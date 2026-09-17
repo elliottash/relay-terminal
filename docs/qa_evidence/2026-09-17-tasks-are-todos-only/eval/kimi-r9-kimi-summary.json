@@ -1,0 +1,97 @@
+{
+  "preset": "kimi",
+  "model": "kimi-k3",
+  "todo_tool": true,
+  "scenarios": {
+    "9": {
+      "asks": 5,
+      "completed": 5,
+      "checks": {
+        "a": true,
+        "b": true,
+        "c": true,
+        "d": true,
+        "e": true
+      },
+      "refinement_merged": true,
+      "todo_count": 5,
+      "todo_texts": [
+        "create a.txt containing alpha",
+        "create b.txt containing bravo",
+        "create c.txt containing CHARLIE (corrected from charlie)",
+        "create d.txt containing delta",
+        "create e.txt containing echo"
+      ],
+      "elapsed_s": 38.5,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Please do all five: 1) create a.txt containing alpha 2) create b.txt containing bravo 3) create c.txt containing charlie"
+        },
+        {
+          "id": "R2",
+          "source": "steer",
+          "status": "done",
+          "reason": null,
+          "text": "wait - c.txt should say CHARLIE in capitals, not charlie"
+        }
+      ],
+      "todos": [
+        {
+          "id": "T1",
+          "text": "create a.txt containing alpha",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T2",
+          "text": "create b.txt containing bravo",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T3",
+          "text": "create c.txt containing CHARLIE (corrected from charlie)",
+          "status": "completed",
+          "request_ids": [
+            "R1",
+            "R2"
+          ],
+          "note": null
+        },
+        {
+          "id": "T4",
+          "text": "create d.txt containing delta",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T5",
+          "text": "create e.txt containing echo",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        }
+      ],
+      "todo_calls": 2,
+      "todo_items": 5,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    }
+  }
+}

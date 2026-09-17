@@ -1,0 +1,83 @@
+{
+  "preset": "openrouter",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "todo_tool": true,
+  "scenarios": {
+    "8": {
+      "asks": 1,
+      "completed": 1,
+      "checks": {
+        "answer.txt": true
+      },
+      "wrote_no_list": true,
+      "elapsed_s": 6.5,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Create answer.txt containing just the number that README.md says is the answer."
+        }
+      ],
+      "todos": [],
+      "todo_calls": 0,
+      "todo_items": 0,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    },
+    "9": {
+      "asks": 2,
+      "completed": 1,
+      "checks": {
+        "note.txt": true
+      },
+      "refinement_merged": true,
+      "todo_count": 2,
+      "elapsed_s": 33.3,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Run `sleep 10` (timeout 60 seconds), then create note.txt containing hello."
+        },
+        {
+          "id": "R2",
+          "source": "steer",
+          "status": "done",
+          "reason": null,
+          "text": "actually make note.txt say hello world, not hello"
+        }
+      ],
+      "todos": [
+        {
+          "id": "T1",
+          "text": "Run `sleep 10` with timeout 60 seconds",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T2",
+          "text": "Create note.txt containing \"hello world\" (R2 changed the content from \"hello\")",
+          "status": "completed",
+          "request_ids": [
+            "R1",
+            "R2"
+          ],
+          "note": null
+        }
+      ],
+      "todo_calls": 3,
+      "todo_items": 2,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    }
+  }
+}

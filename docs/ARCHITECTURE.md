@@ -327,6 +327,20 @@ Pasting never submits.
 
 Text changes trigger a debounced (150 ms) preview route; the route label shows the decision.
 
+### Voice transcription
+
+The microphone chip at the right of the strip toggles recording; holding the voice key (Right Alt by
+default, as in Warp) is push-to-talk. `relay::voice::Capture` (`src/Voice.*`, library `relay-voice`,
+tests `tests/voice_test.cpp`) runs whichever capture tool the desktop has — `pw-record`, `parecord`,
+`arecord`, then `ffmpeg` — into a temporary 16 kHz mono WAV, so Relay links no audio library. The
+worker transcribes it (`backend/relay_core/voice.py`, protocol section 16) with an OpenRouter key of
+its own and the GUI deletes the clip; the transcript is inserted at the cursor and never submitted.
+
+The hold key is matched on the event's native keysym (Qt reports both Alt keys as `Qt::Key_Alt`) and
+the event is not consumed unless it is F9, because Right Alt is AltGr on most layouts; pressing any
+other key while it is held cancels the recording. Settings › Voice has the key, the model, the
+recording cap, the microphone and the recorder in use.
+
 At a password prompt the composer swaps `RichEditor` for a masked `QLineEdit` (section 9); nothing
 typed there is routed, remembered or previewed.
 
@@ -754,7 +768,10 @@ the session and never summarized. The model keeps a todo list with `update_todos
 request ids); linked todos set request statuses. Steers are framed with their id and keep their
 attachments. When the model stops with open todos for the turn, the worker re-prompts at most twice
 (`completion_check`), then `done {open_items}`. After 8 steps without a todo update, a short
-reminder is added. Compaction inserts a deterministic carried block after the summary (requests
+reminder is added; and once a turn passes 4 tool calls having never called `update_todos`, one nudge
+asks for a list if the request has several parts (`NO_LIST_TOOL_CALLS`, card `D8VN`) — the stale
+reminder needs open todos, so nothing otherwise noticed a model that never starts a list, and such a
+turn is neither completion-checked nor counted as tasks. Compaction inserts a deterministic carried block after the summary (requests
 verbatim, todos, plan, files, subagents, recent user messages up to ~20K tokens), and only
 `relay_kind: "prompt"` messages count as turn starts. An optional audit side call
 (`audit_requests`, route-assist model) only flags possibly unaddressed asks. Subagents have none of
@@ -1083,10 +1100,11 @@ Other limits:
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `src/Conversations.*` | conversation list with search (Ctrl+Shift+O) and the Ctrl+F find bar |
 | `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |
+| `src/Voice.*` | voice transcription: capture tool and arguments, the hold key, the transcript's place in the composer, WAV repair |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
 | `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search), `logs` (rotating `worker.log`) |
-| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles) |
+| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `voice` (transcription) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `src/KonsoleBackend.*`, `src/EngineBackend.*` | the two `TerminalBackend` implementations |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |

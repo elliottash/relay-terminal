@@ -373,6 +373,38 @@ class AgentRequestTests(Base):
         self.assertEqual(len(reminders), 1)
         self.assertEqual(reminders[0]['relay_kind'], 'note')
 
+    def test_no_list_reminder_when_the_model_never_writes_one(self):
+        """A turn doing real work with no todo list gets exactly one nudge (card D8VN).
+
+        Nothing else covers this: the stale reminder needs open todos, the completion check counts a
+        request as open only when an open todo points at it, and finish_turn marks a todo-less request
+        done because the turn ended normally.
+        """
+        provider = Script([forever_tools] * 6, default=text('finished'))
+        agent = self.agent(provider, completion_check=False)
+        agent.ask('do five things')
+        notes = [m for m in agent.messages if 'update_todos has not been used' in (m.get('content') or '')]
+        self.assertEqual(len(notes), 1)
+        self.assertIn('several parts', notes[0]['content'])
+        self.assertEqual(notes[0]['relay_kind'], 'note')
+        self.assertEqual(agent.todos.items, [])
+
+    def test_no_list_reminder_is_silent_for_a_short_turn_or_once_a_list_exists(self):
+        # A single simple ask that finishes inside NO_LIST_STEPS is never nudged.
+        short = Script([forever_tools], default=text('done'))
+        agent = self.agent(short, completion_check=False)
+        agent.ask('read one file')
+        self.assertEqual([m for m in agent.messages if 'update_todos has not been used' in (m.get('content') or '')], [])
+        # A model that does write a list gets the stale reminder instead, never this one.
+        provider = Script([todos_call({'text': 'long job', 'status': 'in_progress'})] + [forever_tools] * 9,
+                          default=text('finished'))
+        agent = self.agent(provider, completion_check=False)
+        agent.ask('long job')
+        notes = [m.get('content') or '' for m in agent.messages if 'update_todos has not been used' in (m.get('content') or '')]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("for 8 steps", notes[0])          # the stale reminder
+        self.assertNotIn('several parts', notes[0])     # not the no-list one
+
     def test_invalid_todo_update_returns_error_to_model(self):
         provider = Script([todos_call({'text': 'a', 'status': 'cancelled'}), text('ok')])
         agent = self.agent(provider)

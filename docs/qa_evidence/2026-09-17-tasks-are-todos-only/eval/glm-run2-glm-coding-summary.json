@@ -1,0 +1,117 @@
+{
+  "preset": "glm-coding",
+  "model": "glm-5.3",
+  "todo_tool": true,
+  "scenarios": {
+    "1": {
+      "asks": 5,
+      "completed": 5,
+      "checks": {
+        "a": true,
+        "b": true,
+        "c": true,
+        "d": true,
+        "e": true
+      },
+      "elapsed_s": 26.0,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Please do all five: 1) create a.txt containing alpha 2) create b.txt containing bravo 3) create c.txt containing charlie"
+        }
+      ],
+      "todos": [
+        {
+          "id": "T6",
+          "text": "Create a.txt containing alpha",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T7",
+          "text": "Create b.txt containing bravo",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T8",
+          "text": "Create c.txt containing charlie",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T9",
+          "text": "Create d.txt containing delta",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T10",
+          "text": "Create e.txt containing echo",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        }
+      ],
+      "todo_calls": 2,
+      "todo_items": 5,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    },
+    "9": {
+      "asks": 5,
+      "completed": 5,
+      "checks": {
+        "a": true,
+        "b": true,
+        "c": true,
+        "d": true,
+        "e": true
+      },
+      "refinement_merged": false,
+      "todo_count": 0,
+      "todo_texts": [],
+      "elapsed_s": 18.1,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Please do all five: 1) create a.txt containing alpha 2) create b.txt containing bravo 3) create c.txt containing charlie"
+        },
+        {
+          "id": "R2",
+          "source": "steer",
+          "status": "done",
+          "reason": null,
+          "text": "wait - c.txt should say CHARLIE in capitals, not charlie"
+        }
+      ],
+      "todos": [],
+      "todo_calls": 0,
+      "todo_items": 0,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    }
+  }
+}

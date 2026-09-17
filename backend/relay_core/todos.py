@@ -137,6 +137,21 @@ class TodoList:
         self.turn_id = data.get("turn_id") if isinstance(data.get("turn_id"), str) else None
 
 
+def no_list_reminder_text(tool_calls: int) -> str:
+    """Nudge for a turn that has done real work without ever calling update_todos.
+
+    `reminder_text` below only fires while todos are open, so a model that never starts a list gets
+    no nudge at all. Nothing else covers that: the end-of-turn completion check counts a request as
+    open only when an open todo points at it (agent._open_items), and a request with no todos is
+    marked done because its turn ended normally (requests.RequestLedger.finish_turn). So a multi-part
+    ask answered without a list is never checked. Card D8VN; measured on glm-5.3, which skipped the
+    list on 2 of 12 runs of the same five-ask prompt.
+    """
+    return (f"[Relay reminder: this turn has made {tool_calls} tool calls and update_todos has not been "
+            "used. If this request has several parts, call it now with one todo per part so the parts "
+            "are tracked and none is missed; ignore this if it is a single simple ask.]")
+
+
 def reminder_text(open_todos: list[dict], steps: int) -> str:
     listed = "; ".join(f'{t["id"]} "{t["text"][:80]}" ({t["status"]})' for t in open_todos[:8])
     return (f"[Relay reminder: update_todos has not been used for {steps} steps while todos are open: {listed}. "

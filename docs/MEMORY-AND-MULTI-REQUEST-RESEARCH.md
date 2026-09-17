@@ -194,11 +194,19 @@ R2: "…full text…"
   5. queued prompts plus a failure;
   6. a forced small window (e.g. `context_window` 16K) so compaction happens 2–3 times, with a constraint given at turn 1
      ("never edit tests/") checked at turn 20;
-  7. a resume after restart.
+  7. a resume after restart;
+  8. a single simple ask, which should produce **no** todo list (added 2026-09-17: with the request-as-task backfill
+     gone — card `H3QW` — an empty list is what keeps the Tasks chip hidden, so it has to be measured, not assumed);
+  9. scenario 1's five asks plus a mid-turn steer that *refines* one of them, which should join the existing todo
+     rather than add a sixth (added 2026-09-17 with the matching `todos.RULES` sentence).
 
   Checks are deterministic: files and contents on disk, ledger status, the constraint never violated, no duplicate
   work (the same file written twice with the same content, repeated commands). Metrics: asks completed / asks given,
-  silent drops (open with no reason and not flagged), false "done". Run per preset (Kimi K3, GLM-5.3, OpenRouter
+  silent drops (open with no reason and not flagged), false "done", and (added 2026-09-17) `todo_calls`/`todo_items`,
+  the todo-tool uptake the Tasks UI now depends on. **First results**, 2026-09-17, in
+  `docs/qa_evidence/2026-09-17-tasks-are-todos-only/eval/RESULTS.md`: all three keyed presets write a complete list for
+  a multi-ask prompt and none for a single simple ask, which settles the "do Relay's open-weight models need the list"
+  question below in the affirmative for uptake; GLM-5.3 drops the list when a steer arrives (own card). Run per preset (Kimi K3, GLM-5.3, OpenRouter
   DeepSeek), 3 runs each, with and without the todo tool (to test Claude Code's "newer models don't need it" claim on
   Relay's models).
 - **GUI QA**: Xvfb run checks that the ledger chip counts, steer toast and requeue, and open items on recap all match

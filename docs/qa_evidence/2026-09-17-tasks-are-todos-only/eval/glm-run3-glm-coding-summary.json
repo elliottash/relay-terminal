@@ -1,0 +1,170 @@
+{
+  "preset": "glm-coding",
+  "model": "glm-5.3",
+  "todo_tool": true,
+  "scenarios": {
+    "1": {
+      "asks": 5,
+      "completed": 5,
+      "checks": {
+        "a": true,
+        "b": true,
+        "c": true,
+        "d": true,
+        "e": true
+      },
+      "elapsed_s": 27.5,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Please do all five: 1) create a.txt containing alpha 2) create b.txt containing bravo 3) create c.txt containing charlie"
+        }
+      ],
+      "todos": [
+        {
+          "id": "T6",
+          "text": "Create a.txt containing alpha",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T7",
+          "text": "Create b.txt containing bravo",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T8",
+          "text": "Create c.txt containing charlie",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T9",
+          "text": "Create d.txt containing delta",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T10",
+          "text": "Create e.txt containing echo",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        }
+      ],
+      "todo_calls": 2,
+      "todo_items": 5,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    },
+    "9": {
+      "asks": 5,
+      "completed": 5,
+      "checks": {
+        "a": true,
+        "b": true,
+        "c": true,
+        "d": true,
+        "e": true
+      },
+      "refinement_merged": true,
+      "todo_count": 5,
+      "todo_texts": [
+        "Create a.txt containing alpha",
+        "Create b.txt containing bravo",
+        "Create c.txt containing CHARLIE (updated per R2)",
+        "Create d.txt containing delta",
+        "Create e.txt containing echo"
+      ],
+      "elapsed_s": 25.2,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Please do all five: 1) create a.txt containing alpha 2) create b.txt containing bravo 3) create c.txt containing charlie"
+        },
+        {
+          "id": "R2",
+          "source": "steer",
+          "status": "done",
+          "reason": null,
+          "text": "wait - c.txt should say CHARLIE in capitals, not charlie"
+        }
+      ],
+      "todos": [
+        {
+          "id": "T1",
+          "text": "Create a.txt containing alpha",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T2",
+          "text": "Create b.txt containing bravo",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T3",
+          "text": "Create c.txt containing CHARLIE (updated per R2)",
+          "status": "completed",
+          "request_ids": [
+            "R1",
+            "R2"
+          ],
+          "note": null
+        },
+        {
+          "id": "T4",
+          "text": "Create d.txt containing delta",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T5",
+          "text": "Create e.txt containing echo",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        }
+      ],
+      "todo_calls": 3,
+      "todo_items": 5,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    }
+  }
+}

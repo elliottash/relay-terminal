@@ -42,6 +42,10 @@ DEFAULT_MAX_STEPS = 50
 DEFAULT_MAX_TOOL_CALLS = 150
 MAX_COMPLETION_REMINDERS = 2   # owner decision: automatic re-prompts per turn
 STALE_TODO_STEPS = 8
+# Tool calls into a turn before nudging a model that wrote no todo list (card D8VN). Counted in tool
+# calls, not steps: glm-5.3 issues every write of a five-part job in one parallel batch, so by step 4
+# the work is done and a step threshold fires too late to help. A single simple ask stays under this.
+NO_LIST_TOOL_CALLS = 4
 OPEN_ITEM_PREVIEW = 120
 # A stalled model call is retried once per turn, and only when nothing of the answer arrived
 # (issue SQAM). See _model_call for why that is the whole safety argument.
@@ -526,7 +530,8 @@ class Agent:
         self._turn = turn
         record = self._begin_record(turn_id if isinstance(turn_id, str) and turn_id else f"t{_TURN_PREFIX}-{next(_TURN_COUNTER)}", prompt)
         turn_id = record["turn_id"]
-        ctx = {"turn_id": turn_id, "requests": [], "opening": [], "todos_touched": False, "since_todos": 0}
+        ctx = {"turn_id": turn_id, "requests": [], "opening": [], "todos_touched": False, "since_todos": 0,
+               "no_list_note": False}
         self._turn_ctx = ctx
         # Identifiers, sizes and settings only: the prompt itself is logged solely at "verbose".
         logs.event(_log, "turn_start", session=self.session_id, turn=turn_id, model=self.config.model,
@@ -584,6 +589,13 @@ class Agent:
                     add({"role": "user", "content": todo_tool.reminder_text(self.todos.open_items(), ctx["since_todos"]),
                          "relay_kind": "note"})
                     ctx["since_todos"] = 0
+                # A turn that has done real work without ever writing a list gets one nudge: the
+                # reminder above cannot fire (no open todos), and nothing else notices. See
+                # todos.no_list_reminder_text.
+                elif (self._todos_enabled() and not ctx["todos_touched"] and not ctx["no_list_note"]
+                        and calls_used >= NO_LIST_TOOL_CALLS):
+                    add({"role": "user", "content": todo_tool.no_list_reminder_text(calls_used), "relay_kind": "note"})
+                    ctx["no_list_note"] = True
                 self._maybe_compact()
                 self.emit({"event": "status", "text": f"Requesting model · step {steps + 1}/{self.max_steps}"})
                 self._last_usage = None

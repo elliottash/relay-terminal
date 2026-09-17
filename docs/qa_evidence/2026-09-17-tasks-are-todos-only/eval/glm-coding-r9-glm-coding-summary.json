@@ -1,0 +1,44 @@
+{
+  "preset": "glm-coding",
+  "model": "glm-5.3",
+  "todo_tool": true,
+  "scenarios": {
+    "9": {
+      "asks": 5,
+      "completed": 5,
+      "checks": {
+        "a": true,
+        "b": true,
+        "c": true,
+        "d": true,
+        "e": true
+      },
+      "refinement_merged": false,
+      "todo_count": 0,
+      "todo_texts": [],
+      "elapsed_s": 12.8,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Please do all five: 1) create a.txt containing alpha 2) create b.txt containing bravo 3) create c.txt containing charlie"
+        },
+        {
+          "id": "R2",
+          "source": "steer",
+          "status": "done",
+          "reason": null,
+          "text": "wait - c.txt should say CHARLIE in capitals, not charlie"
+        }
+      ],
+      "todos": [],
+      "todo_calls": 0,
+      "todo_items": 0,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    }
+  }
+}

@@ -59,6 +59,14 @@ display: the todos only ever rendered nested under request rows inside a request
   `state_loaded` "N tasks still open" line and the resume picker's `· N open` column, both derived
   from `open_requests`. Chip tooltip, `/tasks` help, keymap and palette wording follow.
 
+Alongside it, in the backend: `backend/relay_core/todos.py` `RULES` gains the refinement half of the
+rule it was missing. It said only "one todo per ask", which always pointed at *adding* a todo; it now
+also says that a message which changes, narrows or corrects an ask already covered by a todo adds its
+request id to that todo instead. The `request_ids` schema description says the same at call time. No
+new mechanism was needed — `request_ids` was already a list, `validate()` already merges and dedupes
+links on an existing todo id (`todos.py:79`), and `RequestLedger.apply_todos()` already settles every
+request in the group together. New test: `test_a_refining_message_joins_the_existing_todo`.
+
 **Removed with the ledger surface:** `d` done, `x` cancel, `o` reopen and `r` re-ask. `request_set`,
 `request_get` and `request_reask` are untouched in the protocol and the worker, and
 `Pane::reaskRequest()` is still in `main.cpp`, so re-ask can come back as a palette action if it is
@@ -71,13 +79,29 @@ missed. No backend or protocol change in this card.
   steps rather than the prompts that caused them.
 - `Tasks c/t` now means one thing in every turn.
 
-## Risk to check in QA
+## Risk: measured, and it holds
 
-The task surface is now model-quality-dependent: a preset that never calls `update_todos` shows an
-empty panel where it used to show a manufactured task. `docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md`
-section 2 records todo-tool uptake for open-weight presets as UNVERIFIED and says the eval decides
-it. **`scripts/eval-requests.py` (with and without `--no-todos`) has not been run for this card** —
-the old backfill was hiding the real uptake rate, so measuring it is the next step.
+The worry was that with the backfill gone, a preset that never calls `update_todos` would show an
+empty panel. `scripts/eval-requests.py` was run across the three presets with a stored key
+(`openrouter` deepseek-v4.1-flash, `kimi` kimi-k3, `glm-coding` glm-5.3); full numbers in
+[`eval/RESULTS.md`](../../../docs/qa_evidence/2026-09-17-tasks-are-todos-only/eval/RESULTS.md).
+
+- **Multi-ask prompts (scenarios 1–3): 3/3 presets wrote a complete list, one todo per ask, every
+  run.** 12/12 file checks each, no silent drops, no completion-check re-prompts. There is a real
+  task list to show, so the split does not leave the panel empty where it matters.
+- **A single simple ask (new scenario 8): 3/3 wrote no list** — exactly what `todos.RULES` asks for,
+  and exactly the case that used to read `Tasks 1/1` with the user's own command as the task.
+- **A refinement mid-turn (new scenario 9): when a model keeps its list through a steer it follows
+  the new merge rule, 3/3 presets**, and the list stayed at five items instead of growing to six.
+
+Two new scenarios were added to `scripts/eval-requests.py` for this (8 and 9; 5 and 7 stay reserved
+for the work named in `docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md` section 7), and the summary now
+reports `todo_calls`/`todo_items` so uptake is visible in every future run.
+
+**Separate finding, filed as `D8VN`:** GLM-5.3 skipped `update_todos` in 2 of 6 runs of the same
+five-ask prompt. The work was correct every time (5/5 files, 0 silent drops) — only the list was
+missing, so those turns show no task UI at all. The information was never there; before this change
+the request backfill hid its absence behind `Tasks 1/1`. Pre-existing, not caused here.
 
 ## Implementer check (not a QA verdict)
 
@@ -86,8 +110,10 @@ Automated: `tests/requests_test.cpp`, 14 cases (was 12), including two new ones 
 entry is still parsed) and `panelWithoutATaskList` (empty panel, empty-state text, the prompt text
 absent). `panelKeys` became `panelShowsTasks`: the real `RequestsPanel` widget under offscreen Qt,
 asserting exact row text `✓  T1  fix parser` and that the detail pane never names `R2`.
-`earlierInPanel` now asserts todo rows and an `Earlier · 1/1` group. `ctest --test-dir build` 13/13;
-`./scripts/test.sh` 422 OK; build without new warnings.
+`earlierInPanel` now asserts todo rows and an `Earlier · 1/1` group. Backend:
+`test_a_refining_message_joins_the_existing_todo` in `tests/test_requests.py` covers the merge path
+end to end (one todo carrying `R1` and `R2`, both settling with it, `next_id` unchanged).
+`ctest --test-dir build` 13/13; `./scripts/test.sh` 423 OK; build without new warnings.
 
 Live: launched under `xvfb-run` with isolated `HOME`, `XDG_CONFIG_HOME` and `XDG_DATA_HOME`
 (`implementer-01-no-chip-on-startup.png`) — starts clean with no Tasks chip.
@@ -114,5 +140,6 @@ gap first.
    `Earlier`, and neither the session-loaded line nor the resume picker mentions open requests.
 6. Turn on Agent options › Audit requests and provoke a flag: the line reads
    `⚠ may be unaddressed: “…”` with no `R<n>` id.
-7. Run `scripts/eval-requests.py --preset <yours>` across the presets and record how often a
-   multi-ask prompt actually yields a linked todo list (see "Risk to check in QA").
+7. Done by the implementer, re-run if you want confirmation:
+   `scripts/eval-requests.py --preset <yours> --scenarios 1,2,3,8,9` — scenarios 1–3 should write a
+   complete list, 8 should write none, 9 should merge the steer into the existing todo.

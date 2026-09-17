@@ -1,0 +1,217 @@
+{
+  "preset": "openrouter",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "todo_tool": true,
+  "scenarios": {
+    "1": {
+      "asks": 5,
+      "completed": 5,
+      "checks": {
+        "a": true,
+        "b": true,
+        "c": true,
+        "d": true,
+        "e": true
+      },
+      "elapsed_s": 29.0,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Please do all five: 1) create a.txt containing alpha 2) create b.txt containing bravo 3) create c.txt containing charlie"
+        }
+      ],
+      "todos": [
+        {
+          "id": "T1",
+          "text": "Create a.txt containing alpha",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T2",
+          "text": "Create b.txt containing bravo",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T3",
+          "text": "Create c.txt containing charlie",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T4",
+          "text": "Create d.txt containing delta",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T5",
+          "text": "Create e.txt containing echo",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        }
+      ],
+      "todo_calls": 2,
+      "todo_items": 5,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    },
+    "2": {
+      "asks": 3,
+      "completed": 3,
+      "checks": {
+        "fix.txt": true,
+        "renamed": true,
+        "readme": true
+      },
+      "elapsed_s": 37.5,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "create fix.txt containing fixed, and also rename old.txt to new.txt, oh and add a line saying updated at the end of READ"
+        }
+      ],
+      "todos": [
+        {
+          "id": "T1",
+          "text": "create fix.txt containing 'fixed'",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T2",
+          "text": "rename old.txt to new.txt",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T3",
+          "text": "add a line saying 'updated' at the end of README.md",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        }
+      ],
+      "todo_calls": 2,
+      "todo_items": 3,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    },
+    "3": {
+      "asks": 4,
+      "completed": 4,
+      "checks": {
+        "slow.txt": true,
+        "s1.txt": true,
+        "s2.txt": true,
+        "s3.txt": true
+      },
+      "elapsed_s": 34.1,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Run the command `sleep 12 && echo finished > slow.txt` (timeout 60 seconds), then tell me what slow.txt contains."
+        },
+        {
+          "id": "R2",
+          "source": "steer",
+          "status": "done",
+          "reason": null,
+          "text": "also create s1.txt containing one"
+        },
+        {
+          "id": "R3",
+          "source": "steer",
+          "status": "done",
+          "reason": null,
+          "text": "also create s2.txt containing two"
+        },
+        {
+          "id": "R4",
+          "source": "steer",
+          "status": "done",
+          "reason": null,
+          "text": "also create s3.txt containing three"
+        }
+      ],
+      "todos": [
+        {
+          "id": "T1",
+          "text": "Run `sleep 12 && echo finished > slow.txt` (timeout 60) and report slow.txt contents",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T2",
+          "text": "Create s1.txt containing \"one\"",
+          "status": "completed",
+          "request_ids": [
+            "R2"
+          ],
+          "note": null
+        },
+        {
+          "id": "T3",
+          "text": "Create s2.txt containing \"two\"",
+          "status": "completed",
+          "request_ids": [
+            "R3"
+          ],
+          "note": null
+        },
+        {
+          "id": "T4",
+          "text": "Create s3.txt containing \"three\"",
+          "status": "completed",
+          "request_ids": [
+            "R4"
+          ],
+          "note": null
+        }
+      ],
+      "todo_calls": 2,
+      "todo_items": 4,
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    }
+  }
+}

@@ -166,22 +166,54 @@ def scenario8(run: Run, ws: Path, timeout: float) -> dict:
 
 def scenario9(run: Run, ws: Path, timeout: float) -> dict:
     """A message that refines an ask already covered by a todo. `todos.RULES` says to add its request
-    id to that todo rather than add one, so the refinement should not become a second task."""
-    run.sup.submit("Run `sleep 10` (timeout 60 seconds), then create note.txt containing hello.", "now")
+    id to that todo rather than add one, so the refinement should not become a second task.
+
+    Built on scenario 1's five asks, because that is a prompt every preset writes a list for: a
+    two-ask prompt is one the models reasonably skip the list for, leaving nothing to merge into.
+    """
+    run.sup.submit("Please do all five: 1) create a.txt containing alpha 2) create b.txt containing bravo "
+                   "3) create c.txt containing charlie 4) create d.txt containing delta 5) create e.txt containing echo. "
+                   "Each file holds only that word.", "now")
     run.wait(lambda e: e.get("event") == "tool_started", timeout)
     time.sleep(1.0)
-    run.sup.submit("actually make note.txt say hello world, not hello", "steer")
+    run.sup.submit("wait - c.txt should say CHARLIE in capitals, not charlie", "steer")
     run.idle(timeout)
+    words = {"a": "alpha", "b": "bravo", "c": "CHARLIE", "d": "delta", "e": "echo"}
+    checks = {n: file_is(ws, f"{n}.txt", w) for n, w in words.items()}
     todos = run.agent.todos.items
-    return {"asks": 2, "completed": int(file_is(ws, "note.txt", "hello world")),
-            "checks": {"note.txt": file_is(ws, "note.txt", "hello world")},
-            # The steer is R2: merged means one todo carries both it and the ask it refines.
+    return {"asks": 5, "completed": sum(checks.values()), "checks": checks,
+            # The steer is R2: merged means one todo carries both it and the ask it refines, so the
+            # refinement did not add a sixth task.
             "refinement_merged": any("R2" in t["request_ids"] and len(t["request_ids"]) > 1 for t in todos),
-            "todo_count": len(todos)}
+            "todo_count": len(todos),
+            "todo_texts": [t["text"] for t in todos]}
+
+
+def scenario10(run: Run, ws: Path, timeout: float) -> dict:
+    """One instruction that needs many tool calls — the shape the no-list nudge exists for.
+
+    Models reasonably skip the todo list here ("skip the list for a single simple ask"), so this is
+    the scenario where `agent.NO_LIST_TOOL_CALLS` actually trips, unlike scenarios 1 and 9 where the
+    models list up front and the nudge never fires. Either outcome is informative: a list written
+    after the 4th tool call means a real model acts on the nudge; no list means its "ignore this if
+    it is a single simple ask" escape clause works and the nudge is harmless.
+    """
+    for name in ("one", "two", "three", "four", "five", "six"):
+        (ws / f"{name}.txt").write_text(f"{name} line without a newline", newline="")
+    run.sup.submit("Make sure every .txt file in this folder ends with a trailing newline. "
+                   "Do not change anything else about their contents.", "now")
+    run.idle(timeout)
+    checks = {}
+    for name in ("one", "two", "three", "four", "five", "six"):
+        body = (ws / f"{name}.txt").read_text(errors="replace")
+        checks[name] = body == f"{name} line without a newline\n"
+    todos = run.agent.todos.items
+    return {"asks": 6, "completed": sum(checks.values()), "checks": checks,
+            "wrote_a_list": bool(todos), "todo_count": len(todos)}
 
 
 SCENARIOS = {1: scenario1, 2: scenario2, 3: scenario3, 4: scenario4, 6: scenario6,
-             8: scenario8, 9: scenario9}
+             8: scenario8, 9: scenario9, 10: scenario10}
 
 
 def main() -> int:
@@ -216,6 +248,11 @@ def main() -> int:
                            # The GUI no longer invents a task from the prompt when it does not (card H3QW),
                            # so an empty list here means an empty Tasks panel.
                            "todo_calls": sum(1 for e in run.events if e.get("event") == "todos"),
+                           # Did the no-list nudge fire (agent.NO_LIST_TOOL_CALLS, card D8VN)? It is a
+                           # prompt note, not an event, so it is only visible in the message history.
+                           "no_list_nudges": sum(1 for m in run.agent.messages
+                                                 if "update_todos has not been used" in (m.get("content") or "")
+                                                 and "several parts" in (m.get("content") or "")),
                            "todo_items": max([len(e.get("items") or []) for e in run.events
                                               if e.get("event") == "todos"] or [0]),
                            "completion_checks": sum(1 for e in run.events if e.get("event") == "completion_check"),
