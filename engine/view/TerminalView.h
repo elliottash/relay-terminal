@@ -79,6 +79,10 @@ public:
     void setScrollToBottomOnKeystroke(bool on) { m_scrollOnKey = on; }
     void setVisualBell(bool on) { m_visualBell = on; }
     void setCursorBlink(bool on);
+    // An unfocused view draws the cursor as a hollow outline, the way Konsole does. Relay's panes
+    // never take focus (the prompt box owns the keys), so that outline would sit on the prompt
+    // forever; they turn it off and the cursor appears only once the view really has the keyboard.
+    void setUnfocusedCursorVisible(bool on);
     void setClipboardWriteAllowed(bool allowed); // OSC 52 (off by default)
     void setBuiltinShortcuts(bool on) { m_builtinShortcuts = on; }
     void setBuiltinContextMenu(bool on) { m_builtinContextMenu = on; }
@@ -174,6 +178,7 @@ private:
     int m_lastHistory = -1;
 
     bool m_focused = false;
+    bool m_unfocusedCursor = true;
     bool m_blinkEnabled = true;
     bool m_blinkOn = true;
     QTimer m_blinkTimer;

@@ -58,6 +58,7 @@ void EngineBackend::applyRelayProfile()
     // Konsole's own spacing keys: without them engine panes look tighter than Konsole panes.
     v->setLineSpacing(profile.value(QStringLiteral("Appearance/LineSpacing"), 0).toInt());
     v->setPadding(profile.value(QStringLiteral("Appearance/TerminalMargin"), 2).toInt());
+    v->setUnfocusedCursorVisible(profile.value(QStringLiteral("Cursor Options/ShowUnfocusedCursor"), true).toBool());
 
     const QString schemeName = profile.value(QStringLiteral("Appearance/ColorScheme"), QStringLiteral("RelayDark")).toString();
     const QString schemePath = dir + QStringLiteral("/konsole/") + schemeName + QStringLiteral(".colorscheme");

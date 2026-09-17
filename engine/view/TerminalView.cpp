@@ -335,6 +335,15 @@ void TerminalView::setEmojiFontFamily(const QString &family)
     update();
 }
 
+void TerminalView::setUnfocusedCursorVisible(bool on)
+{
+    if (m_unfocusedCursor == on)
+        return;
+    m_unfocusedCursor = on;
+    if (!m_focused)
+        update();
+}
+
 void TerminalView::setCursorBlink(bool on)
 {
     m_blinkEnabled = on;
@@ -685,6 +694,8 @@ void TerminalView::paintCursor(QPainter &p)
     if (!f.cursor.visible)
         return;
     if (!m_focused) {
+        if (!m_unfocusedCursor)
+            return;
         p.save();
         p.setPen(m_scheme.cursor);
         p.setBrush(Qt::NoBrush);

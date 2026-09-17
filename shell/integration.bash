@@ -103,6 +103,14 @@ bind -m vi-insert -x '"\C-x\C-p":__relay_redraw'
 bind -m vi-move -x '"\C-x\C-p":__relay_redraw'
 trap '__relay_debug' DEBUG
 
+# What you type belongs on its own line, not tacked onto the end of the folder: a command staged by
+# Relay, and the agent's inline output (which erases only the line it opens on), both start below the
+# prompt instead of running into it. Appended to the user's own PS1, whatever it is; never doubled,
+# and skipped for a prompt that already ends in a newline.
+if [[ -n ${PS1:-} && $PS1 != *$'\n' ]]; then
+    PS1=$PS1$'\n'
+fi
+
 # Opt-in OSC 7 / OSC 133 marks (palette: "Shell integration (OSC 7/133)", or
 # RELAY_SHELL_INTEGRATION=1). Sourced last so it wraps the final PS1/PROMPT_COMMAND.
 # Relay's own engine uses the marks; KonsolePart ignores them. See docs/ARCHITECTURE.md.

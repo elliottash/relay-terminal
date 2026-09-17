@@ -6,6 +6,7 @@ LineSpacing=2
 
 [Cursor Options]
 CursorShape=1
+ShowUnfocusedCursor=false
 
 [General]
 Name=Relay
