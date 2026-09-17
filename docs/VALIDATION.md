@@ -74,6 +74,7 @@ Claude session. They show the feature worked once; they are not independent QA.
 | File explorer and preview panes | [`qa_evidence/2026-09-17-file-panes/`](qa_evidence/2026-09-17-file-panes/) |
 | Palette, presets, agent `set_keybinding`, copy on select | [`qa_evidence/2026-09-17-keyboard-and-palettes/`](qa_evidence/2026-09-17-keyboard-and-palettes/) |
 | Windows, tabs, panes, restore | [`qa_evidence/2026-09-17-windows-tabs-panes/`](qa_evidence/2026-09-17-windows-tabs-panes/) |
+| Relay's own title bar (move, resize, maximize) and the notification bell | [`qa_evidence/2026-09-17-window-header/`](qa_evidence/2026-09-17-window-header/) |
 | Per-pane systemd scopes, OOM banners, restart | [`qa_evidence/2026-09-17-pane-isolation/`](qa_evidence/2026-09-17-pane-isolation/) |
 | Agent queue strip, remove, interrupt, pause/resume | [`qa_evidence/2026-09-17-queue-interrupt-gui/`](qa_evidence/2026-09-17-queue-interrupt-gui/) |
 | libvterm engine spike (vim, less, htop, tmux, throughput) | [`qa_evidence/2026-09-17-engine-spike/`](qa_evidence/2026-09-17-engine-spike/), report in [ENGINE-SPIKE.md](ENGINE-SPIKE.md) |
@@ -100,7 +101,8 @@ Bugs found only by running the real app:
 | Area | Why it matters |
 |---|---|
 | **Qt6/KF6 app on a real KDE Plasma desktop** | All GUI checks ran on Qt5/KF5 under Xvfb. The inline-output D-Bus hook, clipboard slots, hidden scrollbar and profile loading depend on KonsolePart internals that may differ in Konsole 24.02+. |
-| **Wayland** | No Wayland session was tested: focus, Alt+Tab, notifications, clipboard, IME. |
+| **Wayland** | No Wayland session was tested: focus, Alt+Tab, notifications, clipboard, IME. The frameless window's move and resize go through `startSystemMove` / `startSystemResize`, which is the only supported path there. |
+| **Window manager drags** | The frameless title bar was exercised under Xvfb, which has no WM, so only Relay's own fallback move/resize ran. WM snapping, tiling, minimize and real maximizing are unchecked. |
 | **Real systemd-oomd kill** | Isolation was tested with scope `MemoryMax` limits and a manual `systemctl kill`, not with systemd-oomd acting under real memory pressure. |
 | **IME** | Only the editor's preedit guard is unit-tested. No fcitx or ibus session was used. |
 | **amd64 packages outside CI** | The development machine is arm64. amd64 `.deb`s are built only by the release workflow, which has not run. There is no recorded install of a `.deb` or AUR package on a real desktop. |

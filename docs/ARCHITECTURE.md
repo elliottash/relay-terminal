@@ -81,7 +81,7 @@ Options: `--workspace/-w PATH` (initial terminal directory and agent workspace) 
 | Class | Role |
 |---|---|
 | `WindowManager` | Window list, a stack of up to 25 closed items (pane, tab or window), the saved window layout, the `relay open` socket |
-| `RelayWindow` | `QMainWindow`: toolbar (Actions, New chat, Stop agent, Provider / BYOK…), a `QTabWidget`, the actions palette overlay, an application event filter for shortcuts |
+| `RelayWindow` | `QMainWindow`: its own title bar (the tab row), a `QTabWidget`, the actions palette overlay, an application event filter for shortcuts |
 | Tab page | One root widget: a leaf or a tree of `QSplitter`s |
 | `Pane` (leaf) | Terminal pane: KonsolePart, Bash bridge, composer, its own worker and conversation |
 | `ToolPane` (leaf) | Folder explorer or file preview (section 10) |
@@ -130,6 +130,47 @@ Layout rules:
   context menu run `tab.new` / `tab.moveToNewWindow`; the tab page moves to
   `WindowManager::newEmptyWindow()`.
 - Typing `exit` closes the pane. A shell stopped for memory keeps the pane open (section 13).
+
+### Window header (Relay draws its own title bar)
+
+There is no OS title bar: `RelayWindow` sets `Qt::FramelessWindowHint` and the tab row is the
+title bar, with two `QTabWidget` corner widgets on it (`buildWindowChrome`):
+
+| Corner | Holds |
+|---|---|
+| Top left | The Relay icon |
+| Top right | Bell (notification centre), gear (opens the actions palette), then minimize, maximize/restore and close |
+
+`ChromeButton` paints each glyph with `QPainter` instead of using a font character, so the header
+does not depend on an emoji font and hover, disabled and close-button colours come from the theme.
+
+- **Moving and resizing.** The window keeps `kFrameMargin` (5 px) of padding; `edgesAt()` turns a
+  press there into a resize and `headerDrag()` turns a press on the empty tab row into a move,
+  with a double-click maximizing. Both call `startSystemMove()` / `startSystemResize()` first, so
+  the window manager's snapping and tiling still apply; when no WM takes the drag, Relay moves or
+  resizes the window itself from the press point. Presses on a tab, on `+` or on a header button
+  are left to those widgets.
+- **Maximized** windows drop the padding and show the "restore" glyph (`changeEvent` →
+  `updateChromeState()`).
+- **Fallback.** `window/native_frame` (Actions › System title bar) keeps the system decorations;
+  the header then shows only the bell and the gear, and the tab row no longer drags the window.
+  It applies to windows opened after the change.
+
+### Notification centre
+
+`relay::NotificationCenter` (`src/Notifications.*`, the `relay-notifications` library) is one
+in-memory list per process, shared by every window: newest first, a kind per entry
+(info / success / warning / error), an unread count for the bell badge, dismiss, clear, and a
+200-entry cap. `NotificationsPopup` renders it under the bell and marks everything seen on open.
+
+`Pane::notify()` is the single entry point. The centre always keeps the entry; `notify-send` and
+`QApplication::alert()` still only fire when Relay is not the active window and
+`notifications/desktop` is on. What posts: a command that ran longer than 30 s, a shell or command
+killed for memory, a password prompt waiting, a finished subagent, and the pane's own agent turn
+finishing or failing — except that a turn finished in the pane the user is watching
+(`Pane::watched()`) posts nothing. Each entry carries the pane's session token, so clicking it
+calls `WindowManager::focusPane()` → `RelayWindow::revealPane()` and lands on that pane in
+whatever window it now lives.
 
 ### Reopen where I left off (saved window layout)
 
@@ -667,35 +708,46 @@ verbatim, todos, plan, files, subagents, recent user messages up to ~20K tokens)
 (`audit_requests`, route-assist model) only flags possibly unaddressed asks. Subagents have none of
 this (no ledger or todos).
 
-**Tasks UI** (request ledger UI: `src/RequestLedger.*`, `src/RequestsPanel.*`, library
-`relay-requests`, tests `tests/requests_test.cpp`). `RequestLedgerModel` holds the latest
-`requests`/`todos` lists (verbatim text from `request_get`, and settled todos the model later
-dropped from its list) and derives **tasks**, all in the GUI (no protocol change): each todo is a
-task; a user request with no linked todos (or open again while all its todos are settled) counts as
-one task itself; Relay-origin requests do not count. Outcomes: todo `completed` → completed;
-`blocked` → failed; `deferred` → deferred; `cancelled` → cancelled; request `done` → completed,
-`cancelled`/`cancelled_by_user` → cancelled, `blocked` → failed, `deferred` → deferred. Open todos
-and open requests are *active* while any request is `in_progress` or they wait in the queue (not
-delivered, or re-asked/requeued: a new `queue_item` since last delivery), otherwise *unfinished*
-(the turn ended by error, cancel, the step limit or an exhausted completion check); open todos of a
-request the user marked done or cancelled follow it. **Batches:** a new request starts a new task
-list when the current list has tasks, none active, no request in progress and it did not arrive in
-the same turn; unfinished (and re-asked) tasks of earlier lists move into the current one. After a
-restart or `/resume` the same walk runs over the loaded ledger; a ledger whose highest id went down
-or whose ids changed text (new chat, other session, rewind) resets the batches. The `requestsChip`
-shows `Tasks c/t` (property `state`: `running`, `done` green, `attention` amber with the suffix
-"(1 failed, 1 deferred, 1 cancelled, 1 unfinished)" once settled), hosted in the queue strip header
-while the strip is visible and in the composer row otherwise; `turnEndLine()` gives the `✦ Tasks …`
-line printed on `done`/`cancelled`/`error` (skipped for a single completed task). `RequestsPanel`
-floats over the right of the terminal: current requests (unfolded, with `c/t` and their todos),
-"Other tasks", then a folded "Earlier · c/t (…)" row; d/x/o/r send `request_set` and
-`request_reask`. Toggle: `agent.requests` (Ctrl+Shift+K in the Relay preset; unbound in the Warp,
-VS Code and Konsole presets, where the key clears blocks, deletes a line, or clears scrollback),
-`/tasks`, `/requests`, `/todos`, the chip. `done {stop_reason: "limit"}` prints a
-`relay://continue/<pane>` link handled by
-`WindowManager::handleOpen`; Continue sends an ordinary ask. `max_steps`, `max_tool_calls` and
-`audit_requests` live in QSettings `agent/*`, go into `configure` and are sent with
-`set_agent_options` when changed.
+**Tasks UI** (`src/RequestLedger.*`, `src/RequestsPanel.*`, library `relay-requests`, tests
+`tests/requests_test.cpp`). `RequestLedgerModel` holds the latest `requests`/`todos` lists and
+derives **tasks**, all in the GUI (no protocol change). **A task is one of the model's todos and
+nothing else.** A user request is never a task and is never shown: the ledger is internal machinery
+(it links todos, survives compaction, and drives re-asks and the completion check), and a prompt is
+not a plan. Until 2026-09-17 a request with no linked todos counted as a task itself, so every
+one-ask turn reported `Tasks 0/1` → `Tasks 1/1` — a turn-completion indicator in task vocabulary,
+since a todo-less request is marked `done` by `finish_turn()` purely because its turn ended normally
+(`backend/relay_core/requests.py:178`). `deriveAll()` keeps the old request pseudo-tasks for one
+purpose only: the batch walk, so a turn that wrote no todos still closes a task list.
+
+Outcomes: todo `completed` → completed; `blocked` → failed; `deferred` → deferred; `cancelled` →
+cancelled. Open todos are *active* while any request is `in_progress` or a linked request waits in
+the queue (not delivered, or re-asked/requeued: a new `queue_item` since last delivery), otherwise
+*unfinished* (the turn ended by error, cancel, the step limit or an exhausted completion check);
+open todos of a request the user marked done or cancelled follow it. Settled todos the model later
+drops from its list are kept in the count (so `5/5` does not shrink); dropped open todos disappear.
+**Batches:** a new request starts a new task list when the current list has tasks, none active, no
+request in progress and it did not arrive in the same turn; unfinished (and re-asked) tasks of
+earlier lists move into the current one. After a restart or `/resume` the same walk runs over the
+loaded ledger; a ledger whose highest id went down or whose ids changed text (new chat, other
+session, rewind) resets the batches.
+
+The `requestsChip` shows `Tasks c/t` (property `state`: `running`, `done` green, `attention` amber
+with the suffix "(1 failed, 1 deferred, 1 cancelled, 1 unfinished)" once settled), hosted in the
+queue strip header while the strip is visible and in the composer row otherwise. **It is hidden
+whenever the model wrote no todo list**, which the prompt tells it to skip for a single simple ask
+(`backend/relay_core/todos.py`), so simple turns carry no task UI at all. `turnEndLine()` gives the
+`✦ Tasks …` line printed on `done`/`cancelled`/`error` (skipped for a list of one completed task, so
+also skipped when there is no list). `RequestsPanel` floats over the right of the terminal and lists
+the current batch's todos, then a folded `Earlier · c/t (…)` row; the selected task's full text,
+status and note show below. It has no actions: marking done, cancelling, reopening and re-asking
+were request operations and went with the ledger. `request_set`, `request_get` and `request_reask`
+remain in the protocol and in the worker, unused by the GUI. Toggle: `agent.requests` (Ctrl+Shift+K
+in the Relay preset; unbound in the Warp, VS Code and Konsole presets, where the key clears blocks,
+deletes a line, or clears scrollback), `/tasks`, `/requests`, `/todos`, the chip. `openItemsLine()`
+and `auditLine()` name todos and the user's own quoted words, never `R<n>` ids. `done {stop_reason:
+"limit"}` prints a `relay://continue/<pane>` link handled by `WindowManager::handleOpen`; Continue
+sends an ordinary ask. `max_steps`, `max_tool_calls` and `audit_requests` live in QSettings
+`agent/*`, go into `configure` and are sent with `set_agent_options` when changed.
 
 ### Tools
 
@@ -918,6 +970,7 @@ Other limits:
 | `src/FilePanes.*` | explorer and preview widgets |
 | `src/Theme.*` | palette, stylesheet, Konsole profile exposure |
 | `src/Hints.*` | shortcut hint limits and idle tips |
+| `src/Notifications.*` | notification centre behind the header bell |
 | `src/TurnTranscript.*` | turn details pane (tool calls, transcript) |
 | `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |
 | `src/AgentUi.*` | pickers and instructions dialog |

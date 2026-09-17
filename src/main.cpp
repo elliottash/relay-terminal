@@ -348,7 +348,7 @@ private:
         add("find.inView", "agent", "Find in this pane: the conversation and the terminal scrollback (from the prompt box)",
             {QStringLiteral("Ctrl+F")});
         add("agent.recap", "agent", "Recap this agent session", {});
-        add("agent.requests", "agent", "Tasks: show or hide the task list (/tasks)", {QStringLiteral("Ctrl+Shift+K")});
+        add("agent.requests", "agent", "Tasks: show or hide the agent's task list (/tasks)", {QStringLiteral("Ctrl+Shift+K")});
         add("agent.continue", "agent", "Continue the agent turn after a step limit (/continue)", {});
         add("agent.instructions", "agent", "Choose agent instruction files", {});
         add("agent.export", "agent", "Export the conversation as Markdown", {});
@@ -1975,8 +1975,6 @@ private:
             else
                 printInline(QStringLiteral("Session loaded%1 · %2 turn(s)\n").arg(title.isEmpty() ? QString() : QStringLiteral(": “") + title + QStringLiteral("”"))
                             .arg(m_turnsCompleted), Ink::Note);
-            if (const int open = event.value(QStringLiteral("open_requests")).toInt(); open > 0)
-                printInline(QStringLiteral("○ %1 task%2 still open · /tasks\n").arg(open).arg(open == 1 ? QString() : QStringLiteral("s")), Ink::Note);
             m_forkLoadPending = false;
             closeInline();
             clearAgentQueue();
@@ -2151,8 +2149,7 @@ private:
             relay::agentui::PickerRow row;
             row.columns = QStringList{item.value(QStringLiteral("title")).toString(),
                            QDateTime::fromSecsSinceEpoch(qint64(item.value(QStringLiteral("updated")).toDouble())).toString(QStringLiteral("yyyy-MM-dd HH:mm")),
-                           QString::number(item.value(QStringLiteral("turns")).toInt())
-                               + (item.value(QStringLiteral("open_requests")).toInt() > 0 ? QStringLiteral(" · %1 open").arg(item.value(QStringLiteral("open_requests")).toInt()) : QString()),
+                           QString::number(item.value(QStringLiteral("turns")).toInt()),
                            item.value(QStringLiteral("model")).toString()};
             rows << row;
             ids << item.value(QStringLiteral("id")).toString();
@@ -2362,8 +2359,8 @@ private:
             {QStringLiteral("find"), QStringLiteral("[words]"), QStringLiteral("Find in this pane: conversation and terminal scrollback")},
             {QStringLiteral("plan"), QString(), QStringLiteral("Toggle plan mode")},
             {QStringLiteral("recap"), QString(), QStringLiteral("Summarize this session")},
-            {QStringLiteral("tasks"), QString(), QStringLiteral("Task list: progress, mark done, cancel, re-ask")},
-            {QStringLiteral("requests"), QString(), QStringLiteral("Task list grouped by what you asked (same as /tasks)")},
+            {QStringLiteral("tasks"), QString(), QStringLiteral("Task list: what the agent is working on")},
+            {QStringLiteral("requests"), QString(), QStringLiteral("Task list (same as /tasks)")},
             {QStringLiteral("todos"), QString(), QStringLiteral("Task list (same as /tasks)")},
             {QStringLiteral("continue"), QString(), QStringLiteral("Continue the agent turn (after a step limit)")},
             {QStringLiteral("agents"), QString(), QStringLiteral("Subagents: definitions and running agents")},
@@ -2619,7 +2616,9 @@ private:
             QTimer::singleShot(400, this, [this] { if (!m_agentBusy && !moreTurnsPending()) closeInline(); });
         };
         m_subagents.onFinished = [this](const relay::SubagentRow &row) {
-            notifyIfAway(QStringLiteral("Agent %1 %2").arg(row.type + ' ' + row.id, row.status), row.summary.left(200));
+            const bool failed = row.status.contains(QStringLiteral("fail")) || row.status.contains(QStringLiteral("error"));
+            notify(QStringLiteral("Agent %1 %2").arg(row.type + ' ' + row.id, row.status), row.summary.left(200),
+                   failed ? relay::NotificationCenter::kindError : relay::NotificationCenter::kindSuccess);
         };
         m_subagents.onTranscript = [this](const QString &id, const QJsonObject &event) {
             for (const auto &view : std::as_const(m_subagentViews)) if (view && view->agentId() == id) view->handleEvent(event);
@@ -2693,7 +2692,7 @@ private:
         const bool show = m_ledger.hasTasks();
         m_requestsChip->setText(m_ledger.chipText());
         const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.requests"));
-        m_requestsChip->setToolTip(m_ledger.chipToolTip() + QStringLiteral("\nClick, /tasks%1: task list, mark done, cancel, re-ask")
+        m_requestsChip->setToolTip(m_ledger.chipToolTip() + QStringLiteral("\nClick, /tasks%1: the agent's task list")
                                        .arg(keys.isEmpty() ? QString() : QStringLiteral(" or ") + keys));
         m_requestsChip->setProperty("state", m_ledger.chipState());
         m_requestsChip->style()->unpolish(m_requestsChip); m_requestsChip->style()->polish(m_requestsChip);
@@ -2757,14 +2756,6 @@ public:
         if (!m_requestsPanel) {
             auto *panel = new relay::RequestsPanel(&m_ledger, this);
             m_requestsPanel = panel;
-            panel->onSetStatus = [this](const QString &ledgerId, const QString &state) {
-                send({{"type", "request_set"}, {"id", QStringLiteral("req-%1").arg(++m_requestId)}, {"ledger_id", ledgerId}, {"status", state}});
-                toast(QStringLiteral("%1 %2").arg(ledgerId, relay::RequestLedgerModel::statusLabel(state == QStringLiteral("open") ? QStringLiteral("reopened") : state)));
-            };
-            panel->onReask = [this](const QString &ledgerId) { reaskRequest(ledgerId); };
-            panel->onFetch = [this](const QString &ledgerId) {
-                send({{"type", "request_get"}, {"id", QStringLiteral("req-%1").arg(++m_requestId)}, {"ledger_id", ledgerId}});
-            };
             panel->onClose = [this] { closeRequests(); };
         }
         send({{"type", "requests"}, {"id", QStringLiteral("req-%1").arg(++m_requestId)}});
@@ -3279,6 +3270,11 @@ private:
             if (outcome == QStringLiteral("done")) {
                 ++m_turnsCompleted;
                 if (window() && !window()->isActiveWindow()) m_finishedWhileAway = true;
+                // A finished turn is only news when the user was not watching this pane.
+                if (!watched() && !moreTurnsPending())
+                    notify(QStringLiteral("Agent finished"), turnSummary(), relay::NotificationCenter::kindSuccess);
+            } else if (outcome == QStringLiteral("error")) {
+                notify(QStringLiteral("Agent turn failed"), turnSummary(), relay::NotificationCenter::kindError);
             }
             if (!m_agentBusy && !moreTurnsPending()) { ensureLineStart(); closeInline(); }
             if (outcome == QStringLiteral("done") && !m_agentBusy && !moreTurnsPending()
@@ -3466,7 +3462,8 @@ private:
             showBanner(QStringLiteral("A command in this pane was stopped because it ran out of memory (limit %1). The shell is still running.")
                            .arg(isolation::memory("isolation/shell_memory_max", "8G")),
                        QString(), {});
-            notifyIfAway(QStringLiteral("Out of memory"), QStringLiteral("A command in %1 was stopped (limit %2).").arg(m_cwd, isolation::memory("isolation/shell_memory_max", "8G")));
+            notify(QStringLiteral("Out of memory"), QStringLiteral("A command in %1 was stopped (limit %2).").arg(m_cwd, isolation::memory("isolation/shell_memory_max", "8G")),
+                   relay::NotificationCenter::kindError);
         }
         m_oomKills = kills;
     }
@@ -3480,7 +3477,8 @@ private:
                              .arg(isolation::memory("isolation/shell_memory_max", "8G"))
                        : QStringLiteral("This pane's shell was stopped."),
                    QStringLiteral("Restart shell"), [this] { restartShell(); });
-        if (oom) notifyIfAway(QStringLiteral("Out of memory"), QStringLiteral("The shell in %1 was stopped.").arg(m_cwd));
+        if (oom) notify(QStringLiteral("Out of memory"), QStringLiteral("The shell in %1 was stopped.").arg(m_cwd),
+                        relay::NotificationCenter::kindError);
     }
 
     void showBanner(const QString &text, const QString &actionLabel, std::function<void()> action) {
@@ -3558,7 +3556,8 @@ private:
             enterSecretMode(foregroundProgramName());
             if (!m_secretNotified) {
                 m_secretNotified = true;
-                notifyIfAway(QStringLiteral("Password prompt"), QStringLiteral("A command in %1 is waiting for a password.").arg(m_cwd));
+                notify(QStringLiteral("Password prompt"), QStringLiteral("A command in %1 is waiting for a password.").arg(m_cwd),
+                       relay::NotificationCenter::kindWarning);
             }
             return;
         }
@@ -3629,11 +3628,32 @@ private:
         status(QStringLiteral("Password sent to %1").arg(m_secretProgram.isEmpty() ? QStringLiteral("the program") : m_secretProgram));
     }
 
-    void notifyIfAway(const QString &title, const QString &body) {
+    // Something worth telling the user about after the fact. The bell in the window header always
+    // keeps it; the desktop only hears about it when Relay is not the active window (and desktop
+    // alerts are on), which is what notify-send was always used for here.
+    void notify(const QString &title, const QString &body,
+                const QString &kind = relay::NotificationCenter::kindInfo) {
+        relay::NotificationCenter::instance().post(title, body, kind, sessionToken());
         if (window() && window()->isActiveWindow()) return;
         QApplication::alert(window());
+        if (!relay::NotificationCenter::desktopEnabled()) return;
         const QString notifier = QStandardPaths::findExecutable(QStringLiteral("notify-send"));
         if (!notifier.isEmpty()) QProcess::startDetached(notifier, {QStringLiteral("-a"), QStringLiteral("Relay"), title, body});
+    }
+
+    // True while this pane is the one the user is looking at: routine notices (a finished agent
+    // turn) are not worth a bell entry then, while failures are posted either way.
+    bool watched() const {
+        return window() && window()->isActiveWindow() && isVisible() && property("relayActive").toBool();
+    }
+
+    // The last line the agent wrote this turn, prefixed with the folder, for notification bodies.
+    QString turnSummary() const {
+        const QString folder = QDir(m_cwd).dirName();
+        QString line;
+        const QStringList lines = m_turnText.trimmed().split('\n');
+        for (auto it = lines.crbegin(); it != lines.crend() && line.isEmpty(); ++it) line = it->trimmed();
+        return line.isEmpty() ? folder : folder + QStringLiteral(" · ") + line.left(160);
     }
 
     static bool copyOnSelect() { return QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool(); }
@@ -5048,7 +5068,8 @@ private:
             if (m_runningSince.isValid()) {
                 const qint64 ms = m_runningSince.elapsed();
                 m_runningSince.invalidate();
-                if (ms > 30000) notifyIfAway(QStringLiteral("Command finished"), QStringLiteral("Exit %1 after %2 s in %3").arg(status).arg(ms / 1000).arg(m_cwd));
+                if (ms > 30000) notify(QStringLiteral("Command finished"), QStringLiteral("Exit %1 after %2 s in %3").arg(status).arg(ms / 1000).arg(m_cwd),
+                                       status == 0 ? relay::NotificationCenter::kindSuccess : relay::NotificationCenter::kindWarning);
             }
             m_programPoll.stop();
             endWaiting(true);
@@ -5751,7 +5772,7 @@ protected:
         painter.setBrush(Qt::NoBrush);
         const QPointF centre(width() / 2.0, height() / 2.0);
         switch (m_glyph) {
-        case Glyph::Bell: paintBell(painter, centre, ink); break;
+        case Glyph::Bell: paintBell(painter, centre); break;
         case Glyph::Gear: paintGear(painter, centre); break;
         case Glyph::Minimize: painter.drawLine(QPointF(centre.x() - 5, centre.y() + 3), QPointF(centre.x() + 5, centre.y() + 3)); break;
         case Glyph::Maximize: painter.drawRect(QRectF(centre.x() - 4.5, centre.y() - 4.5, 9, 9)); break;
@@ -5776,7 +5797,7 @@ protected:
     void leaveEvent(QEvent *event) override { QToolButton::leaveEvent(event); update(); }
 
 private:
-    void paintBell(QPainter &painter, const QPointF &centre, const QColor &ink) const {
+    void paintBell(QPainter &painter, const QPointF &centre) const {
         const qreal x = centre.x(), y = centre.y();
         QPainterPath bell;
         bell.moveTo(x - 5.5, y + 2.5);
@@ -5801,7 +5822,6 @@ private:
             painter.setPen(relay::theme::AccentText);
             painter.drawText(dot, Qt::AlignCenter, m_badge > 9 ? QStringLiteral("9+") : QString::number(m_badge));
         }
-        Q_UNUSED(ink)
     }
 
     void paintGear(QPainter &painter, const QPointF &centre) const {
@@ -6255,7 +6275,7 @@ protected:
     // ----- frameless window: the padding around the window resizes it -----------------------------
     void mousePressEvent(QMouseEvent *event) override {
         const Qt::Edges edges = event->button() == Qt::LeftButton ? edgesAt(event->pos()) : Qt::Edges();
-        if (edges) { startWindowDrag(edges); event->accept(); return; }
+        if (edges) { startWindowDrag(edges, event->globalPos()); event->accept(); return; }
         QMainWindow::mousePressEvent(event);
     }
 
@@ -6879,8 +6899,8 @@ private:
         }
         items << actionItem(agent, QStringLiteral("Recap"), QStringLiteral("Summarize what happened in this session"), QStringLiteral("agent.recap"));
         items << actionItem(agent, QStringLiteral("Tasks…"),
-                            pane && !pane->tasksProgress().isEmpty() ? pane->tasksProgress() + QStringLiteral(" · mark done, cancel, re-ask · /tasks")
-                                                                     : QStringLiteral("Task list: everything you asked and its progress · /tasks"), QStringLiteral("agent.requests"));
+                            pane && !pane->tasksProgress().isEmpty() ? pane->tasksProgress() + QStringLiteral(" · the agent's task list · /tasks")
+                                                                     : QStringLiteral("Task list: what the agent is working on · /tasks"), QStringLiteral("agent.requests"));
         items << actionItem(agent, QStringLiteral("Continue agent turn"),
                             pane && pane->limitReached() ? QStringLiteral("The last turn stopped at its step limit · /continue")
                                                          : QStringLiteral("Send “Continue” to the agent · /continue"), QStringLiteral("agent.continue"));
@@ -7079,6 +7099,40 @@ private:
             items << actionItem(panes, QStringLiteral("Start a fresh window set"),
                                 QStringLiteral("Forget the saved layout; the next start opens one new window"),
                                 QStringLiteral("windows.fresh"));
+        }
+        {
+            // Window header: Relay's own title bar, or the desktop's. Existing windows keep theirs.
+            PaletteItem frame; frame.key = QStringLiteral("option:window/native_frame"); frame.section = panes;
+            const bool native = nativeFrame();
+            frame.label = QStringLiteral("System title bar");
+            frame.detail = (native ? QStringLiteral("On · ") : QStringLiteral("Off · "))
+                + QStringLiteral("off: the tab row is the title bar, with the window buttons on it · new windows");
+            frame.aliases = QStringLiteral("frameless decorations titlebar header chrome window buttons");
+            frame.checked = native; frame.stayOpen = true;
+            frame.run = [this, native] {
+                QSettings().setValue(QStringLiteral("window/native_frame"), !native);
+                statusBar()->showMessage(native ? QStringLiteral("New windows will draw Relay's own title bar.")
+                                                : QStringLiteral("New windows will use the system title bar."), 6000);
+            };
+            items << frame;
+            PaletteItem bell; bell.key = QStringLiteral("notifications.open"); bell.section = panes;
+            const int unseen = relay::NotificationCenter::instance().unseen();
+            bell.label = QStringLiteral("Notifications…");
+            bell.detail = unseen > 0 ? QStringLiteral("%1 new · the bell in the window header").arg(unseen)
+                                     : QStringLiteral("%1 in this session · the bell in the window header")
+                                           .arg(relay::NotificationCenter::instance().count());
+            bell.aliases = QStringLiteral("bell alerts notice history");
+            bell.run = [this] { QTimer::singleShot(0, this, [this] { toggleNotifications(); }); };
+            items << bell;
+            PaletteItem desktop; desktop.key = QStringLiteral("option:notifications/desktop"); desktop.section = panes;
+            const bool on = relay::NotificationCenter::desktopEnabled();
+            desktop.label = QStringLiteral("Desktop notifications");
+            desktop.detail = (on ? QStringLiteral("On · ") : QStringLiteral("Off · "))
+                + QStringLiteral("notify-send while another window has the focus; the bell keeps them either way");
+            desktop.aliases = QStringLiteral("notify-send popup alert away");
+            desktop.checked = on; desktop.stayOpen = true;
+            desktop.run = [on] { relay::NotificationCenter::setDesktopEnabled(!on); };
+            items << desktop;
         }
         items << actionItem(panes, QStringLiteral("Next tab"), QString(), QStringLiteral("tab.next"));
         items << actionItem(panes, QStringLiteral("Previous tab"), QString(), QStringLiteral("tab.previous"));
@@ -7940,14 +7994,16 @@ private:
 
     // Hand the drag to the window manager, so its snapping, tiling and edge magnetism still work.
     // Should it refuse (older X11 setups), Relay moves or resizes the window itself.
-    bool startWindowDrag(Qt::Edges edges) {
+    bool startWindowDrag(Qt::Edges edges, const QPoint &pressedAt) {
         QWindow *handle = windowHandle();
         if (handle) {
             if (!edges && handle->startSystemMove()) return true;
             if (edges && handle->startSystemResize(edges)) return true;
         }
+        // No window manager took the drag: follow the pointer from where the press landed, not
+        // from wherever it has moved to by the time this runs.
         m_manualEdges = edges;
-        m_manualFrom = QCursor::pos();
+        m_manualFrom = pressedAt;
         m_manualGeometry = geometry();
         return false;
     }
@@ -7994,7 +8050,7 @@ private:
         if (onTabBar && m_newTabButton && m_newTabButton->geometry().contains(mouse->pos())) return false;
         if (!onTabBar && header->childAt(mouse->pos())) return false;
         if (type == QEvent::MouseButtonDblClick) { toggleMaximize(); return true; }
-        startWindowDrag({});
+        startWindowDrag({}, mouse->globalPos());
         return true;
     }
 

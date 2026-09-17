@@ -2,9 +2,9 @@
      edit the card files and regenerate. -->
 # Board
 
-70 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+74 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (63)
+## Features (65)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -22,6 +22,7 @@
 | `#FW77` | [Relay as a pure terminal (TUI) app](features/2026-09-17-terminal-only-tui-relay.md) | ready |  |  |  |
 | `#NY7Z` | [Voice transcription mode (microphone button, hold Right Alt)](features/2026-09-17-voice-transcription.md) | ready |  |  |  |
 | `#P4GP` | [Website and beta release](features/2026-09-17-website-and-beta-release.md) | ready |  |  |  |
+| `#JRWQ` | [The pane header is an agent-written summary of the session](features/2026-09-17-pane-title-summary.md) | ready |  |  |  |
 | `#78BN` | [One key for a new pane, with an arrow to choose the side](features/2026-09-17-new-pane-direction-by-arrow.md) | ready |  |  |  |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/2026-09-17-agent-sessions-planning-subagents.md) | in-progress | Claude Opus 5 (orchestrating) with subagents, 2026-09-17 |  |  |
 | `#YZTK` | [Clickable file and folder paths open Relay panes](features/2026-09-17-clickable-paths.md) | in-progress |  |  |  |
@@ -54,6 +55,7 @@
 | `#X2N2` | [! and * prompt prefixes (Claude Code style)](features/needs_qa_llm/2026-09-17-prefix-modes.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17 |  |  |
 | `#ZK66` | ["Agent stays in control" option, per program](features/needs_qa_llm/2026-09-17-program-control-policy.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
 | `#TP3W` | [Prompt box stays visible for ordinary programs; hides for full-screen, password and remote sessions; waiting-for-input focus](features/needs_qa_llm/2026-09-17-prompt-visibility-and-waiting-input.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI D subagent), 2026-09-17 |  |  |
+| `#HR4B` | [Relay draws its own title bar, with a notification centre behind a bell](features/needs_qa_llm/2026-09-17-window-header-and-notifications.md) | needs-qa-llm | implemented by Claude Opus 5 (Relay agent session), 2026-09-17 |  |  |
 | `#K1YZ` | [Queue or interrupt agent prompts sent while the agent is busy](features/needs_qa_llm/2026-09-17-queue-or-interrupt-agent-prompts.md) | needs-qa-llm | unassigned (backend implemented by Claude Opus 5, 2026-09-16) |  |  |
 | `#4TZD` | [Queue or interrupt shell commands while a foreground program runs](features/needs_qa_llm/2026-09-17-queue-shell-commands-while-busy.md) | needs-qa-llm |  |  |  |
 | `#9PGA` | [Backend: request ledger, todos, completion check, drop-path fixes, compaction that keeps asks](features/needs_qa_llm/2026-09-17-request-ledger-todos-completion.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, backend), 2026-09-17. Not committed. |  |  |
@@ -72,7 +74,7 @@
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | Claude Opus 5 research subagent, 2026-09-16 |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | implemented by Claude Opus 5 (Claude Code session), 2026-09-16 |  |  |
 
-## Bugs (7)
+## Bugs (9)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -83,3 +85,5 @@
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
 | `#90JF` | [Check that a terminal command will run before it is sent](changes/needs_qa_llm/2026-09-17-pre-submit-run-check.md) | needs-qa-llm |  |  |  |
 | `#AHS5` | [The prompt box is the only input; clicking the terminal does not type into it](changes/needs_qa_llm/2026-09-17-terminal-not-directly-typable.md) | needs-qa-llm | implemented by Claude Opus 5 (1M context) (Claude Code session), 2026-09-17 |  |  |
+| `#Q7MK` | [Numpad Enter submits like Return instead of inserting a newline](changes/needs_qa_llm/2026-09-17-keypad-enter-submits.md) | needs-qa-llm | implemented by Claude (Relay agent session), 2026-09-17 |  |  |
+| `#H3QW` | [Tasks are the model's todos only; the request ledger becomes invisible](changes/needs_qa_llm/2026-09-17-tasks-are-todos-only.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code), 2026-09-17 |  |  |

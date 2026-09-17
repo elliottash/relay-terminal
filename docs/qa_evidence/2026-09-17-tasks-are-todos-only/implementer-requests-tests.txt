@@ -1,0 +1,21 @@
+********* Start testing of RequestsTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : RequestsTests::initTestCase()
+PASS   : RequestsTests::parsesRequestsAndTodos()
+PASS   : RequestsTests::aPromptIsNeverATask()
+PASS   : RequestsTests::verbatimTextSurvivesRefresh()
+PASS   : RequestsTests::chipWhenAllSettled()
+PASS   : RequestsTests::outcomeMappings()
+PASS   : RequestsTests::batchesRestartWhenSettled()
+PASS   : RequestsTests::batchesRebuiltOnLoad()
+QWARN  : RequestsTests::earlierInPanel() This plugin does not support propagateSizeHints()
+PASS   : RequestsTests::earlierInPanel()
+PASS   : RequestsTests::glyphs()
+PASS   : RequestsTests::inlineLines()
+QWARN  : RequestsTests::panelShowsTasks() This plugin does not support propagateSizeHints()
+PASS   : RequestsTests::panelShowsTasks()
+QWARN  : RequestsTests::panelWithoutATaskList() This plugin does not support propagateSizeHints()
+PASS   : RequestsTests::panelWithoutATaskList()
+PASS   : RequestsTests::cleanupTestCase()
+Totals: 14 passed, 0 failed, 0 skipped, 0 blacklisted, 35ms
+********* Finished testing of RequestsTests *********

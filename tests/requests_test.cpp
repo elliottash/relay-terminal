@@ -5,6 +5,7 @@
 #include <QJsonArray>
 #include <QHash>
 #include <QJsonDocument>
+#include <QLabel>
 #include <QTest>
 #include <QTreeWidget>
 
@@ -53,13 +54,33 @@ private slots:
         QVERIFY(model.find(QStringLiteral("R4"))->reason.isEmpty());   // null reason
         QCOMPARE(model.todosFor(QStringLiteral("R2")).size(), 1);
         QCOMPARE(model.unlinkedTodos().size(), 1);
-        // Tasks: T1 completed, T2 in progress, T3 pending (unlinked), R3 deferred and R4 queued
-        // (no todos, so each counts itself). R2 is in progress, so nothing is unfinished yet.
-        QCOMPARE(model.chipText(), QStringLiteral("Tasks 1/5"));
+        // Tasks are the model's todos and nothing else: T1 completed, T2 in progress, T3 pending.
+        // R3 (deferred) and R4 (queued) have no todos, and a request is never a task of its own.
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks 1/3"));
         QCOMPARE(model.chipState(), QStringLiteral("running"));
-        QVERIFY(model.chipToolTip().contains(QStringLiteral("1 of 5 completed")));
-        QVERIFY(model.chipToolTip().contains(QStringLiteral("1 deferred")));
+        QVERIFY(model.chipToolTip().contains(QStringLiteral("1 of 3 completed")));
+        for (const auto &task : model.tasks()) QVERIFY2(task.key.startsWith('T'), qPrintable(task.key));
+        // The ledger itself is still parsed in full: it links todos and survives compaction.
+        QVERIFY(model.chipToolTip().split('\n').first().startsWith(QStringLiteral("Current task list")));
         QVERIFY(!model.handle(json("{'event':'done'}")));
+    }
+
+    // The complaint this split fixes: typing one ask used to show "Tasks 0/1" → "Tasks 1/1" with
+    // the user's own command as the task text. With no todos there is no task list and no chip.
+    void aPromptIsNeverATask() {
+        RequestLedgerModel model;
+        model.handle(json("{'event':'requests','items':[{'id':'R1','text_preview':'ls the repo','status':'in_progress','delivered':true,'turn_id':'q1'}]}"));
+        QVERIFY(model.tasks().isEmpty());
+        QVERIFY(!model.hasTasks());
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks"));
+        QCOMPARE(model.chipState(), QStringLiteral("none"));
+        QVERIFY(model.turnEndLine().isEmpty());
+        model.handle(json("{'event':'requests','items':[{'id':'R1','text_preview':'ls the repo','status':'done','delivered':true,'turn_id':'q1'}]}"));
+        QVERIFY(!model.hasTasks());
+        QVERIFY(model.turnEndLine().isEmpty());
+        // The ledger kept the entry all along; it is simply not a user-facing task.
+        QCOMPARE(model.requests().size(), 1);
+        QCOMPARE(model.find(QStringLiteral("R1"))->status, QStringLiteral("done"));
     }
 
     void verbatimTextSurvivesRefresh() {
@@ -106,14 +127,8 @@ private slots:
         QHash<QString, relay::TaskOutcome> outcome;
         for (const auto &task : model.tasks()) outcome.insert(task.key, task.outcome);
         using O = relay::TaskOutcome;
-        QCOMPARE(outcome.size(), 13);                      // R7, R9, R10 have todos; R8 is Relay's
-        QVERIFY(!outcome.contains(QStringLiteral("R7")) && !outcome.contains(QStringLiteral("R8")));
-        QCOMPARE(outcome.value(QStringLiteral("R1")), O::Completed);
-        QCOMPARE(outcome.value(QStringLiteral("R2")), O::Cancelled);
-        QCOMPARE(outcome.value(QStringLiteral("R3")), O::Failed);
-        QCOMPARE(outcome.value(QStringLiteral("R4")), O::Deferred);
-        QCOMPARE(outcome.value(QStringLiteral("R5")), O::Cancelled);
-        QCOMPARE(outcome.value(QStringLiteral("R6")), O::Unfinished);   // delivered, no turn running
+        QCOMPARE(outcome.size(), 7);                       // the seven todos; no request is a task
+        for (const QString &key : outcome.keys()) QVERIFY2(key.startsWith('T'), qPrintable(key));
         QCOMPARE(outcome.value(QStringLiteral("T1")), O::Completed);
         QCOMPARE(outcome.value(QStringLiteral("T2")), O::Failed);
         QCOMPARE(outcome.value(QStringLiteral("T3")), O::Deferred);
@@ -121,10 +136,10 @@ private slots:
         QCOMPARE(outcome.value(QStringLiteral("T5")), O::Unfinished);
         QCOMPARE(outcome.value(QStringLiteral("T6")), O::Completed);    // R9 marked done by the user
         QCOMPARE(outcome.value(QStringLiteral("T7")), O::Cancelled);    // R10 cancelled by the user
-        QCOMPARE(model.chipText(), QStringLiteral("Tasks 3/13 (2 failed, 2 deferred, 4 cancelled, 2 unfinished)"));
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks 2/7 (1 failed, 1 deferred, 2 cancelled, 1 unfinished)"));
         QCOMPARE(model.chipState(), QStringLiteral("attention"));
         const QString line = model.turnEndLine(400);
-        QVERIFY2(line.startsWith(QStringLiteral("Tasks 3/13 (2 failed, 2 deferred, 4 cancelled, 2 unfinished) · R3 “c” failed, T2 “two” failed, R4 “d” deferred")), qPrintable(line));
+        QVERIFY2(line.startsWith(QStringLiteral("Tasks 2/7 (1 failed, 1 deferred, 2 cancelled, 1 unfinished) · T2 “two” failed, T3 “three” deferred, T4 “four” cancelled")), qPrintable(line));
         QVERIFY(model.turnEndLine(60).contains(QStringLiteral("more")));
         QCOMPARE(RequestLedgerModel::statusLabel(QStringLiteral("blocked")), QStringLiteral("failed"));
 
@@ -135,9 +150,10 @@ private slots:
           {'id':'R7','text_preview':'g','status':'open','turn_id':'q1','delivered':true}]})"));
         // (The highest id went from R10 to R7: treated as another ledger, batches rebuilt.)
         model.handle(json(R"({'event':'todos','items':[{'id':'T5','text':'five','status':'pending','request_ids':['R7']}]})"));
-        QCOMPARE(model.chipText(), QStringLiteral("Tasks 0/3"));
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks 0/1"));
         QCOMPARE(model.chipState(), QStringLiteral("running"));
-        QCOMPARE(model.turnEndLine(), QStringLiteral("Tasks 0/3 (1 failed) · R2 “b” failed"));
+        // R2 is blocked, but a request is not a task: one active todo alone is not worth a line.
+        QVERIFY(model.turnEndLine().isEmpty());
         // A queued (never delivered) request is not unfinished even when nothing runs.
         model.handle(json(R"({'event':'requests','total':2,'open':2,'items':[
           {'id':'R1','text_preview':'a','status':'done','turn_id':'q1','delivered':true},
@@ -145,8 +161,7 @@ private slots:
           {'id':'R7','text_preview':'g','status':'open','turn_id':'q1','delivered':true},
           {'id':'R8','text_preview':'later','status':'open','delivered':false}]})"));
         for (const auto &task : model.tasks())
-            if (task.key == QStringLiteral("R8")) QCOMPARE(task.outcome, O::Active);
-            else if (task.key == QStringLiteral("T5")) QCOMPARE(task.outcome, O::Unfinished);   // R8 waiting does not make R7's todo active
+            if (task.key == QStringLiteral("T5")) QCOMPARE(task.outcome, O::Unfinished);   // R8 waiting does not make R7's todo active
     }
 
     // A live session: counting restarts when everything is settled and a new request arrives.
@@ -156,8 +171,9 @@ private slots:
             model.handle(json((QByteArray("{'event':'requests','items':[") + items + "]}").constData()));
         };
         requests("{'id':'R1','text_preview':'three things','status':'open'}");
-        QCOMPARE(model.chipText(), QStringLiteral("Tasks 0/1"));
-        QCOMPARE(model.chipState(), QStringLiteral("running"));
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks"));       // a queued ask is not a task
+        QCOMPARE(model.chipState(), QStringLiteral("none"));
+        QVERIFY(!model.hasTasks());
         requests("{'id':'R1','text_preview':'three things','status':'in_progress','delivered':true,'turn_id':'q1'}");
         model.handle(json(R"({'event':'todos','items':[{'id':'T1','text':'a','status':'in_progress','request_ids':['R1']},
             {'id':'T2','text':'b','status':'pending','request_ids':['R1']},{'id':'T3','text':'c','status':'pending','request_ids':['R1']}]})"));
@@ -173,19 +189,20 @@ private slots:
 
         // Settled + new request → a new list; the old one is "earlier".
         requests("{'id':'R1','text_preview':'three things','status':'blocked','delivered':true,'turn_id':'q1'},{'id':'R2','text_preview':'one thing','status':'open'}");
-        QCOMPARE(model.currentBatch(), 2);
-        QCOMPARE(model.chipText(), QStringLiteral("Tasks 0/1"));
+        QCOMPARE(model.currentBatch(), 2);                          // the ledger still starts a new list
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks"));        // which has no todos yet
         QVERIFY(!model.inCurrentBatch(QStringLiteral("R1")));
         QCOMPARE(model.earlierSummary().progress(true), QStringLiteral("2/3 (1 failed)"));
         requests("{'id':'R1','text_preview':'three things','status':'blocked','delivered':true,'turn_id':'q1'},{'id':'R2','text_preview':'one thing','status':'in_progress','delivered':true,'turn_id':'q2'}");
         // A steer while R2 runs joins the same list.
         requests("{'id':'R1','text_preview':'three things','status':'blocked','delivered':true,'turn_id':'q1'},{'id':'R2','text_preview':'one thing','status':'in_progress','delivered':true,'turn_id':'q2'},{'id':'R3','text_preview':'and this','status':'in_progress','delivered':true,'turn_id':'q2','source':'steer'}");
         QCOMPARE(model.currentBatch(), 2);
-        QCOMPARE(model.chipText(), QStringLiteral("Tasks 0/2"));
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks"));
         requests("{'id':'R1','text_preview':'three things','status':'blocked','delivered':true,'turn_id':'q1'},{'id':'R2','text_preview':'one thing','status':'done','delivered':true,'turn_id':'q2'},{'id':'R3','text_preview':'and this','status':'done','delivered':true,'turn_id':'q2'}");
-        QCOMPARE(model.chipText(), QStringLiteral("Tasks 2/2"));
-        QCOMPARE(model.chipState(), QStringLiteral("done"));
-        QCOMPARE(model.turnEndLine(), QStringLiteral("Tasks 2/2"));
+        // Two asks answered without a todo list: nothing to show, and no end-of-turn line.
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks"));
+        QCOMPARE(model.chipState(), QStringLiteral("none"));
+        QVERIFY(model.turnEndLine().isEmpty());
 
         // Next request: todos, then the step limit leaves one unfinished.
         const char *base = "{'id':'R1','text_preview':'three things','status':'blocked','delivered':true,'turn_id':'q1'},{'id':'R2','text_preview':'one thing','status':'done','delivered':true,'turn_id':'q2'},{'id':'R3','text_preview':'and this','status':'done','delivered':true,'turn_id':'q2'}";
@@ -193,7 +210,8 @@ private slots:
         QCOMPARE(model.currentBatch(), 3);
         model.handle(json(R"({'event':'todos','items':[{'id':'T4','text':'d','status':'completed','request_ids':['R4']},
             {'id':'T5','text':'e','status':'pending','request_ids':['R4']}]})"));   // T1–T3 dropped by the model
-        QCOMPARE(model.earlierSummary().progress(true), QStringLiteral("4/5 (1 failed)"));   // settled todos are kept
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks 1/2"));
+        QCOMPARE(model.earlierSummary().progress(true), QStringLiteral("2/3 (1 failed)"));   // settled todos are kept
         requests((QByteArray(base) + ",{'id':'R4','text_preview':'two more','status':'open','delivered':true,'turn_id':'q3'}").constData());
         QCOMPARE(model.chipText(), QStringLiteral("Tasks 1/2 (1 unfinished)"));
         QCOMPARE(model.turnEndLine(), QStringLiteral("Tasks 1/2 (1 unfinished) · T5 “e” unfinished"));
@@ -201,26 +219,26 @@ private slots:
         // "Continue": a new list that carries the unfinished task.
         requests((QByteArray(base) + ",{'id':'R4','text_preview':'two more','status':'open','delivered':true,'turn_id':'q3'},{'id':'R5','text_preview':'Continue','status':'open'}").constData());
         QCOMPARE(model.currentBatch(), 4);
-        QCOMPARE(model.chipText(), QStringLiteral("Tasks 0/2"));
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks 0/1 (1 unfinished)"));   // T5 carried over
         QVERIFY(model.inCurrentBatch(QStringLiteral("R4")));
         requests((QByteArray(base) + ",{'id':'R4','text_preview':'two more','status':'done','delivered':true,'turn_id':'q4'},{'id':'R5','text_preview':'Continue','status':'done','delivered':true,'turn_id':'q4'}").constData());
         model.handle(json(R"({'event':'todos','items':[{'id':'T4','text':'d','status':'completed','request_ids':['R4']},
             {'id':'T5','text':'e','status':'completed','request_ids':['R4']}]})"));
-        QCOMPARE(model.chipText(), QStringLiteral("Tasks 2/2"));
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks 1/1"));
 
         // Re-asking an earlier request starts a new list with it.
         requests((QByteArray(base).replace("'one thing','status':'done'", "'one thing','status':'open','queue_item':'k9'")
                   + ",{'id':'R4','text_preview':'two more','status':'done','delivered':true,'turn_id':'q4'},{'id':'R5','text_preview':'Continue','status':'done','delivered':true,'turn_id':'q4'}").constData());
-        QCOMPARE(model.currentBatch(), 5);
-        QCOMPARE(model.chipText(), QStringLiteral("Tasks 0/1"));
+        QCOMPARE(model.currentBatch(), 5);                          // the re-ask still opens a new list
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks"));
         QVERIFY(model.inCurrentBatch(QStringLiteral("R2")));
         // Reopened (o) without re-asking: unfinished, and it joins the current list.
         requests((QByteArray(base).replace("'three things','status':'blocked'", "'three things','status':'open'").replace("'one thing','status':'done'", "'one thing','status':'done','queue_item':'k9'")
                   + ",{'id':'R4','text_preview':'two more','status':'done','delivered':true,'turn_id':'q4'},{'id':'R5','text_preview':'Continue','status':'done','delivered':true,'turn_id':'q4'}").constData());
         QCOMPARE(model.currentBatch(), 5);
         QVERIFY(model.inCurrentBatch(QStringLiteral("R1")));
-        // R1's todos are settled (and kept although the model dropped them): R1 counts itself.
-        QCOMPARE(model.chipText(), QStringLiteral("Tasks 1/2 (1 unfinished)"));
+        // R1's todos are all settled, so reopening R1 adds no task: the ledger moved, the list did not.
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks"));
 
         // A new chat: the ledger starts over.
         requests("");
@@ -228,7 +246,7 @@ private slots:
         QVERIFY(!model.hasTasks());
         requests("{'id':'R1','text_preview':'fresh','status':'open'}");
         QCOMPARE(model.currentBatch(), 1);
-        QCOMPARE(model.chipText(), QStringLiteral("Tasks 0/1"));
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks"));
     }
 
     // After a restart or /resume the whole ledger arrives at once.
@@ -239,6 +257,11 @@ private slots:
           {'id':'R2','text_preview':'b','status':'done','delivered':true,'turn_id':'q1','source':'steer'},
           {'id':'R3','text_preview':'c','status':'open','delivered':true,'turn_id':'q2'},
           {'id':'R4','text_preview':'d','status':'done','delivered':true,'turn_id':'q3'}]})"));
+        model.handle(json(R"({'event':'todos','items':[
+          {'id':'T1','text':'a','status':'completed','request_ids':['R1']},
+          {'id':'T2','text':'b','status':'completed','request_ids':['R2']},
+          {'id':'T3','text':'c','status':'pending','request_ids':['R3']},
+          {'id':'T4','text':'d','status':'completed','request_ids':['R4']}]})"));
         QCOMPARE(model.chipText(), QStringLiteral("Tasks 1/2 (1 unfinished)"));
         QVERIFY(model.inCurrentBatch(QStringLiteral("R3")));
         QVERIFY(!model.inCurrentBatch(QStringLiteral("R2")));
@@ -249,7 +272,11 @@ private slots:
           {'id':'R2','text_preview':'x','status':'done','delivered':true,'turn_id':'q2'},
           {'id':'R3','text_preview':'y','status':'done','delivered':true,'turn_id':'q2'},
           {'id':'R4','text_preview':'z','status':'done','delivered':true,'turn_id':'q2'}]})"));
-        QCOMPARE(model.chipText(), QStringLiteral("Tasks 3/3"));
+        QVERIFY(!model.hasTasks());                 // the reset cleared the todos with the ledger
+        model.handle(json(R"({'event':'todos','items':[
+          {'id':'T1','text':'a','status':'completed','request_ids':['R1']},
+          {'id':'T2','text':'b','status':'completed','request_ids':['R2']}]})"));
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks 1/1"));
         QCOMPARE(model.earlierSummary().total, 1);
     }
 
@@ -261,6 +288,9 @@ private slots:
         model.handle(json(R"({'event':'requests','items':[
           {'id':'R1','text_preview':'first','status':'done','delivered':true,'turn_id':'q1'},
           {'id':'R2','text_preview':'second','status':'in_progress','delivered':true,'turn_id':'q2'}]})"));
+        model.handle(json(R"({'event':'todos','items':[
+          {'id':'T1','text':'the first list','status':'completed','request_ids':['R1']},
+          {'id':'T2','text':'the current one','status':'in_progress','request_ids':['R2']}]})"));
         QCOMPARE(model.currentBatch(), 2);
         RequestsPanel panel(&model);
         model.onChanged = [&] { panel.refresh(); };
@@ -268,15 +298,16 @@ private slots:
         panel.show();
         panel.enter();
         auto *tree = panel.findChild<QTreeWidget *>(QStringLiteral("requestsList"));
+        // The current list's tasks, then a folded Earlier group. No request rows anywhere.
         QCOMPARE(tree->topLevelItemCount(), 2);
-        QVERIFY(tree->topLevelItem(0)->text(0).contains(QStringLiteral("R2")));
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("◐  T2  the current one"));
         QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("Earlier · 1/1"));
         QVERIFY(!tree->topLevelItem(1)->isExpanded());
-        QCOMPARE(panel.selectedId(), QStringLiteral("R2"));
-        panel.select(QStringLiteral("R1"));
+        QCOMPARE(panel.selectedId(), QStringLiteral("T2"));
+        panel.select(QStringLiteral("T1"));
         QVERIFY(tree->topLevelItem(1)->isExpanded());
-        QCOMPARE(panel.selectedId(), QStringLiteral("R1"));
-        QTest::keyClick(tree, Qt::Key_Up);                     // the Earlier row itself: no request
+        QCOMPARE(panel.selectedId(), QStringLiteral("T1"));
+        QTest::keyClick(tree, Qt::Key_Up);                     // the Earlier row itself: not a task
         QCOMPARE(panel.selectedId(), QString());
     }
 
@@ -297,13 +328,17 @@ private slots:
             {'kind':'todo','id':'T2','status':'pending','preview':'README','request_ids':['R3']}]})").value(QStringLiteral("a")).toArray());
         QCOMPARE(items.size(), 3);
         QCOMPARE(items.at(2).requestIds, QStringList{QStringLiteral("R3")});
-        QCOMPARE(RequestLedgerModel::openItemsLine(items),
-                 QStringLiteral("2 tasks still open: R4 “write tests”, T2 “README”"));
-        QCOMPARE(RequestLedgerModel::openItemsLine(items.mid(1, 1)), QStringLiteral("1 task still open: R4 “write tests”"));
+        // Only the model's todos are named: open requests are ledger state the user never sees.
+        QCOMPARE(RequestLedgerModel::openItemsLine(items), QStringLiteral("1 task still open: T2 “README”"));
+        QVERIFY(RequestLedgerModel::openItemsLine(items.mid(0, 2)).isEmpty());   // two open requests, no todo
         QVERIFY(RequestLedgerModel::openItemsLine({}).isEmpty());
         // Long lists are cut with a count.
         QList<relay::LedgerOpenItem> many;
-        for (int i = 0; i < 10; ++i) { relay::LedgerOpenItem item; item.id = QStringLiteral("R%1").arg(i); item.preview = QString(40, 'x'); many << item; }
+        for (int i = 0; i < 10; ++i) {
+            relay::LedgerOpenItem item;
+            item.kind = QStringLiteral("todo"); item.id = QStringLiteral("T%1").arg(i); item.preview = QString(40, 'x');
+            many << item;
+        }
         QVERIFY(RequestLedgerModel::openItemsLine(many).contains(QStringLiteral("more")));
         // recap.open_items has no kind: requests.
         QCOMPARE(RequestLedgerModel::parseOpenItems(json("{'a':[{'id':'R1','status':'blocked','reason':'x','preview':'p'}]}").value(QStringLiteral("a")).toArray()).first().kind,
@@ -314,54 +349,56 @@ private slots:
         QVERIFY(RequestLedgerModel::limitLine(json("{'limit':{'which':'tool_calls','tool_calls':151,'max_tool_calls':150}}")).contains(QStringLiteral("tool-call limit (151 tool calls")));
         QCOMPARE(RequestLedgerModel::completionCheckLine(json("{'reminder':1,'max_reminders':2}")), QStringLiteral("✦ checking open items (1/2)"));
         QCOMPARE(RequestLedgerModel::auditLine(json("{'unaddressed':[{'request_id':'R2','quote':'update the docs'}]}")),
-                 QStringLiteral("may be unaddressed: R2 “update the docs”"));
+                 QStringLiteral("may be unaddressed: “update the docs”"));   // the user's words, not the ledger id
         QVERIFY(RequestLedgerModel::auditLine(json("{'unaddressed':[]}")).isEmpty());
     }
 
-    void panelKeys() {
+    // The panel is the task list: todos only, no request rows and no ledger actions.
+    void panelShowsTasks() {
         RequestLedgerModel model;
         model.handle(json(kRequests));
         model.handle(json(kTodos));
         RequestsPanel panel(&model);
-        QStringList calls;
-        panel.onSetStatus = [&](const QString &id, const QString &status) { calls << id + ':' + status; };
-        panel.onReask = [&](const QString &id) { calls << id + QStringLiteral(":reask"); };
-        panel.onFetch = [&](const QString &id) { calls << id + QStringLiteral(":fetch"); };
         bool closed = false;
         panel.onClose = [&] { closed = true; };
         model.onChanged = [&] { panel.refresh(); };
         panel.resize(500, 400);
         panel.show();
         panel.enter();
-        QCOMPARE(panel.selectedId(), QStringLiteral("R2"));   // first open request
         auto *tree = panel.findChild<QTreeWidget *>(QStringLiteral("requestsList"));
         QVERIFY(tree);
-        QCOMPARE(tree->topLevelItemCount(), 5);                // 4 requests + other tasks
-        QCOMPARE(tree->topLevelItem(1)->childCount(), 2);      // audit flag + todo
-        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("◐  R2  0/1  also update the docs"));
-        QCOMPARE(tree->topLevelItem(4)->text(0), QStringLiteral("Other tasks (1)"));
-        QVERIFY(tree->topLevelItem(1)->isExpanded());          // current requests show their tasks
-        QTest::keyClick(tree, Qt::Key_Return);
-        QVERIFY(!tree->topLevelItem(1)->isExpanded());
-        QTest::keyClick(tree, Qt::Key_Return);
-        QVERIFY(tree->topLevelItem(1)->isExpanded());
-        QTest::keyClick(tree, Qt::Key_R);                      // in progress: re-ask refused
-        QTest::keyClick(tree, Qt::Key_D);
-        QTest::keyClick(tree, Qt::Key_Down);                   // into the children
-        QTest::keyClick(tree, Qt::Key_X);                      // acts on the parent request
-        QCOMPARE(panel.selectedId(), QStringLiteral("R2"));
-        panel.select(QStringLiteral("R1"));
-        QTest::keyClick(tree, Qt::Key_D);                      // already done: nothing
-        QTest::keyClick(tree, Qt::Key_O);
-        QTest::keyClick(tree, Qt::Key_R);
-        QCOMPARE(calls, (QStringList{QStringLiteral("R2:fetch"), QStringLiteral("R2:done"), QStringLiteral("R2:cancelled_by_user"),
-                                     QStringLiteral("R1:fetch"), QStringLiteral("R1:open"), QStringLiteral("R1:reask")}));
-        // A refresh keeps the selection and expansion.
+        QCOMPARE(tree->topLevelItemCount(), 3);                // T1, T2, T3 — no request rows
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("✓  T1  fix parser"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("◐  T2  update README"));
+        QCOMPARE(tree->topLevelItem(2)->text(0), QStringLiteral("○  T3  tidy imports"));
+        QCOMPARE(panel.selectedId(), QStringLiteral("T2"));    // the first task still running
+        auto *detail = panel.findChild<QLabel *>(QStringLiteral("requestDetail"));
+        QVERIFY(detail->text().contains(QStringLiteral("update README")));
+        QVERIFY2(!detail->text().contains(QStringLiteral("R2")), qPrintable(detail->text()));
+        panel.select(QStringLiteral("T3"));
+        QCOMPARE(panel.selectedId(), QStringLiteral("T3"));
+        QVERIFY(detail->text().contains(QStringLiteral("tidy imports")));
+        // A refresh keeps the selection.
         model.handle(json(kRequests));
-        QCOMPARE(panel.selectedId(), QStringLiteral("R1"));
-        QVERIFY(tree->topLevelItem(1)->isExpanded());
+        QCOMPARE(panel.selectedId(), QStringLiteral("T3"));
         QTest::keyClick(tree, Qt::Key_Escape);
         QVERIFY(closed);
+    }
+
+    // With no todos the panel says so instead of listing what the user typed.
+    void panelWithoutATaskList() {
+        RequestLedgerModel model;
+        model.handle(json("{'event':'requests','items':[{'id':'R1','text_preview':'ls the repo','status':'done','delivered':true,'turn_id':'q1'}]}"));
+        RequestsPanel panel(&model);
+        panel.resize(500, 400);
+        panel.show();
+        panel.enter();
+        auto *tree = panel.findChild<QTreeWidget *>(QStringLiteral("requestsList"));
+        QCOMPARE(tree->topLevelItemCount(), 0);
+        QCOMPARE(panel.selectedId(), QString());
+        auto *detail = panel.findChild<QLabel *>(QStringLiteral("requestDetail"));
+        QVERIFY(detail->text().startsWith(QStringLiteral("No task list")));
+        QVERIFY2(!detail->text().contains(QStringLiteral("ls the repo")), qPrintable(detail->text()));
     }
 };
 

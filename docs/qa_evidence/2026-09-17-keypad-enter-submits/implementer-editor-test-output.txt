@@ -1,0 +1,29 @@
+# Implementer run — numpad Enter submits like Return (2026-09-17)
+
+Widget test on the real RichEditor (QTest key events, Qt 5.15, offscreen platform).
+Command: cmake --build build --target relay-editor-tests && cd build && QT_QPA_PLATFORM=offscreen ./relay-editor-tests
+
+********* Start testing of EditorTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : EditorTests::initTestCase()
+PASS   : EditorTests::nativeSelectionAndUndo()
+PASS   : EditorTests::submissionAndMultiline()
+PASS   : EditorTests::keypadEnterMatchesReturn()
+PASS   : EditorTests::shiftClickSelection()
+PASS   : EditorTests::mouseDragSelection()
+PASS   : EditorTests::pasteNeverSubmits()
+PASS   : EditorTests::imeDoesNotPrematurelySubmit()
+PASS   : EditorTests::historyPreservesDraft()
+PASS   : EditorTests::ghostTextAcceptsWholeOrWord()
+PASS   : EditorTests::upInsideMultilineTextMovesCursor()
+PASS   : EditorTests::cleanupTestCase()
+Totals: 12 passed, 0 failed, 0 skipped, 0 blacklisted, 86ms
+********* Finished testing of EditorTests *********
+
+## Regression check (fix reverted, test run against HEAD's RichEditor.cpp)
+
+FAIL!  : EditorTests::keypadEnterMatchesReturn()
+   Actual   (routes) size: 0
+   Expected (QStringList({"auto"})) size: 1
+   Loc: [tests/editor_test.cpp(45)]
+-> without the fix, keypad Enter submitted nothing and inserted a newline (the reported bug).

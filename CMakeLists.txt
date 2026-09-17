@@ -102,6 +102,13 @@ target_include_directories(relay-conversations PUBLIC src)
 target_link_libraries(relay-conversations PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-conversations PRIVATE -Wall -Wextra -Wpedantic)
 
+# Notification centre: the list behind the bell in the window header. Plain QtCore so the
+# rules (order, unread count, cap) can be tested without a window.
+add_library(relay-notifications STATIC src/Notifications.cpp src/Notifications.h)
+target_include_directories(relay-notifications PUBLIC src)
+target_link_libraries(relay-notifications PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-notifications PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
 target_include_directories(relay-requests PUBLIC src)
 target_link_libraries(relay-requests PUBLIC ${RELAY_QT}::Widgets)
@@ -123,7 +130,7 @@ if(RELAY_BUILD_APP)
     add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/Hints.cpp src/Hints.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
         src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -180,6 +187,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-backends-tests PRIVATE relay-backends ${RELAY_QT}::Test)
     add_test(NAME backends COMMAND relay-backends-tests)
     set_tests_properties(backends PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-notifications-tests tests/notifications_test.cpp)
+    target_link_libraries(relay-notifications-tests PRIVATE relay-notifications ${RELAY_QT}::Test)
+    add_test(NAME notifications COMMAND relay-notifications-tests)
+    set_tests_properties(notifications PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-hints-tests tests/hints_test.cpp src/Hints.cpp)
     target_include_directories(relay-hints-tests PRIVATE src)
     target_link_libraries(relay-hints-tests PRIVATE ${RELAY_QT}::Test)

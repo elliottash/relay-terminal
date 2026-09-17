@@ -31,14 +31,14 @@ SPEC = {"type": "function", "function": {
             "id": {"type": "string", "description": "Existing todo id (T<n>) to keep; omit for a new todo."},
             "text": {"type": "string", "description": "The ask, quoted or closely paraphrased."},
             "status": {"type": "string", "enum": list(STATUSES)},
-            "request_ids": {"type": "array", "items": {"type": "string"}, "description": "Linked requests, e.g. [\"R3\"]. Omit to link a new todo to the current turn's message."},
+            "request_ids": {"type": "array", "items": {"type": "string"}, "description": "Linked requests, e.g. [\"R3\"]. Omit to link a new todo to the current turn's message. Listing several means one piece of work serves them all: add a new id here when a later message refines an ask this todo already covers."},
             "note": {"type": "string", "description": "Reason; required for cancelled, deferred and blocked."}},
             "required": ["text", "status"], "additionalProperties": False}}},
         "required": ["items"], "additionalProperties": False}}}
 
 RULES = """
 
-Requests and todos: Relay records every message the user sends as a request with an id (R<n>). Messages that arrive while you work are labelled with their id. When a message contains more than one ask, or a new message arrives while you are working, call update_todos before continuing: one todo per ask, with the ask quoted, linked with request_ids (todos you add without request_ids are linked to the message that started the current turn; the tool result shows the links). Keep exactly one todo in_progress, mark each completed as soon as it is actually done, and keep going until every todo of the current turn's requests is completed, or cancelled, deferred or blocked with a reason. Do not end your turn with pending todos for those requests. Todos of an earlier request whose turn was stopped may stay pending until the user asks to continue it; do not cancel them on your own. Skip the list for a single simple ask."""
+Requests and todos: Relay records every message the user sends as a request with an id (R<n>). Messages that arrive while you work are labelled with their id. When a message contains more than one ask, or a new message arrives while you are working, call update_todos before continuing: one todo per ask, with the ask quoted, linked with request_ids (todos you add without request_ids are linked to the message that started the current turn; the tool result shows the links). When a message changes, narrows or corrects an ask you already have a todo for, add its request id to that todo's request_ids instead of adding a todo; add a todo only for work that is genuinely new. Keep exactly one todo in_progress, mark each completed as soon as it is actually done, and keep going until every todo of the current turn's requests is completed, or cancelled, deferred or blocked with a reason. Do not end your turn with pending todos for those requests. Todos of an earlier request whose turn was stopped may stay pending until the user asks to continue it; do not cancel them on your own. Skip the list for a single simple ask."""
 
 
 def validate(raw, known_request_ids, existing: list[dict], next_id: int,

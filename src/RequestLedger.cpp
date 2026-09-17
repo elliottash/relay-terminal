@@ -175,7 +175,9 @@ bool RequestLedgerModel::turnRunning() const {
     return false;
 }
 
-// Outcome rules (the owner's mapping):
+// Tasks are the model's todos. `deriveAll()` additionally derives a pseudo-task per user request;
+// those never reach tasks() and exist only so the batch walk below can tell one turn's list from the
+// next (a turn with no todos still closes a batch). Outcome rules (the owner's mapping):
 //   todo completed → Completed; blocked → Failed; deferred → Deferred; cancelled → Cancelled.
 //   todo pending/in_progress → Active while a turn runs or a linked request still waits in the queue,
 //     else Unfinished (its turn ended: error, cancel, step limit, or the completion check gave up).
@@ -185,7 +187,7 @@ bool RequestLedgerModel::turnRunning() const {
 //     or re-asked/requeued and not delivered again) or while another turn runs, else Unfinished.
 //   A request whose todos are all settled but which is open again also counts itself.
 // Relay-origin requests (requires_completion false) are not tasks; their todos are.
-QList<TaskItem> RequestLedgerModel::deriveTasks() const {
+QList<TaskItem> RequestLedgerModel::deriveAll() const {
     const bool running = turnRunning();
     QList<TaskItem> out;
     const QList<LedgerTodo> todos = allTodos();
@@ -237,6 +239,15 @@ QList<TaskItem> RequestLedgerModel::deriveTasks() const {
     return out;
 }
 
+// The user-facing task list: the model's todos only. A request is never a task — the ledger is
+// internal (it links todos, survives compaction and drives re-asks), and showing a prompt as a
+// task made every turn report "Tasks 1/1" for having ended normally.
+QList<TaskItem> RequestLedgerModel::deriveTasks() const {
+    QList<TaskItem> out;
+    for (const auto &task : deriveAll()) if (task.todo) out << task;
+    return out;
+}
+
 // Batches. The current task list is everything since all tasks were last settled:
 //  1. New requests are taken in id order. A request with requires_completion starts a new batch
 //     when the current batch has tasks, none of them is Active, no older request is in progress,
@@ -249,7 +260,7 @@ QList<TaskItem> RequestLedgerModel::deriveTasks() const {
 //     reopened or re-asked request) move into the current batch, so the latest list always shows
 //     what is left. A re-asked (Active) task starts a new batch first when the current one is settled.
 void RequestLedgerModel::updateBatches() {
-    QList<TaskItem> list = deriveTasks();
+    QList<TaskItem> list = deriveAll();
     QHash<QString, TaskOutcome> outcome;
     for (const auto &task : list) outcome.insert(task.key, task.outcome);
     auto batchOf = [&](const TaskItem &task) {
@@ -409,8 +420,6 @@ QString RequestLedgerModel::chipToolTip() const {
     if (!sum.suffix().isEmpty()) tip += QStringLiteral(", ") + sum.suffix();
     const TaskSummary earlier = earlierSummary();
     if (earlier.total > 0) tip += QStringLiteral("\nEarlier: %1").arg(earlier.progress(true));
-    tip += QStringLiteral("\n%1 request%2 this session").arg(m_total).arg(m_total == 1 ? QString() : QStringLiteral("s"));
-    if (m_open > 0) tip += QStringLiteral(", %1 open").arg(m_open);
     return tip;
 }
 
@@ -475,16 +484,11 @@ QList<LedgerOpenItem> RequestLedgerModel::parseOpenItems(const QJsonArray &items
 }
 
 QString RequestLedgerModel::openItemsLine(const QList<LedgerOpenItem> &items, int maxChars) {
-    // Counted as tasks, like the chip: open todos, plus open requests that have no open todo of their own.
-    QSet<QString> requestsWithTodos;
-    for (const auto &item : items)
-        if (item.kind == QStringLiteral("todo"))
-            for (const QString &id : item.requestIds) requestsWithTodos.insert(id);
+    // Counted as tasks, like the chip: the model's open todos. Open requests are ledger state and
+    // are never named to the user.
     QStringList entries;
-    for (const auto &item : items) {
-        if (item.kind != QStringLiteral("todo") && requestsWithTodos.contains(item.id)) continue;
-        entries << item.id + ' ' + quoted(item.preview, 48);
-    }
+    for (const auto &item : items)
+        if (item.kind == QStringLiteral("todo")) entries << item.id + ' ' + quoted(item.preview, 48);
     if (entries.isEmpty()) return QString();
     QString line = QStringLiteral("%1 task%2 still open: ").arg(entries.size()).arg(entries.size() == 1 ? QString() : QStringLiteral("s"));
     QString list;
@@ -517,7 +521,7 @@ QString RequestLedgerModel::auditLine(const QJsonObject &event) {
     QStringList parts;
     for (const auto &value : event.value(QStringLiteral("unaddressed")).toArray()) {
         const QJsonObject flag = value.toObject();
-        parts << flag.value(QStringLiteral("request_id")).toString() + ' ' + quoted(flag.value(QStringLiteral("quote")).toString(), 60);
+        parts << quoted(flag.value(QStringLiteral("quote")).toString(), 60);   // no ledger id: the ledger is internal
     }
     return parts.isEmpty() ? QString() : QStringLiteral("may be unaddressed: ") + parts.join(QStringLiteral(", "));
 }

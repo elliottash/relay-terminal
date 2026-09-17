@@ -35,6 +35,22 @@ private Q_SLOTS:
         QTest::keyClick(&editor, Qt::Key_Return, Qt::ControlModifier | Qt::ShiftModifier);
         QCOMPARE(routes, QStringList({"auto", "agent", "shell"}));
     }
+    void keypadEnterMatchesReturn() {
+        RichEditor editor; QStringList routes;
+        editor.onSubmit = [&routes](const QString &route) { routes.append(route); };
+        QTest::keyClicks(&editor, "echo hi");
+        // The numpad's Enter arrives as Key_Enter with KeypadModifier; it must submit like
+        // Return, not fall through to a newline, and its Ctrl/Ctrl+Shift forms must work too.
+        QTest::keyClick(&editor, Qt::Key_Enter, Qt::KeypadModifier);
+        QCOMPARE(routes, QStringList({"auto"}));
+        QCOMPARE(editor.toPlainText(), QStringLiteral("echo hi"));
+        QTest::keyClick(&editor, Qt::Key_Enter, Qt::KeypadModifier | Qt::ShiftModifier);
+        QCOMPARE(editor.toPlainText(), QStringLiteral("echo hi\n"));
+        QVERIFY(routes.size() == 1);
+        QTest::keyClick(&editor, Qt::Key_Enter, Qt::KeypadModifier | Qt::ControlModifier);
+        QTest::keyClick(&editor, Qt::Key_Enter, Qt::KeypadModifier | Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(routes, QStringList({"auto", "agent", "shell"}));
+    }
     void shiftClickSelection() {
         RichEditor editor; editor.resize(600, 150); editor.setPlainText(QStringLiteral("hello world")); editor.show();
         QTest::qWait(30);

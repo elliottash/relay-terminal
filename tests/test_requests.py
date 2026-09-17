@@ -195,6 +195,32 @@ class TodoUnitTests(unittest.TestCase):
         restored.load_json(todos.to_json())
         self.assertEqual((restored.items, restored.next_id), (todos.items, 4))
 
+    def test_a_refining_message_joins_the_existing_todo(self):
+        """The prompt tells the model to add the new request id to a todo it already has rather
+        than adding one (todos.RULES). Both requests then settle with that todo."""
+        ledger = ledger_mod.RequestLedger()
+        ledger.add('add a button', 'ask')
+        ledger.deliver('R1', 't1', 1)
+        todos = todo_mod.TodoList()
+        todos.replace({'items': [{'text': 'add a button', 'status': 'in_progress'}]}, {'R1'}, 't1', ['R1'])
+        # "make it blue" arrives mid-turn: a refinement, not new work.
+        ledger.add('make it blue', 'steer')
+        ledger.deliver('R2', 't1', 1)
+        items = todos.replace({'items': [{'id': 'T1', 'text': 'add a blue button', 'status': 'in_progress',
+                                          'request_ids': ['R1', 'R2']}]},
+                              {'R1', 'R2'}, 't1', ['R2'])
+        self.assertEqual([(i['id'], i['request_ids']) for i in items], [('T1', ['R1', 'R2'])])
+        ledger.apply_todos(items)
+        self.assertEqual([ledger.get(r)['status'] for r in ('R1', 'R2')], ['in_progress', 'in_progress'])
+        items = todos.replace({'items': [{'id': 'T1', 'text': 'add a blue button', 'status': 'completed',
+                                          'request_ids': ['R1', 'R2']}]},
+                              {'R1', 'R2'}, 't1', ['R2'])
+        ledger.apply_todos(items)
+        self.assertEqual([ledger.get(r)['status'] for r in ('R1', 'R2')], ['done', 'done'])
+        # One task, not two: the refinement never became its own todo.
+        self.assertEqual(len(todos.items), 1)
+        self.assertEqual(todos.next_id, 2)
+
 
 class CarriedBlockTests(unittest.TestCase):
     def test_block_contents(self):

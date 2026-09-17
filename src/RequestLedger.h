@@ -31,13 +31,14 @@ struct LedgerRequest {
     QString fullText() const { return text.isEmpty() ? preview : text; }
 };
 
-// How a task counts in the Tasks chip. A task is one of the model's todos, or a user request
-// with no linked todos (the request itself). See docs/ARCHITECTURE.md, "Tasks".
+// How a task counts in the Tasks chip. A task is one of the model's todos — nothing else.
+// The request ledger below is internal: it anchors batches and links todos, but a request is
+// never shown to the user and never counts as a task. See docs/ARCHITECTURE.md, "Tasks".
 enum class TaskOutcome { Active, Completed, Failed, Deferred, Cancelled, Unfinished };
 
 struct TaskItem {
-    QString key;          // "T3" (todo) or "R2" (request counted as its own task)
-    bool todo = true;
+    QString key;          // "T3"; batching also walks request pseudo-tasks keyed "R2"
+    bool todo = true;     // always true for tasks(); false only inside the batch walk
     QString text, status, note;   // status: the raw todo or request status
     QStringList requestIds;       // a todo's links; a request task: its own id
     TaskOutcome outcome = TaskOutcome::Active;
@@ -85,8 +86,8 @@ public:
     QList<LedgerTodo> allTodos() const;
 
     // ----- tasks -----
-    // Every task of the session with its outcome and batch. The current batch is the task list
-    // since everything was last settled; see "Batches" in RequestLedger.cpp.
+    // Every task (todo) of the session with its outcome and batch. The current batch is the task
+    // list since everything was last settled; see "Batches" in RequestLedger.cpp.
     QList<TaskItem> tasks() const;
     int currentBatch() const { return m_batch; }
     TaskSummary summary() const;                     // current batch
@@ -98,6 +99,7 @@ public:
     bool inCurrentBatch(const QString &requestId) const;
 
     // "Tasks 3/5" while work runs; "Tasks 5/5" or "Tasks 3/5 (1 failed, 1 deferred)" when settled.
+    // Empty of tasks (the model wrote no list) means no chip at all: see updateRequestsChip().
     QString chipText() const;
     // "none" (no tasks), "running", "done" (all completed) or "attention" (settled with a suffix).
     QString chipState() const;
@@ -126,7 +128,8 @@ private:
     void changed() { if (onChanged) onChanged(); }
     void resetBatches();
     void updateBatches();
-    QList<TaskItem> deriveTasks() const;             // outcomes, batch unset
+    QList<TaskItem> deriveAll() const;               // todos + request pseudo-tasks, for batching only
+    QList<TaskItem> deriveTasks() const;             // todos with outcomes, batch unset
     QList<LedgerRequest> m_requests;
     QList<LedgerTodo> m_todos;
     QHash<QString, LedgerTodo> m_retainedTodos;      // settled todos no longer in the list
