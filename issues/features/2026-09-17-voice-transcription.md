@@ -49,3 +49,7 @@ Second live test (transcription-only system prompt, two clips):
 | `google/gemini-3.8-flash` | exact | exact | 2.0–2.6 s | $0.0003–0.0004 (≈50 reasoning tokens) |
 
 Implementation notes: default model `google/gemini-3.5-flash-lite`, no reasoning; offer 3.8 Flash and OpenRouter Whisper as higher-accuracy options; light client-side punctuation/capitalization cleanup is optional.
+
+## Key requirement (2026-09-17, owner)
+
+Voice uses `google/gemini-3.5-flash-lite` on OpenRouter, so users provide an **OpenRouter key** to use it, independent of which model their panes' agents use. Behavior when no OpenRouter key is stored (keyring or `RELAY_OPENROUTER_API_KEY`): the microphone button and Right Alt show "Voice needs an OpenRouter key" with actions to add one in Provider / BYOK or import it from Warp; nothing is recorded or sent. The voice settings name the model and state that audio is sent to OpenRouter and Google.
