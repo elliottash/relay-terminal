@@ -5,6 +5,7 @@
 #include "AgentUi.h"
 #include "Completion.h"
 #include "Hints.h"
+#include "Notifications.h"        // window header: the bell and its list
 #include "InputPolicy.h"           // prompt-box-only input: where a submitted line goes
 #include "TurnTranscript.h"
 #include "SkillsDialog.h"
@@ -85,6 +86,7 @@
 #include <QLockFile>
 #include <QTimer>
 #include <QToolBar>
+#include <QWindow>
 #include <QUuid>
 #include <QVBoxLayout>
 #include <QStyledItemDelegate>
@@ -1288,9 +1290,8 @@ private:
         connect(m_secretEdit, &QLineEdit::returnPressed, this, [this] { submitSecret(); });
         composerLayout->addWidget(m_secretEdit);
         composerLayout->addLayout(routeRow);
-        auto *help = new QLabel(QStringLiteral("Shift+Enter  newline     Ctrl+Enter  agent (interrupts when busy)     Ctrl+Shift+Enter  terminal     Ctrl+H  type into the terminal     Esc  stop agent     @  files     ↑  queue / history"));
-        help->setWordWrap(true); composerLayout->addWidget(help);
-        m_help = help;
+        // No key-hints row: Ctrl+? lists every shortcut, and the strip stays quiet.
+        m_help = nullptr;
         buildTranscript();
         layout->addWidget(m_transcript);
         // The queue strip floats over the bottom of the terminal instead of taking layout space:
@@ -3657,6 +3658,7 @@ private:
     // The strip stays quiet: one word ("TERMINAL", "AGENT", "COMMAND"), the full sentence on hover.
     void setRouteText(const QString &full) {
         if (!m_routeLabel) return;
+        if (full.startsWith(QStringLiteral("EMPTY"))) { m_routeLabel->clear(); m_routeLabel->setToolTip(QString()); return; }
         const QString head = full.section(QStringLiteral(" · "), 0, 0).trimmed();
         m_routeLabel->setText(head.isEmpty() ? full : head);
         m_routeLabel->setToolTip(full);
@@ -4240,8 +4242,6 @@ private:
     }
 
     void onComposerEdited() {
-        // The key hints are for an empty box; once you are typing the space is better spent on text.
-        if (m_help) m_help->setVisible(m_editor->toPlainText().isEmpty());
         if (!m_editor->toPlainText().isEmpty()) m_idleTip.stop();
         if (!m_editor->toPlainText().isEmpty()) clearAiGhost();
         updateSlashPopup();
