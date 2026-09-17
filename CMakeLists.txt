@@ -64,7 +64,7 @@ if(RELAY_BUILD_APP)
     endif()
     find_package(${RELAY_KF}CoreAddons REQUIRED)
     find_package(${RELAY_KF}Parts REQUIRED)
-    add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h)
+    add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
     target_link_libraries(relay PRIVATE relay-editor relay-filepanes ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE

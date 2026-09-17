@@ -107,12 +107,32 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
   with line input on), and for `ssh`/`mosh`/`telnet` sessions. When a program is blocked reading
   the terminal (for example `read -p "continue? [Y/n]"` or a Python REPL), Relay shows "Waiting
   for input" and moves the focus to the terminal; focus returns to the prompt box when it stops
-  waiting. Ctrl+H / Ctrl+Shift+H still hand control back and forth, and the per-program policy in
-  the palette decides who is in control of full-screen programs.
+  waiting. While `sudo`, `doas`, `pkexec`, `su` or a program running as another user is in the
+  foreground (Relay cannot see whether it is reading), the prompt box stays but the keys go to the
+  terminal, with a hint in the prompt row; Ctrl+Shift+H moves to the prompt box to queue items and
+  Ctrl+H or a click returns. Ctrl+H / Ctrl+Shift+H still hand control back and forth, and the
+  per-program policy in the palette decides who is in control of full-screen programs.
 - **@ files.** Typing `@` lists files in the repository (git-tracked and untracked, respecting
   `.gitignore`) or a bounded walk of the directory, previewable files first, filtered as you type.
 - **History suggestions.** A dim completion from commands you ran in this directory, the prompt
   history and your shell history file; Actions › Command suggestions from history turns it off.
+- **Agent sessions.** Per pane: switch model without losing the conversation, reasoning effort
+  (picker, Alt+. / Alt+,), and a context indicator (`ctx 142k · 14%`, amber near the auto-compact
+  limit). Type `/` in the prompt box for commands: `/new`, `/model`, `/effort`, `/compact [focus]`,
+  `/context`, `/rewind` (also Esc Esc in an empty prompt), `/fork` (continues in a new pane),
+  `/resume` (with a recap), `/plan`, `/recap`, `/agents`, `/skills`, `/instructions`, `/export`
+  (Markdown under `.relay/exports`). Coming back to the window after 3 minutes, with a finished
+  turn and an empty prompt, prints a short recap (Actions › Agent options turns it off).
+- **Plan mode.** Shift+Tab in the prompt box (or `/plan`) shows a PLAN chip: the agent
+  investigates read-only and writes a plan, which opens in an editable pane (Ctrl+S saves) with
+  **Execute**, **Execute in fresh context** and **Keep planning**.
+- **Steering.** Enter a prompt while the agent works, then press Enter again on the empty prompt
+  box: the prompt joins the running turn at its next tool call instead of waiting in the queue.
+- **Instruction files.** On first launch Relay lists instruction files from other tools
+  (CLAUDE.md, AGENTS.md, WARP.md, …) to include, and can combine them into a global
+  `~/.config/relay/relay.md`. Change it later in Actions › Agent options › Instructions….
+- **AI suggestions (off by default).** Actions › Agent options: a suggested next command after a
+  command finishes (→ or Tab accepts) and a suggested next prompt after an agent turn (Tab).
 - **Windows, tabs and panes.** Each pane has its own shell, prompt, agent and conversation.
   Closed panes, tabs and windows restore in the same directories with new shells.
 - **File panes.** Folder explorer and file preview (code, Markdown, images, optional PDF).

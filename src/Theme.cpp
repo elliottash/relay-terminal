@@ -157,6 +157,14 @@ QFrame#queueStrip { background: @surface; border: 1px solid @border; border-radi
 QLabel#queueTitle { color: @muted; font-weight: 600; letter-spacing: 1px; }
 QLabel#queueRunning { color: @accent; }
 QLabel#queueItem { color: @text; }
+QLabel#queueSteer { color: #c9a6ff; }
+QLabel#opaqueHint { color: #e5c07b; }
+/* Agent sessions: plan chip, context indicator, plan editor */
+QLabel#planChip { color: #1b1530; background: #c9a6ff; border-radius: 4px; padding: 1px 6px; font-weight: 700; letter-spacing: 1px; font-size: 8pt; }
+QLabel#contextLabel { color: @muted; font-family: "@mono"; font-size: 9pt; padding: 0 4px; }
+QLabel#contextLabel[warn="true"] { color: #e5c07b; }
+QPlainTextEdit#planText { background: @bg; border: none; font-family: "@mono"; font-size: 10pt; padding: 8px; }
+QLabel#planNotice { color: @muted; }
 QFrame#queueStrip QToolButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 1px 6px; }
 QFrame#queueStrip QToolButton:hover { color: @text; border-color: @border; }
 QFrame#paneBanner { background: @raised; border: 1px solid #b0603a; border-radius: 8px; }

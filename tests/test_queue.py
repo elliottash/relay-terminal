@@ -313,3 +313,98 @@ class WorkerQueueProtocolTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SlowToolThenAnswer:
+    """First call asks for a slow tool; later calls record what they saw and answer."""
+    def __init__(self, command='sleep 1'):
+        self.command, self.seen, self.calls = command, [], 0
+
+    def complete(self, messages, tools, emit, cancel):
+        self.calls += 1
+        self.seen.append(json.loads(json.dumps(messages)))
+        if self.calls == 1:
+            return {'role': 'assistant', 'content': '', 'tool_calls': [
+                {'id': 's1', 'type': 'function', 'function': {'name': 'run_command',
+                                                              'arguments': json.dumps({'command': self.command})}}]}
+        return {'role': 'assistant', 'content': 'answer %d' % self.calls}
+
+    def cancel(self): pass
+
+
+class SteerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.rec = Recorder()
+        self.sup = TurnSupervisor(self.rec)
+
+    def tearDown(self):
+        self.sup.shutdown(timeout=3)
+        self.temp.cleanup()
+
+    def use(self, provider):
+        self.agent = Agent(CONFIG, self.temp.name, self.sup.agent_emit, provider=provider)
+        self.sup.set_agent(self.agent)
+        return provider
+
+    def test_steer_joins_running_turn_after_tool_results(self):
+        p = self.use(SlowToolThenAnswer())
+        first = self.sup.submit('tool please', 'now')
+        self.rec.wait(lambda e: e['event'] == 'tool_started')
+        steer = self.sup.submit('also check README', 'steer', request_id='r1')
+        self.assertEqual(self.rec.wait(lambda e: e['event'] == 'queued' and e['id'] == steer)['when'], 'steer')
+        self.rec.wait(lambda e: e['event'] == 'steer_delivered' and steer in e['ids'])
+        self.assertEqual(self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == first)['outcome'], 'done')
+        second_call = p.seen[1]
+        roles = [m['role'] for m in second_call]
+        # The steering prompt comes after the tool result, never between the tool call and its result.
+        self.assertEqual(roles[-2:], ['tool', 'user'])
+        self.assertEqual(second_call[-1]['content'], 'also check README')
+        self.assertFalse(self.rec.of('steer_returned'))
+        self.assertEqual(p.calls, 2)
+
+    def test_steer_returned_and_requeued_when_turn_ends_without_tool_call(self):
+        p = self.use(GatedProvider())
+        first = self.sup.submit('first', 'now')
+        self.rec.wait(lambda e: e.get('text') == 'working on first')
+        steer = self.sup.submit('late thought', 'steer')
+        changed = self.rec.wait(lambda e: e['event'] == 'queue_changed' and e.get('steering'))
+        self.assertEqual(changed['steering'][0]['id'], steer)
+        p.release.release()
+        returned = self.rec.wait(lambda e: e['event'] == 'steer_returned')
+        self.assertEqual((returned['id'], returned['requeued']), (steer, True))
+        self.rec.wait(lambda e: e.get('text') == 'working on late thought')
+        p.release.release()
+        self.assertEqual(self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == steer)['outcome'], 'done')
+        self.assertEqual(p.prompts, ['first', 'late thought'])
+
+    def test_steer_without_requeue_is_only_reported(self):
+        p = self.use(GatedProvider())
+        self.sup.submit('first', 'now')
+        self.rec.wait(lambda e: e.get('text') == 'working on first')
+        steer = self.sup.submit('gui keeps order', 'steer', request_id='g1', requeue=False)
+        p.release.release()
+        returned = self.rec.wait(lambda e: e['event'] == 'steer_returned')
+        self.assertEqual((returned['id'], returned['request_id'], returned['requeued'], returned['prompt']),
+                         (steer, 'g1', False, 'gui keeps order'))
+        time.sleep(0.2)
+        self.assertEqual(p.prompts, ['first'])
+
+    def test_steer_when_idle_queues_normally(self):
+        p = self.use(GatedProvider())
+        item = self.sup.submit('idle steer', 'steer')
+        self.assertEqual(self.rec.wait(lambda e: e['event'] == 'queued' and e['id'] == item)['when'], 'queue')
+        self.rec.wait(lambda e: e.get('text') == 'working on idle steer')
+        p.release.release()
+
+    def test_queue_steer_upgrades_a_queued_prompt(self):
+        p = self.use(SlowToolThenAnswer('sleep 1'))
+        self.sup.submit('tool please', 'now')
+        self.rec.wait(lambda e: e['event'] == 'tool_started')
+        queued = self.sup.submit('upgrade me', 'queue')
+        self.sup.steer(queued)
+        self.rec.wait(lambda e: e['event'] == 'steer_delivered' and queued in e['ids'])
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        self.assertEqual(p.seen[1][-1]['content'], 'upgrade me')
+        with self.assertRaises(ValueError):
+            self.sup.steer('nope')

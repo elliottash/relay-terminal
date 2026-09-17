@@ -34,3 +34,22 @@ Under Xvfb (`docs/qa_evidence/2026-09-17-prompt-visibility/`): prompt visible du
 3. `ssh localhost`: hidden; `exit`: back.
 4. `read -p`, `python3` REPL: waiting hint and focus; typing answers; focus returns.
 5. Queue commands while `sleep 20` runs; they run afterwards.
+
+## 2026-09-17 update: sudo and programs Relay cannot inspect (GUI E1, owner decision)
+
+- While the foreground program is `sudo`, `doas`, `pkexec`, `su` or `run0`, runs with another real or effective uid, or has an unreadable `/proc/<pid>/syscall` while the shell's is readable, the prompt box stays visible but focus moves to the terminal. The prompt row shows "sudo is running · typing goes to the program · Ctrl+Shift+H to type a prompt" (shortcut text from the keymap; the program name is the real one).
+- Ctrl+Shift+H moves focus to the prompt box so terminal and agent items can be queued; the hint becomes "sudo is running · prompts queue until it exits · Ctrl+H or click the terminal to type into it". Ctrl+H in the prompt box or a click returns focus to the terminal (the prompt box stays).
+- Password prompts still hide the prompt box; when echo returns, focus goes back to the terminal (not the prompt box) while sudo runs.
+- When the program exits, the hint goes away; focus returns to the prompt box unless you typed into the terminal while it ran, in which case it stays in the terminal.
+- The waiting-for-input detection is skipped for these programs (it cannot see them).
+
+Implementer check under Xvfb (`docs/qa_evidence/2026-09-17-sudo-focus/`), with fake cases because sudo cannot run non-interactively here:
+- `sleep 4`: no hint, focus stays in the prompt box.
+- `bash -c 'exec -a sudo sleep 8'`: hint, terminal focus (`implementer-fake-sudo-hint-terminal-focus.png`); Ctrl+Shift+H → prompt box, queued `echo queued-after-sudo`, Ctrl+H → terminal (`implementer-ctrl-shift-h-composer-focus.png`, `implementer-queue-while-sudo-ctrl-h-back.png`); on exit the queued command ran and the hint cleared.
+- Unreadable case: `python3 -c 'import ctypes,time; ctypes.CDLL(None).prctl(4,0); time.sleep(8)'` (PR_SET_DUMPABLE 0 makes `/proc/<pid>/syscall` unreadable): "python3 is running" hint, then focus back to the prompt box.
+- `bash -c 'exec -a sudo bash -c "read -p Continue? a; echo got=\$a"'`: typed `y` Enter reached the program (`got=y`) and focus stayed in the terminal afterwards.
+- Sequence: `implementer-sequence-plain-sudo-undumpable-typed.png`. Not verified: a real `sudo apt upgrade` and a different-uid process.
+
+QA checklist additions:
+6. `sudo apt update`: type the password, answer prompts in the terminal; Ctrl+Shift+H, queue `echo done`, Ctrl+H; on exit `echo done` runs.
+7. `sudo -i` (a root shell): hint stays while it runs; `exit` clears it.

@@ -80,6 +80,8 @@ class Agent:
         self.subagents = None
         self.inbox = None
         # --- end subagents ---
+        # steer: callable returning user prompts to add at the next step boundary (TurnSupervisor.take_steer).
+        self.steer_source = None
         self.mode = "build"
         self.effort = None
         if effort is not None:
@@ -274,6 +276,12 @@ class Agent:
                         delivered += notes
                         self.messages.append({"role": "user", "content": "\n\n".join(notes)})
                 # --- end subagents ---
+                # Steering: prompts the user sent "at the next tool call" join the conversation here,
+                # after every tool result of the previous response and before the next model request.
+                if self.steer_source is not None:
+                    steered = self.steer_source()
+                    if steered:
+                        self.messages.append({"role": "user", "content": "\n\n".join(steered)})
                 self._maybe_compact()
                 self.emit({"event": "status", "text": f"Requesting model · step {step + 1}/{self.max_steps}"})
                 self._last_usage = None

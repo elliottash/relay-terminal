@@ -146,7 +146,10 @@ def main():
             elif kind == "ask":
                 subagents.user_activity()
                 turns.submit(request.get("text", ""), request.get("when", "now"), request.get("id"),
-                             request.get("context"), session_protocol.load_attachments(request, turns))
+                             request.get("context"), session_protocol.load_attachments(request, turns),
+                             requeue=request.get("requeue", True))
+            elif kind == "queue_steer":
+                turns.steer(request.get("item"))
             elif kind == "cancel":
                 turns.cancel()
             elif kind == "resume_queue":

@@ -3,6 +3,12 @@
 #include <QTextBlock>
 #include <QTextCursor>
 
+#include <QSaveFile>
+#include <QShortcut>
+#include <QSyntaxHighlighter>
+#include <QRegularExpression>
+#include <QTextDocument>
+#include <QTextCharFormat>
 #include <QDateTime>
 #include <QResizeEvent>
 #include <algorithm>
@@ -624,6 +630,134 @@ void FilePreview::goToLine(int line) {
     cursor.select(QTextCursor::LineUnderCursor);
     m_textView->setTextCursor(cursor);
     m_textView->centerCursor();
+}
+
+// ----- PlanEditor ---------------------------------------------------------------------------
+
+namespace {
+// Minimal Markdown colouring when KSyntaxHighlighting is not built in.
+class SimpleMarkdownHighlighter final : public QSyntaxHighlighter {
+public:
+    explicit SimpleMarkdownHighlighter(QTextDocument *document) : QSyntaxHighlighter(document) {}
+protected:
+    void highlightBlock(const QString &text) override {
+        QTextCharFormat heading; heading.setForeground(QColor(0x3e, 0xc5, 0xf0)); heading.setFontWeight(QFont::Bold);
+        QTextCharFormat bullet; bullet.setForeground(QColor(0xe5, 0xc0, 0x7b));
+        QTextCharFormat code; code.setForeground(QColor(0x9a, 0xd1, 0x8b));
+        const bool inFence = previousBlockState() == 1;
+        const bool fence = text.trimmed().startsWith(QStringLiteral("```"));
+        if (inFence || fence) {
+            setFormat(0, text.size(), code);
+            setCurrentBlockState(inFence != fence ? 1 : 0);
+            return;
+        }
+        setCurrentBlockState(0);
+        if (text.startsWith('#')) { setFormat(0, text.size(), heading); return; }
+        static const QRegularExpression list(QStringLiteral("^\\s*([-*+]|\\d+\\.)\\s"));
+        const auto match = list.match(text);
+        if (match.hasMatch()) setFormat(0, match.capturedLength(), bullet);
+        static const QRegularExpression inlineCode(QStringLiteral("`[^`]+`"));
+        auto it = inlineCode.globalMatch(text);
+        while (it.hasNext()) { const auto m = it.next(); setFormat(m.capturedStart(), m.capturedLength(), code); }
+    }
+};
+}  // namespace
+
+struct PlanEditor::Private {
+#ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
+    KSyntaxHighlighting::Repository repository;
+    KSyntaxHighlighting::SyntaxHighlighter *highlighter = nullptr;
+#endif
+    QSyntaxHighlighter *fallback = nullptr;
+};
+
+PlanEditor::PlanEditor(QWidget *parent) : QWidget(parent), d(new Private) {
+    setObjectName(QStringLiteral("planEditor"));
+    auto *layout = new QVBoxLayout(this); layout->setContentsMargins(8, 6, 8, 8); layout->setSpacing(6);
+    auto *header = new QHBoxLayout;
+    m_title = new QLabel; m_title->setObjectName(QStringLiteral("planTitle"));
+    m_title->setTextFormat(Qt::PlainText);
+    header->addWidget(m_title, 1);
+    auto *saveButton = new QToolButton; saveButton->setText(QStringLiteral("Save")); saveButton->setToolTip(QStringLiteral("Save (Ctrl+S)"));
+    auto *reload = new QToolButton; reload->setText(QStringLiteral("Reload"));
+    header->addWidget(saveButton); header->addWidget(reload);
+    layout->addLayout(header);
+    m_notice = new QLabel; m_notice->setObjectName(QStringLiteral("planNotice")); m_notice->setWordWrap(true); m_notice->hide();
+    layout->addWidget(m_notice);
+    m_editor = new QPlainTextEdit;
+    m_editor->setObjectName(QStringLiteral("planText"));
+    m_editor->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    m_editor->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    layout->addWidget(m_editor, 1);
+    m_planActions = new QWidget;
+    auto *actions = new QHBoxLayout(m_planActions); actions->setContentsMargins(0, 0, 0, 0);
+    auto *execute = new QPushButton(QStringLiteral("Execute"));
+    execute->setObjectName(QStringLiteral("planExecute"));
+    execute->setToolTip(QStringLiteral("Switch to build mode and carry out this plan (your edits are saved first)"));
+    auto *fresh = new QPushButton(QStringLiteral("Execute in fresh context"));
+    fresh->setToolTip(QStringLiteral("Start a new conversation that only has this plan"));
+    auto *keep = new QPushButton(QStringLiteral("Keep planning"));
+    actions->addWidget(execute); actions->addWidget(fresh); actions->addStretch(1); actions->addWidget(keep);
+    layout->addWidget(m_planActions);
+    connect(saveButton, &QToolButton::clicked, this, [this] { save(); });
+    connect(reload, &QToolButton::clicked, this, [this] { if (!m_path.isEmpty()) open(m_path); });
+    connect(execute, &QPushButton::clicked, this, [this] { if (onExecute) onExecute(false); });
+    connect(fresh, &QPushButton::clicked, this, [this] { if (onExecute) onExecute(true); });
+    connect(keep, &QPushButton::clicked, this, [this] { if (onKeepPlanning) onKeepPlanning(); });
+    connect(m_editor->document(), &QTextDocument::modificationChanged, this, [this](bool) { updateTitle(); });
+    auto *shortcut = new QShortcut(QKeySequence::Save, this);
+    shortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(shortcut, &QShortcut::activated, this, [this] { save(); });
+#ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
+    const KSyntaxHighlighting::Definition definition = d->repository.definitionForName(QStringLiteral("Markdown"));
+    if (definition.isValid()) {
+        d->highlighter = new KSyntaxHighlighting::SyntaxHighlighter(m_editor->document());
+        KSyntaxHighlighting::Theme theme = d->repository.theme(QStringLiteral("Breeze Dark"));
+        if (!theme.isValid()) theme = d->repository.defaultTheme(KSyntaxHighlighting::Repository::DarkTheme);
+        d->highlighter->setTheme(theme);
+        d->highlighter->setDefinition(definition);
+    }
+    if (!d->highlighter) d->fallback = new SimpleMarkdownHighlighter(m_editor->document());
+#else
+    d->fallback = new SimpleMarkdownHighlighter(m_editor->document());
+#endif
+}
+
+PlanEditor::~PlanEditor() { delete d; }
+
+bool PlanEditor::open(const QString &path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) { m_notice->setText(QStringLiteral("Could not open %1").arg(path)); m_notice->show(); return false; }
+    if (file.size() > FilePreview::kMaxTextBytes) { m_notice->setText(QStringLiteral("File is too large to edit here.")); m_notice->show(); return false; }
+    m_path = QFileInfo(path).absoluteFilePath();
+    m_editor->setPlainText(QString::fromUtf8(file.readAll()));
+    m_editor->document()->setModified(false);
+    m_notice->hide();
+    updateTitle();
+    return true;
+}
+
+bool PlanEditor::save() {
+    if (m_path.isEmpty()) return false;
+    QSaveFile out(m_path);
+    if (!out.open(QIODevice::WriteOnly)) { m_notice->setText(QStringLiteral("Could not save: %1").arg(out.errorString())); m_notice->show(); return false; }
+    out.write(m_editor->toPlainText().toUtf8());
+    if (!out.commit()) { m_notice->setText(QStringLiteral("Could not save: %1").arg(out.errorString())); m_notice->show(); return false; }
+    m_editor->document()->setModified(false);
+    m_notice->hide();
+    updateTitle();
+    return true;
+}
+
+bool PlanEditor::isDirty() const { return m_editor->document()->isModified(); }
+QString PlanEditor::text() const { return m_editor->toPlainText(); }
+QString PlanEditor::title() const { return QFileInfo(m_path).fileName(); }
+void PlanEditor::setPlanActions(bool enabled) { m_planActions->setVisible(enabled); }
+
+void PlanEditor::updateTitle() {
+    m_title->setText((isDirty() ? QStringLiteral("● ") : QString()) + title());
+    m_title->setToolTip(m_path);
+    if (onTitleChanged) onTitleChanged(title());
 }
 
 }  // namespace relay

@@ -42,6 +42,8 @@ class TurnSupervisor:
         self._paused = False
         self._closed = False
         self._outcome: str | None = None
+        # Steering prompts waiting for the running turn's next step boundary.
+        self._steer: list[dict] = []
         self._thread = threading.Thread(target=self._dispatch, name="relay-turns", daemon=True)
         self._thread.start()
 
@@ -67,6 +69,8 @@ class TurnSupervisor:
             if self._running is not None:
                 raise ValueError("Stop the active agent turn before changing provider or workspace.")
             self._agent = agent
+            if agent is not None:
+                agent.steer_source = self.take_steer
             self._clear_locked()
 
     def reset(self) -> None:
@@ -82,10 +86,32 @@ class TurnSupervisor:
 
     # ----- requests -------------------------------------------------------
     def submit(self, prompt, when: str = "now", request_id=None, context=None, attachments=None,
-               origin: str = "user") -> str:
-        """origin "relay" marks prompts Relay queued itself (e.g. a background subagent finished)."""
-        if when not in {"now", "queue", "interrupt"}:
-            raise ValueError('"when" must be "now", "queue", or "interrupt".')
+               origin: str = "user", requeue: bool = True) -> str:
+        """origin "relay" marks prompts Relay queued itself (e.g. a background subagent finished).
+
+        when="steer" delivers the prompt inside the running turn at its next step boundary. If no
+        turn is running it is queued like "queue". A steer prompt the turn never reached (the model
+        answered without another tool call, or the turn stopped) is reported with steer_returned and,
+        when requeue is true, becomes the next queued turn.
+        """
+        if when not in {"now", "queue", "interrupt", "steer"}:
+            raise ValueError('"when" must be "now", "queue", "interrupt", or "steer".')
+        if type(requeue) is not bool:
+            raise ValueError("requeue must be a boolean.")
+        with self._lock:
+            if when == "steer":
+                if self._agent is None:
+                    raise ValueError("Configure a provider and workspace first.")
+                validate_prompt(prompt)
+                if self._running is not None and not self._running.startswith(("compact-",)):
+                    item = {"id": uuid.uuid4().hex, "prompt": prompt, "request_id": request_id,
+                            "context": context, "attachments": attachments, "origin": origin, "requeue": requeue}
+                    self._steer.append(item)
+                    self._emit({"event": "queued", "id": item["id"], "request_id": request_id,
+                                "when": "steer", "position": len(self._steer) - 1, "origin": origin})
+                    self._changed_locked()
+                    return item["id"]
+                when = "queue"
         with self._lock:
             if self._agent is None:
                 raise ValueError("Configure a provider and workspace first.")
@@ -144,6 +170,47 @@ class TurnSupervisor:
 
         threading.Thread(target=runner, name=f"relay-{name}", daemon=True).start()
 
+    def take_steer(self) -> list[str]:
+        """Called by the running agent at a step boundary: the steering prompts to add now."""
+        with self._lock:
+            items, self._steer = self._steer, []
+            if not items:
+                return []
+            self._emit({"event": "steer_delivered", "ids": [i["id"] for i in items],
+                        "request_ids": [i["request_id"] for i in items]})
+            self._changed_locked()
+        return [i["prompt"] for i in items]
+
+    def steer(self, item_id) -> None:
+        """Upgrade a queued prompt to steer the running turn at its next step boundary."""
+        with self._lock:
+            if self._running is None:
+                raise ValueError("No agent turn is running to steer.")
+            for item in self._queue:
+                if item["id"] == item_id:
+                    self._queue.remove(item)
+                    item.setdefault("request_id", None)
+                    item["requeue"] = True
+                    self._steer.append(item)
+                    self._emit({"event": "queued", "id": item["id"], "request_id": item["request_id"],
+                                "when": "steer", "position": len(self._steer) - 1, "origin": item.get("origin", "user")})
+                    self._changed_locked()
+                    return
+            raise ValueError("That prompt is not queued (it may already have started).")
+
+    def _return_steer_locked(self) -> None:
+        items, self._steer = self._steer, []
+        front = []
+        for item in items:
+            self._emit({"event": "steer_returned", "id": item["id"], "request_id": item.get("request_id"),
+                        "prompt": item["prompt"], "requeued": bool(item.get("requeue", True))})
+            if item.get("requeue", True):
+                front.append({"id": item["id"], "prompt": item["prompt"], "force": False,
+                              "context": item.get("context"), "attachments": item.get("attachments"),
+                              "origin": item.get("origin", "user")})
+        for item in reversed(front):
+            self._queue.appendleft(item)
+
     def cancel(self) -> None:
         """Stop the running turn and pause the queue (resume with resume_queue)."""
         with self._lock:
@@ -196,8 +263,9 @@ class TurnSupervisor:
         self._agent.stop()
 
     def _clear_locked(self) -> None:
-        had = bool(self._queue) or self._paused
+        had = bool(self._queue) or self._paused or bool(self._steer)
         self._queue.clear()
+        self._steer.clear()
         self._paused = False
         if had:
             self._changed_locked()
@@ -206,7 +274,9 @@ class TurnSupervisor:
         self._emit({"event": "queue_changed", "running": self._running, "paused": self._paused,
                     "items": [{"id": i["id"], "preview": i["prompt"][:PREVIEW], "forced": i["force"],
                                "origin": i.get("origin", "user")}
-                              for i in self._queue]})
+                              for i in self._queue],
+                    "steering": [{"id": i["id"], "preview": i["prompt"][:PREVIEW], "origin": i.get("origin", "user")}
+                                 for i in self._steer]})
 
     def _next_locked(self):
         if self._closed or self._running is not None or not self._queue or self._agent is None:
@@ -241,6 +311,8 @@ class TurnSupervisor:
             with self._lock:
                 outcome = self._outcome or "error"
                 self._emit({"event": "agent_finished", "id": item["id"], "outcome": outcome})
+                if self._steer:
+                    self._return_steer_locked()
                 self._running = None
                 if outcome == "error" and any(not i["force"] for i in self._queue):
                     # Tool actions may already have run; do not fire queued prompts blindly.

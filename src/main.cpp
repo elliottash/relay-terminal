@@ -2,6 +2,7 @@
 #include "RichEditor.h"
 #include "Theme.h"
 #include "FilePanes.h"
+#include "AgentUi.h"
 #include <iterator>
 #include <KParts/ReadOnlyPart>
 #include <KPluginFactory>
@@ -55,6 +56,7 @@
 #include <QTabWidget>
 #include <QFileSystemWatcher>
 #include <QKeySequence>
+#include <QInputDialog>
 #include <QRegularExpression>
 #include <QIcon>
 #include <QScrollBar>
@@ -294,6 +296,16 @@ private:
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
         add("input.modeAgent", "agent", "Input mode: agent", {});
         add("input.toggle", "agent", "Toggle input between terminal command and agent prompt (from the prompt box)", {QStringLiteral("Ctrl+I")});
+        add("agent.planToggle", "agent", "Toggle plan mode (from the prompt box)", {QStringLiteral("Shift+Tab")});
+        add("agent.effortUp", "agent", "Raise reasoning effort (from the prompt box)", {QStringLiteral("Alt+.")});
+        add("agent.effortDown", "agent", "Lower reasoning effort (from the prompt box)", {QStringLiteral("Alt+,")});
+        add("agent.compact", "agent", "Compact the agent conversation", {});
+        add("agent.rewind", "agent", "Rewind to an earlier checkpoint (Esc Esc in an empty prompt box)", {});
+        add("agent.fork", "agent", "Fork the conversation into a new pane", {});
+        add("agent.resume", "agent", "Resume a saved agent session", {});
+        add("agent.recap", "agent", "Recap this agent session", {});
+        add("agent.instructions", "agent", "Choose agent instruction files", {});
+        add("agent.export", "agent", "Export the conversation as Markdown", {});
         add("keybindings.edit", "terminal", "Edit keyboard shortcuts", {});
         add("keybindings.reload", "terminal", "Reload keyboard shortcuts", {});
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
@@ -604,7 +616,16 @@ public:
     void selectModel(const QString &id) {
         if (id.isEmpty() || id == m_currentPreset) return;
         if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before switching models.")); changed(); return; }
-        configurePreset(id, true);
+        const auto preset = presetById(id);
+        if (!m_configured || preset.isEmpty()) { configurePreset(id, true); return; }
+        // Switch the provider between turns; the conversation is kept.
+        send({{"type", "set_model"}, {"preset", id}, {"use_stored_key", true},
+              {"base_url", preset.value(QStringLiteral("base_url")).toString()},
+              {"model", preset.value(QStringLiteral("model")).toString()},
+              {"extra", preset.value(QStringLiteral("extra")).toObject()},
+              {"max_tokens", QSettings().value(QStringLiteral("provider/max_tokens"), 8192).toInt()}});
+        QSettings().setValue(QStringLiteral("provider/preset"), id);
+        m_currentPreset = id; changed();
     }
     void openProviderDialog() { configure(); }
     void toggleInputMode() {
@@ -660,6 +681,8 @@ public:
 
     // Human control: the prompt box hides and keys go to the terminal.
     void takeControl() {
+        // sudo & co.: the prompt box stays; Ctrl+H only hands the keyboard back to the program.
+        if (!m_opaqueProgram.isEmpty() && !m_native) { focusTerminal(); refreshOpaqueHint(); return; }
         // During a running program the prompt returns when it exits; at an idle shell you stay in control.
         m_autoHuman = processBusy() || !m_promptReported;
         if (!m_native) setNative(true);
@@ -671,7 +694,8 @@ public:
     void showPrompt() {
         m_autoHuman = false;
         if (m_native) setNative(false, !processBusy());
-        else m_editor->setFocus(Qt::OtherFocusReason);
+        m_editor->setFocus(Qt::OtherFocusReason);
+        if (!m_opaqueProgram.isEmpty()) { refreshOpaqueHint(); return; }
         if (processBusy())
             toast(QStringLiteral("Agent in control · %1 to take control").arg(Keymap::instance().shortcutText(QStringLiteral("control.human"))));
     }
@@ -680,6 +704,138 @@ public:
     bool runCommand(const QString &command) { return runInTerminal(command, false, 0); }
     void sendKeybindings() { if (m_configured) send(QJsonObject{{"type", "keybindings"}, {"path", Keymap::instance().path()}, {"actions", Keymap::instance().catalog().value(QStringLiteral("actions"))}}); }
     void importWarpKeys() { send({{"type", "import_warp"}}); }
+
+    // ===== agent sessions UI: model/effort, context, plan mode, rewind, fork, resume, recaps, =====
+    // ===== instructions, suggestions and steering (docs/AGENT-SESSIONS-PROTOCOL.md)          =====
+    std::function<void(const QString &path, Pane *owner)> onPlanWritten;   // open the plan in an editable pane
+    std::function<void(const QString &path)> onOpenDocument;               // open e.g. relay.md in an editable pane
+    std::function<void(const QJsonObject &state, const QString &title)> onForkState;
+    std::function<void()> onShowAgents;                                    // subagents panel (GUI E2), if present
+
+    static QStringList efforts() { return {QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"), QStringLiteral("max")}; }
+    QString effort() const { return m_effort; }
+    QString agentMode() const { return m_agentMode; }
+    void setInitialState(const QJsonObject &state, const QString &title) { m_initialState = state; m_forkTitle = title; }
+
+    void setEffort(const QString &value) {
+        if (!efforts().contains(value)) return;
+        QSettings().setValue(QStringLiteral("agent/effort"), value);
+        m_effort = value;
+        if (m_configured) send({{"type", "set_effort"}, {"effort", value}});
+        changed();
+        toast(QStringLiteral("Effort: ") + value);
+    }
+    void effortStep(int delta) {
+        int index = efforts().indexOf(m_effort);
+        if (index < 0) index = 2;
+        index = std::clamp(index + delta, 0, int(efforts().size()) - 1);
+        if (efforts().at(index) != m_effort) setEffort(efforts().at(index));
+    }
+
+    void setAgentMode(const QString &mode) {
+        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+        send({{"type", "set_mode"}, {"mode", mode}});
+    }
+    void togglePlanMode() { setAgentMode(m_agentMode == QStringLiteral("plan") ? QStringLiteral("build") : QStringLiteral("plan")); }
+
+    void compactNow(const QString &focus = QString()) {
+        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+        if (m_agentBusy) { status(QStringLiteral("Wait for the agent turn to finish before compacting.")); return; }
+        QJsonObject request{{"type", "compact"}};
+        if (!focus.trimmed().isEmpty()) request.insert(QStringLiteral("focus"), focus.trimmed());
+        send(request);
+    }
+    void openRewind() {
+        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+        if (m_agentBusy) { status(QStringLiteral("Stop the agent turn before rewinding.")); return; }
+        m_rewindPending = true;
+        send({{"type", "checkpoints"}});
+    }
+    void requestFork(int turn = -1) {
+        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+        if (m_agentBusy) { status(QStringLiteral("Wait for the agent turn to finish before forking.")); return; }
+        QJsonObject request{{"type", "fork"}};
+        if (turn >= 0) request.insert(QStringLiteral("turn"), turn);
+        m_forkPending = true;
+        send(request);
+    }
+    void openResume() {
+        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+        m_resumePending = true;
+        send({{"type", "sessions"}});
+    }
+    void requestRecap() {
+        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+        m_recapManual = true;
+        send({{"type", "recap_request"}, {"reason", "manual"}});
+        status(QStringLiteral("Writing a recap…"));
+    }
+    void openInstructions() {
+        if (!m_workerReady) return;
+        m_instructionsDialogPending = true;
+        send({{"type", "scan_instructions"}, {"workspace", m_workspace}});
+    }
+    void executePlan(const QString &path, bool fresh) {
+        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+        if (fresh && m_agentBusy) { status(QStringLiteral("Stop the agent turn before executing in a fresh context.")); return; }
+        send({{"type", "plan_execute"}, {"path", path}, {"fresh", fresh},
+              {"when", m_agentBusy ? QStringLiteral("queue") : QStringLiteral("now")}});
+        ensureLineStart();
+        printInline(QStringLiteral("› Execute the plan %1%2\n").arg(QFileInfo(path).fileName(), fresh ? QStringLiteral(" (fresh context)") : QString()), Ink::User);
+        focusInput();
+    }
+    void keepPlanning() {
+        focusInput();
+        toast(QStringLiteral("Still planning · tell the agent what to change"));
+    }
+
+    // Settings changed in Actions › Agent options.
+    void agentOptionsChanged(const QString &key) {
+        if (key == QStringLiteral("agent/max_auto_turns")) {
+            if (m_configured) send({{"type", "set_agent_options"}, {"max_auto_turns", QSettings().value(QStringLiteral("agent/max_auto_turns"), 50).toInt()}});
+            return;
+        }
+        applyConfigureChange(QStringLiteral("Agent options saved"));
+    }
+
+    // Export the saved conversation of this pane as Markdown and open it in a preview pane.
+    void exportConversation() {
+        if (m_sessionDir.isEmpty() || m_sessionId.isEmpty()) { status(QStringLiteral("Nothing to export yet.")); return; }
+        QFile file(m_sessionDir + '/' + m_sessionId + QStringLiteral(".json"));
+        if (!file.open(QIODevice::ReadOnly)) { status(QStringLiteral("Nothing to export yet: the conversation has not been saved.")); return; }
+        const QJsonObject data = QJsonDocument::fromJson(file.readAll()).object();
+        QString markdown = QStringLiteral("# ") + (data.value(QStringLiteral("title")).toString().isEmpty() ? QStringLiteral("Relay conversation") : data.value(QStringLiteral("title")).toString())
+            + QStringLiteral("\n\nModel: %1 · exported %2\n").arg(data.value(QStringLiteral("model")).toString(), QDateTime::currentDateTime().toString(Qt::ISODate));
+        for (const auto &value : data.value(QStringLiteral("messages")).toArray()) {
+            const QJsonObject message = value.toObject();
+            const QString role = message.value(QStringLiteral("role")).toString();
+            if (role == QStringLiteral("system")) continue;
+            QString content = message.value(QStringLiteral("content")).toString();
+            if (role == QStringLiteral("user")) markdown += QStringLiteral("\n## You\n\n") + content + '\n';
+            else if (role == QStringLiteral("assistant")) {
+                markdown += QStringLiteral("\n## Agent\n\n") + content + '\n';
+                for (const auto &call : message.value(QStringLiteral("tool_calls")).toArray()) {
+                    const QJsonObject function = call.toObject().value(QStringLiteral("function")).toObject();
+                    markdown += QStringLiteral("\n```tool %1\n%2\n```\n").arg(function.value(QStringLiteral("name")).toString(), function.value(QStringLiteral("arguments")).toString().left(4000));
+                }
+            } else if (role == QStringLiteral("tool")) {
+                markdown += QStringLiteral("\n<details><summary>tool result</summary>\n\n```\n%1\n```\n</details>\n").arg(content.left(4000));
+            }
+        }
+        const QString dir = m_workspace + QStringLiteral("/.relay/exports");
+        QDir().mkpath(dir);
+        QString slug = data.value(QStringLiteral("title")).toString().toLower();
+        slug.replace(QRegularExpression(QStringLiteral("[^a-z0-9]+")), QStringLiteral("-"));
+        slug = slug.left(40).remove(QRegularExpression(QStringLiteral("^-+|-+$")));
+        const QString path = dir + '/' + QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd-HHmm")) + '-' + (slug.isEmpty() ? QStringLiteral("conversation") : slug) + QStringLiteral(".md");
+        QSaveFile out(path);
+        if (!out.open(QIODevice::WriteOnly)) { status(out.errorString()); return; }
+        out.write(markdown.toUtf8());
+        if (!out.commit()) { status(out.errorString()); return; }
+        toast(QStringLiteral("Exported to .relay/exports"));
+        if (onOpenPath) onOpenPath(path);
+    }
+
 
 protected:
     void resizeEvent(QResizeEvent *event) override {
@@ -692,6 +848,8 @@ protected:
     }
 
     bool eventFilter(QObject *object, QEvent *event) override {
+        if ((event->type() == QEvent::WindowActivate || event->type() == QEvent::WindowDeactivate) && object == window())
+            noteWindowActivation(event->type() == QEvent::WindowActivate);
         if (object == m_cwdLabel && event->type() == QEvent::MouseButtonRelease
             && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && !m_cwdLabel->hasSelectedText()) {
             if (onOpenPath) onOpenPath(m_cwd);
@@ -712,6 +870,10 @@ protected:
                 return true;
             }
         }
+        if (event->type() == QEvent::KeyPress && !m_opaqueProgram.isEmpty() && !m_native
+            && ownsTerminalWidget(qobject_cast<QWidget *>(object)) && Keymap::instance().match(static_cast<QKeyEvent *>(event)).isEmpty())
+            m_opaqueTyped = true;
+        if (event->type() == QEvent::FocusIn && !m_opaqueProgram.isEmpty()) QTimer::singleShot(0, this, [this] { refreshOpaqueHint(); });
         if (event->type() == QEvent::KeyPress && object == m_editor) {
             auto *key = static_cast<QKeyEvent *>(event);
             if (handleComposerKey(key)) return true;
@@ -769,6 +931,10 @@ private:
         // Narrow split panes: labels may shrink instead of forcing a wide minimum width.
         m_routeLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         routeRow->addWidget(m_routeLabel, 1);
+        m_opaqueHint = new QLabel;
+        m_opaqueHint->setObjectName(QStringLiteral("opaqueHint"));
+        m_opaqueHint->hide();
+        routeRow->addWidget(m_opaqueHint, 1);
         // Per-pane controls live under the terminal, next to the input they affect.
         m_modeBox = new QComboBox;
         m_modeBox->addItem(QStringLiteral("Auto detect"), QStringLiteral("auto"));
@@ -792,6 +958,7 @@ private:
             selectModel(m_modelBox->itemData(index).toString()); focusInput();
         });
         routeRow->addWidget(m_modelBox);
+        buildSessionControls(routeRow);
         auto *cancel = new QToolButton;
         cancel->setObjectName(QStringLiteral("interruptButton"));
         const QString cancelIcon = relay::theme::themeDataDir() + QStringLiteral("/icons/cancel.svg");
@@ -820,6 +987,654 @@ private:
         m_queueStrip->hide();
         layout->addWidget(composer);
         updatePaths();
+    }
+
+    // ----- agent sessions UI: helpers ----------------------------------------------------------
+    void buildSessionControls(QHBoxLayout *row) {
+        m_planChip = new QLabel(QStringLiteral("PLAN"));
+        m_planChip->setObjectName(QStringLiteral("planChip"));
+        m_planChip->setToolTip(QStringLiteral("Plan mode: the agent investigates and writes a plan (Shift+Tab to leave)"));
+        m_planChip->hide();
+        row->insertWidget(1, m_planChip);
+        m_ctxLabel = new QLabel;
+        m_ctxLabel->setObjectName(QStringLiteral("contextLabel"));
+        m_ctxLabel->hide();
+        row->insertWidget(2, m_ctxLabel);
+        m_effortBox = new QComboBox;
+        for (const QString &level : efforts()) m_effortBox->addItem(level, level);
+        m_effortBox->setAccessibleName(QStringLiteral("Reasoning effort"));
+        m_effortBox->setToolTip(QStringLiteral("Reasoning effort for this pane (Alt+. / Alt+,)"));
+        m_effortBox->setFocusPolicy(Qt::TabFocus);
+        m_effortBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        m_effortBox->setMinimumContentsLength(5);
+        m_effort = QSettings().value(QStringLiteral("agent/effort"), QStringLiteral("high")).toString();
+        if (!efforts().contains(m_effort)) m_effort = QStringLiteral("high");
+        connect(m_effortBox, qOverload<int>(&QComboBox::activated), this, [this](int index) {
+            setEffort(m_effortBox->itemData(index).toString()); focusInput();
+        });
+        row->addWidget(m_effortBox);
+    }
+
+    void refreshSessionControls() {
+        if (!m_effortBox) return;
+        const QSignalBlocker block(m_effortBox);
+        m_effortBox->setCurrentIndex(std::max(0, m_effortBox->findData(m_effort)));
+        m_planChip->setVisible(m_agentMode == QStringLiteral("plan"));
+        updateContextLabel();
+    }
+
+    static QString compactTokens(qint64 tokens) {
+        if (tokens >= 1000000) return QString::number(tokens / 1000000.0, 'f', tokens >= 10000000 ? 0 : 1) + QStringLiteral("M");
+        if (tokens >= 1000) return QString::number(tokens / 1000.0, 'f', tokens >= 100000 ? 0 : 1) + QStringLiteral("k");
+        return QString::number(tokens);
+    }
+
+    void updateContextLabel() {
+        if (!m_ctxLabel) return;
+        if (m_ctxWindow <= 0) { m_ctxLabel->hide(); return; }
+        if (m_compacting) {
+            m_ctxLabel->setText(QStringLiteral("Compacting…"));
+        } else {
+            m_ctxLabel->setText(QStringLiteral("ctx %1 · %2%").arg(compactTokens(m_ctxUsed)).arg(QString::number(m_ctxPercent, 'f', m_ctxPercent > 0 && m_ctxPercent < 10 ? 1 : 0)));
+        }
+        const bool near = m_ctxLimit > 0 && m_ctxUsed >= m_ctxLimit * 9 / 10;
+        m_ctxLabel->setProperty("warn", near);
+        m_ctxLabel->style()->unpolish(m_ctxLabel); m_ctxLabel->style()->polish(m_ctxLabel);
+        m_ctxLabel->setToolTip(QStringLiteral("%1 of %2 tokens%3\nAuto-compacts at %4 tokens")
+            .arg(QLocale().toString(m_ctxUsed), QLocale().toString(m_ctxWindow), m_ctxEstimated ? QStringLiteral(" (estimated)") : QString(),
+                 QLocale().toString(m_ctxLimit)));
+        m_ctxLabel->show();
+    }
+
+    static QString relayMdPath() {
+        const QString base = qEnvironmentVariable("XDG_CONFIG_HOME", QDir::homePath() + QStringLiteral("/.config"));
+        return base + QStringLiteral("/relay/relay.md");
+    }
+
+    // Session-related configure fields from settings (protocol sections 1 and 8).
+    QJsonObject withSessionFields(QJsonObject request) const {
+        QSettings settings;
+        request.insert(QStringLiteral("effort"), m_effort.isEmpty() ? settings.value(QStringLiteral("agent/effort"), QStringLiteral("high")).toString() : m_effort);
+        bool ok = false;
+        const double threshold = settings.value(QStringLiteral("agent/compact_threshold")).toDouble(&ok);
+        if (ok && threshold >= 0.5 && threshold <= 0.98) request.insert(QStringLiteral("compact_threshold"), threshold);
+        const QString plans = settings.value(QStringLiteral("agent/plans_dir")).toString().trimmed();
+        if (!plans.isEmpty() && QDir::isAbsolutePath(QDir::fromNativeSeparators(plans))) request.insert(QStringLiteral("plans_dir"), plans);
+        request.insert(QStringLiteral("instructions"), QJsonObject{
+            {"files", QJsonArray::fromStringList(settings.value(QStringLiteral("instructions/files")).toStringList())},
+            {"project_auto", settings.value(QStringLiteral("instructions/project_auto"), true).toBool()}});
+        QJsonObject agents = request.value(QStringLiteral("agents")).toObject();
+        agents.insert(QStringLiteral("max_auto_turns"), settings.value(QStringLiteral("agent/max_auto_turns"), 50).toInt());
+        request.insert(QStringLiteral("agents"), agents);
+        const QStringList exclude = settings.value(QStringLiteral("skills/exclude")).toStringList();
+        if (!exclude.isEmpty()) request.insert(QStringLiteral("skills"), QJsonObject{{"exclude", QJsonArray::fromStringList(exclude)}});
+        return request;
+    }
+
+    // Settings that live in `configure` need a new agent. Apply now when the conversation is empty,
+    // otherwise at the next New chat.
+    void applyConfigureChange(const QString &what) {
+        if (!m_configured || m_currentPreset.isEmpty()) return;
+        if (!m_agentBusy && m_turnsCompleted == 0) {
+            configurePreset(m_currentPreset, false);
+            toast(what + QStringLiteral(" · applied"));
+        } else {
+            m_reconfigureOnNewChat = true;
+            toast(what + QStringLiteral(" · applies to the next New chat"));
+        }
+    }
+
+    void onSessionConfigured(const QJsonObject &event) {
+        m_agentMode = event.value(QStringLiteral("mode")).toString(QStringLiteral("build"));
+        const QString effort = event.value(QStringLiteral("effort")).toString();
+        if (efforts().contains(effort)) m_effort = effort;
+        m_ctxWindow = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
+        m_ctxLimit = event.value(QStringLiteral("limit_tokens")).toVariant().toLongLong();
+        m_sessionId = event.value(QStringLiteral("session_id")).toString();
+        m_sessionDir = event.value(QStringLiteral("session_dir")).toString();
+        m_turnsCompleted = 0;
+        refreshSessionControls();
+        if (!m_initialState.isEmpty()) {
+            const QJsonObject state = m_initialState;
+            m_initialState = QJsonObject();
+            m_forkLoadPending = true;
+            send({{"type", "load_state"}, {"state", state}});
+        }
+        // First launch: offer to choose instruction files (once per installation).
+        static bool offered = false;
+        if (!offered && !QSettings().value(QStringLiteral("instructions/onboarded"), false).toBool()) {
+            offered = true;
+            m_onboarding = true;
+            QTimer::singleShot(400, this, [this] { openInstructions(); });
+        }
+    }
+
+    // Worker events added by the sessions protocol. Returns true when the event was handled here.
+    bool handleSessionEvent(const QString &type, const QJsonObject &event) {
+        if (type == QStringLiteral("queued") && event.value(QStringLiteral("when")).toString() == QStringLiteral("steer")) {
+            const QString requestId = event.value(QStringLiteral("request_id")).toString();
+            for (auto &entry : m_steering) if (entry.requestId == requestId) entry.itemId = event.value(QStringLiteral("id")).toString();
+            return true;
+        }
+        if (type == QStringLiteral("steer_delivered")) {
+            const QJsonArray requestIds = event.value(QStringLiteral("request_ids")).toArray();
+            for (const auto &value : requestIds) {
+                for (int i = 0; i < m_steering.size(); ++i) {
+                    if (m_steering[i].requestId != value.toString()) continue;
+                    ensureLineStart();
+                    printInline(QStringLiteral("› ") + m_steering[i].text + QStringLiteral("  ↪ at the next tool call\n"), Ink::User);
+                    m_steering.removeAt(i);
+                    break;
+                }
+            }
+            rebuildQueueStrip();
+            return true;
+        }
+        if (type == QStringLiteral("steer_returned")) {
+            const QString requestId = event.value(QStringLiteral("request_id")).toString();
+            for (int i = 0; i < m_steering.size(); ++i) {
+                if (m_steering[i].requestId != requestId) continue;
+                if (!event.value(QStringLiteral("requeued")).toBool()) {
+                    // The turn ended before another tool call: the prompt becomes the next queue item.
+                    QueueEntry entry; entry.agent = true; entry.text = m_steering[i].text; entry.attachments = m_steering[i].attachments;
+                    entry.id = ++m_entrySerial;
+                    m_entries.prepend(entry);
+                    toast(QStringLiteral("The agent finished first · your message is next in the queue"));
+                }
+                m_steering.removeAt(i);
+                break;
+            }
+            rebuildQueueStrip(); changed();
+            QTimer::singleShot(0, this, [this] { pumpQueue(); });
+            return true;
+        }
+        if (type == QStringLiteral("model_changed")) {
+            m_model = event.value(QStringLiteral("model")).toString();
+            const QString preset = event.value(QStringLiteral("preset")).toString();
+            if (!preset.isEmpty()) { m_currentPreset = preset; QSettings().setValue(QStringLiteral("provider/preset"), preset); }
+            const qint64 window = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
+            if (window > 0) m_ctxWindow = window;
+            const QString effort = event.value(QStringLiteral("effort")).toString();
+            if (efforts().contains(effort)) m_effort = effort;
+            status(QStringLiteral("Model: %1 · conversation kept").arg(m_model));
+            toast(QStringLiteral("Model: %1 · conversation kept").arg(m_model));
+            changed();
+            return true;
+        }
+        if (type == QStringLiteral("effort_changed")) {
+            const QString effort = event.value(QStringLiteral("effort")).toString();
+            if (efforts().contains(effort)) m_effort = effort;
+            changed();
+            return true;
+        }
+        if (type == QStringLiteral("context")) {
+            m_ctxUsed = event.value(QStringLiteral("used_tokens")).toVariant().toLongLong();
+            m_ctxWindow = event.value(QStringLiteral("window")).toVariant().toLongLong();
+            m_ctxLimit = event.value(QStringLiteral("limit_tokens")).toVariant().toLongLong();
+            m_ctxPercent = event.value(QStringLiteral("percent")).toDouble();
+            m_ctxEstimated = event.value(QStringLiteral("estimated")).toBool();
+            if (m_contextNotePending) {
+                m_contextNotePending = false;
+                ensureLineStart();
+                printInline(QStringLiteral("Context: %1 of %2 tokens (%3%) · compacts at %4%5\n")
+                    .arg(compactTokens(m_ctxUsed), compactTokens(m_ctxWindow), QString::number(m_ctxPercent, 'f', 1), compactTokens(m_ctxLimit),
+                         m_ctxEstimated ? QStringLiteral(" · estimated") : QString()), Ink::Note);
+                if (!m_agentBusy && !moreTurnsPending()) closeInline();
+            }
+            updateContextLabel();
+            return true;
+        }
+        if (type == QStringLiteral("compaction_started")) {
+            m_compacting = true; updateContextLabel();
+            status(QStringLiteral("Compacting the conversation…"));
+            return true;
+        }
+        if (type == QStringLiteral("compacted")) {
+            m_compacting = false;
+            status(QStringLiteral("Conversation compacted"));
+            ensureLineStart();
+            printInline(QStringLiteral("Conversation compacted (%1) · %2 → %3 tokens\n")
+                .arg(event.value(QStringLiteral("reason")).toString(QStringLiteral("manual")),
+                     compactTokens(event.value(QStringLiteral("before_tokens")).toVariant().toLongLong()),
+                     compactTokens(event.value(QStringLiteral("after_tokens")).toVariant().toLongLong())), Ink::Note);
+            if (!m_agentBusy && !moreTurnsPending()) closeInline();
+            updateContextLabel();
+            return true;
+        }
+        if (type == QStringLiteral("mode_changed")) {
+            const QString mode = event.value(QStringLiteral("mode")).toString();
+            const bool changedMode = mode != m_agentMode;
+            m_agentMode = mode;
+            if (changedMode)
+                toast(mode == QStringLiteral("plan") ? QStringLiteral("Plan mode · the agent investigates and writes a plan")
+                                                     : QStringLiteral("Build mode"));
+            changed();
+            return true;
+        }
+        if (type == QStringLiteral("plan_written")) {
+            const QString path = event.value(QStringLiteral("path")).toString();
+            ensureLineStart();
+            printInline(QStringLiteral("Plan written: %1\n").arg(QDir(m_workspace).relativeFilePath(path)), Ink::Note);
+            if (onPlanWritten) QTimer::singleShot(0, this, [this, path] { if (onPlanWritten) onPlanWritten(path, this); });
+            return true;
+        }
+        if (type == QStringLiteral("checkpoints")) {
+            if (!m_rewindPending) return true;
+            m_rewindPending = false;
+            const QJsonArray items = event.value(QStringLiteral("items")).toArray();
+            QTimer::singleShot(0, this, [this, items] { showRewindPicker(items); });
+            return true;
+        }
+        if (type == QStringLiteral("rewound")) {
+            const QJsonArray restored = event.value(QStringLiteral("restored_files")).toArray();
+            const QJsonArray conflicts = event.value(QStringLiteral("conflicts")).toArray();
+            ensureLineStart();
+            printInline(QStringLiteral("Rewound to turn %1 (%2) · %3 file(s) restored\n")
+                .arg(event.value(QStringLiteral("turn")).toInt()).arg(event.value(QStringLiteral("restore")).toString()).arg(restored.size()), Ink::Note);
+            if (!conflicts.isEmpty()) {
+                QStringList names;
+                for (const auto &value : conflicts) names << (value.isString() ? value.toString() : value.toObject().value(QStringLiteral("path")).toString());
+                printInline(QStringLiteral("Changed since, not restored: %1\n").arg(names.join(QStringLiteral(", "))), Ink::Error);
+            }
+            const QString note = event.value(QStringLiteral("note")).toString();
+            if (!note.isEmpty()) printInline(note + '\n', Ink::Note);
+            closeInline();
+            const QString prompt = event.value(QStringLiteral("prompt")).toString();
+            if (!prompt.isEmpty() && m_editor->toPlainText().isEmpty()) {
+                m_editor->setPlainText(prompt);
+                m_editor->moveCursor(QTextCursor::End);
+                m_editor->setFocus();
+            }
+            m_turnsCompleted = std::max(0, event.value(QStringLiteral("turn")).toInt() - 1);
+            return true;
+        }
+        if (type == QStringLiteral("fork_state")) {
+            if (!m_forkPending) return true;
+            m_forkPending = false;
+            const QJsonObject state = event.value(QStringLiteral("state")).toObject();
+            const QString title = state.value(QStringLiteral("title")).toString();
+            if (onForkState) QTimer::singleShot(0, this, [this, state, title] { if (onForkState) onForkState(state, title); });
+            return true;
+        }
+        if (type == QStringLiteral("state_loaded")) {
+            m_sessionId = event.value(QStringLiteral("session_id")).toString(m_sessionId);
+            m_turnsCompleted = event.value(QStringLiteral("turns")).toInt();
+            const QString title = event.value(QStringLiteral("title")).toString();
+            ensureLineStart();
+            if (m_forkLoadPending)
+                printInline(QStringLiteral("Forked from “%1” · %2 turn(s)\n").arg(m_forkTitle.isEmpty() ? title : m_forkTitle).arg(m_turnsCompleted), Ink::Note);
+            else
+                printInline(QStringLiteral("Session loaded%1 · %2 turn(s)\n").arg(title.isEmpty() ? QString() : QStringLiteral(": “") + title + QStringLiteral("”"))
+                            .arg(m_turnsCompleted), Ink::Note);
+            m_forkLoadPending = false;
+            closeInline();
+            clearAgentQueue();
+            return true;
+        }
+        if (type == QStringLiteral("sessions")) {
+            if (!m_resumePending) return true;
+            m_resumePending = false;
+            const QJsonArray items = event.value(QStringLiteral("items")).toArray();
+            QTimer::singleShot(0, this, [this, items] { showResumePicker(items); });
+            return true;
+        }
+        if (type == QStringLiteral("recap")) {
+            const QString reason = event.value(QStringLiteral("reason")).toString();
+            if (event.contains(QStringLiteral("skipped"))) {
+                if (reason == QStringLiteral("manual") || m_recapManual)
+                    status(event.value(QStringLiteral("skipped")).toString() == QStringLiteral("failed")
+                           ? QStringLiteral("Recap failed: ") + event.value(QStringLiteral("error")).toString()
+                           : QStringLiteral("Not enough conversation for a recap yet."));
+                m_recapManual = false;
+                return true;
+            }
+            m_recapManual = false;
+            m_lastRecapTurns = event.value(QStringLiteral("turns_covered")).toInt();
+            ensureLineStart();
+            printInline(QStringLiteral("Recap · ") + event.value(QStringLiteral("text")).toString() + '\n', Ink::Recap);
+            const QString next = event.value(QStringLiteral("next_action")).toString();
+            if (!next.isEmpty()) printInline(QStringLiteral("Next · ") + next + '\n', Ink::Recap);
+            if (!m_agentBusy && !moreTurnsPending()) closeInline();
+            if (reason == QStringLiteral("away")) toast(QStringLiteral("Welcome back · recap above"));
+            return true;
+        }
+        if (type == QStringLiteral("instructions_found")) {
+            if (!m_instructionsDialogPending) return true;
+            m_instructionsDialogPending = false;
+            const QJsonArray items = event.value(QStringLiteral("items")).toArray();
+            QTimer::singleShot(0, this, [this, items] { showInstructionsDialog(items); });
+            return true;
+        }
+        if (type == QStringLiteral("instructions_synthesized")) {
+            const QString path = event.value(QStringLiteral("path")).toString();
+            QSettings().setValue(QStringLiteral("instructions/files"), QStringList{path});
+            status(QStringLiteral("Created %1").arg(path));
+            ensureLineStart();
+            printInline(QStringLiteral("Created %1 from your instruction files\n").arg(path), Ink::Note);
+            closeInline();
+            applyConfigureChange(QStringLiteral("relay.md created"));
+            if (onOpenDocument) QTimer::singleShot(0, this, [this, path] { if (onOpenDocument) onOpenDocument(path); });
+            return true;
+        }
+        if (type == QStringLiteral("suggestion")) {
+            const QString kind = event.value(QStringLiteral("kind")).toString();
+            const QString text = event.value(QStringLiteral("text")).toString().trimmed();
+            if (event.value(QStringLiteral("id")).toString() != m_suggestionId || text.isEmpty() || !m_editor->toPlainText().isEmpty()) return true;
+            if (kind == QStringLiteral("next_command") && m_modeValue == QStringLiteral("agent")) return true;
+            if (kind == QStringLiteral("next_prompt") && m_modeValue == QStringLiteral("shell")) return true;
+            m_aiGhost = text;
+            m_aiGhostKind = kind;
+            updateGhost();
+            return true;
+        }
+        if (type == QStringLiteral("agent_options")) {
+            status(QStringLiteral("Automatic turns from background agents: up to %1").arg(event.value(QStringLiteral("max_auto_turns")).toInt()));
+            return true;
+        }
+        if (type == QStringLiteral("reset")) {
+            m_turnsCompleted = 0; m_lastRecapTurns = -1;
+            if (m_reconfigureOnNewChat) {
+                m_reconfigureOnNewChat = false;
+                QTimer::singleShot(0, this, [this] { if (!m_agentBusy) configurePreset(m_currentPreset, false); });
+            }
+            return true;
+        }
+        return false;
+    }
+
+    void showRewindPicker(const QJsonArray &items) {
+        QList<relay::agentui::PickerRow> rows;
+        QList<int> turns;
+        for (int i = items.size() - 1; i >= 0; --i) {
+            const QJsonObject item = items.at(i).toObject();
+            const QStringList files = item.value(QStringLiteral("files")).toVariant().toStringList();
+            relay::agentui::PickerRow row;
+            row.columns = QStringList{QString::number(item.value(QStringLiteral("turn")).toInt()), item.value(QStringLiteral("prompt_preview")).toString(),
+                           QDateTime::fromSecsSinceEpoch(qint64(item.value(QStringLiteral("time")).toDouble())).toString(QStringLiteral("HH:mm")),
+                           files.isEmpty() ? QString(QStringLiteral("—")) : QStringLiteral("%1 file(s)").arg(files.size())};
+            row.detail = files.join('\n');
+            rows << row;
+            turns << item.value(QStringLiteral("turn")).toInt();
+        }
+        const auto result = relay::agentui::pick(this, QStringLiteral("Rewind"),
+            QStringLiteral("Restore the conversation and the agent's file changes to just before a turn. Shell commands are never undone."),
+            {QStringLiteral("Turn"), QStringLiteral("Prompt"), QStringLiteral("Time"), QStringLiteral("Files")}, rows,
+            {{QStringLiteral("both"), QStringLiteral("Restore conversation and files"), true},
+             {QStringLiteral("conversation"), QStringLiteral("Conversation only"), false},
+             {QStringLiteral("files"), QStringLiteral("Files only"), false},
+             {QStringLiteral("fork"), QStringLiteral("Fork from here"), false}});
+        if (result.row < 0) { focusInput(); return; }
+        const int turn = turns.at(result.row);
+        if (result.action == QStringLiteral("fork")) requestFork(turn - 1);
+        else send({{"type", "rewind"}, {"turn", turn}, {"restore", result.action}});
+    }
+
+    void showResumePicker(const QJsonArray &items) {
+        QList<relay::agentui::PickerRow> rows;
+        QStringList ids;
+        for (const auto &value : items) {
+            const QJsonObject item = value.toObject();
+            relay::agentui::PickerRow row;
+            row.columns = QStringList{item.value(QStringLiteral("title")).toString(),
+                           QDateTime::fromSecsSinceEpoch(qint64(item.value(QStringLiteral("updated")).toDouble())).toString(QStringLiteral("yyyy-MM-dd HH:mm")),
+                           QString::number(item.value(QStringLiteral("turns")).toInt()), item.value(QStringLiteral("model")).toString()};
+            rows << row;
+            ids << item.value(QStringLiteral("id")).toString();
+        }
+        const auto result = relay::agentui::pick(this, QStringLiteral("Resume session"),
+            QStringLiteral("Saved agent sessions for this workspace. Resuming replaces this pane's conversation."),
+            {QStringLiteral("Title"), QStringLiteral("Updated"), QStringLiteral("Turns"), QStringLiteral("Model")}, rows,
+            {{QStringLiteral("resume"), QStringLiteral("Resume"), true}});
+        if (result.row < 0) { focusInput(); return; }
+        if (m_agentBusy) { status(QStringLiteral("Stop the agent turn before resuming a session.")); return; }
+        send({{"type", "resume"}, {"id", ids.at(result.row)}});
+    }
+
+    void showInstructionsDialog(const QJsonArray &items) {
+        QSettings settings;
+        const QStringList selected = settings.value(QStringLiteral("instructions/files")).toStringList();
+        QList<relay::agentui::InstructionFile> files;
+        for (const auto &value : items) {
+            const QJsonObject item = value.toObject();
+            relay::agentui::InstructionFile file;
+            file.path = item.value(QStringLiteral("path")).toString();
+            file.tool = item.value(QStringLiteral("tool")).toString();
+            file.scope = item.value(QStringLiteral("scope")).toString();
+            file.bytes = item.value(QStringLiteral("bytes")).toVariant().toLongLong();
+            file.exists = item.value(QStringLiteral("exists")).toBool();
+            file.checked = selected.contains(file.path);
+            files << file;
+        }
+        if (QFileInfo::exists(relayMdPath()) && std::none_of(files.cbegin(), files.cend(), [](const auto &f) { return f.path == relayMdPath(); })) {
+            relay::agentui::InstructionFile relay;
+            relay.path = relayMdPath(); relay.tool = QStringLiteral("Relay"); relay.scope = QStringLiteral("global");
+            relay.bytes = QFileInfo(relayMdPath()).size(); relay.exists = true; relay.checked = selected.contains(relay.path);
+            files.prepend(relay);
+        }
+        const auto result = relay::agentui::chooseInstructions(this, files, settings.value(QStringLiteral("instructions/project_auto"), true).toBool(), relayMdPath());
+        settings.setValue(QStringLiteral("instructions/onboarded"), true);
+        m_onboarding = false;
+        if (!result.accepted) { focusInput(); return; }
+        settings.setValue(QStringLiteral("instructions/project_auto"), result.projectAuto);
+        if (result.synthesize && !result.files.isEmpty()) {
+            settings.setValue(QStringLiteral("instructions/files"), result.files);
+            send({{"type", "synthesize_instructions"}, {"files", QJsonArray::fromStringList(result.files)}, {"target", relayMdPath()}});
+            status(QStringLiteral("Creating relay.md from %1 file(s)…").arg(result.files.size()));
+            toast(QStringLiteral("Creating relay.md…"));
+        } else {
+            settings.setValue(QStringLiteral("instructions/files"), result.files);
+            applyConfigureChange(QStringLiteral("Instructions saved"));
+        }
+        focusInput();
+    }
+
+    // ----- slash commands in the composer --------------------------------------------------------
+    struct SlashCommand { QString name, args, description; };
+    static const QList<SlashCommand> &slashCommands() {
+        static const QList<SlashCommand> commands{
+            {QStringLiteral("new"), QString(), QStringLiteral("Start a new conversation")},
+            {QStringLiteral("clear"), QString(), QStringLiteral("Start a new conversation (same as /new)")},
+            {QStringLiteral("model"), QStringLiteral("[name]"), QStringLiteral("Switch model, keeping the conversation")},
+            {QStringLiteral("effort"), QStringLiteral("[low|medium|high|max]"), QStringLiteral("Set reasoning effort")},
+            {QStringLiteral("compact"), QStringLiteral("[focus]"), QStringLiteral("Summarize older turns to free context")},
+            {QStringLiteral("context"), QString(), QStringLiteral("Show context usage")},
+            {QStringLiteral("rewind"), QString(), QStringLiteral("Restore to an earlier turn")},
+            {QStringLiteral("fork"), QString(), QStringLiteral("Continue this conversation in a new pane")},
+            {QStringLiteral("resume"), QString(), QStringLiteral("Resume a saved session")},
+            {QStringLiteral("plan"), QString(), QStringLiteral("Toggle plan mode")},
+            {QStringLiteral("recap"), QString(), QStringLiteral("Summarize this session")},
+            {QStringLiteral("agents"), QString(), QStringLiteral("Subagents: definitions and running agents")},
+            {QStringLiteral("skills"), QString(), QStringLiteral("Skills available to the agent")},
+            {QStringLiteral("instructions"), QString(), QStringLiteral("Choose instruction files (CLAUDE.md, AGENTS.md, WARP.md…)")},
+            {QStringLiteral("export"), QString(), QStringLiteral("Save the conversation as Markdown")},
+            {QStringLiteral("shell"), QStringLiteral("<command>"), QStringLiteral("Send to the terminal")},
+            {QStringLiteral("agent"), QStringLiteral("<prompt>"), QStringLiteral("Send to the agent")}};
+        return commands;
+    }
+
+    void updateSlashPopup() {
+        const QString text = m_editor ? m_editor->toPlainText() : QString();
+        if (!m_editor || m_native || !text.startsWith('/') || text.contains(QRegularExpression(QStringLiteral("\\s")))) { hideSlashPopup(); return; }
+        const QString query = text.mid(1).toLower();
+        struct Ranked { int score; int index; };
+        QList<Ranked> ranked;
+        const auto &commands = slashCommands();
+        for (int i = 0; i < commands.size(); ++i) {
+            // Name prefix first, then names containing the query; descriptions do not match.
+            const QString &name = commands[i].name;
+            const int score = name.startsWith(query) ? 3000 - i : name.contains(query) ? 2000 - i : 0;
+            if (score > 0) ranked.append({score, i});
+        }
+        std::stable_sort(ranked.begin(), ranked.end(), [](const Ranked &a, const Ranked &b) { return a.score > b.score; });
+        if (ranked.isEmpty()) { hideSlashPopup(); return; }
+        if (!m_slashList) {
+            m_slashList = new QListWidget(this);
+            m_slashList->setObjectName(QStringLiteral("atPicker"));
+            m_slashList->setFocusPolicy(Qt::NoFocus);
+            m_slashList->setUniformItemSizes(true);
+            connect(m_slashList, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) { m_slashList->setCurrentItem(item); acceptSlashSelection(true); });
+        }
+        m_slashList->clear();
+        for (const auto &entry : std::as_const(ranked)) {
+            const auto &command = commands[entry.index];
+            auto *item = new QListWidgetItem(QStringLiteral("/%1 %2    %3").arg(command.name, command.args, command.description).simplified(), m_slashList);
+            item->setData(Qt::UserRole, command.name);
+            item->setData(Qt::UserRole + 1, !command.args.isEmpty() && command.args.startsWith('<'));
+        }
+        m_slashList->setCurrentRow(0);
+        if (m_composer) {
+            const QRect composer(m_composer->mapTo(this, QPoint(0, 0)), m_composer->size());
+            const int rowHeight = std::max(18, m_slashList->sizeHintForRow(0));
+            const int height = std::min(9, m_slashList->count()) * rowHeight + 8;
+            m_slashList->setGeometry(composer.left() + 12, std::max(0, composer.top() - height - 4), std::min(640, composer.width() - 24), height);
+        }
+        m_slashList->show();
+        m_slashList->raise();
+        if (m_editor->ghost().size()) m_editor->setGhost(QString());
+    }
+
+    // The Relay command being typed: "/co" while it is a prefix of a command name, or "/compact args".
+    static const SlashCommand *slashCommandFor(const QString &text) {
+        static const QRegularExpression pattern(QStringLiteral("^/([a-z]*)(\\s[\\s\\S]*)?$"));
+        const auto match = pattern.match(text);
+        if (!match.hasMatch()) return nullptr;
+        const QString name = match.captured(1);
+        const bool hasArgs = match.capturedLength(2) > 0;
+        const SlashCommand *prefix = nullptr;
+        for (const auto &command : slashCommands()) {
+            if (command.name == QStringLiteral("shell") || command.name == QStringLiteral("agent")) continue;
+            if (command.name == name) return &command;
+            if (!hasArgs && !prefix && command.name.startsWith(name)) prefix = &command;
+        }
+        return prefix;
+    }
+
+    void hideSlashPopup() { if (m_slashList && m_slashList->isVisible()) m_slashList->hide(); }
+
+    // Enter runs the selected command (commands that need an argument are completed instead); Tab completes.
+    void acceptSlashSelection(bool run) {
+        if (!m_slashList || !m_slashList->currentItem()) return;
+        const QString name = m_slashList->currentItem()->data(Qt::UserRole).toString();
+        const bool needsArgument = m_slashList->currentItem()->data(Qt::UserRole + 1).toBool();
+        hideSlashPopup();
+        if (!run || needsArgument) {
+            m_editor->setPlainText(QStringLiteral("/") + name + ' ');
+            m_editor->moveCursor(QTextCursor::End);
+            return;
+        }
+        m_editor->clear();
+        runSlashCommand(name, QString());
+    }
+
+    // True when `text` is a Relay slash command (not the router's /shell and /agent prefixes).
+    bool tryRunSlashCommand(const QString &text) {
+        static const QRegularExpression pattern(QStringLiteral("^/([a-z]+)(?:\\s+([\\s\\S]*))?$"));
+        const auto match = pattern.match(text.trimmed());
+        if (!match.hasMatch()) return false;
+        const QString name = match.captured(1);
+        if (name == QStringLiteral("shell") || name == QStringLiteral("agent")) return false;
+        if (std::none_of(slashCommands().cbegin(), slashCommands().cend(), [&](const auto &c) { return c.name == name; })) return false;
+        m_editor->remember(text.trimmed());
+        m_editor->clear();
+        hideSlashPopup();
+        runSlashCommand(name, match.captured(2).trimmed());
+        return true;
+    }
+
+    void runSlashCommand(const QString &name, const QString &args) {
+        if (name == QStringLiteral("new") || name == QStringLiteral("clear")) newChat();
+        else if (name == QStringLiteral("model")) {
+            if (!args.isEmpty()) {
+                for (const auto &model : std::as_const(m_stored)) {
+                    if (model.first.compare(args, Qt::CaseInsensitive) == 0 || model.second.contains(args, Qt::CaseInsensitive)) { selectModel(model.first); return; }
+                }
+                status(QStringLiteral("No stored model matches “%1”.").arg(args));
+                return;
+            }
+            QList<relay::agentui::PickerRow> rows;
+            for (const auto &model : std::as_const(m_stored)) rows << relay::agentui::PickerRow{{model.second, model.first == m_currentPreset ? QStringLiteral("current") : QString()}, model.first, model.first};
+            const auto result = relay::agentui::pick(this, QStringLiteral("Model"), QStringLiteral("Switch this pane's model. The conversation is kept."),
+                                                     {QStringLiteral("Model"), QString()}, rows, {{QStringLiteral("use"), QStringLiteral("Use"), true}});
+            if (result.row >= 0) selectModel(m_stored.at(result.row).first);
+        } else if (name == QStringLiteral("effort")) {
+            if (efforts().contains(args.toLower())) setEffort(args.toLower());
+            else if (args.isEmpty()) effortStep(1 - (efforts().indexOf(m_effort) == efforts().size() - 1 ? 4 : 0));
+            else status(QStringLiteral("Effort must be low, medium, high or max."));
+        } else if (name == QStringLiteral("compact")) compactNow(args);
+        else if (name == QStringLiteral("context")) {
+            if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+            m_contextNotePending = true;
+            send({{"type", "context"}});
+        } else if (name == QStringLiteral("rewind")) openRewind();
+        else if (name == QStringLiteral("fork")) requestFork();
+        else if (name == QStringLiteral("resume")) openResume();
+        else if (name == QStringLiteral("plan")) togglePlanMode();
+        else if (name == QStringLiteral("recap")) requestRecap();
+        else if (name == QStringLiteral("instructions")) openInstructions();
+        else if (name == QStringLiteral("export")) exportConversation();
+        else if (name == QStringLiteral("agents")) {
+            if (onShowAgents) onShowAgents();
+            else { m_agentsListPending = true; send({{"type", "agents_list"}, {"workspace", m_workspace}}); }
+        } else if (name == QStringLiteral("skills")) {
+            ensureLineStart();
+            printInline(QStringLiteral("%1 skill(s) available to the agent (from ~/.warp and ~/.claude/skills). Ask it to use one by name.\n").arg(m_skillCount), Ink::Note);
+            closeInline();
+        }
+    }
+
+    // ----- steering, away recaps, AI suggestions -------------------------------------------------
+    struct SteerEntry { QString requestId, itemId, text; QJsonArray attachments; };
+
+    // Enter on an empty prompt right after queuing an agent prompt while the agent works: deliver that
+    // prompt at the agent's next tool call instead of after the turn.
+    bool upgradeLastQueuedToSteer() {
+        if (!m_agentBusy || m_entries.isEmpty() || !m_lastQueuedAt.isValid() || m_lastQueuedAt.elapsed() > 15000) return false;
+        const QueueEntry &last = m_entries.last();
+        if (!last.agent || last.fix || last.id != m_lastQueuedEntryId) return false;
+        QueueEntry entry = m_entries.takeLast();
+        m_lastQueuedAt.invalidate();
+        SteerEntry steer;
+        steer.requestId = QStringLiteral("steer-%1").arg(++m_askSerial);
+        steer.text = entry.text; steer.attachments = entry.attachments;
+        m_steering.append(steer);
+        QJsonObject request{{"type", "ask"}, {"id", steer.requestId}, {"text", entry.text}, {"when", "steer"}, {"requeue", false}};
+        if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
+        send(request);
+        rebuildQueueStrip(); changed();
+        toast(QStringLiteral("Steering · delivered at the agent's next tool call"));
+        return true;
+    }
+
+    void noteWindowActivation(bool active) {
+        if (!active) {
+            if (!m_awaySince.isValid()) m_awaySince.start();
+            return;
+        }
+        const bool wasAway = m_awaySince.isValid();
+        const qint64 awayMs = wasAway ? m_awaySince.elapsed() : 0;
+        m_awaySince.invalidate();
+        const qint64 threshold = qEnvironmentVariableIsSet("RELAY_RECAP_AWAY_SECONDS")
+            ? qEnvironmentVariableIntValue("RELAY_RECAP_AWAY_SECONDS") * 1000LL : 180000LL;
+        if (!wasAway || awayMs < threshold || !m_finishedWhileAway) return;
+        m_finishedWhileAway = false;
+        if (!QSettings().value(QStringLiteral("recap/away"), true).toBool() || !m_configured || m_agentBusy) return;
+        if (!m_editor->toPlainText().isEmpty() || m_turnsCompleted == m_lastRecapTurns || m_turnsCompleted < 3) return;
+        send({{"type", "recap_request"}, {"reason", "away"}});
+    }
+
+    void requestSuggestion(const QString &kind, const QJsonObject &fields = QJsonObject()) {
+        if (!m_configured || !m_editor->toPlainText().isEmpty()) return;
+        m_suggestionId = QStringLiteral("suggest-%1").arg(++m_askSerial);
+        QJsonObject request{{"type", "suggest"}, {"kind", kind}, {"id", m_suggestionId}};
+        for (auto it = fields.begin(); it != fields.end(); ++it) request.insert(it.key(), it.value());
+        send(request);
+    }
+
+    void clearAiGhost() {
+        if (m_aiGhost.isEmpty()) return;
+        m_aiGhost.clear(); m_aiGhostKind.clear(); m_suggestionId.clear();
+        if (m_editor && m_editor->toPlainText().isEmpty()) m_editor->setGhost(QString());
+        updateGhost();
     }
 
     void startWorker() {
@@ -977,6 +1792,11 @@ private:
                 }
             }
             if (m_atList && m_atList->isVisible()) hideAtPopup();
+            if (tryRunSlashCommand(m_editor->toPlainText())) return;
+            clearAiGhost();
+        } else if (const SlashCommand *command = slashCommandFor(m_editor->toPlainText())) {
+            m_routeLabel->setText(QStringLiteral("COMMAND · /%1 · %2").arg(command->name, command->description));
+            return;
         }
         if (!m_workerReady) {
             if (submit) status(QStringLiteral("Local router is not ready; use the native terminal or restart Relay."));
@@ -997,6 +1817,7 @@ private:
 
     void handle(const QJsonObject &event) {
         const QString type = event.value(QStringLiteral("event")).toString();
+        if (handleSessionEvent(type, event)) return;
         if (type == QStringLiteral("ready")) {
             m_workerReady = true; requestRoute(false, QStringLiteral("auto"));
             send({{"type", "presets"}});
@@ -1021,6 +1842,8 @@ private:
         } else if (type == QStringLiteral("configured")) {
             m_configured = true; m_configuring = false;
             m_model = event.value(QStringLiteral("model")).toString();
+            m_skillCount = event.value(QStringLiteral("skills")).toInt();
+            onSessionConfigured(event);
             status(QStringLiteral("Agent ready · ") + event.value(QStringLiteral("model")).toString());
             changed();
         } else if (type == QStringLiteral("presets")) {
@@ -1078,6 +1901,17 @@ private:
             }
             rebuildQueueStrip();
             changed();
+        } else if (type == QStringLiteral("agents") && m_agentsListPending) {
+            m_agentsListPending = false;
+            ensureLineStart();
+            const QJsonArray items = event.value(QStringLiteral("items")).toArray();
+            printInline(QStringLiteral("%1 agent definition(s):\n").arg(items.size()), Ink::Note);
+            for (const auto &value : items) {
+                const QJsonObject item = value.toObject();
+                printInline(QStringLiteral("  %1 · %2 (%3)\n").arg(item.value(QStringLiteral("name")).toString(),
+                            item.value(QStringLiteral("description")).toString().left(90), item.value(QStringLiteral("source")).toString()), Ink::ToolOutput);
+            }
+            closeInline();
         } else if (type == QStringLiteral("interrupting")) {
             status(QStringLiteral("Interrupting the current agent turn…"));
         } else if (type == QStringLiteral("agent_started")) {
@@ -1106,7 +1940,14 @@ private:
             m_itemPrompts.remove(event.value(QStringLiteral("id")).toString());
             if (m_currentItem == event.value(QStringLiteral("id")).toString()) m_currentItem.clear();
             m_agentBusy = !m_runningItem.isEmpty() && m_runningItem != event.value(QStringLiteral("id")).toString();
+            if (outcome == QStringLiteral("done")) {
+                ++m_turnsCompleted;
+                if (window() && !window()->isActiveWindow()) m_finishedWhileAway = true;
+            }
             if (!m_agentBusy && !moreTurnsPending()) { ensureLineStart(); closeInline(); }
+            if (outcome == QStringLiteral("done") && !m_agentBusy && !moreTurnsPending()
+                && QSettings().value(QStringLiteral("suggestions/next_prompt"), false).toBool())
+                QTimer::singleShot(300, this, [this] { requestSuggestion(QStringLiteral("next_prompt")); });
             changed();
         } else if (type == QStringLiteral("delta")) {
             const QString text = event.value(QStringLiteral("text")).toString();
@@ -1431,7 +2272,7 @@ private:
     static constexpr int kMaxFixAttempts = 3;
 
     void status(const QString &text) { if (onStatus) onStatus(text); }
-    void changed() { refreshPickers(); if (onStateChanged) onStateChanged(); }
+    void changed() { refreshPickers(); refreshSessionControls(); if (onStateChanged) onStateChanged(); }
 
     void refreshPickers() {
         if (!m_modeBox || !m_modelBox) return;
@@ -1512,7 +2353,7 @@ private:
     }
 
     // ----- inline output in the terminal -------------------------------------------------
-    enum class Ink { Agent, User, Tool, ToolOutput, DiffAdd, DiffRemove, Error, Note };
+    enum class Ink { Agent, User, Tool, ToolOutput, DiffAdd, DiffRemove, Error, Note, Recap };
 
     static QByteArray inkCode(Ink ink) {
         switch (ink) {
@@ -1524,6 +2365,7 @@ private:
         case Ink::DiffRemove: return "\x1b[38;2;232;120;128m";
         case Ink::Error: return "\x1b[38;2;240;113;120m";
         case Ink::Note: return "\x1b[3;38;2;128;135;150m";
+        case Ink::Recap: return "\x1b[38;2;190;160;240m";
         }
         return {};
     }
@@ -1584,6 +2426,7 @@ private:
         case Ink::ToolOutput: case Ink::Note: return QColor(128, 135, 150);
         case Ink::DiffAdd: return QColor(126, 200, 140);
         case Ink::DiffRemove: case Ink::Error: return QColor(240, 113, 120);
+        case Ink::Recap: return QColor(190, 160, 240);
         }
         return QColor(226, 229, 235);
     }
@@ -1710,11 +2553,11 @@ private:
         settings.setValue("provider/extra", QString::fromUtf8(QJsonDocument(preset.value(QStringLiteral("extra")).toObject()).toJson(QJsonDocument::Compact)));
         m_apiKey.clear(); m_configured = false; m_configuring = true; m_currentPreset = id; changed();
         if (announce) status(QStringLiteral("Switching model. This starts a new conversation."));
-        send({{"type", "configure"}, {"preset", id}, {"use_stored_key", true},
+        send(withSessionFields(QJsonObject{{"type", "configure"}, {"preset", id}, {"use_stored_key", true},
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
               {"model", preset.value(QStringLiteral("model")).toString()},
               {"extra", preset.value(QStringLiteral("extra")).toObject()}, {"max_tokens", tokens},
-              {"api_key", QString()}, {"workspace", m_workspace}, {"keybindings", Keymap::instance().catalog()}});
+              {"api_key", QString()}, {"workspace", m_workspace}, {"keybindings", Keymap::instance().catalog()}}));
         updatePaths();
     }
 
@@ -1769,7 +2612,8 @@ private:
             m_entries.append(entry);
         }
         m_selected = -1;
-        status(entry.agent ? QStringLiteral("Queued · the agent prompt runs after the items ahead of it")
+        if (entry.agent && m_agentBusy) { m_lastQueuedEntryId = entry.id; m_lastQueuedAt.start(); }
+        status(entry.agent ? QStringLiteral("Queued · the agent prompt runs after the items ahead of it · Enter again to send at the next tool call")
                            : QStringLiteral("Queued · the command runs when the terminal is free"));
         rebuildQueueStrip(); changed();
         pumpQueue();
@@ -1839,6 +2683,36 @@ private:
         const auto mods = key->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
         const int k = key->key();
         const bool enter = k == Qt::Key_Return || k == Qt::Key_Enter;
+        if (m_slashList && m_slashList->isVisible()) {
+            if (mods == Qt::NoModifier && (k == Qt::Key_Up || k == Qt::Key_Down)) {
+                m_slashList->setCurrentRow(std::clamp(m_slashList->currentRow() + (k == Qt::Key_Down ? 1 : -1), 0, m_slashList->count() - 1));
+                return true;
+            }
+            if (mods == Qt::NoModifier && k == Qt::Key_Tab) { acceptSlashSelection(false); return true; }
+            if (mods == Qt::NoModifier && enter) { acceptSlashSelection(true); return true; }
+            if (k == Qt::Key_Escape) { hideSlashPopup(); return true; }
+        }
+        // AI suggestions shown in an empty prompt box: Tab (or → / Ctrl+F) accepts.
+        if (!m_aiGhost.isEmpty() && m_editor->toPlainText().isEmpty() && mods == Qt::NoModifier && k == Qt::Key_Tab) {
+            const QString text = m_aiGhost;
+            clearAiGhost();
+            m_editor->setPlainText(text);
+            m_editor->moveCursor(QTextCursor::End);
+            return true;
+        }
+        if (mods == Qt::NoModifier && enter && m_editor->toPlainText().trimmed().isEmpty() && upgradeLastQueuedToSteer()) return true;
+        // Esc Esc in an empty prompt box while the agent is idle opens Rewind; a single Esc keeps
+        // its usual meaning (take control of the terminal) after a short wait.
+        if (mods == Qt::NoModifier && k == Qt::Key_Escape && !m_agentBusy && m_editor->toPlainText().isEmpty()
+            && m_selected < 0 && !(m_atList && m_atList->isVisible()) && m_configured) {
+            if (m_escTimer.isActive()) { m_escTimer.stop(); openRewind(); return true; }
+            m_escTimer.setSingleShot(true);
+            m_escTimer.setInterval(350);
+            m_escTimer.disconnect();
+            connect(&m_escTimer, &QTimer::timeout, this, [this] { setNative(true); });
+            m_escTimer.start();
+            return true;
+        }
         if (m_atList && m_atList->isVisible()) {
             if (mods == Qt::NoModifier && (k == Qt::Key_Up || k == Qt::Key_Down)) {
                 const int row = std::clamp(m_atList->currentRow() + (k == Qt::Key_Down ? 1 : -1), 0, m_atList->count() - 1);
@@ -1911,6 +2785,8 @@ private:
     }
 
     void onComposerEdited() {
+        if (!m_editor->toPlainText().isEmpty()) clearAiGhost();
+        updateSlashPopup();
         if (m_selected >= 0 && !m_editor->toPlainText().isEmpty()) { m_selected = -1; rebuildQueueStrip(); }
         updateAtPopup();
         updateGhost();
@@ -1924,8 +2800,24 @@ private:
         const QTextCursor cursor = m_editor->textCursor();
         if (QSettings().value(QStringLiteral("composer/history_suggestions"), true).toBool()
             && m_modeValue != QStringLiteral("agent") && !text.trimmed().isEmpty() && !text.contains('\n')
-            && cursor.atEnd() && !cursor.hasSelection() && !(m_atList && m_atList->isVisible()) && !text.startsWith('@')) {
+            && cursor.atEnd() && !cursor.hasSelection() && !(m_atList && m_atList->isVisible()) && !text.startsWith('@')
+            && !(m_slashList && m_slashList->isVisible()) && !slashCommandFor(text)) {
             remainder = historySuggestion(text);
+        }
+        // An AI suggestion in the empty prompt box takes the placeholder's place.
+        const bool aiGhost = text.isEmpty() && !m_aiGhost.isEmpty();
+        if (aiGhost && !m_editor->placeholderText().isEmpty()) {
+            m_savedPlaceholder = m_editor->placeholderText();
+            m_editor->setPlaceholderText(QString());
+        } else if (!aiGhost && m_editor->placeholderText().isEmpty() && !m_savedPlaceholder.isEmpty()) {
+            m_editor->setPlaceholderText(m_savedPlaceholder);
+        }
+        if (aiGhost) {
+            remainder = m_aiGhost;
+            m_editor->setToolTip(m_aiGhostKind == QStringLiteral("next_prompt") ? QStringLiteral("Suggested prompt (AI) · Tab accepts")
+                                                                                : QStringLiteral("Suggested command (AI) · → or Tab accepts"));
+        } else if (m_editor->toolTip().contains(QStringLiteral("(AI)"))) {
+            m_editor->setToolTip(QString());
         }
         m_editor->setGhost(remainder);
     }
@@ -2149,7 +3041,8 @@ private:
     }
 
     void pollProgram() {
-        if (m_promptReported || !m_iface) { m_programPoll.stop(); endWaiting(true); return; }
+        if (m_promptReported || !m_iface) { m_programPoll.stop(); endWaiting(true); updateOpaqueProgram(); return; }
+        updateOpaqueProgram();
         checkPasswordPrompt();
         if (m_native && m_hideReason == HideReason::Password) {
             // The password was entered once echo is back on; show the prompt box again.
@@ -2167,7 +3060,9 @@ private:
                 m_autoHuman = true; setNative(true); m_hideReason = HideReason::Remote;
                 return;
             }
-            if (programWaitingForInput()) {
+            if (!m_opaqueProgram.isEmpty()) {
+                // Relay cannot see whether sudo & co. are reading the terminal; focus already went there.
+            } else if (programWaitingForInput()) {
                 if (++m_waitTicks == 2) startWaiting();
             } else {
                 if (m_waiting) endWaiting(true);
@@ -2224,6 +3119,70 @@ private:
         return false;
     }
 
+    // Programs Relay cannot inspect: sudo, doas, pkexec, su, run0, anything running as another user,
+    // or a process whose /proc/<pid>/syscall is unreadable. The prompt box stays visible, but the
+    // keyboard focus stays in the terminal; a hint in the composer row says how to type a prompt.
+    QString opaqueForegroundProgram() const {
+        if (!processBusy()) return {};
+        const int shell = m_iface->terminalProcessId();
+        long group = shell > 0 ? foregroundGroup(shell) : -1;
+        if (group <= 0 || group == shell) group = m_iface->foregroundProcessId();
+        if (group <= 0 || group == shell) return {};
+        QString name = foregroundProgramName();
+        static const QSet<QString> elevators{QStringLiteral("sudo"), QStringLiteral("doas"), QStringLiteral("pkexec"),
+                                             QStringLiteral("su"), QStringLiteral("run0")};
+        if (elevators.contains(name)) return name;
+        if (name.isEmpty()) name = QStringLiteral("A program");
+        QFile statusFile(QStringLiteral("/proc/%1/status").arg(group));
+        if (statusFile.open(QIODevice::ReadOnly)) {
+            for (const QByteArray &line : statusFile.readAll().split('\n')) {
+                if (!line.startsWith("Uid:")) continue;
+                const QList<QByteArray> ids = line.mid(4).simplified().split(' ');
+                if (ids.size() >= 2 && (ids[0].toUInt() != ::getuid() || ids[1].toUInt() != ::geteuid())) return name;
+                break;
+            }
+        }
+        auto readable = [](long pid) {
+            QFile file(QStringLiteral("/proc/%1/syscall").arg(pid));
+            return file.open(QIODevice::ReadOnly) && !file.readAll().isEmpty();
+        };
+        if (readable(shell) && !readable(group)) return name;
+        return {};
+    }
+
+    void updateOpaqueProgram() {
+        const QString name = (m_promptReported || m_altScreen || !m_iface) ? QString() : opaqueForegroundProgram();
+        if (name != m_opaqueProgram) {
+            const bool was = !m_opaqueProgram.isEmpty();
+            m_opaqueProgram = name;
+            if (!was) {
+                endWaiting(false);
+                m_opaqueTyped = false;
+                if (!m_native) focusTerminal();
+            } else if (name.isEmpty()) {
+                // The user answered the program in the terminal: leave the focus there.
+                if (m_opaqueTyped) m_refocus = false;
+                else if (!m_native && ownsTerminalWidget(QApplication::focusWidget())) m_editor->setFocus(Qt::OtherFocusReason);
+            }
+        }
+        refreshOpaqueHint();
+    }
+
+    void refreshOpaqueHint() {
+        if (!m_opaqueHint) return;
+        const bool show = !m_opaqueProgram.isEmpty() && !m_native;
+        if (show) {
+            const bool inComposer = ownsComposerWidget(QApplication::focusWidget());
+            m_opaqueHint->setText(inComposer
+                ? QStringLiteral("%1 is running · prompts queue until it exits · %2 or click the terminal to type into it")
+                      .arg(m_opaqueProgram, Keymap::instance().shortcutText(QStringLiteral("control.human")))
+                : QStringLiteral("%1 is running · typing goes to the program · %2 to type a prompt")
+                      .arg(m_opaqueProgram, Keymap::instance().shortcutText(QStringLiteral("control.prompt"))));
+        }
+        m_opaqueHint->setVisible(show);
+        m_routeLabel->setVisible(!show);
+    }
+
     void startWaiting() {
         m_waiting = true;
         m_waitMovedFocus = m_editor->hasFocus();
@@ -2255,7 +3214,7 @@ private:
     // commands ($, amber) and agent prompts (✦, cyan) in order. Rows drag to reorder; × removes.
     void rebuildQueueStrip() {
         if (!m_queueStrip) return;
-        const bool visible = !m_entries.isEmpty() || m_entriesPaused;
+        const bool visible = !m_entries.isEmpty() || m_entriesPaused || !m_steering.isEmpty();
         auto *layout = static_cast<QVBoxLayout *>(m_queueStrip->layout());
         while (QLayoutItem *item = layout->takeAt(0)) {
             if (QWidget *w = item->widget()) { if (w != m_queueList) w->deleteLater(); }
@@ -2290,6 +3249,12 @@ private:
         if (!running.trimmed().isEmpty()) {
             auto *label = new QLabel(QStringLiteral("▸ running  ") + fontMetrics().elidedText(running.simplified(), Qt::ElideRight, std::max(160, width() - 180)));
             label->setObjectName(QStringLiteral("queueRunning"));
+            layout->addWidget(label);
+        }
+        for (const auto &steer : std::as_const(m_steering)) {
+            auto *label = new QLabel(QStringLiteral("↪ next tool call  ✦ ") + fontMetrics().elidedText(steer.text.simplified(), Qt::ElideRight, std::max(160, width() - 220)));
+            label->setObjectName(QStringLiteral("queueSteer"));
+            label->setToolTip(QStringLiteral("Delivered inside the running turn at the agent's next tool call"));
             layout->addWidget(label);
         }
         if (!m_queueList) {
@@ -2393,6 +3358,16 @@ private:
             m_shellPath = event.value(QStringLiteral("path")).toString();
             const int status = event.value(QStringLiteral("status")).toInt();
             if (!m_agentBusy) this->status(QStringLiteral("Shell ready · exit %1").arg(status));
+            // Fast commands can finish between two polls, so "running" is not a reliable trigger.
+            const bool suggestNext = m_commandLoaded;
+            m_commandLoaded = false;
+            if (suggestNext && !m_pendingCommand.isEmpty() && !m_agentBusy
+                && QSettings().value(QStringLiteral("suggestions/next_command"), false).toBool()) {
+                const QString command = m_pendingCommand;
+                QTimer::singleShot(250, this, [this, command, status] {
+                    requestSuggestion(QStringLiteral("next_command"), {{"command", command}, {"exit_status", status}, {"cwd", m_cwd}});
+                });
+            }
             if (m_runningSince.isValid()) {
                 const qint64 ms = m_runningSince.elapsed();
                 m_runningSince.invalidate();
@@ -2400,6 +3375,7 @@ private:
             }
             m_programPoll.stop();
             endWaiting(true);
+            updateOpaqueProgram();
             m_remoteHandled = false;
             if (m_native && m_autoHuman) { m_autoHuman = false; setNative(false, false); }
             if (m_activeValid && !m_active.agent && m_activeLoaded) {
@@ -2438,6 +3414,7 @@ private:
                    event.value(QStringLiteral("input_sha256")).toString() == m_pendingHash) {
             m_loading = false; m_shellReady = false; m_promptReported = false; m_refocus = true;
             m_editor->remember(m_pendingCommand);
+            m_commandLoaded = true;
             m_commandLog.append({m_pendingCommand, m_cwd});
             if (m_commandLog.size() > 500) m_commandLog.removeFirst();
             const bool fromQueue = m_activeValid && !m_active.agent;
@@ -2470,8 +3447,10 @@ private:
             if (cancelLine && m_shellReady && m_iface && (m_iface->foregroundProcessId() <= 0 || m_iface->foregroundProcessId() == m_iface->terminalProcessId())) {
                 m_iface->sendInput(QString(QChar(3))); m_shellReady = false; m_promptReported = false; m_refocus = true;
             }
-            m_editor->setFocus(); requestRoute(false, QStringLiteral("auto"));
+            if (!m_opaqueProgram.isEmpty()) focusTerminal(); else m_editor->setFocus();
+            requestRoute(false, QStringLiteral("auto"));
         }
+        refreshOpaqueHint();
     }
 
     void focusTerminal() { if (m_terminal) m_terminal->setFocus(Qt::OtherFocusReason); }
@@ -2556,10 +3535,10 @@ private:
             settings.setValue("provider/extra", extra->toPlainText()); settings.setValue("provider/max_tokens", tokens->value());
             if (saveKey->isChecked() && !m_apiKey.isEmpty() && presetId != QStringLiteral("custom"))
                 send({{"type", "store_key"}, {"preset", presetId}, {"api_key", m_apiKey}});
-            send({{"type", "configure"}, {"base_url", base->text().trimmed()}, {"model", model->text().trimmed()},
+            send(withSessionFields(QJsonObject{{"type", "configure"}, {"base_url", base->text().trimmed()}, {"model", model->text().trimmed()},
                   {"api_key", m_apiKey}, {"preset", presetId}, {"use_stored_key", m_apiKey.isEmpty()},
                   {"workspace", m_workspace}, {"extra", doc.object()}, {"max_tokens", tokens->value()},
-                  {"keybindings", Keymap::instance().catalog()}});
+                  {"keybindings", Keymap::instance().catalog()}}));
             updatePaths(); dialog.accept();
         });
         dialog.exec();
@@ -2642,6 +3621,28 @@ private:
     QJsonArray m_presets;
     bool m_configuring = false;
     bool m_seenShell = false, m_refocus = true, m_configured = false, m_agentBusy = false;
+    // agent sessions UI
+    QLabel *m_planChip = nullptr, *m_ctxLabel = nullptr;
+    QComboBox *m_effortBox = nullptr;
+    QListWidget *m_slashList = nullptr;
+    QString m_effort = QStringLiteral("high"), m_agentMode = QStringLiteral("build"), m_sessionId, m_sessionDir, m_forkTitle;
+    QString m_aiGhost, m_aiGhostKind, m_suggestionId, m_savedPlaceholder;
+    QJsonObject m_initialState;
+    qint64 m_ctxUsed = 0, m_ctxWindow = 0, m_ctxLimit = 0;
+    double m_ctxPercent = 0;
+    bool m_ctxEstimated = false, m_compacting = false, m_contextNotePending = false;
+    bool m_rewindPending = false, m_forkPending = false, m_resumePending = false, m_recapManual = false;
+    bool m_instructionsDialogPending = false, m_onboarding = false, m_agentsListPending = false, m_reconfigureOnNewChat = false;
+    bool m_finishedWhileAway = false, m_forkLoadPending = false, m_commandLoaded = false;
+    int m_turnsCompleted = 0, m_lastRecapTurns = -1, m_skillCount = 0;
+    QList<SteerEntry> m_steering;
+    quint64 m_lastQueuedEntryId = 0;
+    QElapsedTimer m_lastQueuedAt, m_awaySince;
+    QTimer m_escTimer;
+    // sudo & co. in the foreground
+    QLabel *m_opaqueHint = nullptr;
+    QString m_opaqueProgram;
+    bool m_opaqueTyped = false;
     quint64 m_requestId = 0, m_loadSerial = 0;
 };
 
@@ -2650,13 +3651,19 @@ private:
 // as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
 class ToolPane final : public QWidget {
 public:
-    enum class Kind { Explorer, Preview };
+    enum class Kind { Explorer, Preview, Plan };
 
-    ToolPane(Kind kind, const QString &path) : m_kind(kind) {
+    ToolPane(Kind kind, const QString &path, bool planActions = true) : m_kind(kind) {
         setObjectName(QStringLiteral("pane"));
         setAttribute(Qt::WA_StyledBackground);
         auto *layout = new QVBoxLayout(this); layout->setContentsMargins(1, 1, 1, 1);
-        if (kind == Kind::Explorer) {
+        if (kind == Kind::Plan) {
+            // Editable Markdown: agent plans (with Execute buttons) and documents such as relay.md.
+            m_plan = new relay::PlanEditor;
+            m_plan->setPlanActions(planActions);
+            layout->addWidget(m_plan);
+            m_plan->open(path);
+        } else if (kind == Kind::Explorer) {
             m_explorer = new relay::FileExplorer(path);
             layout->addWidget(m_explorer);
         } else {
@@ -2669,15 +3676,21 @@ public:
     Kind kind() const { return m_kind; }
     relay::FileExplorer *explorer() const { return m_explorer; }
     relay::FilePreview *preview() const { return m_preview; }
-    QString path() const { return m_explorer ? m_explorer->root() : m_preview->path(); }
-    QString cwd() const { return m_explorer ? m_explorer->root() : QFileInfo(m_preview->path()).absolutePath(); }
+    relay::PlanEditor *plan() const { return m_plan; }
+    QString path() const { return m_explorer ? m_explorer->root() : m_plan ? m_plan->path() : m_preview->path(); }
+    QString cwd() const { return m_explorer ? m_explorer->root() : QFileInfo(path()).absolutePath(); }
     QString title() const {
+        if (m_plan) return (m_plan->isDirty() ? QStringLiteral("● ") : QString()) + m_plan->title();
         const QString name = QFileInfo(path()).fileName();
         return name.isEmpty() ? path() : name;
     }
-    QJsonObject node() const { return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}}; }
+    QJsonObject node() const {
+        if (m_plan) return {{"plan", QJsonObject{{"path", path()}}}};
+        return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};
+    }
     void focusInput() {
-        if (m_explorer) m_explorer->view()->setFocus(Qt::OtherFocusReason);
+        if (m_plan) m_plan->editor()->setFocus(Qt::OtherFocusReason);
+        else if (m_explorer) m_explorer->view()->setFocus(Qt::OtherFocusReason);
         else m_preview->setFocus(Qt::OtherFocusReason);
     }
 
@@ -2685,6 +3698,7 @@ private:
     Kind m_kind;
     relay::FileExplorer *m_explorer = nullptr;
     relay::FilePreview *m_preview = nullptr;
+    relay::PlanEditor *m_plan = nullptr;
 };
 
 // ----- windows, tabs and panes --------------------------------------------------------------
@@ -2890,6 +3904,46 @@ public:
         updateTitles();
     }
 
+    // Agent plans and documents such as relay.md open in an editable pane beside the agent pane; a pane
+    // already showing the same file is reused. Plan panes drive their owner: Execute sends plan_execute.
+    void openDocument(const QString &path, Pane *owner, bool planActions) {
+        if (!owner || owner->window() != this || !QFileInfo::exists(path)) return;
+        QWidget *page = pageOf(owner);
+        m_tabs->setCurrentWidget(page);
+        ToolPane *target = nullptr;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Plan && tool->path() == QFileInfo(path).absoluteFilePath()) target = tool;
+        if (target) {
+            if (!target->plan()->isDirty()) target->plan()->open(path);
+        } else {
+            target = createToolPane(ToolPane::Kind::Plan, QFileInfo(path).absoluteFilePath(), planActions);
+            insertBeside(owner, target, Qt::Horizontal, false);
+        }
+        QPointer<Pane> guard(owner);
+        QPointer<ToolPane> tool(target);
+        target->plan()->onExecute = [guard, tool](bool fresh) {
+            if (!guard || !tool) return;
+            if (tool->plan()->isDirty() && !tool->plan()->save()) return;
+            guard->executePlan(tool->path(), fresh);
+        };
+        target->plan()->onKeepPlanning = [this, guard] { if (guard) { setActive(guard); guard->keepPlanning(); } };
+        setActiveLeaf(target);
+        focusLeaf(target);
+        updateTitles();
+    }
+
+    // Fork: a new agent pane on the right continues from the same conversation state.
+    void openFork(Pane *source, const QJsonObject &state, const QString &title) {
+        if (!source || source->window() != this) return;
+        Pane *pane = nullptr;
+        try { pane = createPane({{"cwd", source->cwd()}, {"workspace", source->workspace()}}); }
+        catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
+        pane->setInitialState(state, title);
+        insertBeside(source, pane, Qt::Horizontal, false);
+        setActive(pane);
+        QTimer::singleShot(0, pane, [pane] { pane->focusInput(); });
+    }
+
 protected:
     bool eventFilter(QObject *object, QEvent *event) override {
         if (event->type() == QEvent::Resize && object == centralWidget()) placeSidebar();
@@ -2915,7 +3969,8 @@ protected:
         // A program such as vim owns its keys, unless the program_keys rule lets this shortcut act.
         Pane *pane = paneOf(widget);
         // Ctrl+H only takes control from the prompt box; in the terminal it stays Backspace.
-        if ((id == QStringLiteral("control.human") || id == QStringLiteral("input.toggle") || id == QStringLiteral("agent.interrupt"))
+        if ((id == QStringLiteral("control.human") || id == QStringLiteral("input.toggle") || id == QStringLiteral("agent.interrupt")
+             || id == QStringLiteral("agent.planToggle") || id == QStringLiteral("agent.effortUp") || id == QStringLiteral("agent.effortDown"))
             && !(pane && pane->ownsComposerWidget(widget)))
             return QMainWindow::eventFilter(object, event);
         if (pane && pane->ownsTerminalWidget(widget) && pane->processBusy() && !Keymap::instance().actsInsidePrograms(key))
@@ -3009,6 +4064,16 @@ private:
         else if (id == QStringLiteral("control.human")) pane->takeControl();
         else if (id == QStringLiteral("control.prompt")) pane->showPrompt();
         else if (id == QStringLiteral("input.toggle")) pane->toggleInputMode();
+        else if (id == QStringLiteral("agent.planToggle")) pane->togglePlanMode();
+        else if (id == QStringLiteral("agent.effortUp")) pane->effortStep(1);
+        else if (id == QStringLiteral("agent.effortDown")) pane->effortStep(-1);
+        else if (id == QStringLiteral("agent.compact")) pane->compactNow();
+        else if (id == QStringLiteral("agent.rewind")) pane->openRewind();
+        else if (id == QStringLiteral("agent.fork")) pane->requestFork();
+        else if (id == QStringLiteral("agent.resume")) pane->openResume();
+        else if (id == QStringLiteral("agent.recap")) pane->requestRecap();
+        else if (id == QStringLiteral("agent.instructions")) pane->openInstructions();
+        else if (id == QStringLiteral("agent.export")) pane->exportConversation();
         else if (id == QStringLiteral("agent.interrupt")) pane->interruptAgentWithPrompt();
         else if (id == QStringLiteral("agent.clearQueue")) pane->clearAgentQueue();
         else if (id == QStringLiteral("agent.resumeQueue")) pane->resumeAgentQueue();
@@ -3099,6 +4164,102 @@ private:
         return item;
     }
 
+    // Agent options (Actions › Agent options). Settings live in QSettings; most apply to the next
+    // conversation (New chat), except max automatic turns, which applies at once.
+    QList<PaletteItem> agentOptionItems() {
+        QList<PaletteItem> children;
+        const QString section = QStringLiteral("Agent options");
+        auto toggle = [&](const QString &key, const QString &label, const QString &detail, bool fallback) {
+            PaletteItem item;
+            const bool on = QSettings().value(key, fallback).toBool();
+            item.key = QStringLiteral("option:") + key; item.section = section; item.label = label;
+            item.detail = (on ? QStringLiteral("On · ") : QStringLiteral("Off · ")) + detail;
+            item.checked = on; item.stayOpen = true;
+            item.run = [key, on] { QSettings().setValue(key, !on); };
+            children << item;
+        };
+        PaletteItem instructions = actionItem(section, QStringLiteral("Instructions…"), QStringLiteral("CLAUDE.md, AGENTS.md, WARP.md and other instruction files"), QStringLiteral("agent.instructions"));
+        children << instructions;
+        auto askText = [this](const QString &key, const QString &title, const QString &label, const QString &fallback, std::function<void(const QString &)> apply) {
+            bool ok = false;
+            const QString value = QInputDialog::getText(this, title, label, QLineEdit::Normal, QSettings().value(key, fallback).toString(), &ok);
+            if (ok) { apply(value.trimmed()); if (m_active) m_active->agentOptionsChanged(key); }
+        };
+        {
+            PaletteItem item; item.key = QStringLiteral("option:plans_dir"); item.section = section;
+            const QString dir = QSettings().value(QStringLiteral("agent/plans_dir")).toString();
+            item.label = QStringLiteral("Plans folder…");
+            item.detail = dir.isEmpty() ? QStringLiteral("<project>/.relay/plans") : dir;
+            item.run = [askText] { askText(QStringLiteral("agent/plans_dir"), QStringLiteral("Plans folder"),
+                QStringLiteral("Absolute folder for plans (empty: <project>/.relay/plans)"), QString(),
+                [](const QString &value) { QSettings().setValue(QStringLiteral("agent/plans_dir"), value); }); };
+            children << item;
+        }
+        {
+            PaletteItem item; item.key = QStringLiteral("option:compact_threshold"); item.section = section;
+            const QString value = QSettings().value(QStringLiteral("agent/compact_threshold")).toString();
+            item.label = QStringLiteral("Compaction threshold…");
+            item.detail = value.isEmpty() ? QStringLiteral("Default: 80% of the model window, minus output room") : value + QStringLiteral(" of the window");
+            item.run = [askText] { askText(QStringLiteral("agent/compact_threshold"), QStringLiteral("Compaction threshold"),
+                QStringLiteral("Fraction of the model's context window, 0.50–0.98 (empty: default)"), QString(),
+                [](const QString &value) {
+                    bool ok = false; const double number = value.toDouble(&ok);
+                    if (value.isEmpty()) QSettings().remove(QStringLiteral("agent/compact_threshold"));
+                    else if (ok && number >= 0.5 && number <= 0.98) QSettings().setValue(QStringLiteral("agent/compact_threshold"), number);
+                }); };
+            children << item;
+        }
+        {
+            PaletteItem item; item.key = QStringLiteral("option:max_auto_turns"); item.section = section;
+            item.label = QStringLiteral("Automatic turns from background agents…");
+            item.detail = QStringLiteral("Up to %1 in a row without your input (0 = unlimited)").arg(QSettings().value(QStringLiteral("agent/max_auto_turns"), 50).toInt());
+            item.run = [this] {
+                bool ok = false;
+                const int value = QInputDialog::getInt(this, QStringLiteral("Automatic turns"), QStringLiteral("Consecutive automatic turns (0 = unlimited)"),
+                                                       QSettings().value(QStringLiteral("agent/max_auto_turns"), 50).toInt(), 0, 10000, 1, &ok);
+                if (!ok) return;
+                QSettings().setValue(QStringLiteral("agent/max_auto_turns"), value);
+                if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/max_auto_turns"));
+            };
+            children << item;
+        }
+        {
+            PaletteItem item; item.key = QStringLiteral("option:skills_exclude"); item.section = section;
+            const QStringList list = QSettings().value(QStringLiteral("skills/exclude")).toStringList();
+            item.label = QStringLiteral("Excluded skills…");
+            item.detail = list.isEmpty() ? QStringLiteral("Default: Warp-app skills") : list.join(QStringLiteral(", "));
+            item.run = [askText] { askText(QStringLiteral("skills/exclude_text"), QStringLiteral("Excluded skills"),
+                QStringLiteral("Comma-separated skill names to skip (replaces the default list; empty: default)"), QString(),
+                [](const QString &value) {
+                    QStringList names;
+                    for (const QString &name : value.split(',', Qt::SkipEmptyParts)) if (!name.trimmed().isEmpty()) names << name.trimmed();
+                    QSettings().setValue(QStringLiteral("skills/exclude_text"), value);
+                    if (names.isEmpty()) QSettings().remove(QStringLiteral("skills/exclude")); else QSettings().setValue(QStringLiteral("skills/exclude"), names);
+                }); };
+            children << item;
+        }
+        {
+            const QString effort = QSettings().value(QStringLiteral("agent/effort"), QStringLiteral("high")).toString();
+            PaletteItem item; item.key = QStringLiteral("option:effort_default"); item.section = section;
+            item.label = QStringLiteral("Default reasoning effort"); item.detail = effort + QStringLiteral(" · new panes and new chats");
+            item.children = [effort] {
+                QList<PaletteItem> levels;
+                for (const QString &level : Pane::efforts()) {
+                    PaletteItem child; child.key = QStringLiteral("option:effort_default:") + level; child.section = QStringLiteral("Default reasoning effort");
+                    child.label = level; child.checked = effort == level; child.stayOpen = true;
+                    child.run = [level] { QSettings().setValue(QStringLiteral("agent/effort"), level); };
+                    levels << child;
+                }
+                return levels;
+            };
+            children << item;
+        }
+        toggle(QStringLiteral("suggestions/next_command"), QStringLiteral("AI next-command suggestions"), QStringLiteral("after a command finishes; uses your API key"), false);
+        toggle(QStringLiteral("suggestions/next_prompt"), QStringLiteral("Suggested next prompts"), QStringLiteral("after an agent turn; uses your API key"), false);
+        toggle(QStringLiteral("recap/away"), QStringLiteral("Recap when you come back"), QStringLiteral("after 3+ minutes away while the agent worked"), true);
+        return children;
+    }
+
     QList<PaletteItem> rootItems() {
         QList<PaletteItem> items;
         Pane *pane = m_active;
@@ -3128,6 +4289,33 @@ private:
                 actionItem(QStringLiteral("Input mode"), QStringLiteral("Agent"), QStringLiteral("Always the agent"), QStringLiteral("input.modeAgent"), mode == QStringLiteral("agent"))};
         });
         items << actionItem(agent, QStringLiteral("Toggle terminal / agent input"), QStringLiteral("From the prompt box"), QStringLiteral("input.toggle"));
+        if (pane) {
+            const QString effort = pane->effort();
+            items << submenu(QStringLiteral("menu:effort"), agent, QStringLiteral("Reasoning effort"), effort, [this, effort] {
+                QList<PaletteItem> children;
+                for (const QString &level : Pane::efforts()) {
+                    PaletteItem item;
+                    item.key = QStringLiteral("effort:") + level; item.section = QStringLiteral("Reasoning effort"); item.label = level;
+                    item.detail = QStringLiteral("This pane; keeps the conversation");
+                    item.checked = effort == level; item.stayOpen = true;
+                    item.run = [this, level] { if (m_active) m_active->setEffort(level); };
+                    children << item;
+                }
+                return children;
+            });
+            items << actionItem(agent, pane->agentMode() == QStringLiteral("plan") ? QStringLiteral("Leave plan mode") : QStringLiteral("Plan mode"),
+                                QStringLiteral("Investigate and write a plan before changing anything"), QStringLiteral("agent.planToggle"),
+                                pane->agentMode() == QStringLiteral("plan"));
+        }
+        items << actionItem(agent, QStringLiteral("Compact conversation"), QStringLiteral("Summarize older turns to free context"), QStringLiteral("agent.compact"));
+        items << actionItem(agent, QStringLiteral("Rewind…"), QStringLiteral("Restore the conversation and/or files to an earlier turn"), QStringLiteral("agent.rewind"));
+        items << actionItem(agent, QStringLiteral("Fork conversation"), QStringLiteral("Continue this conversation in a new pane"), QStringLiteral("agent.fork"));
+        items << actionItem(agent, QStringLiteral("Resume session…"), QStringLiteral("Open a saved agent session in this pane"), QStringLiteral("agent.resume"));
+        items << actionItem(agent, QStringLiteral("Recap"), QStringLiteral("Summarize what happened in this session"), QStringLiteral("agent.recap"));
+        items << actionItem(agent, QStringLiteral("Export conversation"), QStringLiteral("Save the conversation as Markdown"), QStringLiteral("agent.export"));
+        items << submenu(QStringLiteral("menu:agentOptions"), agent, QStringLiteral("Agent options"), QStringLiteral("Instructions, plans, compaction, suggestions"), [this] {
+            return agentOptionItems();
+        });
         items << actionItem(agent, QStringLiteral("New chat"), QStringLiteral("Start a new conversation in this pane"), QStringLiteral("agent.newChat"));
         items << actionItem(agent, QStringLiteral("Stop agent"), pane && pane->agentBusy() ? QStringLiteral("Cancel the running turn") : QStringLiteral("Agent is idle"), QStringLiteral("agent.stop"));
         if (pane && pane->queuedPrompts() > 0)
@@ -3466,14 +4654,16 @@ private:
         return {};
     }
 
-    ToolPane *createToolPane(ToolPane::Kind kind, const QString &path) {
-        auto *tool = new ToolPane(kind, path);
+    ToolPane *createToolPane(ToolPane::Kind kind, const QString &path, bool planActions = true) {
+        auto *tool = new ToolPane(kind, path, planActions);
         QPointer<ToolPane> guard(tool);
         if (tool->explorer()) {
             tool->explorer()->onOpenFile = [this, guard](const QString &file) { if (guard) openPath(file, 0, guard); };
             tool->explorer()->onDirectoryChanged = [this](const QString &) { updateTitles(); };
-        } else {
+        } else if (tool->preview()) {
             tool->preview()->onTitleChanged = [this](const QString &) { updateTitles(); };
+        } else {
+            tool->plan()->onTitleChanged = [this](const QString &) { updateTitles(); };
         }
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
@@ -3521,6 +4711,9 @@ private:
         };
         pane->onShellExited = [this, guard] { if (guard) closePane(guard, false); };
         pane->onOpenPath = [this, guard](const QString &path) { if (guard) openPath(path, 0, guard); };
+        pane->onPlanWritten = [this, guard](const QString &path, Pane *) { if (guard) openDocument(path, guard, true); };
+        pane->onOpenDocument = [this, guard](const QString &path) { if (guard) openDocument(path, guard, false); };
+        pane->onForkState = [this, guard](const QJsonObject &state, const QString &title) { if (guard) openFork(guard, state, title); };
         relay::theme::polishWindow(pane);
         return pane;
     }
@@ -3534,6 +4727,11 @@ private:
             for (const auto &size : node.value(QStringLiteral("sizes")).toArray()) sizes.append(size.toInt());
             if (sizes.size() == splitter->count()) splitter->setSizes(sizes);
             return splitter;
+        }
+        if (node.contains(QStringLiteral("plan"))) {
+            const QString path = node.value(QStringLiteral("plan")).toObject().value(QStringLiteral("path")).toString();
+            if (QFileInfo::exists(path)) return createToolPane(ToolPane::Kind::Plan, path);
+            return createPane({{"cwd", m_manager->workspace()}, {"workspace", m_manager->workspace()}});
         }
         if (node.contains(QStringLiteral("explorer")) || node.contains(QStringLiteral("preview"))) {
             const bool explorer = node.contains(QStringLiteral("explorer"));

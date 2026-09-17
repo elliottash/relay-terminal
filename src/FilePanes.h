@@ -119,4 +119,37 @@ private:
     Private *d = nullptr;
 };
 
+// An editable Markdown document pane (agent plans, relay.md). Save with Ctrl+S or the Save button;
+// a dot in the title marks unsaved edits. For plans, Execute / Execute in fresh context / Keep
+// planning call back into the pane that wrote the plan; the caller saves first.
+class PlanEditor : public QWidget {
+public:
+    explicit PlanEditor(QWidget *parent = nullptr);
+    ~PlanEditor() override;
+
+    bool open(const QString &path);
+    bool save();
+    bool isDirty() const;
+    QString path() const { return m_path; }
+    QString title() const;
+    QString text() const;
+    QPlainTextEdit *editor() const { return m_editor; }
+    // Plans show the Execute buttons; other documents (relay.md) only Save and Reload.
+    void setPlanActions(bool enabled);
+
+    std::function<void(bool fresh)> onExecute;
+    std::function<void()> onKeepPlanning;
+    std::function<void(const QString &)> onTitleChanged;
+
+private:
+    void updateTitle();
+
+    QString m_path;
+    QLabel *m_title = nullptr, *m_notice = nullptr;
+    QPlainTextEdit *m_editor = nullptr;
+    QWidget *m_planActions = nullptr;
+    struct Private;
+    Private *d = nullptr;
+};
+
 }  // namespace relay
