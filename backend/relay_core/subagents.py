@@ -15,8 +15,9 @@ Lifecycle and rules:
 * Messages (``agent_message``) reach a running subagent before its next model call. A finished
   subagent resumes with the message as a new turn; resumed runs are always handed off as background.
 * Background results are delivered to the main agent before its next model call. If the main agent is
-  idle, a main turn is queued through ``TurnSupervisor`` (origin "relay"), at most ``wake_cap`` (3) times
-  in a row without user input; beyond that the result stays pending until the user's next turn.
+  idle, a main turn is queued through ``TurnSupervisor`` (origin "relay"), at most ``max_auto_turns``
+  (default 50, 0 = unlimited) times in a row without user input; beyond that the result stays pending
+  until the user's next turn.
   A main turn the user cancelled never triggers a wake-up; its results wait for the next turn.
 * Every result handed to the main agent is labelled as untrusted model output.
 """
@@ -37,7 +38,13 @@ from .tools import ToolExecutor, spec
 
 MAX_CONCURRENT = 4
 MAX_LIVE = 16
-WAKE_CAP = 3
+MAX_AUTO_TURNS = 50   # automatic main turns in a row without user input; 0 = unlimited
+
+
+def validate_max_auto_turns(value) -> int:
+    if type(value) is not int or not 0 <= value <= 10000:
+        raise ValueError("max_auto_turns must be an integer from 0 (unlimited) to 10000.")
+    return value
 MAX_TASK_BYTES = 64 * 1024
 MAX_RESULT_CHARS = 32 * 1024
 SUMMARY_CHARS = 2000
@@ -232,11 +239,11 @@ class _SubInbox:
 
 class SubagentManager:
     def __init__(self, emit: Callable[[dict], None], *, max_concurrent: int = MAX_CONCURRENT,
-                 wake_cap: int = WAKE_CAP, clock: Callable[[], float] = time.monotonic):
+                 max_auto_turns: int = MAX_AUTO_TURNS, clock: Callable[[], float] = time.monotonic):
         self._emit = emit
         self._lock = threading.Condition(threading.RLock())
         self.max_concurrent = max_concurrent
-        self.wake_cap = wake_cap
+        self.max_auto_turns = validate_max_auto_turns(max_auto_turns)
         self.clock = clock
         self.catalog: AgentCatalog | None = None
         self.factory = None
@@ -261,6 +268,12 @@ class SubagentManager:
         """Give a main agent the subagent tools and the background-result inbox."""
         agent.subagents = self
         agent.inbox = self.main_inbox
+
+    def set_options(self, max_auto_turns=None) -> dict:
+        with self._lock:
+            if max_auto_turns is not None:
+                self.max_auto_turns = validate_max_auto_turns(max_auto_turns)
+            return {"max_auto_turns": self.max_auto_turns, "wakeups": self._wakeups}
 
     def user_activity(self) -> None:
         """The user submitted something: automatic wake-ups may start again."""
@@ -461,16 +474,22 @@ class SubagentManager:
         sub.finished = self.clock()
         sub.last_activity = outcome
         self._progress_locked(sub, force=True)
-        handoff = "returned"
-        if sub.background and sub.waiters == 0 and sub.generation == self._generation and not self._closed:
-            self._pending[sub.id] = {"note": self._note(sub), "turn": self._turn_text(sub)}
-            handoff = self._handoff_locked(sub.id)
-        elif sub.background and sub.waiters == 0:
-            handoff = "discarded"
-        self._emit({"event": "subagent_finished", "id": sub.id, "type": sub.type, "outcome": outcome,
-                    "summary": sub.result[:SUMMARY_CHARS], "handoff": handoff, "wakeups": self._wakeups,
-                    "tools": sub.tools, "tokens": sub.tokens, "elapsed_ms": self._elapsed(sub)})
-        sub.done.set()
+        try:
+            handoff = "returned"
+            if sub.background and sub.waiters == 0 and sub.generation == self._generation and not self._closed:
+                self._pending[sub.id] = {"note": self._note(sub), "turn": self._turn_text(sub)}
+                handoff = self._handoff_locked(sub.id, submit=False)
+            elif sub.background and sub.waiters == 0:
+                handoff = "discarded"
+            self._emit({"event": "subagent_finished", "id": sub.id, "type": sub.type, "outcome": outcome,
+                        "summary": sub.result[:SUMMARY_CHARS], "handoff": handoff,
+                        "wakeups": self._wakeups + (handoff == "wake"), "max_auto_turns": self.max_auto_turns,
+                        "tools": sub.tools, "tokens": sub.tokens, "elapsed_ms": self._elapsed(sub)})
+            if handoff == "wake" and self._wake_locked(sub.id) != "wake":
+                self._emit({"event": "subagent_handoff", "id": sub.id, "handoff": "pending",
+                            "wakeups": self._wakeups, "max_auto_turns": self.max_auto_turns})
+        finally:
+            sub.done.set()
 
     @staticmethod
     def _note(sub: Subagent) -> str:
@@ -483,19 +502,22 @@ class SubagentManager:
                 "the user did not type it. Use the result to continue the user's task if appropriate, and tell the "
                 f"user briefly what it found.\n{_labelled(sub)}\n{CONTEXT_CLOSE}")
 
-    def _handoff_locked(self, agent_id: str) -> str:
-        """Decide how a pending background result reaches the main agent."""
+    def _handoff_locked(self, agent_id: str, *, submit: bool = True) -> str:
+        """Decide how a pending background result reaches the main agent (and queue the wake-up turn)."""
         turns = self.turns
         if turns is None:
             return "next_model_call"
         if turns.busy:
             return "next_model_call"
-        if self._wakeups >= self.wake_cap:
+        if self.max_auto_turns and self._wakeups >= self.max_auto_turns:
             return "pending"
+        return self._wake_locked(agent_id) if submit else "wake"
+
+    def _wake_locked(self, agent_id: str) -> str:
         entry = self._pending.pop(agent_id)
         try:
-            turns.submit(entry["turn"], "queue", None, None, origin="relay")
-        except ValueError:
+            self.turns.submit(entry["turn"], "queue", None, None, origin="relay")
+        except (ValueError, AttributeError):
             self._pending[agent_id] = entry
             return "pending"
         self._wakeups += 1
@@ -515,7 +537,7 @@ class SubagentManager:
                 handoff = self._handoff_locked(agent_id)
                 if handoff != "next_model_call":
                     self._emit({"event": "subagent_handoff", "id": agent_id, "handoff": handoff,
-                                "wakeups": self._wakeups})
+                                "wakeups": self._wakeups, "max_auto_turns": self.max_auto_turns})
                 if handoff != "wake":
                     break
 

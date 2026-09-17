@@ -136,7 +136,7 @@ def final(text='ok'):
 
 class Base(unittest.TestCase):
     max_concurrent = 4
-    wake_cap = 3
+    max_auto_turns = 50
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -144,7 +144,7 @@ class Base(unittest.TestCase):
         (self.root / 'fixture.txt').write_text('hello\n')
         self.rec = Recorder()
         self.hub = Hub()
-        self.manager = SubagentManager(self.rec, max_concurrent=self.max_concurrent, wake_cap=self.wake_cap)
+        self.manager = SubagentManager(self.rec, max_concurrent=self.max_concurrent, max_auto_turns=self.max_auto_turns)
         catalog = load_catalog(self.root, [])
         factory = SubagentFactory(CONFIG, self.temp.name, provider_factory=lambda config: SubProvider(self.hub))
         self.manager.configure(catalog, factory)
@@ -379,6 +379,7 @@ class HandoffTests(Base):
         finished = self.rec.wait(lambda e: e['event'] == 'subagent_finished')
         self.assertEqual(finished['handoff'], 'wake')
         self.assertEqual(finished['wakeups'], 1)
+        self.assertEqual(finished['max_auto_turns'], 50)
         queued = self.rec.wait(lambda e: e['event'] == 'queued' and e.get('origin') == 'relay')
         self.rec.wait(lambda e: e['event'] == 'agent_finished', count=2)
         prompt = provider.seen[2][0][-1]['content']
@@ -427,7 +428,7 @@ class HandoffTests(Base):
         self.assertIn('Background agent a1 (general) finished', provider.seen[2][0][-1]['content'])
 
     def test_wake_cap_leaves_result_pending_until_user_turn(self):
-        self.manager.wake_cap = 1
+        self.manager.set_options(max_auto_turns=1)
         agent, provider = self.with_turns([
             calls(call('agent', {'description': 'one', 'prompt': 'A gate:g1', 'subagent_type': 'general',
                                  'background': True}, 'c1'),
@@ -451,6 +452,17 @@ class HandoffTests(Base):
         messages = provider.seen[3][0]
         self.assertEqual(messages[-2]['content'], 'what happened?')
         self.assertIn('Background agent a2 (general) finished.', messages[-1]['content'])
+
+    def test_zero_max_auto_turns_is_unlimited(self):
+        agent, provider = self.with_turns([final('woken')])
+        self.manager.set_options(max_auto_turns=0)
+        self.manager._wakeups = 10000
+        self.manager.spawn({'description': 'd', 'prompt': 'U', 'subagent_type': 'general', 'background': True})
+        finished = self.rec.wait(lambda e: e['event'] == 'subagent_finished')
+        self.assertEqual(finished['handoff'], 'wake')
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        with self.assertRaises(ValueError):
+            self.manager.set_options(max_auto_turns=-1)
 
     def test_cancelled_main_turn_does_not_wake_and_keeps_result(self):
         agent, provider = self.with_turns([
@@ -489,6 +501,38 @@ class HandoffTests(Base):
         finished = self.rec.wait(lambda e: e['event'] == 'subagent_finished')
         self.assertEqual(finished['handoff'], 'discarded')
         self.assertEqual(self.manager._pending, {})
+
+
+class WorkerOptionTests(unittest.TestCase):
+    def test_max_auto_turns_configure_and_runtime_message(self):
+        import subprocess, sys
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temp:
+            payload = ''.join(json.dumps(m) + '\n' for m in [
+                {'type': 'set_agent_options', 'id': 'o0'},
+                {'type': 'configure', 'base_url': 'http://127.0.0.1:1/v1', 'model': 't', 'api_key': '',
+                 'workspace': temp, 'agents': {'dirs': [], 'max_auto_turns': 7}},
+                {'type': 'set_agent_options', 'id': 'o1'},
+                {'type': 'set_agent_options', 'id': 'o2', 'max_auto_turns': 0},
+                {'type': 'set_agent_options', 'id': 'o3', 'max_auto_turns': 'many'},
+                {'type': 'agent_stop', 'id': 'all'},
+                {'type': 'agents_status'},
+                {'type': 'agent_message', 'id': 'a1', 'text': 'hi'},
+                {'type': 'shutdown'}])
+            proc = subprocess.run([sys.executable, '-S', str(root / 'backend/worker.py')], input=payload, text=True,
+                                  capture_output=True, timeout=10, cwd=root)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            events = [json.loads(line) for line in proc.stdout.splitlines()]
+            options = {e['id']: e for e in events if e['event'] == 'agent_options'}
+            self.assertEqual(options['o0']['max_auto_turns'], 50)
+            self.assertEqual(options['o1']['max_auto_turns'], 7)
+            self.assertEqual(options['o2']['max_auto_turns'], 0)
+            self.assertTrue(any(e['event'] == 'error' and 'max_auto_turns' in e['text'] for e in events))
+            self.assertIn({'event': 'agent_stopped', 'ids': []}, events)
+            self.assertIn({'event': 'agents_status', 'items': []}, events)
+            self.assertTrue(any(e['event'] == 'error' and 'Unknown subagent' in e['text'] for e in events))
+            configured = next(e for e in events if e['event'] == 'configured')
+            self.assertEqual(configured['agents'], 2)
 
 
 class FactoryTests(unittest.TestCase):

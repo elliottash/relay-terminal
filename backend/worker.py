@@ -116,6 +116,8 @@ def main():
                 subagent_factory = SubagentFactory(config, workspace, skills=skill_index,
                                                    preset_id=request.get("preset"), key_lookup=keystore.lookup,
                                                    aliases=agents_request.get("aliases"))
+                if "max_auto_turns" in agents_request:
+                    subagents.set_options(agents_request["max_auto_turns"])
                 turns.set_agent(agent)
                 subagents.configure(agent_catalog, subagent_factory)
                 subagents.attach(agent)
@@ -176,6 +178,9 @@ def main():
             elif kind == "agent_stop":
                 target = request.get("id")
                 emit({"event": "agent_stopped", "ids": subagents.stop("all" if target in (None, "all") else target)})
+            elif kind == "set_agent_options":
+                emit({"event": "agent_options", "id": request.get("id"),
+                      **subagents.set_options(request.get("max_auto_turns"))})
             elif kind == "agents_status":
                 emit({"event": "agents_status", "items": subagents.list()})
             # --- end subagents ---
