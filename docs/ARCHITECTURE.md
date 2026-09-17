@@ -874,6 +874,32 @@ Detection, once a second: an increase in the shell scope's `memory.events` `oom_
 KonsolePart in the same pane. A stopped worker shows Restart agent. Failed scopes are
 `reset-failed`. Scrollback is capped at 20,000 lines by the profile.
 
+## 13a. Logs
+
+Relay writes a rotating diagnostics log to `~/.local/share/relay/logs/` (`$XDG_DATA_HOME`):
+`relay.log` from the window (`src/Logging.cpp`) and `worker.log` from every per-pane worker
+(`backend/relay_core/logs.py`), 5 MiB x 3 backups, files `0600` in a `0700` directory. Before this
+the process wrote only to stderr, which a desktop launcher throws away, so a stalled turn left
+nothing to look at (issue `#SQAM`).
+
+Both files share one line format, `<ISO-8601 UTC> <LEVEL> <logger> pane=<id> <event> key=value ...`,
+and the same pane id, so the two sides of one pane line up. Workers share `worker.log`; each record
+is written under an advisory lock on a hidden `.worker.log.lock` and a handler whose file was
+rotated by another worker reopens it.
+
+**Nothing about content is logged**: no prompts, model answers, reasoning, tool arguments, tool
+output, file contents, terminal output, API keys or password-mode input. Identifiers, model and
+host, event types, counts, durations and error types only; `scrub()` masks credential-shaped text
+in every record as a second line of defence. There is still no telemetry: the files never leave the
+machine.
+
+Actions > Diagnostics has "Open log folder" and "Log detail" (`off | error | info | debug |
+verbose`, setting `logging/level`, passed to workers as `RELAY_LOG_LEVEL`). **`verbose` also writes
+prompt text** and is the only level that does; it is off by default and says so in the menu.
+
+Related: Actions > Diagnostics > "Stop a silent model after..." sets `stall_timeout_s`, the idle
+deadline that ends a turn whose model has gone quiet (docs/AGENT-SESSIONS-PROTOCOL.md section 15).
+
 ## 14. Theme
 
 `src/Theme.{h,cpp}`: Fusion style, a dark `QPalette`, and one stylesheet built from color
@@ -992,9 +1018,10 @@ Other limits:
 | `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `src/Conversations.*` | conversation list with search (Ctrl+Shift+O) and the Ctrl+F find bar |
+| `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
-| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search) |
+| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search), `logs` (rotating `worker.log`) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `src/KonsoleBackend.*`, `src/EngineBackend.*` | the two `TerminalBackend` implementations |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |

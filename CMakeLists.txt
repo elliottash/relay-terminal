@@ -88,6 +88,13 @@ target_include_directories(relay-completion PUBLIC src)
 target_link_libraries(relay-completion PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-completion PRIVATE -Wall -Wextra -Wpedantic)
 
+# Rotating diagnostics log (~/.local/share/relay/logs/relay.log). Plain QtCore so the rotation,
+# level and redaction rules can be tested without a window.
+add_library(relay-logging STATIC src/Logging.cpp src/Logging.h)
+target_include_directories(relay-logging PUBLIC src)
+target_link_libraries(relay-logging PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-logging PRIVATE -Wall -Wextra -Wpedantic)
+
 # Prompt-box-only input: where a submitted line goes, when "Take control" is offered, and how
 # a password typed into the masked prompt box is wiped. Pure rules, no terminal.
 add_library(relay-input STATIC src/InputPolicy.cpp src/InputPolicy.h)
@@ -137,7 +144,7 @@ if(RELAY_BUILD_APP)
     add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/Hints.cpp src/Hints.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
         src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -186,6 +193,9 @@ if(BUILD_TESTING)
     add_executable(relay-input-tests tests/inputpolicy_test.cpp)
     target_link_libraries(relay-input-tests PRIVATE relay-input ${RELAY_QT}::Test)
     add_test(NAME input COMMAND relay-input-tests)
+    add_executable(relay-logging-tests tests/logging_test.cpp)
+    target_link_libraries(relay-logging-tests PRIVATE relay-logging ${RELAY_QT}::Test)
+    add_test(NAME logging COMMAND relay-logging-tests)
     add_executable(relay-conversations-tests tests/conversations_test.cpp)
     target_link_libraries(relay-conversations-tests PRIVATE relay-conversations ${RELAY_QT}::Test)
     add_test(NAME conversations COMMAND relay-conversations-tests)

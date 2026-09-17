@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 from relay_core.agent import Agent
-from relay_core.provider import ProviderConfig
+from relay_core.provider import ProviderConfig, ProviderStalled
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ProviderConfig('http://127.0.0.1:12345/v1', 'mock', '')
@@ -84,6 +84,70 @@ class AgentTests(unittest.TestCase):
         results=[m['tool_call_id'] for m in agent.messages if m['role']=='tool']
         self.assertEqual(calls, results)
         self.assertIn('not finished', agent.messages[-1]['content'])
+
+class StallRetryTests(unittest.TestCase):
+    """Issue SQAM: a stalled model call is retried once, and only when nothing of the answer arrived."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.root = Path(self.temp.name)
+    def tearDown(self): self.temp.cleanup()
+
+    class StallingProvider:
+        """Stalls on the first `stalls` calls, then answers. Records what it was asked to send."""
+        def __init__(self, stalls=1, produced=False):
+            self.stalls, self.produced, self.calls, self.sent = stalls, produced, 0, []
+        def complete(self, messages, tools, emit, cancel):
+            self.calls += 1
+            self.sent.append(json.loads(json.dumps(messages)))
+            if self.calls <= self.stalls:
+                emit({'event': 'thinking_delta', 'text': 'reasoning that goes nowhere'})
+                raise ProviderStalled(60.0, self.produced)
+            emit({'event': 'delta', 'text': 'Finished.'})
+            return {'role': 'assistant', 'content': 'Finished.'}
+        def cancel(self): pass
+
+    def agent(self, provider, events):
+        return Agent(CONFIG, self.temp.name, events.append, provider=provider)
+
+    def test_retried_once_and_the_second_try_sends_the_same_conversation(self):
+        provider = self.StallingProvider(stalls=1); events = []
+        agent = self.agent(provider, events); agent.ask('do the thing')
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(provider.sent[0], provider.sent[1])   # no side effect, nothing added or lost
+        retries = [e for e in events if e['event'] == 'provider_retry']
+        self.assertEqual(len(retries), 1)
+        self.assertEqual(retries[0]['attempt'], 1)
+        self.assertIn('sent nothing for 60 s', retries[0]['text'])
+        self.assertEqual(events[-1]['event'], 'done')
+        # The stalled thinking block is closed before the retry, so the overlay does not stay open.
+        self.assertTrue(any(e['event'] == 'thinking_done' for e in events))
+        self.assertEqual([e for e in events if e['event'] == 'turn_summary'][-1]['outcome'], 'done')
+
+    def test_a_second_stall_fails_the_turn_and_keeps_the_request_open(self):
+        provider = self.StallingProvider(stalls=2); events = []
+        agent = self.agent(provider, events); agent.ask('do the thing')
+        self.assertEqual(provider.calls, 2)                    # one try, one retry, then it stops
+        self.assertEqual(events[-1]['event'], 'error')
+        self.assertIn('sent nothing for 60 s', events[-1]['text'])
+        self.assertEqual(agent.requests.open_count(), 1)       # the request stays open in the ledger
+        self.assertEqual(agent.messages[1]['content'], 'do the thing')
+        self.assertIn('not finished', agent.messages[-1]['content'])
+
+    def test_a_started_answer_is_not_retried(self):
+        provider = self.StallingProvider(stalls=1, produced=True); events = []
+        agent = self.agent(provider, events); agent.ask('do the thing')
+        self.assertEqual(provider.calls, 1)
+        self.assertFalse(any(e['event'] == 'provider_retry' for e in events))
+        self.assertEqual(events[-1]['event'], 'error')
+
+    def test_stall_timeout_is_an_agent_option(self):
+        provider = self.StallingProvider(stalls=0)
+        agent = self.agent(provider, [])
+        self.assertEqual(agent.options()['stall_timeout_s'], 60.0)
+        self.assertEqual(agent.set_options({'stall_timeout_s': 120})['stall_timeout_s'], 120.0)
+        with self.assertRaises(ValueError):
+            agent.set_options({'stall_timeout_s': 0})
+
 
 class WorkerTests(unittest.TestCase):
     def run_worker(self, messages):

@@ -6,12 +6,14 @@ import json
 import threading
 import time
 import itertools
+import urllib.parse
 import uuid
 from collections import OrderedDict
 from pathlib import Path
 from typing import Callable
 
 from . import context as compaction
+from . import logs
 from . import route_assist
 from . import todos as todo_tool
 from .attachments import format_block as format_attachments
@@ -21,7 +23,8 @@ from .planning import (PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, vali
                        write_plan)
 from .presets import (apply_effort, context_window_for, effort_style, infer_effort, resolve_preset,
                       validate_effort)
-from .provider import Cancelled, ChatProvider, ProviderConfig, ProviderError
+from .provider import (DEFAULT_STALL_TIMEOUT, Cancelled, ChatProvider, ProviderConfig, ProviderError,
+                       ProviderStalled, validate_stall_timeout)
 from .requests import OPEN as REQUEST_OPEN
 from .requests import AUDIT_MAX_TOKENS, RequestLedger, run_audit
 from .sessions import STATE_VERSION, SessionStore, validate_messages
@@ -40,6 +43,25 @@ DEFAULT_MAX_TOOL_CALLS = 150
 MAX_COMPLETION_REMINDERS = 2   # owner decision: automatic re-prompts per turn
 STALE_TODO_STEPS = 8
 OPEN_ITEM_PREVIEW = 120
+# A stalled model call is retried once per turn, and only when nothing of the answer arrived
+# (issue SQAM). See _model_call for why that is the whole safety argument.
+MAX_STALL_RETRIES = 1
+
+_log = logs.get("agent")
+
+
+def _error_text(event: dict) -> str | None:
+    """The message of a failed turn, for the log. Relay's own error strings never quote a prompt,
+    a tool result or a provider body (provider.py strips those), and logs.scrub() masks keys."""
+    return str(event.get("text") or "")[:300] if event.get("event") == "error" else None
+
+
+def _host(base_url: str) -> str:
+    """Provider host for the log. The path, query and key never go near the log file."""
+    try:
+        return urllib.parse.urlsplit(base_url).hostname or ""
+    except ValueError:
+        return ""
 
 
 def validate_turn_options(request: dict) -> dict:
@@ -56,6 +78,8 @@ def validate_turn_options(request: dict) -> dict:
             if type(request[key]) is not bool:
                 raise ValueError(f"{key} must be a boolean.")
             out[key] = request[key]
+    if request.get("stall_timeout_s") is not None:
+        out["stall_timeout_s"] = validate_stall_timeout(request["stall_timeout_s"])
     return out
 # Turn ids for turns started outside the queue (subagents, tests). A counter, not uuid4: no syscall
 # (which would release the GIL) between a turn's start and its first message.
@@ -113,15 +137,18 @@ class Agent:
                  session_dir: str | None = None, plans_dir: str | None = None, instructions=None,
                  max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS, track_requests: bool = True,
                  todo_tool: bool = True, completion_check: bool = True, audit_requests: bool = False,
-                 roles=None):
+                 stall_timeout_s: float = DEFAULT_STALL_TIMEOUT, roles=None):
         self.emit = emit
         self.cancel_event = threading.Event()
         self.config = config
         self.preset = resolve_preset(preset_id, config.base_url, config.model)
         # Model roles (relay_core.roles.RoleResolver) or None: side calls then use the main model.
         self.roles = roles
+        # Idle deadline for a streamed model call, in seconds (protocol 15).
+        self.stall_timeout_s = validate_stall_timeout(stall_timeout_s)
         self._injected_provider = provider is not None
-        self.provider = provider or ChatProvider(config)
+        self.provider = provider or ChatProvider(config, self.stall_timeout_s)
+        self._apply_stall_timeout()
         self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings, skills)
         self.max_steps = max_steps
         self.max_tool_calls = max_tool_calls
@@ -198,12 +225,20 @@ class Agent:
             setattr(self, key, value)
         if "todo_tool" in request:
             self.refresh_system_prompt()
+        if "stall_timeout_s" in request:
+            self._apply_stall_timeout()
         return self.options()
 
     def options(self) -> dict:
         return {"max_steps": self.max_steps, "max_tool_calls": self.max_tool_calls,
                 "completion_check": self.completion_check, "audit_requests": self.audit_requests,
-                "todo_tool": self.todo_tool}
+                "todo_tool": self.todo_tool, "stall_timeout_s": self.stall_timeout_s}
+
+    def _apply_stall_timeout(self) -> None:
+        """Push the pane's idle deadline onto the transport (also after a model switch)."""
+        setter = getattr(self.provider, "set_stall_timeout", None)
+        if callable(setter):
+            setter(self.stall_timeout_s)
 
     def _todos_enabled(self) -> bool:
         return self.track_requests and self.todo_tool
@@ -265,7 +300,8 @@ class Agent:
         if provider is not None:
             self.provider, self._injected_provider = provider, True
         elif not self._injected_provider:
-            self.provider = ChatProvider(config)
+            self.provider = ChatProvider(config, self.stall_timeout_s)
+        self._apply_stall_timeout()
         if self.effort is not None:
             self.set_effort(self.effort)
         else:
@@ -284,6 +320,7 @@ class Agent:
         no roles are configured, or the role follows the main agent, the main model is used."""
         if self._injected_provider:
             return self.provider
+        make = lambda cfg: ChatProvider(cfg, self.stall_timeout_s)   # noqa: E731 - side calls share the deadline
         resolved = self.roles.resolve(role) if role is not None and self.roles is not None else None
         if resolved is not None and not resolved.is_main:
             # A role's model was picked for this job: its own params (and its effort, already applied
@@ -292,12 +329,12 @@ class Agent:
             extra = copy.deepcopy(config.extra)
             limit = min(config.max_tokens, 4096) if cheap else config.max_tokens
         elif not cheap:
-            return ChatProvider(self.config)
+            return make(self.config)
         else:
             config = self.config
             extra, _ = apply_effort(config.extra, self._effort_style(), "low")
             limit = min(config.max_tokens, 4096)
-        provider = ChatProvider(ProviderConfig(config.base_url, config.model, config.api_key, extra, limit))
+        provider = make(ProviderConfig(config.base_url, config.model, config.api_key, extra, limit))
         if max_tokens is not None:
             provider.config.max_tokens = max(1, min(int(max_tokens), provider.config.max_tokens))
         return provider
@@ -340,13 +377,17 @@ class Agent:
         self._turn_record = record
         return record
 
-    def _record_tool(self, record: dict, call_id: str, name: str, preview: str, result) -> None:
+    def _record_tool(self, record: dict, call_id: str, name: str, preview: str, result,
+                     ms: int | None = None) -> None:
         ok = isinstance(result, dict) and "error" not in result and result.get("exit_code") in (None, 0) \
             and not result.get("timed_out")
         entry = {"call_id": call_id, "name": name, "preview": preview, "result": result, "ok": ok}
         if isinstance(result, dict) and isinstance(result.get("exit_code"), int):
             entry["exit_code"] = result["exit_code"]
         record["tools"][call_id] = entry
+        # The log gets the tool's name, outcome and duration. Never its arguments, preview or output.
+        logs.event(_log, "tool", session=self.session_id, turn=record["turn_id"], call=call_id,
+                   tool=name, ok=ok, ms=ms, exit_code=entry.get("exit_code"))
 
     def turn_summary(self, record: dict) -> dict:
         tools = []
@@ -487,6 +528,13 @@ class Agent:
         turn_id = record["turn_id"]
         ctx = {"turn_id": turn_id, "requests": [], "opening": [], "todos_touched": False, "since_todos": 0}
         self._turn_ctx = ctx
+        # Identifiers, sizes and settings only: the prompt itself is logged solely at "verbose".
+        logs.event(_log, "turn_start", session=self.session_id, turn=turn_id, model=self.config.model,
+                   host=_host(self.config.base_url), mode=self.mode, effort=self.effort,
+                   prompt_chars=len(prompt), messages=len(self.messages),
+                   stall_s=getattr(self.provider, "stall_timeout", self.stall_timeout_s),
+                   max_steps=self.max_steps)
+        logs.prompt(_log, "turn_prompt", prompt, session=self.session_id, turn=turn_id)
 
         def add(message: dict) -> None:
             self.messages.append(message)
@@ -539,7 +587,7 @@ class Agent:
                 self._maybe_compact()
                 self.emit({"event": "status", "text": f"Requesting model · step {steps + 1}/{self.max_steps}"})
                 self._last_usage = None
-                message = self.provider.complete(self.messages, self.tools(), self._provider_emit, self.cancel_event)
+                message = self._model_call(record, ctx, steps + 1)
                 steps += 1
                 ctx["since_todos"] += 1
                 self._close_thinking(record)
@@ -572,6 +620,7 @@ class Agent:
                         raise Cancelled("Stopped.")
                     func = call["function"]
                     preview = ""
+                    call_started = time.monotonic()
                     calls_used += 1
                     if calls_used > self.max_tool_calls:
                         result = {"error": "Tool budget reached. Do not request more tools this turn."}
@@ -585,7 +634,8 @@ class Agent:
                                 result = self.subagents.run_tool(func["name"], args, call["id"], batch, self.cancel_event)
                                 add({"role": "tool", "tool_call_id": call["id"],
                                      "content": json.dumps(result, ensure_ascii=False)})
-                                self._record_tool(record, call["id"], func["name"], preview, result)
+                                self._record_tool(record, call["id"], func["name"], preview, result,
+                                                  int((time.monotonic() - call_started) * 1000))
                                 self.emit({"event": "tool_result", "tool": func["name"], "result": result,
                                            "turn_id": turn_id, "call_id": call["id"]})
                                 continue
@@ -597,7 +647,8 @@ class Agent:
                         except (OSError, ValueError, UnicodeError) as exc:
                             result = {"error": str(exc)[:2000]}
                     add({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, ensure_ascii=False)})
-                    self._record_tool(record, call["id"], func["name"], preview, result)
+                    self._record_tool(record, call["id"], func["name"], preview, result,
+                                      int((time.monotonic() - call_started) * 1000))
                     self.emit({"event": "tool_result", "tool": func["name"], "result": result,
                                "turn_id": turn_id, "call_id": call["id"]})
                 batch = None
@@ -625,6 +676,64 @@ class Agent:
                 record["elapsed_ms"] = int((time.monotonic() - record["started"]) * 1000)
                 record["outcome"] = record["outcome"] or "error"
             self.autosave()
+
+    # ----- model call and stall retry (issue SQAM) -------------------------------------
+    def _model_call(self, record: dict, ctx: dict, step: int) -> dict:
+        """One model call, retried once when the provider stalls.
+
+        Why a retry is safe here: `complete()` is only ever called at a step boundary, where every
+        tool call of the previous response already has its result in `self.messages`. No tool call
+        can be in flight, so the retry repeats no side effect, and the conversation it re-sends is
+        byte-identical (the stalled response was never added). The request stays `in_progress` in the
+        ledger throughout, so nothing is finished or re-opened by the retry.
+
+        It is refused when the stalled response had already produced answer text or a tool-call
+        fragment (`produced`): that text has been streamed to the pane, and repeating it would show
+        the user two answers. Reasoning-only output does not count, because the thinking overlay is
+        cleared for the retry.
+        """
+        attempts = 0
+        while True:
+            call_started = time.monotonic()
+            try:
+                return self.provider.complete(self.messages, self.tools(), self._provider_emit,
+                                              self.cancel_event)
+            except ProviderStalled as exc:
+                waited = int((time.monotonic() - call_started) * 1000)
+                retry = attempts < MAX_STALL_RETRIES and not exc.produced and not self.cancel_event.is_set()
+                logs.event(_log, "provider_stall", level_name="error", session=self.session_id,
+                           turn=record["turn_id"], step=step, model=self.config.model,
+                           host=_host(self.config.base_url), stall_s=exc.seconds, waited_ms=waited,
+                           produced=exc.produced, retry=retry)
+                self._ensure_no_open_response(record["turn_id"], "stall")
+                if not retry:
+                    raise
+                attempts += 1
+                record["retries"] = record.get("retries", 0) + 1
+                self._close_thinking(record)
+                self.emit({"event": "provider_retry", "turn_id": record["turn_id"], "reason": "stall",
+                           "attempt": attempts, "max_attempts": MAX_STALL_RETRIES,
+                           "seconds": exc.seconds, "step": step,
+                           "text": f"{exc} Retrying this turn once; the request stays open."})
+                self.emit({"event": "status", "text": f"No response for {exc.seconds:g} s · retrying once"})
+
+    def _ensure_no_open_response(self, turn_id, how: str) -> bool:
+        """Socket hygiene: no provider connection may outlive its turn (issue SQAM).
+
+        Returns True when something was still open, which is a bug worth a log line; the connection
+        is closed either way so the observed 12-minute leak cannot repeat.
+        """
+        provider = self.provider
+        check = getattr(provider, "response_open", None)
+        if not callable(check) or not check():
+            return False
+        logs.event(_log, "provider_response_left_open", level_name="error", session=self.session_id,
+                   turn=turn_id, how=how, model=self.config.model, host=_host(self.config.base_url))
+        try:
+            provider.cancel()
+        except Exception:                                   # never let hygiene break a turn
+            pass
+        return True
 
     # ----- drop-path handling (research G1-G3) ----------------------------------------
     def _stop_at_limit(self, record: dict, ctx: dict, steps: int, calls_used: int) -> None:
@@ -769,6 +878,15 @@ class Agent:
         self._close_thinking(record)
         record["outcome"] = event["event"]
         record["elapsed_ms"] = int((time.monotonic() - record["started"]) * 1000)
+        # Every end state (done, cancelled, error, limit) passes through here, which makes it the one
+        # place to prove no provider connection outlived the turn.
+        leaked = self._ensure_no_open_response(record["turn_id"], record["outcome"])
+        logs.event(_log, "turn_end", level_name="error" if event["event"] == "error" else "info",
+                   session=self.session_id, turn=record["turn_id"], outcome=record["outcome"],
+                   stop_reason=event.get("stop_reason"), ms=record["elapsed_ms"],
+                   thinking_ms=record["thinking_ms"], tools=len(record["tools"]),
+                   retries=record.get("retries", 0), open_items=len(event.get("open_items") or []),
+                   error=_error_text(event), leaked_socket=leaked or None)
         self.emit(self.turn_summary(record))
         self.emit(event)
 

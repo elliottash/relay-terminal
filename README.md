@@ -203,6 +203,17 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
   `✦ Tasks 3/5 (1 failed, 1 deferred) · T4 “…” failed, T5 “…” deferred`. Resume and recaps list
   unfinished requests. Actions › Agent options › Audit requests after each turn (off by default)
   flags asks that may be unaddressed.
+- **When a model goes quiet.** A turn whose model sends nothing usable for 60 s (SSE keepalives do
+  not count) ends instead of hanging: the connection is closed, the turn is retried once
+  automatically when nothing of the answer had arrived, and only then does it fail with "the model
+  sent nothing for 60 s", keeping your request open. While a turn runs the status line counts up —
+  `thinking · 48 s · Esc stops`. Change the limit in Actions › Diagnostics › Stop a silent model
+  after…, or set `RELAY_PROVIDER_TIMEOUT` (seconds).
+- **Logs.** Relay writes `~/.local/share/relay/logs/relay.log` and `worker.log` (5 MB × 3, mode
+  0600): timestamps, pane and session ids, model and provider host, turn start/end and outcome,
+  tool names and durations, event types, errors and retries. **No prompts, answers, tool output,
+  file contents or keys.** Actions › Diagnostics › Open log folder, and Log detail to change the
+  level — its opt-in "Verbose" level does add your prompt text to the file.
 - **Instruction files.** On first launch Relay lists instruction files from other tools
   (CLAUDE.md, AGENTS.md, WARP.md, …) to include, and can combine them into a global
   `~/.config/relay/relay.md`. Change it later in Actions › Agent options › Instructions….
