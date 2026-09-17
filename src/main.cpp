@@ -302,8 +302,10 @@ private:
         add("tab.new", "tab", "New tab", {QStringLiteral("Ctrl+T"), QStringLiteral("Ctrl+Shift+T")});
         add("tab.next", "tab", "Next tab", {QStringLiteral("Ctrl+Tab")});
         add("tab.previous", "tab", "Previous tab", {QStringLiteral("Ctrl+Shift+Tab")});
-        add("pane.splitRight", "pane", "New pane to the right", {QStringLiteral("Ctrl+P")});
-        add("pane.splitDown", "pane", "New pane below", {QStringLiteral("Ctrl+Shift+P")});
+        // Ctrl+E, not Ctrl+P: one-handed (owner, 2026-09-17). Ctrl+D is left alone because it is
+        // end-of-input for a running program. Ctrl+Shift+E is the twin that programs cannot swallow.
+        add("pane.splitRight", "pane", "New pane to the right", {QStringLiteral("Ctrl+E"), QStringLiteral("Ctrl+Shift+E")});
+        add("pane.splitDown", "pane", "New pane below", {QStringLiteral("Ctrl+Alt+E")});
         add("pane.focusLeft", "pane", "Focus pane to the left", {QStringLiteral("Alt+Left")});
         add("pane.focusRight", "pane", "Focus pane to the right", {QStringLiteral("Alt+Right")});
         add("pane.focusUp", "pane", "Focus pane above", {QStringLiteral("Alt+Up")});
@@ -6281,14 +6283,20 @@ private:
 // the same weight as the tab labels beside them.
 class ChromeButton final : public QToolButton {
 public:
-    enum class Glyph { Bell, Gear, Minimize, Maximize, Restore, Close };
+    // Plus and TabClose are the tab row's own buttons; they are drawn here so the whole header
+    // shares one stroke weight instead of mixing painted glyphs with the icon theme's bitmaps.
+    enum class Glyph { Bell, Gear, Minimize, Maximize, Restore, Close, Plus, TabClose };
 
-    explicit ChromeButton(Glyph glyph, QWidget *parent = nullptr) : QToolButton(parent), m_glyph(glyph) {
-        setObjectName(glyph == Glyph::Close ? QStringLiteral("windowCloseButton") : QStringLiteral("windowChromeButton"));
+    explicit ChromeButton(Glyph glyph, QWidget *parent = nullptr, int size = kSize)
+        : QToolButton(parent), m_glyph(glyph) {
+        setObjectName(glyph == Glyph::Close ? QStringLiteral("windowCloseButton")
+                    : glyph == Glyph::Plus ? QStringLiteral("newTabButton")
+                    : glyph == Glyph::TabClose ? QStringLiteral("tabCloseButton")
+                                               : QStringLiteral("windowChromeButton"));
         setAutoRaise(true);
         setFocusPolicy(Qt::NoFocus);
         setCursor(Qt::ArrowCursor);
-        setFixedSize(kSize, kSize);
+        setFixedSize(size, size);
     }
 
     void setGlyph(Glyph glyph) { if (m_glyph == glyph) return; m_glyph = glyph; update(); }
@@ -6306,27 +6314,39 @@ protected:
         if (hovered) {
             painter.setPen(Qt::NoPen);
             painter.setBrush(closing ? QColor(0xc0, 0x39, 0x2b) : relay::theme::SurfaceRaised);
-            painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 5, 5);
+            const qreal radius = std::min(width(), height()) * 5.0 / kSize;
+            painter.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), radius, radius);
         }
         QColor ink = hovered ? (closing ? QColor(Qt::white) : relay::theme::Text) : relay::theme::TextMuted;
+        if (m_dim && !hovered) ink = relay::theme::TextMuted.darker(135);
         if (!isEnabled()) ink = relay::theme::TextMuted.darker(150);
-        painter.setPen(QPen(ink, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        // Every glyph is drawn for a 26 px button and scaled from there, so a smaller button
+        // (the tab's close cross) keeps the same proportions and the same apparent weight.
+        const qreal unit = std::min(width(), height()) / qreal(kSize);
+        painter.setPen(QPen(ink, 1.3 * std::max(0.85, unit), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         painter.setBrush(Qt::NoBrush);
         const QPointF centre(width() / 2.0, height() / 2.0);
         switch (m_glyph) {
-        case Glyph::Bell: paintBell(painter, centre); break;
-        case Glyph::Gear: paintGear(painter, centre); break;
-        case Glyph::Minimize: painter.drawLine(QPointF(centre.x() - 5, centre.y() + 3), QPointF(centre.x() + 5, centre.y() + 3)); break;
-        case Glyph::Maximize: painter.drawRect(QRectF(centre.x() - 4.5, centre.y() - 4.5, 9, 9)); break;
+        case Glyph::Bell: paintBell(painter, centre, unit); break;
+        case Glyph::Gear: paintGear(painter, centre, unit); break;
+        case Glyph::Minimize: painter.drawLine(centre + QPointF(-5, 3) * unit, centre + QPointF(5, 3) * unit); break;
+        case Glyph::Maximize: painter.drawRect(QRectF(centre + QPointF(-4.5, -4.5) * unit, QSizeF(9 * unit, 9 * unit))); break;
         case Glyph::Restore:
-            painter.drawRect(QRectF(centre.x() - 5.5, centre.y() - 2.5, 8, 8));
-            painter.drawPolyline(QPolygonF({QPointF(centre.x() - 2.5, centre.y() - 5.5), QPointF(centre.x() + 5.5, centre.y() - 5.5),
-                                            QPointF(centre.x() + 5.5, centre.y() + 2.5)}));
+            painter.drawRect(QRectF(centre + QPointF(-5.5, -2.5) * unit, QSizeF(8 * unit, 8 * unit)));
+            painter.drawPolyline(QPolygonF({centre + QPointF(-2.5, -5.5) * unit, centre + QPointF(5.5, -5.5) * unit,
+                                            centre + QPointF(5.5, 2.5) * unit}));
+            break;
+        case Glyph::Plus:
+            painter.drawLine(centre + QPointF(-4.5, 0) * unit, centre + QPointF(4.5, 0) * unit);
+            painter.drawLine(centre + QPointF(0, -4.5) * unit, centre + QPointF(0, 4.5) * unit);
             break;
         case Glyph::Close:
-            painter.drawLine(QPointF(centre.x() - 4.5, centre.y() - 4.5), QPointF(centre.x() + 4.5, centre.y() + 4.5));
-            painter.drawLine(QPointF(centre.x() + 4.5, centre.y() - 4.5), QPointF(centre.x() - 4.5, centre.y() + 4.5));
+        case Glyph::TabClose: {
+            const qreal arm = (m_glyph == Glyph::Close ? 4.5 : 3.6) * unit;
+            painter.drawLine(centre + QPointF(-arm, -arm), centre + QPointF(arm, arm));
+            painter.drawLine(centre + QPointF(arm, -arm), centre + QPointF(-arm, arm));
             break;
+        }
         }
     }
 
@@ -6339,7 +6359,11 @@ protected:
     void leaveEvent(QEvent *event) override { QToolButton::leaveEvent(event); update(); }
 
 private:
-    void paintBell(QPainter &painter, const QPointF &centre) const {
+    void paintBell(QPainter &painter, const QPointF &centre, qreal unit) const {
+        painter.save();
+        painter.translate(centre);
+        painter.scale(unit, unit);
+        painter.translate(-centre);
         const qreal x = centre.x(), y = centre.y();
         QPainterPath bell;
         bell.moveTo(x - 5.5, y + 2.5);
@@ -6350,6 +6374,7 @@ private:
         bell.closeSubpath();
         painter.drawPath(bell);
         painter.drawArc(QRectF(x - 2, y + 2.6, 4, 3.4), 200 * 16, 140 * 16);   // clapper
+        painter.restore();
         if (m_badge <= 0) return;
         // Unread dot, top-right, over the bell's shoulder.
         painter.setPen(Qt::NoPen);
@@ -6366,18 +6391,31 @@ private:
         }
     }
 
-    void paintGear(QPainter &painter, const QPointF &centre) const {
-        painter.drawEllipse(centre, 2.6, 2.6);
-        for (int step = 0; step < 8; ++step) {
-            const double angle = step * M_PI / 4.0;
-            const QPointF direction(std::cos(angle), std::sin(angle));
-            painter.drawLine(centre + direction * 4.4, centre + direction * 6.2);
+    // A cog drawn as one outline: six teeth around a ring, rather than a circle with spokes
+    // poking through it. At 26 px the spokes read as noise; the solid outline does not.
+    void paintGear(QPainter &painter, const QPointF &centre, qreal unit) const {
+        constexpr int teeth = 6;
+        const qreal inner = 4.2 * unit, outer = 6.0 * unit;
+        const qreal half = M_PI / teeth;          // half of one tooth-and-gap period
+        QPolygonF cog;
+        for (int i = 0; i < teeth; ++i) {
+            const qreal base = i * 2 * half;
+            const qreal angle[4] = {base - half * 0.60, base - half * 0.34, base + half * 0.34, base + half * 0.60};
+            const qreal radius[4] = {inner, outer, outer, inner};
+            for (int k = 0; k < 4; ++k) cog << centre + QPointF(std::cos(angle[k]), std::sin(angle[k])) * radius[k];
         }
-        painter.drawEllipse(centre, 4.4, 4.4);
+        painter.drawPolygon(cog);
+        painter.drawEllipse(centre, 2.1 * unit, 2.1 * unit);
     }
 
+public:
+    // The tab's cross sits at half strength until the tab is hovered or current.
+    void setDim(bool dim) { if (m_dim == dim) return; m_dim = dim; update(); }
+
+private:
     Glyph m_glyph;
     int m_badge = 0;
+    bool m_dim = false;
 };
 
 // The list behind the bell: newest first, one row per notification, click to go back to the pane
@@ -6545,7 +6583,7 @@ public:
         Keymap::instance().listen(this, [this] { syncToolbar(); syncChromeTooltips(); });
         m_tabs = new QTabWidget;
         m_tabs->setDocumentMode(true);
-        m_tabs->setTabsClosable(true);
+        m_tabs->setTabsClosable(false);
         m_tabs->setMovable(true);
         m_tabs->tabBar()->setExpanding(false);
         buildTabBarControls();
@@ -6573,10 +6611,7 @@ public:
             if (!leaf) { const auto leaves = leavesIn(page); leaf = leaves.isEmpty() ? nullptr : leaves.first(); }
             if (leaf) { setActiveLeaf(leaf); focusLeaf(leaf); }
         });
-        connect(m_tabs, &QTabWidget::tabCloseRequested, this, [this](int index) {
-            if (m_tabs->count() > 1) closeTab(index, true); else closeWindowWithWarning();
-            hint(QStringLiteral("tab.close.mouse"), relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("pane.close")), QStringLiteral("close pane, then tab")));
-        });
+        connect(m_tabs, &QTabWidget::tabCloseRequested, this, [this](int index) { requestCloseTab(index); });
         connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *now) {
             if (QWidget *leaf = leafOf(now); leaf && leaf->window() == this) {
                 const bool byMouse = QApplication::mouseButtons() != Qt::NoButton;
@@ -8567,11 +8602,7 @@ private:
         bar->setMouseTracking(true);
         bar->installEventFilter(this);
         bar->setContextMenuPolicy(Qt::CustomContextMenu);
-        m_newTabButton = new QToolButton(bar);
-        m_newTabButton->setObjectName(QStringLiteral("newTabButton"));
-        m_newTabButton->setText(QStringLiteral("+"));
-        m_newTabButton->setAutoRaise(true);
-        m_newTabButton->setFocusPolicy(Qt::NoFocus);
+        m_newTabButton = new ChromeButton(ChromeButton::Glyph::Plus, bar, 22);
         connect(m_newTabButton, &QToolButton::clicked, this, [this] {
             runAction(QStringLiteral("tab.new"));
             hint(QStringLiteral("tab.new.mouse"), relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("tab.new")), QStringLiteral("new tab")));
@@ -8586,7 +8617,7 @@ private:
                 move->setEnabled(m_tabs->count() > 1);
                 connect(move, &QAction::triggered, this, [this, index] { moveTabToNewWindow(index); });
                 auto *close = menu.addAction(QStringLiteral("Close tab"));
-                connect(close, &QAction::triggered, this, [this, index] { if (m_tabs->count() > 1) closeTab(index, true); else closeWindowWithWarning(); });
+                connect(close, &QAction::triggered, this, [this, index] { requestCloseTab(index); });
                 menu.addSeparator();
             }
             auto *add = menu.addAction(QStringLiteral("New tab"));
@@ -8790,10 +8821,10 @@ private:
         if (!m_newTabButton) return;
         QTabBar *bar = m_tabs->tabBar();
         const QRect last = bar->count() ? bar->tabRect(bar->count() - 1) : QRect();
-        const QSize size(std::max(24, bar->height() - 6), std::max(20, bar->height() - 6));
-        int x = last.isValid() ? last.right() + 4 : 4;
+        const QSize size = m_newTabButton->size();
+        int x = last.isValid() ? last.right() + 6 : 6;
         x = std::min(x, bar->width() - size.width() - 2);
-        m_newTabButton->setGeometry(x, (bar->height() - size.height()) / 2, size.width(), size.height());
+        m_newTabButton->move(x, (bar->height() - size.height()) / 2);
         const QString keys = Keymap::instance().shortcutText(QStringLiteral("tab.new"));
         m_newTabButton->setToolTip(keys.isEmpty() ? QStringLiteral("New tab") : QStringLiteral("New tab  (%1)").arg(keys));
         m_newTabButton->show(); m_newTabButton->raise();
@@ -8824,7 +8855,31 @@ private:
             detach->setEnabled(m_tabs->count() > 1);
             detach->setProperty("hovered", hovered);
             detach->setText(hovered ? QStringLiteral("⧉") : QString());
+
+            // Relay's own close cross. Qt's closable tabs take "window-close" from the icon
+            // theme, which lands as a red disc next to the flat header glyphs.
+            auto *close = qobject_cast<ChromeButton *>(bar->tabButton(i, QTabBar::RightSide));
+            if (!close) {
+                close = new ChromeButton(ChromeButton::Glyph::TabClose, bar, 18);
+                connect(close, &QToolButton::clicked, this, [this, close] {
+                    QTabBar *tabs = m_tabs->tabBar();
+                    for (int j = 0; j < tabs->count(); ++j)
+                        if (tabs->tabButton(j, QTabBar::RightSide) == close) { requestCloseTab(j); return; }
+                });
+                bar->setTabButton(i, QTabBar::RightSide, close);
+            }
+            close->setToolTip(m_tabs->count() > 1 ? QStringLiteral("Close tab") : QStringLiteral("Close window"));
+            // Full strength on the tab you are pointing at or working in, faint elsewhere, so a
+            // row of tabs is not a row of crosses.
+            close->setDim(!hovered && i != bar->currentIndex());
         }
+    }
+
+    // One path for every "close this tab": the cross, the context menu and the keyboard.
+    void requestCloseTab(int index) {
+        if (m_tabs->count() > 1) closeTab(index, true); else closeWindowWithWarning();
+        hint(QStringLiteral("tab.close.mouse"), relay::ShortcutHints::nextTime(
+            Keymap::instance().shortcutText(QStringLiteral("pane.close")), QStringLiteral("close pane, then tab")));
     }
 
     void syncChrome() {
