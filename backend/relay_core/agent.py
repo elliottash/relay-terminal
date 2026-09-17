@@ -78,7 +78,7 @@ def validate_context(context) -> dict | None:
         value = context.get(key)
         if value is not None and (not isinstance(value, str) or len(value) > limit):
             raise ValueError(f"Context {key} must be text of at most {limit} characters.")
-    return context if context.get("foreground_program") else None
+    return context if (context.get("foreground_program") or context.get("terminal_cwd")) else None
 
 
 def format_context(context) -> str:
@@ -86,9 +86,16 @@ def format_context(context) -> str:
     context = validate_context(context)
     if not context:
         return ""
-    program = "".join(c for c in context["foreground_program"] if c.isprintable())
+    program = "".join(c for c in context.get("foreground_program", "") if c.isprintable())
     cwd = "".join(c for c in context.get("terminal_cwd", "") if c.isprintable())
     where = f" (terminal directory: {cwd})" if cwd else ""
+    if not program:
+        # The user moved around in the terminal; commands should run where they are looking.
+        return (f"{CONTEXT_OPEN}\n"
+                f"The user's terminal pane is in `{cwd}`. Unless they say otherwise, treat it as the "
+                "current directory: it is the default working directory of run_command, and relative "
+                "paths they mention are relative to it.\n"
+                f"{CONTEXT_CLOSE}\n\n")
     return (f"{CONTEXT_OPEN}\n"
             f"A program is running in the user's visible terminal pane: `{program}`{where}.\n"
             "You cannot see that program's screen or type into it yet. Your run_command tool runs in a "
@@ -449,6 +456,8 @@ class Agent:
             attachments: list[dict] | None = None, turn_id: str | None = None, ledger_id: str | None = None):
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode('utf-8')) > 131072:
             raise ValueError("Prompt must contain 1–131072 bytes of text.")
+        # `cd` in the terminal moves the agent's default working directory with it.
+        self.executor.set_default_cwd((validate_context(context) or {}).get("terminal_cwd"))
         note = self._pending_note + format_context(context) + format_attachments(attachments)
         if reset_cancellation:
             self.cancel_event.clear()

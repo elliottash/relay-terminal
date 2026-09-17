@@ -1,12 +1,13 @@
-# Relay terminal engine. Built only with -DRELAY_BUILD_ENGINE=ON (default OFF);
-# the relay app target does not depend on it yet.
+# Relay terminal engine. The library and its tests are always built; the app links it
+# and selects it per pane with --engine=relay (src/EngineBackend). The manual harness
+# and the benchmark need -DRELAY_BUILD_ENGINE=ON (default OFF).
 #
 # Targets:
 #   relay-vterm-c           vendored + patched libvterm 0.3.3 (MIT), C99
 #   relay-terminal-engine   static library: VtCore (ghostty / libvterm), Pty, session, view, backend
-#   relay-engine-bench      headless core throughput
-#   relay-vterm-spike       manual GUI harness
 #   relay-engine-tests      unit tests (ctest), with BUILD_TESTING
+#   relay-engine-bench      headless core throughput          (RELAY_BUILD_ENGINE)
+#   relay-vterm-spike       manual GUI harness                (RELAY_BUILD_ENGINE)
 enable_language(C)
 
 option(RELAY_ENGINE_WITH_GHOSTTY "Build the libghostty-vt emulator core (needs a libghostty-vt prefix, see engine/scripts/build-libghostty-vt.sh)" OFF)
@@ -98,11 +99,13 @@ if(RELAY_ENGINE_WITH_GHOSTTY)
     target_compile_definitions(relay-terminal-engine PUBLIC RELAY_HAVE_GHOSTTY)
 endif()
 
-add_executable(relay-engine-bench bench/EngineBench.cpp)
-target_link_libraries(relay-engine-bench PRIVATE relay-terminal-engine)
+if(RELAY_BUILD_ENGINE OR RELAY_BUILD_ENGINE_SPIKE)
+    add_executable(relay-engine-bench bench/EngineBench.cpp)
+    target_link_libraries(relay-engine-bench PRIVATE relay-terminal-engine)
 
-add_executable(relay-vterm-spike main.cpp)
-target_link_libraries(relay-vterm-spike PRIVATE relay-terminal-engine)
+    add_executable(relay-vterm-spike main.cpp)
+    target_link_libraries(relay-vterm-spike PRIVATE relay-terminal-engine)
+endif()
 
 if(BUILD_TESTING)
     find_package(${RELAY_QT} REQUIRED COMPONENTS Test)

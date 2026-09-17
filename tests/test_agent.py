@@ -137,8 +137,23 @@ class ContextTests(unittest.TestCase):
     def test_no_context_leaves_prompt_unchanged(self):
         fake = FakeProvider({'role': 'assistant', 'content': 'ok'})
         agent = Agent(CONFIG, self.temp.name, lambda e: None, provider=fake)
-        agent.ask('hello', context={'foreground_program': '', 'terminal_cwd': '/tmp'})
+        agent.ask('hello', context=None)
         self.assertEqual(fake.messages[-1]['content'], 'hello')
+
+    def test_terminal_directory_alone_is_still_context(self):
+        # `cd` in the terminal moves the agent: the note is added and run_command follows.
+        fake = FakeProvider({'role': 'assistant', 'content': 'ok'})
+        agent = Agent(CONFIG, self.temp.name, lambda e: None, provider=fake)
+        import os
+        os.mkdir(os.path.join(self.temp.name, 'sub'))
+        agent.ask('hello', context={'foreground_program': '', 'terminal_cwd': os.path.join(self.temp.name, 'sub')})
+        content = fake.messages[-1]['content']
+        self.assertIn('`' + os.path.join(self.temp.name, 'sub') + '`', content)
+        self.assertTrue(content.endswith('hello'))
+        self.assertEqual(agent.executor.default_cwd, 'sub')
+        # A directory outside the workspace is ignored rather than escaping it.
+        agent.ask('hello', context={'terminal_cwd': '/tmp'})
+        self.assertEqual(agent.executor.default_cwd, '.')
 
     def test_invalid_context_rejected(self):
         from relay_core.agent import validate_context

@@ -102,3 +102,10 @@ bind -m emacs-standard -x '"\C-x\C-p":__relay_redraw'
 bind -m vi-insert -x '"\C-x\C-p":__relay_redraw'
 bind -m vi-move -x '"\C-x\C-p":__relay_redraw'
 trap '__relay_debug' DEBUG
+
+# Opt-in OSC 7 / OSC 133 marks (palette: "Shell integration (OSC 7/133)", or
+# RELAY_SHELL_INTEGRATION=1). Sourced last so it wraps the final PS1/PROMPT_COMMAND.
+# Relay's own engine uses the marks; KonsolePart ignores them. See docs/ARCHITECTURE.md.
+if [[ ${RELAY_SHELL_INTEGRATION:-0} == 1 && -r ${BASH_SOURCE[0]%/*}/relay-integration.bash ]]; then
+    source "${BASH_SOURCE[0]%/*}/relay-integration.bash"
+fi

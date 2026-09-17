@@ -64,11 +64,34 @@ target_include_directories(relay-subagents PUBLIC src)
 target_link_libraries(relay-subagents PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-subagents PRIVATE -Wall -Wextra -Wpedantic)
 
+# Terminal engine selection (--engine / RELAY_ENGINE): plain Qt, no KParts and no engine,
+# so the parsing rules can be tested on their own. src/BackendFactory.cpp adds the two
+# implementations to the app.
+add_library(relay-backends STATIC src/TerminalBackends.cpp src/TerminalBackends.h)
+target_include_directories(relay-backends PUBLIC src)
+target_link_libraries(relay-backends PUBLIC ${RELAY_QT}::Core)
+# The engine library is always built (see add_subdirectory(engine) below), so
+# --engine=relay is available in every build.
+target_compile_definitions(relay-backends PUBLIC RELAY_HAVE_ENGINE)
+target_compile_options(relay-backends PRIVATE -Wall -Wextra -Wpedantic)
+
 # Request ledger UI: model for requests/todos events and the expanded request list (plain Qt).
+add_library(relay-completion STATIC src/Completion.cpp src/Completion.h)
+target_include_directories(relay-completion PUBLIC src)
+target_link_libraries(relay-completion PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-completion PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
 target_include_directories(relay-requests PUBLIC src)
 target_link_libraries(relay-requests PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-requests PRIVATE -Wall -Wextra -Wpedantic)
+
+# Relay's own terminal engine (engine/, docs/ENGINE.md). The library is built and linked
+# into the app (RELAY_HAVE_ENGINE, --engine=relay); the manual harness and the benchmark
+# are extra targets behind RELAY_BUILD_ENGINE.
+option(RELAY_BUILD_ENGINE "Also build the engine harness (relay-vterm-spike) and benchmark" OFF)
+option(RELAY_BUILD_ENGINE_SPIKE "Deprecated alias for RELAY_BUILD_ENGINE" OFF)
+add_subdirectory(engine)
 
 if(RELAY_BUILD_APP)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -76,9 +99,10 @@ if(RELAY_BUILD_APP)
     endif()
     find_package(${RELAY_KF}CoreAddons REQUIRED)
     find_package(${RELAY_KF}Parts REQUIRED)
-    add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/Hints.cpp src/Hints.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h)
+    add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/Hints.cpp src/Hints.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
+        src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests relay-completion relay-backends relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -99,13 +123,6 @@ if(RELAY_BUILD_APP)
     include(packaging/cpack.cmake)
 endif()
 
-# Relay-owned terminal engine (engine/, docs/ENGINE.md). Not used by the app yet.
-option(RELAY_BUILD_ENGINE "Build the Relay terminal engine library, harness, bench and tests" OFF)
-option(RELAY_BUILD_ENGINE_SPIKE "Deprecated alias for RELAY_BUILD_ENGINE" OFF)
-if(RELAY_BUILD_ENGINE OR RELAY_BUILD_ENGINE_SPIKE)
-    add_subdirectory(engine)
-endif()
-
 if(BUILD_TESTING)
     find_package(${RELAY_QT} REQUIRED COMPONENTS Test)
     add_executable(relay-editor-tests tests/editor_test.cpp)
@@ -120,10 +137,18 @@ if(BUILD_TESTING)
     target_link_libraries(relay-subagents-tests PRIVATE relay-subagents ${RELAY_QT}::Test)
     add_test(NAME subagents COMMAND relay-subagents-tests)
     set_tests_properties(subagents PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-completion-tests tests/completion_test.cpp)
+    target_link_libraries(relay-completion-tests PRIVATE relay-completion ${RELAY_QT}::Test)
+    add_test(NAME completion COMMAND relay-completion-tests)
+
     add_executable(relay-requests-tests tests/requests_test.cpp)
     target_link_libraries(relay-requests-tests PRIVATE relay-requests ${RELAY_QT}::Test)
     add_test(NAME requests COMMAND relay-requests-tests)
     set_tests_properties(requests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-backends-tests tests/backends_test.cpp)
+    target_link_libraries(relay-backends-tests PRIVATE relay-backends ${RELAY_QT}::Test)
+    add_test(NAME backends COMMAND relay-backends-tests)
+    set_tests_properties(backends PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-hints-tests tests/hints_test.cpp src/Hints.cpp)
     target_include_directories(relay-hints-tests PRIVATE src)
     target_link_libraries(relay-hints-tests PRIVATE ${RELAY_QT}::Test)

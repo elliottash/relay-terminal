@@ -3,6 +3,7 @@
 #include "Theme.h"
 #include "FilePanes.h"
 #include "AgentUi.h"
+#include "Completion.h"
 #include "Hints.h"
 #include "TurnTranscript.h"
 #include "SkillsDialog.h"
@@ -10,11 +11,9 @@
 #include "SubagentsPanel.h"
 #include "RequestLedger.h"         // request ledger UI
 #include "RequestsPanel.h"
+#include "TerminalBackends.h"
+#include "TerminalBackend.h"
 #include <iterator>
-#include <KParts/ReadOnlyPart>
-#include <KPluginFactory>
-#include <KPluginMetaData>
-#include <kde_terminal_interface.h>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -52,7 +51,7 @@
 #include <QScreen>
 #include <QSettings>
 #include <QSet>
-#include <QDBusConnection>
+#include <QDesktopServices>
 #include <QMetaObject>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -92,6 +91,7 @@
 #include <sys/syscall.h>
 #include <algorithm>
 #include <functional>
+#include <memory>
 #include <cmath>
 #include <stdexcept>
 #include <fcntl.h>
@@ -303,7 +303,7 @@ private:
         add("control.prompt", "terminal", "Back to the Relay prompt (the agent is in control)", {QStringLiteral("Ctrl+Shift+H")});
         add("terminal.native", "terminal", "Toggle native terminal input", {QStringLiteral("F12")});
         add("pane.restartShell", "terminal", "Restart this pane's shell or agent after it stopped", {QStringLiteral("Ctrl+Shift+R")});
-        add("terminal.interrupt", "terminal", "Interrupt the running command (Ctrl+C)", {});
+        add("terminal.interrupt", "terminal", "Interrupt the running command (Esc)", {});
         add("agent.newChat", "agent", "Start a new agent conversation", {});
         add("agent.clearQueue", "agent", "Clear queued agent prompts", {});
         add("agent.resumeQueue", "agent", "Resume the paused agent queue", {});
@@ -470,17 +470,6 @@ inline long oomKills(int pid) {
 
 }  // namespace isolation
 
-// Konsole's Session emits primaryScreenInUse(bool) when a program switches to or from the
-// alternate screen (vim, less, htop, tmux). KonsolePart has no other way to report it, and
-// connecting to a string-based signal needs a real slot, hence this small QObject.
-class ScreenWatcher final : public QObject {
-    Q_OBJECT
-public:
-    std::function<void(bool)> onPrimary;
-public Q_SLOTS:
-    void primaryScreenInUse(bool use) { if (onPrimary) onPrimary(use); }
-};
-
 // Case-insensitive subsequence score; 0 means no match. Contiguous and earlier matches score higher.
 static int relayFuzzyScore(const QString &needle, const QString &haystack) {
     if (needle.isEmpty()) return 1;
@@ -522,14 +511,18 @@ public:
     }
 };
 
-// One terminal pane: a KonsolePart shell, its Bash bridge, a composer, and its own agent worker
-// and conversation. Windows arrange panes in tabs and splits; the toolbar acts on the active pane.
+// One terminal pane: a shell behind relay::TerminalBackend (KonsolePart by default, Relay's
+// own engine with --engine=relay), its Bash bridge, a composer, and its own agent worker and
+// conversation. Windows arrange panes in tabs and splits; the toolbar acts on the active pane.
 class Pane final : public QWidget {
 public:
     struct QueueEntry { quint64 id = 0; bool agent = false, fix = false, watch = false; QString text, why; QJsonArray attachments; };
     enum class HideReason { None, AltScreen, Password, Remote, Manual };
-    Pane(const QString &workspace, const QString &cwd, bool cleanShell)
+    Pane(const QString &workspace, const QString &cwd, bool cleanShell,
+         relay::EngineKind engine = relay::defaultEngineKind(), const QString &engineCore = relay::defaultEngineCore())
         : m_workspace(workspace), m_cwd(cwd.isEmpty() ? workspace : cwd), m_cleanShell(cleanShell) {
+        m_engine = engine;
+        m_engineCore = engineCore;
         m_data = dataRoot();
         m_python = QStandardPaths::findExecutable(QStringLiteral("python3"));
         if (m_python.isEmpty()) throw std::runtime_error("Python 3 is required.");
@@ -563,12 +556,11 @@ public:
         // While a command runs: password prompts, answered passwords, and programs waiting for input.
         m_programPoll.setInterval(250);
         connect(&m_programPoll, &QTimer::timeout, this, [this] { pollProgram(); });
-        m_screenWatcher.onPrimary = [this](bool primary) { onPrimaryScreen(primary); };
         m_editor->onSubmit = [this](const QString &destination) { requestRoute(true, destination); };
         m_editor->onNative = [this] { setNative(true); };
         qApp->installEventFilter(this);
         QTimer::singleShot(5000, this, [this] {
-            if (!m_seenShell && m_iface) {
+            if (!m_seenShell && m_backend) {
                 setNative(true);
                 status(QStringLiteral("Shell integration did not initialize. Native terminal remains available; try --clean-shell."));
             }
@@ -580,8 +572,9 @@ public:
         delete m_subagentOverlay.data();   // subagents UI: its destroyed() handler uses members
         qApp->removeEventFilter(this);
         m_poll.stop();
-        // Destroy the part before its private shell state directory is removed.
-        if (m_part) delete m_part.data();
+        // Destroy the terminal before its private shell state directory is removed.
+        m_backend = nullptr;
+        m_backendOwned.reset();
         if (m_worker.state() != QProcess::NotRunning) {
             send({{"type", "cancel"}});
             send({{"type", "shutdown"}});
@@ -604,20 +597,27 @@ public:
     QString sessionToken() const { return m_token; }
     QString workspace() const { return m_workspace; }
     bool cleanShell() const { return m_cleanShell; }
+    relay::EngineKind engine() const { return m_engine; }
+    QString engineCore() const { return m_engineCore; }
     QString mode() const { return m_modeValue; }
     void setMode(const QString &mode) { m_modeValue = mode; requestRoute(false, QStringLiteral("auto")); changed(); }
     bool isNative() const { return m_native; }
     void toggleNative() { setNative(!m_native); }
     bool agentBusy() const { return m_agentBusy; }
     bool processBusy() const {
-        return m_iface && m_iface->foregroundProcessId() > 0 && m_iface->foregroundProcessId() != m_iface->terminalProcessId();
+        return m_backend && foregroundPid() > 0 && foregroundPid() != shellPid();
     }
+    // The pane's shell and the process group in the terminal's foreground, through whichever
+    // engine this pane uses. 0 when there is no terminal.
+    int shellPid() const { return m_backend ? int(m_backend->shellPid()) : 0; }
+    int foregroundPid() const { return m_backend ? int(m_backend->foregroundProcessId()) : 0; }
+    void sendShellInput(const QString &text) { if (m_backend) m_backend->sendText(text, false); }
     QList<QPair<QString, QString>> storedModels() const { return m_stored; }
     QString currentPreset() const { return m_currentPreset; }
     void focusInput() { if (m_native) focusTerminal(); else m_editor->setFocus(Qt::OtherFocusReason); }
 
     void interruptShell() {
-        if (m_iface) { m_loading = false; m_promptReported = false; clearFix(); m_iface->sendInput(QString(QChar(3))); focusTerminal(); }
+        if (m_backend) { m_loading = false; m_promptReported = false; clearFix(); sendShellInput(QString(QChar(3))); focusTerminal(); }
     }
     void newChat() {
         if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn first.")); return; }
@@ -694,11 +694,11 @@ public:
 
     // Command line of the program in the terminal's foreground, or empty at the shell prompt.
     QString foregroundCommandLine() const {
-        if (!m_iface) return {};
-        const int shell = m_iface->terminalProcessId();
+        if (!m_backend) return {};
+        const int shell = shellPid();
         long group = shell > 0 ? foregroundGroup(shell) : -1;
         if (group <= 0 || group == shell) {
-            const int fallback = m_iface->foregroundProcessId();
+            const int fallback = foregroundPid();
             if (fallback <= 0 || fallback == shell) return {};
             group = fallback;
         }
@@ -739,6 +739,22 @@ public:
     }
 
     bool ownsTerminalWidget(QWidget *widget) const { return m_terminal && widget && (widget == m_terminal || m_terminal->isAncestorOf(widget)); }
+    // What this pane's engine can do (engine/TerminalBackend.h). Actions that need a
+    // capability are only offered when the pane's backend reports it.
+    bool terminalCan(int capability) const { return m_backend && (m_backend->capabilities() & capability); }
+    bool jumpToPrompt(int direction) { return m_backend && m_backend->scrollToPrompt(direction); }
+    int findInTerminal(const QString &text, bool backwards) { return m_backend ? m_backend->find(text, backwards) : 0; }
+    void clearTerminal() {
+        if (!m_backend) return;
+        closeInline();
+        m_backend->clear();
+        if (shellIdleAtPrompt()) m_backend->redrawPrompt();
+    }
+    QString engineLabel() const {
+        return m_engine == relay::EngineKind::Relay
+            ? (m_engineCore.isEmpty() ? QStringLiteral("Relay engine") : QStringLiteral("Relay engine (%1)").arg(m_engineCore))
+            : QStringLiteral("KonsolePart");
+    }
     bool runCommand(const QString &command) { return runInTerminal(command, false, 0); }
     void sendKeybindings() { if (m_configured) send(QJsonObject{{"type", "keybindings"}, {"path", Keymap::instance().path()}, {"actions", Keymap::instance().catalog().value(QStringLiteral("actions"))}}); }
     void importWarpKeys() { send({{"type", "import_warp"}}); }
@@ -988,11 +1004,10 @@ protected:
             // vim it is passed through (visual block). Ctrl+X always reaches the terminal.
             const auto mods = key->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
             if (event->type() == QEvent::KeyPress && ownsTerminalWidget(widget) && mods == Qt::ControlModifier && !key->isAutoRepeat()) {
-                QObject *display = terminalDisplay();
-                if (display && key->key() == Qt::Key_C) {
+                if (m_backend && key->key() == Qt::Key_C) {
                     if (copySelection()) return true;
-                } else if (display && key->key() == Qt::Key_V && !processBusy()) {
-                    QMetaObject::invokeMethod(display, "pasteFromClipboard", Qt::DirectConnection);
+                } else if (m_backend && key->key() == Qt::Key_V && !processBusy()) {
+                    m_backend->paste();
                     return true;
                 }
             }
@@ -1069,7 +1084,7 @@ private:
         cancel->setObjectName(QStringLiteral("interruptButton"));
         const QString cancelIcon = relay::theme::themeDataDir() + QStringLiteral("/icons/cancel.svg");
         if (QFileInfo::exists(cancelIcon)) cancel->setIcon(QIcon(cancelIcon)); else cancel->setText(QStringLiteral("⊘"));
-        cancel->setToolTip(QStringLiteral("Interrupt the running command (Ctrl+C)"));
+        cancel->setToolTip(QStringLiteral("Interrupt the running command (Esc in the prompt box)"));
         cancel->setAccessibleName(QStringLiteral("Interrupt shell"));
         cancel->setFocusPolicy(Qt::NoFocus);
         connect(cancel, &QToolButton::clicked, this, [this] { interruptShell(); });
@@ -1373,6 +1388,16 @@ private:
             auto *close = new QToolButton; close->setText(QStringLiteral("×")); close->setAutoRaise(true); close->setFocusPolicy(Qt::NoFocus);
             close->setToolTip(QStringLiteral("Hide for this turn (Actions › Agent options › Show thinking turns it off)"));
             connect(close, &QToolButton::clicked, this, [this] { m_thinkingDismissed = true; m_thinking->hide(); });
+            auto *expand = new QToolButton; expand->setAutoRaise(true); expand->setFocusPolicy(Qt::NoFocus);
+            expand->setText(QStringLiteral("▴"));
+            expand->setToolTip(QStringLiteral("Show more of the reasoning"));
+            connect(expand, &QToolButton::clicked, this, [this, expand] {
+                m_thinkingExpanded = !m_thinkingExpanded;
+                expand->setText(m_thinkingExpanded ? QStringLiteral("▾") : QStringLiteral("▴"));
+                expand->setToolTip(m_thinkingExpanded ? QStringLiteral("Show less") : QStringLiteral("Show more of the reasoning"));
+                placeThinking();
+            });
+            header->addWidget(expand);
             header->addWidget(close);
             box->addLayout(header);
             m_thinkingView = new QPlainTextEdit;
@@ -1400,7 +1425,11 @@ private:
     void placeThinking() {
         if (!m_thinking || !m_thinking->isVisible() || !m_terminalHost) return;
         const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
-        const int height = std::min(150, host.height() / 3);
+        // Compact by default: the overlay floats over the terminal, so it must cover as little
+        // output as possible. The ▴ button expands it when the reasoning is worth reading.
+        const int lineHeight = std::max(14, m_thinkingView->fontMetrics().height());
+        const int wanted = m_thinkingExpanded ? host.height() / 3 : lineHeight * 2 + 30;
+        const int height = std::min(m_thinkingExpanded ? 220 : 90, std::max(wanted, lineHeight + 30));
         int bottom = host.bottom() - 6;
         if (m_queueStrip && m_queueStrip->isVisible()) bottom = m_queueStrip->geometry().top() - 4;
         m_thinking->setGeometry(host.left() + 8, bottom - height, host.width() - 16, height);
@@ -2350,29 +2379,24 @@ private:
     }
 
     void startTerminal(bool cleanShell) {
-        // Set before the KPart constructs its KPtyProcess so it inherits these values.
+        // Set before the backend starts its shell so the child inherits these values.
         qputenv("RELAY_RUNTIME_DIR", m_runtime.path().toUtf8());
         qputenv("RELAY_SESSION_TOKEN", m_token.toUtf8());
         qputenv("RELAY_SHELL_EVENT", (m_data + QStringLiteral("/shell/event.py")).toUtf8());
         qputenv("RELAY_PYTHON", m_python.toUtf8());
         qputenv("RELAY_CLEAN_SHELL", cleanShell ? "1" : "0");
-#if QT_VERSION_MAJOR >= 6
-        const auto factory = KPluginFactory::loadFactory(KPluginMetaData(QStringLiteral("kf6/parts/konsolepart")));
-        if (!factory.plugin) throw std::runtime_error("Qt6 KonsolePart could not be loaded. Install the KDE Frameworks 6 version of Konsole.");
-#else
-        // KF5 Konsole (e.g. Ubuntu 24.04 konsole-kpart) installs the part at the plugin root.
-        auto factory = KPluginFactory::loadFactory(KPluginMetaData(QStringLiteral("konsolepart")));
-        if (!factory.plugin) factory = KPluginFactory::loadFactory(KPluginMetaData(QStringLiteral("kf5/parts/konsolepart")));
-        if (!factory.plugin) throw std::runtime_error("Qt5 KonsolePart could not be loaded. Install the KDE Frameworks 5 Konsole part (konsole-kpart).");
-#endif
-        m_part = factory.plugin->create<KParts::ReadOnlyPart>(this);
-        if (!m_part) throw std::runtime_error("KonsolePart could not be created.");
-        m_iface = qobject_cast<TerminalInterface *>(m_part.data());
-        if (!m_iface) throw std::runtime_error("KonsolePart does not provide TerminalInterface.");
-        m_terminal = m_part->widget();
+        // Opt-in OSC 7 / OSC 133 marks (shell/relay-integration.bash). Relay's own engine
+        // tracks the working directory and command boundaries from them; Konsole ignores them.
+        qputenv("RELAY_SHELL_INTEGRATION",
+                QSettings().value(QStringLiteral("terminal/shell_integration"), false).toBool() ? "1" : "0");
+        m_backendOwned.reset(relay::createTerminalBackend(m_engine, m_engineCore, m_terminalHost));
+        m_backend = m_backendOwned.get();
+        m_terminal = m_backend->widget();
         m_terminalHost->layout()->addWidget(m_terminal);
-        connect(m_part.data(), &QObject::destroyed, this, [this] {
-            m_iface = nullptr; m_terminal = nullptr; m_shellReady = false;
+        m_backend->onFinished = [this](int) {
+            m_backend = nullptr; m_terminal = nullptr; m_shellReady = false;
+            // The backend outlives this callback; drop it once the stack has unwound.
+            QTimer::singleShot(0, this, [this] { if (!m_backend) m_backendOwned.reset(); });
             if (m_closing || m_restarting) return;
             // A shell stopped for memory (its scope's limit or systemd-oomd) keeps the pane open
             // with a restart banner. Any other exit closes the pane, like other terminals.
@@ -2384,7 +2408,29 @@ private:
                 return;
             }
             if (onShellExited) QTimer::singleShot(0, this, [this] { if (onShellExited) onShellExited(); });
-        });
+        };
+        // Alternate screen (vim, less, htop, tmux): KonsolePart reports it through its Session
+        // signal, the Relay engine through the emulator itself.
+        m_backend->onAltScreenChanged = [this](bool active) { onPrimaryScreen(!active); };
+        // OSC 7 from the shell integration (engine panes; see shell/relay-integration.bash).
+        m_backend->onCwdChanged = [this](const QString &path) {
+            if (path.isEmpty() || path == m_cwd || !QFileInfo(path).isDir()) return;
+            m_cwd = path; updatePaths(); changed();
+        };
+        // OSC 133 prompt marks: Relay keeps its own command state from the Bash bridge, so the
+        // marks are only remembered here (engine panes use them to jump between prompts).
+        m_backend->onPromptMark = [this](char kind, int exitCode) {
+            m_lastPromptMark = kind;
+            if (kind == 'D') m_lastMarkExitCode = exitCode;
+        };
+        m_backend->onLinkActivated = [this](const QString &target, int line, int column) {
+            if (target.startsWith(QStringLiteral("http")) || target.startsWith(QStringLiteral("relay://"))) {
+                QDesktopServices::openUrl(QUrl(target));
+                return;
+            }
+            Q_UNUSED(line); Q_UNUSED(column);
+            if (onOpenPath && QFileInfo::exists(target)) onOpenPath(target);
+        };
         // The part has loaded Relay's profile; the shell should see the user's own XDG paths.
         relay::theme::restoreXdgEnvironment();
         // Konsole starts new sessions in its own default directory, so the Bash integration
@@ -2393,31 +2439,29 @@ private:
         const QStringList shell{QStringLiteral("/bin/bash"), QStringLiteral("--noprofile"),
             QStringLiteral("--rcfile"), m_data + QStringLiteral("/shell/integration.bash"), QStringLiteral("-i")};
         m_shellUnit.clear();
+        bool started = false;
         if (isolation::enabled() && isolation::available()) {
             // OOMPolicy=continue (default): when a command exceeds the limit, the kernel stops that
             // command and the shell keeps running; Relay reports the kill from memory.events.
             // isolation/shell_oom_policy=stop ends the whole pane shell instead (restart banner).
             m_shellUnit = QStringLiteral("relay-pane-%1-shell-%2").arg(m_token.left(8)).arg(++m_shellGeneration);
             const QString tool = QStandardPaths::findExecutable(QStringLiteral("systemd-run"));
-            m_iface->startProgram(tool, QStringList{tool} + isolation::wrap(m_shellUnit,
+            started = m_backend->startProgram(tool, isolation::wrap(m_shellUnit,
                 {QStringLiteral("MemoryMax=") + isolation::memory("isolation/shell_memory_max", "8G"),
                  QStringLiteral("MemoryHigh=") + isolation::memory("isolation/shell_memory_high", "6G"),
                  QStringLiteral("MemorySwapMax=") + isolation::memory("isolation/shell_swap_max", "2G"),
                  // Interactive bash ignores SIGTERM; SIGHUP ends it (and its jobs) when the scope stops.
                  QStringLiteral("KillSignal=SIGHUP"), QStringLiteral("TimeoutStopSec=5"),
                  QStringLiteral("OOMPolicy=") + (QSettings().value(QStringLiteral("isolation/shell_oom_policy")).toString() == QStringLiteral("stop")
-                                                     ? QStringLiteral("stop") : QStringLiteral("continue"))}, shell));
+                                                     ? QStringLiteral("stop") : QStringLiteral("continue"))}, shell), m_cwd);
         } else {
             if (isolation::enabled() && !s_isolationNoticeShown) {
                 s_isolationNoticeShown = true;
                 QTimer::singleShot(1500, this, [this] { status(QStringLiteral("Per-pane memory isolation is unavailable (no systemd user session); panes run unisolated.")); });
             }
-            m_iface->startProgram(shell.first(), shell);
+            started = m_backend->startProgram(shell.first(), shell.mid(1), m_cwd);
         }
-        // KonsolePart applies its profile before the view exists, which leaves OSC 8 hyperlinks
-        // (AllowEscapedLinks) off (Konsole 23.08 SessionManager::applyProfile loops over views).
-        // Re-applying the same profile now turns them on for the "✦ N tool calls" links.
-        if (auto *v2 = qobject_cast<TerminalInterfaceV2 *>(m_part.data())) v2->setCurrentProfile(v2->currentProfileName());
+        if (!started) throw std::runtime_error("The pane's shell could not be started.");
         m_oomKills = -1;
     }
 
@@ -2765,11 +2809,11 @@ private:
     }
 
     bool runInTerminal(const QString &text, bool watch, int attempt) {
-        if (!m_iface || !m_shellReady || m_loading || m_native) {
+        if (!m_backend || !m_shellReady || m_loading || m_native) {
             status(QStringLiteral("Shell is not at an integrated prompt. Use native input; Relay will not type into a running program."));
             return false;
         }
-        if (m_iface->foregroundProcessId() > 0 && m_iface->foregroundProcessId() != m_iface->terminalProcessId()) {
+        if (foregroundPid() > 0 && foregroundPid() != shellPid()) {
             m_shellReady = false; focusTerminal();
             status(QStringLiteral("A foreground program is running. Composer submission was not sent."));
             return false;
@@ -2784,7 +2828,7 @@ private:
         m_pendingCommand = text; m_loading = true; m_shellReady = false; m_promptReported = false;
         m_fixCommand = watch ? text : QString(); m_fixAttempt = attempt; m_fixWatch = watch; m_fixArmed = false;
         // Stage text via a bound Readline function. Enter is sent only after its hash acknowledgement.
-        m_iface->sendInput(QString(QChar(24)) + QChar(18));
+        sendShellInput(QString(QChar(24)) + QChar(18));
         const quint64 serial = ++m_loadSerial;
         QTimer::singleShot(2500, this, [this, serial] {
             if (m_loading && m_loadSerial == serial) {
@@ -2798,8 +2842,8 @@ private:
 
     // A command in this pane's scope was killed for memory while the shell kept running.
     void checkOomKills() {
-        if (!m_iface || m_shellStopped) return;
-        int pid = m_iface->terminalProcessId();
+        if (!m_backend || m_shellStopped) return;
+        int pid = shellPid();
         if (pid > 0) m_shellPid = pid;
         // A shell killed by a signal leaves Konsole showing "Program crashed" instead of closing,
         // and KonsolePart then reports no PID; use the last PID the shell itself reported.
@@ -2860,21 +2904,22 @@ public:
     // Ctrl+Shift+R: restart whatever stopped in this pane.
     void restartStopped() {
         if (m_bannerCallback && m_banner && m_banner->isVisible()) { auto run = m_bannerCallback; run(); return; }
-        if (!m_iface || m_shellStopped) { restartShell(); return; }
+        if (!m_backend || m_shellStopped) { restartShell(); return; }
         if (m_worker.state() == QProcess::NotRunning) { hideBanner(); startWorker(); return; }
         status(QStringLiteral("The shell and agent in this pane are running."));
     }
 
     void restartShell() {
         hideBanner();
-        if (m_iface && !m_shellStopped) return;
-        if (m_part) {
-            // Replace the part that still shows the stopped program; do not close the pane.
+        if (m_backend && !m_shellStopped) return;
+        if (m_backendOwned) {
+            // Replace the terminal that still shows the stopped program; do not close the pane.
             m_restarting = true;
-            delete m_part.data();
+            m_backend = nullptr;
+            m_backendOwned.reset();
             m_restarting = false;
         }
-        m_iface = nullptr; m_terminal = nullptr; m_shellStopped = false; m_shellPid = 0;
+        m_backend = nullptr; m_terminal = nullptr; m_shellStopped = false; m_shellPid = 0;
         m_shellReady = false; m_promptReported = false; m_loading = false; m_seenShell = false;
         m_shellSequence.clear(); m_inlineOpen = false; m_atLineStart = true; m_autoHuman = false;
         if (m_native) setNative(false, false);
@@ -2892,8 +2937,8 @@ private:
     // Warp's rule: a password prompt turns echo off but keeps canonical (line) input. Full-screen
     // programs and Readline turn canonical input off, so they do not match.
     void checkPasswordPrompt() {
-        if (m_promptReported || m_secretNotified || !m_iface) return;
-        const int pid = m_iface->terminalProcessId();
+        if (m_promptReported || m_secretNotified || !m_backend) return;
+        const int pid = shellPid();
         if (pid <= 0) return;
         const auto name = QStringLiteral("/proc/%1/fd/0").arg(pid).toLocal8Bit();
         const int fd = ::open(name.constData(), O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
@@ -2919,14 +2964,14 @@ private:
 
     static bool copyOnSelect() { return QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool(); }
 
-    // Konsole exposes no "has selection" query, and its copy does nothing without a selection.
-    // Copy, and treat a clipboard change as proof that text was selected.
+    // KonsolePart exposes no "has selection" query, and its copy does nothing without a
+    // selection. Copy, and treat a clipboard change as proof that text was selected; the
+    // engine behaves the same way (it only writes the clipboard for a non-empty selection).
     bool copySelection() {
-        QObject *display = terminalDisplay();
-        if (!display) return false;
+        if (!m_backend) return false;
         bool copied = false;
         const auto connection = connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [&copied] { copied = true; });
-        QMetaObject::invokeMethod(display, "copyToClipboard", Qt::DirectConnection);
+        m_backend->copySelection();
         disconnect(connection);
         if (!copied) return false;
         const int count = QApplication::clipboard()->text().toUcs4().size();
@@ -2993,23 +3038,12 @@ public:
     }
 private:
 
-    // Scroll the terminal's scrollback by one page through Konsole's (possibly hidden) scrollbar.
+    // Scroll the terminal's scrollback by one page (Konsole's possibly hidden scrollbar, or
+    // the engine's viewport).
     bool scrollTerminalPage(int direction) {
-        if (!m_terminal) return false;
-        QScrollBar *bar = nullptr;
-        for (QScrollBar *candidate : m_terminal->findChildren<QScrollBar *>())
-            if (candidate->orientation() == Qt::Vertical) { bar = candidate; break; }
-        if (!bar) return false;
-        bar->setValue(bar->value() + direction * std::max(1, bar->pageStep() - 1));
+        if (!m_backend || !(m_backend->capabilities() & relay::TerminalBackend::ScrollControl)) return false;
+        m_backend->scrollPages(direction);
         return true;
-    }
-
-    QObject *terminalDisplay() const {
-        if (!m_terminal) return nullptr;
-        if (m_terminal->metaObject()->indexOfMethod("copyToClipboard()") >= 0) return m_terminal;
-        for (QObject *child : m_terminal->findChildren<QObject *>())
-            if (child->metaObject()->indexOfMethod("copyToClipboard()") >= 0) return child;
-        return nullptr;
     }
 
     // ----- fix and re-run loop (terminal mode) -----------------------------------------
@@ -3114,40 +3148,19 @@ private:
         return {};
     }
 
-    // Konsole's Session is not reachable through KParts, but every session registers itself on
-    // D-Bus. In-process, objectRegisteredAt() returns the Session QObject, whose onReceiveBlock()
-    // slot feeds bytes to the terminal emulator exactly like program output. Nothing is typed
-    // into the shell, so agent text never reaches shell history and is never executed.
-    QObject *konsoleSession() {
-        if (m_session) return m_session;
-        if (!m_iface) return nullptr;
-        const int pid = m_iface->terminalProcessId();
-        for (int n = 1; n <= 256 && pid > 0; ++n) {
-            QObject *session = QDBusConnection::sessionBus().objectRegisteredAt(QStringLiteral("/Sessions/%1").arg(n));
-            if (!session) continue;
-            for (QObject *child : session->children()) {
-                int childPid = 0;
-                if (child->metaObject()->indexOfMethod("processId()") >= 0
-                    && QMetaObject::invokeMethod(child, "processId", Qt::DirectConnection, Q_RETURN_ARG(int, childPid))
-                    && childPid == pid) {
-                    m_session = session;
-                    return session;
-                }
-            }
-        }
-        return nullptr;
-    }
-
     bool shellIdleAtPrompt() const {
-        return m_iface && m_promptReported && !m_loading && !m_native
-            && (m_iface->foregroundProcessId() <= 0 || m_iface->foregroundProcessId() == m_iface->terminalProcessId());
+        return m_backend && m_promptReported && !m_loading && !m_native
+            && (foregroundPid() <= 0 || foregroundPid() == shellPid());
     }
 
+    // Inline agent output: bytes go to the terminal emulator as if the program had printed
+    // them. Nothing is typed into the shell, so agent text never reaches shell history and is
+    // never executed. KonsolePart does it through its Session, the engine through its parser.
     void writeTerminal(const QByteArray &bytes) {
-        QObject *session = konsoleSession();
-        if (!session) { fprintf(stderr, "%s", bytes.constData()); return; }
-        QMetaObject::invokeMethod(session, "onReceiveBlock", Qt::DirectConnection,
-                                  Q_ARG(const char *, bytes.constData()), Q_ARG(int, bytes.size()));
+        if (m_backend && (m_backend->capabilities() & relay::TerminalBackend::DisplayInjection))
+            m_backend->writeToDisplay(bytes);
+        else
+            fprintf(stderr, "%s", bytes.constData());
     }
 
     // Model and tool output is untrusted: drop C0/C1 controls so it cannot emit escape
@@ -3258,7 +3271,7 @@ private:
         if (!m_atLineStart) writeTerminal("\r\n");
         m_inlineOpen = false; m_atLineStart = true;
         // Ctrl+X Ctrl+P is bound to a no-op shell function; Readline redraws the prompt after it.
-        if (m_iface && shellIdleAtPrompt()) m_iface->sendInput(QString(QChar(24)) + QChar(16));
+        if (m_backend && shellIdleAtPrompt()) m_backend->redrawPrompt();
     }
 
     void flushInline() {
@@ -3343,7 +3356,7 @@ private:
         enqueue(entry);
     }
 
-    bool shellIdleForQueue() const { return m_iface && m_shellReady && !m_loading && !m_native && !processBusy(); }
+    bool shellIdleForQueue() const { return m_backend && m_shellReady && !m_loading && !m_native && !processBusy(); }
 
     void enqueue(QueueEntry entry) {
         entry.id = ++m_entrySerial;
@@ -3370,11 +3383,14 @@ private:
         QJsonObject request{{"type", "ask"}, {"text", entry.text}, {"when", when}};
         if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
         const QString program = processBusy() ? foregroundCommandLine() : QString();
+        // The terminal's directory always goes along: `cd` in the terminal must move the agent too.
+        QJsonObject context{{"terminal_cwd", m_cwd}};
         if (!program.isEmpty()) {
             // Tell the agent what owns the terminal and that it cannot see or type into it yet.
-            request.insert(QStringLiteral("context"), QJsonObject{{"foreground_program", program}, {"terminal_cwd", m_cwd}});
+            context.insert(QStringLiteral("foreground_program"), program);
             prompt.program = QFileInfo(program.section(' ', 0, 0)).fileName();
         }
+        request.insert(QStringLiteral("context"), context);
         const QString requestId = sendPrompt(request, prompt);
         if (fromQueue) { m_active = entry; m_activeValid = true; m_activeRequest = requestId; }
     }
@@ -3439,6 +3455,24 @@ private:
             return true;
         }
         const bool enter = k == Qt::Key_Return || k == Qt::Key_Enter;
+        if (m_tabList && m_tabList->isVisible()) {
+            const bool next = (mods == Qt::NoModifier && (k == Qt::Key_Tab || k == Qt::Key_Down));
+            const bool previous = ((mods == Qt::ShiftModifier && k == Qt::Key_Tab) || (mods == Qt::NoModifier && k == Qt::Key_Up));
+            if (next || previous) {
+                const int rows = m_tabList->count();
+                m_tabList->setCurrentRow((m_tabList->currentRow() + (next ? 1 : rows - 1)) % rows);
+                return true;
+            }
+            if (mods == Qt::NoModifier && enter) { acceptTabSelection(); return true; }
+            if (k == Qt::Key_Escape) { hideTabPopup(); return true; }
+            hideTabPopup();   // any other key edits the line again
+        }
+        // Tab completes the path or command being typed. Relay sends whole lines, so Readline
+        // never sees the half-typed word.
+        if (mods == Qt::NoModifier && k == Qt::Key_Tab && !m_native && !m_editor->toPlainText().isEmpty()
+            && !(m_slashList && m_slashList->isVisible()) && !(m_atList && m_atList->isVisible())
+            && completeInComposer())
+            return true;
         if (m_slashList && m_slashList->isVisible()) {
             if (mods == Qt::NoModifier && (k == Qt::Key_Up || k == Qt::Key_Down)) {
                 m_slashList->setCurrentRow(std::clamp(m_slashList->currentRow() + (k == Qt::Key_Down ? 1 : -1), 0, m_slashList->count() - 1));
@@ -3457,6 +3491,13 @@ private:
             return true;
         }
         if (mods == Qt::NoModifier && enter && m_editor->toPlainText().trimmed().isEmpty() && upgradeLastQueuedToSteer()) return true;
+        // Esc stops a running program, so Ctrl+C is left to copying.
+        if (mods == Qt::NoModifier && k == Qt::Key_Escape && !m_agentBusy && m_editor->toPlainText().isEmpty()
+            && processBusy() && m_backend) {
+            interruptShell();
+            toast(QStringLiteral("Interrupted %1").arg(foregroundProgramName().isEmpty() ? QStringLiteral("the program") : foregroundProgramName()));
+            return true;
+        }
         // Esc Esc in an empty prompt box while the agent is idle opens Rewind; a single Esc keeps
         // its usual meaning (take control of the terminal) after a short wait.
         if (mods == Qt::NoModifier && k == Qt::Key_Escape && !m_agentBusy && m_editor->toPlainText().isEmpty()
@@ -3531,12 +3572,6 @@ private:
         if (mods == Qt::NoModifier && k == Qt::Key_Escape && m_agentBusy) {
             stopAgent();
             toast(QStringLiteral("Agent interrupted"));
-            return true;
-        }
-        if (mods == Qt::ControlModifier && k == Qt::Key_C && !m_editor->textCursor().hasSelection() && processBusy() && m_iface) {
-            // Nothing to copy in the prompt box: interrupt the program in the terminal instead.
-            m_iface->sendInput(QString(QChar(3)));
-            toast(QStringLiteral("Sent Ctrl+C to the program"));
             return true;
         }
         if (!m_editor->ghost().isEmpty() && m_editor->textCursor().atEnd() && !m_editor->textCursor().hasSelection()) {
@@ -3735,6 +3770,82 @@ private:
 
     void hideAtPopup() { if (m_atList && m_atList->isVisible()) m_atList->hide(); }
 
+    QStringList knownCommandNames() const {
+        QStringList names;
+        for (const QJsonValue &value : m_knownCommands) names << value.toString();
+        return names;
+    }
+
+    // Returns true when Tab did something: completed the word, or opened the candidate list.
+    bool completeInComposer() {
+        const QTextCursor cursor = m_editor->textCursor();
+        if (cursor.hasSelection()) return false;
+        const QString line = cursor.block().text();
+        const relay::Completion completion =
+            relay::completeAt(line, cursor.positionInBlock(), m_cwd, knownCommandNames());
+        if (completion.inserts.isEmpty()) return true;   // nothing matches: swallow the Tab
+        const QString typed = line.mid(completion.start, completion.length);
+        if (completion.inserts.size() == 1) {
+            // A directory keeps the cursor after the slash, so the next Tab walks into it.
+            replaceComposerToken(completion, completion.inserts.first()
+                                 + (completion.inserts.first().endsWith('/') ? QString() : QStringLiteral(" ")));
+            hideTabPopup();
+            return true;
+        }
+        if (completion.common.size() > typed.size()) replaceComposerToken(completion, completion.common);
+        showTabPopup(completion);
+        return true;
+    }
+
+    void replaceComposerToken(const relay::Completion &completion, const QString &text) {
+        QTextCursor cursor = m_editor->textCursor();
+        cursor.setPosition(cursor.block().position() + completion.start);
+        cursor.setPosition(cursor.block().position() + completion.start + completion.length, QTextCursor::KeepAnchor);
+        cursor.insertText(text);
+        m_editor->setTextCursor(cursor);
+    }
+
+    void showTabPopup(const relay::Completion &completion) {
+        if (!m_tabList) {
+            m_tabList = new QListWidget(this);
+            m_tabList->setObjectName(QStringLiteral("atPicker"));
+            m_tabList->setFocusPolicy(Qt::NoFocus);
+            m_tabList->setUniformItemSizes(true);
+            connect(m_tabList, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
+                m_tabList->setCurrentItem(item); acceptTabSelection();
+            });
+        }
+        m_tabList->clear();
+        m_tabCompletion = completion;
+        for (int i = 0; i < completion.labels.size() && i < 200; ++i) {
+            auto *item = new QListWidgetItem(completion.labels.at(i), m_tabList);
+            item->setData(Qt::UserRole, completion.inserts.at(i));
+        }
+        m_tabList->setCurrentRow(0);
+        placeTabPopup();
+        m_tabList->show();
+        m_tabList->raise();
+        hint(QStringLiteral("completion"), QStringLiteral("Tab again cycles, Enter accepts, Esc closes"));
+    }
+
+    void placeTabPopup() {
+        if (!m_tabList || !m_composer) return;
+        const QRect composer(m_composer->mapTo(this, QPoint(0, 0)), m_composer->size());
+        const int rowHeight = std::max(18, m_tabList->sizeHintForRow(0));
+        const int height = std::min(8, m_tabList->count()) * rowHeight + 8;
+        const int width = std::min(640, composer.width() - 24);
+        m_tabList->setGeometry(composer.left() + 12, std::max(0, composer.top() - height - 4), width, height);
+    }
+
+    void hideTabPopup() { if (m_tabList && m_tabList->isVisible()) m_tabList->hide(); }
+
+    void acceptTabSelection() {
+        if (!m_tabList || !m_tabList->currentItem()) return;
+        const QString insert = m_tabList->currentItem()->data(Qt::UserRole).toString();
+        replaceComposerToken(m_tabCompletion, insert + (insert.endsWith('/') ? QString() : QStringLiteral(" ")));
+        hideTabPopup();
+    }
+
     void acceptAtSelection() {
         if (!m_atList || !m_atList->currentItem()) return;
         const QString path = m_atList->currentItem()->data(Qt::UserRole).toString();
@@ -3771,13 +3882,7 @@ private:
     }
 
     // ----- program state: alternate screen, passwords, waiting for input ----------------------
-    void connectScreenWatcher() {
-        QObject *session = konsoleSession();
-        if (!session || session == m_watchedSession) return;
-        m_watchedSession = session;
-        QObject::connect(session, SIGNAL(primaryScreenInUse(bool)), &m_screenWatcher, SLOT(primaryScreenInUse(bool)));
-    }
-
+    // Called from the backend's onAltScreenChanged (Konsole's Session signal or the engine).
     void onPrimaryScreen(bool primary) {
         m_altScreen = !primary;
         if (!primary) {
@@ -3806,7 +3911,7 @@ private:
     }
 
     void pollProgram() {
-        if (m_promptReported || !m_iface) { m_programPoll.stop(); endWaiting(true); updateOpaqueProgram(); return; }
+        if (m_promptReported || !m_backend) { m_programPoll.stop(); endWaiting(true); updateOpaqueProgram(); return; }
         updateOpaqueProgram();
         checkPasswordPrompt();
         if (m_native && m_hideReason == HideReason::Password) {
@@ -3826,7 +3931,17 @@ private:
                 return;
             }
             if (!m_opaqueProgram.isEmpty()) {
-                // Relay cannot see whether sudo & co. are reading the terminal; focus already went there.
+                // Relay cannot see whether sudo & co. are reading the terminal; focus went there in
+                // case it wants a password. Once the terminal echoes again the program is only
+                // printing, so the prompt box takes the keyboard back and the next command can be
+                // queued while it runs. Typing in the terminal keeps the focus there.
+                if (!m_opaqueTyped && terminalMode() == TerminalMode::Echoing
+                    && ownsTerminalWidget(QApplication::focusWidget())) {
+                    m_editor->setFocus(Qt::OtherFocusReason);
+                    hint(QStringLiteral("queue.whileRunning"),
+                         QStringLiteral("Tip: type the next command here while %1 runs · it is queued until the terminal is free")
+                             .arg(m_opaqueProgram));
+                }
             } else if (programWaitingForInput()) {
                 if (++m_waitTicks == 2) startWaiting();
             } else {
@@ -3838,8 +3953,8 @@ private:
 
     enum class TerminalMode { Unknown, Raw, Echoing, Secret };
     TerminalMode terminalMode() const {
-        if (!m_iface) return TerminalMode::Unknown;
-        const int pid = m_iface->terminalProcessId();
+        if (!m_backend) return TerminalMode::Unknown;
+        const int pid = shellPid();
         if (pid <= 0) return TerminalMode::Unknown;
         const auto name = QStringLiteral("/proc/%1/fd/0").arg(pid).toLocal8Bit();
         const int fd = ::open(name.constData(), O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
@@ -3856,8 +3971,8 @@ private:
     // /proc/<pid>/syscall needs ptrace access, so programs running as another user (sudo) are
     // not visible here.
     bool programWaitingForInput() const {
-        if (!m_iface) return false;
-        const int shell = m_iface->terminalProcessId();
+        if (!m_backend) return false;
+        const int shell = shellPid();
         if (shell <= 0) return false;
         const QString tty = QFileInfo(QStringLiteral("/proc/%1/fd/0").arg(shell)).symLinkTarget();
         if (tty.isEmpty()) return false;
@@ -3889,9 +4004,9 @@ private:
     // keyboard focus stays in the terminal; a hint in the composer row says how to type a prompt.
     QString opaqueForegroundProgram() const {
         if (!processBusy()) return {};
-        const int shell = m_iface->terminalProcessId();
+        const int shell = shellPid();
         long group = shell > 0 ? foregroundGroup(shell) : -1;
-        if (group <= 0 || group == shell) group = m_iface->foregroundProcessId();
+        if (group <= 0 || group == shell) group = foregroundPid();
         if (group <= 0 || group == shell) return {};
         QString name = foregroundProgramName();
         static const QSet<QString> elevators{QStringLiteral("sudo"), QStringLiteral("doas"), QStringLiteral("pkexec"),
@@ -3916,7 +4031,7 @@ private:
     }
 
     void updateOpaqueProgram() {
-        const QString name = (m_promptReported || m_altScreen || !m_iface) ? QString() : opaqueForegroundProgram();
+        const QString name = (m_promptReported || m_altScreen || !m_backend) ? QString() : opaqueForegroundProgram();
         if (name != m_opaqueProgram) {
             const bool was = !m_opaqueProgram.isEmpty();
             m_opaqueProgram = name;
@@ -4074,8 +4189,8 @@ private:
     }
 
     bool readlineReady() const {
-        if (!m_iface) return false;
-        const int pid = m_iface->terminalProcessId();
+        if (!m_backend) return false;
+        const int pid = shellPid();
         if (pid <= 0) return false;
         const auto name = QStringLiteral("/proc/%1/fd/0").arg(pid).toLocal8Bit();
         const int fd = ::open(name.constData(), O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
@@ -4113,7 +4228,6 @@ private:
         // PROMPT_COMMAND runs before Readline puts the tty into noncanonical mode.
         // Recheck on every tick, even when the state file has not changed.
         refreshShellReady();
-        connectScreenWatcher();
         if (!m_entries.isEmpty() && !m_activeValid) pumpQueue();
         QFile file(m_runtime.filePath(QStringLiteral("state.json")));
         if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024) return;
@@ -4185,7 +4299,7 @@ private:
             m_waitTicks = 0; m_echoTicks = 0; m_remoteHandled = false;
             m_programPoll.start();
             QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
-        } else if (stage == QStringLiteral("loaded") && m_loading && m_iface &&
+        } else if (stage == QStringLiteral("loaded") && m_loading && m_backend &&
                    event.value(QStringLiteral("input_sha256")).toString() == m_pendingHash) {
             m_loading = false; m_shellReady = false; m_promptReported = false; m_refocus = true;
             m_editor->remember(m_pendingCommand);
@@ -4198,7 +4312,7 @@ private:
             else if (m_editor->toPlainText() == m_submittedDraft) m_editor->clear();
             m_fixArmed = m_fixWatch;
             // Focus stays in the prompt box so more commands and prompts can be queued.
-            m_iface->sendInput(QStringLiteral("\r"));
+            sendShellInput(QStringLiteral("\r"));
         } else if (stage == QStringLiteral("unsupported")) {
             m_shellReady = false; m_promptReported = false; setNative(true);
             status(QStringLiteral("Your shell already has a DEBUG hook. It was left untouched; use native mode or relaunch with --clean-shell."));
@@ -4215,13 +4329,13 @@ private:
         if (!enabled) m_hideReason = HideReason::None;
         if (enabled) hideAtPopup();
         if (enabled) {
-            m_routeLabel->setText(QStringLiteral("NATIVE · keystrokes go directly to Konsole."));
+            m_routeLabel->setText(QStringLiteral("NATIVE · keystrokes go directly to the terminal."));
             focusTerminal();
         } else {
             // Returning from native mode cancels Readline's partial line at a prompt.
             // Never inject a cancellation into a foreground TUI/process here.
-            if (cancelLine && m_shellReady && m_iface && (m_iface->foregroundProcessId() <= 0 || m_iface->foregroundProcessId() == m_iface->terminalProcessId())) {
-                m_iface->sendInput(QString(QChar(3))); m_shellReady = false; m_promptReported = false; m_refocus = true;
+            if (cancelLine && m_shellReady && m_backend && (foregroundPid() <= 0 || foregroundPid() == shellPid())) {
+                sendShellInput(QString(QChar(3))); m_shellReady = false; m_promptReported = false; m_refocus = true;
             }
             if (!m_opaqueProgram.isEmpty()) focusTerminal(); else m_editor->setFocus();
             requestRoute(false, QStringLiteral("auto"));
@@ -4229,7 +4343,9 @@ private:
         refreshOpaqueHint();
     }
 
-    void focusTerminal() { if (m_terminal) m_terminal->setFocus(Qt::OtherFocusReason); }
+    void focusTerminal() {
+        if (QWidget *target = m_backend ? m_backend->focusWidget() : nullptr) target->setFocus(Qt::OtherFocusReason);
+    }
     void updatePaths() {
         if (!m_cwdLabel) return;
         const QString home = QDir::homePath();
@@ -4329,8 +4445,12 @@ private:
     QByteArray m_workerBuffer;
     QList<QByteArray> m_workerPending;
     QTimer m_poll, m_debounce;
-    QPointer<KParts::ReadOnlyPart> m_part;
-    TerminalInterface *m_iface = nullptr;
+    // The pane's terminal engine (src/TerminalBackends.h). m_backend is cleared when the
+    // shell ends; m_backendOwned keeps the object alive until it can be destroyed safely.
+    std::unique_ptr<relay::TerminalBackend> m_backendOwned;
+    relay::TerminalBackend *m_backend = nullptr;
+    relay::EngineKind m_engine = relay::EngineKind::Konsole;
+    QString m_engineCore;
     QWidget *m_terminal = nullptr, *m_terminalHost = nullptr;
     RichEditor *m_editor = nullptr;
     QString m_modeValue = QStringLiteral("auto");
@@ -4342,7 +4462,6 @@ private:
     bool m_fixWatch = false, m_fixArmed = false, m_fixAwaitingAgent = false, m_turnHeader = false;
     bool m_inlineOpen = false, m_atLineStart = true;
     QList<QPair<QString, Ink>> m_inlinePending;
-    QPointer<QObject> m_session;
     QList<QPair<QString, QString>> m_stored;
     QComboBox *m_modeBox = nullptr, *m_modelBox = nullptr;
     QLabel *m_toast = nullptr;
@@ -4358,7 +4477,7 @@ private:
     QStringList m_turnOrder;
     QHash<QString, QPointer<relay::TurnTranscriptView>> m_turnViews;
     QString m_lastTurnId;
-    bool m_thinkingShown = false, m_thinkingDismissed = false;
+    bool m_thinkingShown = false, m_thinkingDismissed = false, m_thinkingExpanded = false;
     QFrame *m_thinking = nullptr;
     QLabel *m_thinkingHeader = nullptr;
     QPlainTextEdit *m_thinkingView = nullptr;
@@ -4398,8 +4517,8 @@ private:
     QElapsedTimer m_fileIndexAge;
     QDateTime m_shellHistoryStamp;
     QList<QPair<QString, QString>> m_commandLog;   // command, directory
-    ScreenWatcher m_screenWatcher;
-    QPointer<QObject> m_watchedSession;
+    char m_lastPromptMark = 0;      // OSC 133 A/B/C/D, engine panes with the shell integration
+    int m_lastMarkExitCode = -1;
     QTimer m_programPoll;
     HideReason m_hideReason = HideReason::None;
     bool m_altScreen = false, m_waiting = false, m_waitMovedFocus = false, m_remoteHandled = false;
@@ -4420,6 +4539,8 @@ private:
     QLabel *m_planChip = nullptr, *m_ctxLabel = nullptr;
     QComboBox *m_effortBox = nullptr;
     QListWidget *m_slashList = nullptr;
+    QListWidget *m_tabList = nullptr;   // Tab completion candidates
+    relay::Completion m_tabCompletion;
     QString m_effort = QStringLiteral("high"), m_agentMode = QStringLiteral("build"), m_sessionId, m_sessionDir, m_forkTitle;
     QString m_aiGhost, m_aiGhostKind, m_suggestionId, m_savedPlaceholder;
     QJsonObject m_initialState;
@@ -4553,8 +4674,9 @@ public:
         m_grip->setToolTip(QStringLiteral("Drag onto another pane's edge to move this pane there, or onto the tab bar to make it a tab"));
         m_grip->installEventFilter(this);
         row->addWidget(m_grip);
-        button(row, QStringLiteral("◫"), QStringLiteral("pane.splitRight"), QStringLiteral("Split right"));
-        button(row, QStringLiteral("⬓"), QStringLiteral("pane.splitDown"), QStringLiteral("Split down"));
+        // The + makes it obvious that these open a new pane (a new shell and chat), not a layout toggle.
+        button(row, QStringLiteral("◫+"), QStringLiteral("pane.splitRight"), QStringLiteral("New pane to the right"));
+        button(row, QStringLiteral("⬓+"), QStringLiteral("pane.splitDown"), QStringLiteral("New pane below"));
         button(row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
         button(row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
         hide();
@@ -4723,7 +4845,8 @@ public:
         setMinimumSize(760, 520);
         const QRect available = screen() ? screen()->availableGeometry() : QRect(0, 0, 1280, 860);
         resize(std::min(1320, available.width() * 9 / 10), std::min(860, available.height() * 9 / 10));
-        buildToolbar();
+        // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+A).
+        Keymap::instance().listen(this, [this] { syncToolbar(); });
         m_tabs = new QTabWidget;
         m_tabs->setDocumentMode(true);
         m_tabs->setTabsClosable(true);
@@ -4963,13 +5086,10 @@ protected:
 
 private:
     // ----- toolbar ----------------------------------------------------------------------------
+    // Kept for the palette-driven action list; nothing is shown in a toolbar any more.
     void buildToolbar() {
         auto *toolbar = addToolBar(QStringLiteral("Relay"));
         toolbar->setMovable(false);
-        auto *brand = new QLabel(QStringLiteral("  RELAY  "));
-        auto font = brand->font(); font.setBold(true); font.setPointSize(13); brand->setFont(font);
-        toolbar->addWidget(brand);
-        toolbar->addSeparator();
         auto addAction = [this, toolbar](const QString &label, const QString &id) {
             auto *action = toolbar->addAction(label);
             connect(action, &QAction::triggered, this, [this, id, label] {
@@ -5379,7 +5499,7 @@ private:
         importKeys.run = [this] { if (m_active) m_active->importWarpKeys(); };
         items << importKeys;
 
-        items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Send Ctrl+C to the running program") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
+        items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Stop the running program · Esc in the prompt box") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
         items << actionItem(terminal, QStringLiteral("Take control"), QStringLiteral("Hide the prompt and type into the terminal"), QStringLiteral("control.human"), pane && pane->isNative());
         {
             PaletteItem suggestions;
@@ -5437,9 +5557,81 @@ private:
             copy.run = [on] { QSettings().setValue(QStringLiteral("terminal/copy_on_select"), !on); };
             items << copy;
         }
+        {
+            // shell/relay-integration.bash: OSC 7 and OSC 133 marks, used by Relay's engine.
+            PaletteItem shellIntegration;
+            const bool on = QSettings().value(QStringLiteral("terminal/shell_integration"), false).toBool();
+            shellIntegration.key = QStringLiteral("terminal.shellIntegration"); shellIntegration.section = terminal;
+            shellIntegration.label = QStringLiteral("Shell integration (OSC 7/133)");
+            shellIntegration.detail = on ? QStringLiteral("On for new panes: directory and prompt marks")
+                                         : QStringLiteral("Off · new panes only");
+            shellIntegration.aliases = QStringLiteral("osc7 osc133 prompt marks");
+            shellIntegration.checked = on; shellIntegration.stayOpen = true;
+            shellIntegration.run = [on] { QSettings().setValue(QStringLiteral("terminal/shell_integration"), !on); };
+            items << shellIntegration;
+        }
+        if (m_active) {
+            PaletteItem clear;
+            clear.key = QStringLiteral("terminal.clear"); clear.section = terminal;
+            clear.label = QStringLiteral("Clear terminal");
+            clear.detail = QStringLiteral("Screen and scrollback · %1").arg(m_active->engineLabel());
+            clear.run = [this] { if (m_active) m_active->clearTerminal(); };
+            items << clear;
+            if (m_active->terminalCan(relay::TerminalBackend::PromptMarks)) {
+                for (const int direction : {-1, 1}) {
+                    PaletteItem jump;
+                    jump.key = QStringLiteral("terminal.prompt%1").arg(direction < 0 ? QStringLiteral("Previous") : QStringLiteral("Next"));
+                    jump.section = terminal;
+                    jump.label = direction < 0 ? QStringLiteral("Jump to previous prompt") : QStringLiteral("Jump to next prompt");
+                    jump.detail = QStringLiteral("Needs the shell integration (OSC 133)");
+                    jump.run = [this, direction] {
+                        if (m_active && !m_active->jumpToPrompt(direction))
+                            statusBar()->showMessage(QStringLiteral("No prompt mark in that direction. Enable the shell integration (OSC 7/133)."));
+                    };
+                    items << jump;
+                }
+            }
+            if (m_active->terminalCan(relay::TerminalBackend::Search)) {
+                PaletteItem find;
+                find.key = QStringLiteral("terminal.find"); find.section = terminal;
+                find.label = QStringLiteral("Search terminal…");
+                find.detail = QStringLiteral("Screen and scrollback · %1").arg(m_active->engineLabel());
+                find.run = [this] {
+                    if (!m_active) return;
+                    bool ok = false;
+                    const QString text = QInputDialog::getText(this, QStringLiteral("Search terminal"),
+                                                               QStringLiteral("Find:"), QLineEdit::Normal, QString(), &ok);
+                    if (!ok || text.isEmpty() || !m_active) return;
+                    const int matches = m_active->findInTerminal(text, false);
+                    statusBar()->showMessage(matches > 0 ? QStringLiteral("%1 match(es) for \"%2\"").arg(matches).arg(text)
+                                                         : QStringLiteral("No match for \"%1\"").arg(text));
+                };
+                items << find;
+            }
+        }
 
         items << actionItem(panes, QStringLiteral("Open folder in explorer"), QStringLiteral("This pane's directory"), QStringLiteral("files.explorer"));
         items << actionItem(panes, QStringLiteral("Open file…"), QStringLiteral("Preview a file in a pane"), QStringLiteral("files.open"));
+        {
+            // Per-pane terminal engine (docs/ENGINE.md). Both can run side by side in one window.
+            const bool engineDefault = relay::defaultEngineKind() == relay::EngineKind::Relay;
+            PaletteItem relayPane;
+            relayPane.key = QStringLiteral("pane.splitRight.relay"); relayPane.section = panes;
+            relayPane.label = QStringLiteral("New pane (Relay engine)");
+            relayPane.detail = QStringLiteral("Splits right using Relay's own terminal engine%1")
+                                   .arg(engineDefault ? QStringLiteral(" (the default here)") : QString());
+            relayPane.aliases = QStringLiteral("engine vterm ghostty libvterm");
+            relayPane.run = [this] { split(Qt::Horizontal, QStringLiteral("relay")); };
+            items << relayPane;
+            PaletteItem konsolePane;
+            konsolePane.key = QStringLiteral("pane.splitRight.konsole"); konsolePane.section = panes;
+            konsolePane.label = QStringLiteral("New pane (Konsole engine)");
+            konsolePane.detail = QStringLiteral("Splits right using KonsolePart%1")
+                                     .arg(engineDefault ? QString() : QStringLiteral(" (the default here)"));
+            konsolePane.aliases = QStringLiteral("engine kpart konsolepart");
+            konsolePane.run = [this] { split(Qt::Horizontal, QStringLiteral("konsole")); };
+            items << konsolePane;
+        }
         items << actionItem(panes, QStringLiteral("Split right"), QString(), QStringLiteral("pane.splitRight"));
         items << actionItem(panes, QStringLiteral("Split down"), QString(), QStringLiteral("pane.splitDown"));
         items << actionItem(panes, QStringLiteral("New tab"), QString(), QStringLiteral("tab.new"));
@@ -5924,7 +6116,12 @@ private:
         if (!QFileInfo(cwd).isDir()) cwd = m_manager->workspace();
         QString workspace = spec.value(QStringLiteral("workspace")).toString();
         if (!QFileInfo(workspace).isDir()) workspace = m_manager->workspace();
-        auto *pane = new Pane(workspace, cwd, m_manager->cleanShell());
+        // Per-pane terminal engine: the spec (palette action or restored session), else the
+        // process default from --engine / RELAY_ENGINE.
+        relay::EngineKind engine = relay::defaultEngineKind();
+        relay::parseEngineKind(spec.value(QStringLiteral("engine")).toString(), &engine);
+        const QString core = spec.value(QStringLiteral("engine_core")).toString(relay::defaultEngineCore());
+        auto *pane = new Pane(workspace, cwd, m_manager->cleanShell(), engine, core);
         QPointer<Pane> guard(pane);
         // Callbacks find the pane's current window, so panes and tabs can move between windows.
         pane->onStatus = [guard](const QString &text) { if (auto *w = windowOf(guard); w && guard == w->m_active) w->statusBar()->showMessage(text); };
@@ -5979,7 +6176,9 @@ private:
 
     QJsonObject serializeNode(QWidget *widget) const {
         if (auto *pane = dynamic_cast<Pane *>(widget))
-            return {{"pane", QJsonObject{{"cwd", pane->cwd()}, {"workspace", pane->workspace()}}}};
+            return {{"pane", QJsonObject{{"cwd", pane->cwd()}, {"workspace", pane->workspace()},
+                                        {"engine", relay::engineKindName(pane->engine())},
+                                        {"engine_core", pane->engineCore()}}}};
         if (auto *tool = dynamic_cast<ToolPane *>(widget)) return tool->node();
         if (auto *splitter = dynamic_cast<QSplitter *>(widget)) {
             QJsonArray children, sizes;
@@ -6089,12 +6288,14 @@ private:
         updateTitles();
     }
 
-    void split(Qt::Orientation orientation) {
+    void split(Qt::Orientation orientation, const QString &engine = QString()) {
         QWidget *anchor = m_activeLeaf;
         if (!anchor) return;
         Pane *pane = nullptr;
         const QString workspace = m_active ? m_active->workspace() : m_manager->workspace();
-        try { pane = createPane({{"cwd", leafCwd(anchor)}, {"workspace", workspace}}); }
+        QJsonObject spec{{"cwd", leafCwd(anchor)}, {"workspace", workspace}};
+        if (!engine.isEmpty()) spec.insert(QStringLiteral("engine"), engine);
+        try { pane = createPane(spec); }
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
         insertBeside(anchor, pane, orientation, false);
         setActive(pane);
@@ -6718,11 +6919,18 @@ int main(int argc, char **argv) {
         QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("org.relayterminal.Relay"), QIcon(png)));
     } catch (const std::exception &) {
     }
-    QCommandLineParser parser; parser.setApplicationDescription(QStringLiteral("Konsole-based terminal with rich input and BYOK agents."));
+    QCommandLineParser parser; parser.setApplicationDescription(QStringLiteral("Terminal with rich input and BYOK agents."));
     parser.addHelpOption(); parser.addVersionOption();
     QCommandLineOption workspace(QStringList{QStringLiteral("w"), QStringLiteral("workspace")}, QStringLiteral("Initial terminal directory and agent workspace."), QStringLiteral("path"), QDir::currentPath());
     QCommandLineOption clean(QStringLiteral("clean-shell"), QStringLiteral("Do not source ~/.bashrc; useful for incompatible DEBUG/preexec prompt hooks."));
-    parser.addOption(workspace); parser.addOption(clean); parser.process(app);
+    QCommandLineOption engine(QStringLiteral("engine"), QStringLiteral("Terminal engine for new panes: konsole (default) or relay. Also RELAY_ENGINE."), QStringLiteral("name"));
+    QCommandLineOption engineCore(QStringLiteral("engine-core"), QStringLiteral("Emulator core of Relay-engine panes: ghostty or libvterm. Also RELAY_ENGINE_CORE."), QStringLiteral("name"));
+    parser.addOption(workspace); parser.addOption(clean); parser.addOption(engine); parser.addOption(engineCore); parser.process(app);
+    // Per-pane terminal engine (docs/ENGINE.md); the palette can still pick the other one.
+    QString engineWarning;
+    relay::setDefaultEngineKind(relay::resolveEngineKind(parser.value(engine), qEnvironmentVariable("RELAY_ENGINE"), &engineWarning));
+    relay::setDefaultEngineCore(relay::resolveEngineCore(parser.value(engineCore), qEnvironmentVariable("RELAY_ENGINE_CORE")));
+    if (!engineWarning.isEmpty()) fprintf(stderr, "relay: %s\n", qPrintable(engineWarning));
     const auto path = QFileInfo(parser.value(workspace)).canonicalFilePath();
     if (path.isEmpty() || !QFileInfo(path).isDir()) { QMessageBox::critical(nullptr, QStringLiteral("Relay"), QStringLiteral("Workspace must be an existing directory.")); return 1; }
     QDir::setCurrent(path);
@@ -6741,4 +6949,3 @@ int main(int argc, char **argv) {
     }
 }
 
-#include "main.moc"

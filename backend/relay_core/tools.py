@@ -113,8 +113,26 @@ class ToolExecutor:
         self.keybindings = keybindings
         self.emit = emit
         self.cancel = cancel
+        # Where run_command runs when the model gives no cwd: the directory the user's terminal is in.
+        self.default_cwd = "."
         self._process: subprocess.Popen | None = None
         self._lock = threading.Lock()
+
+    def set_default_cwd(self, path: str | None) -> None:
+        """Follow the user's terminal. Anything outside the workspace falls back to its root."""
+        self.default_cwd = "."
+        if not isinstance(path, str) or not path:
+            return
+        try:
+            relative = Path(path).expanduser().resolve(strict=True).relative_to(self.workspace.root)
+        except (ValueError, OSError):
+            return
+        candidate = str(relative) or "."
+        try:
+            self.workspace.resolve(candidate)
+        except ValueError:
+            return
+        self.default_cwd = candidate
 
     def stop_process(self):
         with self._lock:
@@ -166,7 +184,8 @@ class ToolExecutor:
             command = self._text(args, "command", maximum=16384)
             if not command.strip():
                 raise ValueError("Command must not be empty.")
-            cwd = self.workspace.resolve(args.get("cwd", "."))
+            args["cwd"] = args.get("cwd") or self.default_cwd
+            cwd = self.workspace.resolve(args["cwd"])
             if not cwd.is_dir():
                 raise ValueError("Command working directory must be a directory.")
             timeout = args.get("timeout_seconds", 30)
