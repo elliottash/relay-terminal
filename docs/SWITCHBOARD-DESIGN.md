@@ -334,3 +334,17 @@ Board UI), so autonomy is QA'd before the drag-and-drop pane lands.
    plan onto a card rather than a free-standing `.relay/plans` file (supersedes the earlier `.relay/plans` decision
    for projects with a Switchboard).
 5. **Card agent:** leaning to the pane model; alternatives to be described to the owner before deciding.
+
+### 12.5 Card agent (owner decision, 2026-09-17)
+
+- **Thread replies** come from a dedicated **Switchboard agent** (a worker per window, as in 4.3), whose model is a
+  role in Agent options defaulting to the main agent (see `issues/features/2026-09-17-model-roles-and-fast-agent.md`).
+- **Pane hand-off (option C):** a card can be pulled into a terminal pane's own conversation (`#K7Q2`, "work on
+  #K7Q2"), so the pane agent has the card body, open tasks and thread tail in context and posts progress back.
+- **Per-card conversation (option D):** each card keeps a saved conversation so long discussions retain full detail
+  (tool results, reasoning). The card file and its append-only thread remain the shared record: a collaborator, or this
+  machine after the local state is lost, reconstructs the thread from the file, and an edit to the card invalidates the
+  saved conversation (it is reseeded from the file).
+- **Chores (option E):** duplicate checks, label and title suggestions and non-compliant-note scans run on the chores
+  role, default `google/gemini-3.8-flash` via OpenRouter (fast agent if no OpenRouter key). They never post thread
+  replies and every write is logged.
