@@ -318,3 +318,19 @@ Board UI), so autonomy is QA'd before the drag-and-drop pane lands.
    Private tab under `.relay/board-private/`)?
 5. **Card agent:** a stateless board worker on the anchor pane's model (recommended), or a cheap triage default
    (`gemini-3.5-flash-lite`) that escalates to the pane's model for real discussion?
+
+## 12. Owner decisions (2026-09-17)
+
+1. **Name:** "Switchboard" everywhere in the product for now (UI, `/switchboard`, docs); revisit during QA. Code and
+   tool identifiers may stay short (`board_*`, `BoardPane`) where they are not user-visible.
+2. **Unify:** yes. Migrate the 43 issues to YAML front matter + `threads/`, add the paragraph to the global
+   `issue-tracking` skill; Bugs tab on `changes/`.
+3. **Autonomy edges:** in `auto` the agent may remove or rewrite input text (intake notes, quick-adds, owner-authored
+   card text). Every such change is logged in the card's thread as an event holding the original text and the new text,
+   so the thread works like a GitHub issue's discussion history and any rewrite can be reverted. This replaces the
+   6.3 guardrail that refused edits to hash-recorded owner text; the hash now detects unlogged edits instead.
+4. **Plans and privacy:** plans are committed; private cards exist. A card marked private lives outside git (local,
+   gitignored) and its plans are private too. Plans are implemented in the Switchboard directly: plan mode writes the
+   plan onto a card rather than a free-standing `.relay/plans` file (supersedes the earlier `.relay/plans` decision
+   for projects with a Switchboard).
+5. **Card agent:** leaning to the pane model; alternatives to be described to the owner before deciding.
