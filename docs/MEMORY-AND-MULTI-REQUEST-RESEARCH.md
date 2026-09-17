@@ -210,3 +210,13 @@ R2: "…full text…"
 (completion check, reminders) → eval baseline before and after → 6 (UI) → 8 → 9 alongside the Switchboard → 10.
 Open questions for the owner: default turn limit; whether the completion check may re-prompt automatically (proposed
 yes, max 2); whether memory lives in the repo (`.relay/memory.md`, shareable like the Switchboard) or per user.
+
+## 9. Owner decisions (2026-09-17)
+
+- **Do all recommended fixes.** Items 1–8 are being implemented now. The todo tool (item 3) ships in the minimal
+  form above; the user-facing task list is redesigned in a separate proposal (Warp vs Claude Code, integrated with the
+  Switchboard: a task can be a whole card or an item on a card).
+- **Step limit:** default 50 model steps (tool-call cap 150), configurable in Agent options.
+- **End-of-turn check:** yes, automatic re-prompt, at most 2 per turn.
+- **Project memory:** lives in the repo's Switchboard, viewable and editable alongside plans and issues, with private
+  (not synced to git) memories, like private cards. Supersedes the `.relay/memory.md` location in item 9.
