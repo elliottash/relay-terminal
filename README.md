@@ -151,8 +151,7 @@ that arrives while a program is running waits until the next prompt.
 | Alt+Left / Right / Up / Down | Move focus to the neighboring pane |
 | Ctrl+W | Close the pane; the tab if it is the last pane; the window, after a warning, if it is the last tab |
 | Ctrl+Shift+W | Restore the last closed pane, tab or window |
-| Ctrl+Shift+A | Agent options palette: model, input mode, new chat, stop, provider |
-| Ctrl+Shift+T | Terminal options palette: interrupt, native input, splits, tabs, shortcuts |
+| Ctrl+Shift+A | Actions palette: agent, terminal, panes and tabs, shortcuts |
 
 Every pane has its own shell, composer, agent worker and conversation. The toolbar acts on
 the focused pane, which has an accent outline. Typing `exit` closes a pane. Restoring
@@ -162,9 +161,11 @@ composer and the shell prompt. While a program such as vim, nano or less runs in
 terminal, only Ctrl+Shift shortcuts and F-keys act; everything else reaches the program. Most
 desktop window managers reserve Alt+Tab for themselves, in which case Relay never receives it.
 
-Palettes float over the right edge without resizing the terminal. Type to filter, use the
-arrow keys or Ctrl+N / Ctrl+P, Enter to run, and Esc to clear the filter and then close. Focus
-returns to where it was. The input mode and model pickers and an interrupt button sit in each
+The actions palette floats over the right edge without resizing the terminal. With an empty
+filter it shows recently used actions, then sections ordered by where focus was. Typing
+searches everything, including submenu entries: "deep" finds Model › DeepSeek. Use the arrow
+keys or Ctrl+N / Ctrl+P to move, Right or Enter to open a submenu, Left to go back, Enter to
+run, and Esc to clear the filter, go back, then close. Focus returns to where it was. The input mode and model pickers and an interrupt button sit in each
 pane's input row.
 
 ### Changing shortcuts
@@ -173,10 +174,16 @@ All window shortcuts are named actions stored in
 `~/.config/RelayTerminal/relay/keybindings.json`, which reloads automatically:
 
 ```json
-{"version": 1, "program_keys": "shift-only", "bindings": {"pane.close": ["Ctrl+W"], "agent.newChat": ["Ctrl+Shift+N"]}}
+{"version": 1, "preset": "relay", "program_keys": "shift-only", "bindings": {"agent.newChat": ["Ctrl+Shift+Y"]}}
 ```
 
-**Terminal options › Edit keyboard shortcuts** opens the file in `$VISUAL`, `$EDITOR` or
+`preset` is `relay` (Chrome-style defaults), `warp`, `vscode` or `konsole`; switch it from
+**Actions › Shortcut preset**. Presets follow each program's Linux defaults where Relay has an
+equivalent action; sources and adaptations are in `docs/KEYBINDING-PRESETS.md`. Entries in
+`bindings` override the preset and survive preset changes; **Clear custom overrides** removes
+them.
+
+**Actions › Edit keyboard shortcuts** opens the file in `$VISUAL`, `$EDITOR` or
 nano in the focused pane. `program_keys` is `shift-only` (default), `all` or `none`. Conflicts
 and unknown keys are reported in the status bar. The agent can also change shortcuts: ask it,
 for example, to bind `agent.newChat` to Ctrl+Shift+N. Its `set_keybinding` tool edits only

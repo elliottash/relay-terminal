@@ -1,0 +1,2 @@
+when i was in vim, i couldnt get back to the terminal with a keyboard shortcut. 
+

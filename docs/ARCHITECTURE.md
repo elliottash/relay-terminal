@@ -210,5 +210,10 @@ key strings and rewrites only that binding atomically; the watcher reloads it ev
 
 Terminal Ctrl+C calls the display's `copyToClipboard` slot and treats a clipboard change as
 proof of a selection, because KonsolePart exposes no selection query; otherwise the key
-reaches the shell as an interrupt. Palettes are an overlay child of the central widget, so
-opening one never resizes the terminal or makes a TUI redraw.
+reaches the shell as an interrupt. The single actions palette is an overlay child of the central widget, so opening it never
+resizes the terminal or makes a TUI redraw. Items carry a stable key (recent list in QSettings),
+a section, and either a run function or a submenu builder; searching flattens submenus.
+
+Presets (`relay`, `warp`, `vscode`, `konsole`) are embedded tables; loading applies the Relay
+defaults, then the chosen preset, then user overrides. Symbol keys match with or without
+Shift, because shifted punctuation differs between keyboard layouts.

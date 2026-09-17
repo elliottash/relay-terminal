@@ -46,6 +46,15 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(normalize_key('Ctrl+`'), 'Ctrl+`')
         self.assertEqual(normalize_key('Ctrl+Shift+Backtab'), 'Ctrl+Shift+Backtab')
 
+    def test_symbol_keys_and_aliases(self):
+        from relay_core import keybindings as kb
+        self.assertEqual(kb.normalize_key("ctrl+shift+("), "Ctrl+Shift+(")
+        self.assertEqual(kb.normalize_key("Ctrl+|"), "Ctrl+|")
+        self.assertEqual(kb.normalize_key("Ctrl+Esc"), "Ctrl+Escape")
+        self.assertEqual(kb.normalize_key("Ctrl+PageDown"), "Ctrl+PgDown")
+        with self.assertRaises(kb.KeybindingError):
+            kb.normalize_key("Ctrl++")
+
     def test_invalid_keys(self):
         for bad in ['', 'Ctrl+', '+P', 'Hyper+P', 'Ctrl+Ctrl+P', 'Ctrl+F36', 'Ctrl+Pause', 'Ctrl+P, Ctrl+Q',
                     'Ctrl+é', 'Ctrl+PP', 7, None, 'x' * 80]:

@@ -40,6 +40,7 @@
 #include <QSaveFile>
 #include <QScreen>
 #include <QSettings>
+#include <QSet>
 #include <QDBusConnection>
 #include <QMetaObject>
 #include <QSignalBlocker>
@@ -53,6 +54,8 @@
 #include <QFileSystemWatcher>
 #include <QKeySequence>
 #include <QListWidget>
+#include <QTreeWidget>
+#include <QHeaderView>
 #include <QToolButton>
 #include <QTabBar>
 #include <QTimer>
@@ -106,6 +109,20 @@ public:
     const QList<ActionDef> &actions() const { return m_actions; }
     QString path() const { return m_path; }
     QString programKeys() const { return m_programKeys; }
+    QString preset() const { return m_preset; }
+    // Built-in presets. "relay" is the Chrome-style default; the others follow their programs'
+    // Linux defaults where Relay has an equivalent action (see docs/KEYBINDING-PRESETS.md).
+    static QList<QPair<QString, QString>> presets() {
+        return {{QStringLiteral("relay"), QStringLiteral("Relay (Chrome-style)")}, {QStringLiteral("warp"), QStringLiteral("Warp")},
+                {QStringLiteral("vscode"), QStringLiteral("VS Code")}, {QStringLiteral("konsole"), QStringLiteral("Konsole")}};
+    }
+    void setPreset(const QString &id) { writeSetting(QStringLiteral("preset"), id); }
+    bool hasOverrides() const { return !m_overrides.isEmpty(); }
+    void clearOverrides() {
+        QJsonObject root = readObject();
+        root.insert(QStringLiteral("bindings"), QJsonObject());
+        writeObject(root);
+    }
     QStringList keysFor(const QString &id) const { return m_bindings.value(id); }
     QString shortcutText(const QString &id) const {
         const auto keys = keysFor(id);
@@ -119,7 +136,12 @@ public:
         auto mods = event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
         if (key == Qt::Key_Backtab) { key = Qt::Key_Tab; mods |= Qt::ShiftModifier; }
         if (key == 0 || key == Qt::Key_unknown || key == Qt::Key_Control || key == Qt::Key_Shift || key == Qt::Key_Alt || key == Qt::Key_Meta) return {};
-        return m_lookup.value(combo(key, mods));
+        QString id = m_lookup.value(combo(key, mods));
+        // Shifted symbols differ by keyboard layout: "(" needs Shift on US keyboards but not on
+        // AZERTY. For symbol keys, accept the binding written with or without Shift.
+        const bool symbol = (key >= 0x21 && key <= 0x2f) || (key >= 0x3a && key <= 0x40) || (key >= 0x5b && key <= 0x60) || (key >= 0x7b && key <= 0x7e);
+        if (id.isEmpty() && symbol) id = m_lookup.value(combo(key, mods ^ Qt::ShiftModifier));
+        return id;
     }
 
     // True when a shortcut should act even though a program has keyboard focus.
@@ -133,12 +155,28 @@ public:
 
     void setProgramKeys(const QString &mode) { writeSetting(QStringLiteral("program_keys"), mode); }
 
+    // Preset table for one preset; actions missing from a table use the Relay default.
+    static QHash<QString, QStringList> presetTable(const QString &preset) {
+        QHash<QString, QStringList> table;
+        const QJsonObject all = QJsonDocument::fromJson(presetJson()).object();
+        const QJsonObject chosen = all.value(preset).toObject();
+        for (auto it = chosen.begin(); it != chosen.end(); ++it) {
+            QStringList keys;
+            for (const auto &value : it.value().toArray()) keys << value.toString();
+            table.insert(it.key(), keys);
+        }
+        return table;
+    }
+
     // Writes a complete, editable file when none exists yet.
     void ensureFile() {
         if (QFileInfo::exists(m_path)) return;
-        QJsonObject bindings;
-        for (const auto &action : m_actions) bindings.insert(action.id, QJsonArray::fromStringList(m_bindings.value(action.id)));
-        writeObject({{"version", 1}, {"program_keys", m_programKeys}, {"bindings", bindings}});
+        // Overrides start empty so switching presets keeps working; "reference" lists every
+        // action with its current keys and is ignored when loading.
+        QJsonObject reference;
+        for (const auto &action : m_actions)
+            reference.insert(action.id, QStringLiteral("%1 [%2]").arg(action.description, m_bindings.value(action.id).join(QStringLiteral(", "))));
+        writeObject({{"version", 1}, {"preset", m_preset}, {"program_keys", m_programKeys}, {"bindings", QJsonObject()}, {"reference", reference}});
     }
 
     QJsonObject catalog() const {
@@ -152,9 +190,10 @@ public:
     void listen(QObject *context, std::function<void()> callback) { m_listeners.append({context, std::move(callback)}); }
 
     void reload() {
-        m_bindings.clear();
-        for (const auto &action : m_actions) m_bindings.insert(action.id, action.defaults);
+        m_bindings.clear(); m_overrides.clear();
         m_programKeys = QStringLiteral("shift-only");
+        m_preset = QStringLiteral("relay");
+        QJsonObject root;
         QString problem;
         QFile file(m_path);
         if (file.exists()) {
@@ -163,19 +202,26 @@ public:
                 const auto doc = QJsonDocument::fromJson(file.readAll(), &error);
                 if (error.error != QJsonParseError::NoError || !doc.isObject()) problem = QStringLiteral("keybindings.json is not valid JSON; using defaults.");
                 else {
-                    const auto root = doc.object();
+                    root = doc.object();
                     const QString mode = root.value(QStringLiteral("program_keys")).toString();
                     if (mode == QStringLiteral("all") || mode == QStringLiteral("none") || mode == QStringLiteral("shift-only")) m_programKeys = mode;
-                    const auto bindings = root.value(QStringLiteral("bindings")).toObject();
-                    for (auto it = bindings.begin(); it != bindings.end(); ++it) {
-                        if (!m_bindings.contains(it.key())) continue;
-                        QStringList keys;
-                        for (const auto &value : it.value().toArray())
-                            if (!value.toString().trimmed().isEmpty()) keys << value.toString().trimmed();
-                        m_bindings.insert(it.key(), keys);
-                    }
+                    const QString preset = root.value(QStringLiteral("preset")).toString();
+                    for (const auto &known : presets()) if (known.first == preset) m_preset = preset;
                 }
             } else problem = QStringLiteral("keybindings.json could not be read; using defaults.");
+        }
+        const auto table = presetTable(m_preset);
+        for (const auto &action : m_actions) m_bindings.insert(action.id, table.contains(action.id) ? table.value(action.id) : action.defaults);
+        const auto bindings = root.value(QStringLiteral("bindings")).toObject();
+        for (auto it = bindings.begin(); it != bindings.end(); ++it) {
+            // Earlier builds had separate agent and terminal palettes.
+            const QString id = it.key() == QStringLiteral("palette.agent") ? QStringLiteral("palette.open") : it.key();
+            if (!m_bindings.contains(id)) continue;
+            QStringList keys;
+            for (const auto &value : it.value().toArray())
+                if (!value.toString().trimmed().isEmpty()) keys << value.toString().trimmed();
+            m_bindings.insert(id, keys);
+            m_overrides.insert(id);
         }
         m_lookup.clear(); m_conflicts.clear();
         for (const auto &action : m_actions) {
@@ -209,8 +255,7 @@ private:
         add("pane.focusDown", "pane", "Focus pane below", {QStringLiteral("Alt+Down")});
         add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W")});
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+W")});
-        add("palette.agent", "palette", "Open agent options", {QStringLiteral("Ctrl+Shift+A")});
-        add("palette.terminal", "palette", "Open terminal options", {QStringLiteral("Ctrl+Shift+T")});
+        add("palette.open", "palette", "Open the Relay actions palette", {QStringLiteral("Ctrl+Shift+A")});
         add("terminal.native", "terminal", "Toggle native terminal input", {QStringLiteral("F12")});
         add("terminal.interrupt", "terminal", "Interrupt the running command (Ctrl+C)", {});
         add("agent.newChat", "agent", "Start a new agent conversation", {});
@@ -251,14 +296,15 @@ private:
         return combo(key, mods);
     }
 
-    void writeSetting(const QString &name, const QString &value) {
-        QJsonObject root;
+    QJsonObject readObject() const {
         QFile file(m_path);
-        if (file.open(QIODevice::ReadOnly)) {
-            const auto doc = QJsonDocument::fromJson(file.readAll());
-            if (doc.isObject()) root = doc.object();
-            file.close();
-        }
+        if (!file.open(QIODevice::ReadOnly)) return {};
+        const auto doc = QJsonDocument::fromJson(file.readAll());
+        return doc.isObject() ? doc.object() : QJsonObject();
+    }
+
+    void writeSetting(const QString &name, const QString &value) {
+        QJsonObject root = readObject();
         if (!root.contains(QStringLiteral("version"))) root.insert(QStringLiteral("version"), 1);
         root.insert(name, value);
         writeObject(root);
@@ -276,7 +322,13 @@ private:
     QHash<QString, QStringList> m_bindings;
     QHash<int, QString> m_lookup;
     QStringList m_conflicts;
-    QString m_path, m_programKeys = QStringLiteral("shift-only");
+    QString m_path, m_programKeys = QStringLiteral("shift-only"), m_preset = QStringLiteral("relay");
+    QSet<QString> m_overrides;
+
+    // Filled from docs/KEYBINDING-PRESETS.md research. Missing actions fall back to Relay defaults.
+    static QByteArray presetJson() {
+        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":["Ctrl+Shift+E"],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+Shift+Y"],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":["Ctrl+Shift+I"],"input.modeAgent":["Ctrl+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[]},"vscode":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":["Ctrl+Shift+|"],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+N"],"agent.stop":["Ctrl+Esc"],"agent.provider":["Ctrl+Alt+."],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[]},"konsole":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":["Ctrl+Shift+)","Ctrl+)"],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[]}})PRESETS");
+    }
     QFileSystemWatcher m_watcher;
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_listeners;
 };
@@ -1311,7 +1363,7 @@ public:
             const auto conflicts = Keymap::instance().conflicts();
             statusBar()->showMessage(conflicts.isEmpty() ? QStringLiteral("Keyboard shortcuts reloaded.")
                                                          : QStringLiteral("Keyboard shortcuts: ") + conflicts.join(QStringLiteral("; ")));
-            if (m_sidebar->isVisible()) refreshPalette();
+            if (m_sidebar->isVisible()) renderPalette();
         });
         connect(m_tabs, &QTabWidget::currentChanged, this, [this](int) {
             QWidget *page = m_tabs->currentWidget();
@@ -1390,10 +1442,14 @@ protected:
         if (widget == m_filter && event->type() == QEvent::ShortcutOverride) {
             const int k = key->key();
             if (k == Qt::Key_Escape || k == Qt::Key_Return || k == Qt::Key_Enter || k == Qt::Key_Up || k == Qt::Key_Down
+                || k == Qt::Key_Left || k == Qt::Key_Right || k == Qt::Key_PageUp || k == Qt::Key_PageDown
                 || ((key->modifiers() & Qt::ControlModifier) && (k == Qt::Key_N || k == Qt::Key_P))) { event->accept(); return true; }
         }
         // Palette keys stay inside the palette.
-        if (m_sidebar->isVisible() && (widget == m_filter || widget == m_list)) return QMainWindow::eventFilter(object, event);
+        if (m_sidebar->isVisible() && (widget == m_filter || widget == m_list)) {
+            // Only the palette key itself (to close) acts while the palette has focus.
+            if (Keymap::instance().match(key) != QStringLiteral("palette.open")) return QMainWindow::eventFilter(object, event);
+        }
         const QString id = Keymap::instance().match(key);
         if (id.isEmpty()) return QMainWindow::eventFilter(object, event);
         // A program such as vim owns its keys, unless the program_keys rule lets this shortcut act.
@@ -1434,8 +1490,7 @@ private:
             connect(action, &QAction::triggered, this, [this, id] { runAction(id); });
             m_toolbarActions.append({action, id});
         };
-        addAction(QStringLiteral("Agent options"), QStringLiteral("palette.agent"));
-        addAction(QStringLiteral("Terminal options"), QStringLiteral("palette.terminal"));
+        addAction(QStringLiteral("Actions"), QStringLiteral("palette.open"));
         toolbar->addSeparator();
         addAction(QStringLiteral("New chat"), QStringLiteral("agent.newChat"));
         addAction(QStringLiteral("Stop agent"), QStringLiteral("agent.stop"));
@@ -1470,8 +1525,7 @@ private:
         else if (id == QStringLiteral("pane.focusDown")) navigate(Qt::Key_Down);
         else if (id == QStringLiteral("pane.close")) closeActive();
         else if (id == QStringLiteral("closed.restore")) m_manager->restore(this);
-        else if (id == QStringLiteral("palette.agent")) togglePalette(QStringLiteral("agent"));
-        else if (id == QStringLiteral("palette.terminal")) togglePalette(QStringLiteral("terminal"));
+        else if (id == QStringLiteral("palette.open")) togglePalette();
         else if (id == QStringLiteral("keybindings.reload")) Keymap::instance().reload();
         else if (id == QStringLiteral("keybindings.edit")) {
             Keymap::instance().ensureFile();
@@ -1491,37 +1545,48 @@ private:
         else if (id == QStringLiteral("input.modeAgent")) pane->setMode(QStringLiteral("agent"));
     }
 
-    // ----- palettes ---------------------------------------------------------------------------
-    // Provisional contents; see docs/PALETTE-RESEARCH.md for the research that will refine them.
-    struct PaletteItem { QString label, detail, shortcut; bool checked = false; std::function<void()> run; };
+    // ----- palette ----------------------------------------------------------------------------
+    // One Relay actions palette (Ctrl+Shift+A). Sections: Recent, then Agent / Terminal ordered by
+    // where focus was, then Panes and tabs, then Shortcuts. Typing searches everything, including
+    // submenu entries ("deep" finds Model › DeepSeek). Right or Enter opens a submenu; Left or
+    // Backspace on an empty filter goes back; Esc clears the filter, goes back, then closes.
+    struct PaletteItem {
+        QString key, section, label, detail, shortcut;
+        bool checked = false, stayOpen = false;
+        std::function<void()> run;
+        std::function<QList<PaletteItem>()> children;
+    };
 
     void buildSidebar() {
         m_sidebar = new QWidget;
         m_sidebar->setObjectName(QStringLiteral("sidebar"));
         m_sidebar->setAttribute(Qt::WA_StyledBackground);
-        m_sidebar->setFixedWidth(380);
         auto *layout = new QVBoxLayout(m_sidebar); layout->setContentsMargins(12, 12, 12, 12); layout->setSpacing(8);
         m_paletteTitle = new QLabel; m_paletteTitle->setObjectName(QStringLiteral("paletteTitle"));
         layout->addWidget(m_paletteTitle);
-        m_filter = new QLineEdit; m_filter->setPlaceholderText(QStringLiteral("Type to filter · ↑↓ select · Enter run · Esc close"));
+        m_filter = new QLineEdit; m_filter->setPlaceholderText(QStringLiteral("Search actions · ↑↓ select · → open · Enter run · Esc back"));
         layout->addWidget(m_filter);
-        m_list = new QListWidget; m_list->setObjectName(QStringLiteral("paletteList"));
-        m_list->setUniformItemSizes(true); m_list->setFocusPolicy(Qt::NoFocus);
+        m_list = new QTreeWidget; m_list->setObjectName(QStringLiteral("paletteList"));
+        m_list->setColumnCount(2); m_list->setHeaderHidden(true); m_list->setRootIsDecorated(false);
+        m_list->setIndentation(0); m_list->setUniformRowHeights(true); m_list->setFocusPolicy(Qt::NoFocus);
+        m_list->header()->setStretchLastSection(false);
+        m_list->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+        m_list->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
         layout->addWidget(m_list, 1);
         m_sidebar->hide();
-        connect(m_filter, &QLineEdit::textChanged, this, [this] { filterPalette(); });
-        connect(m_list, &QListWidget::itemActivated, this, [this](QListWidgetItem *) { runSelected(); });
-        connect(m_list, &QListWidget::itemClicked, this, [this](QListWidgetItem *) { runSelected(); });
+        connect(m_filter, &QLineEdit::textChanged, this, [this] { renderPalette(); });
+        connect(m_list, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *row) { if (row && row->data(0, Qt::UserRole).toInt() >= 0) { m_list->setCurrentItem(row); activateSelected(false); } });
         m_filter->installEventFilter(this);
     }
 
-    void togglePalette(const QString &kind) {
-        if (m_sidebar->isVisible() && m_paletteKind == kind) { closePalette(); return; }
-        m_paletteKind = kind;
+    void togglePalette() {
+        if (m_sidebar->isVisible()) { closePalette(); return; }
         m_returnPane = m_active;
         m_returnFocus = QApplication::focusWidget();
+        m_terminalContext = m_active && m_active->ownsTerminalWidget(m_returnFocus);
+        m_stack.clear();
         m_filter->clear();
-        refreshPalette();
+        renderPalette();
         placeSidebar();
         m_sidebar->show();
         m_sidebar->raise();
@@ -1531,75 +1596,131 @@ private:
     void placeSidebar() {
         if (!m_sidebar || !centralWidget()) return;
         const QRect area = centralWidget()->rect();
-        const int width = std::min(380, area.width() - 40);
+        const int width = std::min(420, area.width() - 40);
         m_sidebar->setGeometry(area.right() - width - 8, area.top() + 36, width, std::max(200, area.height() - 48));
     }
 
     void closePalette() {
         m_sidebar->hide();
+        m_stack.clear();
         // Return focus exactly where it was, e.g. to vim in the terminal, not to the composer.
         if (m_returnFocus && m_returnFocus->window() == this && m_returnFocus != m_filter) m_returnFocus->setFocus(Qt::OtherFocusReason);
         else if (Pane *pane = m_returnPane ? m_returnPane.data() : m_active.data()) pane->focusInput();
     }
 
-    void refreshPalette() {
-        m_items.clear();
-        Pane *pane = m_active;
-        auto item = [this](const QString &label, const QString &detail, const QString &action, bool checked = false, std::function<void()> run = {}) {
-            PaletteItem entry;
-            entry.label = label; entry.detail = detail; entry.checked = checked;
-            entry.shortcut = action.isEmpty() ? QString() : Keymap::instance().shortcutText(action);
-            entry.run = run ? std::move(run) : std::function<void()>([this, action] { runAction(action); });
-            m_items.append(entry);
-        };
-        if (m_paletteKind == QStringLiteral("agent")) {
-            m_paletteTitle->setText(QStringLiteral("AGENT OPTIONS"));
-            if (pane) {
-                for (const auto &model : pane->storedModels()) {
-                    const QString id = model.first;
-                    item(QStringLiteral("Model: ") + model.second, QStringLiteral("Switch this pane's model; starts a new conversation"), QString(),
-                         pane->currentPreset() == id, [this, id] { if (m_active) m_active->selectModel(id); });
-                }
-                item(QStringLiteral("Input: Auto detect"), QStringLiteral("Commands to the terminal, everything else to the agent"), QStringLiteral("input.modeAuto"), pane->mode() == QStringLiteral("auto"));
-                item(QStringLiteral("Input: Terminal"), QStringLiteral("Always the terminal; the agent fixes failures"), QStringLiteral("input.modeTerminal"), pane->mode() == QStringLiteral("shell"));
-                item(QStringLiteral("Input: Agent"), QStringLiteral("Always the agent"), QStringLiteral("input.modeAgent"), pane->mode() == QStringLiteral("agent"));
-            }
-            item(QStringLiteral("New chat"), QStringLiteral("Start a new conversation in this pane"), QStringLiteral("agent.newChat"));
-            item(QStringLiteral("Stop agent"), QStringLiteral("Cancel the running turn"), QStringLiteral("agent.stop"));
-            item(QStringLiteral("Provider and API keys…"), QStringLiteral("Base URL, model ID, key, request options"), QStringLiteral("agent.provider"));
-            item(QStringLiteral("Import keys from Warp"), QStringLiteral("Copy Warp's custom-endpoint keys into the keyring"), QString(), false,
-                 [this] { if (m_active) m_active->importWarpKeys(); });
-        } else {
-            m_paletteTitle->setText(QStringLiteral("TERMINAL OPTIONS"));
-            item(QStringLiteral("Interrupt"), QStringLiteral("Send Ctrl+C to the running command"), QStringLiteral("terminal.interrupt"));
-            item(QStringLiteral("Native terminal input"), QStringLiteral("Type directly into Konsole"), QStringLiteral("terminal.native"), pane && pane->isNative());
-            item(QStringLiteral("Split right"), QString(), QStringLiteral("pane.splitRight"));
-            item(QStringLiteral("Split down"), QString(), QStringLiteral("pane.splitDown"));
-            item(QStringLiteral("New tab"), QString(), QStringLiteral("tab.new"));
-            item(QStringLiteral("New window"), QString(), QStringLiteral("window.new"));
-            item(QStringLiteral("Close pane"), QStringLiteral("Then the tab, then the window"), QStringLiteral("pane.close"));
-            item(QStringLiteral("Restore closed"), QStringLiteral("Last closed pane, tab or window"), QStringLiteral("closed.restore"));
-            item(QStringLiteral("Edit keyboard shortcuts…"), Keymap::instance().path(), QStringLiteral("keybindings.edit"));
-            item(QStringLiteral("Reload keyboard shortcuts"), QString(), QStringLiteral("keybindings.reload"));
-            const QString mode = Keymap::instance().programKeys();
-            auto programKeys = [this](const QString &label, const QString &detail, const QString &value, bool checked) {
-                PaletteItem entry; entry.label = label; entry.detail = detail; entry.checked = checked;
-                entry.run = [value] { Keymap::instance().setProgramKeys(value); };
-                m_items.append(entry);
-            };
-            programKeys(QStringLiteral("Keys in programs: Ctrl+Shift and F-keys only"), QStringLiteral("Other shortcuts reach vim, nano, less…"), QStringLiteral("shift-only"), mode == QStringLiteral("shift-only"));
-            programKeys(QStringLiteral("Keys in programs: all Relay shortcuts"), QStringLiteral("Relay shortcuts win inside programs"), QStringLiteral("all"), mode == QStringLiteral("all"));
-            programKeys(QStringLiteral("Keys in programs: none"), QStringLiteral("Programs receive every key"), QStringLiteral("none"), mode == QStringLiteral("none"));
-        }
-        filterPalette();
+    PaletteItem actionItem(const QString &section, const QString &label, const QString &detail, const QString &action, bool checked = false) {
+        PaletteItem item;
+        item.key = action; item.section = section; item.label = label; item.detail = detail; item.checked = checked;
+        item.shortcut = Keymap::instance().shortcutText(action);
+        item.run = [this, action] { runAction(action); };
+        return item;
     }
 
-    // Case-insensitive subsequence match; tighter and earlier matches rank higher.
+    PaletteItem submenu(const QString &key, const QString &section, const QString &label, const QString &detail,
+                        std::function<QList<PaletteItem>()> children) {
+        PaletteItem item;
+        item.key = key; item.section = section; item.label = label; item.detail = detail; item.children = std::move(children);
+        return item;
+    }
+
+    QList<PaletteItem> rootItems() {
+        QList<PaletteItem> items;
+        Pane *pane = m_active;
+        const QString agent = QStringLiteral("Agent"), terminal = QStringLiteral("Terminal"), panes = QStringLiteral("Panes and tabs"), keys = QStringLiteral("Shortcuts");
+        QString currentModel;
+        if (pane) for (const auto &model : pane->storedModels()) if (model.first == pane->currentPreset()) currentModel = model.second;
+        items << submenu(QStringLiteral("menu:model"), agent, QStringLiteral("Model"), currentModel.isEmpty() ? QStringLiteral("No stored keys") : currentModel, [this] {
+            QList<PaletteItem> children;
+            if (!m_active) return children;
+            for (const auto &model : m_active->storedModels()) {
+                PaletteItem item;
+                const QString id = model.first;
+                item.key = QStringLiteral("model:") + id; item.section = QStringLiteral("Model"); item.label = model.second;
+                item.detail = QStringLiteral("This pane; starts a new conversation");
+                item.checked = m_active->currentPreset() == id;
+                item.run = [this, id] { if (m_active) m_active->selectModel(id); };
+                children << item;
+            }
+            return children;
+        });
+        const QString mode = pane ? pane->mode() : QStringLiteral("auto");
+        const QString modeName = mode == QStringLiteral("shell") ? QStringLiteral("Terminal") : mode == QStringLiteral("agent") ? QStringLiteral("Agent") : QStringLiteral("Auto detect");
+        items << submenu(QStringLiteral("menu:mode"), agent, QStringLiteral("Input mode"), modeName, [this, mode] {
+            return QList<PaletteItem>{
+                actionItem(QStringLiteral("Input mode"), QStringLiteral("Auto detect"), QStringLiteral("Commands to the terminal, everything else to the agent"), QStringLiteral("input.modeAuto"), mode == QStringLiteral("auto")),
+                actionItem(QStringLiteral("Input mode"), QStringLiteral("Terminal"), QStringLiteral("Always the terminal; the agent fixes failures"), QStringLiteral("input.modeTerminal"), mode == QStringLiteral("shell")),
+                actionItem(QStringLiteral("Input mode"), QStringLiteral("Agent"), QStringLiteral("Always the agent"), QStringLiteral("input.modeAgent"), mode == QStringLiteral("agent"))};
+        });
+        items << actionItem(agent, QStringLiteral("New chat"), QStringLiteral("Start a new conversation in this pane"), QStringLiteral("agent.newChat"));
+        items << actionItem(agent, QStringLiteral("Stop agent"), pane && pane->agentBusy() ? QStringLiteral("Cancel the running turn") : QStringLiteral("Agent is idle"), QStringLiteral("agent.stop"));
+        items << actionItem(agent, QStringLiteral("Provider and API keys…"), QStringLiteral("Base URL, model ID, key, request options"), QStringLiteral("agent.provider"));
+        PaletteItem importKeys; importKeys.key = QStringLiteral("agent.importWarp"); importKeys.section = agent;
+        importKeys.label = QStringLiteral("Import keys from Warp"); importKeys.detail = QStringLiteral("Copy Warp's custom-endpoint keys into the keyring");
+        importKeys.run = [this] { if (m_active) m_active->importWarpKeys(); };
+        items << importKeys;
+
+        items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Send Ctrl+C to the running program") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
+        items << actionItem(terminal, QStringLiteral("Native terminal input"), QStringLiteral("Type directly into Konsole"), QStringLiteral("terminal.native"), pane && pane->isNative());
+
+        items << actionItem(panes, QStringLiteral("Split right"), QString(), QStringLiteral("pane.splitRight"));
+        items << actionItem(panes, QStringLiteral("Split down"), QString(), QStringLiteral("pane.splitDown"));
+        items << actionItem(panes, QStringLiteral("New tab"), QString(), QStringLiteral("tab.new"));
+        items << actionItem(panes, QStringLiteral("New window"), QString(), QStringLiteral("window.new"));
+        items << actionItem(panes, QStringLiteral("Close pane"), QStringLiteral("Then the tab, then the window"), QStringLiteral("pane.close"));
+        items << actionItem(panes, QStringLiteral("Restore closed"), QStringLiteral("Last closed pane, tab or window"), QStringLiteral("closed.restore"));
+        items << actionItem(panes, QStringLiteral("Next tab"), QString(), QStringLiteral("tab.next"));
+        items << actionItem(panes, QStringLiteral("Previous tab"), QString(), QStringLiteral("tab.previous"));
+
+        const QString presetId = Keymap::instance().preset();
+        QString presetName;
+        for (const auto &preset : Keymap::presets()) if (preset.first == presetId) presetName = preset.second;
+        items << submenu(QStringLiteral("menu:preset"), keys, QStringLiteral("Shortcut preset"), presetName, [this, presetId] {
+            QList<PaletteItem> children;
+            for (const auto &preset : Keymap::presets()) {
+                PaletteItem item;
+                const QString id = preset.first;
+                item.key = QStringLiteral("preset:") + id; item.section = QStringLiteral("Shortcut preset"); item.label = preset.second;
+                item.detail = Keymap::instance().hasOverrides() ? QStringLiteral("Your custom overrides stay on top") : QString();
+                item.checked = id == presetId; item.stayOpen = true;
+                item.run = [id] { Keymap::instance().setPreset(id); };
+                children << item;
+            }
+            return children;
+        });
+        const QString programKeys = Keymap::instance().programKeys();
+        items << submenu(QStringLiteral("menu:programKeys"), keys, QStringLiteral("Shortcuts inside programs"),
+                         programKeys == QStringLiteral("all") ? QStringLiteral("All shortcuts act") : programKeys == QStringLiteral("none") ? QStringLiteral("Programs get every key") : QStringLiteral("Ctrl+Shift and F-keys only"),
+                         [programKeys] {
+            QList<PaletteItem> children;
+            const QList<QStringList> options{{QStringLiteral("shift-only"), QStringLiteral("Ctrl+Shift and F-keys only"), QStringLiteral("Other keys reach vim, nano, less")},
+                                             {QStringLiteral("all"), QStringLiteral("All shortcuts act"), QStringLiteral("Relay wins inside programs")},
+                                             {QStringLiteral("none"), QStringLiteral("Programs get every key"), QStringLiteral("No shortcuts while a program runs")}};
+            for (const auto &option : options) {
+                PaletteItem item;
+                const QString value = option[0];
+                item.key = QStringLiteral("programKeys:") + value; item.section = QStringLiteral("Shortcuts inside programs");
+                item.label = option[1]; item.detail = option[2]; item.checked = programKeys == value; item.stayOpen = true;
+                item.run = [value] { Keymap::instance().setProgramKeys(value); };
+                children << item;
+            }
+            return children;
+        });
+        items << actionItem(keys, QStringLiteral("Edit keyboard shortcuts…"), Keymap::instance().path(), QStringLiteral("keybindings.edit"));
+        items << actionItem(keys, QStringLiteral("Reload keyboard shortcuts"), QString(), QStringLiteral("keybindings.reload"));
+        if (Keymap::instance().hasOverrides()) {
+            PaletteItem clear; clear.key = QStringLiteral("keybindings.clearOverrides"); clear.section = keys;
+            clear.label = QStringLiteral("Clear custom overrides"); clear.detail = QStringLiteral("Use the preset's keys only");
+            clear.run = [] { Keymap::instance().clearOverrides(); };
+            items << clear;
+        }
+        return items;
+    }
+
     static int fuzzyScore(const QString &needle, const QString &haystack) {
         if (needle.isEmpty()) return 1;
         const QString n = needle.toLower(), h = haystack.toLower();
         const int direct = h.indexOf(n);
-        if (direct >= 0) return 10000 - direct;
+        if (direct >= 0) return 10000 - direct - (direct > 0 && h.at(direct - 1).isLetterOrNumber() ? 500 : 0);
         int pos = 0, first = -1, last = -1;
         for (const QChar c : n) {
             if (c.isSpace()) continue;
@@ -1611,52 +1732,156 @@ private:
         return std::max(1, 5000 - (last - first) * 10 - first);
     }
 
-    void filterPalette() {
+    void renderPalette() {
+        const bool nested = !m_stack.isEmpty();
         const QString needle = m_filter->text().trimmed();
-        QList<QPair<int, int>> ranked;
-        for (int i = 0; i < m_items.size(); ++i) {
-            const int score = std::max(fuzzyScore(needle, m_items[i].label), fuzzyScore(needle, m_items[i].detail) / 2);
-            if (score > 0) ranked.append({needle.isEmpty() ? -i : score, i});
+        m_rows.clear();
+        QList<PaletteItem> source = nested ? m_stack.last().second : rootItems();
+        m_paletteTitle->setText(nested ? QStringLiteral("ACTIONS  ›  ") + m_stack.last().first.toUpper() : QStringLiteral("ACTIONS"));
+        if (!nested && !needle.isEmpty()) {
+            // Search reaches into submenus: "deep" finds Model › DeepSeek directly.
+            QList<PaletteItem> flat;
+            for (const auto &item : std::as_const(source)) {
+                flat << item;
+                if (item.children) for (auto child : item.children()) { child.label = item.label + QStringLiteral(" › ") + child.label; flat << child; }
+            }
+            source = flat;
         }
-        if (!needle.isEmpty()) std::stable_sort(ranked.begin(), ranked.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+        struct Scored { int score; int order; PaletteItem item; };
+        QList<Scored> scored;
+        for (int i = 0; i < source.size(); ++i) {
+            const auto &item = source[i];
+            const int score = std::max({fuzzyScore(needle, item.label), fuzzyScore(needle, item.detail) / 3, fuzzyScore(needle, item.section) / 4});
+            if (score > 0) scored.append({score, i, item});
+        }
         m_list->clear();
-        for (const auto &entry : std::as_const(ranked)) {
-            const PaletteItem &item = m_items[entry.second];
-            QString text = (item.checked ? QStringLiteral("● ") : QStringLiteral("   ")) + item.label;
-            if (!item.shortcut.isEmpty()) text += QStringLiteral("    ") + item.shortcut;
-            auto *row = new QListWidgetItem(text, m_list);
-            row->setData(Qt::UserRole, entry.second);
-            row->setToolTip(item.detail);
+        auto addHeader = [this](const QString &text) {
+            auto *row = new QTreeWidgetItem(m_list, {text.toUpper(), QString()});
+            row->setData(0, Qt::UserRole, -1);
+            row->setFlags(Qt::ItemIsEnabled);
+            QFont font = row->font(0); font.setPointSizeF(font.pointSizeF() * 0.85); font.setBold(true); row->setFont(0, font);
+            row->setForeground(0, QColor(relay::theme::TextMuted));
+        };
+        auto addRow = [this](const PaletteItem &item) {
+            QString label = (item.checked ? QStringLiteral("✓ ") : QStringLiteral("   ")) + item.label;
+            if (item.children) label += QStringLiteral("   ›");
+            auto *row = new QTreeWidgetItem(m_list, {label, item.shortcut});
+            row->setToolTip(0, item.detail);
+            if (!item.detail.isEmpty() && item.children) row->setText(0, label + QStringLiteral("   ") + item.detail);
+            row->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
+            row->setForeground(1, QColor(relay::theme::TextMuted));
+            row->setData(0, Qt::UserRole, m_rows.size());
+            m_rows.append(item);
+        };
+        if (!needle.isEmpty()) {
+            std::stable_sort(scored.begin(), scored.end(), [](const Scored &a, const Scored &b) { return a.score > b.score; });
+            for (const auto &entry : std::as_const(scored)) addRow(entry.item);
+        } else if (nested) {
+            for (const auto &entry : std::as_const(scored)) addRow(entry.item);
+        } else {
+            // Recent first, then the section that matches where focus was.
+            const QStringList recent = QSettings().value(QStringLiteral("palette/recent")).toStringList();
+            QList<PaletteItem> recentItems;
+            for (const QString &key : recent)
+                for (const auto &entry : std::as_const(scored))
+                    if (entry.item.key == key && recentItems.size() < 4) recentItems << entry.item;
+            if (!recentItems.isEmpty()) { addHeader(QStringLiteral("Recent")); for (const auto &item : recentItems) addRow(item); }
+            QStringList order{QStringLiteral("Agent"), QStringLiteral("Terminal"), QStringLiteral("Panes and tabs"), QStringLiteral("Shortcuts")};
+            if (m_terminalContext) order = QStringList{QStringLiteral("Terminal"), QStringLiteral("Panes and tabs"), QStringLiteral("Agent"), QStringLiteral("Shortcuts")};
+            for (const QString &section : order) {
+                bool header = false;
+                for (const auto &entry : std::as_const(scored)) {
+                    if (entry.item.section != section) continue;
+                    if (!header) { addHeader(section); header = true; }
+                    addRow(entry.item);
+                }
+            }
         }
-        if (m_list->count()) m_list->setCurrentRow(0);
+        selectRow(0, 1);
     }
 
-    void runSelected() {
-        QListWidgetItem *row = m_list->currentItem();
+    // Move the selection to the nearest selectable row from `index` in `direction`.
+    void selectRow(int index, int direction) {
+        const int count = m_list->topLevelItemCount();
+        if (!count) return;
+        index = std::clamp(index, 0, count - 1);
+        for (int i = index; i >= 0 && i < count; i += direction) {
+            if (m_list->topLevelItem(i)->data(0, Qt::UserRole).toInt() >= 0) { m_list->setCurrentItem(m_list->topLevelItem(i)); return; }
+        }
+        for (int i = index; i >= 0 && i < count; i -= direction) {
+            if (m_list->topLevelItem(i)->data(0, Qt::UserRole).toInt() >= 0) { m_list->setCurrentItem(m_list->topLevelItem(i)); return; }
+        }
+    }
+
+    void moveSelection(int steps) {
+        const int count = m_list->topLevelItemCount();
+        if (!count) return;
+        int index = m_list->indexOfTopLevelItem(m_list->currentItem());
+        const int direction = steps > 0 ? 1 : -1;
+        int moved = 0;
+        for (int i = index + direction; moved < std::abs(steps); i += direction) {
+            if (i < 0) i = count - 1; else if (i >= count) i = 0;   // wrap
+            if (i == index) break;
+            if (m_list->topLevelItem(i)->data(0, Qt::UserRole).toInt() >= 0) { index = i; ++moved; }
+        }
+        if (index >= 0) m_list->setCurrentItem(m_list->topLevelItem(index));
+    }
+
+    void activateSelected(bool openOnly) {
+        QTreeWidgetItem *row = m_list->currentItem();
         if (!row) return;
-        const int index = row->data(Qt::UserRole).toInt();
-        if (index < 0 || index >= m_items.size()) return;
-        const auto run = m_items[index].run;
+        const int index = row->data(0, Qt::UserRole).toInt();
+        if (index < 0 || index >= m_rows.size()) return;
+        const PaletteItem item = m_rows[index];
+        if (item.children) {
+            m_stack.append({item.label, item.children()});
+            m_filter->clear();
+            renderPalette();
+            return;
+        }
+        if (openOnly || !item.run) return;
+        QStringList recent = QSettings().value(QStringLiteral("palette/recent")).toStringList();
+        recent.removeAll(item.key); recent.prepend(item.key);
+        QSettings().setValue(QStringLiteral("palette/recent"), QStringList(recent.mid(0, 12)));
+        if (item.stayOpen) {
+            item.run();
+            // Toggles stay open and show their new state.
+            QTimer::singleShot(150, this, [this] {
+                if (!m_sidebar->isVisible() || m_stack.isEmpty()) return;
+                const QString title = m_stack.last().first;
+                m_stack.removeLast();
+                for (const auto &parent : rootItems()) if (parent.label == title && parent.children) m_stack.append({title, parent.children()});
+                renderPalette();
+            });
+            return;
+        }
+        const auto run = item.run;
         closePalette();
-        if (run) QTimer::singleShot(0, this, run);
+        QTimer::singleShot(0, this, run);
     }
 
     bool paletteKey(QKeyEvent *key) {
+        const bool ctrl = key->modifiers() & Qt::ControlModifier;
         switch (key->key()) {
-        case Qt::Key_Escape: if (!m_filter->text().isEmpty()) m_filter->clear(); else closePalette(); return true;
-        case Qt::Key_Return: case Qt::Key_Enter: runSelected(); return true;
-        case Qt::Key_Down: case Qt::Key_Up: case Qt::Key_PageDown: case Qt::Key_PageUp: {
-            if (!m_list->count()) return true;
-            const int step = (key->key() == Qt::Key_PageDown || key->key() == Qt::Key_PageUp) ? 8 : 1;
-            const int direction = (key->key() == Qt::Key_Down || key->key() == Qt::Key_PageDown) ? 1 : -1;
-            m_list->setCurrentRow(std::clamp(m_list->currentRow() + step * direction, 0, m_list->count() - 1));
+        case Qt::Key_Escape:
+            if (!m_filter->text().isEmpty()) m_filter->clear();
+            else if (!m_stack.isEmpty()) { m_stack.removeLast(); renderPalette(); }
+            else closePalette();
             return true;
-        }
+        case Qt::Key_Return: case Qt::Key_Enter: activateSelected(false); return true;
+        case Qt::Key_Right:
+            if (m_filter->cursorPosition() < m_filter->text().size()) return false;
+            activateSelected(true); return true;
+        case Qt::Key_Left: case Qt::Key_Backspace:
+            if (!m_filter->text().isEmpty() || m_stack.isEmpty()) return false;
+            m_stack.removeLast(); renderPalette(); return true;
+        case Qt::Key_Down: moveSelection(1); return true;
+        case Qt::Key_Up: moveSelection(-1); return true;
+        case Qt::Key_PageDown: moveSelection(8); return true;
+        case Qt::Key_PageUp: moveSelection(-8); return true;
         default:
-            if ((key->modifiers() & Qt::ControlModifier) && (key->key() == Qt::Key_N || key->key() == Qt::Key_P)) {
-                if (m_list->count()) m_list->setCurrentRow(std::clamp(m_list->currentRow() + (key->key() == Qt::Key_N ? 1 : -1), 0, m_list->count() - 1));
-                return true;
-            }
+            if (ctrl && key->key() == Qt::Key_N) { moveSelection(1); return true; }
+            if (ctrl && key->key() == Qt::Key_P) { moveSelection(-1); return true; }
             return false;
         }
     }
@@ -1955,11 +2180,12 @@ private:
     QWidget *m_sidebar = nullptr;
     QLabel *m_paletteTitle = nullptr;
     QLineEdit *m_filter = nullptr;
-    QListWidget *m_list = nullptr;
-    QString m_paletteKind;
+    QTreeWidget *m_list = nullptr;
+    QList<QPair<QString, QList<PaletteItem>>> m_stack;
+    QList<PaletteItem> m_rows;
+    bool m_terminalContext = false;
     QPointer<Pane> m_returnPane;
     QPointer<QWidget> m_returnFocus;
-    QList<PaletteItem> m_items;
     QPointer<Pane> m_active;
     QHash<QWidget *, QPointer<Pane>> m_lastActive;
     bool m_confirmedClose = false, m_skipRemember = false;

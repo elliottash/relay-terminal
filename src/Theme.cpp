@@ -154,9 +154,9 @@ QCheckBox::indicator:checked { background: @accent; border-color: @accent; image
 QSplitter::handle { background: @bg; }
 QWidget#sidebar { background: @surface; border: 1px solid @border; border-radius: 10px; }
 QLabel#paletteTitle { color: @muted; font-weight: 600; letter-spacing: 1px; padding: 2px 4px; }
-QListWidget#paletteList { background: transparent; border: none; outline: none; font-size: 10pt; }
-QListWidget#paletteList::item { padding: 7px 6px; border-radius: 6px; color: @text; }
-QListWidget#paletteList::item:selected { background: @raised; color: @text; border-left: 2px solid @accent; }
+QTreeWidget#paletteList { background: transparent; border: none; outline: none; font-size: 10pt; }
+QTreeWidget#paletteList::item { padding: 6px 4px; color: @text; }
+QTreeWidget#paletteList::item:selected { background: @raised; color: @text; }
 QToolButton#interruptButton { border: 1px solid @border; border-radius: 6px; padding: 4px; background: transparent; }
 QToolButton#interruptButton:hover { border-color: @accent; }
 QWidget#pane { background: @bg; border: 1px solid @border; border-radius: 6px; }

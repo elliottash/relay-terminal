@@ -26,7 +26,10 @@ _MODIFIER_ALIASES = {"ctrl": "Ctrl", "control": "Ctrl", "alt": "Alt", "shift": "
 NAMED_KEYS = ("Tab", "Backtab", "Return", "Enter", "Escape", "Space", "Backspace", "Delete", "Insert",
               "Home", "End", "PgUp", "PgDown", "Left", "Right", "Up", "Down")
 _NAMED = {name.lower(): name for name in NAMED_KEYS}
-PUNCTUATION = set(",./;'[]\\-=`")
+_NAMED.update({"esc": "Escape", "del": "Delete", "ins": "Insert", "pageup": "PgUp", "pagedown": "PgDown"})
+# Every printable ASCII symbol except '+', which separates modifiers. Shifted symbols such as
+# ( | % ~ are needed by the Konsole and VS Code presets.
+PUNCTUATION = set("!\"#$%&'()*,-./:;<=>?@[\\]^_`{|}~")
 
 
 class KeybindingError(ValueError):
@@ -62,7 +65,7 @@ def normalize_key(text: str) -> str:
     else:
         raise KeybindingError(
             f"Invalid key '{raw}': '{key}' is not a supported key. Use a letter, digit, F1-F35, "
-            f"punctuation , . / ; ' [ ] \\ - = `, or one of: {', '.join(NAMED_KEYS)}.")
+            f"an ASCII symbol other than +, or one of: {', '.join(NAMED_KEYS)}.")
     return "+".join([m for m in MODIFIER_ORDER if m in seen] + [key])
 
 
