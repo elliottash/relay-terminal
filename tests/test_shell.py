@@ -15,6 +15,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def wait_for_foreground(master, name, timeout=4.0):
+    """True once a process called `name` leads the terminal's foreground process group."""
+    import termios
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            group = os.tcgetpgrp(master)
+            if Path(f"/proc/{group}/comm").read_text().strip() == name:
+                return True
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.02)
+    return False
+
+
 class BashSession:
     def __init__(self, home=None, clean=True):
         self.temp = tempfile.TemporaryDirectory(prefix="relay-test-")
@@ -123,6 +138,9 @@ class ShellTests(unittest.TestCase):
         self.assertIn(b'GOT=native input', s.output)
         s.submit('sleep 10')
         s.wait('running')
+        # "running" fires from the DEBUG trap before sleep starts; an interrupt sent in that gap
+        # hits the event helper instead. Wait until sleep owns the terminal's foreground group.
+        self.assertTrue(wait_for_foreground(s.master, 'sleep'), 'sleep never reached the foreground')
         os.write(s.master, b'\x03')
         self.assertEqual(s.wait('ready')['status'], 130)
 
