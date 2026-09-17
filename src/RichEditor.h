@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
+#include <QColor>
 #include <QPlainTextEdit>
+#include <QTimer>
 #include <QStringList>
 #include <functional>
 
@@ -19,6 +21,9 @@ public:
     void setAutoHeight(int minLines, int maxLines);
     // The placeholder shrinks with the pane instead of wrapping onto a second line.
     void updatePlaceholder();
+    // Relay paints the caret itself: Qt draws the built-in one in the stylesheet's text colour,
+    // which cannot follow the destination (terminal, agent) per keystroke.
+    void setCaretColor(const QColor &color);
     void setGhost(const QString &remainder);
     QString ghost() const { return m_ghost; }
     // Accept the whole suggestion, or only up to the end of the next word. False if none.
@@ -36,4 +41,7 @@ private:
     bool m_preedit = false;
     QString m_ghost;
     int m_minLines = 0, m_maxLines = 0;
+    QColor m_caret;
+    QTimer *m_caretBlink = nullptr;
+    bool m_caretOn = true;
 };

@@ -132,8 +132,33 @@ bool RichEditor::acceptGhost(bool wholeSuggestion) {
     return true;
 }
 
+void RichEditor::setCaretColor(const QColor &color) {
+    m_caret = color;
+    // Hide Qt's own caret and blink ours at the desktop's rate.
+    setCursorWidth(m_caret.isValid() ? 0 : 1);
+    if (m_caret.isValid()) {
+        if (!m_caretBlink) {
+            m_caretBlink = new QTimer(this);
+            const int flash = QApplication::cursorFlashTime();
+            m_caretBlink->setInterval(std::max(200, flash > 0 ? flash / 2 : 500));
+            connect(m_caretBlink, &QTimer::timeout, this, [this] { m_caretOn = !m_caretOn; viewport()->update(); });
+        }
+        m_caretOn = true;
+        m_caretBlink->start();
+    } else if (m_caretBlink) {
+        m_caretBlink->stop();
+    }
+    viewport()->update();
+}
+
 void RichEditor::paintEvent(QPaintEvent *event) {
     QPlainTextEdit::paintEvent(event);
+    if (m_caret.isValid() && m_caretOn && hasFocus() && !isReadOnly() && !textCursor().hasSelection()) {
+        QPainter caret(viewport());
+        QRect rect = cursorRect();
+        rect.setWidth(2);
+        caret.fillRect(rect, m_caret);
+    }
     if (m_ghost.isEmpty() || textCursor().hasSelection() || !textCursor().atEnd() || m_preedit) return;
     QPainter painter(viewport());
     QColor color = palette().color(QPalette::Text);

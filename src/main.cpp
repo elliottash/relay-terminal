@@ -4145,8 +4145,9 @@ private:
         // Qt draws the caret in the widget's *stylesheet* colour, so the palette alone does nothing
         // here (the app stylesheet sets one). The highlighter gives every character an explicit
         // colour, so this only shows up in the caret and the placeholder.
-        const QString color = relay::InputHighlighter::colorFor(destination).name();
-        m_editor->setStyleSheet(QStringLiteral("QPlainTextEdit { color: %1; }").arg(color));
+        const QColor color = relay::InputHighlighter::colorFor(destination);
+        m_editor->setStyleSheet(QStringLiteral("QPlainTextEdit { color: %1; }").arg(color.name()));
+        m_editor->setCaretColor(color);
         if (m_modeChip) {
             const bool decided = destination != relay::InputHighlighter::Destination::Auto;
             m_modeChip->setProperty("dest", decided ? (destination == relay::InputHighlighter::Destination::Shell
