@@ -81,6 +81,11 @@ if(RELAY_BUILD_APP)
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
 endif()
 
+option(RELAY_BUILD_ENGINE_SPIKE "Build the experimental libvterm engine spike (relay-vterm-spike)" OFF)
+if(RELAY_BUILD_ENGINE_SPIKE)
+    add_subdirectory(engine)
+endif()
+
 if(BUILD_TESTING)
     find_package(${RELAY_QT} REQUIRED COMPONENTS Test)
     add_executable(relay-editor-tests tests/editor_test.cpp)
