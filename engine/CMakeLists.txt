@@ -85,7 +85,8 @@ endif()
 add_library(relay-terminal-engine STATIC ${RELAY_ENGINE_SOURCES})
 target_include_directories(relay-terminal-engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 find_package(Threads REQUIRED)
-target_link_libraries(relay-terminal-engine PUBLIC ${RELAY_QT}::Widgets PRIVATE relay-vterm-c Threads::Threads)
+# relay-outputlinks is PUBLIC: view/TerminalView.h names relay::links::Cursor.
+target_link_libraries(relay-terminal-engine PUBLIC ${RELAY_QT}::Widgets relay-outputlinks PRIVATE relay-vterm-c Threads::Threads)
 if(UNIX AND NOT APPLE)
     target_link_libraries(relay-terminal-engine PRIVATE util) # forkpty
 endif()

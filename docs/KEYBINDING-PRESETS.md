@@ -180,6 +180,14 @@ window filter takes it before KonsolePart, whose own Ctrl+Shift+K is "Clear Scro
 (`editor.action.deleteLines`) and Konsole (Clear Scrollback and Reset), so users of those presets keep
 their habit; `/tasks` and the chip still work.
 
+**Step through links (`links.step`, added 2026-09-17):** Ctrl+Shift+L, the same in all four
+presets, because it is free everywhere: Warp, VS Code (Linux) and Konsole 23.08/24.08 bind
+nothing to it (VS Code's Ctrl+Shift+L is "select all occurrences" in the editor, not in the
+terminal; Konsole's L bindings are Ctrl+Shift+Alt+L "Show Menu Bar" and nothing on
+Ctrl+Shift+L), and Relay had no Ctrl+Shift+L either. It is left out of the preset tables, so
+every preset inherits the Relay default. It is a Ctrl+Shift combination, so it also acts while
+a program owns the terminal under the default `program_keys: "shift-only"`.
+
 **Desktop-environment grabs:**
 - **Alt+Tab / Alt+Shift+Tab** (Relay default window.next/previous): taken by GNOME, KDE Plasma, Cinnamon and XFCE, so no preset uses them.
 - **Ctrl+Alt+T** (Warp closed.restore): launches a terminal on Ubuntu/GNOME and KDE Plasma, so it will usually never reach Relay. Warp on Linux has the same problem. Rebind if needed.

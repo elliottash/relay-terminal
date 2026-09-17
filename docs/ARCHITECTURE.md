@@ -291,7 +291,7 @@ Default window shortcuts:
 | Split right / down | Ctrl+P / Ctrl+Shift+P | Back to the prompt | Ctrl+Shift+H |
 | Focus neighbor pane | Alt+Arrows | Native input toggle (same hand-over as Ctrl+H) | F12 |
 | Toggle terminal/agent input | Ctrl+I | Restart stopped shell/agent | Ctrl+Shift+R |
-| Interrupt agent with prompt | Ctrl+Alt+Enter | | |
+| Interrupt agent with prompt | Ctrl+Alt+Enter | Step through links in the output | Ctrl+Shift+L |
 
 Unbound by default: `files.explorer`, `files.open`, `terminal.interrupt`, `agent.newChat`,
 `agent.stop`, `agent.clearQueue`, `agent.resumeQueue`, `agent.provider`, `input.mode*`,
@@ -602,12 +602,34 @@ Ways to open a path:
 | Click the pane's directory line | `Pane::onOpenPath` → explorer |
 | Palette: Open folder in explorer / Open file… | `files.explorer`, `files.open` |
 | `relay open PATH` in a pane shell | shell function → `scripts/relay-open` → socket request `{path, line, token}`; the token selects the pane |
-| Ctrl+click a text file in terminal output | Relay's Konsole profile sets `UnderlineFilesEnabled=true` and `TextEditorCmdCustom=relay-open PATH:LINE:COLUMN` |
+| Click or Ctrl+click a path in an engine pane's output | `relay::links` (`src/OutputLinks.*`) → `TerminalView::linkActivated` → `Pane::openOutputTarget` |
+| `Ctrl+Shift+L` then Enter (engine panes) | the keyboard walk over the same links |
+| Ctrl+click a text file in a KonsolePart pane | Relay's Konsole profile sets `UnderlineFilesEnabled=true` and `TextEditorCmdCustom=relay-open PATH:LINE:COLUMN` |
 
-KonsolePart sends folders, images and PDFs to KIO (the desktop default app), not to the
-editor command, so those clicks do not reach Relay
-(`issues/features/2026-09-17-clickable-paths.md`). `relay-open` falls back to `xdg-open` when
-Relay is not reachable.
+### Clickable paths in terminal output
+
+`src/OutputLinks.{h,cpp}` (library `relay-outputlinks`, namespace `relay::links`) holds the
+rules, with no terminal and an injectable filesystem probe, so every format is unit-tested
+(`tests/outputlinks_test.cpp`). `candidates()` finds the spans of one logical line: URLs of any
+scheme (left as URLs), Python traceback frames (`File "x.py", line 12`), `file(line,column)`
+(tsc/MSVC), quoted names with spaces, and bare tokens (`ls` names, `file:line[:column]` from
+gcc/clang/grep/cargo, pytest node ids, stack frames inside brackets, backslash-escaped spaces).
+`resolve()` expands `~`, resolves a relative path against the pane's directory (OSC 7 when the
+shell integration is on, else `/proc/<pid>/cwd`) and asks the probe: **a path that does not
+exist is not a link**. `--flags`, bare numbers, version strings and `FOO=bar` are rejected
+before the probe.
+
+The Relay engine uses it in `engine/view/TerminalView.cpp` for the hover underline and tooltip,
+plain click (only in the active pane, so the click that moves the focus cannot open a file),
+Ctrl+click, the right-click menu ("Open …", "Open in the system editor", "Copy path") and the
+ordered link list behind `Ctrl+Shift+L`. `Pane::openOutputTarget` routes the result: a folder to
+an explorer pane, a file to a preview pane at `line`, a URL to `QDesktopServices`.
+
+KonsolePart panes keep the older, narrower path: the profile underlines files and hands text
+files to `relay-open`. KonsolePart sends folders, images and PDFs to KIO (the desktop default
+app), does not recognise a `:line:column` suffix, and exposes no screen text, so `Ctrl+Shift+L`
+says so and does nothing (`issues/features/needs_qa_llm/2026-09-17-clickable-paths.md`).
+`relay-open` falls back to `xdg-open` when Relay is not reachable.
 
 ## 11. Agent backend
 
@@ -1035,6 +1057,10 @@ are real, so the pane only offers what its engine supports.
 | `relay::KonsoleBackend` | `src/KonsoleBackend.{h,cpp}` | **Default.** KParts KonsolePart: `TerminalInterface`, the Session D-Bus object (`onReceiveBlock` for inline output, `primaryScreenInUse` for the alternate screen), the display's clipboard slots and the hidden scrollbar. Reports `AltScreenState`, `DisplayInjection`, `ScrollControl` (plus `ScreenText` on KF6) |
 | `relay::EngineBackend` | `src/EngineBackend.{h,cpp}` | Relay's own engine (`engine/`, [ENGINE.md](ENGINE.md)) — `relay::VTermBackend` plus Relay's font and colour scheme from `data/theme/konsole` and the copy-on-select setting. Reports every capability |
 
+Capabilities a KonsolePart pane does not report, so the actions behind them are only offered
+in engine panes: `ScreenText`, `Scrollback`, `LinkClicks`, `Osc8Links`, `PromptMarks`,
+`CwdTracking`, `Search` and `LinkWalk` (the `Ctrl+Shift+L` walk over the output's links).
+
 `src/TerminalBackends.{h,cpp}` holds the selection rules (unit-tested in
 `tests/backends_test.cpp`); `src/BackendFactory.cpp` is the only file that knows both
 implementations. The engine is chosen **per pane**, so both run side by side in one window:
@@ -1093,6 +1119,7 @@ Other limits:
 | `src/FilePanes.*` | explorer and preview widgets |
 | `src/Theme.*` | palette, stylesheet, Konsole profile exposure |
 | `src/Hints.*` | shortcut hint limits and idle tips |
+| `src/OutputLinks.*` | which spans of terminal output are files, folders or URLs, what they resolve to, and the keyboard cursor over them |
 | `src/Notifications.*` | notification centre behind the header bell |
 | `src/TurnTranscript.*` | turn details pane (tool calls, transcript) |
 | `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |

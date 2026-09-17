@@ -123,6 +123,15 @@ target_include_directories(relay-panes PUBLIC src)
 target_link_libraries(relay-panes PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-panes PRIVATE -Wall -Wextra -Wpedantic)
 
+# Clickable paths in terminal output (#YZTK) and the keyboard walk over them (#GWXM):
+# which spans of a line are files, folders or URLs, what they resolve to against a pane's
+# working directory, and the cursor that steps through the ordered list. Plain QtCore with
+# an injectable filesystem probe, so every format and every false positive is testable.
+add_library(relay-outputlinks STATIC src/OutputLinks.cpp src/OutputLinks.h)
+target_include_directories(relay-outputlinks PUBLIC src)
+target_link_libraries(relay-outputlinks PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-outputlinks PRIVATE -Wall -Wextra -Wpedantic)
+
 # Voice transcription (issue NY7Z): which capture tool to run, which key event is the hold key,
 # where the transcript lands in the composer, and WAV repair. Plain QtCore so every rule can be
 # tested without a microphone or a window; the worker does the transcribing (protocol 16).
@@ -160,7 +169,7 @@ if(RELAY_BUILD_APP)
         src/ModelSettings.cpp src/ModelSettings.h
         src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-outputlinks relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -220,6 +229,9 @@ if(BUILD_TESTING)
     target_link_libraries(relay-panes-tests PRIVATE relay-panes ${RELAY_QT}::Test)
     add_test(NAME panes COMMAND relay-panes-tests)
     set_tests_properties(panes PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-outputlinks-tests tests/outputlinks_test.cpp)
+    target_link_libraries(relay-outputlinks-tests PRIVATE relay-outputlinks ${RELAY_QT}::Test)
+    add_test(NAME outputlinks COMMAND relay-outputlinks-tests)
     add_executable(relay-backends-tests tests/backends_test.cpp)
     target_link_libraries(relay-backends-tests PRIVATE relay-backends ${RELAY_QT}::Test)
     add_test(NAME backends COMMAND relay-backends-tests)

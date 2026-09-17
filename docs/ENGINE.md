@@ -45,7 +45,7 @@ Sanitizers (2026-09-17): the suite is clean under ASan+UBSan (Debug; the libvter
 |---|---|
 | `relay-vterm-c` | Vendored libvterm 0.3.3 (MIT) with Relay patches, C99 |
 | `relay-ghostty-vt` | Imported libghostty-vt static library; on Linux a partial link keeps only `ghostty_*` global (the Zig archive exports `memcpy`, `__chk_fail`, ...) |
-| `relay-terminal-engine` | Static library: cores, PTY, session, view, backend |
+| `relay-terminal-engine` | Static library: cores, PTY, session, view, backend (links `relay-outputlinks` for the path rules) |
 | `relay-engine-bench` | Headless core throughput (`--core`, `--frames`) |
 | `relay-vterm-spike` | Manual/xdotool harness (name kept for the old scripts): `--core`, `--size`, `--dump`, `--font`, `-e` |
 | `relay-engine-tests` | ctest: core (x2 cores), pty, session (x2), view (x2) |
@@ -140,10 +140,11 @@ Documented fallbacks, not implemented: alacritty_terminal (Rust FFI), xterm.js i
 | Clipboard | `copySelection()`, `paste()`, `selectedText()`, `selectAll()`, `clearScrollback()`, `clear()` |
 | Scrolling | `scrollLines(n)`, `scrollPages(n)`, `scrollToBottom()`, `scrollToPrompt(direction)` |
 | Search | `find(text, backwards)` |
+| Links | `stepLink(delta, Link*, index*, count*)`, `endLinkWalk()`, `linkWalkActive()`, `setPlainClickOpensLinks(on)` — the keyboard walk over every file, folder and URL in the screen and the scrollback (`Ctrl+Shift+L`) |
 | Callbacks | `onLinkActivated(target, line, column)` (OSC 8 URI, URL, or absolute path with `:line:col`), `onTitleChanged`, `onCwdChanged`, `onAltScreenChanged`, `onBell`, `onPromptMark(kind 'A'..'D', exitCode)`, `onOutput(bytes)` (opt-in via `setOutputCallbackEnabled`), `onFinished(exitCode)` |
 
 Capabilities reported by `VTermBackend`: ScreenText, Scrollback, AltScreenState, LinkClicks,
-Osc8Links, PromptMarks, CwdTracking, DisplayInjection, Search, ScrollControl. A KonsolePart adapter
+Osc8Links, PromptMarks, CwdTracking, DisplayInjection, Search, ScrollControl, LinkWalk. A KonsolePart adapter
 would report DisplayInjection (private D-Bus slot) and ScrollControl (hidden scrollbar), ScreenText
 only on KF6 (D-Bus `getDisplayedText`), and none of the others.
 
@@ -173,6 +174,8 @@ GUI scenario (`engine/scripts/gui/scenarios.sh`).
 | Kitty keyboard protocol | 🟡 (encoder follows program flags; release events only for special keys) | ❌ | ❌ | |
 | Focus events, DECSCUSR cursor shapes, cursor blink | ✅ | ✅ | ✅ | CoreTest::cursorShape, pasteAndFocus |
 | OSC 8 hyperlinks, URL and `path:line:col` Ctrl+click **to the host** | ✅ | ✅ | ❌ (opens itself) | ViewTest::ctrlClickLinksAndPaths, dump callbacks |
+| Clickable paths: hover underline + target, plain click, link context menu, `file:line:col`, quoted names with spaces, compiler/test output (`src/OutputLinks.*`) | ✅ | ✅ | 🟡 (its own filter: text files only, no `:line`, folders to KIO) | ViewTest::plainClickFollowsAPath, `relay-outputlinks-tests` |
+| Keyboard walk over the links in screen + scrollback (`Ctrl+Shift+L`) | ✅ | ✅ | ❌ (no screen text) | ViewTest::keyboardLinkWalk |
 | OSC 7 cwd, OSC 133 prompt marks + jump to prompt, OSC 9/777 notifications | ✅ | ✅ | 🟡 (cwd via /proc) | CoreTest::osc7*, osc133*, promptJump |
 | Alt-screen state + change callback | ✅ | ✅ | ❌ | CoreTest::altScreen, SessionTest |
 | Screen text + scrollback text for the agent | ✅ | ✅ | ❌ (KF6 D-Bus: screen only) | SessionTest |

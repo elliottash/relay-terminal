@@ -9,6 +9,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCursor>
+#include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -26,6 +27,7 @@
 #include <QRegularExpression>
 #include <QStyle>
 #include <QToolButton>
+#include <QUrl>
 #include <QWheelEvent>
 #include <QtMath>
 
@@ -447,8 +449,10 @@ void TerminalView::pullFrame()
         return;
 
     // A link underline belongs to the content it was computed for.
-    if (m_hoverRow >= 0 && (m_frame.full || (m_hoverRow < int(m_frame.dirty.size()) && m_frame.dirty[size_t(m_hoverRow)]))) {
+    if (m_hoverRow >= 0 && !m_linkCursor.active()
+        && (m_frame.full || (m_hoverRow < int(m_frame.dirty.size()) && m_frame.dirty[size_t(m_hoverRow)]))) {
         m_hoverRow = m_hoverStart = m_hoverEnd = -1;
+        m_hoverCellRow = m_hoverCellCol = -2;
         setCursor(Qt::IBeamCursor);
     }
 
@@ -833,10 +837,6 @@ void TerminalView::keyPressEvent(QKeyEvent *e)
         e->ignore();
         return;
     }
-    if (e->key() == Qt::Key_Control)
-        updateHover(mapFromGlobal(QCursor::pos()), e->modifiers() | Qt::ControlModifier);
-    else if (m_hoverRow >= 0)
-        updateHover(QPoint(-1, -1), Qt::NoModifier);
     if (m_builtinShortcuts && handleBuiltinShortcut(e))
         return;
     KeyInput k;
@@ -849,8 +849,6 @@ void TerminalView::keyPressEvent(QKeyEvent *e)
 
 void TerminalView::keyReleaseEvent(QKeyEvent *e)
 {
-    if (e->key() == Qt::Key_Control && m_hoverRow >= 0)
-        updateHover(QPoint(-1, -1), Qt::NoModifier);
     // Release events matter only for the kitty keyboard protocol's event
     // reporting; the core drops them otherwise.
     KeyInput k;
@@ -962,13 +960,22 @@ void TerminalView::mousePressEvent(QMouseEvent *e)
     }
     const CellPos pos = cellAt(e->pos());
     if (e->button() == Qt::LeftButton) {
-        if (e->modifiers() & Qt::ControlModifier) {
-            QString target;
-            int line = -1, column = -1, s = 0, en = 0;
-            if (linkAt(pos, &target, &line, &column, &s, &en)) {
-                emit linkActivated(target, line, column);
-                return;
-            }
+        endLinkWalk();
+        m_pressedLink = Link();
+        Link link;
+        int s = 0, en = 0;
+        const bool onLink = linkAt(pos, &link, &s, &en);
+        if (onLink && (e->modifiers() & Qt::ControlModifier)) {
+            emit linkActivated(link.target, link.line, link.column);
+            return;
+        }
+        // A plain click opens on release, so that dragging from inside a path still
+        // selects text (issue YZTK).
+        if (onLink && m_plainClickOpens && e->modifiers() == Qt::NoModifier) {
+            m_pressedLink = link;
+            m_pressedRow = pos.row;
+            m_pressedStart = s;
+            m_pressedEnd = en;
         }
         const bool near = (e->pos() - m_lastClickPos).manhattanLength() < 6;
         if (m_lastClick.elapsed() < QApplication::doubleClickInterval() && near)
@@ -1053,8 +1060,17 @@ void TerminalView::mouseReleaseEvent(QMouseEvent *e)
     if (!m_selectionMoved) {
         m_session->withCore([](VtCore &c) { c.selectionClear(); });
         scheduleFrame();
+        // A click that neither dragged nor left the link follows it.
+        if (m_pressedLink.valid() && e->button() == Qt::LeftButton) {
+            const CellPos pos = cellAt(e->pos());
+            const Link link = m_pressedLink;
+            m_pressedLink = Link();
+            if (pos.row == m_pressedRow && pos.col >= m_pressedStart && pos.col <= m_pressedEnd)
+                emit linkActivated(link.target, link.line, link.column);
+        }
         return;
     }
+    m_pressedLink = Link();
     if (m_copyOnSelect && QApplication::clipboard()->supportsSelection()) {
         const QString text = selectedText();
         if (!text.isEmpty())
@@ -1094,19 +1110,38 @@ void TerminalView::wheelEvent(QWheelEvent *e)
     scrollLines(-3 * steps);
 }
 
-void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers mods)
+void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
 {
+    // Hovering a path underlines it and shows where it points, with or without Ctrl
+    // (issue YZTK). The scan is per cell, so moving inside one cell costs nothing.
+    if (m_linkCursor.active())
+        return; // the keyboard walk owns the underline until it ends
+    const bool inside = rect().contains(pos);
+    const CellPos c = inside ? cellAt(pos) : CellPos{-1, -1};
+    if (c.row == m_hoverCellRow && c.col == m_hoverCellCol)
+        return;
+    m_hoverCellRow = c.row;
+    m_hoverCellCol = c.col;
     int newRow = -1, newStart = -1, newEnd = -1;
-    if (mods & Qt::ControlModifier) {
-        QString target;
-        int line = -1, col = -1, s = -1, en = -1;
-        const CellPos c = cellAt(pos);
-        if (linkAt(c, &target, &line, &col, &s, &en)) {
+    Link link;
+    if (inside) {
+        int s = -1, en = -1;
+        if (linkAt(c, &link, &s, &en)) {
             newRow = c.row;
             newStart = s;
             newEnd = en;
         }
     }
+    QString tip;
+    if (link.valid()) {
+        tip = link.target;
+        if (link.line > 0)
+            tip += QLatin1Char(':') + QString::number(link.line);
+        if (link.directory)
+            tip = tr("%1 (folder)").arg(tip);
+    }
+    if (tip != toolTip())
+        setToolTip(tip);
     if (newRow == m_hoverRow && newStart == m_hoverStart && newEnd == m_hoverEnd)
         return;
     if (m_hoverRow >= 0)
@@ -1139,29 +1174,26 @@ QString TerminalView::currentDirectory() const
 
 bool TerminalView::splitPathToken(const QString &token, QString *path, int *line, int *column)
 {
-    static const QRegularExpression re(QStringLiteral("^(.+?)(?::(\\d+))?(?::(\\d+))?:?$"));
-    const QRegularExpressionMatch m = re.match(token);
-    *line = -1;
-    *column = -1;
-    if (!m.hasMatch()) {
-        *path = token;
-        return !token.isEmpty();
-    }
-    *path = m.captured(1);
-    if (!m.captured(2).isEmpty())
-        *line = m.captured(2).toInt();
-    if (!m.captured(3).isEmpty())
-        *column = m.captured(3).toInt();
-    return !path->isEmpty();
+    return links::splitLocation(token, path, line, column);
 }
 
-bool TerminalView::linkAt(const CellPos &c, QString *target, int *line, int *col, int *startCol, int *endCol)
+// The logical line the cell belongs to: soft-wrapped rows of the viewport joined into one
+// string, with the (row, column) each UTF-16 unit came from.
+namespace {
+struct LogicalRow {
+    QString text;
+    std::vector<std::pair<int, int>> cellOf;
+};
+} // namespace
+
+bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endCol)
 {
+    *link = Link();
     if (c.row < 0 || c.row >= int(m_frame.lines.size()))
         return false;
     const Line &l = m_frame.lines[size_t(c.row)];
-    *line = -1;
-    *col = -1;
+
+    // An OSC 8 hyperlink: the program itself said what the text points at.
     const QString uri = m_session->withCore([&](VtCore &core) { return core.hyperlinkAt(c.row, c.col); });
     if (!uri.isEmpty() && c.col < int(l.cells.size())) {
         const uint32_t id = l.cells[size_t(c.col)].link;
@@ -1170,20 +1202,29 @@ bool TerminalView::linkAt(const CellPos &c, QString *target, int *line, int *col
             --s;
         while (e + 1 < int(l.cells.size()) && l.cells[size_t(e + 1)].link == id && id)
             ++e;
-        *target = uri;
+        link->text = uri;
+        // file:// hyperlinks are local paths, so they open in a Relay pane like any other.
+        const QString local = uri.startsWith(QLatin1String("file://")) ? QUrl(uri).toLocalFile() : QString();
+        if (!local.isEmpty() && QFileInfo::exists(local)) {
+            link->target = local;
+            link->directory = QFileInfo(local).isDir();
+        } else {
+            link->target = uri;
+            link->url = true;
+        }
         *startCol = s;
         *endCol = e;
         return true;
     }
-    // Plain text token under the pointer, joined across soft-wrapped rows of
-    // the viewport (long URLs and paths wrap at the terminal edge).
+
+    // Plain text, joined across the soft-wrapped rows of the viewport (long URLs and
+    // paths wrap at the terminal edge).
     int firstRow = c.row, lastRow = c.row;
     while (firstRow > 0 && m_frame.lines[size_t(firstRow)].continuation)
         --firstRow;
     while (lastRow + 1 < int(m_frame.lines.size()) && m_frame.lines[size_t(lastRow + 1)].continuation)
         ++lastRow;
-    QString text;
-    std::vector<std::pair<int, int>> cellOf; // (row, col) per UTF-16 unit
+    LogicalRow logical;
     for (int r = firstRow; r <= lastRow; ++r) {
         const Line &rowLine = m_frame.lines[size_t(r)];
         const int n = r < lastRow ? m_frame.columns : int(rowLine.cells.size());
@@ -1191,54 +1232,157 @@ bool TerminalView::linkAt(const CellPos &c, QString *target, int *line, int *col
             const Cell cell = i < int(rowLine.cells.size()) ? rowLine.cells[size_t(i)] : Cell();
             if (cell.ch == kWideTail)
                 continue;
-            const QString s = rowLine.cellText(cell);
-            for (int k = 0; k < s.size(); ++k)
-                cellOf.push_back({r, i});
-            text += s;
+            const QString text = rowLine.cellText(cell);
+            for (int k = 0; k < text.size(); ++k)
+                logical.cellOf.push_back({r, i});
+            logical.text += text;
         }
     }
     int idx = -1;
-    for (int i = 0; i < int(cellOf.size()); ++i) {
-        if (cellOf[size_t(i)].first == c.row && cellOf[size_t(i)].second == c.col) {
+    for (int i = 0; i < int(logical.cellOf.size()); ++i) {
+        if (logical.cellOf[size_t(i)].first == c.row && logical.cellOf[size_t(i)].second == c.col) {
             idx = i;
             break;
         }
     }
-    auto boundary = [](QChar ch) { return ch.isSpace() || QStringLiteral("\"'`()[]{}<>|").contains(ch); };
-    if (idx < 0 || idx >= text.size() || boundary(text[idx]))
+    if (idx < 0 || idx >= logical.text.size())
         return false;
-    int s = idx, e = idx;
-    while (s > 0 && !boundary(text[s - 1]))
-        --s;
-    while (e + 1 < text.size() && !boundary(text[e + 1]))
-        ++e;
-    while (e > s && QStringLiteral(".,;:").contains(text[e]))
-        --e;
-    const QString token = text.mid(s, e - s + 1);
-    // Hover highlight is per row: clip the token to the row under the pointer.
-    *startCol = cellOf[size_t(s)].first == c.row ? cellOf[size_t(s)].second : 0;
-    *endCol = cellOf[size_t(e)].first == c.row ? cellOf[size_t(e)].second : m_frame.columns - 1;
-    static const QRegularExpression urlRe(QStringLiteral("^(https?|ftp|file|ssh)://\\S+$"));
-    if (urlRe.match(token).hasMatch()) {
-        *target = token;
+    for (const links::Found &found : links::scan(logical.text, currentDirectory(), QDir::homePath(), links::systemProbe())) {
+        const int s = found.candidate.start;
+        const int e = s + found.candidate.length - 1;
+        if (idx < s || idx > e || e >= int(logical.cellOf.size()))
+            continue;
+        link->target = found.target.target;
+        link->text = found.candidate.text;
+        link->url = found.target.kind == links::Kind::Url;
+        link->directory = found.target.directory;
+        link->line = found.target.line;
+        link->column = found.target.column;
+        // The hover underline is per row: clip the span to the row under the pointer.
+        *startCol = logical.cellOf[size_t(s)].first == c.row ? logical.cellOf[size_t(s)].second : 0;
+        *endCol = logical.cellOf[size_t(e)].first == c.row ? logical.cellOf[size_t(e)].second : m_frame.columns - 1;
         return true;
     }
-    QString path;
-    if (!splitPathToken(token, &path, line, col))
-        return false;
-    for (const QString &candidate : {token, path}) {
-        QString p = candidate;
-        if (p.startsWith(QLatin1String("~/")))
-            p = QDir::homePath() + p.mid(1);
-        const QFileInfo fi(QDir(currentDirectory()), p);
-        if (!p.isEmpty() && fi.exists()) {
-            *target = fi.absoluteFilePath();
-            if (candidate == token)
-                *line = *col = -1;
-            return true;
-        }
-    }
     return false;
+}
+
+TerminalView::Link TerminalView::linkAtPoint(const QPoint &pos)
+{
+    Link link;
+    int start = -1, end = -1;
+    linkAt(cellAt(pos), &link, &start, &end);
+    return link;
+}
+
+// ---------------------------------------------------------------- keyboard link walk
+
+// Enough to cover a long build log without scanning a full 100 000-line scrollback on
+// every Ctrl+Shift+L, and a cap on how many links one walk holds.
+static constexpr int kWalkScrollbackLines = 2000;
+static constexpr int kWalkMaxLinks = 500;
+
+void TerminalView::collectLinks()
+{
+    m_linkWalk.clear();
+    QStringList rows;
+    int historyRows = 0, columns = 80;
+    m_session->withCore([&](VtCore &core) {
+        historyRows = core.historyRows();
+        columns = std::max(1, core.columns());
+        rows = core.historyText(kWalkScrollbackLines);
+        const QString screen = core.screenText();
+        rows += screen.split(QLatin1Char('\n'));
+    });
+    // historyText() returns the newest lines, so the first row it gave us sits this far
+    // down the scrollback; screen row k follows at historyRows + k.
+    const int firstRow = std::max(0, historyRows - int(rows.size()));
+    const QString cwd = currentDirectory();
+    const QString home = QDir::homePath();
+    const links::Probe probe = links::systemProbe();
+    for (int i = 0; i < rows.size() && int(m_linkWalk.size()) < kWalkMaxLinks;) {
+        // Rows the emulator filled to the last column continue on the next row: a path
+        // that wrapped is one logical line again.
+        int last = i;
+        QString text = rows[i];
+        while (last + 1 < rows.size() && rows[last].size() >= columns) {
+            ++last;
+            text += rows[last];
+        }
+        for (const links::Found &found : links::scan(text, cwd, home, probe)) {
+            WalkLink walk;
+            const int s = found.candidate.start;
+            const int e = s + found.candidate.length - 1;
+            walk.row = firstRow + i + s / columns;
+            walk.col = s % columns;
+            walk.endRow = firstRow + i + e / columns;
+            walk.endCol = e % columns;
+            walk.link.target = found.target.target;
+            walk.link.text = found.candidate.text;
+            walk.link.url = found.target.kind == links::Kind::Url;
+            walk.link.directory = found.target.directory;
+            walk.link.line = found.target.line;
+            walk.link.column = found.target.column;
+            m_linkWalk.push_back(walk);
+            if (int(m_linkWalk.size()) >= kWalkMaxLinks)
+                break;
+        }
+        i = last + 1;
+    }
+}
+
+void TerminalView::showWalkLink(const WalkLink &walk)
+{
+    // Put the link in the viewport, a third of the way down when it has to scroll.
+    int top = m_session->withCore([](VtCore &core) { return core.viewportTop(); });
+    if (walk.row < top || walk.endRow > top + m_rows - 1) {
+        scrollToRow(std::max(0, walk.row - m_rows / 3));
+        top = m_session->withCore([](VtCore &core) { return core.viewportTop(); });
+    }
+    const int row = walk.row - top;
+    const int endRow = walk.endRow - top;
+    m_session->withCore([&](VtCore &core) {
+        core.selectionBegin(row, walk.col, SelectionUnit::Cell, false);
+        core.selectionExtend(endRow, walk.endCol);
+    });
+    // The underline the mouse draws, for the row the link starts on.
+    m_hoverRow = row >= 0 && row < m_rows ? row : -1;
+    m_hoverStart = walk.col;
+    m_hoverEnd = row == endRow ? walk.endCol : m_frame.columns - 1;
+    m_hoverCellRow = m_hoverCellCol = -2;
+    m_forceFull = true;
+    scheduleFrame();
+}
+
+bool TerminalView::stepLink(int delta, Link *link)
+{
+    // The list is built when the walk starts and kept while it lasts, so repeated presses
+    // move through the same links even as the program keeps printing.
+    if (!m_linkCursor.active())
+        collectLinks();
+    m_linkCursor.setCount(int(m_linkWalk.size()));
+    const int index = m_linkCursor.step(delta);
+    if (index < 0 || index >= int(m_linkWalk.size())) {
+        endLinkWalk();
+        return false;
+    }
+    const WalkLink &walk = m_linkWalk[size_t(index)];
+    showWalkLink(walk);
+    if (link)
+        *link = walk.link;
+    return true;
+}
+
+void TerminalView::endLinkWalk()
+{
+    if (!m_linkCursor.active() && m_linkWalk.empty())
+        return;
+    m_linkCursor.cancel();
+    m_linkWalk.clear();
+    m_session->withCore([](VtCore &core) { core.selectionClear(); });
+    m_hoverRow = m_hoverStart = m_hoverEnd = -1;
+    m_hoverCellRow = m_hoverCellCol = -2;
+    m_forceFull = true;
+    scheduleFrame();
 }
 
 void TerminalView::contextMenuEvent(QContextMenuEvent *e)
@@ -1251,6 +1395,19 @@ void TerminalView::contextMenuEvent(QContextMenuEvent *e)
     // view (e.g. the shell exits and the host closes the pane) under a stack menu.
     auto *menu = new QMenu(this);
     menu->setAttribute(Qt::WA_DeleteOnClose);
+    // A right click on a path offers the two things a click cannot do (issue YZTK).
+    const Link link = linkAtPoint(e->pos());
+    if (link.valid()) {
+        const QString name = link.url ? link.target : QFileInfo(link.target).fileName();
+        menu->addAction(tr("Open %1").arg(name), this,
+                        [this, link] { emit linkActivated(link.target, link.line, link.column); });
+        if (!link.url)
+            menu->addAction(tr("Open in the system editor"), this,
+                            [link] { QDesktopServices::openUrl(QUrl::fromLocalFile(link.target)); });
+        menu->addAction(link.url ? tr("Copy link") : tr("Copy path"), this,
+                        [link] { QApplication::clipboard()->setText(link.target); });
+        menu->addSeparator();
+    }
     QAction *copy = menu->addAction(tr("Copy"), this, &TerminalView::copySelection);
     copy->setEnabled(m_session->withCore([](VtCore &c) { return c.hasSelection(); }));
     menu->addAction(tr("Paste"), this, &TerminalView::pasteClipboard);

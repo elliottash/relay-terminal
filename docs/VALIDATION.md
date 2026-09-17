@@ -133,10 +133,12 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-agent-output-while-program-runs.md`
 - `2026-09-17-agent-program-context.md`
 - `2026-09-17-agent-responses-in-terminal.md`
+- `2026-09-17-clickable-paths.md`
 - `2026-09-17-ctrl-i-input-toggle.md`
 - `2026-09-17-file-explorer-and-preview-panes.md`
 - `2026-09-17-fix-and-rerun-terminal-commands.md`
 - `2026-09-17-human-agent-control-and-password-prompts.md`
+- `2026-09-17-keyboard-jump-to-output-links.md`
 - `2026-09-17-keyboard-shortcuts-and-palettes.md`
 - `2026-09-17-load-global-warp-skills.md`
 - `2026-09-17-model-roles-and-fast-agent.md`

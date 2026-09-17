@@ -122,7 +122,43 @@ void VTermBackend::redrawPrompt()
 int VTermBackend::capabilities() const
 {
     return ScreenText | Scrollback | AltScreenState | LinkClicks | Osc8Links | PromptMarks | CwdTracking | DisplayInjection
-        | Search | ScrollControl;
+        | Search | ScrollControl | LinkWalk;
+}
+
+bool VTermBackend::stepLink(int delta, Link *link, int *index, int *count)
+{
+    if (!m_view)
+        return false;
+    TerminalView::Link found;
+    if (!m_view->stepLink(delta, &found))
+        return false;
+    if (link) {
+        link->target = found.target;
+        link->text = found.text;
+        link->url = found.url;
+        link->directory = found.directory;
+        link->line = found.line;
+        link->column = found.column;
+    }
+    if (index)
+        *index = m_view->linkWalkIndex();
+    if (count)
+        *count = m_view->linkWalkCount();
+    return true;
+}
+
+void VTermBackend::endLinkWalk()
+{
+    if (m_view)
+        m_view->endLinkWalk();
+}
+
+bool VTermBackend::linkWalkActive() const { return m_view && m_view->linkWalkActive(); }
+
+void VTermBackend::setPlainClickOpensLinks(bool on)
+{
+    if (m_view)
+        m_view->setPlainClickOpensLinks(on);
 }
 
 QString VTermBackend::screenText() const { return m_session->screenText(); }

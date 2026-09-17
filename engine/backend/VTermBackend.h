@@ -64,6 +64,11 @@ public:
 
     int find(const QString &text, bool backwards) override;
 
+    bool stepLink(int delta, Link *link, int *index, int *count) override;
+    void endLinkWalk() override;
+    bool linkWalkActive() const override;
+    void setPlainClickOpensLinks(bool on) override;
+
     void setOutputCallbackEnabled(bool enabled) override;
 
 private:

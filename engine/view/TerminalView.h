@@ -4,6 +4,7 @@
 
 #include "ColorScheme.h"
 #include "KeyMapper.h"
+#include "OutputLinks.h"
 #include "core/CellTypes.h"
 
 #include <QElapsedTimer>
@@ -14,6 +15,7 @@
 
 #include <functional>
 #include <unordered_map>
+#include <vector>
 
 class QLabel;
 class QLineEdit;
@@ -88,6 +90,35 @@ public:
     void setBuiltinContextMenu(bool on) { m_builtinContextMenu = on; }
     void setKeyMapperOptions(const KeyMapperOptions &o) { m_keyOptions = o; }
 
+    // ---- links in the output (issues YZTK and GWXM)
+    //
+    // A link the view found: an OSC 8 hyperlink, a URL, or a file or folder that exists.
+    // The recognition and resolution rules live in src/OutputLinks.* and are tested there.
+    struct Link {
+        QString target;         // an absolute path, or the URL as written
+        QString text;           // the output text it was found as
+        bool url = false;       // open in a browser rather than a Relay pane
+        bool directory = false; // a folder: the explorer pane, not the preview
+        int line = -1;
+        int column = -1;
+        bool valid() const { return !target.isEmpty(); }
+    };
+
+    // The link under a point in the widget, if any (the context menu and the host use it).
+    Link linkAtPoint(const QPoint &pos);
+    // A plain left click opens a link; Ctrl+click always does. Hosts that use the first
+    // click of an inactive pane to move the focus disarm it until the pane is active.
+    void setPlainClickOpensLinks(bool on) { m_plainClickOpens = on; }
+
+    // Step through every link in the scrollback and on the screen: -1 towards older
+    // output, +1 towards newer, 0 re-reads the current one. The link is scrolled into
+    // view, underlined and selected. Returns false when the output holds no link.
+    bool stepLink(int delta, Link *link);
+    void endLinkWalk();   // Esc, or any other input: drop the highlight
+    bool linkWalkActive() const { return m_linkCursor.active(); }
+    int linkWalkIndex() const { return m_linkCursor.index(); }
+    int linkWalkCount() const { return m_linkCursor.count(); }
+
     // Resolve a Ctrl+click token to an absolute path (relative to the shell's
     // current directory) if it exists. Exposed for tests.
     static bool splitPathToken(const QString &token, QString *path, int *line, int *column);
@@ -144,7 +175,18 @@ private:
     void sendKey(const KeyInput &k);
     void afterUserInput();
     void updateHover(const QPoint &pos, Qt::KeyboardModifiers mods);
-    bool linkAt(const CellPos &c, QString *target, int *line, int *col, int *startCol, int *endCol);
+    bool linkAt(const CellPos &c, Link *link, int *startCol, int *endCol);
+    // Every link in the scrollback and on the screen, oldest first, in absolute rows
+    // (0 = the oldest scrollback line, the same coordinates as scrollToRow()).
+    struct WalkLink {
+        int row = 0;
+        int col = 0;
+        int endRow = 0;
+        int endCol = 0;
+        Link link;
+    };
+    void collectLinks();
+    void showWalkLink(const WalkLink &walk);
     QString currentDirectory() const;
     bool mouseToProgram(Qt::KeyboardModifiers mods) const;
     void sendMouse(QMouseEvent *e, int action);
@@ -202,6 +244,17 @@ private:
     int m_hoverRow = -1;
     int m_hoverStart = -1;
     int m_hoverEnd = -1;
+    int m_hoverCellRow = -2;   // the cell the hover was computed for, so a move inside
+    int m_hoverCellCol = -2;   // one cell costs nothing
+    bool m_plainClickOpens = true;
+    Link m_pressedLink;        // the link a plain left press landed on
+    int m_pressedRow = -1;
+    int m_pressedStart = -1;
+    int m_pressedEnd = -1;
+
+    // Keyboard walk over the links (Ctrl+Shift+L)
+    std::vector<WalkLink> m_linkWalk;
+    relay::links::Cursor m_linkCursor;
 
     QString m_preedit;
     bool m_flash = false;

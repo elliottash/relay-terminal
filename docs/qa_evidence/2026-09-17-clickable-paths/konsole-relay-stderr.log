@@ -1,0 +1,4 @@
+kf.kio.widgets: Cannot read information about filesystem under path "/tmp/tmp.MO9gfT4ANt/thumbnails/"
+Fontconfig error: "/etc/fonts/fonts.conf", line 86: out of memory
+Fontconfig error: "/etc/fonts/fonts.conf", line 91: out of memory
+Fontconfig error: Cannot load config file from /etc/fonts/fonts.conf

@@ -10,6 +10,7 @@
 #include <QFontDatabase>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QtTest>
 
 using namespace relay;
@@ -208,6 +209,81 @@ private slots:
         QTest::mouseClick(t.view, Qt::LeftButton, Qt::ControlModifier, QPoint(2 + 3 * cw + cw / 2, 2 + ch + ch / 2));
         QCOMPARE(links.size(), 1);
         QCOMPARE(links[0][0].toString(), QString::fromLatin1(url));
+    }
+
+    // Issue GWXM: Ctrl+Shift+L walks the links in the screen and the scrollback, newest
+    // first, scrolling older ones back into view; Esc drops the highlight.
+    void keyboardLinkWalk()
+    {
+        QFETCH_GLOBAL(QString, core);
+        QTemporaryDir dir;
+        for (const char *name : {"alpha.txt", "beta.txt", "gamma.txt"}) {
+            QFile f(dir.filePath(QString::fromLatin1(name)));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+        }
+        Term t(core, QStringLiteral("/bin/cat"), {}, dir.path());
+        const QByteArray osc7 = "\x1b]7;file://" + QUrl::toPercentEncoding(dir.path(), "/") + "\x07";
+        QByteArray filler;
+        for (int i = 0; i < 20; ++i)
+            filler += "filler line " + QByteArray::number(i) + "\r\n";
+        // alpha scrolls into the scrollback; beta and gamma stay on the screen.
+        t.backend->writeToDisplay(osc7 + "alpha.txt:3:1\r\n" + filler + "beta.txt gamma.txt:7\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("gamma.txt")));
+        QTest::qWait(60);
+
+        TerminalView::Link link;
+        QVERIFY(t.view->stepLink(-1, &link));          // the newest link first
+        QCOMPARE(link.target, QFileInfo(dir.filePath(QStringLiteral("gamma.txt"))).absoluteFilePath());
+        QCOMPARE(link.line, 7);
+        QVERIFY(t.view->linkWalkActive());
+        QCOMPARE(t.view->linkWalkCount(), 3);
+        QVERIFY(t.view->stepLink(-1, &link));
+        QCOMPARE(QFileInfo(link.target).fileName(), QStringLiteral("beta.txt"));
+        QVERIFY(t.view->stepLink(-1, &link));          // back into the scrollback
+        QCOMPARE(QFileInfo(link.target).fileName(), QStringLiteral("alpha.txt"));
+        QCOMPARE(link.line, 3);
+        QVERIFY(!t.backend->selectedText().isEmpty()); // the link is highlighted
+        QVERIFY(t.view->stepLink(-1, &link));          // and the walk wraps at the oldest
+        QCOMPARE(QFileInfo(link.target).fileName(), QStringLiteral("gamma.txt"));
+        QVERIFY(t.view->stepLink(1, &link));           // the arrows go the other way
+        QCOMPARE(QFileInfo(link.target).fileName(), QStringLiteral("alpha.txt"));
+        t.view->endLinkWalk();
+        QVERIFY(!t.view->linkWalkActive());
+    }
+
+    // Issue YZTK: a plain left click follows a path, a click that drags still selects, and
+    // a path that does not exist is not a link at all.
+    void plainClickFollowsAPath()
+    {
+        QFETCH_GLOBAL(QString, core);
+        QTemporaryDir dir;
+        QFile f(dir.filePath(QStringLiteral("notes.txt")));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.close();
+        QVERIFY(QDir(dir.path()).mkdir(QStringLiteral("sub")));
+        Term t(core, QStringLiteral("/bin/cat"), {}, dir.path());
+        QSignalSpy links(t.view, &TerminalView::linkActivated);
+        const QByteArray osc7 = "\x1b]7;file://" + QUrl::toPercentEncoding(dir.path(), "/") + "\x07";
+        t.backend->writeToDisplay(osc7 + "notes.txt sub missing.txt\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("missing")));
+        QTest::qWait(60);
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        auto click = [&](int col) { QTest::mouseClick(t.view, Qt::LeftButton, Qt::NoModifier, QPoint(2 + col * cw + cw / 2, 2 + ch / 2)); };
+        click(2);  // notes.txt
+        QCOMPARE(links.size(), 1);
+        QCOMPARE(links[0][0].toString(), QFileInfo(f).absoluteFilePath());
+        click(11); // sub (a folder)
+        QCOMPARE(links.size(), 2);
+        QCOMPARE(QFileInfo(links[1][0].toString()).fileName(), QStringLiteral("sub"));
+        click(18); // missing.txt does not exist
+        QCOMPARE(links.size(), 2);
+        QVERIFY(t.view->linkAtPoint(QPoint(2 + 18 * cw, 2 + ch / 2)).target.isEmpty());
+        // Disarmed (an inactive Relay pane): a plain click no longer opens, Ctrl+click does.
+        t.view->setPlainClickOpensLinks(false);
+        click(2);
+        QCOMPARE(links.size(), 2);
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::ControlModifier, QPoint(2 + 2 * cw + cw / 2, 2 + ch / 2));
+        QCOMPARE(links.size(), 3);
     }
 
     void pathTokenParsing()
