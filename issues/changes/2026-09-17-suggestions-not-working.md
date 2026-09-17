@@ -5,7 +5,7 @@ status: ready
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: agent
-rank: zz30
+rank: zz31
 created: '2026-09-17'
 labels: [bug]
 acceptance: a suggestion appears after a finished command and can be accepted with Tab, with a test covering the path
