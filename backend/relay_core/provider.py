@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -13,6 +14,15 @@ from typing import Callable
 
 MAX_EVENT = 2 * 1024 * 1024
 MAX_RESPONSE = 8 * 1024 * 1024
+# Silence allowed on one socket read. 30 s was too short: a reasoning model on a long conversation
+# can think for over a minute before the first byte, and the turn died with "Provider connection
+# failed (TimeoutError)" (owner reports, 2026-09-17). Override with RELAY_PROVIDER_TIMEOUT.
+def _read_timeout() -> float:
+    try:
+        value = float(os.environ.get("RELAY_PROVIDER_TIMEOUT", "120"))
+    except ValueError:
+        return 120.0
+    return min(max(value, 5.0), 900.0)
 
 def _reasoning_text(part: dict) -> str:
     """Displayable reasoning in a streamed delta or a complete message.
@@ -122,7 +132,7 @@ class ChatProvider:
                                          data=data, headers=headers, method="POST")
         opener = urllib.request.build_opener(NoRedirect())
         try:
-            response = opener.open(request, timeout=30)
+            response = opener.open(request, timeout=_read_timeout())
             with self._lock:
                 self._response = response
             with response:
