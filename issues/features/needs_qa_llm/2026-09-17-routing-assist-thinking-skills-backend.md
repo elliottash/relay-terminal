@@ -78,3 +78,24 @@ event name with streaming `tool_output {text}` chunks and is marked `stored: tru
    confirm a subset; check the copy location, that symlinks were not copied as links, and that `configure` without
    `skills.dirs` lists the imported skills. `skills_check_updates` reports `current` and `latest`. Refuse `http://`,
    `file://`, `ext::` and option-like URLs.
+
+## Routing model benchmark (2026-09-17, OpenRouter, 6 fixed cases, non-streaming)
+
+Owner asked whether anything on OpenRouter is faster than Gemini 3.5 Flash-Lite for the routing call.
+
+| Model | Median | Slowest | Correct |
+|---|---|---|---|
+| `google/gemini-3.5-flash-lite` (current) | **0.64 s** | 0.78 s | 6/6 |
+| `mistralai/mistral-small-2603` | 0.76 s | 0.84 s | 5/6 |
+| `google/gemini-3.1-flash-lite` | 0.80 s | 1.69 s | 6/6 |
+| `inclusionai/ling-3.0-flash` | 0.98 s | 1.42 s | 6/6 |
+| `openai/gpt-5.4-nano` (minimal reasoning) | 1.25 s | 2.13 s | 6/6 |
+| `openai/gpt-5-nano` (minimal reasoning) | 1.29 s | 1.89 s | 5/6 |
+| `nvidia/nemotron-3.5-lightning` | 1.62 s | 3.39 s | 1/6 |
+| `minimax/minimax-m3` | 1.60 s | 2.91 s | 4/6 |
+| `mistralai/mistral-nemo` | 1.84 s | 2.88 s | 6/6 |
+| `bytedance-seed/seed-2.0-mini` | 2.50 s | 2.88 s | 3/6 |
+| `google/gemini-3.8-flash-lite`, `meta-llama/llama-4.1-8b-instruct` | HTTP 400 (not available) | | |
+
+Nothing beat Flash-Lite on both speed and accuracy, so the routing model is unchanged. Cheaper models exist
+(`ling-3.0-flash` at $0.021/M in), but they are slower; the cost of this call is negligible either way.
