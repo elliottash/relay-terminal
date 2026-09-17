@@ -194,6 +194,22 @@ private slots:
         QCOMPARE(links[2][0].toString(), QStringLiteral("https://relay.test/x"));
     }
 
+    void wrappedUrlClick()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        QSignalSpy links(t.view, &TerminalView::linkActivated);
+        // 50 columns: the URL starts on row 0 and continues on row 1.
+        const QByteArray url = "https://example.com/a/very/long/path/that/wraps/around/the/edge";
+        t.backend->writeToDisplay("see " + url + " ok\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("edge")));
+        QTest::qWait(60);
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::ControlModifier, QPoint(2 + 3 * cw + cw / 2, 2 + ch + ch / 2));
+        QCOMPARE(links.size(), 1);
+        QCOMPARE(links[0][0].toString(), QString::fromLatin1(url));
+    }
+
     void pathTokenParsing()
     {
         QString path;

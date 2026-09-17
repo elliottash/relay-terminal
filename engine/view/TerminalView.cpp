@@ -1099,21 +1099,31 @@ bool TerminalView::linkAt(const CellPos &c, QString *target, int *line, int *col
         *endCol = e;
         return true;
     }
-    // Plain text token under the pointer.
+    // Plain text token under the pointer, joined across soft-wrapped rows of
+    // the viewport (long URLs and paths wrap at the terminal edge).
+    int firstRow = c.row, lastRow = c.row;
+    while (firstRow > 0 && m_frame.lines[size_t(firstRow)].continuation)
+        --firstRow;
+    while (lastRow + 1 < int(m_frame.lines.size()) && m_frame.lines[size_t(lastRow + 1)].continuation)
+        ++lastRow;
     QString text;
-    std::vector<int> colOf;
-    for (int i = 0; i < int(l.cells.size()); ++i) {
-        const Cell &cell = l.cells[size_t(i)];
-        if (cell.ch == kWideTail)
-            continue;
-        const QString s = l.cellText(cell);
-        for (int k = 0; k < s.size(); ++k)
-            colOf.push_back(i);
-        text += s;
+    std::vector<std::pair<int, int>> cellOf; // (row, col) per UTF-16 unit
+    for (int r = firstRow; r <= lastRow; ++r) {
+        const Line &rowLine = m_frame.lines[size_t(r)];
+        const int n = r < lastRow ? m_frame.columns : int(rowLine.cells.size());
+        for (int i = 0; i < n; ++i) {
+            const Cell cell = i < int(rowLine.cells.size()) ? rowLine.cells[size_t(i)] : Cell();
+            if (cell.ch == kWideTail)
+                continue;
+            const QString s = rowLine.cellText(cell);
+            for (int k = 0; k < s.size(); ++k)
+                cellOf.push_back({r, i});
+            text += s;
+        }
     }
     int idx = -1;
-    for (int i = 0; i < int(colOf.size()); ++i) {
-        if (colOf[size_t(i)] == c.col) {
+    for (int i = 0; i < int(cellOf.size()); ++i) {
+        if (cellOf[size_t(i)].first == c.row && cellOf[size_t(i)].second == c.col) {
             idx = i;
             break;
         }
@@ -1129,8 +1139,9 @@ bool TerminalView::linkAt(const CellPos &c, QString *target, int *line, int *col
     while (e > s && QStringLiteral(".,;:").contains(text[e]))
         --e;
     const QString token = text.mid(s, e - s + 1);
-    *startCol = colOf[size_t(s)];
-    *endCol = colOf[size_t(e)];
+    // Hover highlight is per row: clip the token to the row under the pointer.
+    *startCol = cellOf[size_t(s)].first == c.row ? cellOf[size_t(s)].second : 0;
+    *endCol = cellOf[size_t(e)].first == c.row ? cellOf[size_t(e)].second : m_frame.columns - 1;
     static const QRegularExpression urlRe(QStringLiteral("^(https?|ftp|file|ssh)://\\S+$"));
     if (urlRe.match(token).hasMatch()) {
         *target = token;

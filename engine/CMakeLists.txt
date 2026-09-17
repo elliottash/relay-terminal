@@ -88,7 +88,11 @@ target_link_libraries(relay-terminal-engine PUBLIC ${RELAY_QT}::Widgets PRIVATE 
 if(UNIX AND NOT APPLE)
     target_link_libraries(relay-terminal-engine PRIVATE util) # forkpty
 endif()
-target_compile_options(relay-terminal-engine PRIVATE -Wall -Wextra)
+if(MSVC)
+    target_compile_options(relay-terminal-engine PRIVATE /W3 /utf-8)
+else()
+    target_compile_options(relay-terminal-engine PRIVATE -Wall -Wextra)
+endif()
 if(RELAY_ENGINE_WITH_GHOSTTY)
     target_link_libraries(relay-terminal-engine PRIVATE relay-ghostty-vt)
     target_compile_definitions(relay-terminal-engine PUBLIC RELAY_HAVE_GHOSTTY)

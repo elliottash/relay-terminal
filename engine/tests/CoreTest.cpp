@@ -342,6 +342,13 @@ private slots:
         QCOMPARE(text(0x00e9, QStringLiteral("é")), QStringLiteral("é").toUtf8());
         h.feed("\x1b[?1h"); // application cursor keys
         QCOMPARE(key(Key::Up), QByteArray("\x1bOA"));
+        // Key releases produce nothing unless a program asked for them (kitty protocol).
+        h.replies.clear();
+        KeyInput release;
+        release.key = Key::Up;
+        release.release = true;
+        h.vt->sendKey(release);
+        QVERIFY(h.replies.isEmpty());
     }
 
     void pasteAndFocus()

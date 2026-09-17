@@ -16,13 +16,19 @@
 #include <QStringList>
 
 #include <cstdio>
+#if defined(Q_OS_UNIX)
 #include <sys/resource.h>
+#endif
 
 static long maxRssKb()
 {
+#if defined(Q_OS_UNIX)
     struct rusage ru {};
     getrusage(RUSAGE_SELF, &ru);
     return ru.ru_maxrss;
+#else
+    return -1; // TODO(windows): GetProcessMemoryInfo
+#endif
 }
 
 int main(int argc, char **argv)

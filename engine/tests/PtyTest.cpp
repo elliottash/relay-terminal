@@ -98,7 +98,8 @@ private slots:
         Collector c;
         c.attach(pty.get());
         Pty::StartOptions o;
-        o.program = QStringLiteral("/bin/sh");
+        o.program = QStringLiteral("bash");
+        o.arguments = QStringList{QStringLiteral("--norc"), QStringLiteral("--noprofile"), QStringLiteral("-i")};
         o.rows = 30;
         o.cols = 100;
         o.environment = QStringList{QStringLiteral("PS1=$ ")};
