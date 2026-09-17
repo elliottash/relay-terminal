@@ -2,6 +2,8 @@
 #include "ShellHighlighter.h"
 #include "Theme.h"
 
+#include <QDir>
+#include <QDirIterator>
 #include <QRegularExpression>
 #include <QTextDocument>
 
@@ -47,10 +49,26 @@ static const QSet<QString> &shellBuiltins() {
     return builtins;
 }
 
+// Relay's shell integration reports the shell's own command list, but it is opt-in and a pane may
+// not have it. Falling back to a scan of PATH means Terminal mode can still tell a typo from a
+// command (owner: "greckle" stayed cyan, 2026-09-17).
+static const QSet<QString> &pathCommands() {
+    static const QSet<QString> commands = [] {
+        QSet<QString> out;
+        const QString path = qEnvironmentVariable("PATH");
+        for (const QString &dir : path.split(':', Qt::SkipEmptyParts)) {
+            QDirIterator it(dir, QDir::Files | QDir::Executable | QDir::NoDotAndDotDot);
+            while (it.hasNext()) { it.next(); out.insert(it.fileName()); }
+        }
+        return out;
+    }();
+    return commands;
+}
+
 QColor InputHighlighter::commandColor(const QString &word) const {
-    if (!m_flagUnknown || m_known.isEmpty()) return kCommand;
+    if (!m_flagUnknown) return kCommand;
     if (word.contains('/') || word.startsWith('.') || word.contains('$')) return kCommand;
-    if (m_known.contains(word) || shellBuiltins().contains(word)) return kCommand;
+    if (m_known.contains(word) || shellBuiltins().contains(word) || pathCommands().contains(word)) return kCommand;
     return kUnknown;
 }
 
@@ -125,10 +143,7 @@ void InputHighlighter::highlightShell(const QString &text) {
         if (inLiteral(start)) continue;
         const QString value = match.captured();
         if (expectCommand && !value.contains('=')) {
-            // Always the command colour. Marking an unfamiliar word red was wrong as often as not
-            // (builtins, aliases, anything installed since the pane started), and the pre-submit
-            // check already reports a command that will not run (owner, 2026-09-17).
-            setFormat(start, value.size(), charFormat(kCommand, true));
+            setFormat(start, value.size(), charFormat(commandColor(value), true));
             expectCommand = false;
             continue;
         }
