@@ -1,0 +1,6 @@
+cards checked: 57
+body byte-identical to the original minus its header block: 57
+body mismatches: none
+header values lost or changed: none
+PyYAML cross-check mismatches: none
+a second migration run produces identical bytes: True
