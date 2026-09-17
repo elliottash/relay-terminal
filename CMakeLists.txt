@@ -69,7 +69,8 @@ if(RELAY_BUILD_APP)
     target_link_libraries(relay PRIVATE relay-editor relay-filepanes ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
-        RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+        RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+        RELAY_VERSION="${PROJECT_VERSION}")
     target_compile_options(relay PRIVATE -Wall -Wextra -Wpedantic)
     install(TARGETS relay RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     install(DIRECTORY backend shell DESTINATION ${CMAKE_INSTALL_DATADIR}/relay

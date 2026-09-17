@@ -80,6 +80,9 @@
 #include <termios.h>
 #include <unistd.h>
 
+#ifndef RELAY_VERSION
+#define RELAY_VERSION "0.0.0-dev"
+#endif
 #ifndef RELAY_DATA_DIR
 #define RELAY_DATA_DIR "/usr/local/share/relay"
 #endif
@@ -3214,7 +3217,7 @@ int main(int argc, char **argv) {
     relay::theme::applyDarkTheme(app);
     QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminal"));
     QCoreApplication::setApplicationName(QStringLiteral("relay"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral(RELAY_VERSION));
     QGuiApplication::setDesktopFileName(QStringLiteral("org.relayterminal.Relay"));
     try {
         // Theme icon when installed; the bundled PNG from the source tree or install otherwise.

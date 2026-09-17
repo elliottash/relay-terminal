@@ -8,7 +8,7 @@ import os
 import sys
 import threading
 
-from relay_core import keystore, skills
+from relay_core import __version__, keystore, skills
 from relay_core.agent import Agent
 from relay_core.keybindings import KeybindingCatalog, KeybindingError
 from relay_core.presets import PRESETS, match_preset
@@ -51,7 +51,7 @@ def main():
 
     turns = TurnSupervisor(emit)
 
-    emit({"event": "ready", "version": "0.1.0"})
+    emit({"event": "ready", "version": __version__})
     while True:
         line = sys.stdin.buffer.readline(MAX_MESSAGE + 1)
         if not line:
