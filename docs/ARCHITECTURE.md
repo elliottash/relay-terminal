@@ -140,7 +140,8 @@ text from the live Keymap, so rebinding changes the hint and unbound actions get
 triggers: toolbar and palette activations of actions with shortcuts, pane buttons, the tab "+",
 tab close and ⧉ buttons, clicking into another pane, mouse model/effort/mode pickers, clicking
 the directory line (`@`), the queue ×, `/shell ` and `/agent ` (`!`, `*`), palette rewinds, pane
-drags, the first `relay://` link, and rotating idle tips 4 s after a finished agent turn with an
+drags, the first `relay://` link, the Requests chip (→ `/requests` or `agent.requests`), Continue
+from the link or palette (→ `/continue` or `agent.continue`), and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
 in `WARP.md`); tests in `tests/hints_test.cpp`.
 
@@ -513,6 +514,17 @@ verbatim, todos, plan, files, subagents, recent user messages up to ~20K tokens)
 `relay_kind: "prompt"` messages count as turn starts. An optional audit side call
 (`audit_requests`, route-assist model) only flags possibly unaddressed asks. Subagents have none of
 this (no ledger or todos).
+
+**Request ledger UI** (`src/RequestLedger.*`, `src/RequestsPanel.*`, library `relay-requests`, tests
+`tests/requests_test.cpp`). `RequestLedgerModel` holds the latest `requests`/`todos` lists (and
+verbatim text from `request_get`) and builds the inline texts (limit line, open items, completion
+check, audit flags). `Pane` owns one model: the `requestsChip` shows "Requests N open" (or
+"Requests ✓ N"), hosted in the queue strip header while the strip is visible and in the composer
+row otherwise. `RequestsPanel` floats over the right of the terminal (d/x/o/r send `request_set` and
+`request_reask`). `done {stop_reason: "limit"}` prints a `relay://continue/<pane>` link handled by
+`WindowManager::handleOpen`; Continue sends an ordinary ask. `max_steps`, `max_tool_calls` and
+`audit_requests` live in QSettings `agent/*`, go into `configure` and are sent with
+`set_agent_options` when changed.
 
 ### Tools
 

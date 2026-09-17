@@ -8,6 +8,8 @@
 #include "SkillsDialog.h"
 #include "SubagentTranscript.h"   // subagents UI
 #include "SubagentsPanel.h"
+#include "RequestLedger.h"         // request ledger UI
+#include "RequestsPanel.h"
 #include <iterator>
 #include <KParts/ReadOnlyPart>
 #include <KPluginFactory>
@@ -324,6 +326,8 @@ private:
         add("agent.fork", "agent", "Fork the conversation into a new pane", {});
         add("agent.resume", "agent", "Resume a saved agent session", {});
         add("agent.recap", "agent", "Recap this agent session", {});
+        add("agent.requests", "agent", "Requests and todos: open the request list (/requests)", {});
+        add("agent.continue", "agent", "Continue the agent turn after a step limit (/continue)", {});
         add("agent.instructions", "agent", "Choose agent instruction files", {});
         add("agent.export", "agent", "Export the conversation as Markdown", {});
         add("keybindings.edit", "terminal", "Edit keyboard shortcuts", {});
@@ -832,6 +836,16 @@ public:
             if (m_configured) send({{"type", "set_agent_options"}, {"max_auto_turns", QSettings().value(QStringLiteral("agent/max_auto_turns"), 50).toInt()}});
             return;
         }
+        // Turn limits and the request audit apply to the running agent at once (protocol 12.1).
+        if (key == QStringLiteral("agent/max_steps") || key == QStringLiteral("agent/max_tool_calls") || key == QStringLiteral("agent/audit_requests")) {
+            if (m_configured) {
+                QJsonObject request{{"type", "set_agent_options"}};
+                const QJsonObject options = requestOptions();
+                for (auto it = options.begin(); it != options.end(); ++it) request.insert(it.key(), it.value());
+                send(request);
+            }
+            return;
+        }
         applyConfigureChange(QStringLiteral("Agent options saved"));
     }
 
@@ -921,6 +935,7 @@ protected:
         if (m_help) m_help->setVisible(width() >= 900);
         placeQueueStrip();
         placeSubagentOverlay();   // subagents UI
+        placeRequestsPanel();     // request ledger UI
         placeSubagentsPanel();
         QTimer::singleShot(0, this, [this] { placeSubagentsPanel(); });
         if (m_transcript) m_transcript->setMaximumHeight(std::max(120, height() * 2 / 5));
@@ -1049,6 +1064,7 @@ private:
         });
         routeRow->addWidget(m_modelBox);
         buildSessionControls(routeRow);
+        setupRequestsUi(routeRow);   // request ledger UI: the Requests chip
         auto *cancel = new QToolButton;
         cancel->setObjectName(QStringLiteral("interruptButton"));
         const QString cancelIcon = relay::theme::themeDataDir() + QStringLiteral("/icons/cancel.svg");
@@ -1144,6 +1160,14 @@ private:
         return base + QStringLiteral("/relay/relay.md");
     }
 
+    // Turn limits and request audit from Agent options (protocol 12.1).
+    static QJsonObject requestOptions() {
+        QSettings settings;
+        return {{"max_steps", std::clamp(settings.value(QStringLiteral("agent/max_steps"), 50).toInt(), 1, 500)},
+                {"max_tool_calls", std::clamp(settings.value(QStringLiteral("agent/max_tool_calls"), 150).toInt(), 1, 2000)},
+                {"audit_requests", settings.value(QStringLiteral("agent/audit_requests"), false).toBool()}};
+    }
+
     // Session-related configure fields from settings (protocol sections 1 and 8).
     QJsonObject withSessionFields(QJsonObject request) const {
         QSettings settings;
@@ -1159,6 +1183,8 @@ private:
         QJsonObject agents = request.value(QStringLiteral("agents")).toObject();
         agents.insert(QStringLiteral("max_auto_turns"), settings.value(QStringLiteral("agent/max_auto_turns"), 50).toInt());
         request.insert(QStringLiteral("agents"), agents);
+        const QJsonObject limits = requestOptions();
+        for (auto it = limits.begin(); it != limits.end(); ++it) request.insert(it.key(), it.value());
         const QStringList exclude = settings.value(QStringLiteral("skills/exclude")).toStringList();
         if (!exclude.isEmpty()) request.insert(QStringLiteral("skills"), QJsonObject{{"exclude", QJsonArray::fromStringList(exclude)}});
         return request;
@@ -1625,6 +1651,8 @@ private:
             else
                 printInline(QStringLiteral("Session loaded%1 · %2 turn(s)\n").arg(title.isEmpty() ? QString() : QStringLiteral(": “") + title + QStringLiteral("”"))
                             .arg(m_turnsCompleted), Ink::Note);
+            if (const int open = event.value(QStringLiteral("open_requests")).toInt(); open > 0)
+                printInline(QStringLiteral("○ %1 request%2 still open · /requests\n").arg(open).arg(open == 1 ? QString() : QStringLiteral("s")), Ink::Note);
             m_forkLoadPending = false;
             closeInline();
             clearAgentQueue();
@@ -1653,6 +1681,8 @@ private:
             printInline(QStringLiteral("Recap · ") + event.value(QStringLiteral("text")).toString() + '\n', Ink::Recap);
             const QString next = event.value(QStringLiteral("next_action")).toString();
             if (!next.isEmpty()) printInline(QStringLiteral("Next · ") + next + '\n', Ink::Recap);
+            const QString openLine = relay::RequestLedgerModel::openItemsLine(relay::RequestLedgerModel::parseOpenItems(event.value(QStringLiteral("open_items")).toArray()));
+            if (!openLine.isEmpty()) printInline(QStringLiteral("Open · ") + openLine + QStringLiteral("  · /requests\n"), Ink::Recap);
             if (!m_agentBusy && !moreTurnsPending()) closeInline();
             if (reason == QStringLiteral("away")) toast(QStringLiteral("Welcome back · recap above"));
             return true;
@@ -1770,7 +1800,9 @@ private:
             relay::agentui::PickerRow row;
             row.columns = QStringList{item.value(QStringLiteral("title")).toString(),
                            QDateTime::fromSecsSinceEpoch(qint64(item.value(QStringLiteral("updated")).toDouble())).toString(QStringLiteral("yyyy-MM-dd HH:mm")),
-                           QString::number(item.value(QStringLiteral("turns")).toInt()), item.value(QStringLiteral("model")).toString()};
+                           QString::number(item.value(QStringLiteral("turns")).toInt())
+                               + (item.value(QStringLiteral("open_requests")).toInt() > 0 ? QStringLiteral(" · %1 open").arg(item.value(QStringLiteral("open_requests")).toInt()) : QString()),
+                           item.value(QStringLiteral("model")).toString()};
             rows << row;
             ids << item.value(QStringLiteral("id")).toString();
         }
@@ -1837,6 +1869,9 @@ private:
             {QStringLiteral("resume"), QString(), QStringLiteral("Resume a saved session")},
             {QStringLiteral("plan"), QString(), QStringLiteral("Toggle plan mode")},
             {QStringLiteral("recap"), QString(), QStringLiteral("Summarize this session")},
+            {QStringLiteral("requests"), QString(), QStringLiteral("Requests and todos: open items, mark done, cancel, re-ask")},
+            {QStringLiteral("todos"), QString(), QStringLiteral("The agent's todos with their requests (same as /requests)")},
+            {QStringLiteral("continue"), QString(), QStringLiteral("Continue the agent turn (after a step limit)")},
             {QStringLiteral("agents"), QString(), QStringLiteral("Subagents: definitions and running agents")},
             {QStringLiteral("skills"), QString(), QStringLiteral("Skills: list, exclude, refine, import from a repository")},
             {QStringLiteral("instructions"), QString(), QStringLiteral("Choose instruction files (CLAUDE.md, AGENTS.md, WARP.md…)")},
@@ -1965,6 +2000,8 @@ private:
         else if (name == QStringLiteral("resume")) openResume();
         else if (name == QStringLiteral("plan")) togglePlanMode();
         else if (name == QStringLiteral("recap")) requestRecap();
+        else if (name == QStringLiteral("requests") || name == QStringLiteral("todos")) openRequests();
+        else if (name == QStringLiteral("continue")) continueTurn();
         else if (name == QStringLiteral("instructions")) openInstructions();
         else if (name == QStringLiteral("export")) exportConversation();
         else if (name == QStringLiteral("agents")) {
@@ -2094,6 +2131,157 @@ private:
         m_subagentOverlay->setGeometry(width() - w - 8, 8, w, std::max(160, height() - 16));
     }
     // ----- end subagents UI ---------------------------------------------------------------------
+
+    // ----- request ledger UI (protocol section 12) ----------------------------------------------
+    void setupRequestsUi(QHBoxLayout *row) {
+        m_routeRow = row;
+        m_requestsChip = new QToolButton;
+        m_requestsChip->setObjectName(QStringLiteral("requestsChip"));
+        m_requestsChip->setFocusPolicy(Qt::NoFocus);
+        m_requestsChip->setAccessibleName(QStringLiteral("Requests"));
+        m_requestsChip->hide();
+        row->insertWidget(3, m_requestsChip);   // after the PLAN chip and the context label
+        connect(m_requestsChip, &QToolButton::clicked, this, [this] {
+            toggleRequests();
+            hint(QStringLiteral("requests.chip"), requestsShortcutHint());
+        });
+        m_ledger.onChanged = [this] {
+            updateRequestsChip();
+            if (m_requestsPanel) m_requestsPanel->refresh();
+        };
+    }
+
+    QString requestsShortcutHint() const {
+        const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.requests"));
+        return keys.isEmpty() ? QStringLiteral("Next time: /requests in the prompt box opens the request list")
+                              : relay::ShortcutHints::nextTime(keys, QStringLiteral("request list"));
+    }
+
+    void updateRequestsChip() {
+        if (!m_requestsChip) return;
+        const bool show = m_ledger.total() > 0;
+        m_requestsChip->setText(m_ledger.chipText());
+        m_requestsChip->setToolTip(m_ledger.chipToolTip() + QStringLiteral("\nClick or /requests: list, mark done, cancel, re-ask"));
+        m_requestsChip->setProperty("open", m_ledger.openCount() > 0);
+        m_requestsChip->style()->unpolish(m_requestsChip); m_requestsChip->style()->polish(m_requestsChip);
+        const bool wasVisible = m_requestsChip->isVisible();
+        m_requestsChip->setVisible(show);
+        if (wasVisible != show && m_queueStrip && m_queueStrip->isVisible()) rebuildQueueStrip();
+    }
+
+public:
+    bool requestsOpen() const { return m_requestsPanel && m_requestsPanel->isVisible(); }
+    void toggleRequests() { if (requestsOpen()) closeRequests(); else openRequests(); }
+
+    void openRequests() {
+        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+        if (!m_requestsPanel) {
+            auto *panel = new relay::RequestsPanel(&m_ledger, this);
+            m_requestsPanel = panel;
+            panel->onSetStatus = [this](const QString &ledgerId, const QString &state) {
+                send({{"type", "request_set"}, {"id", QStringLiteral("req-%1").arg(++m_requestId)}, {"ledger_id", ledgerId}, {"status", state}});
+                toast(QStringLiteral("%1 %2").arg(ledgerId, relay::RequestLedgerModel::statusLabel(state == QStringLiteral("open") ? QStringLiteral("reopened") : state)));
+            };
+            panel->onReask = [this](const QString &ledgerId) { reaskRequest(ledgerId); };
+            panel->onFetch = [this](const QString &ledgerId) {
+                send({{"type", "request_get"}, {"id", QStringLiteral("req-%1").arg(++m_requestId)}, {"ledger_id", ledgerId}});
+            };
+            panel->onClose = [this] { closeRequests(); };
+        }
+        send({{"type", "requests"}, {"id", QStringLiteral("req-%1").arg(++m_requestId)}});
+        send({{"type", "todos"}, {"id", QStringLiteral("req-%1").arg(++m_requestId)}});
+        m_requestsPanel->refresh();
+        placeRequestsPanel();
+        m_requestsPanel->show();
+        m_requestsPanel->raise();
+        m_requestsPanel->enter();
+    }
+
+    void closeRequests() {
+        if (m_requestsPanel) m_requestsPanel->hide();
+        focusInput();
+    }
+
+    // "Continue" after a turn stopped at its step or tool-call limit: an ordinary ask.
+    void continueTurn(bool slowPath = false) {
+        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+        m_limitReached = false;
+        submitAgent(QStringLiteral("Continue"), false);
+        if (slowPath) {
+            const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.continue"));
+            hint(QStringLiteral("continue.slow"), keys.isEmpty() ? QStringLiteral("Next time: /continue in the prompt box")
+                                                               : relay::ShortcutHints::nextTime(keys, QStringLiteral("continue")));
+        }
+    }
+    bool limitReached() const { return m_limitReached; }
+    int openRequestCount() const { return m_ledger.openCount(); }
+
+private:
+    void reaskRequest(const QString &ledgerId) {
+        const relay::LedgerRequest *request = m_ledger.find(ledgerId);
+        if (!request) return;
+        const QString requestId = QStringLiteral("ask-%1").arg(++m_askSerial);
+        PendingPrompt prompt; prompt.text = request->fullText();
+        m_pendingPrompts.insert(requestId, prompt);
+        send({{"type", "request_reask"}, {"id", requestId}, {"ledger_id", ledgerId}, {"when", "queue"}});
+        toast(QStringLiteral("Re-asked %1 · %2").arg(ledgerId, m_agentBusy ? QStringLiteral("queued") : QStringLiteral("starting")));
+    }
+
+    void placeRequestsPanel() {
+        if (!m_requestsPanel || !m_terminalHost) return;
+        const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
+        const int w = std::min(host.width() - 16, std::max(380, host.width() * 3 / 5));
+        m_requestsPanel->setGeometry(host.right() - w - 8, host.top() + 8, w, std::max(180, host.height() - 16));
+    }
+
+    // Terminal-output lines for the end of a turn: the limit with a Continue link, open items.
+    void printTurnEndRequests(const QString &type, const QJsonObject &event) {
+        if (type == QStringLiteral("done")) m_limitReached = event.value(QStringLiteral("stop_reason")).toString() == QStringLiteral("limit");
+        if (m_limitReached && type == QStringLiteral("done")) {
+            ensureLineStart();
+            printInline(relay::RequestLedgerModel::limitLine(event) + '\n', Ink::Tool);
+            printContinueLink();
+        }
+        const QString line = relay::RequestLedgerModel::openItemsLine(relay::RequestLedgerModel::parseOpenItems(event.value(QStringLiteral("open_items")).toArray()));
+        if (!line.isEmpty()) { ensureLineStart(); printInline(QStringLiteral("○ ") + line + QStringLiteral("  · /requests\n"), Ink::Note); }
+    }
+
+    // "▸ Continue" as a terminal hyperlink (relay://continue/<pane>), like the tool-calls link.
+    void printContinueLink() {
+        const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.continue"));
+        const QString fast = keys.isEmpty() ? QStringLiteral("/continue") : keys + QStringLiteral(" or /continue");
+        if (!shellIdleAtPrompt()) { printInline(QStringLiteral("▸ Continue: %1 (Actions › Continue agent turn)\n").arg(fast), Ink::Note); return; }
+        const QByteArray url = QStringLiteral("relay://continue/%1").arg(m_token).toUtf8();
+        QByteArray out;
+        if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; }
+        if (!m_atLineStart) out += "\r\n";
+        out += "\x1b]8;;" + url + "\x1b\\" + inkCode(Ink::User) + QByteArray("▸ Continue") + "\x1b[0m" + "\x1b]8;;\x1b\\";
+        out += inkCode(Ink::Note) + QStringLiteral("  (Ctrl+click · %1)").arg(fast).toUtf8() + "\x1b[0m\r\n";
+        m_atLineStart = true;
+        writeTerminal(out);
+    }
+
+    bool handleRequestsEvent(const QString &type, const QJsonObject &event) {
+        if (type == QStringLiteral("ready")) { m_ledger.clear(); m_limitReached = false; return false; }
+        if (m_ledger.handle(event)) {
+            if (type == QStringLiteral("request_audit")) {
+                const QString line = relay::RequestLedgerModel::auditLine(event);
+                if (!line.isEmpty()) {
+                    ensureLineStart();
+                    printInline(QStringLiteral("⚠ ") + line + QStringLiteral("  · /requests\n"), Ink::Note);
+                    if (!m_agentBusy && !moreTurnsPending()) closeInline();
+                }
+            }
+            return true;
+        }
+        if (type == QStringLiteral("completion_check")) {
+            ensureLineStart();
+            printInline(relay::RequestLedgerModel::completionCheckLine(event) + '\n', Ink::Note);
+            return true;
+        }
+        return false;
+    }
+    // ----- end request ledger UI ------------------------------------------------------------------
 
     void startWorker() {
         if (!m_workerConnected) connectWorker();
@@ -2289,6 +2477,7 @@ private:
         if (type == QStringLiteral("configured")) QTimer::singleShot(0, this, [this] { refreshAgentDefinitions(); });
         if (m_subagents.handle(event)) return;
         // --- end subagents UI ---
+        if (handleRequestsEvent(type, event)) return;   // request ledger UI
         if (handleObservabilityEvent(type, event)) return;
         if (handleSessionEvent(type, event)) return;
         if (type == QStringLiteral("ready")) {
@@ -2508,6 +2697,7 @@ private:
             if (type == QStringLiteral("cancelled")) {
                 ensureLineStart(); printInline(QStringLiteral("Stopped. Actions that already ran are not rolled back.\n"), Ink::Error);
             }
+            printTurnEndRequests(type, event);   // request ledger UI
             ensureLineStart();
             // Readline redraws its prompt asynchronously; closing between queued turns would drop the
             // redrawn prompt into the middle of the next turn's output. Close once the queue is idle.
@@ -2531,6 +2721,7 @@ private:
             status(text);
             if (wasBusy && !m_agentBusy) {
                 ensureLineStart(); printInline(QStringLiteral("✗ ") + text + '\n', Ink::Error);
+                printTurnEndRequests(type, event);   // request ledger UI
                 if (!moreTurnsPending()) closeInline();
                 finishFixTurn(false);
             }
@@ -3783,16 +3974,24 @@ private:
         auto *layout = static_cast<QVBoxLayout *>(m_queueStrip->layout());
         while (QLayoutItem *item = layout->takeAt(0)) {
             if (QWidget *w = item->widget()) { if (w != m_queueList) w->deleteLater(); }
-            else if (QLayout *l = item->layout()) { while (QLayoutItem *inner = l->takeAt(0)) { if (inner->widget()) inner->widget()->deleteLater(); delete inner; } }
+            else if (QLayout *l = item->layout()) {
+                while (QLayoutItem *inner = l->takeAt(0)) { if (inner->widget() && inner->widget() != m_requestsChip) inner->widget()->deleteLater(); delete inner; }
+            }
             delete item;
         }
         m_queueStrip->setVisible(visible);
+        // The Requests chip sits in the queue strip while it shows, else in the composer row.
+        if (m_requestsChip && m_routeRow && (!visible || m_ledger.total() == 0) && m_routeRow->indexOf(m_requestsChip) < 0) {
+            m_routeRow->insertWidget(3, m_requestsChip);
+            m_requestsChip->setVisible(m_ledger.total() > 0);
+        }
         if (!visible) return;
         auto *header = new QHBoxLayout;
         auto *title = new QLabel(m_entriesPaused ? QStringLiteral("QUEUE · PAUSED") : QStringLiteral("QUEUE"));
         title->setObjectName(QStringLiteral("queueTitle"));
         title->setToolTip(m_pauseReason);
         header->addWidget(title, 1);
+        if (m_requestsChip && m_ledger.total() > 0) { header->addWidget(m_requestsChip); m_requestsChip->show(); }
         auto *hint = new QLabel(QStringLiteral("↑ select · Ctrl+↑↓ move · Enter edit · Del remove"));
         hint->setObjectName(QStringLiteral("queueHint"));
         header->addWidget(hint);
@@ -4233,6 +4432,12 @@ private:
     quint64 m_requestId = 0, m_loadSerial = 0;
     // subagents UI
     relay::SubagentModel m_subagents;
+    // request ledger UI
+    relay::RequestLedgerModel m_ledger;
+    QToolButton *m_requestsChip = nullptr;
+    QHBoxLayout *m_routeRow = nullptr;
+    QPointer<relay::RequestsPanel> m_requestsPanel;
+    bool m_limitReached = false;   // the last turn stopped at the step or tool-call limit
     relay::SubagentsPanel *m_agentsPanel = nullptr;
     QList<QPointer<relay::SubagentTranscriptView>> m_subagentViews;
     QPointer<relay::SubagentTranscriptView> m_subagentOverlay;
@@ -4843,6 +5048,8 @@ private:
         else if (id == QStringLiteral("agent.fork")) pane->requestFork();
         else if (id == QStringLiteral("agent.resume")) pane->openResume();
         else if (id == QStringLiteral("agent.recap")) pane->requestRecap();
+        else if (id == QStringLiteral("agent.requests")) pane->toggleRequests();
+        else if (id == QStringLiteral("agent.continue")) pane->continueTurn(Keymap::instance().shortcutText(id).isEmpty());
         else if (id == QStringLiteral("agent.instructions")) pane->openInstructions();
         else if (id == QStringLiteral("agent.export")) pane->exportConversation();
         else if (id == QStringLiteral("agent.interrupt")) pane->interruptAgentWithPrompt();
@@ -4997,6 +5204,32 @@ private:
             children << item;
         }
         {
+            // Turn limits (protocol 12.1): apply to the running agent at once.
+            auto askInt = [this, section](const QString &key, const QString &label, const QString &detail, const QString &prompt, int fallback, int min, int max) {
+                PaletteItem item; item.key = QStringLiteral("option:") + key; item.section = section; item.label = label;
+                item.detail = detail.arg(QSettings().value(key, fallback).toInt());
+                item.run = [this, key, label, prompt, fallback, min, max] {
+                    bool ok = false;
+                    const int value = QInputDialog::getInt(this, label.chopped(1), prompt, QSettings().value(key, fallback).toInt(), min, max, 1, &ok);
+                    if (!ok) return;
+                    QSettings().setValue(key, value);
+                    if (m_active) m_active->agentOptionsChanged(key);
+                };
+                return item;
+            };
+            children << askInt(QStringLiteral("agent/max_steps"), QStringLiteral("Step limit per turn…"),
+                               QStringLiteral("%1 model calls, then the turn stops with Continue (default 50)"), QStringLiteral("Model calls per turn (1–500)"), 50, 1, 500);
+            children << askInt(QStringLiteral("agent/max_tool_calls"), QStringLiteral("Tool-call limit per turn…"),
+                               QStringLiteral("%1 tool calls (default 150)"), QStringLiteral("Tool calls per turn (1–2000)"), 150, 1, 2000);
+            PaletteItem audit; audit.key = QStringLiteral("option:agent/audit_requests"); audit.section = section;
+            const bool on = QSettings().value(QStringLiteral("agent/audit_requests"), false).toBool();
+            audit.label = QStringLiteral("Audit requests after each turn");
+            audit.detail = (on ? QStringLiteral("On · ") : QStringLiteral("Off · ")) + QStringLiteral("a small side call flags asks that may be unaddressed");
+            audit.checked = on; audit.stayOpen = true;
+            audit.run = [this, on] { QSettings().setValue(QStringLiteral("agent/audit_requests"), !on); if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/audit_requests")); };
+            children << audit;
+        }
+        {
             PaletteItem manage; manage.key = QStringLiteral("option:skills"); manage.section = section;
             manage.label = QStringLiteral("Skills…"); manage.detail = QStringLiteral("list, exclude, refine, import from a repository · /skills");
             manage.run = [pane = m_active] { if (pane) pane->openSkills(); };
@@ -5104,6 +5337,12 @@ private:
         items << actionItem(agent, QStringLiteral("Fork conversation"), QStringLiteral("Continue this conversation in a new pane"), QStringLiteral("agent.fork"));
         items << actionItem(agent, QStringLiteral("Resume session…"), QStringLiteral("Open a saved agent session in this pane"), QStringLiteral("agent.resume"));
         items << actionItem(agent, QStringLiteral("Recap"), QStringLiteral("Summarize what happened in this session"), QStringLiteral("agent.recap"));
+        items << actionItem(agent, QStringLiteral("Requests and todos…"),
+                            pane && pane->openRequestCount() > 0 ? QStringLiteral("%1 open · mark done, cancel, re-ask · /requests").arg(pane->openRequestCount())
+                                                                 : QStringLiteral("Everything you asked this session · /requests"), QStringLiteral("agent.requests"));
+        items << actionItem(agent, QStringLiteral("Continue agent turn"),
+                            pane && pane->limitReached() ? QStringLiteral("The last turn stopped at its step limit · /continue")
+                                                         : QStringLiteral("Send “Continue” to the agent · /continue"), QStringLiteral("agent.continue"));
         items << actionItem(agent, QStringLiteral("Export conversation"), QStringLiteral("Save the conversation as Markdown"), QStringLiteral("agent.export"));
         items << submenu(QStringLiteral("menu:agentOptions"), agent, QStringLiteral("Agent options"), QStringLiteral("Instructions, plans, compaction, suggestions"), [this] {
             return agentOptionItems();
@@ -5281,6 +5520,10 @@ private:
             {QStringLiteral("inside programs"), QStringLiteral("vim nano less passthrough program keys")},
             {QStringLiteral("suggest"), QStringLiteral("autocomplete ghost ai suggestions next command prompt")},
             {QStringLiteral("recap"), QStringLiteral("summary away return catch up")},
+            {QStringLiteral("requests"), QStringLiteral("todos todo tasks ledger asks open items checklist unaddressed")},
+            {QStringLiteral("continue agent"), QStringLiteral("continue keep going limit steps more turn")},
+            {QStringLiteral("limit"), QStringLiteral("max steps tool calls budget turn length continue")},
+            {QStringLiteral("audit"), QStringLiteral("unaddressed missed requests check todos")},
             {QStringLiteral("shortcut hint"), QStringLiteral("tips tutorial learn keys hints help")},
             {QStringLiteral("thinking"), QStringLiteral("reasoning chain of thought visibility show")},
             {QStringLiteral("agents"), QStringLiteral("subagents workers background explore tasks")},
@@ -6344,6 +6587,12 @@ bool WindowManager::handleOpen(const QJsonObject &request) {
         // relay://turn/<pane-token>/<turn-id>: the inline "✦ N tool calls" link.
         const QUrl url(request.value(QStringLiteral("url")).toString());
         const QStringList parts = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+        // relay://continue/<pane-token>: the inline "▸ Continue" link after a step limit.
+        if (url.scheme() == QStringLiteral("relay") && url.host() == QStringLiteral("continue") && parts.size() == 1) {
+            for (RelayWindow *window : std::as_const(m_windows))
+                if (Pane *pane = window->findPaneByToken(parts.at(0))) { pane->continueTurn(true); window->raise(); window->activateWindow(); return true; }
+            return false;
+        }
         if (url.scheme() != QStringLiteral("relay") || url.host() != QStringLiteral("turn") || parts.size() != 2) return false;
         for (RelayWindow *window : std::as_const(m_windows))
             if (Pane *pane = window->findPaneByToken(parts.at(0))) {

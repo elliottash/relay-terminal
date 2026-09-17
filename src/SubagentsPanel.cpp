@@ -232,7 +232,13 @@ bool SubagentModel::handle(const QJsonObject &event) {
     if (type == QStringLiteral("agent_options")) {
         if (onStatus) onStatus(QStringLiteral("Automatic agent turns: %1 used of %2").arg(event.value(QStringLiteral("wakeups")).toInt())
                                    .arg(event.value(QStringLiteral("max_auto_turns")).toInt() == 0 ? QStringLiteral("unlimited")
-                                        : QString::number(event.value(QStringLiteral("max_auto_turns")).toInt())));
+                                        : QString::number(event.value(QStringLiteral("max_auto_turns")).toInt()))
+                                   // Turn limits and request audit (protocol 12.1), present once an agent is configured.
+                                   + (event.contains(QStringLiteral("max_steps"))
+                                      ? QStringLiteral(" · %1 steps / %2 tool calls per turn · request audit %3").arg(event.value(QStringLiteral("max_steps")).toInt())
+                                            .arg(event.value(QStringLiteral("max_tool_calls")).toInt())
+                                            .arg(event.value(QStringLiteral("audit_requests")).toBool() ? QStringLiteral("on") : QStringLiteral("off"))
+                                      : QString()));
         return true;
     }
     // Observed, not consumed.

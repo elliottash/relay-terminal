@@ -64,6 +64,12 @@ target_include_directories(relay-subagents PUBLIC src)
 target_link_libraries(relay-subagents PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-subagents PRIVATE -Wall -Wextra -Wpedantic)
 
+# Request ledger UI: model for requests/todos events and the expanded request list (plain Qt).
+add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
+target_include_directories(relay-requests PUBLIC src)
+target_link_libraries(relay-requests PUBLIC ${RELAY_QT}::Widgets)
+target_compile_options(relay-requests PRIVATE -Wall -Wextra -Wpedantic)
+
 if(RELAY_BUILD_APP)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
         message(FATAL_ERROR "Relay v0.1 targets Linux (KonsolePart, /proc, and Bash integration).")
@@ -72,7 +78,7 @@ if(RELAY_BUILD_APP)
     find_package(${RELAY_KF}Parts REQUIRED)
     add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/Hints.cpp src/Hints.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -114,6 +120,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-subagents-tests PRIVATE relay-subagents ${RELAY_QT}::Test)
     add_test(NAME subagents COMMAND relay-subagents-tests)
     set_tests_properties(subagents PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-requests-tests tests/requests_test.cpp)
+    target_link_libraries(relay-requests-tests PRIVATE relay-requests ${RELAY_QT}::Test)
+    add_test(NAME requests COMMAND relay-requests-tests)
+    set_tests_properties(requests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-hints-tests tests/hints_test.cpp src/Hints.cpp)
     target_include_directories(relay-hints-tests PRIVATE src)
     target_link_libraries(relay-hints-tests PRIVATE ${RELAY_QT}::Test)
