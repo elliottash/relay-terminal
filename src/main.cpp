@@ -4142,6 +4142,9 @@ private:
     void applyDestinationColor(relay::InputHighlighter::Destination destination) {
         if (!m_highlighter || !m_editor) return;
         m_highlighter->setDestination(destination);
+        // Red for a command that does not resolve belongs to the chosen Terminal mode only.
+        m_highlighter->setFlagUnknownCommands(m_modeValue == QStringLiteral("shell")
+                                              || m_prefixMode == QStringLiteral("shell"));
         // Qt draws the caret in the widget's *stylesheet* colour, so the palette alone does nothing
         // here (the app stylesheet sets one). The highlighter gives every character an explicit
         // colour, so this only shows up in the caret and the placeholder.

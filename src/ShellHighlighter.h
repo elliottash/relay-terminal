@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
+#include <QColor>
+#include <QSet>
 #include <QSyntaxHighlighter>
 #include <QStringList>
 
@@ -19,6 +21,9 @@ public:
     Destination destination() const { return m_destination; }
     // Command names Relay knows are installed; anything else is flagged as unknown.
     void setKnownCommands(const QStringList &commands);
+    // Flag a command that does not resolve. Only in the chosen Terminal mode: in auto mode the
+    // line may well be an agent request, and red on ordinary words is noise (owner, 2026-09-17).
+    void setFlagUnknownCommands(bool flag);
 
     static QColor colorFor(Destination destination);
 
@@ -26,11 +31,13 @@ protected:
     void highlightBlock(const QString &text) override;
 
 private:
+    QColor commandColor(const QString &word) const;
     void highlightShell(const QString &text);
     void highlightAgent(const QString &text);
 
     Destination m_destination = Destination::Auto;
     QSet<QString> m_known;
+    bool m_flagUnknown = false;
 };
 
 }  // namespace relay

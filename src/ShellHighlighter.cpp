@@ -10,6 +10,7 @@ namespace {
 
 // One palette for both the caret and the tokens, so a shell line reads the same as the chip.
 const QColor kCommand{0x3e, 0xc5, 0xf0};   // Relay accent: the command word
+const QColor kUnknown{0xf0, 0x71, 0x78};   // Terminal mode only: this command does not resolve
 const QColor kFlag{0xe5, 0xc0, 0x7b};      // -r, --force
 const QColor kString{0x7e, 0xc8, 0x8c};    // "quoted"
 const QColor kPath{0x66, 0xd0, 0xc0};      // paths and globs
@@ -29,6 +30,30 @@ QTextCharFormat charFormat(const QColor &color, bool bold = false) {
 
 InputHighlighter::InputHighlighter(QTextDocument *document) : QSyntaxHighlighter(document) {}
 
+// Bash builtins and keywords are commands even though they are not files on PATH; the shell's
+// command list does not always carry them (`test one two` was being marked unknown).
+static const QSet<QString> &shellBuiltins() {
+    static const QSet<QString> builtins = [] {
+        const QString words = QStringLiteral(
+            "alias bg bind break builtin caller cd command compgen complete compopt continue declare dirs "
+            "disown echo enable eval exec exit export false fc fg getopts hash help history jobs kill let "
+            "local logout mapfile popd printf pushd pwd read readarray readonly return set shift shopt "
+            "source suspend test times trap true type typeset ulimit umask unalias unset wait "
+            "if then else elif fi for while until do done case esac function select time in");
+        QSet<QString> out;
+        for (const QString &word : words.split(' ', Qt::SkipEmptyParts)) out.insert(word);
+        return out;
+    }();
+    return builtins;
+}
+
+QColor InputHighlighter::commandColor(const QString &word) const {
+    if (!m_flagUnknown || m_known.isEmpty()) return kCommand;
+    if (word.contains('/') || word.startsWith('.') || word.contains('$')) return kCommand;
+    if (m_known.contains(word) || shellBuiltins().contains(word)) return kCommand;
+    return kUnknown;
+}
+
 QColor InputHighlighter::colorFor(Destination destination) {
     switch (destination) {
     case Destination::Shell: return kCommand;
@@ -42,6 +67,12 @@ void InputHighlighter::setDestination(Destination destination) {
     if (destination == m_destination) return;
     m_destination = destination;
     rehighlight();
+}
+
+void InputHighlighter::setFlagUnknownCommands(bool flag) {
+    if (flag == m_flagUnknown) return;
+    m_flagUnknown = flag;
+    if (m_destination == Destination::Shell) rehighlight();
 }
 
 void InputHighlighter::setKnownCommands(const QStringList &commands) {
