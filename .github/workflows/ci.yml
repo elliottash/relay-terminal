@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu-qt5:
+    name: Build and test (Ubuntu 24.04, Qt5/KF5)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends build-essential cmake ninja-build \
+            python3 bash qtbase5-dev libkf5parts-dev libkf5coreaddons-dev \
+            libkf5syntaxhighlighting-dev qtpdf5-dev konsole-kpart \
+            appstream desktop-file-utils
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DRELAY_QT_MAJOR=5 -DBUILD_TESTING=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Install layout
+        run: |
+          DESTDIR="$PWD/stage" cmake --install build --prefix /usr
+          find stage -type f | sort
+          test -x stage/usr/bin/relay
+          test -f stage/usr/share/relay/backend/worker.py
+          test -x stage/usr/share/relay/scripts/relay-open
+      - name: Validate desktop and AppStream metadata
+        run: |
+          desktop-file-validate org.relayterminal.Relay.desktop
+          appstreamcli validate --no-net packaging/org.relayterminal.Relay.metainfo.xml
+
+  debian-qt6:
+    name: Build and test (Debian 13, Qt6/KF6)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build, test and package in a debian:trixie container
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -v "$PWD/out:/out" debian:trixie \
+            bash /src/packaging/deb/build-deb.sh /src /out
+          ls -l out

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: CC0-1.0 -->
+<component type="desktop-application">
+  <id>org.relayterminal.Relay</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Relay</name>
+  <summary>Terminal with a rich prompt and bring-your-own-key agents</summary>
+  <developer id="io.github.elliottash">
+    <name>Elliott Ash</name>
+  </developer>
+  <description>
+    <p>
+      Relay embeds Konsole's terminal component and adds a real text editor for
+      composing commands: mouse selection, multi-line editing, undo and history.
+      The same prompt sends natural-language requests to an agent that runs on
+      your own API key with any OpenAI-compatible provider.
+    </p>
+    <ul>
+      <li>The real Konsole terminal, with tabs, splits and native input when a program needs it</li>
+      <li>Automatic routing between the shell and the agent, with explicit overrides</li>
+      <li>Agent tool calls, commands and file diffs shown inline in the terminal</li>
+      <li>Folder explorer and file preview panes</li>
+      <li>API keys kept in the desktop keyring; no accounts and no telemetry</li>
+    </ul>
+    <p>
+      Relay is beta software. Agent tools currently run without a per-action
+      approval step.
+    </p>
+  </description>
+  <launchable type="desktop-id">org.relayterminal.Relay.desktop</launchable>
+  <provides>
+    <binary>relay</binary>
+  </provides>
+  <categories>
+    <category>System</category>
+    <category>TerminalEmulator</category>
+    <category>Development</category>
+  </categories>
+  <keywords>
+    <keyword>terminal</keyword>
+    <keyword>shell</keyword>
+    <keyword>agent</keyword>
+    <keyword>konsole</keyword>
+  </keywords>
+  <url type="homepage">https://github.com/elliottash/relay-terminal</url>
+  <url type="bugtracker">https://github.com/elliottash/relay-terminal/issues</url>
+  <url type="vcs-browser">https://github.com/elliottash/relay-terminal</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Agent tool calls and file diffs inline in the terminal</caption>
+      <image>https://raw.githubusercontent.com/elliottash/relay-terminal/main/site/assets/agent-inline.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Split panes, each with its own prompt</caption>
+      <image>https://raw.githubusercontent.com/elliottash/relay-terminal/main/site/assets/splits.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Folder explorer and file preview panes</caption>
+      <image>https://raw.githubusercontent.com/elliottash/relay-terminal/main/site/assets/file-panes.png</image>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <releases>
+    <release version="0.1.0~beta.1" date="2026-09-17" type="development">
+      <description>
+        <p>First public Linux beta.</p>
+      </description>
+    </release>
+  </releases>
+</component>

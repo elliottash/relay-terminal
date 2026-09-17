@@ -1,0 +1,30 @@
+pkgbase = relay-terminal-git
+	pkgdesc = Linux terminal with a rich prompt and bring-your-own-key agents (development version)
+	pkgver = 0.1.0.r0.g0000000
+	pkgrel = 1
+	url = https://github.com/elliottash/relay-terminal
+	arch = x86_64
+	arch = aarch64
+	license = GPL-3.0-or-later
+	checkdepends = git
+	makedepends = cmake
+	makedepends = ninja
+	makedepends = git
+	depends = konsole
+	depends = kparts
+	depends = kcoreaddons
+	depends = syntax-highlighting
+	depends = qt6-base
+	depends = python
+	depends = bash
+	depends = gcc-libs
+	depends = glibc
+	depends = hicolor-icon-theme
+	optdepends = libsecret: store API keys in the desktop keyring (secret-tool)
+	optdepends = xdg-utils: open files outside Relay
+	provides = relay-terminal=0.1.0
+	conflicts = relay-terminal
+	source = relay-terminal::git+https://github.com/elliottash/relay-terminal.git
+	sha256sums = SKIP
+
+pkgname = relay-terminal-git

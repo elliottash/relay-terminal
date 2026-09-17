@@ -1,0 +1,154 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Tag-triggered beta release. Tags look like v0.1.0-beta.1 (pre-release) or v0.1.0.
+# Builds a source tarball and one .deb per distribution/architecture, smoke-tests every
+# .deb in a fresh container, writes SHA256SUMS and creates the GitHub release.
+# See docs/RELEASING.md.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    name: Source tarball
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      deb_suffix: ${{ steps.version.outputs.deb_suffix }}
+      arch_pkgver: ${{ steps.version.outputs.arch_pkgver }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Derive and check the version
+        id: version
+        run: |
+          tag=${GITHUB_REF_NAME}
+          version=${tag#v}                    # 0.1.0-beta.1
+          base=${version%%-*}                 # 0.1.0
+          suffix=${version#"$base"}           # -beta.1 or empty
+          cmake_version=$(sed -n 's/^project(Relay VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          if [ "$cmake_version" != "$base" ]; then
+            echo "::error::Tag $tag does not match project(Relay VERSION $cmake_version) in CMakeLists.txt"
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "deb_suffix=${suffix/-/\~}"          # ~beta.1
+            echo "arch_pkgver=$base${suffix#-}"       # 0.1.0beta.1
+          } >> "$GITHUB_OUTPUT"
+      - name: Create tarball
+        run: |
+          v=${{ steps.version.outputs.version }}
+          git archive --format=tar.gz --prefix="relay-$v/" -o "relay-$v.tar.gz" "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source
+          path: relay-*.tar.gz
+
+  deb:
+    name: .deb ${{ matrix.image }} ${{ matrix.arch }}
+    needs: source
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:24.04', 'debian:trixie', 'ubuntu:26.04']
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build, test, install and smoke-test in containers
+        run: packaging/deb/docker-build-all.sh "$PWD/out" "${{ needs.source.outputs.deb_suffix }}" "${{ matrix.image }}"
+      - name: Rename for release assets
+        # GitHub rewrites "~" in asset names, so use only [A-Za-z0-9._-].
+        run: |
+          image=${{ matrix.image }}
+          case "$image" in
+            ubuntu:*) distro=ubuntu${image#ubuntu:} ;;
+            debian:trixie) distro=debian13 ;;
+            *) distro=${image//[:]/} ;;
+          esac
+          mkdir -p dist
+          for deb in out/*/*.deb; do
+            cp "$deb" "dist/relay_${{ needs.source.outputs.version }}_${distro}_${{ matrix.arch }}.deb"
+          done
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deb-${{ strategy.job-index }}
+          path: |
+            dist/*.deb
+            out/logs/*.log
+
+  release:
+    name: GitHub release
+    needs: [source, deb]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect assets and checksums
+        run: |
+          mkdir -p assets
+          find artifacts -name '*.deb' -exec cp {} assets/ \;
+          cp artifacts/source/relay-*.tar.gz assets/
+          (cd assets && sha256sum -- * > SHA256SUMS)
+          cat assets/SHA256SUMS
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=${GITHUB_REF_NAME}
+          flags=(--generate-notes --title "Relay ${tag#v}" --verify-tag)
+          case "$tag" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" "${flags[@]}" assets/*
+
+  aur:
+    name: Update AUR (disabled)
+    # Enable after the AUR package exists: create the relay-terminal package on the AUR, add
+    # the private SSH key registered on the AUR account as the repository secret
+    # AUR_SSH_PRIVATE_KEY, then remove `false &&` below.
+    if: false && !contains(github.ref_name, '-rc')
+    needs: [source, release]
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Update PKGBUILD and .SRCINFO
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git openssh pacman-contrib
+          useradd -m builder
+          cp -r packaging/arch/relay-terminal /home/builder/pkg
+          cd /home/builder/pkg
+          sed -i "s/^_tag=.*/_tag=${GITHUB_REF_NAME}/; s/^pkgver=.*/pkgver=${{ needs.source.outputs.arch_pkgver }}/; s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          chown -R builder .
+          su builder -c 'updpkgsums && makepkg --printsrcinfo > .SRCINFO'
+      - name: Push to the AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          install -dm700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur && chmod 600 ~/.ssh/aur
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur"
+          git clone ssh://aur@aur.archlinux.org/relay-terminal.git aur
+          cp /home/builder/pkg/PKGBUILD /home/builder/pkg/.SRCINFO aur/
+          cd aur
+          git config user.name "Relay release bot"
+          git config user.email "noreply@github.com"
+          git add PKGBUILD .SRCINFO
+          git commit -m "Update to ${GITHUB_REF_NAME#v}"
+          git push origin HEAD:master

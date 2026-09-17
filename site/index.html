@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relay Terminal</title>
+  <meta name="description" content="Relay is a Linux terminal with a rich prompt and bring-your-own-key agents. It embeds Konsole's terminal and runs no telemetry.">
+  <meta name="theme-color" content="#0f1115">
+  <meta property="og:title" content="Relay Terminal">
+  <meta property="og:description" content="A Linux terminal with a rich prompt and bring-your-own-key agents.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="assets/agent-inline.png">
+  <link rel="icon" href="assets/relay.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="top">
+    <div class="wrap top-inner">
+      <a class="brand" href="#" aria-label="Relay home">
+        <img src="assets/relay.svg" alt="" width="28" height="28">
+        <span>RELAY</span>
+      </a>
+      <nav aria-label="Sections">
+        <ul>
+          <li><a href="#features">Features</a></li>
+          <li><a href="#install">Install</a></li>
+          <li><a href="#privacy">Privacy</a></li>
+          <li><a href="https://github.com/elliottash/relay-terminal">GitHub</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="wrap hero-inner">
+        <img class="hero-logo" src="assets/relay.svg" alt="" width="88" height="88">
+        <p class="badge"><span class="dot" aria-hidden="true"></span>Beta · Linux</p>
+        <h1 id="hero-title">A Linux terminal with a rich prompt and bring‑your‑own‑key agents</h1>
+        <p class="lede">Relay embeds Konsole's real terminal and adds a text editor for your commands. Type a
+          shell command or ask for something in plain language. The agent runs on your own API key, and its
+          commands and diffs print right in the terminal.</p>
+        <div class="cta">
+          <a class="button primary" href="#install">Install the beta</a>
+          <a class="button" href="https://github.com/elliottash/relay-terminal">Source on GitHub</a>
+        </div>
+      </div>
+      <div class="wrap">
+        <figure class="shot hero-shot">
+          <img src="assets/agent-inline.png" width="1320" height="860"
+               alt="Relay window: the agent writes done.txt, shows the diff and runs cat in the terminal, with the prompt editor below.">
+        </figure>
+      </div>
+    </section>
+
+    <section id="features" aria-labelledby="features-title">
+      <div class="wrap">
+        <h2 id="features-title">What it does</h2>
+        <ul class="grid features">
+          <li>
+            <h3>A prompt that edits like an editor</h3>
+            <p>Mouse selection, multi-line commands, undo, clipboard and history in a real text field. Commands
+              stay plain text.</p>
+          </li>
+          <li>
+            <h3>The real Konsole terminal</h3>
+            <p>Relay embeds KonsolePart, not an imitation. vim, less, ssh and password prompts get your keys
+              directly while they run.</p>
+          </li>
+          <li>
+            <h3>Shell or agent, detected locally</h3>
+            <p><code>git status</code> goes to the shell; <code>why is this build failing?</code> goes to the
+              agent. Routing never calls a model, and you can force either side.</p>
+          </li>
+          <li>
+            <h3>Agent work shown inline</h3>
+            <p>Every command the agent runs, every file it reads and every diff it writes prints in the
+              terminal as it happens. Nothing enters your shell history.</p>
+          </li>
+          <li>
+            <h3>Tabs, splits and file panes</h3>
+            <p>Each pane has its own shell, prompt and conversation. Open a folder explorer or a file preview
+              next to the terminal with <code>relay open PATH</code>.</p>
+          </li>
+          <li>
+            <h3>Keyboard first</h3>
+            <p>An actions palette and shortcut presets for Relay, Warp, VS Code and Konsole habits.</p>
+          </li>
+        </ul>
+
+        <div class="gallery">
+          <figure class="shot">
+            <img src="assets/splits.png" width="1320" height="860" loading="lazy"
+                 alt="Three split panes, each with its own shell and prompt editor.">
+            <figcaption>Split panes, each with its own shell and prompt</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="assets/file-panes.png" width="660" height="435" loading="lazy"
+                 alt="Terminal next to a folder explorer and a rendered Markdown preview.">
+            <figcaption>Folder explorer and file preview</figcaption>
+          </figure>
+          <figure class="shot">
+            <img src="assets/palette.png" width="660" height="435" loading="lazy"
+                 alt="Actions palette listing agent, terminal and pane actions with their shortcuts.">
+            <figcaption>Actions palette</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="install" aria-labelledby="install-title">
+      <div class="wrap">
+        <h2 id="install-title">Install</h2>
+        <p class="note" role="note"><strong>Coming with the first beta release.</strong> The commands below
+          are what installation will look like once <code>v0.1.0-beta.1</code> is published on
+          <a href="https://github.com/elliottash/relay-terminal/releases">GitHub Releases</a>. Until then, build
+          from source. Packages are available for x86_64 and arm64.</p>
+
+        <div class="grid install">
+          <article>
+            <h3>Ubuntu 24.04 LTS</h3>
+            <p>Qt 5 / KDE Frameworks 5 build.</p>
+            <pre><code>v=0.1.0-beta.1
+wget https://github.com/elliottash/relay-terminal/releases/download/v$v/relay_${v}_ubuntu24.04_amd64.deb
+sudo apt install ./relay_${v}_ubuntu24.04_amd64.deb</code></pre>
+          </article>
+          <article>
+            <h3>Ubuntu 26.04 LTS</h3>
+            <p>Qt 6 / KDE Frameworks 6 build.</p>
+            <pre><code>v=0.1.0-beta.1
+wget https://github.com/elliottash/relay-terminal/releases/download/v$v/relay_${v}_ubuntu26.04_amd64.deb
+sudo apt install ./relay_${v}_ubuntu26.04_amd64.deb</code></pre>
+          </article>
+          <article>
+            <h3>Debian 13 (trixie)</h3>
+            <p>Qt 6 / KDE Frameworks 6 build.</p>
+            <pre><code>v=0.1.0-beta.1
+wget https://github.com/elliottash/relay-terminal/releases/download/v$v/relay_${v}_debian13_amd64.deb
+sudo apt install ./relay_${v}_debian13_amd64.deb</code></pre>
+          </article>
+          <article>
+            <h3>Arch Linux (AUR)</h3>
+            <p>Release and development packages.</p>
+            <pre><code>yay -S relay-terminal
+# or the latest main branch
+yay -S relay-terminal-git</code></pre>
+          </article>
+          <article>
+            <h3>Fedora and others: from source</h3>
+            <p>Needs Qt 6, KF6 Parts and CoreAddons, the Konsole part, CMake, Python 3.10+ and Bash.</p>
+            <pre><code>sudo dnf install cmake gcc-c++ qt6-qtbase-devel kf6-kparts-devel \
+  kf6-kcoreaddons-devel konsole-part python3
+git clone https://github.com/elliottash/relay-terminal
+cd relay-terminal && ./scripts/build.sh
+cmake --install build</code></pre>
+          </article>
+          <article>
+            <h3>Verify the download</h3>
+            <p>Each release lists SHA-256 checksums.</p>
+            <pre><code>v=0.1.0-beta.1
+wget https://github.com/elliottash/relay-terminal/releases/download/v$v/SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS</code></pre>
+          </article>
+        </div>
+        <p class="small">Replace <code>amd64</code> with <code>arm64</code> on ARM machines. Then start Relay from
+          your application menu or run <code>relay --workspace ~/project</code>. For API keys in the desktop keyring,
+          install <code>libsecret-tools</code> (Debian/Ubuntu) or <code>libsecret</code> (Arch).</p>
+      </div>
+    </section>
+
+    <section id="privacy" aria-labelledby="privacy-title">
+      <div class="wrap">
+        <h2 id="privacy-title">Your key, your provider</h2>
+        <div class="grid two">
+          <div>
+            <h3>What stays with you</h3>
+            <ul class="checks">
+              <li>No telemetry, no analytics, no crash reporting.</li>
+              <li>No Relay account and no Relay server. Relay connects to the network only to reach the provider you configure, when you use the agent.</li>
+              <li>API keys are stored in your desktop keyring (GNOME Keyring or KWallet, through
+                <code>secret-tool</code>), or read from an environment variable.</li>
+              <li>Shell commands you send to the terminal stay on your machine.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>What goes to your provider</h3>
+            <ul class="checks warn">
+              <li>Your agent prompts, the conversation, and the results of the agent's tools (command output,
+                file contents it reads) go to the provider you configure: Kimi, GLM, OpenRouter or any
+                OpenAI-compatible endpoint. Their privacy policy applies.</li>
+              <li><strong>Agent tools currently run without asking for approval.</strong> The agent can run
+                commands and write files in your workspace as your user. Every action prints in the terminal,
+                and you can stop the agent at any time, but review what you ask it to do.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="status" aria-labelledby="status-title">
+      <div class="wrap">
+        <h2 id="status-title">Status</h2>
+        <div class="grid two">
+          <div>
+            <p><strong>Beta.</strong> Relay is usable day to day on Linux, but expect rough edges and changes
+              between releases. Please report problems on
+              <a href="https://github.com/elliottash/relay-terminal/issues">GitHub Issues</a>.</p>
+            <p>Rich prompt integration covers Bash. With zsh, fish, tmux or over SSH, use native terminal input
+              (F12).</p>
+          </div>
+          <div>
+            <p><strong>Platforms.</strong> Linux with KDE Frameworks 5 or 6. Flatpak is planned next. macOS and
+              Windows need a portable terminal engine and are on the roadmap, not in this beta.</p>
+            <p><strong>License.</strong> GPL-3.0-or-later. Relay uses Konsole's part as installed on your system
+              and does not include Warp or other proprietary code.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap footer-inner">
+      <p><img src="assets/relay.svg" alt="" width="20" height="20"> Relay · GPL-3.0-or-later</p>
+      <ul>
+        <li><a href="https://github.com/elliottash/relay-terminal">Source</a></li>
+        <li><a href="https://github.com/elliottash/relay-terminal/releases">Releases</a></li>
+        <li><a href="https://github.com/elliottash/relay-terminal/issues">Issues</a></li>
+        <li><a href="https://github.com/elliottash/relay-terminal/blob/main/LICENSE">License</a></li>
+      </ul>
+    </div>
+  </footer>
+</body>
+</html>

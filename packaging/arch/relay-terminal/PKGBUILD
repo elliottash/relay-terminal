@@ -1,0 +1,46 @@
+# Maintainer: Elliott Ash <e at elliottash dot com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Named relay-terminal: "relay" is too generic on the AUR, and other packages (for example
+# sentry-relay) ship a /usr/bin/relay. Updating: set _tag, bump pkgver to match
+# (hyphens become nothing: v0.1.0-beta.1 -> 0.1.0beta.1), reset pkgrel=1, then run
+# `updpkgsums && makepkg --printsrcinfo > .SRCINFO`.
+
+pkgname=relay-terminal
+_tag=v0.1.0-beta.1
+pkgver=0.1.0beta.1
+pkgrel=1
+pkgdesc="Linux terminal with a rich prompt and bring-your-own-key agents (embeds KonsolePart)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/elliottash/relay-terminal"
+license=('GPL-3.0-or-later')
+depends=('konsole' 'kparts' 'kcoreaddons' 'syntax-highlighting' 'qt6-base' 'python' 'bash'
+         'gcc-libs' 'glibc' 'hicolor-icon-theme')
+makedepends=('cmake' 'ninja')
+checkdepends=('git')
+optdepends=('libsecret: store API keys in the desktop keyring (secret-tool)'
+            'xdg-utils: open files outside Relay')
+conflicts=('relay-terminal-git')
+source=("relay-${_tag#v}.tar.gz::${url}/releases/download/${_tag}/relay-${_tag#v}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  # QtPdf lives in qt6-webengine on Arch; leave PDF preview out rather than pull it in.
+  cmake -S "relay-${_tag#v}" -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DRELAY_QT_MAJOR=6 \
+    -DCMAKE_DISABLE_FIND_PACKAGE_Qt6Pdf=ON \
+    -DCMAKE_DISABLE_FIND_PACKAGE_Qt6PdfWidgets=ON \
+    -DBUILD_TESTING=ON
+  cmake --build build
+}
+
+check() {
+  PYTHONDONTWRITEBYTECODE=1 ctest --test-dir build --output-on-failure
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 "relay-${_tag#v}/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

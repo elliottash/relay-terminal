@@ -377,8 +377,13 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
         d->pdf = new QPdfDocument(this);
         d->pdfView = new QPdfView;
         d->pdfView->setDocument(d->pdf);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        d->pdfView->setPageMode(QPdfView::PageMode::MultiPage);
+        d->pdfView->setZoomMode(QPdfView::ZoomMode::FitToWidth);
+#else
         d->pdfView->setPageMode(QPdfView::MultiPage);
         d->pdfView->setZoomMode(QPdfView::FitToWidth);
+#endif
         pdfLayout->addWidget(d->pdfView);
     }
 #endif

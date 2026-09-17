@@ -79,6 +79,11 @@ if(RELAY_BUILD_APP)
     install(DIRECTORY data/icons/hicolor DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)
     install(FILES data/icons/org.relayterminal.Relay.svg data/icons/org.relayterminal.Relay-symbolic.svg
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+    # dataRoot() prepends <data>/scripts to PATH and points RELAY_OPEN_HELPER at relay-open.
+    install(PROGRAMS scripts/relay-open scripts/relay-agent.py DESTINATION ${CMAKE_INSTALL_DATADIR}/relay/scripts)
+    install(FILES packaging/org.relayterminal.Relay.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
+    install(FILES README.md packaging/copyright DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/relay)
+    include(packaging/cpack.cmake)
 endif()
 
 if(BUILD_TESTING)

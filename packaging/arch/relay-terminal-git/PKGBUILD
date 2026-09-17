@@ -1,0 +1,49 @@
+# Maintainer: Elliott Ash <e at elliottash dot com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+pkgname=relay-terminal-git
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc="Linux terminal with a rich prompt and bring-your-own-key agents (development version)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/elliottash/relay-terminal"
+license=('GPL-3.0-or-later')
+depends=('konsole' 'kparts' 'kcoreaddons' 'syntax-highlighting' 'qt6-base' 'python' 'bash'
+         'gcc-libs' 'glibc' 'hicolor-icon-theme')
+makedepends=('cmake' 'ninja' 'git')
+checkdepends=('git')
+optdepends=('libsecret: store API keys in the desktop keyring (secret-tool)'
+            'xdg-utils: open files outside Relay')
+provides=("relay-terminal=${pkgver%%.r*}")
+conflicts=('relay-terminal')
+source=("relay-terminal::git+${url}.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd relay-terminal
+  if git describe --long --tags --abbrev=7 >/dev/null 2>&1; then
+    git describe --long --tags --abbrev=7 | sed 's/^v//;s/-beta\./beta./;s/\([^-]*-g\)/r\1/;s/-/./g'
+  else
+    printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+  fi
+}
+
+build() {
+  cmake -S relay-terminal -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DRELAY_QT_MAJOR=6 \
+    -DCMAKE_DISABLE_FIND_PACKAGE_Qt6Pdf=ON \
+    -DCMAKE_DISABLE_FIND_PACKAGE_Qt6PdfWidgets=ON \
+    -DBUILD_TESTING=ON
+  cmake --build build
+}
+
+check() {
+  PYTHONDONTWRITEBYTECODE=1 ctest --test-dir build --output-on-failure
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 relay-terminal/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
