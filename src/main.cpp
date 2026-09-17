@@ -2,6 +2,8 @@
 #include "RichEditor.h"
 #include "Theme.h"
 #include "FilePanes.h"
+#include "SubagentTranscript.h"   // subagents UI
+#include "SubagentsPanel.h"
 #include <iterator>
 #include <KParts/ReadOnlyPart>
 #include <KPluginFactory>
@@ -287,6 +289,8 @@ private:
         add("agent.clearQueue", "agent", "Clear queued agent prompts", {});
         add("agent.resumeQueue", "agent", "Resume the paused agent queue", {});
         add("agent.stop", "agent", "Stop the agent turn", {});
+        add("agent.stopAllSubagents", "agent", "Stop all running subagents", {QStringLiteral("Ctrl+Shift+X")});   // subagents UI
+        add("agent.agentsMenu", "agent", "Agents: definitions and running subagents", {});
         add("agent.interrupt", "agent", "Send to the agent; while it is busy, interrupt it and send now (prompt box)",
             {QStringLiteral("Ctrl+Return"), QStringLiteral("Ctrl+Enter"), QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
         add("agent.provider", "agent", "Provider and API keys", {});
@@ -529,6 +533,7 @@ public:
 
     ~Pane() override {
         m_closing = true;
+        delete m_subagentOverlay.data();   // subagents UI: its destroyed() handler uses members
         qApp->removeEventFilter(this);
         m_poll.stop();
         // Destroy the part before its private shell state directory is removed.
@@ -681,12 +686,56 @@ public:
     void sendKeybindings() { if (m_configured) send(QJsonObject{{"type", "keybindings"}, {"path", Keymap::instance().path()}, {"actions", Keymap::instance().catalog().value(QStringLiteral("actions"))}}); }
     void importWarpKeys() { send({{"type", "import_warp"}}); }
 
+    // ----- subagents UI (running-agents list, transcripts) ------------------------------------
+    // Opens a transcript pane split right; when unset or the window is narrow, an overlay is used.
+    std::function<void(const QString &id)> onOpenSubagent;
+    const relay::SubagentModel &subagents() const { return m_subagents; }
+    void stopSubagent(const QString &id) { send({{"type", "agent_stop"}, {"id", id}}); }
+    void stopAllSubagents() {
+        if (m_subagents.liveCount() == 0) { status(QStringLiteral("No running agents to stop.")); return; }
+        send({{"type", "agent_stop"}, {"id", "all"}});
+        toast(QStringLiteral("Stopping all agents"));
+    }
+    void refreshAgentDefinitions() { send({{"type", "agents_list"}}); }
+    void setComposerText(const QString &text) {
+        if (m_native) setNative(false, false);
+        m_editor->setPlainText(text); m_editor->moveCursor(QTextCursor::End); focusInput();
+    }
+    void openSubagent(const QString &id) {
+        if (!m_subagents.row(id)) return;
+        if (onOpenSubagent && window() && window()->width() >= 1000) { onOpenSubagent(id); return; }
+        openSubagentOverlay(id);
+    }
+    // Subscribes the view to the subagent's stream; unsubscribes when the last view for it closes.
+    void attachSubagentView(relay::SubagentTranscriptView *view) {
+        const QString id = view->agentId();
+        m_subagentViews.append(view);
+        QPointer<Pane> self(this);
+        view->onSend = [self, id](const QString &text) {
+            if (self) self->send({{"type", "agent_message"}, {"id", id}, {"text", text}});
+        };
+        if (const auto *row = m_subagents.row(id)) view->setRow(*row, m_subagents.elapsedNow(*row));
+        const QObject *gone = view;
+        connect(view, &QObject::destroyed, this, [this, id, gone] {
+            if (m_closing) return;
+            m_subagentViews.removeAll(nullptr);
+            const bool others = std::any_of(m_subagentViews.cbegin(), m_subagentViews.cend(),
+                                            [&](const auto &v) { return v && v.data() != gone && v->agentId() == id; });
+            if (!others) send({{"type", "agent_subscribe"}, {"id", id}, {"on", false}});
+        });
+        send({{"type", "agent_subscribe"}, {"id", id}, {"on", true}});
+    }
+    // ----- end subagents UI ---------------------------------------------------------------------
+
 protected:
     void resizeEvent(QResizeEvent *event) override {
         QWidget::resizeEvent(event);
         // Split panes get narrow: drop the key hints and the agent workspace path first.
         if (m_help) m_help->setVisible(width() >= 900);
         placeQueueStrip();
+        placeSubagentOverlay();   // subagents UI
+        placeSubagentsPanel();
+        QTimer::singleShot(0, this, [this] { placeSubagentsPanel(); });
         if (m_transcript) m_transcript->setMaximumHeight(std::max(120, height() * 2 / 5));
         updatePaths();
     }
@@ -819,8 +868,75 @@ private:
         auto *queueLayout = new QVBoxLayout(m_queueStrip); queueLayout->setContentsMargins(10, 6, 6, 6); queueLayout->setSpacing(2);
         m_queueStrip->hide();
         layout->addWidget(composer);
+        setupSubagentsUi(layout);   // subagents UI: running-agents list under the composer
         updatePaths();
     }
+
+    // ----- subagents UI -------------------------------------------------------------------------
+    void setupSubagentsUi(QVBoxLayout *layout) {
+        // Floats over the bottom of the terminal like the queue strip: taking layout space would
+        // resize the terminal, and Readline then redraws its prompt in the middle of agent output.
+        Q_UNUSED(layout);
+        m_agentsPanel = new relay::SubagentsPanel(&m_subagents, this);
+        m_agentsPanel->onOpen = [this](const QString &id) { openSubagent(id); };
+        m_agentsPanel->onStop = [this](const QString &id) { stopSubagent(id); toast(QStringLiteral("Stopping ") + id); };
+        m_agentsPanel->onExit = [this] { focusInput(); };
+        m_subagents.onChanged = [this] {
+            m_agentsPanel->refresh();
+            placeSubagentsPanel();
+            for (const auto &view : std::as_const(m_subagentViews))
+                if (view) if (const auto *row = m_subagents.row(view->agentId())) view->setRow(*row, m_subagents.elapsedNow(*row));
+            if (m_modelBox) m_modelBox->setToolTip(QStringLiteral("Agent model for this pane. Switching starts a new conversation.\nTokens: ")
+                                                   + m_subagents.tokenSplit());
+        };
+        // Only one start and one finish line per subagent reach the terminal, never its tool activity.
+        m_subagents.onInline = [this](const QString &line) {
+            ensureLineStart();
+            printInline(line + '\n', Ink::Note);
+            // A wake-up turn often follows a finish line; let it start before redrawing the prompt.
+            QTimer::singleShot(400, this, [this] { if (!m_agentBusy && !moreTurnsPending()) closeInline(); });
+        };
+        m_subagents.onFinished = [this](const relay::SubagentRow &row) {
+            notifyIfAway(QStringLiteral("Agent %1 %2").arg(row.type + ' ' + row.id, row.status), row.summary.left(200));
+        };
+        m_subagents.onTranscript = [this](const QString &id, const QJsonObject &event) {
+            for (const auto &view : std::as_const(m_subagentViews)) if (view && view->agentId() == id) view->handleEvent(event);
+        };
+        m_subagents.onStatus = [this](const QString &text) { status(text); };
+    }
+
+    void openSubagentOverlay(const QString &id) {
+        if (m_subagentOverlay) {
+            if (m_subagentOverlay->agentId() == id) { m_subagentOverlay->focusInput(); return; }
+            delete m_subagentOverlay.data();
+        }
+        auto *view = new relay::SubagentTranscriptView(id, this);
+        m_subagentOverlay = view;
+        QPointer<relay::SubagentTranscriptView> guard(view);
+        view->onClose = [this, guard] { if (guard) guard->deleteLater(); focusInput(); };
+        attachSubagentView(view);
+        placeSubagentOverlay();
+        view->show(); view->raise();
+        view->focusInput();
+    }
+
+    void placeSubagentsPanel() {
+        if (!m_agentsPanel || !m_terminalHost) return;
+        m_agentsPanel->setAllowed(!m_composer || m_composer->isVisible());
+        if (!m_agentsPanel->isVisible()) { placeQueueStrip(); return; }
+        const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
+        const int height = std::min(m_agentsPanel->sizeHint().height(), host.height() / 2);
+        m_agentsPanel->setGeometry(host.left() + 8, host.bottom() - height - 6, host.width() - 16, height);
+        m_agentsPanel->raise();
+        placeQueueStrip();
+    }
+
+    void placeSubagentOverlay() {
+        if (!m_subagentOverlay) return;
+        const int w = std::min(width() - 16, std::max(340, width() * 3 / 5));
+        m_subagentOverlay->setGeometry(width() - w - 8, 8, w, std::max(160, height() - 16));
+    }
+    // ----- end subagents UI ---------------------------------------------------------------------
 
     void startWorker() {
         if (!m_workerConnected) connectWorker();
@@ -997,6 +1113,10 @@ private:
 
     void handle(const QJsonObject &event) {
         const QString type = event.value(QStringLiteral("event")).toString();
+        // --- subagents UI: subagent_* events are consumed; main-agent state is observed ---
+        if (type == QStringLiteral("configured")) QTimer::singleShot(0, this, [this] { refreshAgentDefinitions(); });
+        if (m_subagents.handle(event)) return;
+        // --- end subagents UI ---
         if (type == QStringLiteral("ready")) {
             m_workerReady = true; requestRoute(false, QStringLiteral("auto"));
             send({{"type", "presets"}});
@@ -1778,6 +1898,7 @@ private:
     void startAgentEntry(const QueueEntry &entry, bool fromQueue, const QString &when = QStringLiteral("now")) {
         PendingPrompt prompt;
         prompt.text = entry.text; prompt.why = entry.why; prompt.fix = entry.fix;
+        if (!entry.fix) m_subagents.clearFinished();   // subagents UI: finished rows linger until a new user turn
         QJsonObject request{{"type", "ask"}, {"text", entry.text}, {"when", when}};
         if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
         const QString program = processBusy() ? foregroundCommandLine() : QString();
@@ -1884,6 +2005,14 @@ private:
             }
             if (k == Qt::Key_Escape) { m_selected = -1; rebuildQueueStrip(); return true; }
         }
+        // --- subagents UI: Down on the last line (history at the draft) enters the running-agents list.
+        // Up stays queue/history; the @ picker and a queue selection above already took their keys.
+        if (mods == Qt::NoModifier && k == Qt::Key_Down && m_agentsPanel && m_agentsPanel->isVisible()
+            && m_editor->textCursor().blockNumber() == m_editor->document()->blockCount() - 1 && m_editor->atDraft()) {
+            m_agentsPanel->enter();
+            return true;
+        }
+        // --- end subagents UI ---
         const bool empty = m_editor->toPlainText().isEmpty();
         if (empty && mods == Qt::NoModifier && k == Qt::Key_Up && !m_entries.isEmpty()) {
             m_selected = m_entries.size() - 1;
@@ -2329,7 +2458,8 @@ private:
         if (!m_queueStrip || !m_queueStrip->isVisible() || !m_terminalHost) return;
         const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
         const int height = std::min(m_queueStrip->sizeHint().height(), host.height() / 2);
-        m_queueStrip->setGeometry(host.left() + 8, host.bottom() - height - 6, host.width() - 16, height);
+        const int below = m_agentsPanel && m_agentsPanel->isVisible() ? m_agentsPanel->height() + 4 : 0;   // subagents UI
+        m_queueStrip->setGeometry(host.left() + 8, host.bottom() - height - 6 - below, host.width() - 16, height);
         m_queueStrip->raise();
     }
 
@@ -2459,6 +2589,7 @@ private:
         m_editor->setReadOnly(enabled);
         // Human control hides the prompt box entirely; the terminal gets the space and the keys.
         if (m_composer) m_composer->setVisible(!enabled);
+        placeSubagentsPanel();   // subagents UI: hidden with the composer
         if (!enabled) m_hideReason = HideReason::None;
         if (enabled) hideAtPopup();
         if (enabled) {
@@ -2643,6 +2774,11 @@ private:
     bool m_configuring = false;
     bool m_seenShell = false, m_refocus = true, m_configured = false, m_agentBusy = false;
     quint64 m_requestId = 0, m_loadSerial = 0;
+    // subagents UI
+    relay::SubagentModel m_subagents;
+    relay::SubagentsPanel *m_agentsPanel = nullptr;
+    QList<QPointer<relay::SubagentTranscriptView>> m_subagentViews;
+    QPointer<relay::SubagentTranscriptView> m_subagentOverlay;
 };
 
 
@@ -2650,7 +2786,7 @@ private:
 // as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
 class ToolPane final : public QWidget {
 public:
-    enum class Kind { Explorer, Preview };
+    enum class Kind { Explorer, Preview, Subagent };
 
     ToolPane(Kind kind, const QString &path) : m_kind(kind) {
         setObjectName(QStringLiteral("pane"));
@@ -2666,18 +2802,32 @@ public:
         }
     }
 
+    // subagents UI: a live subagent transcript. Not saved or restored (node() is empty).
+    ToolPane(relay::SubagentTranscriptView *view, const QString &cwd) : m_kind(Kind::Subagent), m_subagent(view), m_subagentCwd(cwd) {
+        setObjectName(QStringLiteral("pane"));
+        setAttribute(Qt::WA_StyledBackground);
+        auto *layout = new QVBoxLayout(this); layout->setContentsMargins(1, 1, 1, 1);
+        layout->addWidget(view);
+    }
+
     Kind kind() const { return m_kind; }
     relay::FileExplorer *explorer() const { return m_explorer; }
     relay::FilePreview *preview() const { return m_preview; }
-    QString path() const { return m_explorer ? m_explorer->root() : m_preview->path(); }
-    QString cwd() const { return m_explorer ? m_explorer->root() : QFileInfo(m_preview->path()).absolutePath(); }
+    relay::SubagentTranscriptView *subagent() const { return m_subagent; }
+    QString path() const { return m_subagent ? QString() : m_explorer ? m_explorer->root() : m_preview->path(); }
+    QString cwd() const { return m_subagent ? m_subagentCwd : m_explorer ? m_explorer->root() : QFileInfo(m_preview->path()).absolutePath(); }
     QString title() const {
+        if (m_subagent) return m_subagent->title();
         const QString name = QFileInfo(path()).fileName();
         return name.isEmpty() ? path() : name;
     }
-    QJsonObject node() const { return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}}; }
+    QJsonObject node() const {
+        if (m_subagent) return {};
+        return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};
+    }
     void focusInput() {
-        if (m_explorer) m_explorer->view()->setFocus(Qt::OtherFocusReason);
+        if (m_subagent) m_subagent->focusInput();
+        else if (m_explorer) m_explorer->view()->setFocus(Qt::OtherFocusReason);
         else m_preview->setFocus(Qt::OtherFocusReason);
     }
 
@@ -2685,6 +2835,8 @@ private:
     Kind m_kind;
     relay::FileExplorer *m_explorer = nullptr;
     relay::FilePreview *m_preview = nullptr;
+    relay::SubagentTranscriptView *m_subagent = nullptr;
+    QString m_subagentCwd;
 };
 
 // ----- windows, tabs and panes --------------------------------------------------------------
@@ -3015,6 +3167,8 @@ private:
         else if (id == QStringLiteral("terminal.interrupt")) pane->interruptShell();
         else if (id == QStringLiteral("agent.newChat")) pane->newChat();
         else if (id == QStringLiteral("agent.stop")) pane->stopAgent();
+        else if (id == QStringLiteral("agent.stopAllSubagents")) pane->stopAllSubagents();   // subagents UI
+        else if (id == QStringLiteral("agent.agentsMenu")) openAgentsMenu();
         else if (id == QStringLiteral("agent.provider")) pane->openProviderDialog();
         else if (id == QStringLiteral("input.modeAuto")) pane->setMode(QStringLiteral("auto"));
         else if (id == QStringLiteral("input.modeTerminal")) pane->setMode(QStringLiteral("shell"));
@@ -3130,6 +3284,16 @@ private:
         items << actionItem(agent, QStringLiteral("Toggle terminal / agent input"), QStringLiteral("From the prompt box"), QStringLiteral("input.toggle"));
         items << actionItem(agent, QStringLiteral("New chat"), QStringLiteral("Start a new conversation in this pane"), QStringLiteral("agent.newChat"));
         items << actionItem(agent, QStringLiteral("Stop agent"), pane && pane->agentBusy() ? QStringLiteral("Cancel the running turn") : QStringLiteral("Agent is idle"), QStringLiteral("agent.stop"));
+        // --- subagents UI ---
+        {
+            const int live = pane ? pane->subagents().liveCount() : 0;
+            items << submenu(QStringLiteral("menu:agents"), agent, QStringLiteral("Agents…"),
+                             live ? QStringLiteral("%1 running").arg(live) : QStringLiteral("Definitions and running agents"),
+                             [this] { return agentsMenuItems(); });
+            items << actionItem(agent, QStringLiteral("Stop all agents"), live ? QStringLiteral("%1 running subagent(s)").arg(live) : QStringLiteral("No running subagents"),
+                                QStringLiteral("agent.stopAllSubagents"));
+        }
+        // --- end subagents UI ---
         if (pane && pane->queuedPrompts() > 0)
             items << actionItem(agent, QStringLiteral("Clear queue"), QStringLiteral("%1 queued item(s)").arg(pane->queuedPrompts()), QStringLiteral("agent.clearQueue"));
         if (pane && pane->queuePaused())
@@ -3426,6 +3590,80 @@ private:
         }
     }
 
+    // ----- subagents UI: palette submenu and transcript panes ---------------------------------
+    QList<PaletteItem> agentsMenuItems() {
+        QList<PaletteItem> children;
+        Pane *pane = m_active;
+        if (!pane) return children;
+        const auto &model = pane->subagents();
+        for (const auto &row : model.rows()) {
+            PaletteItem item;
+            const QString id = row.id;
+            item.key = QStringLiteral("subagent:") + id; item.section = QStringLiteral("Agents");
+            item.label = QStringLiteral("%1 %2 %3 · %4").arg(relay::SubagentModel::statusIcon(row.status), row.type, row.id, row.description);
+            item.detail = QStringLiteral("%1 · %2 · %3 tools · open the transcript").arg(row.status, relay::SubagentModel::formatElapsed(model.elapsedNow(row))).arg(row.tools);
+            QPointer<Pane> guard(pane);
+            item.run = [guard, id] { if (guard) guard->openSubagent(id); };
+            children << item;
+        }
+        for (const auto &value : model.definitions()) {
+            const QJsonObject def = value.toObject();
+            const QString name = def.value(QStringLiteral("name")).toString();
+            QStringList tools;
+            for (const auto &tool : def.value(QStringLiteral("tools")).toArray()) tools << tool.toString();
+            PaletteItem item;
+            item.key = QStringLiteral("agentdef:") + name; item.section = QStringLiteral("Agents");
+            item.label = QStringLiteral("%1   %2 · model %3 · %4").arg(name, def.value(QStringLiteral("source")).toString(),
+                                                                   def.value(QStringLiteral("model")).toString(),
+                                                                   tools.isEmpty() ? QStringLiteral("no tools") : tools.join(QStringLiteral(", ")));
+            item.detail = def.value(QStringLiteral("description")).toString() + QStringLiteral("\nEnter: ask the main agent to use it");
+            QPointer<Pane> guard(pane);
+            item.run = [guard, name] { if (guard) guard->setComposerText(QStringLiteral("Use the %1 agent to ").arg(name)); };
+            children << item;
+        }
+        PaletteItem reload;
+        reload.key = QStringLiteral("agents.reload"); reload.section = QStringLiteral("Agents");
+        reload.label = model.definitions().isEmpty() ? QStringLiteral("Load agent definitions") : QStringLiteral("Reload agent definitions");
+        reload.detail = model.definitionWarnings().join('\n');
+        reload.stayOpen = true;
+        QPointer<Pane> guard(pane);
+        reload.run = [guard] { if (guard) guard->refreshAgentDefinitions(); };
+        children << reload;
+        return children;
+    }
+
+    void openAgentsMenu() {
+        if (!m_sidebar->isVisible()) togglePalette();
+        m_stack.clear();
+        m_stack.append({QStringLiteral("Agents"), agentsMenuItems()});
+        m_filter->clear();
+        renderPalette();
+    }
+
+    void openSubagentPane(Pane *owner, const QString &id) {
+        QWidget *page = pageOf(owner);
+        if (!page) return;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->subagent() && tool->subagent()->agentId() == id) {
+                setActiveLeaf(tool); focusLeaf(tool); return;
+            }
+        auto *view = new relay::SubagentTranscriptView(id);
+        auto *tool = new ToolPane(view, owner->cwd());
+        relay::theme::polishWindow(tool);
+        QPointer<ToolPane> guard(tool);
+        QPointer<Pane> ownerGuard(owner);
+        view->onClose = [this, guard, ownerGuard] {
+            if (!guard) return;
+            closePane(guard, false);
+            if (ownerGuard) { setActiveLeaf(ownerGuard); ownerGuard->focusInput(); }
+        };
+        owner->attachSubagentView(view);
+        insertBeside(owner, tool, Qt::Horizontal, false);
+        setActiveLeaf(tool);
+        focusLeaf(tool);
+    }
+    // ----- end subagents UI --------------------------------------------------------------------
+
     // ----- panes ------------------------------------------------------------------------------
     static Pane *paneOf(QWidget *widget) {
         for (QWidget *w = widget; w; w = w->parentWidget())
@@ -3521,6 +3759,7 @@ private:
         };
         pane->onShellExited = [this, guard] { if (guard) closePane(guard, false); };
         pane->onOpenPath = [this, guard](const QString &path) { if (guard) openPath(path, 0, guard); };
+        pane->onOpenSubagent = [this, guard](const QString &id) { if (guard) openSubagentPane(guard, id); };   // subagents UI
         relay::theme::polishWindow(pane);
         return pane;
     }
@@ -3557,8 +3796,14 @@ private:
         if (auto *tool = dynamic_cast<ToolPane *>(widget)) return tool->node();
         if (auto *splitter = dynamic_cast<QSplitter *>(widget)) {
             QJsonArray children, sizes;
-            for (int i = 0; i < splitter->count(); ++i) children.append(serializeNode(splitter->widget(i)));
-            for (int size : splitter->sizes()) sizes.append(size);
+            const QList<int> all = splitter->sizes();
+            for (int i = 0; i < splitter->count(); ++i) {
+                const QJsonObject child = serializeNode(splitter->widget(i));
+                if (child.isEmpty()) continue;   // subagent transcripts are not saved
+                children.append(child); sizes.append(all.value(i));
+            }
+            if (children.isEmpty()) return {};
+            if (children.size() == 1) return children.first().toObject();
             return {{"split", splitter->orientation() == Qt::Vertical ? "v" : "h"}, {"children", children}, {"sizes", sizes}};
         }
         return {};
@@ -3718,7 +3963,7 @@ public:
         QWidget *neighbor = splitter->widget(index > 0 ? index - 1 : index + 1);
         const auto neighborPanes = leavesIn(neighbor);
         QWidget *focusNext = neighborPanes.isEmpty() ? nullptr : (index > 0 ? neighborPanes.last() : neighborPanes.first());
-        if (record && focusNext) {
+        if (record && focusNext && !serializeNode(pane).isEmpty()) {
             ClosedItem item;
             item.kind = ClosedItem::PaneItem; item.window = this; item.sibling = focusNext;
             item.orientation = splitter->orientation(); item.before = index == 0;

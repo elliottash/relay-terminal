@@ -12,6 +12,8 @@ public:
     std::function<void()> onNative;
     void remember(const QString &text);
     const QStringList &history() const { return m_history; }
+    // True unless Up/Down is browsing history (Down on the last line then has nothing to do).
+    bool atDraft() const { return m_historyIndex == m_history.size(); }
 
     // Ghost text: a dim suggestion drawn after the cursor when it sits at the end of the text.
     void setGhost(const QString &remainder);
