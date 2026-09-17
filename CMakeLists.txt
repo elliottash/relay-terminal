@@ -58,6 +58,12 @@ else()
     message(STATUS "Relay: PDF preview disabled (${RELAY_QT} Pdf not found)")
 endif()
 
+# Subagents UI: running-agents list and live transcript view (plain Qt).
+add_library(relay-subagents STATIC src/SubagentsPanel.cpp src/SubagentsPanel.h src/SubagentTranscript.cpp src/SubagentTranscript.h)
+target_include_directories(relay-subagents PUBLIC src)
+target_link_libraries(relay-subagents PUBLIC ${RELAY_QT}::Widgets)
+target_compile_options(relay-subagents PRIVATE -Wall -Wextra -Wpedantic)
+
 if(RELAY_BUILD_APP)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
         message(FATAL_ERROR "Relay v0.1 targets Linux (KonsolePart, /proc, and Bash integration).")
@@ -66,7 +72,7 @@ if(RELAY_BUILD_APP)
     find_package(${RELAY_KF}Parts REQUIRED)
     add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-editor relay-filepanes ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -102,6 +108,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-filepanes-tests PRIVATE relay-filepanes ${RELAY_QT}::Test)
     add_test(NAME filepanes COMMAND relay-filepanes-tests)
     set_tests_properties(filepanes PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-subagents-tests tests/subagents_test.cpp)
+    target_link_libraries(relay-subagents-tests PRIVATE relay-subagents ${RELAY_QT}::Test)
+    add_test(NAME subagents COMMAND relay-subagents-tests)
+    set_tests_properties(subagents PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME backend-and-bash COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -v)
     set_tests_properties(backend-and-bash PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/backend" TIMEOUT 120)

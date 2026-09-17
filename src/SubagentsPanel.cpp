@@ -1,0 +1,450 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "SubagentsPanel.h"
+#include "Theme.h"
+#include <QElapsedTimer>
+#include <QFocusEvent>
+#include <QKeyEvent>
+#include <QMouseEvent>
+#include <QPainter>
+#include <algorithm>
+
+namespace relay {
+
+namespace {
+QString str(const QJsonObject &o, const char *key) { return o.value(QLatin1String(key)).toString(); }
+
+const QColor kDone{126, 200, 140};
+const QColor kFailed{240, 113, 120};
+}  // namespace
+
+SubagentModel::SubagentModel() {
+    clock = [] {
+        static QElapsedTimer timer;
+        if (!timer.isValid()) timer.start();
+        return timer.elapsed();
+    };
+}
+
+SubagentRow *SubagentModel::find(const QString &id) {
+    for (auto &row : m_rows) if (row.id == id) return &row;
+    return nullptr;
+}
+
+const SubagentRow *SubagentModel::row(const QString &id) const {
+    for (const auto &row : m_rows) if (row.id == id) return &row;
+    return nullptr;
+}
+
+int SubagentModel::liveCount() const {
+    return int(std::count_if(m_rows.cbegin(), m_rows.cend(), [](const SubagentRow &r) { return r.live(); }));
+}
+
+qint64 SubagentModel::elapsedNow(const SubagentRow &row) const {
+    if (!row.live() || row.reportedAt <= 0) return row.elapsedMs;
+    return row.elapsedMs + std::max<qint64>(0, clock() - row.reportedAt);
+}
+
+qint64 SubagentModel::agentTokens() const {
+    qint64 total = 0;
+    for (const auto &row : m_rows) total += row.tokens;
+    return total;
+}
+
+bool SubagentModel::agentTokensEstimated() const {
+    return std::any_of(m_rows.cbegin(), m_rows.cend(), [](const SubagentRow &r) { return r.tokensEstimated; });
+}
+
+void SubagentModel::dismiss(const QString &id) {
+    for (int i = 0; i < m_rows.size(); ++i)
+        if (m_rows[i].id == id && !m_rows[i].live()) { m_rows.removeAt(i); changed(); return; }
+}
+
+void SubagentModel::clearFinished() {
+    const int before = m_rows.size();
+    m_rows.erase(std::remove_if(m_rows.begin(), m_rows.end(), [](const SubagentRow &r) { return !r.live(); }), m_rows.end());
+    if (m_rows.size() != before) changed();
+}
+
+void SubagentModel::clear() {
+    const bool had = !m_rows.isEmpty();
+    m_rows.clear(); m_mainBusy = false; m_mainTokens = -1;
+    if (had) changed();
+}
+
+QString SubagentModel::tokenSplit() const {
+    const QString main = m_mainTokens >= 0 ? QStringLiteral("main ctx %1").arg(formatTokens(m_mainTokens, false)) : QStringLiteral("main");
+    return QStringLiteral("%1 · agents %2 tok").arg(main, formatTokens(agentTokens(), agentTokensEstimated()));
+}
+
+QString SubagentModel::formatElapsed(qint64 ms) {
+    const qint64 seconds = std::max<qint64>(0, ms) / 1000;
+    if (seconds >= 3600) return QStringLiteral("%1:%2:%3").arg(seconds / 3600).arg((seconds / 60) % 60, 2, 10, QLatin1Char('0')).arg(seconds % 60, 2, 10, QLatin1Char('0'));
+    return QStringLiteral("%1:%2").arg(seconds / 60).arg(seconds % 60, 2, 10, QLatin1Char('0'));
+}
+
+QString SubagentModel::formatTokens(qint64 tokens, bool estimated) {
+    QString text;
+    if (tokens < 1000) text = QString::number(std::max<qint64>(0, tokens));
+    else if (tokens < 100000) text = QString::number(tokens / 1000.0, 'f', 1) + QLatin1Char('k');
+    else text = QString::number(tokens / 1000) + QLatin1Char('k');
+    text.replace(QStringLiteral(".0k"), QStringLiteral("k"));
+    return estimated ? QLatin1Char('~') + text : text;
+}
+
+QString SubagentModel::statusIcon(const QString &status) {
+    if (status == QStringLiteral("running")) return QStringLiteral("●");
+    if (status == QStringLiteral("done")) return QStringLiteral("✓");
+    if (status == QStringLiteral("failed")) return QStringLiteral("✗");
+    if (status == QStringLiteral("stopped")) return QStringLiteral("■");
+    return QStringLiteral("○");   // waiting
+}
+
+QString SubagentModel::handoffText(const QString &handoff, int wakeups, int maxAutoTurns) {
+    if (handoff == QStringLiteral("wake")) return QStringLiteral("background agent finished → main agent continues");
+    if (handoff == QStringLiteral("next_model_call")) return QStringLiteral("result goes to the main agent's next step");
+    if (handoff == QStringLiteral("pending"))
+        return QStringLiteral("result pending: automatic-turn limit reached (%1/%2); it goes with your next prompt").arg(wakeups).arg(maxAutoTurns);
+    if (handoff == QStringLiteral("returned")) return QStringLiteral("result returned to the main agent");
+    if (handoff == QStringLiteral("discarded")) return QStringLiteral("result discarded (new conversation)");
+    return {};
+}
+
+bool SubagentModel::handle(const QJsonObject &event) {
+    const QString type = str(event, "event");
+    const QString id = str(event, "id");
+    const qint64 now = clock();
+    auto metrics = [&](SubagentRow &row) {
+        if (event.contains(QStringLiteral("tools"))) row.tools = event.value(QStringLiteral("tools")).toInt();
+        if (event.contains(QStringLiteral("tokens"))) row.tokens = qint64(event.value(QStringLiteral("tokens")).toDouble());
+        if (event.contains(QStringLiteral("tokens_estimated"))) row.tokensEstimated = event.value(QStringLiteral("tokens_estimated")).toBool();
+        if (event.contains(QStringLiteral("elapsed_ms"))) { row.elapsedMs = qint64(event.value(QStringLiteral("elapsed_ms")).toDouble()); row.reportedAt = now; }
+    };
+    auto ensure = [&](const QString &rowId) -> SubagentRow & {
+        if (SubagentRow *existing = find(rowId)) return *existing;
+        SubagentRow row; row.id = rowId; row.reportedAt = now;
+        m_rows.append(row);
+        return m_rows.last();
+    };
+    if (type == QStringLiteral("subagent_started")) {
+        if (id.isEmpty()) return true;
+        SubagentRow &row = ensure(id);
+        row.type = str(event, "type"); row.description = str(event, "description");
+        row.background = event.value(QStringLiteral("background")).toBool();
+        row.model = str(event, "model"); row.effort = str(event, "effort");
+        row.resumed = event.value(QStringLiteral("resumed")).toBool();
+        row.warnings.clear();
+        for (const auto &w : event.value(QStringLiteral("warnings")).toArray()) row.warnings << w.toString();
+        row.status = QStringLiteral("waiting"); row.summary.clear(); row.handoff.clear();
+        row.lastActivity = row.resumed ? QStringLiteral("resuming") : QStringLiteral("starting");
+        if (!row.resumed) { row.elapsedMs = 0; row.reportedAt = now; }
+        if (onInline) {
+            QString line = QStringLiteral("✦ %1 %2 %3 · %4").arg(row.type, row.id,
+                row.resumed ? QStringLiteral("resumed") : row.background ? QStringLiteral("started in the background") : QStringLiteral("started"),
+                row.description);
+            if (!row.warnings.isEmpty()) line += QStringLiteral(" (") + row.warnings.join(QStringLiteral("; ")) + QLatin1Char(')');
+            onInline(line);
+        }
+        changed();
+        return true;
+    }
+    if (type == QStringLiteral("subagent_progress")) {
+        if (id.isEmpty()) return true;
+        SubagentRow &row = ensure(id);
+        const QString status = str(event, "status");
+        if (!status.isEmpty()) row.status = status;
+        if (event.contains(QStringLiteral("last_activity"))) row.lastActivity = str(event, "last_activity");
+        metrics(row);
+        changed();
+        if (onTranscript) onTranscript(id, event);
+        return true;
+    }
+    if (type == QStringLiteral("subagent_finished")) {
+        if (id.isEmpty()) return true;
+        SubagentRow &row = ensure(id);
+        if (row.type.isEmpty()) row.type = str(event, "type");
+        row.status = str(event, "outcome").isEmpty() ? QStringLiteral("done") : str(event, "outcome");
+        row.summary = str(event, "summary"); row.handoff = str(event, "handoff");
+        row.lastActivity = row.status;
+        metrics(row);
+        const SubagentRow copy = row;
+        if (onInline) {
+            QString line = QStringLiteral("✦ %1 %2 %3 · %4 · %5 tool%6 · %7 tok").arg(copy.type, copy.id, copy.status,
+                formatElapsed(copy.elapsedMs)).arg(copy.tools).arg(copy.tools == 1 ? QString() : QStringLiteral("s"))
+                .arg(formatTokens(copy.tokens, copy.tokensEstimated));
+            const QString handoff = handoffText(copy.handoff, event.value(QStringLiteral("wakeups")).toInt(), event.value(QStringLiteral("max_auto_turns")).toInt());
+            if (!handoff.isEmpty()) line += QStringLiteral(" · ") + handoff;
+            onInline(line);
+        }
+        changed();
+        if (onTranscript) onTranscript(id, event);
+        if (onFinished) onFinished(copy);
+        return true;
+    }
+    if (type == QStringLiteral("subagent_handoff")) {
+        const QString handoff = str(event, "handoff");
+        if (SubagentRow *row = find(id)) row->handoff = handoff;
+        if (onInline && (handoff == QStringLiteral("wake") || handoff == QStringLiteral("pending"))) {
+            onInline(handoff == QStringLiteral("wake")
+                ? QStringLiteral("✦ %1 result → main agent continues").arg(id)
+                : QStringLiteral("✦ %1 %2").arg(id, handoffText(handoff, event.value(QStringLiteral("wakeups")).toInt(), event.value(QStringLiteral("max_auto_turns")).toInt())));
+        }
+        changed();
+        return true;
+    }
+    if (type == QStringLiteral("subagent_transcript") || type == QStringLiteral("subagent_event")) {
+        if (onTranscript) onTranscript(id, event);
+        return true;
+    }
+    if (type == QStringLiteral("agents_status")) {
+        for (const auto &value : event.value(QStringLiteral("items")).toArray()) {
+            const QJsonObject item = value.toObject();
+            SubagentRow &row = ensure(str(item, "id"));
+            row.type = str(item, "type"); row.description = str(item, "description");
+            row.background = item.value(QStringLiteral("background")).toBool(); row.model = str(item, "model");
+            row.status = str(item, "status"); row.lastActivity = str(item, "last_activity");
+            row.tools = item.value(QStringLiteral("tools")).toInt(); row.tokens = qint64(item.value(QStringLiteral("tokens")).toDouble());
+            row.elapsedMs = qint64(item.value(QStringLiteral("elapsed_ms")).toDouble()); row.reportedAt = now;
+        }
+        changed();
+        return true;
+    }
+    if (type == QStringLiteral("agents")) {
+        m_definitions = event.value(QStringLiteral("items")).toArray();
+        m_definitionWarnings.clear();
+        for (const auto &value : event.value(QStringLiteral("skipped")).toArray())
+            m_definitionWarnings << QStringLiteral("%1: %2").arg(str(value.toObject(), "path"), str(value.toObject(), "reason"));
+        for (const auto &value : event.value(QStringLiteral("duplicates")).toArray())
+            m_definitionWarnings << QStringLiteral("%1: duplicate name %2").arg(str(value.toObject(), "source"), str(value.toObject(), "name"));
+        return true;
+    }
+    if (type == QStringLiteral("agent_stopped")) {
+        const QJsonArray ids = event.value(QStringLiteral("ids")).toArray();
+        if (onStatus) onStatus(ids.isEmpty() ? QStringLiteral("No running agents to stop.")
+                                             : QStringLiteral("Stopping %1 agent(s)…").arg(ids.size()));
+        return true;
+    }
+    if (type == QStringLiteral("agent_message_delivered")) {
+        if (onStatus) onStatus(str(event, "delivered") == QStringLiteral("resumed")
+                                   ? QStringLiteral("Message sent · %1 resumed in the background").arg(id)
+                                   : QStringLiteral("Message sent · %1 reads it before its next step").arg(id));
+        return true;
+    }
+    if (type == QStringLiteral("agent_options")) {
+        if (onStatus) onStatus(QStringLiteral("Automatic agent turns: %1 used of %2").arg(event.value(QStringLiteral("wakeups")).toInt())
+                                   .arg(event.value(QStringLiteral("max_auto_turns")).toInt() == 0 ? QStringLiteral("unlimited")
+                                        : QString::number(event.value(QStringLiteral("max_auto_turns")).toInt())));
+        return true;
+    }
+    // Observed, not consumed.
+    if (type == QStringLiteral("agent_started")) { m_mainBusy = true; changed(); }
+    else if (type == QStringLiteral("agent_finished")) { m_mainBusy = false; changed(); }
+    else if (type == QStringLiteral("context")) { m_mainTokens = qint64(event.value(QStringLiteral("used_tokens")).toDouble()); changed(); }
+    else if (type == QStringLiteral("reset")) clearFinished();
+    else if (type == QStringLiteral("ready")) clear();
+    return false;
+}
+
+// ----- panel ---------------------------------------------------------------------------------
+
+SubagentsPanel::SubagentsPanel(SubagentModel *model, QWidget *parent) : QWidget(parent), m_model(model) {
+    setObjectName(QStringLiteral("subagentsPanel"));
+    setFocusPolicy(Qt::ClickFocus);
+    setAccessibleName(QStringLiteral("Running agents"));
+    setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    setMouseTracking(false);
+    m_tick.setInterval(1000);
+    connect(&m_tick, &QTimer::timeout, this, [this] { update(); });
+    hide();
+}
+
+int SubagentsPanel::rowHeight() const { return fontMetrics().height() + 6; }
+
+int SubagentsPanel::visibleCount() const { return std::min<int>(kMaxVisible, m_model->rows().size()); }
+
+int SubagentsPanel::firstVisible() const {
+    const int n = m_model->rows().size();
+    if (n <= kMaxVisible) return 0;
+    const int index = std::max(0, m_selected - 1);
+    return std::clamp(index - kMaxVisible + 1, 0, n - kMaxVisible);
+}
+
+QSize SubagentsPanel::sizeHint() const {
+    const int n = m_model->rows().size();
+    const int lines = 1 + visibleCount() + (n > kMaxVisible ? 1 : 0);
+    return {200, lines * rowHeight() + 6};
+}
+
+QString SubagentsPanel::selectedId() const {
+    const int index = m_selected - 1;
+    return index >= 0 && index < m_model->rows().size() ? m_model->rows().at(index).id : QString();
+}
+
+void SubagentsPanel::refresh() {
+    const bool show = m_allowed && !m_model->isEmpty();
+    m_selected = std::clamp(m_selected, 0, int(m_model->rows().size()));
+    if (show != isVisible()) {
+        if (!show && hasFocus() && onExit) onExit();
+        setVisible(show);
+    }
+    if (show && m_model->liveCount() > 0) { if (!m_tick.isActive()) m_tick.start(); }
+    else m_tick.stop();
+    updateGeometry();
+    update();
+}
+
+void SubagentsPanel::enter() {
+    if (m_model->isEmpty()) return;
+    m_selected = 1;   // always start at the first subagent
+    setFocus(Qt::TabFocusReason);
+    update();
+}
+
+int SubagentsPanel::rowAt(const QPoint &pos) const {
+    const int line = (pos.y() - 2) / rowHeight();
+    if (line <= 0) return 0;
+    if (line > visibleCount()) return -1;
+    return firstVisible() + line;
+}
+
+void SubagentsPanel::act(bool stop) {
+    const QString id = selectedId();
+    const SubagentRow *row = m_model->row(id);
+    if (!row) return;
+    if (row->live()) { if (stop && onStop) onStop(id); }
+    else m_model->dismiss(id);
+    refresh();
+}
+
+void SubagentsPanel::keyPressEvent(QKeyEvent *event) {
+    const auto mods = event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
+    const int n = m_model->rows().size();
+    if (mods != Qt::NoModifier) { QWidget::keyPressEvent(event); return; }
+    switch (event->key()) {
+    case Qt::Key_Up:
+        if (m_selected <= 0) { if (onExit) onExit(); }
+        else { --m_selected; update(); }
+        return;
+    case Qt::Key_Down:
+        if (m_selected < n) { ++m_selected; update(); }
+        return;
+    case Qt::Key_Home: m_selected = 0; update(); return;
+    case Qt::Key_End: m_selected = n; update(); return;
+    case Qt::Key_Return: case Qt::Key_Enter:
+        if (m_selected == 0) { if (onExit) onExit(); }
+        else if (onOpen) onOpen(selectedId());
+        return;
+    case Qt::Key_X: case Qt::Key_Delete: case Qt::Key_Backspace:
+        act(true);
+        return;
+    case Qt::Key_Escape:
+        if (onExit) onExit();
+        return;
+    default:
+        QWidget::keyPressEvent(event);
+    }
+}
+
+void SubagentsPanel::mousePressEvent(QMouseEvent *event) {
+    const int row = rowAt(event->pos());
+    if (row < 0) return;
+    m_selected = row;
+    setFocus(Qt::MouseFocusReason);
+    // The × at the right edge stops or dismisses.
+    if (row > 0 && event->pos().x() >= width() - 24) act(true);
+    update();
+}
+
+void SubagentsPanel::mouseDoubleClickEvent(QMouseEvent *event) {
+    const int row = rowAt(event->pos());
+    if (row > 0 && event->pos().x() < width() - 24 && onOpen) { m_selected = row; onOpen(selectedId()); }
+}
+
+void SubagentsPanel::focusInEvent(QFocusEvent *event) { QWidget::focusInEvent(event); update(); }
+void SubagentsPanel::focusOutEvent(QFocusEvent *event) { QWidget::focusOutEvent(event); update(); }
+
+void SubagentsPanel::paintEvent(QPaintEvent *) {
+    QPainter p(this);
+    const QFontMetrics fm = fontMetrics();
+    const int h = rowHeight();
+    const bool focused = hasFocus();
+    // The list floats over the bottom of the terminal, so it draws its own card.
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(theme::Border);
+    p.setBrush(theme::Surface);
+    p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 8, 8);
+    p.setBrush(Qt::NoBrush);
+    p.setRenderHint(QPainter::Antialiasing, false);
+    const int nameWidth = std::max(fm.horizontalAdvance(QStringLiteral("general a00")) + 8, 96);
+
+    auto drawRow = [&](int line, bool selected, const QString &icon, const QColor &iconColor, const QString &name,
+                       const QString &description, const QString &metrics, const QString &badge, bool closable) {
+        const QRect r(0, 2 + line * h, width(), h);
+        if (selected) p.fillRect(r.adjusted(4, 0, -4, 0), focused ? theme::SurfaceRaised.lighter(135) : theme::SurfaceRaised);
+        int x = 10;
+        p.setPen(iconColor);
+        p.drawText(QRect(x, r.top(), 16, h), Qt::AlignCenter, icon);
+        x += 20;
+        p.setPen(theme::Text);
+        QFont bold = font(); bold.setBold(true); p.setFont(bold);
+        p.drawText(QRect(x, r.top(), nameWidth, h), Qt::AlignVCenter | Qt::AlignLeft, fm.elidedText(name, Qt::ElideRight, nameWidth - 4));
+        p.setFont(font());
+        x += nameWidth;
+        int right = width() - (closable ? 28 : 10);
+        if (!badge.isEmpty()) {
+            const int bw = fm.horizontalAdvance(badge) + 10;
+            const QRect br(right - bw, r.top() + 3, bw, h - 6);
+            p.setPen(theme::Border); p.setBrush(theme::SurfaceRaised);
+            p.drawRoundedRect(br, 4, 4);
+            p.setPen(theme::TextMuted);
+            p.drawText(br, Qt::AlignCenter, badge);
+            p.setBrush(Qt::NoBrush);
+            right -= bw + 8;
+        }
+        const int mw = std::min(fm.horizontalAdvance(metrics) + 8, std::max(0, (right - x) / 2));
+        p.setPen(theme::TextMuted);
+        p.drawText(QRect(right - mw, r.top(), mw, h), Qt::AlignVCenter | Qt::AlignRight, fm.elidedText(metrics, Qt::ElideLeft, mw));
+        p.setPen(theme::Text);
+        const int dw = std::max(0, right - mw - 12 - x);
+        p.drawText(QRect(x, r.top(), dw, h), Qt::AlignVCenter | Qt::AlignLeft, fm.elidedText(description, Qt::ElideRight, dw));
+        if (closable) {
+            p.setPen(theme::TextMuted);
+            p.drawText(QRect(width() - 24, r.top(), 16, h), Qt::AlignCenter, QStringLiteral("×"));
+        }
+    };
+
+    const QString hint = focused ? QStringLiteral("↑↓ select · Enter open · x stop/dismiss · Esc back")
+                                 : QStringLiteral("↓ from the prompt to select");
+    drawRow(0, focused && m_selected == 0, m_model->mainBusy() ? QStringLiteral("●") : QStringLiteral("○"),
+            m_model->mainBusy() ? theme::Accent : theme::TextMuted, QStringLiteral("main"),
+            (m_model->mainBusy() ? QStringLiteral("working") : QStringLiteral("idle")) + QStringLiteral("   ") + hint,
+            m_model->tokenSplit(), QString(), false);
+    const auto &rows = m_model->rows();
+    const int first = firstVisible();
+    for (int i = 0; i < visibleCount(); ++i) {
+        const SubagentRow &row = rows.at(first + i);
+        QColor color = theme::TextMuted;
+        if (row.status == QStringLiteral("running")) color = theme::Accent;
+        else if (row.status == QStringLiteral("done")) color = kDone;
+        else if (row.status == QStringLiteral("failed")) color = kFailed;
+        QStringList parts;
+        if (!row.live()) parts << row.status;
+        else if (row.status == QStringLiteral("waiting")) parts << QStringLiteral("waiting");
+        parts << SubagentModel::formatElapsed(m_model->elapsedNow(row));
+        parts << QStringLiteral("%1 tool%2").arg(row.tools).arg(row.tools == 1 ? QString() : QStringLiteral("s"));
+        parts << SubagentModel::formatTokens(row.tokens, row.tokensEstimated) + QStringLiteral(" tok");
+        QString description = row.description;
+        if (row.live() && !row.lastActivity.isEmpty() && row.lastActivity != QStringLiteral("starting"))
+            description += QStringLiteral("  ·  ") + row.lastActivity;
+        drawRow(i + 1, m_selected == first + i + 1 && focused, SubagentModel::statusIcon(row.status), color,
+                QStringLiteral("%1 %2").arg(row.type, row.id), description, parts.join(QStringLiteral(" · ")),
+                row.background ? QStringLiteral("bg") : QString(), true);
+    }
+    if (rows.size() > kMaxVisible) {
+        const int hidden = rows.size() - kMaxVisible;
+        p.setPen(theme::TextMuted);
+        p.drawText(QRect(30, 2 + (visibleCount() + 1) * h, width() - 40, h), Qt::AlignVCenter | Qt::AlignLeft,
+                   QStringLiteral("+%1 more · ↑↓ scroll · Agents… in the palette").arg(hidden));
+    }
+}
+
+}  // namespace relay
