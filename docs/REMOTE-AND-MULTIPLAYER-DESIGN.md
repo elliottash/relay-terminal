@@ -314,3 +314,12 @@ owner can.
 - [41] WebKit, Web Push for Web Apps on iOS and iPadOS: https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/ · [42] Apple Developer Forums, web push actions on iOS 16.4: https://developer.apple.com/forums/thread/726793 (search summary)
 - [43] Meta Engineering, Code Verify: https://engineering.fb.com/2022/03/10/security/code-verify/ (search summary) · [44] Corbado, Passkeys & WebAuthn PRF: https://www.corbado.com/blog/passkeys-prf-webauthn (search summary)
 - [45] xtermjs/xterm.js #3600 (Android input corruption): https://github.com/xtermjs/xterm.js/issues/3600 (search summary) · [46] xtermjs/xterm.js #5377 (limited touch support): https://github.com/xtermjs/xterm.js/issues/5377 (search summary)
+
+## 11. Owner decisions (2026-09-17)
+
+Recommendations accepted for 1, 2, 5, 6, 7, 8, 9 and 10. Changes:
+
+- **3. Accounts:** pairing-only until multiplayer, but an invite can also be shared as a long unguessable link (e.g. by
+  email), no account needed. When accounts arrive: passkeys plus GitHub and Google sign-in.
+- **4. Guest agent prompts:** a guest's first command asks the owner to approve, with **Approve once** or
+  **Approve always** (for that guest).

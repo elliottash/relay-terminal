@@ -16,3 +16,9 @@ Owner decision (TASKS-AND-MEMORY-DESIGN.md section 9): global aliases live in th
 2. Invocation: palette, `/name` for prompts, and a name typed in terminal mode?
 3. Import existing Warp workflows and shell aliases?
 4. Can the agent create aliases from repeated commands (proposed, logged)?
+
+## Decisions (owner, 2026-09-17)
+All recommendations accepted: one Markdown file per alias (command or prompt) with `{{arg}}` parameters and defaults,
+global in the global Switchboard and local in the repo Switchboard; run from the palette, `/name` and the name in
+terminal mode, filling parameters in the composer with Tab; import Warp workflows and shell aliases with a preview;
+the agent may suggest aliases for repeated commands (suggestion only, logged).
