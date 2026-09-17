@@ -32,6 +32,10 @@ public:
 
     // ---- appearance
     void setTerminalFont(const QFont &font);
+    // Extra pixels between rows and the border around the grid, so engine panes match the
+    // Konsole profile's LineSpacing and TerminalMargin.
+    void setLineSpacing(int pixels);
+    void setPadding(int pixels);
     QFont terminalFont() const { return m_baseFont; }
     void zoomIn();
     void zoomOut();
@@ -157,6 +161,7 @@ private:
     int m_ascent = 12;
     int m_descent = 4;
     int m_padding = 2;
+    int m_lineSpacing = 0;
     int m_rows = 24;
     int m_cols = 80;
 

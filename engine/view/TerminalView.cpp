@@ -251,8 +251,9 @@ void TerminalView::updateMetrics()
     }
     const QFontMetricsF fm(m_fonts[0]);
     m_cw = std::max(1, qCeil(fm.horizontalAdvance(QLatin1Char('M')) - 0.01));
-    m_ch = std::max(1, qCeil(fm.height() - 0.01));
-    m_ascent = qCeil(fm.ascent() - 0.01);
+    m_ch = std::max(1, qCeil(fm.height() - 0.01) + m_lineSpacing);
+    // Half the extra spacing goes above the glyphs, as Konsole does, so text sits centred.
+    m_ascent = qCeil(fm.ascent() - 0.01) + (m_lineSpacing + 1) / 2;
     m_descent = std::max(1, m_ch - m_ascent);
     m_emojiFont.setPixelSize(std::max(6, int(m_ch * 0.88)));
     m_glyphCache.clear();
@@ -264,6 +265,29 @@ void TerminalView::setTerminalFont(const QFont &font)
     m_baseFont.setKerning(false);
     m_zoom = 0;
     updateMetrics();
+    applyGeometry();
+    m_forceFull = true;
+    update();
+}
+
+void TerminalView::setLineSpacing(int pixels)
+{
+    const int clamped = std::max(0, std::min(16, pixels));
+    if (clamped == m_lineSpacing)
+        return;
+    m_lineSpacing = clamped;
+    updateMetrics();
+    applyGeometry();
+    m_forceFull = true;
+    update();
+}
+
+void TerminalView::setPadding(int pixels)
+{
+    const int clamped = std::max(0, std::min(64, pixels));
+    if (clamped == m_padding)
+        return;
+    m_padding = clamped;
     applyGeometry();
     m_forceFull = true;
     update();
