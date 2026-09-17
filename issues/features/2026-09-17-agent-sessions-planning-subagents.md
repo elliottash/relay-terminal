@@ -34,3 +34,19 @@
 | B backend subagents | agent definitions from all tools, agent tool, concurrency, events, messaging, background handoff | worktree |
 | D GUI terminal side | combined queue (terminal + agent, ordered, reorder, colors/icons, Up select/Enter edit/Esc/Ctrl+Enter per the queue issue), prompt visibility rules + waiting-for-input focus, @ file picker, ghost-text history suggestions | main tree |
 | E GUI agent side | slash menu, context indicator, effort keys, Shift+Tab plan mode + editable plan pane, rewind/fork/resume pickers, recap display, onboarding dialog, subagent list under composer + transcript pane, AI suggestions display | after A, B and D land |
+
+## Owner decisions, intake batch 2 (2026-09-17)
+
+Source lines from `issues/feature_intake.txt` are quoted in the implementing issues. Decisions:
+
+12. **Shortcut hints** Superhuman-style: yes; project `WARP.md` carries a standing rule to add hints for new features.
+13. **`!` and `*` prefixes** like Claude Code: a typed `!` as the first character switches to terminal mode, a typed `*` to agent mode; not on paste.
+14. **Thinking and tool calls:** approved plan until the new engine (thinking streams in the overlay, one inline "thought for" line, one clickable "N tool calls" line via a registered `relay://` handler opening the turn transcript; tool outputs open in a preview pane). Revisit with the engine.
+15. **Routing:** curated list of command names that are common English words plus sentence signals; ambiguous input may call the pane's agent model to guess.
+16. **Skills:** refine global skill files into copies; import skill libraries pinned to a commit with review; manual update checks, no subscriptions.
+17. **Scratchpad:** yes, a dynamic per-project user–agent comms pad; design research in `docs/SCRATCHPAD-DESIGN.md` (pending).
+18. **Panes and tabs:** close and move-to-new-tab buttons on panes; move-to-new-window on tabs; new tab and new pane buttons; drag panes like Warp; Ctrl+Alt+arrows move panes.
+19. **Palette aliases:** generous hidden search aliases for Agent options.
+20. **Voice transcription:** filed as `2026-09-17-voice-transcription.md` with an open local-vs-cloud decision.
+
+Workstreams: GUI F1 (hints, prefixes, thinking/tool UI, routing assist UI, skills UI, pane/tab buttons, drag/move, aliases), backend F2 (routing assist, thinking/turn/tool-output events, skills refine/import), research (scratchpad design).
