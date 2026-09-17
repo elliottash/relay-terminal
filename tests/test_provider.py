@@ -104,6 +104,22 @@ class HTTPTests(unittest.TestCase):
         self.assertTrue(request['body']['stream'])
         self.assertEqual(request['body']['thinking']['type'], 'enabled')
 
+    def test_attribute_error_after_cancel_is_a_stop(self):
+        # cancel() closes the response from another thread; http.client then raises AttributeError.
+        from unittest import mock
+        provider = ChatProvider(ProviderConfig(self.base + '/v1', 'test-model', 'TEST_SECRET'))
+        messages = [{'role':'user','content':'hello'}]
+        cancel = threading.Event()
+        def closed_by_cancel(*args):
+            cancel.set()
+            raise AttributeError("'NoneType' object has no attribute 'readline'")
+        with mock.patch.object(provider, '_stream', side_effect=closed_by_cancel):
+            with self.assertRaises(Cancelled):
+                provider.complete(messages, [], lambda x:None, cancel)
+        with mock.patch.object(provider, '_stream', side_effect=AttributeError('real bug')):
+            with self.assertRaises(AttributeError):
+                provider.complete(messages, [], lambda x:None, threading.Event())
+
     def test_json_fallback(self):
         self.assertEqual(self.complete('/json')['content'], 'JSON_OK')
 

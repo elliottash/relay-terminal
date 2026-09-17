@@ -155,6 +155,11 @@ class ChatProvider:
             if cancel.is_set():
                 raise Cancelled("Stopped.") from None
             raise ProviderError(f"Provider connection failed ({type(exc).__name__}). Check connectivity and the base URL.") from None
+        except AttributeError:
+            # cancel() closes the response from another thread; http.client then reads from fp=None.
+            if cancel.is_set():
+                raise Cancelled("Stopped.") from None
+            raise
         except (json.JSONDecodeError, UnicodeError, KeyError, TypeError, ValueError) as exc:
             if cancel.is_set():
                 raise Cancelled("Stopped.") from None
