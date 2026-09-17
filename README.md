@@ -133,7 +133,7 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
   `/context`, `/rewind` (rewind chat: the conversation only, files untouched; also Esc Esc in
   an empty prompt), `/rewind-code` (restores the files the agent changed, after showing them and
   asking; "Code and chat" does both), `/fork` (continues in a new pane),
-  `/resume` (with a recap), `/plan`, `/recap`, `/requests`, `/continue`, `/agents`, `/skills`, `/instructions`, `/export`
+  `/resume` (with a recap), `/plan`, `/recap`, `/tasks`, `/continue`, `/agents`, `/skills`, `/instructions`, `/export`
   (Markdown under `.relay/exports`). Coming back to the window after 3 minutes, with a finished
   turn and an empty prompt, prints a short recap (Actions › Agent options turns it off).
 - **Plan mode.** Shift+Tab in the prompt box (or `/plan`) shows a PLAN chip: the agent
@@ -141,16 +141,21 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
   **Execute**, **Execute in fresh context** and **Keep planning**.
 - **Steering.** Enter a prompt while the agent works, then press Enter again on the empty prompt
   box: the prompt joins the running turn at its next tool call instead of waiting in the queue.
-- **Requests and todos.** Everything you ask (typed, queued, steered, re-asked) is tracked per
-  session. A **Requests 2 open** chip (in the queue strip while it shows, else next to the context
-  indicator) opens the list; so do `/requests`, `/todos` and Actions › Requests and todos….
-  Each request shows ✓ ◐ ○ ✕ ⏸, its verbatim text, the agent's linked todos and reasons;
-  keys: Enter expands, `d` marks done, `x` cancels, `o` reopens, `r` re-asks, Esc closes. When a
-  turn stops at its step limit (default 50 model calls, 150 tool calls; Actions › Agent options),
-  the terminal shows **▸ Continue** (Ctrl+click, `/continue` or the palette), and turns that end
-  with unfinished asks print "2 requests still open: …". Resume and recaps list open requests.
-  Actions › Agent options › Audit requests after each turn (off by default) flags asks that may be
-  unaddressed.
+- **Tasks.** Everything you ask (typed, queued, steered, re-asked) is tracked per session, and
+  the agent splits multi-part asks into tasks. A **Tasks 3/5** chip (in the queue strip while it
+  shows, else next to the context indicator) counts completed tasks of the current list; when the
+  work is settled it reads **Tasks 5/5** (green) or, amber, **Tasks 3/5 (1 failed, 1 deferred)**
+  (failed, deferred, cancelled, unfinished). A new ask after everything settled starts a new
+  list; earlier lists stay in the panel under a folded **Earlier** row. Ctrl+Shift+K (Relay
+  shortcut preset), a click on the chip, `/tasks` (also `/requests`, `/todos`) or Actions › Tasks…
+  open the task list: requests (your words, verbatim) with their tasks under them, marked
+  ✓ ◐ ○ ✗ ⏸ ✕; keys: Enter folds, `d` marks done, `x` cancels, `o` reopens, `r` re-asks, Esc
+  closes. When a turn stops at its step limit (default 50 model calls, 150 tool calls; Actions ›
+  Agent options), the terminal shows **▸ Continue** (Ctrl+click, `/continue` or the palette), and
+  turns with more than one task end with a line such as
+  `✦ Tasks 3/5 (1 failed, 1 deferred) · T4 “…” failed, T5 “…” deferred`. Resume and recaps list
+  unfinished requests. Actions › Agent options › Audit requests after each turn (off by default)
+  flags asks that may be unaddressed.
 - **Instruction files.** On first launch Relay lists instruction files from other tools
   (CLAUDE.md, AGENTS.md, WARP.md, …) to include, and can combine them into a global
   `~/.config/relay/relay.md`. Change it later in Actions › Agent options › Instructions….

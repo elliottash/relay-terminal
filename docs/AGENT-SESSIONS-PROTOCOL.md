@@ -259,8 +259,8 @@ linked todo is still pending/in progress (→ `open`). Linked todos override: al
 **Event** `requests {id?, items: [entry…] (the newest 200), total, open, counts: {status: n}}`, where `open` counts
 `open` + `in_progress` entries with `requires_completion`. Emitted after **every** ledger change (submission, delivery,
 status change, todo update, turn end, audit flags) and after `reset`, `load_state`, `resume` and a conversation
-`rewind`; `id` is set only in the reply to the `requests` command. Chip text such as "Requests 3/5" can use
-`counts.done` and `total`.
+`rewind`; `id` is set only in the reply to the `requests` command. The GUI's "Tasks 3/5" chip is derived from
+`requests` and `todos` together (see `docs/ARCHITECTURE.md`, "Tasks UI"); it does not use `counts`.
 
 **Commands:**
 - `requests {id?}` → `requests {id, …}`.

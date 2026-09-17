@@ -164,7 +164,9 @@ QLabel#planChip { color: #1b1530; background: #c9a6ff; border-radius: 4px; paddi
 QLabel#contextLabel { color: @muted; font-family: "@mono"; font-size: 9pt; padding: 0 4px; }
 QLabel#contextLabel[warn="true"] { color: #e5c07b; }
 QToolButton#requestsChip { color: @muted; border: 1px solid @border; border-radius: 4px; padding: 0 6px; font-size: 9pt; background: transparent; }
-QToolButton#requestsChip[open="true"] { color: #e5c07b; border-color: #6b5a33; }
+QToolButton#requestsChip[state="running"] { color: @text; }
+QToolButton#requestsChip[state="done"] { color: #7ec88c; border-color: #3f6b48; }
+QToolButton#requestsChip[state="attention"] { color: #e5c07b; border-color: #6b5a33; }
 QToolButton#requestsChip:hover { color: @text; border-color: @accent; }
 QPlainTextEdit#planText { background: @bg; border: none; font-family: "@mono"; font-size: 10pt; padding: 8px; }
 QLabel#planNotice { color: @muted; }

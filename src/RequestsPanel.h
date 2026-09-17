@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-// The expanded request list opened from a pane's "Requests" chip, /requests or the palette.
-// Keyboard-first: ↑/↓ select, Enter or Space (or →/←) expands a request to its todos, reasons and
-// audit flags, d marks it done, x or Delete cancels it, o reopens it, r re-asks it (queues the
+// The task list opened from a pane's "Tasks" chip, /tasks (/requests, /todos), Ctrl+Shift+K or the
+// palette. The current batch's requests come first, each with its tasks (the model's todos),
+// reasons and audit flags; earlier batches sit under a folded "Earlier" row.
+// Keyboard-first: ↑/↓ select, Enter or Space (or →/←) folds a request, d marks it done, x or Delete cancels it, o reopens it, r re-asks it (queues the
 // verbatim text again), Esc closes. The selected request's verbatim text shows below the list.
 #include "RequestLedger.h"
+#include <QHash>
 #include <QSet>
 #include <QWidget>
 #include <functional>
@@ -40,11 +42,13 @@ private:
     void act(const QString &action);
     void updateDetail();
     void updateButtons();
+    QTreeWidgetItem *rowFor(const QString &ledgerId) const;
     RequestLedgerModel *m_model;
     QLabel *m_title = nullptr, *m_detail = nullptr, *m_keys = nullptr;
     QTreeWidget *m_tree = nullptr;
     QToolButton *m_done = nullptr, *m_cancel = nullptr, *m_reopen = nullptr, *m_reask = nullptr;
     QSet<QString> m_fetched;
+    QHash<QString, bool> m_expanded;   // request id or "#earlier"/"#other" → expanded
     bool m_rebuilding = false;
 };
 

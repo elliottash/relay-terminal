@@ -140,7 +140,7 @@ text from the live Keymap, so rebinding changes the hint and unbound actions get
 triggers: toolbar and palette activations of actions with shortcuts, pane buttons, the tab "+",
 tab close and ⧉ buttons, clicking into another pane, mouse model/effort/mode pickers, clicking
 the directory line (`@`), the queue ×, `/shell ` and `/agent ` (`!`, `*`), palette rewinds, pane
-drags, the first `relay://` link, the Requests chip (→ `/requests` or `agent.requests`), Continue
+drags, the first `relay://` link, the Tasks chip and `/tasks`, `/requests`, `/todos` (→ `agent.requests`, Ctrl+Shift+K), Continue
 from the link or palette (→ `/continue` or `agent.continue`), and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
 in `WARP.md`); tests in `tests/hints_test.cpp`.
@@ -515,13 +515,32 @@ verbatim, todos, plan, files, subagents, recent user messages up to ~20K tokens)
 (`audit_requests`, route-assist model) only flags possibly unaddressed asks. Subagents have none of
 this (no ledger or todos).
 
-**Request ledger UI** (`src/RequestLedger.*`, `src/RequestsPanel.*`, library `relay-requests`, tests
-`tests/requests_test.cpp`). `RequestLedgerModel` holds the latest `requests`/`todos` lists (and
-verbatim text from `request_get`) and builds the inline texts (limit line, open items, completion
-check, audit flags). `Pane` owns one model: the `requestsChip` shows "Requests N open" (or
-"Requests ✓ N"), hosted in the queue strip header while the strip is visible and in the composer
-row otherwise. `RequestsPanel` floats over the right of the terminal (d/x/o/r send `request_set` and
-`request_reask`). `done {stop_reason: "limit"}` prints a `relay://continue/<pane>` link handled by
+**Tasks UI** (request ledger UI: `src/RequestLedger.*`, `src/RequestsPanel.*`, library
+`relay-requests`, tests `tests/requests_test.cpp`). `RequestLedgerModel` holds the latest
+`requests`/`todos` lists (verbatim text from `request_get`, and settled todos the model later
+dropped from its list) and derives **tasks**, all in the GUI (no protocol change): each todo is a
+task; a user request with no linked todos (or open again while all its todos are settled) counts as
+one task itself; Relay-origin requests do not count. Outcomes: todo `completed` → completed;
+`blocked` → failed; `deferred` → deferred; `cancelled` → cancelled; request `done` → completed,
+`cancelled`/`cancelled_by_user` → cancelled, `blocked` → failed, `deferred` → deferred. Open todos
+and open requests are *active* while any request is `in_progress` or they wait in the queue (not
+delivered, or re-asked/requeued: a new `queue_item` since last delivery), otherwise *unfinished*
+(the turn ended by error, cancel, the step limit or an exhausted completion check); open todos of a
+request the user marked done or cancelled follow it. **Batches:** a new request starts a new task
+list when the current list has tasks, none active, no request in progress and it did not arrive in
+the same turn; unfinished (and re-asked) tasks of earlier lists move into the current one. After a
+restart or `/resume` the same walk runs over the loaded ledger; a ledger whose highest id went down
+or whose ids changed text (new chat, other session, rewind) resets the batches. The `requestsChip`
+shows `Tasks c/t` (property `state`: `running`, `done` green, `attention` amber with the suffix
+"(1 failed, 1 deferred, 1 cancelled, 1 unfinished)" once settled), hosted in the queue strip header
+while the strip is visible and in the composer row otherwise; `turnEndLine()` gives the `✦ Tasks …`
+line printed on `done`/`cancelled`/`error` (skipped for a single completed task). `RequestsPanel`
+floats over the right of the terminal: current requests (unfolded, with `c/t` and their todos),
+"Other tasks", then a folded "Earlier · c/t (…)" row; d/x/o/r send `request_set` and
+`request_reask`. Toggle: `agent.requests` (Ctrl+Shift+K in the Relay preset; unbound in the Warp,
+VS Code and Konsole presets, where the key clears blocks, deletes a line, or clears scrollback),
+`/tasks`, `/requests`, `/todos`, the chip. `done {stop_reason: "limit"}` prints a
+`relay://continue/<pane>` link handled by
 `WindowManager::handleOpen`; Continue sends an ordinary ask. `max_steps`, `max_tool_calls` and
 `audit_requests` live in QSettings `agent/*`, go into `configure` and are sent with
 `set_agent_options` when changed.

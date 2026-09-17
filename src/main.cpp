@@ -326,7 +326,7 @@ private:
         add("agent.fork", "agent", "Fork the conversation into a new pane", {});
         add("agent.resume", "agent", "Resume a saved agent session", {});
         add("agent.recap", "agent", "Recap this agent session", {});
-        add("agent.requests", "agent", "Requests and todos: open the request list (/requests)", {});
+        add("agent.requests", "agent", "Tasks: show or hide the task list (/tasks)", {QStringLiteral("Ctrl+Shift+K")});
         add("agent.continue", "agent", "Continue the agent turn after a step limit (/continue)", {});
         add("agent.instructions", "agent", "Choose agent instruction files", {});
         add("agent.export", "agent", "Export the conversation as Markdown", {});
@@ -393,7 +393,7 @@ private:
 
     // Filled from docs/KEYBINDING-PRESETS.md research. Missing actions fall back to Relay defaults.
     static QByteArray presetJson() {
-        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":["Ctrl+Shift+E"],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.moveLeft":[],"pane.moveRight":[],"pane.moveUp":[],"pane.moveDown":[],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+Shift+Y"],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":["Ctrl+Shift+I"],"input.modeAgent":[],"input.toggle":["Ctrl+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[]},"vscode":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":["Ctrl+Shift+|"],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+N"],"agent.stop":["Ctrl+Esc"],"agent.provider":["Ctrl+Alt+."],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[]},"konsole":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":["Ctrl+Shift+)","Ctrl+)"],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[]}})PRESETS");
+        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":["Ctrl+Shift+E"],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.moveLeft":[],"pane.moveRight":[],"pane.moveUp":[],"pane.moveDown":[],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+Shift+Y"],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":["Ctrl+Shift+I"],"input.modeAgent":[],"input.toggle":["Ctrl+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"vscode":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":["Ctrl+Shift+|"],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+N"],"agent.stop":["Ctrl+Esc"],"agent.provider":["Ctrl+Alt+."],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"konsole":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":["Ctrl+Shift+)","Ctrl+)"],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[],"agent.requests":[]}})PRESETS");
     }
     QFileSystemWatcher m_watcher;
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_listeners;
@@ -1064,7 +1064,7 @@ private:
         });
         routeRow->addWidget(m_modelBox);
         buildSessionControls(routeRow);
-        setupRequestsUi(routeRow);   // request ledger UI: the Requests chip
+        setupRequestsUi(routeRow);   // request ledger UI: the Tasks chip
         auto *cancel = new QToolButton;
         cancel->setObjectName(QStringLiteral("interruptButton"));
         const QString cancelIcon = relay::theme::themeDataDir() + QStringLiteral("/icons/cancel.svg");
@@ -1652,7 +1652,7 @@ private:
                 printInline(QStringLiteral("Session loaded%1 · %2 turn(s)\n").arg(title.isEmpty() ? QString() : QStringLiteral(": “") + title + QStringLiteral("”"))
                             .arg(m_turnsCompleted), Ink::Note);
             if (const int open = event.value(QStringLiteral("open_requests")).toInt(); open > 0)
-                printInline(QStringLiteral("○ %1 request%2 still open · /requests\n").arg(open).arg(open == 1 ? QString() : QStringLiteral("s")), Ink::Note);
+                printInline(QStringLiteral("○ %1 unfinished request%2 · /tasks\n").arg(open).arg(open == 1 ? QString() : QStringLiteral("s")), Ink::Note);
             m_forkLoadPending = false;
             closeInline();
             clearAgentQueue();
@@ -1682,7 +1682,7 @@ private:
             const QString next = event.value(QStringLiteral("next_action")).toString();
             if (!next.isEmpty()) printInline(QStringLiteral("Next · ") + next + '\n', Ink::Recap);
             const QString openLine = relay::RequestLedgerModel::openItemsLine(relay::RequestLedgerModel::parseOpenItems(event.value(QStringLiteral("open_items")).toArray()));
-            if (!openLine.isEmpty()) printInline(QStringLiteral("Open · ") + openLine + QStringLiteral("  · /requests\n"), Ink::Recap);
+            if (!openLine.isEmpty()) printInline(QStringLiteral("Open · ") + openLine + QStringLiteral("  · /tasks\n"), Ink::Recap);
             if (!m_agentBusy && !moreTurnsPending()) closeInline();
             if (reason == QStringLiteral("away")) toast(QStringLiteral("Welcome back · recap above"));
             return true;
@@ -1869,8 +1869,9 @@ private:
             {QStringLiteral("resume"), QString(), QStringLiteral("Resume a saved session")},
             {QStringLiteral("plan"), QString(), QStringLiteral("Toggle plan mode")},
             {QStringLiteral("recap"), QString(), QStringLiteral("Summarize this session")},
-            {QStringLiteral("requests"), QString(), QStringLiteral("Requests and todos: open items, mark done, cancel, re-ask")},
-            {QStringLiteral("todos"), QString(), QStringLiteral("The agent's todos with their requests (same as /requests)")},
+            {QStringLiteral("tasks"), QString(), QStringLiteral("Task list: progress, mark done, cancel, re-ask")},
+            {QStringLiteral("requests"), QString(), QStringLiteral("Task list grouped by what you asked (same as /tasks)")},
+            {QStringLiteral("todos"), QString(), QStringLiteral("Task list (same as /tasks)")},
             {QStringLiteral("continue"), QString(), QStringLiteral("Continue the agent turn (after a step limit)")},
             {QStringLiteral("agents"), QString(), QStringLiteral("Subagents: definitions and running agents")},
             {QStringLiteral("skills"), QString(), QStringLiteral("Skills: list, exclude, refine, import from a repository")},
@@ -2000,7 +2001,11 @@ private:
         else if (name == QStringLiteral("resume")) openResume();
         else if (name == QStringLiteral("plan")) togglePlanMode();
         else if (name == QStringLiteral("recap")) requestRecap();
-        else if (name == QStringLiteral("requests") || name == QStringLiteral("todos")) openRequests();
+        else if (name == QStringLiteral("tasks") || name == QStringLiteral("requests") || name == QStringLiteral("todos")) {
+            openRequests();
+            if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.requests")); !keys.isEmpty() && requestsOpen())
+                hint(QStringLiteral("tasks.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("task list")));
+        }
         else if (name == QStringLiteral("continue")) continueTurn();
         else if (name == QStringLiteral("instructions")) openInstructions();
         else if (name == QStringLiteral("export")) exportConversation();
@@ -2138,12 +2143,12 @@ private:
         m_requestsChip = new QToolButton;
         m_requestsChip->setObjectName(QStringLiteral("requestsChip"));
         m_requestsChip->setFocusPolicy(Qt::NoFocus);
-        m_requestsChip->setAccessibleName(QStringLiteral("Requests"));
+        m_requestsChip->setAccessibleName(QStringLiteral("Tasks"));
         m_requestsChip->hide();
         row->insertWidget(3, m_requestsChip);   // after the PLAN chip and the context label
         connect(m_requestsChip, &QToolButton::clicked, this, [this] {
             toggleRequests();
-            hint(QStringLiteral("requests.chip"), requestsShortcutHint());
+            hint(QStringLiteral("tasks.chip"), requestsShortcutHint());
         });
         m_ledger.onChanged = [this] {
             updateRequestsChip();
@@ -2153,16 +2158,18 @@ private:
 
     QString requestsShortcutHint() const {
         const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.requests"));
-        return keys.isEmpty() ? QStringLiteral("Next time: /requests in the prompt box opens the request list")
-                              : relay::ShortcutHints::nextTime(keys, QStringLiteral("request list"));
+        return keys.isEmpty() ? QStringLiteral("Next time: /tasks in the prompt box opens the task list")
+                              : relay::ShortcutHints::nextTime(keys, QStringLiteral("task list"));
     }
 
     void updateRequestsChip() {
         if (!m_requestsChip) return;
-        const bool show = m_ledger.total() > 0;
+        const bool show = m_ledger.hasTasks();
         m_requestsChip->setText(m_ledger.chipText());
-        m_requestsChip->setToolTip(m_ledger.chipToolTip() + QStringLiteral("\nClick or /requests: list, mark done, cancel, re-ask"));
-        m_requestsChip->setProperty("open", m_ledger.openCount() > 0);
+        const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.requests"));
+        m_requestsChip->setToolTip(m_ledger.chipToolTip() + QStringLiteral("\nClick, /tasks%1: task list, mark done, cancel, re-ask")
+                                       .arg(keys.isEmpty() ? QString() : QStringLiteral(" or ") + keys));
+        m_requestsChip->setProperty("state", m_ledger.chipState());
         m_requestsChip->style()->unpolish(m_requestsChip); m_requestsChip->style()->polish(m_requestsChip);
         const bool wasVisible = m_requestsChip->isVisible();
         m_requestsChip->setVisible(show);
@@ -2215,6 +2222,7 @@ public:
     }
     bool limitReached() const { return m_limitReached; }
     int openRequestCount() const { return m_ledger.openCount(); }
+    QString tasksProgress() const { return m_ledger.hasTasks() ? m_ledger.chipText() : QString(); }
 
 private:
     void reaskRequest(const QString &ledgerId) {
@@ -2242,8 +2250,9 @@ private:
             printInline(relay::RequestLedgerModel::limitLine(event) + '\n', Ink::Tool);
             printContinueLink();
         }
-        const QString line = relay::RequestLedgerModel::openItemsLine(relay::RequestLedgerModel::parseOpenItems(event.value(QStringLiteral("open_items")).toArray()));
-        if (!line.isEmpty()) { ensureLineStart(); printInline(QStringLiteral("○ ") + line + QStringLiteral("  · /requests\n"), Ink::Note); }
+        // The worker's `requests`/`todos` events precede done/cancelled/error, so the model is current.
+        const QString line = m_ledger.turnEndLine();
+        if (!line.isEmpty()) { ensureLineStart(); printInline(QStringLiteral("✦ ") + line + QStringLiteral("  · /tasks\n"), Ink::Note); }
     }
 
     // "▸ Continue" as a terminal hyperlink (relay://continue/<pane>), like the tool-calls link.
@@ -2268,7 +2277,7 @@ private:
                 const QString line = relay::RequestLedgerModel::auditLine(event);
                 if (!line.isEmpty()) {
                     ensureLineStart();
-                    printInline(QStringLiteral("⚠ ") + line + QStringLiteral("  · /requests\n"), Ink::Note);
+                    printInline(QStringLiteral("⚠ ") + line + QStringLiteral("  · /tasks\n"), Ink::Note);
                     if (!m_agentBusy && !moreTurnsPending()) closeInline();
                 }
             }
@@ -3980,10 +3989,10 @@ private:
             delete item;
         }
         m_queueStrip->setVisible(visible);
-        // The Requests chip sits in the queue strip while it shows, else in the composer row.
-        if (m_requestsChip && m_routeRow && (!visible || m_ledger.total() == 0) && m_routeRow->indexOf(m_requestsChip) < 0) {
+        // The Tasks chip sits in the queue strip while it shows, else in the composer row.
+        if (m_requestsChip && m_routeRow && (!visible || !m_ledger.hasTasks()) && m_routeRow->indexOf(m_requestsChip) < 0) {
             m_routeRow->insertWidget(3, m_requestsChip);
-            m_requestsChip->setVisible(m_ledger.total() > 0);
+            m_requestsChip->setVisible(m_ledger.hasTasks());
         }
         if (!visible) return;
         auto *header = new QHBoxLayout;
@@ -3991,7 +4000,7 @@ private:
         title->setObjectName(QStringLiteral("queueTitle"));
         title->setToolTip(m_pauseReason);
         header->addWidget(title, 1);
-        if (m_requestsChip && m_ledger.total() > 0) { header->addWidget(m_requestsChip); m_requestsChip->show(); }
+        if (m_requestsChip && m_ledger.hasTasks()) { header->addWidget(m_requestsChip); m_requestsChip->show(); }
         auto *hint = new QLabel(QStringLiteral("↑ select · Ctrl+↑↓ move · Enter edit · Del remove"));
         hint->setObjectName(QStringLiteral("queueHint"));
         header->addWidget(hint);
@@ -5337,9 +5346,9 @@ private:
         items << actionItem(agent, QStringLiteral("Fork conversation"), QStringLiteral("Continue this conversation in a new pane"), QStringLiteral("agent.fork"));
         items << actionItem(agent, QStringLiteral("Resume session…"), QStringLiteral("Open a saved agent session in this pane"), QStringLiteral("agent.resume"));
         items << actionItem(agent, QStringLiteral("Recap"), QStringLiteral("Summarize what happened in this session"), QStringLiteral("agent.recap"));
-        items << actionItem(agent, QStringLiteral("Requests and todos…"),
-                            pane && pane->openRequestCount() > 0 ? QStringLiteral("%1 open · mark done, cancel, re-ask · /requests").arg(pane->openRequestCount())
-                                                                 : QStringLiteral("Everything you asked this session · /requests"), QStringLiteral("agent.requests"));
+        items << actionItem(agent, QStringLiteral("Tasks…"),
+                            pane && !pane->tasksProgress().isEmpty() ? pane->tasksProgress() + QStringLiteral(" · mark done, cancel, re-ask · /tasks")
+                                                                     : QStringLiteral("Task list: everything you asked and its progress · /tasks"), QStringLiteral("agent.requests"));
         items << actionItem(agent, QStringLiteral("Continue agent turn"),
                             pane && pane->limitReached() ? QStringLiteral("The last turn stopped at its step limit · /continue")
                                                          : QStringLiteral("Send “Continue” to the agent · /continue"), QStringLiteral("agent.continue"));
@@ -5520,7 +5529,7 @@ private:
             {QStringLiteral("inside programs"), QStringLiteral("vim nano less passthrough program keys")},
             {QStringLiteral("suggest"), QStringLiteral("autocomplete ghost ai suggestions next command prompt")},
             {QStringLiteral("recap"), QStringLiteral("summary away return catch up")},
-            {QStringLiteral("requests"), QStringLiteral("todos todo tasks ledger asks open items checklist unaddressed")},
+            {QStringLiteral("tasks"), QStringLiteral("todos todo requests ledger asks open items checklist unaddressed progress")},
             {QStringLiteral("continue agent"), QStringLiteral("continue keep going limit steps more turn")},
             {QStringLiteral("limit"), QStringLiteral("max steps tool calls budget turn length continue")},
             {QStringLiteral("audit"), QStringLiteral("unaddressed missed requests check todos")},

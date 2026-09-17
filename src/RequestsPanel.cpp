@@ -9,6 +9,7 @@
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <functional>
 
 namespace relay {
 
@@ -16,6 +17,7 @@ namespace {
 constexpr int kIdRole = Qt::UserRole;
 const QColor kDone{126, 200, 140};
 const QColor kWarn{229, 192, 123};
+const QColor kFailed{224, 108, 117};
 const QColor kCancelled{150, 150, 160};
 
 // Model text is untrusted; drop control characters except newline and tab.
@@ -32,7 +34,8 @@ QString clean(const QString &text) {
 QColor statusColor(const QString &status) {
     if (status == QStringLiteral("done") || status == QStringLiteral("completed")) return kDone;
     if (status == QStringLiteral("in_progress")) return theme::Accent;
-    if (status == QStringLiteral("blocked") || status == QStringLiteral("deferred")) return kWarn;
+    if (status == QStringLiteral("blocked")) return kFailed;
+    if (status == QStringLiteral("deferred")) return kWarn;
     if (status.startsWith(QStringLiteral("cancelled"))) return kCancelled;
     return theme::Text;
 }
@@ -99,22 +102,45 @@ RequestsPanel::RequestsPanel(RequestLedgerModel *model, QWidget *parent) : QWidg
     refresh();
 }
 
+namespace {
+// Request rows carry their ledger id; todo, reason and group rows do not.
+QTreeWidgetItem *requestRow(QTreeWidgetItem *item) {
+    while (item && item->data(0, kIdRole).toString().isEmpty() && item->parent()) item = item->parent();
+    return item && !item->data(0, kIdRole).toString().isEmpty() ? item : nullptr;
+}
+void forEachRow(QTreeWidgetItem *item, const std::function<void(QTreeWidgetItem *)> &fn) {
+    fn(item);
+    for (int i = 0; i < item->childCount(); ++i) forEachRow(item->child(i), fn);
+}
+}  // namespace
+
 QString RequestsPanel::selectedId() const {
-    QTreeWidgetItem *item = m_tree->currentItem();
-    while (item && item->parent()) item = item->parent();
+    QTreeWidgetItem *item = requestRow(m_tree->currentItem());
     return item ? item->data(0, kIdRole).toString() : QString();
 }
 
+QTreeWidgetItem *RequestsPanel::rowFor(const QString &ledgerId) const {
+    QTreeWidgetItem *found = nullptr;
+    for (int i = 0; i < m_tree->topLevelItemCount() && !found; ++i)
+        forEachRow(m_tree->topLevelItem(i), [&](QTreeWidgetItem *row) { if (!found && row->data(0, kIdRole).toString() == ledgerId) found = row; });
+    return found;
+}
+
 void RequestsPanel::select(const QString &ledgerId) {
-    for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
-        if (m_tree->topLevelItem(i)->data(0, kIdRole).toString() == ledgerId) { m_tree->setCurrentItem(m_tree->topLevelItem(i)); return; }
+    QTreeWidgetItem *row = rowFor(ledgerId);
+    if (!row) return;
+    if (row->parent() && !row->parent()->isExpanded()) row->parent()->setExpanded(true);
+    m_tree->setCurrentItem(row);
 }
 
 void RequestsPanel::refresh() {
     const QString selected = selectedId();
-    QSet<QString> expanded;
+    // Remember expansion of request rows and the Earlier group across rebuilds.
     for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
-        if (m_tree->topLevelItem(i)->isExpanded()) expanded.insert(m_tree->topLevelItem(i)->data(0, kIdRole).toString());
+        forEachRow(m_tree->topLevelItem(i), [this](QTreeWidgetItem *row) {
+            const QString key = row->data(0, kIdRole).toString().isEmpty() ? row->data(0, Qt::UserRole + 1).toString() : row->data(0, kIdRole).toString();
+            if (!key.isEmpty() && row->childCount() > 0) m_expanded.insert(key, row->isExpanded());
+        });
     m_rebuilding = true;
     m_tree->clear();
     auto child = [](QTreeWidgetItem *parent, const QString &text, const QColor &color) {
@@ -123,10 +149,20 @@ void RequestsPanel::refresh() {
         row->setToolTip(0, clean(text));
         return row;
     };
-    for (const auto &request : m_model->requests()) {
-        QString text = QStringLiteral("%1  %2  %3").arg(RequestLedgerModel::statusGlyph(request.status), request.id, clean(request.preview).simplified());
+    const QList<TaskItem> tasks = m_model->tasks();
+    const QList<LedgerTodo> todos = m_model->allTodos();
+    auto addRequest = [&](QTreeWidgetItem *parent, const LedgerRequest &request, bool current) {
+        QList<LedgerTodo> linked;
+        for (const auto &todo : todos) if (todo.requestIds.contains(request.id)) linked << todo;
+        QString progress;   // before the preview, which is elided
+        if (!linked.isEmpty()) {
+            int completed = 0;
+            for (const auto &task : tasks) if (task.todo && task.requestIds.contains(request.id) && task.outcome == TaskOutcome::Completed) ++completed;
+            progress = QStringLiteral("%1/%2  ").arg(completed).arg(linked.size());
+        }
+        QString text = QStringLiteral("%1  %2  %3%4").arg(RequestLedgerModel::statusGlyph(request.status), request.id, progress, clean(request.preview).simplified());
         if (request.origin == QStringLiteral("relay")) text += QStringLiteral("  · Relay");
-        auto *item = new QTreeWidgetItem(m_tree, {text});
+        auto *item = parent ? new QTreeWidgetItem(parent, {text}) : new QTreeWidgetItem(m_tree, {text});
         item->setData(0, kIdRole, request.id);
         item->setForeground(0, statusColor(request.status));
         item->setToolTip(0, QStringLiteral("%1 · %2 · %3\n\n%4").arg(request.id, RequestLedgerModel::statusLabel(request.status), request.source, clean(request.fullText())));
@@ -134,37 +170,62 @@ void RequestsPanel::refresh() {
             child(item, QStringLiteral("%1: %2").arg(RequestLedgerModel::statusLabel(request.status), request.reason), kWarn);
         for (const QString &quote : request.auditQuotes)
             child(item, QStringLiteral("⚠ may be unaddressed: “%1”").arg(quote), kWarn);
-        for (const auto &todo : m_model->todosFor(request.id)) {
+        for (const auto &todo : linked) {
             QString line = QStringLiteral("%1 %2  %3").arg(RequestLedgerModel::todoGlyph(todo.status), todo.id, todo.text);
             if (!todo.note.isEmpty()) line += QStringLiteral(" — ") + todo.note;
             child(item, line, statusColor(todo.status));
         }
-        if (expanded.contains(request.id)) item->setExpanded(true);
-    }
+        // Current requests open with their tasks showing; earlier ones stay folded.
+        item->setExpanded(m_expanded.value(request.id, current && !linked.isEmpty()));
+    };
+    for (const auto &request : m_model->requests())
+        if (m_model->inCurrentBatch(request.id)) addRequest(nullptr, request, true);
     const auto unlinked = m_model->unlinkedTodos();
     if (!unlinked.isEmpty()) {
-        auto *group = new QTreeWidgetItem(m_tree, {QStringLiteral("Other todos (%1)").arg(unlinked.size())});
+        auto *group = new QTreeWidgetItem(m_tree, {QStringLiteral("Other tasks (%1)").arg(unlinked.size())});
+        group->setData(0, Qt::UserRole + 1, QStringLiteral("#other"));
         group->setForeground(0, theme::TextMuted);
         for (const auto &todo : unlinked) {
             QString line = QStringLiteral("%1 %2  %3").arg(RequestLedgerModel::todoGlyph(todo.status), todo.id, todo.text);
             if (!todo.note.isEmpty()) line += QStringLiteral(" — ") + todo.note;
             child(group, line, statusColor(todo.status));
         }
-        group->setExpanded(true);
+        group->setExpanded(m_expanded.value(QStringLiteral("#other"), true));
     }
+    QTreeWidgetItem *earlier = nullptr;
+    for (const auto &request : m_model->requests()) {
+        if (m_model->inCurrentBatch(request.id)) continue;
+        if (!earlier) {
+            const TaskSummary sum = m_model->earlierSummary();
+            earlier = new QTreeWidgetItem(m_tree, {sum.total > 0 ? QStringLiteral("Earlier · %1").arg(sum.progress(true)) : QStringLiteral("Earlier")});
+            earlier->setData(0, Qt::UserRole + 1, QStringLiteral("#earlier"));
+            earlier->setForeground(0, theme::TextMuted);
+            earlier->setToolTip(0, QStringLiteral("Task lists finished before the current one"));
+        }
+        addRequest(earlier, request, false);
+    }
+    if (earlier) earlier->setExpanded(m_expanded.value(QStringLiteral("#earlier"), false));
     m_rebuilding = false;
     if (!selected.isEmpty()) select(selected);
-    if (!m_tree->currentItem() && m_tree->topLevelItemCount() > 0) m_tree->setCurrentItem(m_tree->topLevelItem(m_tree->topLevelItemCount() - 1));
-    int todosOpen = m_model->openTodos();
-    m_title->setText(QStringLiteral("Requests · %1 open of %2%3").arg(m_model->openCount()).arg(m_model->total())
-                         .arg(todosOpen > 0 ? QStringLiteral(" · %1 todo%2 open").arg(todosOpen).arg(todosOpen == 1 ? QString() : QStringLiteral("s")) : QString()));
+    if (!m_tree->currentItem() && m_tree->topLevelItemCount() > 0) {
+        QTreeWidgetItem *last = nullptr;
+        for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
+            if (!m_tree->topLevelItem(i)->data(0, kIdRole).toString().isEmpty()) last = m_tree->topLevelItem(i);
+        m_tree->setCurrentItem(last ? last : m_tree->topLevelItem(0));
+    }
+    const TaskSummary sum = m_model->summary();
+    m_title->setText(sum.total > 0 ? QStringLiteral("Tasks · %1").arg(sum.progress(true)) : QStringLiteral("Tasks"));
+    m_title->setToolTip(m_model->chipToolTip());
     updateDetail();
     updateButtons();
 }
 
 void RequestsPanel::enter() {
     QString target;
-    for (const auto &request : m_model->requests()) if (request.open() && request.requiresCompletion) { target = request.id; break; }
+    for (const auto &request : m_model->requests())
+        if (request.open() && request.requiresCompletion && m_model->inCurrentBatch(request.id)) { target = request.id; break; }
+    if (target.isEmpty())
+        for (const auto &request : m_model->requests()) if (m_model->inCurrentBatch(request.id)) target = request.id;
     if (target.isEmpty() && !m_model->requests().isEmpty()) target = m_model->requests().last().id;
     if (!target.isEmpty()) select(target);
     m_tree->setFocus(Qt::OtherFocusReason);
@@ -172,7 +233,7 @@ void RequestsPanel::enter() {
 
 void RequestsPanel::updateDetail() {
     const LedgerRequest *request = m_model->find(selectedId());
-    if (!request) { m_detail->setText(m_model->requests().isEmpty() ? QStringLiteral("No requests in this session yet.") : QString()); return; }
+    if (!request) { m_detail->setText(m_model->requests().isEmpty() ? QStringLiteral("No tasks in this session yet.") : QString()); return; }
     QStringList lines;
     lines << QStringLiteral("%1 · %2 · %3%4").arg(request->id, RequestLedgerModel::statusLabel(request->status), request->source,
                                                    request->turn > 0 ? QStringLiteral(" · turn %1").arg(request->turn) : QString());
@@ -214,8 +275,8 @@ bool RequestsPanel::eventFilter(QObject *watched, QEvent *event) {
     switch (key->key()) {
     case Qt::Key_Escape: if (onClose) onClose(); return true;
     case Qt::Key_Return: case Qt::Key_Enter: case Qt::Key_Space: {
-        QTreeWidgetItem *item = m_tree->currentItem();
-        if (item && item->parent()) item = item->parent();
+        QTreeWidgetItem *item = requestRow(m_tree->currentItem());
+        if (!item) { item = m_tree->currentItem(); while (item && item->parent() && item->childCount() == 0) item = item->parent(); }
         if (item) { item->setExpanded(!item->isExpanded()); m_tree->setCurrentItem(item); }
         return true;
     }

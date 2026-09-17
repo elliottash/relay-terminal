@@ -174,6 +174,12 @@ Sources:
 
 Everything else, including the F12 bindings, still acts inside programs.
 
+**Tasks panel (`agent.requests`, added 2026-09-17):** Ctrl+Shift+K in the Relay preset only. Relay's
+window filter takes it before KonsolePart, whose own Ctrl+Shift+K is "Clear Scrollback and Reset"
+(still in the terminal context menu). Unbound in Warp (Ctrl+Shift+K clears blocks), VS Code
+(`editor.action.deleteLines`) and Konsole (Clear Scrollback and Reset), so users of those presets keep
+their habit; `/tasks` and the chip still work.
+
 **Desktop-environment grabs:**
 - **Alt+Tab / Alt+Shift+Tab** (Relay default window.next/previous): taken by GNOME, KDE Plasma, Cinnamon and XFCE, so no preset uses them.
 - **Ctrl+Alt+T** (Warp closed.restore): launches a terminal on Ubuntu/GNOME and KDE Plasma, so it will usually never reach Relay. Warp on Linux has the same problem. Rebind if needed.
