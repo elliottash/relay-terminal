@@ -80,6 +80,19 @@ private Q_SLOTS:
         QTest::keyClick(&editor, Qt::Key_Down);
         QCOMPARE(editor.toPlainText(), QStringLiteral("unfinished draft"));
     }
+    void ghostTextAcceptsWholeOrWord() {
+        RichEditor editor;
+        editor.setPlainText(QStringLiteral("git"));
+        editor.moveCursor(QTextCursor::End);
+        editor.setGhost(QStringLiteral(" commit -m wip"));
+        QVERIFY(editor.acceptGhost(false));
+        QCOMPARE(editor.toPlainText(), QStringLiteral("git commit"));
+        QCOMPARE(editor.ghost(), QStringLiteral(" -m wip"));
+        QVERIFY(editor.acceptGhost(true));
+        QCOMPARE(editor.toPlainText(), QStringLiteral("git commit -m wip"));
+        QVERIFY(editor.ghost().isEmpty());
+        QVERIFY(!editor.acceptGhost(true));
+    }
     void upInsideMultilineTextMovesCursor() {
         RichEditor editor; editor.remember(QStringLiteral("git status"));
         editor.setPlainText(QStringLiteral("line one\nline two"));

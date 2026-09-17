@@ -5,6 +5,8 @@
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QMimeData>
+#include <QPainter>
+#include <QPaintEvent>
 #include <QPalette>
 #include <QRegularExpression>
 #include <QSyntaxHighlighter>
@@ -63,6 +65,43 @@ void RichEditor::remember(const QString &text) {
     }
     m_historyIndex = m_history.size();
     m_draft.clear();
+}
+
+void RichEditor::setGhost(const QString &remainder) {
+    if (remainder == m_ghost) return;
+    m_ghost = remainder;
+    viewport()->update();
+}
+
+bool RichEditor::acceptGhost(bool wholeSuggestion) {
+    if (m_ghost.isEmpty()) return false;
+    QString take = m_ghost;
+    if (!wholeSuggestion) {
+        // One word: leading spaces plus the following run of non-space characters.
+        int i = 0;
+        while (i < take.size() && take.at(i).isSpace()) ++i;
+        while (i < take.size() && !take.at(i).isSpace()) ++i;
+        take = take.left(std::max(1, i));
+    }
+    const QString rest = m_ghost.mid(take.size());
+    moveCursor(QTextCursor::End);
+    insertPlainText(take);
+    setGhost(rest);
+    return true;
+}
+
+void RichEditor::paintEvent(QPaintEvent *event) {
+    QPlainTextEdit::paintEvent(event);
+    if (m_ghost.isEmpty() || textCursor().hasSelection() || !textCursor().atEnd() || m_preedit) return;
+    QPainter painter(viewport());
+    QColor color = palette().color(QPalette::Text);
+    color.setAlphaF(0.38);
+    painter.setPen(color);
+    painter.setFont(font());
+    const QRect cursor = cursorRect();
+    const QRect area(cursor.right() + 1, cursor.top(), viewport()->width() - cursor.right() - 4, cursor.height());
+    painter.drawText(area, Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
+                     fontMetrics().elidedText(m_ghost, Qt::ElideRight, std::max(0, area.width())));
 }
 
 void RichEditor::keyPressEvent(QKeyEvent *event) {

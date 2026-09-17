@@ -56,9 +56,11 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 | Key | Action |
 |---|---|
 | Enter | Submit: commands to the terminal, everything else to the agent |
-| Ctrl+Enter | Always the agent |
+| Ctrl+Enter | Always the agent; while the agent is busy, interrupt it and send now (Ctrl+Alt+Enter also works) |
 | Ctrl+Shift+Enter | Always the terminal; the agent fixes an invalid or failing command |
-| Ctrl+Alt+Enter | Interrupt the running agent turn with this prompt |
+| Esc (prompt box) | Stop the agent while it is busy |
+| @ | Pick a file: `@name` alone opens it in a preview pane; inside an agent prompt it attaches the file |
+| → or Ctrl+F / Alt+→ | Accept the dim history suggestion / one word of it |
 | Shift+Enter | New line |
 | Ctrl+I | Toggle terminal / agent input (from the prompt box) |
 | Ctrl+H / Ctrl+Shift+H | Take control of the terminal / back to the prompt |
@@ -70,9 +72,11 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 | F12 | Toggle native terminal input |
 | Ctrl+Shift+R | Restart a pane's shell or agent after it was stopped |
 | Ctrl+Tab, Ctrl+Shift+Tab | Next, previous tab |
+| Up (empty prompt box, items queued) | Select queued items; Ctrl+Up/Down move, Enter edits, Delete removes, Esc leaves |
 | Up / Down (first / last line) | Prompt history |
 | PageUp / PageDown (prompt box) | Scroll the terminal |
 | Ctrl+C in the terminal | Copy the selection, or interrupt when nothing is selected |
+| Ctrl+C in the prompt box (nothing selected, program running) | Interrupt the program |
 
 Shortcut presets: **Relay** (Chrome-style, default), **Warp**, **VS Code**, **Konsole**
 (Actions › Shortcut preset). Every shortcut can be changed in
@@ -90,11 +94,25 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
 - **Inline agent output.** Prompts, answers, tool calls, command output and diffs print in the
   terminal in distinct colors. They are written to the display, never typed into the shell.
   While a program such as vim runs, output shows in a small panel and prints when it exits.
-- **Agent queue.** Prompts sent while the agent works are queued and shown in a strip; remove,
-  clear, interrupt, or resume after a stop.
-- **Human and agent control.** A running program gets your keys; the prompt returns when it
-  exits. Password prompts are detected from the terminal mode and always hand control to you.
-  Per-program policy in the palette.
+- **One queue for commands and prompts.** Terminal commands entered while the shell is busy and
+  agent prompts entered while the agent is busy wait in one queue per pane and run in the order
+  entered: an agent prompt queued after a command waits for that command, and vice versa. The
+  strip over the terminal shows commands in amber (`$`) and agent prompts in cyan (`✦`). Drag
+  rows or use Ctrl+Up/Down to reorder, × or Delete to remove, Enter to edit (editing the next
+  item holds the queue until you resubmit). A failing command or a stopped agent pauses the
+  queue until **Resume**.
+- **The prompt box stays up.** While ordinary programs run (`sudo apt upgrade`, `make`,
+  `sleep`), the prompt box stays visible so you can queue more. It hides for full-screen programs
+  (Konsole reports the alternate screen: vim, less, htop, tmux), for password prompts (echo off
+  with line input on), and for `ssh`/`mosh`/`telnet` sessions. When a program is blocked reading
+  the terminal (for example `read -p "continue? [Y/n]"` or a Python REPL), Relay shows "Waiting
+  for input" and moves the focus to the terminal; focus returns to the prompt box when it stops
+  waiting. Ctrl+H / Ctrl+Shift+H still hand control back and forth, and the per-program policy in
+  the palette decides who is in control of full-screen programs.
+- **@ files.** Typing `@` lists files in the repository (git-tracked and untracked, respecting
+  `.gitignore`) or a bounded walk of the directory, previewable files first, filtered as you type.
+- **History suggestions.** A dim completion from commands you ran in this directory, the prompt
+  history and your shell history file; Actions › Command suggestions from history turns it off.
 - **Windows, tabs and panes.** Each pane has its own shell, prompt, agent and conversation.
   Closed panes, tabs and windows restore in the same directories with new shells.
 - **File panes.** Folder explorer and file preview (code, Markdown, images, optional PDF).

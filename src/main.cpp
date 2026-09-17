@@ -63,6 +63,7 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QElapsedTimer>
+#include <QDateTime>
 #include <QListWidget>
 #include <QTreeWidget>
 #include <QHeaderView>
@@ -72,6 +73,12 @@
 #include <QToolBar>
 #include <QUuid>
 #include <QVBoxLayout>
+#include <QStyledItemDelegate>
+#include <QPainter>
+#include <QDirIterator>
+#include <QMimeDatabase>
+#include <QTextBlock>
+#include <sys/syscall.h>
 #include <algorithm>
 #include <functional>
 #include <cmath>
@@ -280,7 +287,8 @@ private:
         add("agent.clearQueue", "agent", "Clear queued agent prompts", {});
         add("agent.resumeQueue", "agent", "Resume the paused agent queue", {});
         add("agent.stop", "agent", "Stop the agent turn", {});
-        add("agent.interrupt", "agent", "Interrupt the agent turn with the prompt in the prompt box", {QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
+        add("agent.interrupt", "agent", "Send to the agent; while it is busy, interrupt it and send now (prompt box)",
+            {QStringLiteral("Ctrl+Return"), QStringLiteral("Ctrl+Enter"), QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
         add("agent.provider", "agent", "Provider and API keys", {});
         add("input.modeAuto", "agent", "Input mode: auto detect", {});
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
@@ -426,10 +434,64 @@ inline long oomKills(int pid) {
 
 }  // namespace isolation
 
+// Konsole's Session emits primaryScreenInUse(bool) when a program switches to or from the
+// alternate screen (vim, less, htop, tmux). KonsolePart has no other way to report it, and
+// connecting to a string-based signal needs a real slot, hence this small QObject.
+class ScreenWatcher final : public QObject {
+    Q_OBJECT
+public:
+    std::function<void(bool)> onPrimary;
+public Q_SLOTS:
+    void primaryScreenInUse(bool use) { if (onPrimary) onPrimary(use); }
+};
+
+// Case-insensitive subsequence score; 0 means no match. Contiguous and earlier matches score higher.
+static int relayFuzzyScore(const QString &needle, const QString &haystack) {
+    if (needle.isEmpty()) return 1;
+    const QString n = needle.toLower(), h = haystack.toLower();
+    const int direct = h.indexOf(n);
+    if (direct >= 0) return 10000 - direct;
+    int pos = 0, first = -1, last = -1;
+    for (const QChar c : n) {
+        pos = h.indexOf(c, pos);
+        if (pos < 0) return 0;
+        if (first < 0) first = pos;
+        last = pos++;
+    }
+    return std::max(1, 5000 - (last - first) * 10 - first);
+}
+
+// One row of the combined queue: a colored kind icon ($ terminal, ✦ agent), the text, and a
+// remove × at the right edge.
+class QueueRowDelegate final : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
+        painter->save();
+        const QRect r = option.rect;
+        if (option.state & QStyle::State_Selected) painter->fillRect(r, relay::theme::SurfaceRaised.lighter(135));
+        const bool agent = index.data(Qt::UserRole + 1).toBool();
+        painter->setFont(option.font);
+        painter->setPen(agent ? relay::theme::Accent : QColor(0xe5, 0xc0, 0x7b));
+        painter->drawText(QRect(r.left() + 4, r.top(), 18, r.height()), Qt::AlignCenter, agent ? QStringLiteral("✦") : QStringLiteral("$"));
+        painter->setPen(relay::theme::Text);
+        const QString text = option.fontMetrics.elidedText(index.data(Qt::DisplayRole).toString().simplified(), Qt::ElideRight, std::max(20, r.width() - 54));
+        painter->drawText(QRect(r.left() + 26, r.top(), r.width() - 54, r.height()), Qt::AlignVCenter | Qt::AlignLeft, text);
+        painter->setPen(relay::theme::TextMuted);
+        painter->drawText(QRect(r.right() - 22, r.top(), 18, r.height()), Qt::AlignCenter, QStringLiteral("×"));
+        painter->restore();
+    }
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
+        return {QStyledItemDelegate::sizeHint(option, index).width(), option.fontMetrics.height() + 8};
+    }
+};
+
 // One terminal pane: a KonsolePart shell, its Bash bridge, a composer, and its own agent worker
 // and conversation. Windows arrange panes in tabs and splits; the toolbar acts on the active pane.
 class Pane final : public QWidget {
 public:
+    struct QueueEntry { quint64 id = 0; bool agent = false, fix = false, watch = false; QString text, why; QJsonArray attachments; };
+    enum class HideReason { None, AltScreen, Password, Remote, Manual };
     Pane(const QString &workspace, const QString &cwd, bool cleanShell)
         : m_workspace(workspace), m_cwd(cwd.isEmpty() ? workspace : cwd), m_cleanShell(cleanShell) {
         m_data = dataRoot();
@@ -448,7 +510,12 @@ public:
         m_debounce.setSingleShot(true);
         m_debounce.setInterval(150);
         connect(&m_debounce, &QTimer::timeout, this, [this] { requestRoute(false, QStringLiteral("auto")); });
-        connect(m_editor, &QPlainTextEdit::textChanged, this, [this] { m_debounce.start(); });
+        connect(m_editor, &QPlainTextEdit::textChanged, this, [this] { m_debounce.start(); onComposerEdited(); });
+        connect(m_editor, &QPlainTextEdit::cursorPositionChanged, this, [this] { updateGhost(); });
+        // While a command runs: password prompts, answered passwords, and programs waiting for input.
+        m_programPoll.setInterval(250);
+        connect(&m_programPoll, &QTimer::timeout, this, [this] { pollProgram(); });
+        m_screenWatcher.onPrimary = [this](bool primary) { onPrimaryScreen(primary); };
         m_editor->onSubmit = [this](const QString &destination) { requestRoute(true, destination); };
         m_editor->onNative = [this] { setNative(true); };
         qApp->installEventFilter(this);
@@ -507,14 +574,27 @@ public:
         send({{"type", "reset"}}); clearFix();
         printInline(QStringLiteral("New agent conversation\n"), Ink::Note); closeInline();
     }
-    int queuedPrompts() const { return m_queueItems.size(); }
-    bool queuePaused() const { return m_queuePaused; }
-    void clearAgentQueue() { send({{"type", "queue_clear"}}); }
-    void resumeAgentQueue() { send({{"type", "resume_queue"}}); }
-    // Ctrl+Alt+Enter: run the prompt-box text now, stopping the current turn first.
+    int queuedPrompts() const { return m_entries.size(); }
+    bool queuePaused() const { return m_entriesPaused; }
+    void clearAgentQueue() {
+        m_entries.clear(); m_entriesPaused = false; m_resubmitAtFront = false; m_selected = -1;
+        rebuildQueueStrip(); changed();
+    }
+    void resumeAgentQueue() {
+        m_entriesPaused = false; m_resubmitAtFront = false; m_pauseReason.clear();
+        send({{"type", "resume_queue"}});
+        rebuildQueueStrip(); changed();
+        pumpQueue();
+    }
+    // Ctrl+Enter: send to the agent. While the agent is busy, stop the current turn and send now.
     void interruptAgentWithPrompt() {
         const QString text = m_editor->toPlainText().trimmed();
-        if (text.isEmpty()) { status(QStringLiteral("Type a prompt first; Ctrl+Alt+Enter interrupts the agent with it.")); return; }
+        if (!m_agentBusy) {
+            if (text.isEmpty()) { status(QStringLiteral("Type a prompt first.")); return; }
+            requestRoute(true, QStringLiteral("agent"));
+            return;
+        }
+        if (text.isEmpty()) { status(QStringLiteral("Type a prompt first; Ctrl+Enter interrupts the agent with it.")); return; }
         submitAgent(text, true, QString(), QStringLiteral("interrupt"));
     }
     void stopAgent() {
@@ -583,6 +663,7 @@ public:
         // During a running program the prompt returns when it exits; at an idle shell you stay in control.
         m_autoHuman = processBusy() || !m_promptReported;
         if (!m_native) setNative(true);
+        m_hideReason = HideReason::Manual;
         toast(QStringLiteral("You're in control · %1 for the prompt").arg(Keymap::instance().shortcutText(QStringLiteral("control.prompt"))));
     }
 
@@ -622,8 +703,18 @@ protected:
             && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && ownsTerminalWidget(qobject_cast<QWidget *>(object))) {
             QTimer::singleShot(0, this, [this] { copySelection(); });
         }
+        if (m_queueList && object == m_queueList->viewport() && event->type() == QEvent::MouseButtonRelease) {
+            // The × at the right edge of a queue row removes it.
+            const QPoint pos = static_cast<QMouseEvent *>(event)->pos();
+            const QModelIndex index = m_queueList->indexAt(pos);
+            if (index.isValid() && pos.x() >= m_queueList->viewport()->width() - 26) {
+                removeEntry(index.data(Qt::UserRole).toULongLong());
+                return true;
+            }
+        }
         if (event->type() == QEvent::KeyPress && object == m_editor) {
             auto *key = static_cast<QKeyEvent *>(event);
+            if (handleComposerKey(key)) return true;
             const auto mods = key->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
             // The composer is a few lines tall; PageUp/PageDown scroll the pane's terminal instead.
             if (mods == Qt::NoModifier && (key->key() == Qt::Key_PageUp || key->key() == Qt::Key_PageDown)) {
@@ -715,7 +806,7 @@ private:
         connect(submit, &QPushButton::clicked, this, [this] { requestRoute(true, QStringLiteral("auto")); });
         routeRow->addWidget(submit); composerLayout->addLayout(routeRow);
         m_editor = new RichEditor; composerLayout->addWidget(m_editor);
-        auto *help = new QLabel(QStringLiteral("Shift+Enter  newline     Ctrl+Enter  agent     Ctrl+Alt+Enter  interrupt agent     Ctrl+Shift+Enter  terminal     ↑/↓  history"));
+        auto *help = new QLabel(QStringLiteral("Shift+Enter  newline     Ctrl+Enter  agent (interrupts when busy)     Ctrl+Shift+Enter  terminal     Esc  stop agent     @  files     ↑  queue / history"));
         help->setWordWrap(true); composerLayout->addWidget(help);
         m_help = help;
         buildTranscript();
@@ -869,13 +960,33 @@ private:
             if (submit) status(QStringLiteral("Native input is active. Press F12 to return to the composer."));
             return;
         }
+        if (submit) {
+            // `@path` on its own opens the file (or folder) in a Relay pane.
+            static const QRegularExpression only(QStringLiteral("^@(?:\"([^\"]+)\"|(\\S+))$"));
+            const auto match = only.match(m_editor->toPlainText().trimmed());
+            if (match.hasMatch()) {
+                const QString absolute = resolveComposerPath(match.captured(1).isEmpty() ? match.captured(2) : match.captured(1));
+                if (!absolute.isEmpty() && onOpenPath) {
+                    m_editor->remember(m_editor->toPlainText().trimmed());
+                    m_editor->clear();
+                    hideAtPopup();
+                    m_recentFiles.removeAll(absolute); m_recentFiles.prepend(absolute);
+                    while (m_recentFiles.size() > 20) m_recentFiles.removeLast();
+                    onOpenPath(absolute);
+                    return;
+                }
+            }
+            if (m_atList && m_atList->isVisible()) hideAtPopup();
+        }
         if (!m_workerReady) {
             if (submit) status(QStringLiteral("Local router is not ready; use the native terminal or restart Relay."));
             return;
         }
         if (submit && (!m_pendingSubmit.isEmpty() || m_loading)) return;
         const QString id = QString::number(++m_requestId);
-        const QString mode = overrideMode == QStringLiteral("auto") ? m_modeValue : overrideMode;
+        QString mode = overrideMode == QStringLiteral("auto") ? m_modeValue : overrideMode;
+        if (submit && overrideMode == QStringLiteral("auto") && !m_editKind.isEmpty()) mode = m_editKind;
+        if (submit) m_editKind.clear();
         if (submit) {
             m_submitMode = mode;
             m_pendingSubmit = id; m_submittedDraft = m_editor->toPlainText();
@@ -973,6 +1084,7 @@ private:
             // Busy follows agent_started/agent_finished: the next queued turn may start right after done.
             m_agentBusy = true; m_turnHeader = false; m_turnText.clear();
             m_currentItem = event.value(QStringLiteral("id")).toString();
+            QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
             const PendingPrompt prompt = m_itemPrompts.value(m_currentItem);
             m_fixAwaitingAgent = prompt.fix;
             if (!prompt.program.isEmpty()) m_transcriptProgram = prompt.program;
@@ -982,6 +1094,15 @@ private:
                 if (!prompt.why.isEmpty()) printInline(prompt.why + '\n', Ink::Note);
             }
         } else if (type == QStringLiteral("agent_finished")) {
+            const QString outcome = event.value(QStringLiteral("outcome")).toString();
+            const bool stopped = outcome == QStringLiteral("cancelled") || outcome == QStringLiteral("error");
+            if (m_interruptPending && outcome == QStringLiteral("cancelled")) {
+                m_interruptPending = false;   // replaced by the interrupting prompt; keep the queue going
+            } else if (stopped) {
+                pauseQueue(outcome == QStringLiteral("error") ? QStringLiteral("the agent turn failed") : QStringLiteral("the agent was stopped"));
+            }
+            if (m_activeValid && m_active.agent) m_activeValid = false;
+            QTimer::singleShot(0, this, [this] { pumpQueue(); rebuildQueueStrip(); });
             m_itemPrompts.remove(event.value(QStringLiteral("id")).toString());
             if (m_currentItem == event.value(QStringLiteral("id")).toString()) m_currentItem.clear();
             m_agentBusy = !m_runningItem.isEmpty() && m_runningItem != event.value(QStringLiteral("id")).toString();
@@ -1054,6 +1175,11 @@ private:
             const bool wasBusy = m_agentBusy;
             // A rejected ask (queue full, invalid prompt) never started; forget it.
             m_pendingPrompts.remove(event.value(QStringLiteral("id")).toString());
+            if (m_activeValid && m_active.agent && event.value(QStringLiteral("id")).toString() == m_activeRequest) {
+                m_activeValid = false;
+                m_entries.prepend(m_active);
+                pauseQueue(QStringLiteral("the worker refused the prompt: ") + text);
+            }
             // Route errors do not cancel a concurrent agent turn.
             m_agentBusy = event.value(QStringLiteral("agent_busy")).toBool(false);
             m_configuring = false;
@@ -1070,11 +1196,6 @@ private:
         const QString route = decision.value(QStringLiteral("route")).toString();
         const QString text = decision.value(QStringLiteral("text")).toString();
         if (route == QStringLiteral("empty")) return;
-        if (route == QStringLiteral("shell") && processBusy() && mode != QStringLiteral("shell")) {
-            // A program owns the terminal; the prompt talks to the agent.
-            submitAgent(text, true, QStringLiteral("A program is running in this pane, so this went to the agent."));
-            return;
-        }
         if (route == QStringLiteral("shell")) {
             const bool valid = decision.value(QStringLiteral("valid")).toBool(decision.value(QStringLiteral("syntax_ok")).toBool(true));
             const QString problem = decision.value(QStringLiteral("invalid_reason")).toString(
@@ -1084,11 +1205,11 @@ private:
                 // goes to the agent to be fixed; a failing run is fixed and re-run.
                 m_editor->remember(text); m_editor->clear();
                 if (!valid) { startFix(text, problem.isEmpty() ? QStringLiteral("not a valid command") : problem, 1); return; }
-                runInTerminal(text, true, 0);
+                submitTerminal(text, true);
                 return;
             }
             if (!valid) { submitAgent(text, true, problem); return; }
-            runInTerminal(text, false, 0);
+            submitTerminal(text, false);
         } else {
             // "agent", or a legacy "ambiguous" decision: the agent is the default for invalid input.
             // Show why non-command input went to the agent, e.g. "command not found: foo".
@@ -1123,6 +1244,7 @@ private:
         QTimer::singleShot(2500, this, [this, serial] {
             if (m_loading && m_loadSerial == serial) {
                 m_loading = false; clearFix(); setNative(true);
+                if (m_activeValid && !m_active.agent) { m_activeValid = false; m_activeLoaded = false; m_entriesPaused = !m_entries.isEmpty(); rebuildQueueStrip(); }
                 status(QStringLiteral("Shell did not acknowledge the editor text. Enter was NOT sent. Inspect the native input line; try --clean-shell."));
             }
         });
@@ -1236,7 +1358,8 @@ private:
         ::close(fd);
         if (!secret) return;
         m_secretNotified = true;
-        if (!m_native) { m_autoHuman = true; setNative(true); }
+        endWaiting(false);
+        if (!m_native) { m_autoHuman = true; setNative(true); m_hideReason = HideReason::Password; m_echoTicks = 0; }
         focusTerminal();
         toast(QStringLiteral("Password prompt · you're in control"));
         notifyIfAway(QStringLiteral("Password prompt"), QStringLiteral("A command in %1 is waiting for a password.").arg(m_cwd));
@@ -1349,8 +1472,10 @@ private:
             "```relay-run\nls -la\n```\n"
             "Relay runs that block in the user's terminal. If it cannot be fixed, end with an empty relay-run block and a one-line reason before it.")
             .arg(attempt).arg(kMaxFixAttempts).arg(shellQuote(m_cwd), command, problem);
-        PendingPrompt pending; pending.fix = true;
-        sendPrompt(QJsonObject{{"type", "ask"}, {"text", prompt}, {"when", m_queuePaused ? QStringLiteral("now") : QStringLiteral("queue")}}, pending);
+        // Fix turns continue the command the user just ran, so they go ahead of queued items.
+        QueueEntry entry; entry.agent = true; entry.fix = true; entry.text = prompt;
+        if (m_entries.isEmpty() && !m_activeValid && !m_agentBusy) startAgentEntry(entry, false);
+        else { entry.id = ++m_entrySerial; m_entries.prepend(entry); rebuildQueueStrip(); pumpQueue(); }
     }
 
     void finishFixTurn(bool completed) {
@@ -1593,101 +1718,609 @@ private:
         updatePaths();
     }
 
-    // Agent prompts always go through the worker's queue: they start at once when the agent is
-    // idle and wait their turn when it is busy. The prompt is echoed when its turn starts.
+    // Agent prompts and terminal commands share one queue per pane, in the order entered. An item
+    // starts at once when nothing is queued ahead of it and its resource (agent or shell) is free;
+    // otherwise it waits. The worker only ever receives one agent turn at a time from here.
     void submitAgent(const QString &text, bool fromEditor, const QString &why = QString(), QString when = QString()) {
         if (!m_configured) {
             if (fromEditor) { configure(); return; }
             status(QStringLiteral("No agent provider is configured."));
             return;
         }
-        if (when.isEmpty()) when = m_queuePaused ? QStringLiteral("now") : QStringLiteral("queue");
-        if (when == QStringLiteral("interrupt") && !m_agentBusy) when = m_queuePaused ? QStringLiteral("now") : QStringLiteral("queue");
         if (fromEditor) { m_editor->remember(text); m_editor->clear(); }
+        QueueEntry entry;
+        entry.agent = true; entry.text = text; entry.why = why; entry.attachments = attachmentsFor(text);
+        if (when == QStringLiteral("interrupt") && m_agentBusy) {
+            // Bypasses the queue: stop the running turn and run this now. Queued items keep their order.
+            m_interruptPending = true;
+            startAgentEntry(entry, false, QStringLiteral("interrupt"));
+            ensureLineStart();
+            printInline(QStringLiteral("Interrupting the current turn; completed actions are not rolled back.\n"), Ink::Note);
+            return;
+        }
+        if (!m_resubmitAtFront && m_entries.isEmpty() && !m_activeValid && !m_agentBusy) {
+            startAgentEntry(entry, false);
+            return;
+        }
+        enqueue(entry);
+    }
+
+    void submitTerminal(const QString &text, bool watch) {
+        if (!m_resubmitAtFront && m_entries.isEmpty() && !m_activeValid && shellIdleForQueue()) {
+            runInTerminal(text, watch, 0);
+            return;
+        }
+        m_editor->remember(text);
+        if (m_editor->toPlainText() == m_submittedDraft) m_editor->clear();
+        QueueEntry entry; entry.agent = false; entry.text = text; entry.watch = watch;
+        enqueue(entry);
+    }
+
+    bool shellIdleForQueue() const { return m_iface && m_shellReady && !m_loading && !m_native && !processBusy(); }
+
+    void enqueue(QueueEntry entry) {
+        entry.id = ++m_entrySerial;
+        if (m_resubmitAtFront) {
+            // An item pulled from the head for editing goes back to the head and resumes the queue.
+            m_entries.prepend(entry);
+            m_resubmitAtFront = false;
+            m_entriesPaused = false; m_pauseReason.clear();
+        } else {
+            m_entries.append(entry);
+        }
+        m_selected = -1;
+        status(entry.agent ? QStringLiteral("Queued · the agent prompt runs after the items ahead of it")
+                           : QStringLiteral("Queued · the command runs when the terminal is free"));
+        rebuildQueueStrip(); changed();
+        pumpQueue();
+    }
+
+    void startAgentEntry(const QueueEntry &entry, bool fromQueue, const QString &when = QStringLiteral("now")) {
         PendingPrompt prompt;
-        prompt.text = text; prompt.why = why;
-        QJsonObject request{{"type", "ask"}, {"text", text}, {"when", when}};
+        prompt.text = entry.text; prompt.why = entry.why; prompt.fix = entry.fix;
+        QJsonObject request{{"type", "ask"}, {"text", entry.text}, {"when", when}};
+        if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
         const QString program = processBusy() ? foregroundCommandLine() : QString();
         if (!program.isEmpty()) {
             // Tell the agent what owns the terminal and that it cannot see or type into it yet.
             request.insert(QStringLiteral("context"), QJsonObject{{"foreground_program", program}, {"terminal_cwd", m_cwd}});
             prompt.program = QFileInfo(program.section(' ', 0, 0)).fileName();
         }
-        sendPrompt(request, prompt);
-        if (when == QStringLiteral("interrupt")) {
-            ensureLineStart();
-            printInline(QStringLiteral("Interrupting the current turn; completed actions are not rolled back.\n"), Ink::Note);
-        } else if (m_agentBusy || !m_queueItems.isEmpty()) {
-            status(QStringLiteral("Queued · runs after the current agent turn"));
+        const QString requestId = sendPrompt(request, prompt);
+        if (fromQueue) { m_active = entry; m_activeValid = true; m_activeRequest = requestId; }
+    }
+
+    // Start the head of the queue when its resource is free and nothing from the queue is running.
+    void pumpQueue() {
+        if (m_entriesPaused || m_activeValid || m_entries.isEmpty()) return;
+        const QueueEntry head = m_entries.first();
+        if (head.agent) {
+            if (m_agentBusy || !m_configured) return;
+            m_entries.removeFirst();
+            startAgentEntry(head, true);
+        } else {
+            if (!shellIdleForQueue()) return;
+            m_entries.removeFirst();
+            m_active = head; m_activeValid = true; m_activeLoaded = false;
+            if (!runInTerminal(head.text, head.watch, 0)) { m_entries.prepend(head); m_activeValid = false; return; }
         }
+        if (m_selected >= m_entries.size()) m_selected = m_entries.size() - 1;
+        rebuildQueueStrip(); changed();
+    }
+
+    void pauseQueue(const QString &reason) {
+        if (m_entries.isEmpty()) return;
+        m_entriesPaused = true; m_pauseReason = reason;
+        rebuildQueueStrip(); changed();
+    }
+
+    void removeEntry(quint64 id) {
+        for (int i = 0; i < m_entries.size(); ++i)
+            if (m_entries[i].id == id) { m_entries.removeAt(i); break; }
+        if (m_selected >= m_entries.size()) m_selected = m_entries.size() - 1;
+        if (m_entries.isEmpty()) { m_entriesPaused = false; m_resubmitAtFront = false; m_pauseReason.clear(); }
+        rebuildQueueStrip(); changed();
+    }
+
+    void syncEntriesFromList() {
+        if (!m_queueList) return;
+        QList<QueueEntry> ordered;
+        for (int row = 0; row < m_queueList->count(); ++row) {
+            const quint64 id = m_queueList->item(row)->data(Qt::UserRole).toULongLong();
+            for (const auto &entry : std::as_const(m_entries)) if (entry.id == id) { ordered.append(entry); break; }
+        }
+        if (ordered.size() == m_entries.size()) m_entries = ordered;
+        QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); pumpQueue(); });
+    }
+
+    // Keys in the composer that belong to the @ picker, the queue selection, the running agent or
+    // program, and history suggestions. Returns true when the key was handled.
+    bool handleComposerKey(QKeyEvent *key) {
+        const auto mods = key->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
+        const int k = key->key();
+        const bool enter = k == Qt::Key_Return || k == Qt::Key_Enter;
+        if (m_atList && m_atList->isVisible()) {
+            if (mods == Qt::NoModifier && (k == Qt::Key_Up || k == Qt::Key_Down)) {
+                const int row = std::clamp(m_atList->currentRow() + (k == Qt::Key_Down ? 1 : -1), 0, m_atList->count() - 1);
+                m_atList->setCurrentRow(row);
+                return true;
+            }
+            if (mods == Qt::NoModifier && (enter || k == Qt::Key_Tab)) { acceptAtSelection(); return true; }
+            if (k == Qt::Key_Escape) { m_atDismissedAt = m_editor->textCursor().position(); hideAtPopup(); return true; }
+        }
+        if (m_selected >= 0 && m_selected < m_entries.size()) {
+            if (mods == Qt::NoModifier && k == Qt::Key_Up) {
+                if (m_selected > 0) { --m_selected; rebuildQueueStrip(); return true; }
+                m_selected = -1; rebuildQueueStrip();
+                return false;   // past the top: prompt history
+            }
+            if (mods == Qt::NoModifier && k == Qt::Key_Down) {
+                m_selected = m_selected + 1 < m_entries.size() ? m_selected + 1 : -1;
+                rebuildQueueStrip(); return true;
+            }
+            if (mods == Qt::ControlModifier && (k == Qt::Key_Up || k == Qt::Key_Down)) {
+                const int to = m_selected + (k == Qt::Key_Up ? -1 : 1);
+                if (to >= 0 && to < m_entries.size()) { m_entries.move(m_selected, to); m_selected = to; rebuildQueueStrip(); }
+                return true;
+            }
+            if (mods == Qt::NoModifier && enter) {
+                // Pull the item back into the prompt box; if it was next, hold the queue until it is resubmitted.
+                const QueueEntry entry = m_entries.takeAt(m_selected);
+                const bool wasNext = m_selected == 0;
+                m_selected = -1;
+                if (wasNext && !m_entries.isEmpty()) { m_resubmitAtFront = true; pauseQueue(QStringLiteral("editing the next item")); }
+                else if (wasNext) m_resubmitAtFront = true;
+                // The resubmission keeps the item's kind once, without changing the pane's input mode.
+                m_editKind = entry.agent ? QStringLiteral("agent") : QStringLiteral("shell");
+                m_editor->setPlainText(entry.text);
+                m_editor->moveCursor(QTextCursor::End);
+                rebuildQueueStrip(); changed();
+                toast(entry.agent ? QStringLiteral("Editing a queued agent prompt") : QStringLiteral("Editing a queued command"));
+                return true;
+            }
+            if (mods == Qt::NoModifier && (k == Qt::Key_Delete || k == Qt::Key_Backspace)) {
+                removeEntry(m_entries[m_selected].id);
+                return true;
+            }
+            if (k == Qt::Key_Escape) { m_selected = -1; rebuildQueueStrip(); return true; }
+        }
+        const bool empty = m_editor->toPlainText().isEmpty();
+        if (empty && mods == Qt::NoModifier && k == Qt::Key_Up && !m_entries.isEmpty()) {
+            m_selected = m_entries.size() - 1;
+            rebuildQueueStrip();
+            return true;
+        }
+        if (mods == Qt::NoModifier && k == Qt::Key_Escape && m_agentBusy) {
+            stopAgent();
+            toast(QStringLiteral("Agent interrupted"));
+            return true;
+        }
+        if (mods == Qt::ControlModifier && k == Qt::Key_C && !m_editor->textCursor().hasSelection() && processBusy() && m_iface) {
+            // Nothing to copy in the prompt box: interrupt the program in the terminal instead.
+            m_iface->sendInput(QString(QChar(3)));
+            toast(QStringLiteral("Sent Ctrl+C to the program"));
+            return true;
+        }
+        if (!m_editor->ghost().isEmpty() && m_editor->textCursor().atEnd() && !m_editor->textCursor().hasSelection()) {
+            if ((mods == Qt::NoModifier && k == Qt::Key_Right) || (mods == Qt::ControlModifier && k == Qt::Key_F))
+                return m_editor->acceptGhost(true);
+            if ((mods == Qt::AltModifier || mods == (Qt::ControlModifier | Qt::ShiftModifier)) && k == Qt::Key_Right)
+                return m_editor->acceptGhost(false);
+        }
+        return false;
+    }
+
+    void onComposerEdited() {
+        if (m_selected >= 0 && !m_editor->toPlainText().isEmpty()) { m_selected = -1; rebuildQueueStrip(); }
+        updateAtPopup();
+        updateGhost();
+    }
+
+    // ----- history suggestions (ghost text) ---------------------------------------------------
+    void updateGhost() {
+        if (!m_editor) return;
+        const QString text = m_editor->toPlainText();
+        QString remainder;
+        const QTextCursor cursor = m_editor->textCursor();
+        if (QSettings().value(QStringLiteral("composer/history_suggestions"), true).toBool()
+            && m_modeValue != QStringLiteral("agent") && !text.trimmed().isEmpty() && !text.contains('\n')
+            && cursor.atEnd() && !cursor.hasSelection() && !(m_atList && m_atList->isVisible()) && !text.startsWith('@')) {
+            remainder = historySuggestion(text);
+        }
+        m_editor->setGhost(remainder);
+    }
+
+    // Newest match first: commands run in this directory, then prompt history, then the shell's history file.
+    QString historySuggestion(const QString &prefix) {
+        auto fits = [&prefix](const QString &candidate) {
+            return candidate.size() > prefix.size() && candidate.startsWith(prefix) && !candidate.contains('\n');
+        };
+        for (int i = m_commandLog.size() - 1; i >= 0; --i)
+            if (m_commandLog[i].second == m_cwd && fits(m_commandLog[i].first)) return m_commandLog[i].first.mid(prefix.size());
+        const QStringList &history = m_editor->history();
+        for (int i = history.size() - 1; i >= 0; --i) if (fits(history[i])) return history[i].mid(prefix.size());
+        const QStringList &shell = shellHistory();
+        for (int i = shell.size() - 1; i >= 0; --i) if (fits(shell[i])) return shell[i].mid(prefix.size());
+        return {};
+    }
+
+    const QStringList &shellHistory() {
+        const QString path = qEnvironmentVariable("HISTFILE", QDir::homePath() + QStringLiteral("/.bash_history"));
+        const QFileInfo info(path);
+        if (!info.exists() || info.lastModified() == m_shellHistoryStamp) return m_shellHistory;
+        m_shellHistoryStamp = info.lastModified();
+        m_shellHistory.clear();
+        QFile file(path);
+        if (file.open(QIODevice::ReadOnly)) {
+            if (file.size() > 512 * 1024) file.seek(file.size() - 512 * 1024);
+            const QList<QByteArray> lines = file.readAll().split('\n');
+            for (const QByteArray &line : lines) {
+                const QString text = QString::fromUtf8(line).trimmed();
+                if (!text.isEmpty() && !text.startsWith('#')) m_shellHistory.append(text);
+            }
+            while (m_shellHistory.size() > 5000) m_shellHistory.removeFirst();
+        }
+        return m_shellHistory;
+    }
+
+    // ----- @ file picker --------------------------------------------------------------------------
+    static bool previewable(const QString &path) {
+        static QMimeDatabase database;
+        const QMimeType mime = database.mimeTypeForFile(path, QMimeDatabase::MatchExtension);
+        return mime.inherits(QStringLiteral("text/plain")) || mime.name().startsWith(QStringLiteral("image/"))
+            || mime.name() == QStringLiteral("application/pdf") || mime.inherits(QStringLiteral("application/json"));
+    }
+
+    void refreshFileIndex() {
+        if (m_fileIndexCwd == m_cwd && m_fileIndexAge.isValid() && m_fileIndexAge.elapsed() < 15000) return;
+        m_fileIndexCwd = m_cwd; m_fileIndexAge.start();
+        m_fileIndex.clear(); m_changedFiles.clear();
+        auto git = [this](const QStringList &args, int timeout) {
+            QProcess process;
+            process.setWorkingDirectory(m_cwd);
+            process.start(QStringLiteral("git"), args);
+            if (!process.waitForFinished(timeout) || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+                process.kill(); process.waitForFinished(200);
+                return QByteArray();
+            }
+            return process.readAllStandardOutput();
+        };
+        const QString root = QString::fromUtf8(git({QStringLiteral("rev-parse"), QStringLiteral("--show-toplevel")}, 1000)).trimmed();
+        if (!root.isEmpty()) {
+            // Tracked plus untracked-but-not-ignored files, relative to the repository root.
+            const QList<QByteArray> files = git({QStringLiteral("-C"), root, QStringLiteral("ls-files"), QStringLiteral("--cached"), QStringLiteral("--others"),
+                                                 QStringLiteral("--exclude-standard"), QStringLiteral("-z")}, 2500).split('\0');
+            for (const QByteArray &file : files) {
+                if (file.isEmpty()) continue;
+                m_fileIndex.append(QDir(root).filePath(QString::fromUtf8(file)));
+                if (m_fileIndex.size() >= 20000) break;
+            }
+            const QList<QByteArray> status = git({QStringLiteral("-C"), root, QStringLiteral("status"), QStringLiteral("--porcelain"), QStringLiteral("-z")}, 1500).split('\0');
+            for (const QByteArray &entry : status)
+                if (entry.size() > 3) m_changedFiles.insert(QDir(root).filePath(QString::fromUtf8(entry.mid(3))));
+            return;
+        }
+        // Not a repository: a bounded walk that skips hidden and dependency folders.
+        QDirIterator it(m_cwd, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+        while (it.hasNext() && m_fileIndex.size() < 5000) {
+            const QString path = it.next();
+            const QString rel = QDir(m_cwd).relativeFilePath(path);
+            if (rel.startsWith('.') || rel.contains(QStringLiteral("/.")) || rel.contains(QStringLiteral("node_modules/"))) continue;
+            m_fileIndex.append(path);
+        }
+    }
+
+    QString composerPath(const QString &absolute) const {
+        const QString rel = QDir(m_cwd).relativeFilePath(absolute);
+        QString shown = rel.startsWith(QStringLiteral("../../..")) ? absolute : rel;
+        return shown.contains(' ') ? QStringLiteral("\"%1\"").arg(shown) : shown;
+    }
+
+    void updateAtPopup() {
+        if (!m_editor || m_native) { hideAtPopup(); return; }
+        const QTextCursor cursor = m_editor->textCursor();
+        const QString before = cursor.block().text().left(cursor.positionInBlock());
+        static const QRegularExpression token(QStringLiteral("(?:^|\\s)@([^\\s@\"]*)$"));
+        const auto match = token.match(before);
+        if (!match.hasMatch() || cursor.position() == m_atDismissedAt) { hideAtPopup(); return; }
+        const QString query = match.captured(1);
+        refreshFileIndex();
+        struct Ranked { int score; QString path; };
+        QList<Ranked> ranked;
+        for (const QString &path : std::as_const(m_fileIndex)) {
+            const QString rel = QDir(m_cwd).relativeFilePath(path);
+            const QString name = QFileInfo(path).fileName();
+            int score = 0;
+            if (query.isEmpty()) {
+                score = 1;
+                if (m_recentFiles.contains(path)) score += 100000 - m_recentFiles.indexOf(path);
+                if (m_changedFiles.contains(path)) score += 50000;
+            } else {
+                const int nameHit = relayFuzzyScore(query, name), pathHit = relayFuzzyScore(query, rel);
+                if (!nameHit && !pathHit) continue;
+                score = nameHit * 3 + pathHit - rel.size();
+                if (name.compare(query, Qt::CaseInsensitive) == 0) score += 100000;
+            }
+            if (previewable(path)) score += 2000;
+            ranked.append({score, path});
+        }
+        std::stable_sort(ranked.begin(), ranked.end(), [](const Ranked &a, const Ranked &b) { return a.score > b.score; });
+        if (ranked.isEmpty()) { hideAtPopup(); return; }
+        if (!m_atList) {
+            m_atList = new QListWidget(this);
+            m_atList->setObjectName(QStringLiteral("atPicker"));
+            m_atList->setFocusPolicy(Qt::NoFocus);
+            m_atList->setUniformItemSizes(true);
+            connect(m_atList, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) { m_atList->setCurrentItem(item); acceptAtSelection(); });
+        }
+        m_atList->clear();
+        for (int i = 0; i < std::min<int>(50, ranked.size()); ++i) {
+            const QString rel = QDir(m_cwd).relativeFilePath(ranked[i].path);
+            auto *item = new QListWidgetItem((previewable(ranked[i].path) ? QStringLiteral("◆  ") : QStringLiteral("◇  ")) + rel, m_atList);
+            item->setData(Qt::UserRole, ranked[i].path);
+            item->setToolTip(ranked[i].path);
+        }
+        m_atList->setCurrentRow(0);
+        placeAtPopup();
+        m_atList->show();
+        m_atList->raise();
+        if (m_editor->ghost().size()) m_editor->setGhost(QString());
+    }
+
+    void placeAtPopup() {
+        if (!m_atList || !m_composer) return;
+        const QRect composer(m_composer->mapTo(this, QPoint(0, 0)), m_composer->size());
+        const int rowHeight = std::max(18, m_atList->sizeHintForRow(0));
+        const int height = std::min(8, m_atList->count()) * rowHeight + 8;
+        const int width = std::min(640, composer.width() - 24);
+        m_atList->setGeometry(composer.left() + 12, std::max(0, composer.top() - height - 4), width, height);
+    }
+
+    void hideAtPopup() { if (m_atList && m_atList->isVisible()) m_atList->hide(); }
+
+    void acceptAtSelection() {
+        if (!m_atList || !m_atList->currentItem()) return;
+        const QString path = m_atList->currentItem()->data(Qt::UserRole).toString();
+        QTextCursor cursor = m_editor->textCursor();
+        const QString before = cursor.block().text().left(cursor.positionInBlock());
+        const int at = before.lastIndexOf('@');
+        if (at < 0) { hideAtPopup(); return; }
+        cursor.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, before.size() - at);
+        cursor.insertText(QStringLiteral("@") + composerPath(path) + ' ');
+        m_editor->setTextCursor(cursor);
+        hideAtPopup();
+    }
+
+    QString resolveComposerPath(QString path) const {
+        if (path.startsWith(QStringLiteral("~/"))) path = QDir::homePath() + path.mid(1);
+        const QFileInfo info(QDir(m_cwd).filePath(path));
+        return info.exists() ? info.absoluteFilePath() : QString();
+    }
+
+    // `@path` tokens that name existing files become attachments on agent prompts.
+    QJsonArray attachmentsFor(const QString &text) const {
+        QJsonArray attachments;
+        QSet<QString> seen;
+        static const QRegularExpression token(QStringLiteral("(?:^|\\s)@(?:\"([^\"]+)\"|([^\\s\"]+))"));
+        auto matches = token.globalMatch(text);
+        while (matches.hasNext() && attachments.size() < 10) {
+            const auto match = matches.next();
+            const QString absolute = resolveComposerPath(match.captured(1).isEmpty() ? match.captured(2) : match.captured(1));
+            if (absolute.isEmpty() || !QFileInfo(absolute).isFile() || seen.contains(absolute)) continue;
+            seen.insert(absolute);
+            attachments.append(QJsonObject{{"path", absolute}});
+        }
+        return attachments;
+    }
+
+    // ----- program state: alternate screen, passwords, waiting for input ----------------------
+    void connectScreenWatcher() {
+        QObject *session = konsoleSession();
+        if (!session || session == m_watchedSession) return;
+        m_watchedSession = session;
+        QObject::connect(session, SIGNAL(primaryScreenInUse(bool)), &m_screenWatcher, SLOT(primaryScreenInUse(bool)));
+    }
+
+    void onPrimaryScreen(bool primary) {
+        m_altScreen = !primary;
+        if (!primary) {
+            if (m_native) return;
+            const QString program = foregroundProgramName();
+            if (controlFor(program) == QStringLiteral("agent")) {
+                toast(QStringLiteral("Agent in control of %1 · %2 to take control")
+                      .arg(program.isEmpty() ? QStringLiteral("this program") : program,
+                           Keymap::instance().shortcutText(QStringLiteral("control.human"))));
+                return;
+            }
+            endWaiting(false);
+            m_autoHuman = true;
+            setNative(true);
+            m_hideReason = HideReason::AltScreen;
+        } else if (m_native && m_hideReason == HideReason::AltScreen) {
+            m_autoHuman = false;
+            setNative(false, false);
+        }
+    }
+
+    // Remote sessions never switch screens, so a short list stands in for detection.
+    static bool remoteSessionProgram(const QString &name) {
+        static const QSet<QString> names{QStringLiteral("ssh"), QStringLiteral("mosh"), QStringLiteral("mosh-client"), QStringLiteral("telnet")};
+        return names.contains(name);
+    }
+
+    void pollProgram() {
+        if (m_promptReported || !m_iface) { m_programPoll.stop(); endWaiting(true); return; }
+        checkPasswordPrompt();
+        if (m_native && m_hideReason == HideReason::Password) {
+            // The password was entered once echo is back on; show the prompt box again.
+            if (terminalMode() == TerminalMode::Echoing) {
+                if (++m_echoTicks >= 2) { m_secretNotified = false; m_autoHuman = false; setNative(false, false); }
+            } else {
+                m_echoTicks = 0;
+            }
+        }
+        if (!m_native && !m_altScreen && m_runningSince.isValid() && m_runningSince.elapsed() > 300) {
+            const QString program = foregroundProgramName();
+            if (remoteSessionProgram(program) && controlFor(program) != QStringLiteral("agent") && !m_remoteHandled) {
+                m_remoteHandled = true;
+                endWaiting(false);
+                m_autoHuman = true; setNative(true); m_hideReason = HideReason::Remote;
+                return;
+            }
+            if (programWaitingForInput()) {
+                if (++m_waitTicks == 2) startWaiting();
+            } else {
+                if (m_waiting) endWaiting(true);
+                m_waitTicks = 0;
+            }
+        }
+    }
+
+    enum class TerminalMode { Unknown, Raw, Echoing, Secret };
+    TerminalMode terminalMode() const {
+        if (!m_iface) return TerminalMode::Unknown;
+        const int pid = m_iface->terminalProcessId();
+        if (pid <= 0) return TerminalMode::Unknown;
+        const auto name = QStringLiteral("/proc/%1/fd/0").arg(pid).toLocal8Bit();
+        const int fd = ::open(name.constData(), O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) return TerminalMode::Unknown;
+        termios state{};
+        const bool ok = ::tcgetattr(fd, &state) == 0;
+        ::close(fd);
+        if (!ok) return TerminalMode::Unknown;
+        if (!(state.c_lflag & ICANON)) return TerminalMode::Raw;
+        return (state.c_lflag & ECHO) ? TerminalMode::Echoing : TerminalMode::Secret;
+    }
+
+    // A process of this pane's command is blocked in read() on the terminal. Reading
+    // /proc/<pid>/syscall needs ptrace access, so programs running as another user (sudo) are
+    // not visible here.
+    bool programWaitingForInput() const {
+        if (!m_iface) return false;
+        const int shell = m_iface->terminalProcessId();
+        if (shell <= 0) return false;
+        const QString tty = QFileInfo(QStringLiteral("/proc/%1/fd/0").arg(shell)).symLinkTarget();
+        if (tty.isEmpty()) return false;
+        QList<int> pids{shell};
+        for (int i = 0; i < pids.size() && pids.size() < 64; ++i) {
+            QFile children(QStringLiteral("/proc/%1/task/%1/children").arg(pids[i]));
+            if (!children.open(QIODevice::ReadOnly)) continue;
+            for (const QByteArray &child : children.readAll().simplified().split(' ')) {
+                bool ok = false; const int pid = child.toInt(&ok);
+                if (ok && pid > 0) pids.append(pid);
+            }
+        }
+        for (int pid : std::as_const(pids)) {
+            QFile syscallFile(QStringLiteral("/proc/%1/syscall").arg(pid));
+            if (!syscallFile.open(QIODevice::ReadOnly)) continue;
+            const QList<QByteArray> parts = syscallFile.readAll().simplified().split(' ');
+            if (parts.size() < 2) continue;
+            bool ok = false;
+            if (parts[0].toLong(&ok) != SYS_read || !ok) continue;
+            const long fd = parts[1].toLong(&ok, 0);
+            if (!ok || fd < 0) continue;
+            if (QFileInfo(QStringLiteral("/proc/%1/fd/%2").arg(pid).arg(fd)).symLinkTarget() == tty) return true;
+        }
+        return false;
+    }
+
+    void startWaiting() {
+        m_waiting = true;
+        m_waitMovedFocus = m_editor->hasFocus();
+        focusTerminal();
+        toast(QStringLiteral("Waiting for input · typing goes to the program"));
+    }
+
+    void endWaiting(bool restoreFocus) {
+        if (m_waiting && restoreFocus && m_waitMovedFocus && !m_native && ownsTerminalWidget(QApplication::focusWidget()))
+            m_editor->setFocus(Qt::OtherFocusReason);
+        m_waiting = false; m_waitMovedFocus = false; m_waitTicks = 0;
     }
 
     struct PendingPrompt { QString text, why, program; bool fix = false; };
 
     // Another turn will start without user action: something is queued and the queue is not paused.
-    bool moreTurnsPending() const { return !m_queueItems.isEmpty() && !m_queuePaused; }
+    // Another turn will start without user action: queued items, or a turn that is interrupting this one.
+    bool moreTurnsPending() const { return (!m_entries.isEmpty() && !m_entriesPaused) || m_interruptPending; }
 
-    void sendPrompt(QJsonObject request, const PendingPrompt &prompt) {
+    QString sendPrompt(QJsonObject request, const PendingPrompt &prompt) {
         const QString requestId = QStringLiteral("ask-%1").arg(++m_askSerial);
         request.insert(QStringLiteral("id"), requestId);
         m_pendingPrompts.insert(requestId, prompt);
         send(request);
+        return requestId;
     }
 
-    // The queue strip above the prompt: the running prompt, queued prompts with remove buttons,
-    // and a paused state with Resume. queue_changed from the worker is authoritative.
+    // The queue strip over the bottom of the terminal: what is running, then queued terminal
+    // commands ($, amber) and agent prompts (✦, cyan) in order. Rows drag to reorder; × removes.
     void rebuildQueueStrip() {
         if (!m_queueStrip) return;
-        const bool visible = !m_queueItems.isEmpty() || m_queuePaused;
+        const bool visible = !m_entries.isEmpty() || m_entriesPaused;
         auto *layout = static_cast<QVBoxLayout *>(m_queueStrip->layout());
         while (QLayoutItem *item = layout->takeAt(0)) {
-            if (QWidget *w = item->widget()) w->deleteLater();
+            if (QWidget *w = item->widget()) { if (w != m_queueList) w->deleteLater(); }
             else if (QLayout *l = item->layout()) { while (QLayoutItem *inner = l->takeAt(0)) { if (inner->widget()) inner->widget()->deleteLater(); delete inner; } }
             delete item;
         }
         m_queueStrip->setVisible(visible);
         if (!visible) return;
-        placeQueueStrip();
-        auto elide = [this](const QString &text) {
-            QString single = text.simplified();
-            return fontMetrics().elidedText(single, Qt::ElideRight, std::max(160, width() - 160));
-        };
         auto *header = new QHBoxLayout;
-        auto *title = new QLabel(m_queuePaused ? QStringLiteral("AGENT QUEUE · PAUSED") : QStringLiteral("AGENT QUEUE"));
+        auto *title = new QLabel(m_entriesPaused ? QStringLiteral("QUEUE · PAUSED") : QStringLiteral("QUEUE"));
         title->setObjectName(QStringLiteral("queueTitle"));
+        title->setToolTip(m_pauseReason);
         header->addWidget(title, 1);
-        if (m_queuePaused) {
+        auto *hint = new QLabel(QStringLiteral("↑ select · Ctrl+↑↓ move · Enter edit · Del remove"));
+        hint->setObjectName(QStringLiteral("queueHint"));
+        header->addWidget(hint);
+        if (m_entriesPaused) {
             auto *resume = new QToolButton; resume->setText(QStringLiteral("Resume")); resume->setFocusPolicy(Qt::NoFocus);
             connect(resume, &QToolButton::clicked, this, [this] { resumeAgentQueue(); });
             header->addWidget(resume);
         }
-        if (m_queueItems.size() > 1) {
+        if (m_entries.size() > 1) {
             auto *clear = new QToolButton; clear->setText(QStringLiteral("Clear")); clear->setFocusPolicy(Qt::NoFocus);
             connect(clear, &QToolButton::clicked, this, [this] { clearAgentQueue(); });
             header->addWidget(clear);
         }
         layout->addLayout(header);
-        if (!m_runningItem.isEmpty()) {
-            auto *running = new QLabel(QStringLiteral("▸ ") + elide(m_itemPrompts.value(m_runningItem).text.isEmpty()
-                                                                        ? QStringLiteral("running") : m_itemPrompts.value(m_runningItem).text));
-            running->setObjectName(QStringLiteral("queueRunning"));
-            layout->addWidget(running);
+        QString running;
+        if (m_activeValid) running = (m_active.agent ? QStringLiteral("✦ ") : QStringLiteral("$ ")) + (m_active.fix ? QStringLiteral("fix request") : m_active.text);
+        else if (m_agentBusy) running = QStringLiteral("✦ ") + m_itemPrompts.value(m_currentItem).text;
+        else if (!m_promptReported && !m_pendingCommand.isEmpty()) running = QStringLiteral("$ ") + m_pendingCommand;
+        if (!running.trimmed().isEmpty()) {
+            auto *label = new QLabel(QStringLiteral("▸ running  ") + fontMetrics().elidedText(running.simplified(), Qt::ElideRight, std::max(160, width() - 180)));
+            label->setObjectName(QStringLiteral("queueRunning"));
+            layout->addWidget(label);
         }
-        int index = 0;
-        for (const auto &entry : std::as_const(m_queueItems)) {
-            const QString id = entry.first;
-            auto *row = new QHBoxLayout;
-            const QString prefix = entry.second.second ? QStringLiteral("⚡ ") : QStringLiteral("%1. ").arg(++index);
-            auto *label = new QLabel(prefix + elide(m_itemPrompts.contains(id) ? m_itemPrompts.value(id).text : entry.second.first));
-            label->setObjectName(QStringLiteral("queueItem"));
-            label->setToolTip(m_itemPrompts.value(id).text);
-            row->addWidget(label, 1);
-            auto *remove = new QToolButton; remove->setText(QStringLiteral("×")); remove->setAutoRaise(true);
-            remove->setToolTip(QStringLiteral("Remove from the queue")); remove->setFocusPolicy(Qt::NoFocus);
-            connect(remove, &QToolButton::clicked, this, [this, id] { send({{"type", "queue_remove"}, {"item", id}}); });
-            row->addWidget(remove);
-            layout->addLayout(row);
+        if (!m_queueList) {
+            m_queueList = new QListWidget(m_queueStrip);
+            m_queueList->setObjectName(QStringLiteral("queueList"));
+            m_queueList->setItemDelegate(new QueueRowDelegate(m_queueList));
+            m_queueList->setFocusPolicy(Qt::NoFocus);
+            m_queueList->setFrameShape(QFrame::NoFrame);
+            m_queueList->setSelectionMode(QAbstractItemView::SingleSelection);
+            m_queueList->setDragDropMode(QAbstractItemView::InternalMove);
+            m_queueList->setDefaultDropAction(Qt::MoveAction);
+            m_queueList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            connect(m_queueList->model(), &QAbstractItemModel::rowsMoved, this, [this] { syncEntriesFromList(); });
+            connect(m_queueList->model(), &QAbstractItemModel::rowsInserted, this, [this] { if (!m_fillingQueueList) syncEntriesFromList(); });
         }
+        m_fillingQueueList = true;
+        m_queueList->clear();
+        for (const auto &entry : std::as_const(m_entries)) {
+            auto *item = new QListWidgetItem(entry.fix ? QStringLiteral("fix request") : entry.text, m_queueList);
+            item->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(entry.id));
+            item->setData(Qt::UserRole + 1, entry.agent);
+            item->setToolTip(entry.text);
+            item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
+        }
+        m_fillingQueueList = false;
+        if (m_selected >= 0 && m_selected < m_queueList->count()) m_queueList->setCurrentRow(m_selected);
+        else { m_queueList->clearSelection(); m_queueList->setCurrentRow(-1); }
+        const int rowHeight = std::max(20, fontMetrics().height() + 8);
+        m_queueList->setFixedHeight(std::min<int>(6, std::max<int>(1, m_entries.size())) * rowHeight + 4);
+        m_queueList->setVisible(!m_entries.isEmpty());
+        layout->addWidget(m_queueList);
         placeQueueStrip();
         QTimer::singleShot(0, this, [this] { placeQueueStrip(); });
     }
@@ -1740,6 +2373,8 @@ private:
         // PROMPT_COMMAND runs before Readline puts the tty into noncanonical mode.
         // Recheck on every tick, even when the state file has not changed.
         refreshShellReady();
+        connectScreenWatcher();
+        if (!m_entries.isEmpty() && !m_activeValid) pumpQueue();
         QFile file(m_runtime.filePath(QStringLiteral("state.json")));
         if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024) return;
         const auto event = QJsonDocument::fromJson(file.readAll()).object();
@@ -1763,7 +2398,16 @@ private:
                 m_runningSince.invalidate();
                 if (ms > 30000) notifyIfAway(QStringLiteral("Command finished"), QStringLiteral("Exit %1 after %2 s in %3").arg(status).arg(ms / 1000).arg(m_cwd));
             }
+            m_programPoll.stop();
+            endWaiting(true);
+            m_remoteHandled = false;
             if (m_native && m_autoHuman) { m_autoHuman = false; setNative(false, false); }
+            if (m_activeValid && !m_active.agent && m_activeLoaded) {
+                // The queued command finished; a failure pauses whatever is queued behind it.
+                m_activeValid = false; m_activeLoaded = false;
+                if (status != 0) pauseQueue(QStringLiteral("`%1` exited with status %2").arg(m_active.text).arg(status));
+                QTimer::singleShot(150, this, [this] { rebuildQueueStrip(); pumpQueue(); });
+            }
             if (m_fixArmed) {
                 const QString command = m_fixCommand;
                 const int attempt = m_fixAttempt;
@@ -1784,31 +2428,25 @@ private:
         } else if (stage == QStringLiteral("running")) {
             m_shellReady = false; m_promptReported = false;
             m_runningSince.start(); m_secretNotified = false;
-            // Any program that keeps running hands control to the human, like Warp: the prompt
-            // hides and keys go to the program (passwords, REPLs, vim, long builds).
-            const QString sequence = m_shellSequence;
-            QTimer::singleShot(150, this, [this, sequence] {
-                if (m_shellSequence != sequence || m_promptReported || m_native) return;
-                const QString program = foregroundProgramName();
-                if (controlFor(program) == QStringLiteral("agent")) {
-                    // "Agent stays in control": keep the prompt; password prompts still hand over.
-                    m_editor->setFocus(Qt::OtherFocusReason);
-                    toast(QStringLiteral("Agent in control of %1 · %2 to take control")
-                          .arg(program.isEmpty() ? QStringLiteral("this program") : program,
-                               Keymap::instance().shortcutText(QStringLiteral("control.human"))));
-                    return;
-                }
-                m_autoHuman = true;
-                setNative(true);
-            });
+            // The prompt box stays visible while ordinary programs run so more commands and prompts
+            // can be queued. It hides for the alternate screen (Session signal), password prompts,
+            // and remote sessions; a program blocked reading the terminal gets the focus instead.
+            m_waitTicks = 0; m_echoTicks = 0; m_remoteHandled = false;
+            m_programPoll.start();
+            QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
         } else if (stage == QStringLiteral("loaded") && m_loading && m_iface &&
                    event.value(QStringLiteral("input_sha256")).toString() == m_pendingHash) {
             m_loading = false; m_shellReady = false; m_promptReported = false; m_refocus = true;
             m_editor->remember(m_pendingCommand);
+            m_commandLog.append({m_pendingCommand, m_cwd});
+            if (m_commandLog.size() > 500) m_commandLog.removeFirst();
+            const bool fromQueue = m_activeValid && !m_active.agent;
+            if (fromQueue) m_activeLoaded = true;
             // Do not discard edits typed while waiting for the shell acknowledgement.
-            if (m_editor->toPlainText() == m_submittedDraft) m_editor->clear();
+            else if (m_editor->toPlainText() == m_submittedDraft) m_editor->clear();
             m_fixArmed = m_fixWatch;
-            m_iface->sendInput(QStringLiteral("\r")); focusTerminal();
+            // Focus stays in the prompt box so more commands and prompts can be queued.
+            m_iface->sendInput(QStringLiteral("\r"));
         } else if (stage == QStringLiteral("unsupported")) {
             m_shellReady = false; m_promptReported = false; setNative(true);
             status(QStringLiteral("Your shell already has a DEBUG hook. It was left untouched; use native mode or relaunch with --clean-shell."));
@@ -1821,6 +2459,8 @@ private:
         m_editor->setReadOnly(enabled);
         // Human control hides the prompt box entirely; the terminal gets the space and the keys.
         if (m_composer) m_composer->setVisible(!enabled);
+        if (!enabled) m_hideReason = HideReason::None;
+        if (enabled) hideAtPopup();
         if (enabled) {
             m_routeLabel->setText(QStringLiteral("NATIVE · keystrokes go directly to Konsole."));
             focusTerminal();
@@ -1968,6 +2608,28 @@ private:
     QList<QPair<QString, QPair<QString, bool>>> m_queueItems;        // item id -> (preview, forced)
     QString m_runningItem, m_currentItem;
     bool m_queuePaused = false;
+    QList<QueueEntry> m_entries;
+    QueueEntry m_active;
+    bool m_activeValid = false, m_activeLoaded = false, m_entriesPaused = false, m_resubmitAtFront = false;
+    bool m_interruptPending = false, m_fillingQueueList = false;
+    QString m_activeRequest, m_pauseReason;
+    quint64 m_entrySerial = 0;
+    int m_selected = -1;
+    QListWidget *m_queueList = nullptr, *m_atList = nullptr;
+    int m_atDismissedAt = -1;
+    QString m_editKind;
+    QStringList m_fileIndex, m_recentFiles, m_shellHistory;
+    QSet<QString> m_changedFiles;
+    QString m_fileIndexCwd;
+    QElapsedTimer m_fileIndexAge;
+    QDateTime m_shellHistoryStamp;
+    QList<QPair<QString, QString>> m_commandLog;   // command, directory
+    ScreenWatcher m_screenWatcher;
+    QPointer<QObject> m_watchedSession;
+    QTimer m_programPoll;
+    HideReason m_hideReason = HideReason::None;
+    bool m_altScreen = false, m_waiting = false, m_waitMovedFocus = false, m_remoteHandled = false;
+    int m_waitTicks = 0, m_echoTicks = 0;
     quint64 m_askSerial = 0;
     QFrame *m_queueStrip = nullptr;
     bool m_transcriptDismissed = false;
@@ -2469,9 +3131,9 @@ private:
         items << actionItem(agent, QStringLiteral("New chat"), QStringLiteral("Start a new conversation in this pane"), QStringLiteral("agent.newChat"));
         items << actionItem(agent, QStringLiteral("Stop agent"), pane && pane->agentBusy() ? QStringLiteral("Cancel the running turn") : QStringLiteral("Agent is idle"), QStringLiteral("agent.stop"));
         if (pane && pane->queuedPrompts() > 0)
-            items << actionItem(agent, QStringLiteral("Clear agent queue"), QStringLiteral("%1 queued prompt(s)").arg(pane->queuedPrompts()), QStringLiteral("agent.clearQueue"));
+            items << actionItem(agent, QStringLiteral("Clear queue"), QStringLiteral("%1 queued item(s)").arg(pane->queuedPrompts()), QStringLiteral("agent.clearQueue"));
         if (pane && pane->queuePaused())
-            items << actionItem(agent, QStringLiteral("Resume agent queue"), QStringLiteral("Paused after a stop or failure"), QStringLiteral("agent.resumeQueue"));
+            items << actionItem(agent, QStringLiteral("Resume queue"), QStringLiteral("Paused after a stop, failure or edit"), QStringLiteral("agent.resumeQueue"));
         items << actionItem(agent, QStringLiteral("Provider and API keys…"), QStringLiteral("Base URL, model ID, key, request options"), QStringLiteral("agent.provider"));
         PaletteItem importKeys; importKeys.key = QStringLiteral("agent.importWarp"); importKeys.section = agent;
         importKeys.label = QStringLiteral("Import keys from Warp"); importKeys.detail = QStringLiteral("Copy Warp's custom-endpoint keys into the keyring");
@@ -2480,10 +3142,20 @@ private:
 
         items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Send Ctrl+C to the running program") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
         items << actionItem(terminal, QStringLiteral("Take control"), QStringLiteral("Hide the prompt and type into the terminal"), QStringLiteral("control.human"), pane && pane->isNative());
+        {
+            PaletteItem suggestions;
+            const bool on = QSettings().value(QStringLiteral("composer/history_suggestions"), true).toBool();
+            suggestions.key = QStringLiteral("composer.historySuggestions"); suggestions.section = terminal;
+            suggestions.label = QStringLiteral("Command suggestions from history");
+            suggestions.detail = on ? QStringLiteral("On: → or Ctrl+F accepts, Alt+→ accepts a word") : QStringLiteral("Off");
+            suggestions.checked = on; suggestions.stayOpen = true;
+            suggestions.run = [on] { QSettings().setValue(QStringLiteral("composer/history_suggestions"), !on); };
+            items << suggestions;
+        }
         items << actionItem(terminal, QStringLiteral("Show the Relay prompt"), QStringLiteral("The agent is in control of a running program"), QStringLiteral("control.prompt"), pane && !pane->isNative());
         {
             const QString current = Pane::defaultControl();
-            items << submenu(QStringLiteral("menu:control"), terminal, QStringLiteral("Control when a program starts"),
+            items << submenu(QStringLiteral("menu:control"), terminal, QStringLiteral("Control when a full-screen program starts"),
                              current == QStringLiteral("agent") ? QStringLiteral("Agent stays in control") : QStringLiteral("You take control"), [current] {
                 QList<PaletteItem> children;
                 const QList<QStringList> options{{QStringLiteral("human"), QStringLiteral("You take control"), QStringLiteral("The prompt hides and keys go to the program")},
@@ -2491,7 +3163,7 @@ private:
                 for (const auto &option : options) {
                     PaletteItem item;
                     const QString value = option[0];
-                    item.key = QStringLiteral("control.default:") + value; item.section = QStringLiteral("Control when a program starts");
+                    item.key = QStringLiteral("control.default:") + value; item.section = QStringLiteral("Control when a full-screen program starts");
                     item.label = option[1]; item.detail = option[2]; item.checked = current == value; item.stayOpen = true;
                     item.run = [value] { QSettings().setValue(QStringLiteral("control/default"), value); };
                     children << item;
@@ -3249,3 +3921,4 @@ int main(int argc, char **argv) {
     }
 }
 
+#include "main.moc"

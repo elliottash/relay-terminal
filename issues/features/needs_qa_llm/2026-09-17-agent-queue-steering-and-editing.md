@@ -1,6 +1,6 @@
 # Queue steering, Esc to interrupt, and keyboard editing of queued prompts
 
-- **Status**: open
+- **Status**: needs-qa-llm
 - **Component**: gui, worker, agent
 - **Milestone**: desktop-alpha
 - **Workstream**: agent
@@ -48,3 +48,23 @@ Backend work: a `steer` mode that appends the user message after the current ste
 1. The unfinished sentence: which cases should be thought through?
 2. If a steer prompt arrives while the model is producing its final answer (no further tool call), should it become a queued turn or interrupt?
 3. Should Esc interrupt everything (tool command included), or only the model call, letting a running command finish?
+
+## Resolution (2026-09-17, GUI D, implemented by Claude Opus 5)
+
+Implemented in `src/main.cpp` together with the combined queue
+(`issues/features/needs_qa_llm/2026-09-17-combined-terminal-agent-queue.md`):
+
+- Enter while busy queues (agent prompts behind the running turn; terminal commands behind the running command), in entry order.
+- Ctrl+Enter: always the agent; while the agent is busy it interrupts and sends now. Keymap `agent.interrupt` defaults to Ctrl+Return/Ctrl+Enter plus the old Ctrl+Alt+Return/Enter aliases (prompt box only).
+- Esc in the prompt box while the agent is busy stops it; the prompt text stays. Esc otherwise keeps its old meaning.
+- Up on an empty prompt box with items queued selects the last item; Up/Down move; past the top falls back to prompt history; Ctrl+Up/Down reorder; Enter pulls the item into the prompt box (editing the next item pauses the queue, and the resubmission goes back to the head and resumes); Delete/Backspace remove; Esc leaves the selection. The edited item keeps its kind (agent or terminal) for one submission without changing the pane's input mode.
+
+**Not implemented:** "Enter again to steer at the next tool call". It needs the backend `steer` mode, which does not exist yet; tracked in `issues/features/2026-09-17-agent-sessions-planning-subagents.md`. Open questions 2 and 3 of this issue remain open.
+
+Implementer check under Xvfb (not a QA verdict): `docs/qa_evidence/2026-09-17-combined-queue/implementer-select-move-edit-head.png`, `implementer-edit-queued-agent-item.png`, `docs/qa_evidence/2026-09-17-agent-esc-ctrl-enter/implementer-esc-stop-ctrl-enter-interrupt.png` (Esc printed "Stopped"; Ctrl+Enter while counting printed "Interrupting the current turn", then `INTERRUPTED-OK`).
+
+QA checklist:
+1. With a long agent turn running, Enter queues a prompt; Esc stops the turn; the queue shows PAUSED; Resume runs the prompt.
+2. Ctrl+Enter while busy interrupts and runs the new prompt next; queued items keep their order.
+3. Up/Down/Ctrl+Up/Ctrl+Down/Enter/Delete/Esc on queued items behave as above; Up past the top shows history.
+4. Editing the next item holds the queue; resubmitting puts it back first and resumes.
