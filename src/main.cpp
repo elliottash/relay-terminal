@@ -55,6 +55,7 @@
 #include <QTabWidget>
 #include <QFileSystemWatcher>
 #include <QKeySequence>
+#include <QRegularExpression>
 #include <QIcon>
 #include <QScrollBar>
 #include <QTextCharFormat>
@@ -270,6 +271,7 @@ private:
         add("control.human", "terminal", "Take control of the terminal (hides the prompt; works from the prompt box)", {QStringLiteral("Ctrl+H")});
         add("control.prompt", "terminal", "Back to the Relay prompt (the agent is in control)", {QStringLiteral("Ctrl+Shift+H")});
         add("terminal.native", "terminal", "Toggle native terminal input", {QStringLiteral("F12")});
+        add("pane.restartShell", "terminal", "Restart this pane's shell or agent after it stopped", {QStringLiteral("Ctrl+Shift+R")});
         add("terminal.interrupt", "terminal", "Interrupt the running command (Ctrl+C)", {});
         add("agent.newChat", "agent", "Start a new agent conversation", {});
         add("agent.stop", "agent", "Stop the agent turn", {});
@@ -347,6 +349,77 @@ private:
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_listeners;
 };
 
+// ----- per-pane process isolation ----------------------------------------------------------
+//
+// Each pane's shell and agent worker run in their own transient systemd user scope with memory
+// limits, so a runaway command is stopped inside its pane instead of taking down Relay (the kernel
+// OOM killer and systemd-oomd otherwise act on Relay's whole app cgroup). `systemd-run --scope`
+// execs the command in place, so the PID Relay tracks is still bash's / python's own.
+namespace isolation {
+
+inline bool enabled() { return QSettings().value(QStringLiteral("isolation/enabled"), true).toBool(); }
+
+// systemd-run exists and the user manager accepts transient scopes; probed once per process.
+inline bool available() {
+    static int state = -1;
+    if (state < 0) {
+        state = 0;
+        const QString tool = QStandardPaths::findExecutable(QStringLiteral("systemd-run"));
+        if (!tool.isEmpty()) {
+            QProcess probe;
+            probe.start(tool, {QStringLiteral("--user"), QStringLiteral("--scope"), QStringLiteral("--quiet"), QStringLiteral("--"), QStringLiteral("true")});
+            if (probe.waitForFinished(3000) && probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0) state = 1;
+            else probe.kill();
+        }
+    }
+    return state == 1;
+}
+
+// A systemd size such as "8G", "512M" or "infinity"; anything else falls back to the default.
+inline QString memory(const char *key, const char *fallback) {
+    const QString value = QSettings().value(QString::fromLatin1(key), QString::fromLatin1(fallback)).toString().trimmed();
+    static const QRegularExpression valid(QStringLiteral("^(\\d+[KMGT]?|infinity)$"));
+    return valid.match(value).hasMatch() ? value : QString::fromLatin1(fallback);
+}
+
+// Arguments that run `command` inside the named scope.
+inline QStringList wrap(const QString &unit, const QStringList &properties, const QStringList &command) {
+    QStringList args{QStringLiteral("--user"), QStringLiteral("--scope"), QStringLiteral("--quiet"), QStringLiteral("--unit=") + unit};
+    for (const QString &property : properties) args << QStringLiteral("-p") << property;
+    args << QStringLiteral("--") << command;
+    return args;
+}
+
+// systemd's result for a finished scope ("oom-kill" when memory limits or systemd-oomd stopped it).
+// Failed scopes stay loaded until reset, which also lets the name be reused.
+inline QString takeResult(const QString &unit) {
+    if (unit.isEmpty()) return {};
+    QProcess show;
+    show.start(QStringLiteral("systemctl"), {QStringLiteral("--user"), QStringLiteral("show"), unit + QStringLiteral(".scope"), QStringLiteral("-p"), QStringLiteral("Result"), QStringLiteral("--value")});
+    QString result;
+    if (show.waitForFinished(2000)) result = QString::fromUtf8(show.readAllStandardOutput()).trimmed();
+    else show.kill();
+    QProcess::startDetached(QStringLiteral("systemctl"), {QStringLiteral("--user"), QStringLiteral("reset-failed"), unit + QStringLiteral(".scope")});
+    return result;
+}
+
+// memory.events oom_kill counter of the cgroup `pid` belongs to, or -1.
+inline long oomKills(int pid) {
+    if (pid <= 0) return -1;
+    QFile cgroup(QStringLiteral("/proc/%1/cgroup").arg(pid));
+    if (!cgroup.open(QIODevice::ReadOnly)) return -1;
+    const QString line = QString::fromUtf8(cgroup.readLine()).trimmed();   // "0::/user.slice/..."
+    const int split = line.indexOf(QStringLiteral("::"));
+    if (split < 0) return -1;
+    QFile events(QStringLiteral("/sys/fs/cgroup") + line.mid(split + 2) + QStringLiteral("/memory.events"));
+    if (!events.open(QIODevice::ReadOnly)) return -1;
+    for (const QByteArray &row : events.readAll().split('\n'))
+        if (row.startsWith("oom_kill ")) return row.mid(9).trimmed().toLong();
+    return -1;
+}
+
+}  // namespace isolation
+
 // One terminal pane: a KonsolePart shell, its Bash bridge, a composer, and its own agent worker
 // and conversation. Windows arrange panes in tabs and splits; the toolbar acts on the active pane.
 class Pane final : public QWidget {
@@ -363,7 +436,7 @@ public:
         startWorker();
         startTerminal(cleanShell);
         connect(&m_poll, &QTimer::timeout, this, [this] { pollShell(); });
-        connect(&m_secretPoll, &QTimer::timeout, this, [this] { checkPasswordPrompt(); });
+        connect(&m_secretPoll, &QTimer::timeout, this, [this] { checkPasswordPrompt(); checkOomKills(); });
         m_secretPoll.start(1000);
         m_poll.start(80);
         m_debounce.setSingleShot(true);
@@ -635,6 +708,26 @@ private:
     }
 
     void startWorker() {
+        if (!m_workerConnected) connectWorker();
+        m_workerBuffer.clear(); m_workerPending.clear();
+        const QStringList command{m_python, QStringLiteral("-S"), QStringLiteral("-u"), m_data + QStringLiteral("/backend/worker.py")};
+        m_agentUnit.clear();
+        if (isolation::enabled() && isolation::available()) {
+            m_agentUnit = QStringLiteral("relay-pane-%1-agent-%2").arg(m_token.left(8)).arg(++m_agentGeneration);
+            m_worker.setProgram(QStandardPaths::findExecutable(QStringLiteral("systemd-run")));
+            m_worker.setArguments(isolation::wrap(m_agentUnit, {QStringLiteral("MemoryMax=") + isolation::memory("isolation/agent_memory_max", "2G"),
+                                                                QStringLiteral("MemorySwapMax=") + isolation::memory("isolation/agent_swap_max", "512M"),
+                                                                QStringLiteral("TimeoutStopSec=5"),
+                                                                QStringLiteral("OOMPolicy=stop")}, command));
+        } else {
+            m_worker.setProgram(command.first());
+            m_worker.setArguments(command.mid(1));
+        }
+        m_worker.start();
+    }
+
+    void connectWorker() {
+        m_workerConnected = true;
         connect(&m_worker, &QProcess::readyReadStandardOutput, this, [this] {
             m_workerBuffer += m_worker.readAllStandardOutput();
             if (m_workerBuffer.size() > 8 * 1024 * 1024) {
@@ -655,17 +748,20 @@ private:
         connect(&m_worker, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
             status(QStringLiteral("Local worker failed: ") + m_worker.errorString());
         });
-        connect(&m_worker, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int, QProcess::ExitStatus) {
+        connect(&m_worker, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus exit) {
             m_workerReady = false; m_configured = false; m_agentBusy = false;
-            status(QStringLiteral("Local worker stopped. Native terminal remains available; restart Relay to restore routing and agents."));
+            if (m_closing) return;
+            const bool oom = isolation::takeResult(m_agentUnit) == QStringLiteral("oom-kill");
+            const bool killed = exit == QProcess::CrashExit || code == 137 || code == 143;
+            showBanner(oom ? QStringLiteral("The agent worker stopped because it ran out of memory (limit %1).")
+                                 .arg(isolation::memory("isolation/agent_memory_max", "2G"))
+                           : killed ? QStringLiteral("The agent worker was stopped.") : QStringLiteral("The agent worker exited."),
+                       QStringLiteral("Restart agent"), [this] { hideBanner(); startWorker(); });
         });
         connect(&m_worker, &QProcess::started, this, [this] {
             for (const auto &line : std::as_const(m_workerPending)) m_worker.write(line);
             m_workerPending.clear();
         });
-        m_worker.setProgram(m_python);
-        m_worker.setArguments({QStringLiteral("-S"), QStringLiteral("-u"), m_data + QStringLiteral("/backend/worker.py")});
-        m_worker.start();
     }
 
     void startTerminal(bool cleanShell) {
@@ -692,16 +788,48 @@ private:
         m_terminalHost->layout()->addWidget(m_terminal);
         connect(m_part.data(), &QObject::destroyed, this, [this] {
             m_iface = nullptr; m_terminal = nullptr; m_shellReady = false;
-            // Like other terminals, a pane closes when its shell exits.
-            if (!m_closing && onShellExited) QTimer::singleShot(0, this, [this] { if (onShellExited) onShellExited(); });
+            if (m_closing || m_restarting) return;
+            // A shell stopped for memory (its scope's limit or systemd-oomd) keeps the pane open
+            // with a restart banner. Any other exit closes the pane, like other terminals.
+            const bool oom = isolation::takeResult(m_shellUnit) == QStringLiteral("oom-kill");
+            if (oom) {
+                showBanner(QStringLiteral("This pane's shell was stopped because it ran out of memory (limit %1).")
+                               .arg(isolation::memory("isolation/shell_memory_max", "8G")),
+                           QStringLiteral("Restart shell"), [this] { restartShell(); });
+                return;
+            }
+            if (onShellExited) QTimer::singleShot(0, this, [this] { if (onShellExited) onShellExited(); });
         });
         // The part has loaded Relay's profile; the shell should see the user's own XDG paths.
         relay::theme::restoreXdgEnvironment();
         // Konsole starts new sessions in its own default directory, so the Bash integration
         // changes to this pane's directory after loading the user's configuration.
         qputenv("RELAY_START_DIR", m_cwd.toUtf8());
-        m_iface->startProgram(QStringLiteral("/bin/bash"), {QStringLiteral("/bin/bash"), QStringLiteral("--noprofile"),
-            QStringLiteral("--rcfile"), m_data + QStringLiteral("/shell/integration.bash"), QStringLiteral("-i")});
+        const QStringList shell{QStringLiteral("/bin/bash"), QStringLiteral("--noprofile"),
+            QStringLiteral("--rcfile"), m_data + QStringLiteral("/shell/integration.bash"), QStringLiteral("-i")};
+        m_shellUnit.clear();
+        if (isolation::enabled() && isolation::available()) {
+            // OOMPolicy=continue (default): when a command exceeds the limit, the kernel stops that
+            // command and the shell keeps running; Relay reports the kill from memory.events.
+            // isolation/shell_oom_policy=stop ends the whole pane shell instead (restart banner).
+            m_shellUnit = QStringLiteral("relay-pane-%1-shell-%2").arg(m_token.left(8)).arg(++m_shellGeneration);
+            const QString tool = QStandardPaths::findExecutable(QStringLiteral("systemd-run"));
+            m_iface->startProgram(tool, QStringList{tool} + isolation::wrap(m_shellUnit,
+                {QStringLiteral("MemoryMax=") + isolation::memory("isolation/shell_memory_max", "8G"),
+                 QStringLiteral("MemoryHigh=") + isolation::memory("isolation/shell_memory_high", "6G"),
+                 QStringLiteral("MemorySwapMax=") + isolation::memory("isolation/shell_swap_max", "2G"),
+                 // Interactive bash ignores SIGTERM; SIGHUP ends it (and its jobs) when the scope stops.
+                 QStringLiteral("KillSignal=SIGHUP"), QStringLiteral("TimeoutStopSec=5"),
+                 QStringLiteral("OOMPolicy=") + (QSettings().value(QStringLiteral("isolation/shell_oom_policy")).toString() == QStringLiteral("stop")
+                                                     ? QStringLiteral("stop") : QStringLiteral("continue"))}, shell));
+        } else {
+            if (isolation::enabled() && !s_isolationNoticeShown) {
+                s_isolationNoticeShown = true;
+                QTimer::singleShot(1500, this, [this] { status(QStringLiteral("Per-pane memory isolation is unavailable (no systemd user session); panes run unisolated.")); });
+            }
+            m_iface->startProgram(shell.first(), shell);
+        }
+        m_oomKills = -1;
     }
 
     void send(const QJsonObject &object) {
@@ -935,6 +1063,99 @@ private:
         return true;
     }
 
+    // A command in this pane's scope was killed for memory while the shell kept running.
+    void checkOomKills() {
+        if (!m_iface || m_shellStopped) return;
+        int pid = m_iface->terminalProcessId();
+        if (pid > 0) m_shellPid = pid;
+        // A shell killed by a signal leaves Konsole showing "Program crashed" instead of closing,
+        // and KonsolePart then reports no PID; use the last PID the shell itself reported.
+        if (m_shellPid > 0 && !QFileInfo::exists(QStringLiteral("/proc/%1").arg(m_shellPid))) { shellStopped(); return; }
+        pid = m_shellPid;
+        if (m_shellUnit.isEmpty()) return;
+        const long kills = isolation::oomKills(pid);
+        if (kills < 0) return;
+        if (m_oomKills >= 0 && kills > m_oomKills) {
+            showBanner(QStringLiteral("A command in this pane was stopped because it ran out of memory (limit %1). The shell is still running.")
+                           .arg(isolation::memory("isolation/shell_memory_max", "8G")),
+                       QString(), {});
+            notifyIfAway(QStringLiteral("Out of memory"), QStringLiteral("A command in %1 was stopped (limit %2).").arg(m_cwd, isolation::memory("isolation/shell_memory_max", "8G")));
+        }
+        m_oomKills = kills;
+    }
+
+    void shellStopped() {
+        m_shellStopped = true;
+        m_shellReady = false; m_promptReported = false; m_loading = false;
+        if (m_native) setNative(false, false);
+        const bool oom = isolation::takeResult(m_shellUnit) == QStringLiteral("oom-kill");
+        showBanner(oom ? QStringLiteral("This pane's shell was stopped because it ran out of memory (limit %1).")
+                             .arg(isolation::memory("isolation/shell_memory_max", "8G"))
+                       : QStringLiteral("This pane's shell was stopped."),
+                   QStringLiteral("Restart shell"), [this] { restartShell(); });
+        if (oom) notifyIfAway(QStringLiteral("Out of memory"), QStringLiteral("The shell in %1 was stopped.").arg(m_cwd));
+    }
+
+    void showBanner(const QString &text, const QString &actionLabel, std::function<void()> action) {
+        if (!m_banner) {
+            m_banner = new QFrame;
+            m_banner->setObjectName(QStringLiteral("paneBanner"));
+            m_banner->setAttribute(Qt::WA_StyledBackground);
+            auto *row = new QHBoxLayout(m_banner); row->setContentsMargins(12, 8, 8, 8); row->setSpacing(8);
+            m_bannerText = new QLabel; m_bannerText->setWordWrap(true); m_bannerText->setTextFormat(Qt::PlainText);
+            m_bannerText->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+            row->addWidget(m_bannerText, 1);
+            m_bannerAction = new QPushButton;
+            connect(m_bannerAction, &QPushButton::clicked, this, [this] { if (m_bannerCallback) { auto run = m_bannerCallback; run(); } });
+            row->addWidget(m_bannerAction);
+            auto *dismiss = new QToolButton; dismiss->setText(QStringLiteral("×")); dismiss->setAutoRaise(true);
+            connect(dismiss, &QToolButton::clicked, this, [this] { hideBanner(); });
+            row->addWidget(dismiss);
+            if (auto *box = qobject_cast<QVBoxLayout *>(layout())) box->insertWidget(1, m_banner);
+        }
+        m_bannerText->setText(text);
+        m_bannerCallback = std::move(action);
+        const QString shortcut = Keymap::instance().shortcutText(QStringLiteral("pane.restartShell"));
+        m_bannerAction->setText(shortcut.isEmpty() || actionLabel.isEmpty() ? actionLabel : actionLabel + QStringLiteral("  (") + shortcut + ')');
+        m_bannerAction->setVisible(!actionLabel.isEmpty());
+        m_banner->show();
+    }
+
+    void hideBanner() { if (m_banner) m_banner->hide(); m_bannerCallback = nullptr; }
+
+public:
+    // Ctrl+Shift+R: restart whatever stopped in this pane.
+    void restartStopped() {
+        if (m_bannerCallback && m_banner && m_banner->isVisible()) { auto run = m_bannerCallback; run(); return; }
+        if (!m_iface || m_shellStopped) { restartShell(); return; }
+        if (m_worker.state() == QProcess::NotRunning) { hideBanner(); startWorker(); return; }
+        status(QStringLiteral("The shell and agent in this pane are running."));
+    }
+
+    void restartShell() {
+        hideBanner();
+        if (m_iface && !m_shellStopped) return;
+        if (m_part) {
+            // Replace the part that still shows the stopped program; do not close the pane.
+            m_restarting = true;
+            delete m_part.data();
+            m_restarting = false;
+        }
+        m_iface = nullptr; m_terminal = nullptr; m_shellStopped = false; m_shellPid = 0;
+        m_shellReady = false; m_promptReported = false; m_loading = false; m_seenShell = false;
+        m_shellSequence.clear(); m_inlineOpen = false; m_atLineStart = true; m_autoHuman = false;
+        if (m_native) setNative(false, false);
+        try {
+            startTerminal(m_cleanShell);
+            relay::theme::polishWindow(this);
+            focusInput();
+            toast(QStringLiteral("Shell restarted"));
+        } catch (const std::exception &error) {
+            showBanner(QString::fromUtf8(error.what()), QStringLiteral("Try again"), [this] { restartShell(); });
+        }
+    }
+
+private:
     // Warp's rule: a password prompt turns echo off but keeps canonical (line) input. Full-screen
     // programs and Readline turn canonical input off, so they do not match.
     void checkPasswordPrompt() {
@@ -1382,6 +1603,7 @@ private:
         if (sequence.isEmpty() || sequence == m_shellSequence) return;
         m_shellSequence = sequence; m_seenShell = true;
         const QString stage = event.value(QStringLiteral("event")).toString();
+        if (const int reported = event.value(QStringLiteral("shell_pid")).toInt(); reported > 0) m_shellPid = reported;
         const QString newCwd = event.value(QStringLiteral("cwd")).toString(m_cwd);
         if (newCwd != m_cwd) { m_cwd = newCwd; updatePaths(); changed(); }
         if (stage == QStringLiteral("ready")) {
@@ -1583,6 +1805,16 @@ private:
     QList<QPair<QString, QString>> m_stored;
     QComboBox *m_modeBox = nullptr, *m_modelBox = nullptr;
     QLabel *m_toast = nullptr;
+    QFrame *m_banner = nullptr;
+    QLabel *m_bannerText = nullptr;
+    QPushButton *m_bannerAction = nullptr;
+    std::function<void()> m_bannerCallback;
+    QString m_shellUnit, m_agentUnit;
+    int m_shellGeneration = 0, m_agentGeneration = 0;
+    long m_oomKills = -1;
+    int m_shellPid = 0;
+    bool m_workerConnected = false, m_shellStopped = false, m_restarting = false;
+    static inline bool s_isolationNoticeShown = false;
     QFrame *m_composer = nullptr, *m_transcript = nullptr;
     QLabel *m_transcriptHeader = nullptr;
     QPlainTextEdit *m_transcriptView = nullptr;
@@ -1959,6 +2191,7 @@ private:
         }
         else if (!pane) return;
         else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
+        else if (id == QStringLiteral("pane.restartShell")) pane->restartStopped();
         else if (id == QStringLiteral("control.human")) pane->takeControl();
         else if (id == QStringLiteral("control.prompt")) pane->showPrompt();
         else if (id == QStringLiteral("input.toggle")) pane->toggleInputMode();

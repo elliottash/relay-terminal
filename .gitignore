@@ -12,3 +12,6 @@ __pycache__/
 # Editor swap files
 *.swp
 .*.swp
+
+# Agent worktrees
+/.claude/

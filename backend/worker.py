@@ -19,7 +19,29 @@ from relay_core.router import classify
 MAX_MESSAGE = 2 * 1024 * 1024
 
 
+OOM_SCORE_ADJ = 500
+
+
+def prefer_as_oom_victim(value: int = OOM_SCORE_ADJ) -> bool:
+    """Ask the kernel to kill this worker before the Relay window when memory runs out.
+
+    Raising oom_score_adj is unprivileged; lowering is not, so never lower an existing value.
+    """
+    path = "/proc/self/oom_score_adj"
+    try:
+        with open(path, "r", encoding="ascii") as handle:
+            current = int(handle.read().strip() or 0)
+        if current >= value:
+            return True
+        with open(path, "w", encoding="ascii") as handle:
+            handle.write(str(value))
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def main():
+    prefer_as_oom_victim()
     output_lock = threading.Lock()
 
     def emit(obj: dict):

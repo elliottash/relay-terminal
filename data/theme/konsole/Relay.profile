@@ -15,7 +15,8 @@ TerminalRows=30
 ShowTerminalSizeHint=false
 
 [Scrolling]
-HistoryMode=2
+HistoryMode=1
+HistorySize=20000
 ScrollBarPosition=2
 
 [Terminal Features]

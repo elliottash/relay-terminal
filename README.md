@@ -202,6 +202,25 @@ Password prompts always hand control to you.
 The agent cannot type into running programs yet; see
 `issues/features/2026-09-17-agent-delegate-and-take-over.md`.
 
+### Pane isolation
+
+Each pane's shell and agent worker run in their own systemd user scopes
+(`relay-pane-<id>-shell-N.scope`, `relay-pane-<id>-agent-N.scope`) with memory limits, so a runaway
+command is stopped inside its pane instead of taking down Relay or other panes. Pane processes also
+raise their `oom_score_adj` (shell 300, worker 500) so the kernel picks them before the window.
+
+- A command that exceeds the pane limit is stopped; the shell keeps running and the pane shows
+  "A command in this pane was stopped because it ran out of memory".
+- If the shell or worker itself is stopped, the pane stays open with **Restart shell** or
+  **Restart agent** (Ctrl+Shift+R).
+- Defaults: shell `MemoryMax=8G`, `MemoryHigh=6G`, `MemorySwapMax=2G`; worker `MemoryMax=2G`,
+  `MemorySwapMax=512M`. Change them in `~/.config/RelayTerminal/relay.conf` under `[isolation]`
+  (`shell_memory_max`, `shell_memory_high`, `shell_swap_max`, `agent_memory_max`, `agent_swap_max`,
+  `shell_oom_policy=continue|stop`, `enabled=false`). Values are systemd sizes such as `512M` or `infinity`.
+- Without a systemd user session (containers, WSL, non-systemd distros) panes run unisolated.
+- Scrollback is capped at 20,000 lines per pane (it was unlimited) so huge output cannot grow the
+  window's memory or temp files without bound. Older output beyond that is dropped.
+
 ### Files and folders
 
 - Click a pane's directory line, or run **Actions › Open folder in explorer**, to open a folder pane.

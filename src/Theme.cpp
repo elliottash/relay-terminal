@@ -152,6 +152,8 @@ QCheckBox::indicator:hover { border-color: @muted; }
 QCheckBox::indicator:checked { background: @accent; border-color: @accent; image: url(@icons/check.svg); }
 
 QSplitter::handle { background: @bg; }
+QFrame#paneBanner { background: @raised; border: 1px solid #b0603a; border-radius: 8px; }
+QFrame#paneBanner QLabel { color: @text; }
 QFrame#transcript { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
 QLabel#transcriptHeader { color: @muted; }
 QPlainTextEdit#transcriptView { background: transparent; border: none; }
