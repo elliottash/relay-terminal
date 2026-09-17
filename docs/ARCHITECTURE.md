@@ -316,12 +316,14 @@ Applies only to terminal mode (Ctrl+Shift+Enter, `/shell `, or the Terminal pick
 
 ## 8. Inline agent output
 
-There is no agent pane. KonsolePart has no API to write to the display, but each Konsole
-`Session` registers on D-Bus at `/Sessions/N`. In-process,
-`QDBusConnection::objectRegisteredAt()` returns that `QObject`. Relay finds the session whose
-child reports the shell PID through `processId()`, then invokes its
-`onReceiveBlock(const char*, int)` slot. Bytes go to the emulator like program output. They
-never reach the shell, its history or its input.
+There is no agent pane. Output goes through the pane's backend
+(`TerminalBackend::writeToDisplay`, capability `DisplayInjection`; section 16). Bytes reach
+the emulator like program output and never reach the shell, its history or its input. Relay's
+own engine writes them into its parser; KonsolePart has no API for it, but each Konsole
+`Session` registers on D-Bus at `/Sessions/N`, so in-process
+`QDBusConnection::objectRegisteredAt()` returns that `QObject`, and `src/KonsoleBackend.cpp`
+finds the session whose child reports the shell PID through `processId()` and invokes its
+`onReceiveBlock(const char*, int)` slot.
 
 `Pane::printInline`:
 
@@ -695,31 +697,51 @@ Version: `project(Relay VERSION …)` in `CMakeLists.txt` is passed to the app a
 the worker reports `relay_core.__version__`, which `tests/test_version.py` checks against CMake.
 Procedure: [RELEASING.md](RELEASING.md).
 
-## 16. Engine spike and `TerminalBackend`
+## 16. Terminal engines: `TerminalBackend`, KonsolePart and Relay's own engine
 
-`engine/` is built only with `-DRELAY_BUILD_ENGINE_SPIKE=ON` (default OFF) and is **not
-used by the app**.
+A pane never touches a terminal implementation directly. It holds a
+`relay::TerminalBackend *` (`engine/TerminalBackend.h`): process control, input, inline
+display writes, introspection (screen text, scrollback, alternate screen, title, cwd),
+geometry and focus, clipboard, scrolling, search, and callbacks for links, title, cwd,
+alternate screen, bell, OSC 133 prompt marks and exit. `capabilities()` says which of those
+are real, so the pane only offers what its engine supports.
 
-- `engine/Pty.h`, `PtyUnix.cpp`: `relay::Pty` over `forkpty`, non-blocking reads on the GUI
-  thread; the child resets signal dispositions and mask.
-- `engine/VTermWidget.{h,cpp}`: libvterm screen painted with `QPainter`, scrollback ring,
-  selection, bracketed paste, mouse reporting, OSC 8 links, Ctrl+click path detection.
-- `engine/TerminalBackend.h`: the engine-neutral interface. `VTermWidget` implements it.
-  Process (`startProgram`, `sendInput`, `sendText`, `shellPid`, `foregroundProcessId`),
-  introspection (`capabilities`, `screenText`, `scrollbackText`, `altScreen`, rows/columns),
-  geometry and focus, callbacks (`onLinkActivated`, `onPathActivated`, `onTitleChanged`,
-  `onFinished`). Capability flags: `ScreenText`, `Scrollback`, `AltScreenState`, `LinkClicks`,
-  `Osc8Links`.
-- `engine/main.cpp`: `relay-vterm-spike` test harness with a debug dump and `--bench`.
+| Implementation | File | Notes |
+|---|---|---|
+| `relay::KonsoleBackend` | `src/KonsoleBackend.{h,cpp}` | **Default.** KParts KonsolePart: `TerminalInterface`, the Session D-Bus object (`onReceiveBlock` for inline output, `primaryScreenInUse` for the alternate screen), the display's clipboard slots and the hidden scrollbar. Reports `AltScreenState`, `DisplayInjection`, `ScrollControl` (plus `ScreenText` on KF6) |
+| `relay::EngineBackend` | `src/EngineBackend.{h,cpp}` | Relay's own engine (`engine/`, [ENGINE.md](ENGINE.md)) — `relay::VTermBackend` plus Relay's font and colour scheme from `data/theme/konsole` and the copy-on-select setting. Reports every capability |
 
-No KonsolePart adapter exists yet; `src/main.cpp` still calls KonsolePart's `TerminalInterface`
-and the Session D-Bus object directly. Results and gaps: [ENGINE-SPIKE.md](ENGINE-SPIKE.md).
-Plan: [ROADMAP.md](ROADMAP.md).
+`src/TerminalBackends.{h,cpp}` holds the selection rules (unit-tested in
+`tests/backends_test.cpp`); `src/BackendFactory.cpp` is the only file that knows both
+implementations. The engine is chosen **per pane**, so both run side by side in one window:
+
+- `--engine=konsole|relay` (default `konsole`) and `--engine-core=ghostty|libvterm`
+- `RELAY_ENGINE` / `RELAY_ENGINE_CORE` when the flags are absent
+- the palette: "New pane (Relay engine)" and "New pane (Konsole engine)"
+- restored sessions keep each pane's engine (`"engine"` in the saved pane state)
+
+`engine/` is always built and linked into `relay` (`RELAY_HAVE_ENGINE`), and
+`relay-engine-tests` runs under `ctest`. `-DRELAY_BUILD_ENGINE=ON` adds the manual harness
+(`relay-vterm-spike`) and the benchmark. Without a libghostty-vt prefix the engine builds only
+the vendored libvterm core, which needs no Zig.
+
+### Shell integration: OSC 7 and OSC 133
+
+`shell/relay-integration.bash` (and `relay-integration.zsh`) emit OSC 7 for the working
+directory and OSC 133 A/B/C/D for prompt, command and output boundaries with the exit code.
+It is **opt-in**: source it from `~/.bashrc`, or turn on "Shell integration (OSC 7/133)" in
+the palette (`terminal/shell_integration`), which sets `RELAY_SHELL_INTEGRATION=1` for new
+panes so `shell/integration.bash` sources it last. Engine panes turn those marks into cwd
+tracking and the palette's "Jump to previous/next prompt"; KonsolePart ignores them.
+
+Status and the remaining parity gaps: [ENGINE.md](ENGINE.md) and
+`issues/features/needs_qa_llm/2026-09-17-engine-integration.md`.
 
 ## 17. Fragile dependencies and limits
 
-Relay relies on KonsolePart internals that are not a public API. All were exercised on
-Konsole 23.08 / KF5 only:
+Relay relies on KonsolePart internals that are not a public API (all in
+`src/KonsoleBackend.cpp`, and all exercised on Konsole 23.08 / KF5 only). Panes running
+Relay's own engine do not use any of them:
 
 | Dependency | Used for |
 |---|---|
@@ -754,7 +776,10 @@ Other limits:
 | `backend/worker.py` | worker protocol loop |
 | `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills` |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
-| `engine/` | libvterm spike, `TerminalBackend.h` |
+| `src/KonsoleBackend.*`, `src/EngineBackend.*` | the two `TerminalBackend` implementations |
+| `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |
+| `shell/relay-integration.bash`, `.zsh` | opt-in OSC 7 / OSC 133 marks |
+| `engine/` | Relay's terminal engine: cores, PTY, session, view, `TerminalBackend.h` |
 | `data/` | theme, Konsole profile, icons |
 | `packaging/`, `.github/workflows/`, `site/` | packages, CI, release, website |
 | `tests/` | Python backend and PTY tests, Qt editor and file pane tests |

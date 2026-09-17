@@ -3,7 +3,11 @@
 Relay's own terminal engine (owner decision: no Konsole fork; KonsolePart stays the Linux default
 until parity). Long-term targets: Linux, macOS, Windows. Status on 2026-09-17: a reusable library
 with two emulator cores, a threaded PTY, a QPainter view, `TerminalBackend` implemented, 97 passing
-test-case runs in `relay-engine-tests` (both cores), and GUI checks with vim, less, htop and tmux. **Not wired into `src/main.cpp` yet.**
+test-case runs in `relay-engine-tests` (both cores), and GUI checks with vim, less, htop and tmux.
+**Wired into the app behind a per-pane flag**: `--engine=relay`, `RELAY_ENGINE=relay` or the palette's
+"New pane (Relay engine)"; KonsolePart remains the default. See
+[ARCHITECTURE.md](ARCHITECTURE.md) section 16, `src/EngineBackend.*` and the remaining gaps in
+`issues/features/needs_qa_llm/2026-09-17-engine-integration.md`.
 
 Performance: [ENGINE-PERF.md](ENGINE-PERF.md). Evidence:
 [qa_evidence/2026-09-17-engine-phase1/](qa_evidence/2026-09-17-engine-phase1/) (this phase) and
@@ -11,9 +15,9 @@ Performance: [ENGINE-PERF.md](ENGINE-PERF.md). Evidence:
 
 ## Build
 
-`engine/` is only built with `-DRELAY_BUILD_ENGINE=ON` (default **OFF**; the old
-`RELAY_BUILD_ENGINE_SPIKE` still works as an alias). The default configure of the app does not
-reference it.
+`engine/` is always built and linked into `relay` (which defines `RELAY_HAVE_ENGINE`), and
+`relay-engine-tests` runs in the app's `ctest`. `-DRELAY_BUILD_ENGINE=ON` (default **OFF**; the old
+`RELAY_BUILD_ENGINE_SPIKE` still works as an alias) adds the manual harness and the benchmark.
 
 ```sh
 # Optional, recommended core: libghostty-vt (needs git, network, Zig 0.16.x)
@@ -49,7 +53,7 @@ Sanitizers (2026-09-17): the suite is clean under ASan+UBSan (Debug; the libvter
 ## Architecture
 
 ```
-            host (src/main.cpp, later)            engine/
+            host (src/EngineBackend)               engine/
   ┌──────────────────────────────────┐
   │ TerminalBackend (engine-neutral) │  TerminalBackend.h
   └───────────────┬──────────────────┘
@@ -81,7 +85,7 @@ Sanitizers (2026-09-17): the suite is clean under ASan+UBSan (Debug; the libvter
 | PTY | `pty/Pty.h`, `pty/PtyUnix.cpp`, `pty/PtyWin.cpp` | `forkpty` with a prepared `execve` environment, reset signal dispositions and mask, `close_range`; one I/O thread polling the master and a wake pipe; bounded read bursts; non-blocking queued writes; resize (`TIOCSWINSZ` with pixel size); `tcgetpgrp` foreground group; SIGHUP + background reaper. macOS path uses `select`. Windows: ConPTY stub with the implementation plan |
 | Session | `session/TerminalSession.{h,cpp}` | Owns core + pty. Parses on the pty thread under one mutex; the GUI thread gets the lock first (`GuiLock` + yield). Core events are queued and emitted as Qt signals on the GUI thread, coalesced per event-loop pass (one bell, the latest title and cwd per pass; at most 4 096 queued events, so `cat` of a binary cannot stall the GUI). `writeToDisplay()` (inline agent output), `sendInput()`, `withCore(f)` for locked access, `output()` signal (opt-in) |
 | View | `view/TerminalView.{h,cpp}`, `view/KeyMapper.*`, `view/BoxDrawing.*`, `view/ColorScheme.h` | Frame snapshot per repaint (4 ms after a change, ~30 fps during floods), glyph runs with `QRawFont`, explicit colour-emoji font, pixel box drawing/blocks, cursor shapes and blink, underline styles, selection gestures (click/double/triple, Alt = rectangle, drag auto-scroll, PRIMARY on select), Ctrl+click and hover for OSC 8/URLs/`path:line:col`, mouse reporting and alternate scroll, IME (preedit, `inputMethodQuery`), search bar, zoom, context menu, `QAccessibleTextInterface`, host shortcut filter |
-| Backend | `backend/VTermBackend.{h,cpp}`, `TerminalBackend.h` | The API `src/main.cpp` will use (see below) |
+| Backend | `backend/VTermBackend.{h,cpp}`, `TerminalBackend.h` | The API `src/main.cpp` uses, through `src/EngineBackend` (see below) |
 
 ### Threading
 
@@ -186,11 +190,13 @@ GUI scenario (`engine/scripts/gui/scenarios.sh`).
 
 ## Remaining work
 
-### Before switching a Relay pane to the engine (Linux)
+### Before making the engine the Linux default
 
-1. KonsolePart adapter + `--engine=vterm` switch (plan below).
-2. Shell integration: emit OSC 7 and OSC 133 A/B/C/D from `shell/integration.bash` so
-   `onPromptMark` drives waiting-for-input and command blocks.
+1. ~~KonsolePart adapter + `--engine` switch~~ — done: `src/KonsoleBackend`, `src/EngineBackend`,
+   `src/TerminalBackends` (per-pane, default KonsolePart).
+2. ~~Shell integration: emit OSC 7 and OSC 133 A/B/C/D~~ — done, opt-in:
+   `shell/relay-integration.bash` / `.zsh`. Driving waiting-for-input and command blocks from
+   `onPromptMark` (instead of Relay's `/proc` polling and Bash bridge) is still open.
 3. IME with fcitx5 and ibus on X11 and Wayland; accessibility with Orca.
 4. Theme: map `data/theme` to `ColorScheme`; font from Relay settings.
 5. Packaging: CI step for Zig 0.16 + `build-libghostty-vt.sh` (cache by commit), or ship with the
@@ -215,7 +221,7 @@ GUI scenario (`engine/scripts/gui/scenarios.sh`).
 - AltGr handling (Ctrl+Alt with printable text, covered by `KeyMapper`), Segoe UI Emoji,
   DirectWrite font fallback, cwd via OSC 7 only.
 
-## Integration plan for `src/main.cpp`
+## Integration into `src/main.cpp` (done 2026-09-17, steps 1-3)
 
 1. **Adapter, no behaviour change.** Add `src/KonsoleBackend.{h,cpp}` implementing
    `relay::TerminalBackend` with today's calls: `TerminalInterface::sendInput`,
@@ -223,10 +229,10 @@ GUI scenario (`engine/scripts/gui/scenarios.sh`).
    hidden scrollbar for `scrollLines/Pages`, `copyToClipboard`/`pasteFromClipboard` slots, the
    profile keys for fonts/history. `Pane` holds a `std::unique_ptr<TerminalBackend>` and never
    touches KonsolePart directly.
-2. **Build switch.** When `RELAY_BUILD_ENGINE=ON`, link `relay-terminal-engine` into `relay` and
-   define `RELAY_HAVE_ENGINE`. A runtime flag `--engine=vterm` (or `RELAY_ENGINE=vterm`; optional
-   `--engine-core=ghostty|libvterm`) creates `VTermBackend` per pane; default stays KonsolePart on
-   Linux.
+2. **Build switch.** `relay-terminal-engine` is always linked into `relay`, which defines
+   `RELAY_HAVE_ENGINE`. `--engine=relay` (or `RELAY_ENGINE=relay`; optional
+   `--engine-core=ghostty|libvterm`) creates `EngineBackend` per pane; default stays KonsolePart
+   on Linux. `--engine=vterm` is accepted as an alias.
 3. **Map Relay features onto the richer API** (only when `capabilities()` has the bit):
    `printInline` -> `writeToDisplay`; `closeInline` -> `redrawPrompt`; hide the composer on
    `onAltScreenChanged(true)` (intake item 9) instead of the full-screen process list;
@@ -234,10 +240,10 @@ GUI scenario (`engine/scripts/gui/scenarios.sh`).
    file panes at `line:column`; `screenText`/`scrollbackText` into agent context;
    composer PageUp/PageDown -> `scrollPages`; Relay's global shortcuts through
    `TerminalView::setShortcutFilter` (replaces `overrideShortcut`).
-4. **Gate.** `relay-engine-tests`, `engine/scripts/gui/scenarios.sh` and the perf/interrupt
-   scripts with `--engine=vterm` inside Relay, plus Relay's own backend-and-bash tests. Then make
-   the engine the default where there is no KonsolePart (macOS, Windows builds) and flip Linux when
-   the "Before switching" list is done.
+4. **Gate (open).** `relay-engine-tests`, `engine/scripts/gui/scenarios.sh` and the
+   perf/interrupt scripts with `--engine=relay` inside Relay, plus Relay's own backend-and-bash
+   tests. Then make the engine the default where there is no KonsolePart (macOS, Windows builds)
+   and flip Linux when the "Before making the engine the Linux default" list is done.
 
 ## History: the spike (2026-09-17 morning)
 

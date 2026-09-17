@@ -89,13 +89,18 @@ and colour-scheme UI, silence/activity monitoring, macOS/Windows), the *integrat
     (`systemd-run`) with the engine, and the OOM/restart banner path for an engine pane.
 11. **Zsh integration file is untested** — no zsh on the implementer's machine. The Bash one is
     verified end to end.
+12. **Prompt jump lands near, not on, the prompt line.** With the libvterm core, "Jump to
+    previous prompt" scrolled into the scrollback but not to the marked row. The marks
+    themselves arrive (verified over a PTY); the row the engine records for a mark while
+    Relay stages a command with Ctrl+X Ctrl+R needs a closer look.
 
 ## Implementer check (not a QA verdict)
 
 Build: `cmake --build build` clean, no new warnings (Qt5/KF5, `RELAY_QT_MAJOR=AUTO`).
-`./scripts/test.sh` 273 tests OK. `ctest --test-dir build` 8/8 including the new `backends`
-test and `relay-engine-tests`. The engine also still builds standalone
-(`-DRELAY_BUILD_APP=OFF -DRELAY_BUILD_ENGINE=ON`).
+`./scripts/test.sh` OK (274 tests at the time of writing). `ctest --test-dir build` all green,
+including the new `backends` test and `relay-engine-tests`. The engine also still builds
+standalone (`-DRELAY_BUILD_APP=OFF -DRELAY_BUILD_ENGINE=ON`) and under Qt6
+(`-DRELAY_QT_MAJOR=6 -DRELAY_BUILD_APP=OFF`), with no new warnings.
 
 OSC emission over a real PTY through Relay's own rcfile with `RELAY_SHELL_INTEGRATION=1`:
 `133;A`, `133;B`, `133;C`, `133;D;0`, `133;D;1`, `7;file://<host>/tmp` — correct, and
@@ -114,7 +119,7 @@ Live run under Xvfb (`docs/qa_evidence/2026-09-17-engine-integration/drive.sh`, 
 | 09 | mouse selection in the engine pane + Ctrl+C → "9 characters copied" |
 | 10 | inline agent output ("New agent conversation") written into the engine terminal, prompt redrawn |
 | 11 | palette "Clear terminal" on the engine pane |
-| 12 | palette "Jump to previous prompt" moved the viewport into the scrollback |
+| 12 | palette "Jump to previous prompt" moved the viewport into the scrollback (it reported no failure, so a mark was found; it did not land exactly on the prompt line — see gap 12) |
 | 13-14 | the Konsole pane still runs commands normally with the shell integration on |
 
 ## QA checklist

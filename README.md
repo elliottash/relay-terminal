@@ -2,9 +2,10 @@
 
 A Linux terminal with a rich prompt and bring-your-own-key agents.
 
-Relay embeds Konsole's real terminal (KonsolePart). Under it sits a normal text editor.
-Type a shell command and it runs in the terminal. Type a request in plain language and an
-agent, using your own API key, answers inline in the same terminal.
+Relay embeds Konsole's real terminal (KonsolePart) by default, and ships its own terminal
+engine as an option you can pick per pane. Under it sits a normal text editor. Type a shell
+command and it runs in the terminal. Type a request in plain language and an agent, using
+your own API key, answers inline in the same terminal.
 
 **Status: Linux beta in preparation.** The app runs on Ubuntu 24.04 (Qt5/KF5) and builds for
 Qt6/KF6. It has not had independent QA yet. See [docs/VALIDATION.md](docs/VALIDATION.md).
@@ -94,6 +95,15 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
   tests pass"), the label shows the local guess and asks the agent's model in the background
   ("AGENT · guessed: … (82%)"); Enter uses the model's answer if it arrives within 400 ms,
   otherwise the local guess. Typing is never blocked.
+- **Two terminal engines, per pane.** KonsolePart is the default. Relay's own engine
+  (`docs/ENGINE.md`) is built in: start with `--engine=relay` (or `RELAY_ENGINE=relay`), or
+  use the palette's "New pane (Relay engine)" to run both side by side in one window. The
+  engine adds screen and scrollback text for the agent, alternate-screen detection, OSC 8
+  links, search and prompt marks; `--engine-core=ghostty|libvterm` picks its emulator core.
+- **Shell integration (opt-in).** `source /usr/share/relay/shell/relay-integration.bash` in
+  `~/.bashrc` (or the palette's "Shell integration (OSC 7/133)") emits OSC 7 and OSC 133, so
+  engine panes track the working directory and can jump between prompts. A Zsh version ships
+  beside it.
 - **Fix loop.** In terminal mode, an invalid command or a non-zero exit asks the agent for a
   fix, which Relay runs in your terminal. Up to 3 attempts; Ctrl+C stops it.
 - **Inline agent output.** Prompts, answers, tool calls, command output and diffs print in the
