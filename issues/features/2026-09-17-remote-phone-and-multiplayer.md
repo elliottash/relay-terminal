@@ -15,5 +15,5 @@ Research and design in progress: `docs/REMOTE-AND-MULTIPLAYER-DESIGN.md` (pendin
 ## Known constraints
 
 - Depends on Relay's own engine (`docs/ENGINE.md`): KonsolePart cannot serialize screen state.
-- Touches the "no Relay account or cloud service" decision (`docs/ROADMAP.md`): reachability from a phone may need P2P with signaling, the user's tailnet, or an optional end-to-end encrypted relay; push notifications on iOS need a server.
+- Owner (2026-09-17): "the no account / cloud / etc are not strict constraints. ideally it could be done in a browser on relay-terminal.ai as a first version, later on we make android / phone apps." A Relay-operated service and accounts are acceptable; v1 is a browser client on relay-terminal.ai, native apps later. Content should stay end-to-end encrypted.
 - Agent tools run without approval today; remote-originated prompts need a security review.

@@ -33,6 +33,9 @@ milestone; four of six items depend on its integration.
 
 ## Decisions already made
 
+> Update 2026-09-17: "no account" and "no Relay cloud service" are preferences, not strict constraints (owner). Remote access v1 is planned as a browser client on relay-terminal.ai backed by a Relay-operated, end-to-end encrypted relay; native phone apps later.
+
+
 | Decision | Consequence | Source |
 |---|---|---|
 | **No Konsole fork.** Relay embeds the installed KonsolePart and does not patch it. | Features KonsolePart withholds (screen text, click signals, alternate-screen state) wait for the owned engine | [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section A, recommendation "hybrid 3a" |
