@@ -142,6 +142,7 @@ QSpinBox::down-arrow { image: url(@icons/chevron-down.svg); width: 10px; height:
 
 QDialog QPlainTextEdit { min-height: 64px; font-family: "@mono"; }
 QFrame#composer { background: @surface; border: 1px solid @border; border-radius: 10px; }
+QFrame#composer[relayActive="true"] { background: @raised; border: 1px solid @accentBorder; }
 QPlainTextEdit#composerEditor { background: transparent; border: none; padding: 2px 4px; font-family: "@mono"; font-size: 11pt; }
 QPlainTextEdit#agentLog { background: @bg; border: none; font-family: "@mono"; font-size: 10pt; padding: 8px 4px; }
 QWidget#agentPanel { background: @bg; border-left: 1px solid @border; }
@@ -189,8 +190,8 @@ QTreeWidget#paletteList::item { padding: 6px 4px; color: @text; }
 QTreeWidget#paletteList::item:selected { background: @raised; color: @text; }
 QToolButton#interruptButton { border: 1px solid @border; border-radius: 6px; padding: 4px; background: transparent; }
 QToolButton#interruptButton:hover { border-color: @accent; }
-QWidget#pane { background: @bg; border: 1px solid @border; border-radius: 6px; }
-QWidget#pane[relayActive="true"] { border: 1px solid @accent; }
+QWidget#pane { background: @bg; border: 1px solid @border; border-radius: 8px; }
+QWidget#pane[relayActive="true"] { border: 1px solid @borderStrong; }
 /* Pane button row, drop zones, tab bar controls */
 QFrame#helpCard { background: @raised; border: 1px solid @border; border-radius: 8px; }
 QLabel#keyCap { background: @surface; border: 1px solid @border; border-radius: 4px; padding: 1px 6px; color: @text; font-size: 11px; min-width: 14px; }
@@ -247,8 +248,7 @@ QToolButton#notificationDismiss:hover { color: @text; }
 QToolButton#popupTextButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 2px 8px; font-size: 9pt; }
 QToolButton#popupTextButton:hover { color: @text; border-color: @border; background: @raised; }
 QToolButton#popupTextButton:disabled { color: @disabled; }
-QToolButton#newTabButton { color: @muted; border: 1px solid transparent; border-radius: 6px; font-size: 12pt; padding: 0; }
-QToolButton#newTabButton:hover { color: @text; border-color: @border; background: @raised; }
+QToolButton#newTabButton, QToolButton#tabCloseButton { background: transparent; border: none; padding: 0; }
 QToolButton#tabDetachButton { color: @muted; border: none; background: transparent; padding: 0; }
 QToolButton#tabDetachButton:hover { color: @accent; }
 /* Composer prefix chip (! terminal, * agent) */
@@ -287,9 +287,15 @@ QMenu::item { padding: 5px 18px; border-radius: 4px; }
 QMenu::item:selected { background: @accentSoft; }
 QMenu::separator { height: 1px; background: @border; margin: 4px 6px; }
 
-QTabWidget::pane { border: 1px solid @border; }
-QTabBar::tab { background: @bg; color: @muted; padding: 6px 12px; border: none; }
-QTabBar::tab:selected { color: @text; border-bottom: 2px solid @accent; }
+/* The tab row is the title bar, so it carries no frame of its own: the pane below draws
+   its own outline, and QTabWidget would otherwise trace a box around the corner widgets. */
+QTabWidget::pane { border: none; }
+QTabBar { background: @bg; }
+QTabBar::tab { background: transparent; color: @muted; padding: 5px 8px; margin: 3px 1px 0 1px;
+               border: none; border-bottom: 2px solid transparent;
+               border-top-left-radius: 6px; border-top-right-radius: 6px; }
+QTabBar::tab:hover { color: @text; background: @surface; }
+QTabBar::tab:selected { color: @text; background: @surface; border-bottom: 2px solid @accent; }
 
 /* File panes */
 QWidget#fileExplorer, QWidget#filePreview { background: @bg; }
@@ -318,7 +324,8 @@ QToolButton#fileExplorerHidden:checked { color: @accent; border-color: @accentBo
         {QStringLiteral("@accentBorder"), rgba(accentBorder)}, {QStringLiteral("@accentHover"), hex(Accent.lighter(115))},
         {QStringLiteral("@accent"), hex(Accent)}, {QStringLiteral("@selection"), hex(Accent.darker(200))},
         {QStringLiteral("@surface"), hex(Surface)}, {QStringLiteral("@raised"), hex(SurfaceRaised)},
-        {QStringLiteral("@border"), hex(Border)}, {QStringLiteral("@muted"), hex(TextMuted)},
+        {QStringLiteral("@borderStrong"), hex(BorderStrong)}, {QStringLiteral("@border"), hex(Border)},
+        {QStringLiteral("@muted"), hex(TextMuted)},
         {QStringLiteral("@disabled"), hex(TextMuted.darker(150))}, {QStringLiteral("@text"), hex(Text)},
         {QStringLiteral("@bg"), hex(Background)}, {QStringLiteral("@mono"), mono},
         {QStringLiteral("@icons"), themeDataDir() + QStringLiteral("/icons")}};

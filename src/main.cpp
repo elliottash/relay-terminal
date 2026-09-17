@@ -3536,8 +3536,8 @@ private:
             if (m_rolesDialog) m_rolesDialog->setResolved(m_tierSummary, m_roleSummary);
             m_agentRole = event.value(QStringLiteral("agent_role")).toString(QStringLiteral("main"));
             onSessionConfigured(event);
-            status(QStringLiteral("Agent ready · ") + (m_agentRole == QStringLiteral("main") ? QString() : roleLabel(m_agentRole) + QStringLiteral(" · "))
-                   + event.value(QStringLiteral("model")).toString());
+            // No "Agent ready · <model>" here: the composer's own chips carry the model and the
+            // agent role, so announcing it again only filled the window with a permanent line.
             changed();
         } else if (type == QStringLiteral("presets")) {
             m_presets = event.value(QStringLiteral("presets")).toArray();
@@ -6317,8 +6317,10 @@ protected:
             const qreal radius = std::min(width(), height()) * 5.0 / kSize;
             painter.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), radius, radius);
         }
+        // A dimmed button keeps its space in the layout but shows nothing, so a row of tabs is
+        // not a row of crosses; pointing at the tab (or selecting it) brings the cross back.
+        if (m_dim && !hovered) return;
         QColor ink = hovered ? (closing ? QColor(Qt::white) : relay::theme::Text) : relay::theme::TextMuted;
-        if (m_dim && !hovered) ink = relay::theme::TextMuted.darker(135);
         if (!isEnabled()) ink = relay::theme::TextMuted.darker(150);
         // Every glyph is drawn for a 26 px button and scaled from there, so a smaller button
         // (the tab's close cross) keeps the same proportions and the same apparent weight.
@@ -6409,7 +6411,7 @@ private:
     }
 
 public:
-    // The tab's cross sits at half strength until the tab is hovered or current.
+    // The tab's cross stays hidden until the tab is hovered or current.
     void setDim(bool dim) { if (m_dim == dim) return; m_dim = dim; update(); }
 
 private:
@@ -6581,11 +6583,21 @@ public:
         resize(std::min(1320, available.width() * 9 / 10), std::min(860, available.height() * 9 / 10));
         // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+A).
         Keymap::instance().listen(this, [this] { syncToolbar(); syncChromeTooltips(); });
+        // The status bar stays out of the layout until something transient needs it, so the
+        // window has no permanent strip under the composer and the terminal never resizes for one.
+        statusBar()->setSizeGripEnabled(false);
+        statusBar()->hide();
+        connect(statusBar(), &QStatusBar::messageChanged, this, [this](const QString &text) {
+            statusBar()->setVisible(!text.isEmpty());
+        });
         m_tabs = new QTabWidget;
         m_tabs->setDocumentMode(true);
         m_tabs->setTabsClosable(false);
         m_tabs->setMovable(true);
         m_tabs->tabBar()->setExpanding(false);
+        // Fusion traces a base line along the free part of the tab row. In a title bar it
+        // reads as a stray rule hanging between the last tab and the window buttons.
+        m_tabs->tabBar()->setDrawBase(false);
         buildTabBarControls();
         buildWindowChrome();
         auto *central = new QWidget;
@@ -6600,7 +6612,7 @@ public:
         Keymap::instance().listen(this, [this] {
             for (Pane *pane : allPanes()) pane->sendKeybindings();
             const auto conflicts = Keymap::instance().conflicts();
-            statusBar()->showMessage(conflicts.isEmpty() ? QStringLiteral("Keyboard shortcuts reloaded.")
+            notice(conflicts.isEmpty() ? QStringLiteral("Keyboard shortcuts reloaded.")
                                                          : QStringLiteral("Keyboard shortcuts: ") + conflicts.join(QStringLiteral("; ")));
             if (m_sidebar->isVisible()) renderPalette();
         });
@@ -6723,7 +6735,7 @@ public:
     // explorer or preview in the same tab is reused, the way editors reuse a preview tab.
     void openPath(const QString &path, int line, QWidget *anchor) {
         const QFileInfo info(path);
-        if (!info.exists()) { statusBar()->showMessage(QStringLiteral("No such file or folder: ") + path); return; }
+        if (!info.exists()) { notice(QStringLiteral("No such file or folder: ") + path, 6000); return; }
         if (!anchor || !isLeaf(anchor) || anchor->window() != this) anchor = m_activeLeaf;
         if (!anchor) return;
         QWidget *page = pageOf(anchor);
@@ -6984,14 +6996,26 @@ private:
 
     void hint(const QString &id, const QString &text, int limit = 3) {
         if (text.isEmpty() || !relay::ShortcutHints::instance().shouldShow(id, limit)) return;
-        if (m_active) m_active->toast(text, 5000); else statusBar()->showMessage(text, 6000);
+        notice(text, 5000);
     }
+
+    // Transient feedback. The window has no status bar: a permanent line under the composer
+    // repeated what the composer's own chips already say. Messages ride on the active pane as a
+    // toast instead, and the bar only appears (briefly) when there is no pane to put one on.
+public:
+    void notice(const QString &text, int milliseconds = 5000) {
+        if (text.isEmpty()) return;
+        if (m_active) { m_active->toast(text, milliseconds); return; }
+        statusBar()->showMessage(text, milliseconds);
+        statusBar()->show();
+    }
+private:
 
     // Saved window layout: forget it and stop saving for the rest of this session, so the next
     // start opens one new window. The windows on screen are left alone.
     void startFreshWindowSet() {
         m_manager->forgetSavedLayout(true);
-        statusBar()->showMessage(QStringLiteral("Saved window layout cleared. This session is no longer saved; the next start opens one fresh window."), 9000);
+        notice(QStringLiteral("Saved window layout cleared. This session is no longer saved; the next start opens one fresh window."), 9000);
         const QString key = Keymap::instance().shortcutText(QStringLiteral("windows.fresh"));
         hint(QStringLiteral("windows.fresh.palette"),
              key.isEmpty() ? QStringLiteral("Next time: start Relay with --fresh to skip the saved layout once")
@@ -7036,7 +7060,7 @@ private:
             const QString editor = qEnvironmentVariable("VISUAL", qEnvironmentVariable("EDITOR", QStringLiteral("nano")));
             const QString quoted = QStringLiteral("'") + QString(Keymap::instance().path()).replace('\'', QStringLiteral("'\\''")) + '\'';
             if (!pane || !pane->runCommand(editor + ' ' + quoted))
-                statusBar()->showMessage(QStringLiteral("Shortcuts file: ") + Keymap::instance().path());
+                notice(QStringLiteral("Shortcuts file: ") + Keymap::instance().path());
         }
         else if (!pane) return;
         else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
@@ -7284,7 +7308,7 @@ private:
         general.rows << buttonRow(QStringLiteral("option:shortcut_hints_reset"), QStringLiteral("Reset shortcut hints"),
                                   QStringLiteral("Show every tip again"), QStringLiteral("Reset"), [this] {
             relay::ShortcutHints::instance().resetAll();
-            statusBar()->showMessage(QStringLiteral("Shortcut hints reset."), 4000);
+            notice(QStringLiteral("Shortcut hints reset."), 4000);
         });
         general.rows << toggleRow(QStringLiteral("recap/away"), QStringLiteral("Recap when you come back"),
                                   QStringLiteral("After 3+ minutes away while the agent worked"), true);
@@ -7301,7 +7325,7 @@ private:
             reopen.onToggle = [this](bool on) {
                 QSettings().setValue(QStringLiteral("windows/restore"), on);
                 if (on) m_manager->scheduleSave(); else m_manager->forgetSavedLayout(false);
-                statusBar()->showMessage(on ? QStringLiteral("Relay will reopen this window set on start.")
+                notice(on ? QStringLiteral("Relay will reopen this window set on start.")
                                            : QStringLiteral("Relay will open one new window on start."), 6000);
             };
             general.rows << reopen;
@@ -7827,7 +7851,7 @@ private:
                     jump.detail = QStringLiteral("Needs the shell integration (OSC 133)");
                     jump.run = [this, direction] {
                         if (m_active && !m_active->jumpToPrompt(direction))
-                            statusBar()->showMessage(QStringLiteral("No prompt mark in that direction. Enable the shell integration (OSC 7/133)."));
+                            notice(QStringLiteral("No prompt mark in that direction. Enable the shell integration (OSC 7/133)."));
                     };
                     items << jump;
                 }
@@ -7844,7 +7868,7 @@ private:
                                                                QStringLiteral("Find:"), QLineEdit::Normal, QString(), &ok);
                     if (!ok || text.isEmpty() || !m_active) return;
                     const int matches = m_active->findInTerminal(text, false);
-                    statusBar()->showMessage(matches > 0 ? QStringLiteral("%1 match(es) for \"%2\"").arg(matches).arg(text)
+                    notice(matches > 0 ? QStringLiteral("%1 match(es) for \"%2\"").arg(matches).arg(text)
                                                          : QStringLiteral("No match for \"%1\"").arg(text));
                 };
                 items << find;
@@ -7918,9 +7942,9 @@ private:
             open.aliases = QStringLiteral("log logs diagnostics debug troubleshoot relay.log worker.log");
             open.run = [this] {
                 const QString dir = relay::log::directory();
-                if (dir.isEmpty()) { statusBar()->showMessage(QStringLiteral("No writable data directory for logs."), 6000); return; }
+                if (dir.isEmpty()) { notice(QStringLiteral("No writable data directory for logs."), 6000); return; }
                 QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
-                statusBar()->showMessage(dir, 8000);
+                notice(dir, 8000);
             };
             items << open;
         }
@@ -8392,7 +8416,7 @@ private:
         pane->initRestore(spec);
         QPointer<Pane> guard(pane);
         // Callbacks find the pane's current window, so panes and tabs can move between windows.
-        pane->onStatus = [guard](const QString &text) { if (auto *w = windowOf(guard); w && guard == w->m_active) w->statusBar()->showMessage(text); };
+        pane->onStatus = [guard](const QString &text) { if (guard) guard->toast(text, 5000); };
         pane->onStateChanged = [guard] {
             auto *w = windowOf(guard);
             if (!w) return;
@@ -8495,7 +8519,7 @@ private:
             m_activeLeaf = leaf;
             leaf->setProperty("relayActive", true);
             for (int i = 0; i < m_tabs->count(); ++i)
-                for (QWidget *w : leavesIn(m_tabs->widget(i))) { w->style()->unpolish(w); w->style()->polish(w); }
+                for (QWidget *w : leavesIn(m_tabs->widget(i))) { repolishLeaf(w); }
         }
         QWidget *page = pageOf(leaf);
         if (auto *pane = dynamic_cast<Pane *>(leaf)) m_active = pane;
@@ -8506,6 +8530,18 @@ private:
         if (page) m_lastActive.insert(page, leaf);
         syncToolbar();
         updateTitles();
+    }
+
+    // The pane frame and its composer both follow "relayActive", so both have to be repolished.
+    static void repolishLeaf(QWidget *leaf) {
+        const bool active = leaf->property("relayActive").toBool();
+        QList<QWidget *> widgets{leaf};
+        for (auto *editor : leaf->findChildren<QPlainTextEdit *>(QStringLiteral("composerEditor")))
+            if (auto *frame = qobject_cast<QFrame *>(editor->parentWidget())) {
+                frame->setProperty("relayActive", active);
+                widgets.append(frame);
+            }
+        for (QWidget *w : widgets) { w->style()->unpolish(w); w->style()->polish(w); w->update(); }
     }
 
     static QString shortPath(const QString &path) {
@@ -8636,13 +8672,19 @@ private:
         auto *left = new QWidget;
         left->setObjectName(QStringLiteral("windowChromeLeft"));
         auto *leftRow = new QHBoxLayout(left);
-        leftRow->setContentsMargins(10, 0, 8, 0);
+        leftRow->setContentsMargins(12, 0, 10, 0);
         leftRow->setSpacing(0);
         auto *icon = new QLabel;
         icon->setObjectName(QStringLiteral("windowIcon"));
         const QIcon appIcon = QApplication::windowIcon();
         if (appIcon.isNull()) icon->setText(QStringLiteral("◈"));
-        else icon->setPixmap(appIcon.pixmap(18, 18));
+        else {
+            // QIcon::pixmap() ignores the screen's scale factor, so ask for the device pixels.
+            const qreal scale = qApp->devicePixelRatio();
+            QPixmap mark = appIcon.pixmap(QSize(18, 18) * scale);
+            mark.setDevicePixelRatio(scale);
+            icon->setPixmap(mark);
+        }
         icon->setToolTip(QStringLiteral("Relay"));
         icon->setAttribute(Qt::WA_TransparentForMouseEvents);   // the whole corner drags the window
         leftRow->addWidget(icon);
@@ -8858,7 +8900,7 @@ private:
 
             // Relay's own close cross. Qt's closable tabs take "window-close" from the icon
             // theme, which lands as a red disc next to the flat header glyphs.
-            auto *close = qobject_cast<ChromeButton *>(bar->tabButton(i, QTabBar::RightSide));
+            auto *close = dynamic_cast<ChromeButton *>(bar->tabButton(i, QTabBar::RightSide));
             if (!close) {
                 close = new ChromeButton(ChromeButton::Glyph::TabClose, bar, 18);
                 connect(close, &QToolButton::clicked, this, [this, close] {
@@ -9074,7 +9116,7 @@ private:
     void moveLeafToNewTab(QWidget *leaf) {
         QWidget *page = pageOf(leaf);
         if (!page) return;
-        if (leavesIn(page).size() <= 1) { statusBar()->showMessage(QStringLiteral("This pane is already the only pane in its tab."), 4000); return; }
+        if (leavesIn(page).size() <= 1) { notice(QStringLiteral("This pane is already the only pane in its tab."), 4000); return; }
         const int index = m_tabs->indexOf(page) + 1;
         if (!takeLeaf(leaf)) return;
         adoptLeafAsTab(leaf, index);
@@ -9083,7 +9125,7 @@ private:
     void moveTabToNewWindow(int index) {
         QWidget *page = m_tabs->widget(index);
         if (!page) return;
-        if (m_tabs->count() <= 1) { statusBar()->showMessage(QStringLiteral("This is the only tab in the window."), 4000); return; }
+        if (m_tabs->count() <= 1) { notice(QStringLiteral("This is the only tab in the window."), 4000); return; }
         QWidget *lastActive = m_lastActive.value(page);
         if (m_hoverLeaf && pageOf(m_hoverLeaf) == page) m_hoverLeaf = nullptr;
         if (m_wantedHoverLeaf && pageOf(m_wantedHoverLeaf) == page) m_wantedHoverLeaf = nullptr;
@@ -9110,7 +9152,7 @@ private:
         QWidget *page = current ? pageOf(current) : nullptr;
         if (!page) return;
         QWidget *neighbor = neighborOf(current, direction);
-        if (!neighbor) { statusBar()->showMessage(QStringLiteral("No pane in that direction."), 2500); return; }
+        if (!neighbor) { notice(QStringLiteral("No pane in that direction."), 2500); return; }
         const Qt::Orientation orientation = relay::panes::orientationFor(direction);
         const bool towardStart = relay::panes::towardStart(direction);
         auto *splitter = dynamic_cast<QSplitter *>(current->parentWidget());
@@ -9407,7 +9449,7 @@ void WindowManager::announceRestore() {
     if (m_restoreNote.isEmpty() || m_windows.isEmpty() || !m_windows.first()) return;
     QPointer<RelayWindow> window = m_windows.first();
     const QString note = m_restoreNote;
-    QTimer::singleShot(1200, &m_context, [window, note] { if (window) window->statusBar()->showMessage(note, 9000); });
+    QTimer::singleShot(1200, &m_context, [window, note] { if (window) window->notice(note, 9000); });
 }
 
 void WindowManager::forgetSavedLayout(bool suspend) {
@@ -9520,7 +9562,7 @@ void WindowManager::restore(RelayWindow *requester) {
             return;
         }
     }
-    if (requester) requester->statusBar()->showMessage(QStringLiteral("Nothing to restore."));
+    if (requester) requester->notice(QStringLiteral("Nothing to restore."));
 }
 
 // Konsole opens OSC 8 links through KIO, which launches the desktop's handler for the scheme.
@@ -9560,7 +9602,7 @@ static void registerUrlHandler() {
     if (!QSettings().value(QStringLiteral("url_handler/announced")).toBool()) {
         QSettings().setValue(QStringLiteral("url_handler/announced"), true);
         for (QWidget *widget : QApplication::topLevelWidgets())
-            if (auto *window = qobject_cast<QMainWindow *>(widget)) window->statusBar()->showMessage(QStringLiteral("Registered relay:// links so agent turn details open from the terminal."), 8000);
+            if (auto *window = dynamic_cast<RelayWindow *>(widget)) window->notice(QStringLiteral("Registered relay:// links so agent turn details open from the terminal."), 8000);
     }
 }
 

@@ -12,6 +12,9 @@ inline const QColor Background{0x0f, 0x11, 0x15};
 inline const QColor Surface{0x16, 0x18, 0x1d};
 inline const QColor SurfaceRaised{0x1c, 0x1f, 0x26};
 inline const QColor Border{0x2a, 0x2e, 0x37};
+// The focused pane's outline. Grey on purpose: the accent means "shell" in Relay's
+// visual language (the composer, prompt chips), so panes must not compete with it.
+inline const QColor BorderStrong{0x4a, 0x52, 0x60};
 inline const QColor Text{0xe6, 0xe8, 0xec};
 inline const QColor TextMuted{0x8b, 0x91, 0x9c};
 inline const QColor Accent{0x3e, 0xc5, 0xf0};
