@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from .keybindings import KeybindingCatalog
 from .provider import Cancelled
 
 MAX_FILE = 131072
@@ -102,8 +103,11 @@ class Workspace:
 
 
 class ToolExecutor:
-    def __init__(self, root: str, emit: Callable[[dict], None], cancel: threading.Event):
+    def __init__(self, root: str, emit: Callable[[dict], None], cancel: threading.Event,
+                 keybindings: KeybindingCatalog | None = None):
         self.workspace = Workspace(root)
+        # Replaced wholesale by the worker's "keybindings" message; read once per call.
+        self.keybindings = keybindings
         self.emit = emit
         self.cancel = cancel
         self._process: subprocess.Popen | None = None
@@ -125,10 +129,20 @@ class ToolExecutor:
             raise ValueError(f"{key} must be text of at most {maximum} bytes.")
         return value
 
+    def tools(self) -> list[dict]:
+        catalog = self.keybindings
+        return TOOLS + [catalog.tool_spec()] if catalog is not None else list(TOOLS)
+
     def prepare(self, name: str, arguments: dict) -> Prepared:
         if not isinstance(arguments, dict):
             raise ValueError("Tool arguments must be an object.")
         args = dict(arguments)
+        if name == "set_keybinding":
+            catalog = self.keybindings
+            if catalog is None:
+                raise ValueError("Unknown tool or unexpected argument.")
+            normalized, preview = catalog.prepare(args)
+            return Prepared(name, normalized, preview, catalog.path)
         allowed = {"run_command": {"command", "cwd", "timeout_seconds"},
                    "read_file": {"path"}, "list_directory": {"path"}, "write_file": {"path", "content"}}
         if name not in allowed or set(args) - allowed[name]:
@@ -167,6 +181,11 @@ class ToolExecutor:
         if self.cancel.is_set():
             raise Cancelled("Stopped.")
         name, args = prepared.name, prepared.arguments
+        if name == "set_keybinding":
+            catalog = self.keybindings
+            if catalog is None or args["action"] not in catalog.actions:
+                raise ValueError("Keybinding catalog changed; the action is no longer available.")
+            return catalog.apply(args)
         if name == "run_command":
             # Recheck paths at execution time.
             cwd = self.workspace.resolve(args.get("cwd", "."))

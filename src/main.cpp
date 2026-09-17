@@ -50,6 +50,10 @@
 #include <QTemporaryDir>
 #include <QTextCursor>
 #include <QTabWidget>
+#include <QFileSystemWatcher>
+#include <QKeySequence>
+#include <QListWidget>
+#include <QToolButton>
 #include <QTabBar>
 #include <QTimer>
 #include <QToolBar>
@@ -80,6 +84,202 @@ static QString dataRoot() {
     }
     throw std::runtime_error("Relay's backend and shell data files were not found.");
 }
+
+
+// ----- keyboard shortcuts ----------------------------------------------------------------------
+//
+// Every window-level shortcut is a named action. Defaults live here; overrides live in
+// ~/.config/RelayTerminal/relay/keybindings.json as {"version":1,"bindings":{"pane.close":["Ctrl+W"]},
+// "program_keys":"shift-only"}. The file reloads automatically, and the agent's set_keybinding
+// tool writes the same file.
+//
+// program_keys decides what happens while a program such as vim runs in the focused terminal:
+//   "shift-only" (default): only Ctrl+Shift shortcuts and F-keys act; everything else reaches the program
+//   "all": every shortcut acts, even inside programs
+//   "none": no shortcut acts while a program has focus
+struct ActionDef { QString id, description, category; QStringList defaults; };
+
+class Keymap {
+public:
+    static Keymap &instance() { static Keymap map; return map; }
+
+    const QList<ActionDef> &actions() const { return m_actions; }
+    QString path() const { return m_path; }
+    QString programKeys() const { return m_programKeys; }
+    QStringList keysFor(const QString &id) const { return m_bindings.value(id); }
+    QString shortcutText(const QString &id) const {
+        const auto keys = keysFor(id);
+        return keys.isEmpty() ? QString() : QKeySequence::fromString(keys.first(), QKeySequence::PortableText).toString(QKeySequence::NativeText);
+    }
+    QStringList conflicts() const { return m_conflicts; }
+
+    // Returns the action bound to a key event, or an empty string.
+    QString match(const QKeyEvent *event) const {
+        int key = event->key();
+        auto mods = event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
+        if (key == Qt::Key_Backtab) { key = Qt::Key_Tab; mods |= Qt::ShiftModifier; }
+        if (key == 0 || key == Qt::Key_unknown || key == Qt::Key_Control || key == Qt::Key_Shift || key == Qt::Key_Alt || key == Qt::Key_Meta) return {};
+        return m_lookup.value(combo(key, mods));
+    }
+
+    // True when a shortcut should act even though a program has keyboard focus.
+    bool actsInsidePrograms(const QKeyEvent *event) const {
+        if (m_programKeys == QStringLiteral("all")) return true;
+        if (m_programKeys == QStringLiteral("none")) return false;
+        const auto mods = event->modifiers();
+        const bool fkey = event->key() >= Qt::Key_F1 && event->key() <= Qt::Key_F35;
+        return fkey || ((mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier));
+    }
+
+    void setProgramKeys(const QString &mode) { writeSetting(QStringLiteral("program_keys"), mode); }
+
+    // Writes a complete, editable file when none exists yet.
+    void ensureFile() {
+        if (QFileInfo::exists(m_path)) return;
+        QJsonObject bindings;
+        for (const auto &action : m_actions) bindings.insert(action.id, QJsonArray::fromStringList(m_bindings.value(action.id)));
+        writeObject({{"version", 1}, {"program_keys", m_programKeys}, {"bindings", bindings}});
+    }
+
+    QJsonObject catalog() const {
+        QJsonArray actions;
+        for (const auto &action : m_actions)
+            actions.append(QJsonObject{{"id", action.id}, {"description", action.description},
+                                       {"keys", QJsonArray::fromStringList(m_bindings.value(action.id))}});
+        return {{"path", m_path}, {"actions", actions}};
+    }
+
+    void listen(QObject *context, std::function<void()> callback) { m_listeners.append({context, std::move(callback)}); }
+
+    void reload() {
+        m_bindings.clear();
+        for (const auto &action : m_actions) m_bindings.insert(action.id, action.defaults);
+        m_programKeys = QStringLiteral("shift-only");
+        QString problem;
+        QFile file(m_path);
+        if (file.exists()) {
+            if (file.open(QIODevice::ReadOnly) && file.size() < 1024 * 1024) {
+                QJsonParseError error;
+                const auto doc = QJsonDocument::fromJson(file.readAll(), &error);
+                if (error.error != QJsonParseError::NoError || !doc.isObject()) problem = QStringLiteral("keybindings.json is not valid JSON; using defaults.");
+                else {
+                    const auto root = doc.object();
+                    const QString mode = root.value(QStringLiteral("program_keys")).toString();
+                    if (mode == QStringLiteral("all") || mode == QStringLiteral("none") || mode == QStringLiteral("shift-only")) m_programKeys = mode;
+                    const auto bindings = root.value(QStringLiteral("bindings")).toObject();
+                    for (auto it = bindings.begin(); it != bindings.end(); ++it) {
+                        if (!m_bindings.contains(it.key())) continue;
+                        QStringList keys;
+                        for (const auto &value : it.value().toArray())
+                            if (!value.toString().trimmed().isEmpty()) keys << value.toString().trimmed();
+                        m_bindings.insert(it.key(), keys);
+                    }
+                }
+            } else problem = QStringLiteral("keybindings.json could not be read; using defaults.");
+        }
+        m_lookup.clear(); m_conflicts.clear();
+        for (const auto &action : m_actions) {
+            for (const auto &text : m_bindings.value(action.id)) {
+                const int code = parse(text);
+                if (!code) { m_conflicts << QStringLiteral("%1: unrecognized key \"%2\"").arg(action.id, text); continue; }
+                if (m_lookup.contains(code)) m_conflicts << QStringLiteral("%1 and %2 both use %3").arg(m_lookup.value(code), action.id, text);
+                else m_lookup.insert(code, action.id);
+            }
+        }
+        if (!problem.isEmpty()) m_conflicts.prepend(problem);
+        for (auto &listener : m_listeners) if (listener.first) listener.second();
+    }
+
+private:
+    Keymap() {
+        auto add = [this](const char *id, const char *category, const char *description, QStringList keys) {
+            m_actions.append({QString::fromLatin1(id), QString::fromUtf8(description), QString::fromLatin1(category), std::move(keys)});
+        };
+        add("window.new", "window", "New window", {QStringLiteral("Ctrl+N")});
+        add("window.next", "window", "Next Relay window", {QStringLiteral("Alt+Tab")});
+        add("window.previous", "window", "Previous Relay window", {QStringLiteral("Alt+Shift+Tab")});
+        add("tab.new", "tab", "New tab", {QStringLiteral("Ctrl+T")});
+        add("tab.next", "tab", "Next tab", {QStringLiteral("Ctrl+Tab")});
+        add("tab.previous", "tab", "Previous tab", {QStringLiteral("Ctrl+Shift+Tab")});
+        add("pane.splitRight", "pane", "New pane to the right", {QStringLiteral("Ctrl+P")});
+        add("pane.splitDown", "pane", "New pane below", {QStringLiteral("Ctrl+Shift+P")});
+        add("pane.focusLeft", "pane", "Focus pane to the left", {QStringLiteral("Alt+Left")});
+        add("pane.focusRight", "pane", "Focus pane to the right", {QStringLiteral("Alt+Right")});
+        add("pane.focusUp", "pane", "Focus pane above", {QStringLiteral("Alt+Up")});
+        add("pane.focusDown", "pane", "Focus pane below", {QStringLiteral("Alt+Down")});
+        add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W")});
+        add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+W")});
+        add("palette.agent", "palette", "Open agent options", {QStringLiteral("Ctrl+Shift+A")});
+        add("palette.terminal", "palette", "Open terminal options", {QStringLiteral("Ctrl+Shift+T")});
+        add("terminal.native", "terminal", "Toggle native terminal input", {QStringLiteral("F12")});
+        add("terminal.interrupt", "terminal", "Interrupt the running command (Ctrl+C)", {});
+        add("agent.newChat", "agent", "Start a new agent conversation", {});
+        add("agent.stop", "agent", "Stop the agent turn", {});
+        add("agent.provider", "agent", "Provider and API keys", {});
+        add("input.modeAuto", "agent", "Input mode: auto detect", {});
+        add("input.modeTerminal", "agent", "Input mode: terminal", {});
+        add("input.modeAgent", "agent", "Input mode: agent", {});
+        add("keybindings.edit", "terminal", "Edit keyboard shortcuts", {});
+        add("keybindings.reload", "terminal", "Reload keyboard shortcuts", {});
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+        m_path = dir + QStringLiteral("/keybindings.json");
+        QDir().mkpath(dir);
+        // Watch the directory too: atomic replacement swaps the file out from under a file watch.
+        m_watcher.addPath(dir);
+        if (QFileInfo::exists(m_path)) m_watcher.addPath(m_path);
+        auto onChange = [this] {
+            if (QFileInfo::exists(m_path) && !m_watcher.files().contains(m_path)) m_watcher.addPath(m_path);
+            QTimer::singleShot(100, [this] { reload(); });
+        };
+        QObject::connect(&m_watcher, &QFileSystemWatcher::fileChanged, onChange);
+        QObject::connect(&m_watcher, &QFileSystemWatcher::directoryChanged, onChange);
+        reload();
+    }
+
+    static int combo(int key, Qt::KeyboardModifiers mods) { return int(mods) | key; }
+
+    static int parse(const QString &text) {
+        const QKeySequence sequence = QKeySequence::fromString(text, QKeySequence::PortableText);
+        if (sequence.count() != 1) return 0;
+#if QT_VERSION_MAJOR >= 6
+        int key = sequence[0].key(); Qt::KeyboardModifiers mods = sequence[0].keyboardModifiers();
+#else
+        int key = sequence[0] & ~int(Qt::KeyboardModifierMask); Qt::KeyboardModifiers mods(sequence[0] & int(Qt::KeyboardModifierMask));
+#endif
+        if (key == Qt::Key_Backtab) { key = Qt::Key_Tab; mods |= Qt::ShiftModifier; }
+        if (key == 0 || key == Qt::Key_unknown) return 0;
+        return combo(key, mods);
+    }
+
+    void writeSetting(const QString &name, const QString &value) {
+        QJsonObject root;
+        QFile file(m_path);
+        if (file.open(QIODevice::ReadOnly)) {
+            const auto doc = QJsonDocument::fromJson(file.readAll());
+            if (doc.isObject()) root = doc.object();
+            file.close();
+        }
+        if (!root.contains(QStringLiteral("version"))) root.insert(QStringLiteral("version"), 1);
+        root.insert(name, value);
+        writeObject(root);
+    }
+
+    void writeObject(const QJsonObject &root) {
+        QSaveFile out(m_path);
+        if (!out.open(QIODevice::WriteOnly)) return;
+        out.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+        if (out.commit()) QFile::setPermissions(m_path, QFile::ReadOwner | QFile::WriteOwner);
+        reload();
+    }
+
+    QList<ActionDef> m_actions;
+    QHash<QString, QStringList> m_bindings;
+    QHash<int, QString> m_lookup;
+    QStringList m_conflicts;
+    QString m_path, m_programKeys = QStringLiteral("shift-only");
+    QFileSystemWatcher m_watcher;
+    QList<QPair<QPointer<QObject>, std::function<void()>>> m_listeners;
+};
 
 // One terminal pane: a KonsolePart shell, its Bash bridge, a composer, and its own agent worker
 // and conversation. Windows arrange panes in tabs and splits; the toolbar acts on the active pane.
@@ -139,7 +339,7 @@ public:
     QString workspace() const { return m_workspace; }
     bool cleanShell() const { return m_cleanShell; }
     QString mode() const { return m_modeValue; }
-    void setMode(const QString &mode) { m_modeValue = mode; requestRoute(false, QStringLiteral("auto")); }
+    void setMode(const QString &mode) { m_modeValue = mode; requestRoute(false, QStringLiteral("auto")); changed(); }
     bool isNative() const { return m_native; }
     void toggleNative() { setNative(!m_native); }
     bool agentBusy() const { return m_agentBusy; }
@@ -168,6 +368,10 @@ public:
         configurePreset(id, true);
     }
     void openProviderDialog() { configure(); }
+    bool ownsTerminalWidget(QWidget *widget) const { return m_terminal && widget && (widget == m_terminal || m_terminal->isAncestorOf(widget)); }
+    bool runCommand(const QString &command) { return runInTerminal(command, false, 0); }
+    void sendKeybindings() { if (m_configured) send(QJsonObject{{"type", "keybindings"}, {"path", Keymap::instance().path()}, {"actions", Keymap::instance().catalog().value(QStringLiteral("actions"))}}); }
+    void importWarpKeys() { send({{"type", "import_warp"}}); }
 
 protected:
     void resizeEvent(QResizeEvent *event) override {
@@ -181,12 +385,24 @@ protected:
         if (event->type() == QEvent::KeyPress || event->type() == QEvent::ShortcutOverride) {
             auto *key = static_cast<QKeyEvent *>(event);
             auto *widget = qobject_cast<QWidget *>(object);
-            // Only widgets inside this pane; do not steal F12 from dialogs.
-            const bool inside = widget && (widget == this || isAncestorOf(widget));
-            if (inside && key->key() == Qt::Key_F12 && key->modifiers() == Qt::NoModifier) {
-                if (event->type() == QEvent::KeyPress) setNative(!m_native);
-                event->accept();
-                return true;
+            // Terminal clipboard: Ctrl+C copies when text is selected, otherwise it reaches the
+            // shell as an interrupt. Ctrl+V pastes at a shell prompt; inside a program such as
+            // vim it is passed through (visual block). Ctrl+X always reaches the terminal.
+            const auto mods = key->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
+            if (event->type() == QEvent::KeyPress && ownsTerminalWidget(widget) && mods == Qt::ControlModifier && !key->isAutoRepeat()) {
+                QObject *display = terminalDisplay();
+                if (display && key->key() == Qt::Key_C) {
+                    // Konsole exposes no "has selection" query, and its copy does nothing without a
+                    // selection. Copy, and treat a clipboard change as proof that text was selected.
+                    bool copied = false;
+                    const auto connection = connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [&copied] { copied = true; });
+                    QMetaObject::invokeMethod(display, "copyToClipboard", Qt::DirectConnection);
+                    disconnect(connection);
+                    if (copied) { status(QStringLiteral("Copied selection. Ctrl+C without a selection interrupts.")); return true; }
+                } else if (display && key->key() == Qt::Key_V && !processBusy()) {
+                    QMetaObject::invokeMethod(display, "pasteFromClipboard", Qt::DirectConnection);
+                    return true;
+                }
             }
             if (event->type() == QEvent::KeyPress && widget && m_terminal &&
                 (widget == m_terminal || m_terminal->isAncestorOf(widget)) && !m_loading && m_shellReady) {
@@ -213,11 +429,41 @@ private:
         m_routeLabel = new QLabel(QStringLiteral("AUTO · local detection"));
         m_routeLabel->setTextFormat(Qt::PlainText);
         routeRow->addWidget(m_routeLabel, 1);
+        // Per-pane controls live under the terminal, next to the input they affect.
+        m_modeBox = new QComboBox;
+        m_modeBox->addItem(QStringLiteral("Auto detect"), QStringLiteral("auto"));
+        m_modeBox->addItem(QStringLiteral("Terminal"), QStringLiteral("shell"));
+        m_modeBox->addItem(QStringLiteral("Agent"), QStringLiteral("agent"));
+        m_modeBox->setAccessibleName(QStringLiteral("Input destination"));
+        m_modeBox->setFocusPolicy(Qt::TabFocus);
+        connect(m_modeBox, qOverload<int>(&QComboBox::activated), this, [this](int) {
+            setMode(m_modeBox->currentData().toString()); focusInput();
+        });
+        routeRow->addWidget(m_modeBox);
+        m_modelBox = new QComboBox;
+        m_modelBox->setAccessibleName(QStringLiteral("Agent model"));
+        m_modelBox->setToolTip(QStringLiteral("Agent model for this pane. Switching starts a new conversation."));
+        m_modelBox->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+        m_modelBox->setFocusPolicy(Qt::TabFocus);
+        connect(m_modelBox, qOverload<int>(&QComboBox::activated), this, [this](int index) {
+            selectModel(m_modelBox->itemData(index).toString()); focusInput();
+        });
+        routeRow->addWidget(m_modelBox);
+        auto *cancel = new QToolButton;
+        cancel->setObjectName(QStringLiteral("interruptButton"));
+        const QString cancelIcon = relay::theme::themeDataDir() + QStringLiteral("/icons/cancel.svg");
+        if (QFileInfo::exists(cancelIcon)) cancel->setIcon(QIcon(cancelIcon)); else cancel->setText(QStringLiteral("⊘"));
+        cancel->setToolTip(QStringLiteral("Interrupt the running command (Ctrl+C)"));
+        cancel->setAccessibleName(QStringLiteral("Interrupt shell"));
+        cancel->setFocusPolicy(Qt::NoFocus);
+        connect(cancel, &QToolButton::clicked, this, [this] { interruptShell(); });
+        routeRow->addWidget(cancel);
+        refreshPickers();
         auto *submit = new QPushButton(QStringLiteral("Submit ↵"));
         connect(submit, &QPushButton::clicked, this, [this] { requestRoute(true, QStringLiteral("auto")); });
         routeRow->addWidget(submit); composerLayout->addLayout(routeRow);
         m_editor = new RichEditor; composerLayout->addWidget(m_editor);
-        auto *help = new QLabel(QStringLiteral("Shift+Enter  newline     Ctrl+Enter  agent     Ctrl+Shift+Enter  terminal     ↑/↓  history     F12  native input"));
+        auto *help = new QLabel(QStringLiteral("Shift+Enter  newline     Ctrl+Enter  agent     Ctrl+Shift+Enter  terminal     ↑/↓  history"));
         help->setWordWrap(true); composerLayout->addWidget(help);
         m_help = help;
         layout->addWidget(composer);
@@ -383,6 +629,7 @@ private:
                     .arg(names.join(QStringLiteral(", ")), skipped.isEmpty() ? QStringLiteral("none") : QString::number(skipped.size())));
             status(QStringLiteral("Warp import finished. Leave the key field empty to use stored keys."));
             send({{"type", "presets"}});
+        } else if (type == QStringLiteral("keybindings_updated")) {
         } else if (type == QStringLiteral("key_stored")) {
             status(QStringLiteral("API key saved to the keyring for ") + event.value(QStringLiteral("preset")).toString());
         } else if (type == QStringLiteral("agent_started")) {
@@ -519,11 +766,31 @@ private:
         return true;
     }
 
+    QObject *terminalDisplay() const {
+        if (!m_terminal) return nullptr;
+        if (m_terminal->metaObject()->indexOfMethod("copyToClipboard()") >= 0) return m_terminal;
+        for (QObject *child : m_terminal->findChildren<QObject *>())
+            if (child->metaObject()->indexOfMethod("copyToClipboard()") >= 0) return child;
+        return nullptr;
+    }
+
     // ----- fix and re-run loop (terminal mode) -----------------------------------------
     static constexpr int kMaxFixAttempts = 3;
 
     void status(const QString &text) { if (onStatus) onStatus(text); }
-    void changed() { if (onStateChanged) onStateChanged(); }
+    void changed() { refreshPickers(); if (onStateChanged) onStateChanged(); }
+
+    void refreshPickers() {
+        if (!m_modeBox || !m_modelBox) return;
+        const QSignalBlocker modeBlock(m_modeBox), modelBlock(m_modelBox);
+        m_modeBox->setCurrentIndex(std::max(0, m_modeBox->findData(m_modeValue)));
+        m_modelBox->clear();
+        for (const auto &model : std::as_const(m_stored)) m_modelBox->addItem(model.second, model.first);
+        if (m_stored.isEmpty()) m_modelBox->addItem(QStringLiteral("No stored keys"));
+        m_modelBox->setEnabled(!m_stored.isEmpty());
+        const int index = m_modelBox->findData(m_currentPreset);
+        if (index >= 0) m_modelBox->setCurrentIndex(index);
+    }
 
     void clearFix() { m_fixCommand.clear(); m_fixWatch = false; m_fixArmed = false; m_fixAwaitingAgent = false; m_fixAttempt = 0; }
 
@@ -720,7 +987,7 @@ private:
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
               {"model", preset.value(QStringLiteral("model")).toString()},
               {"extra", preset.value(QStringLiteral("extra")).toObject()}, {"max_tokens", tokens},
-              {"api_key", QString()}, {"workspace", m_workspace}});
+              {"api_key", QString()}, {"workspace", m_workspace}, {"keybindings", Keymap::instance().catalog()}});
         updatePaths();
     }
 
@@ -933,7 +1200,8 @@ private:
                 send({{"type", "store_key"}, {"preset", presetId}, {"api_key", m_apiKey}});
             send({{"type", "configure"}, {"base_url", base->text().trimmed()}, {"model", model->text().trimmed()},
                   {"api_key", m_apiKey}, {"preset", presetId}, {"use_stored_key", m_apiKey.isEmpty()},
-                  {"workspace", m_workspace}, {"extra", doc.object()}, {"max_tokens", tokens->value()}});
+                  {"workspace", m_workspace}, {"extra", doc.object()}, {"max_tokens", tokens->value()},
+                  {"keybindings", Keymap::instance().catalog()}});
             updatePaths(); dialog.accept();
         });
         dialog.exec();
@@ -962,6 +1230,7 @@ private:
     QList<QPair<QString, Ink>> m_inlinePending;
     QPointer<QObject> m_session;
     QList<QPair<QString, QString>> m_stored;
+    QComboBox *m_modeBox = nullptr, *m_modelBox = nullptr;
     QString m_currentPreset;
     bool m_cleanShell = false, m_closing = false;
     QJsonArray m_presets;
@@ -1028,7 +1297,22 @@ public:
         m_tabs->setTabsClosable(true);
         m_tabs->setMovable(true);
         m_tabs->tabBar()->setExpanding(false);
-        setCentralWidget(m_tabs);
+        auto *central = new QWidget;
+        auto *row = new QHBoxLayout(central); row->setContentsMargins(0, 0, 0, 0); row->setSpacing(0);
+        row->addWidget(m_tabs, 1);
+        setCentralWidget(central);
+        // The palette floats over the right edge instead of resizing the terminal, so programs
+        // such as vim do not redraw every time it opens.
+        buildSidebar();
+        m_sidebar->setParent(central);
+        central->installEventFilter(this);
+        Keymap::instance().listen(this, [this] {
+            for (Pane *pane : allPanes()) pane->sendKeybindings();
+            const auto conflicts = Keymap::instance().conflicts();
+            statusBar()->showMessage(conflicts.isEmpty() ? QStringLiteral("Keyboard shortcuts reloaded.")
+                                                         : QStringLiteral("Keyboard shortcuts: ") + conflicts.join(QStringLiteral("; ")));
+            if (m_sidebar->isVisible()) refreshPalette();
+        });
         connect(m_tabs, &QTabWidget::currentChanged, this, [this](int) {
             QWidget *page = m_tabs->currentWidget();
             if (!page) return;
@@ -1096,32 +1380,30 @@ public:
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override {
+        if (event->type() == QEvent::Resize && object == centralWidget()) placeSidebar();
         if (event->type() != QEvent::KeyPress && event->type() != QEvent::ShortcutOverride)
             return QMainWindow::eventFilter(object, event);
         auto *widget = qobject_cast<QWidget *>(object);
         if (!widget || widget->window() != this) return QMainWindow::eventFilter(object, event);
         auto *key = static_cast<QKeyEvent *>(event);
-        const auto mods = key->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
-        const int k = key->key();
-        const bool ctrl = mods == Qt::ControlModifier, ctrlShift = mods == (Qt::ControlModifier | Qt::ShiftModifier);
-        const bool alt = mods == Qt::AltModifier, altShift = mods == (Qt::AltModifier | Qt::ShiftModifier);
-        std::function<void()> action;
-        if (ctrl && k == Qt::Key_N) action = [this] { m_manager->newWindowAt(activeCwd()); };
-        else if (alt && k == Qt::Key_Tab) action = [this] { m_manager->cycle(this, 1); };
-        else if (altShift && (k == Qt::Key_Backtab || k == Qt::Key_Tab)) action = [this] { m_manager->cycle(this, -1); };
-        else if (ctrl && k == Qt::Key_T) action = [this] { addTab(paneNode(activeCwd()), m_tabs->currentIndex() + 1); };
-        else if (ctrl && k == Qt::Key_Tab) action = [this] { cycleTab(1); };
-        else if (ctrlShift && (k == Qt::Key_Backtab || k == Qt::Key_Tab)) action = [this] { cycleTab(-1); };
-        else if (ctrl && k == Qt::Key_P) action = [this] { split(Qt::Horizontal); };
-        else if (ctrlShift && k == Qt::Key_P) action = [this] { split(Qt::Vertical); };
-        else if (alt && (k == Qt::Key_Left || k == Qt::Key_Right || k == Qt::Key_Up || k == Qt::Key_Down)) action = [this, k] { navigate(k); };
-        else if (ctrl && k == Qt::Key_W) action = [this] { closeActive(); };
-        else if (ctrlShift && k == Qt::Key_W) action = [this] { m_manager->restore(this); };
-        if (!action) return QMainWindow::eventFilter(object, event);
+        if (widget == m_filter && event->type() == QEvent::KeyPress && paletteKey(key)) return true;
+        if (widget == m_filter && event->type() == QEvent::ShortcutOverride) {
+            const int k = key->key();
+            if (k == Qt::Key_Escape || k == Qt::Key_Return || k == Qt::Key_Enter || k == Qt::Key_Up || k == Qt::Key_Down
+                || ((key->modifiers() & Qt::ControlModifier) && (k == Qt::Key_N || k == Qt::Key_P))) { event->accept(); return true; }
+        }
+        // Palette keys stay inside the palette.
+        if (m_sidebar->isVisible() && (widget == m_filter || widget == m_list)) return QMainWindow::eventFilter(object, event);
+        const QString id = Keymap::instance().match(key);
+        if (id.isEmpty()) return QMainWindow::eventFilter(object, event);
+        // A program such as vim owns its keys, unless the program_keys rule lets this shortcut act.
+        Pane *pane = paneOf(widget);
+        if (pane && pane->ownsTerminalWidget(widget) && pane->processBusy() && !Keymap::instance().actsInsidePrograms(key))
+            return QMainWindow::eventFilter(object, event);
         // Accept the override so neither the composer nor Konsole consumes the key,
         // then act on the key press itself. Auto-repeat does not open a burst of tabs.
         event->accept();
-        if (event->type() == QEvent::KeyPress && !key->isAutoRepeat()) QTimer::singleShot(0, this, action);
+        if (event->type() == QEvent::KeyPress && !key->isAutoRepeat()) QTimer::singleShot(0, this, [this, id] { runAction(id); });
         return true;
     }
 
@@ -1147,53 +1429,235 @@ private:
         auto font = brand->font(); font.setBold(true); font.setPointSize(13); brand->setFont(font);
         toolbar->addWidget(brand);
         toolbar->addSeparator();
-        m_mode = new QComboBox;
-        m_mode->addItem(QStringLiteral("Auto detect"), QStringLiteral("auto"));
-        m_mode->addItem(QStringLiteral("Terminal"), QStringLiteral("shell"));
-        m_mode->addItem(QStringLiteral("Agent"), QStringLiteral("agent"));
-        m_mode->setAccessibleName(QStringLiteral("Input destination"));
-        toolbar->addWidget(m_mode);
-        connect(m_mode, qOverload<int>(&QComboBox::activated), this, [this](int) {
-            if (m_active) { m_active->setMode(m_mode->currentData().toString()); m_active->focusInput(); }
-        });
-        m_nativeAction = toolbar->addAction(QStringLiteral("Native terminal · F12"));
-        m_nativeAction->setCheckable(true);
-        connect(m_nativeAction, &QAction::triggered, this, [this](bool) { if (m_active) m_active->toggleNative(); });
-        auto *interrupt = toolbar->addAction(QStringLiteral("Interrupt shell"));
-        connect(interrupt, &QAction::triggered, this, [this] { if (m_active) m_active->interruptShell(); });
+        auto addAction = [this, toolbar](const QString &label, const QString &id) {
+            auto *action = toolbar->addAction(label);
+            connect(action, &QAction::triggered, this, [this, id] { runAction(id); });
+            m_toolbarActions.append({action, id});
+        };
+        addAction(QStringLiteral("Agent options"), QStringLiteral("palette.agent"));
+        addAction(QStringLiteral("Terminal options"), QStringLiteral("palette.terminal"));
         toolbar->addSeparator();
-        m_modelPicker = new QComboBox;
-        m_modelPicker->setAccessibleName(QStringLiteral("Agent model"));
-        m_modelPicker->setToolTip(QStringLiteral("Agent model for this pane. Keys come from the desktop keyring; switching starts a new conversation."));
-        m_modelPicker->setSizeAdjustPolicy(QComboBox::AdjustToContents);
-        toolbar->addWidget(m_modelPicker);
-        connect(m_modelPicker, qOverload<int>(&QComboBox::activated), this, [this](int index) {
-            if (m_active) { m_active->selectModel(m_modelPicker->itemData(index).toString()); m_active->focusInput(); }
-        });
-        auto *reset = toolbar->addAction(QStringLiteral("New chat"));
-        connect(reset, &QAction::triggered, this, [this] { if (m_active) m_active->newChat(); });
-        auto *stop = toolbar->addAction(QStringLiteral("Stop agent"));
-        connect(stop, &QAction::triggered, this, [this] { if (m_active) m_active->stopAgent(); });
+        addAction(QStringLiteral("New chat"), QStringLiteral("agent.newChat"));
+        addAction(QStringLiteral("Stop agent"), QStringLiteral("agent.stop"));
         auto *spacer = new QWidget; spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         toolbar->addWidget(spacer);
-        auto *provider = toolbar->addAction(QStringLiteral("Provider / BYOK…"));
-        connect(provider, &QAction::triggered, this, [this] { if (m_active) m_active->openProviderDialog(); });
+        addAction(QStringLiteral("Provider / BYOK…"), QStringLiteral("agent.provider"));
         syncToolbar();
+        Keymap::instance().listen(this, [this] { syncToolbar(); });
     }
 
     void syncToolbar() {
-        const QSignalBlocker modeBlock(m_mode), modelBlock(m_modelPicker);
-        const Pane *pane = m_active;
-        m_mode->setCurrentIndex(std::max(0, m_mode->findData(pane ? pane->mode() : QStringLiteral("auto"))));
-        m_nativeAction->setChecked(pane && pane->isNative());
-        m_modelPicker->clear();
-        const auto models = pane ? pane->storedModels() : QList<QPair<QString, QString>>();
-        for (const auto &model : models) m_modelPicker->addItem(model.second, model.first);
-        if (models.isEmpty()) m_modelPicker->addItem(QStringLiteral("No stored keys"));
-        m_modelPicker->setEnabled(!models.isEmpty());
-        if (pane) {
-            const int index = m_modelPicker->findData(pane->currentPreset());
-            if (index >= 0) m_modelPicker->setCurrentIndex(index);
+        for (const auto &entry : std::as_const(m_toolbarActions)) {
+            const QString shortcut = Keymap::instance().shortcutText(entry.second);
+            entry.first->setToolTip(shortcut.isEmpty() ? entry.first->text() : entry.first->text() + QStringLiteral("  (") + shortcut + ')');
+        }
+    }
+
+    // ----- actions ----------------------------------------------------------------------------
+    void runAction(const QString &id) {
+        Pane *pane = m_active;
+        if (id == QStringLiteral("window.new")) m_manager->newWindowAt(activeCwd());
+        else if (id == QStringLiteral("window.next")) m_manager->cycle(this, 1);
+        else if (id == QStringLiteral("window.previous")) m_manager->cycle(this, -1);
+        else if (id == QStringLiteral("tab.new")) addTab(paneNode(activeCwd()), m_tabs->currentIndex() + 1);
+        else if (id == QStringLiteral("tab.next")) cycleTab(1);
+        else if (id == QStringLiteral("tab.previous")) cycleTab(-1);
+        else if (id == QStringLiteral("pane.splitRight")) split(Qt::Horizontal);
+        else if (id == QStringLiteral("pane.splitDown")) split(Qt::Vertical);
+        else if (id == QStringLiteral("pane.focusLeft")) navigate(Qt::Key_Left);
+        else if (id == QStringLiteral("pane.focusRight")) navigate(Qt::Key_Right);
+        else if (id == QStringLiteral("pane.focusUp")) navigate(Qt::Key_Up);
+        else if (id == QStringLiteral("pane.focusDown")) navigate(Qt::Key_Down);
+        else if (id == QStringLiteral("pane.close")) closeActive();
+        else if (id == QStringLiteral("closed.restore")) m_manager->restore(this);
+        else if (id == QStringLiteral("palette.agent")) togglePalette(QStringLiteral("agent"));
+        else if (id == QStringLiteral("palette.terminal")) togglePalette(QStringLiteral("terminal"));
+        else if (id == QStringLiteral("keybindings.reload")) Keymap::instance().reload();
+        else if (id == QStringLiteral("keybindings.edit")) {
+            Keymap::instance().ensureFile();
+            const QString editor = qEnvironmentVariable("VISUAL", qEnvironmentVariable("EDITOR", QStringLiteral("nano")));
+            const QString quoted = QStringLiteral("'") + QString(Keymap::instance().path()).replace('\'', QStringLiteral("'\\''")) + '\'';
+            if (!pane || !pane->runCommand(editor + ' ' + quoted))
+                statusBar()->showMessage(QStringLiteral("Shortcuts file: ") + Keymap::instance().path());
+        }
+        else if (!pane) return;
+        else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
+        else if (id == QStringLiteral("terminal.interrupt")) pane->interruptShell();
+        else if (id == QStringLiteral("agent.newChat")) pane->newChat();
+        else if (id == QStringLiteral("agent.stop")) pane->stopAgent();
+        else if (id == QStringLiteral("agent.provider")) pane->openProviderDialog();
+        else if (id == QStringLiteral("input.modeAuto")) pane->setMode(QStringLiteral("auto"));
+        else if (id == QStringLiteral("input.modeTerminal")) pane->setMode(QStringLiteral("shell"));
+        else if (id == QStringLiteral("input.modeAgent")) pane->setMode(QStringLiteral("agent"));
+    }
+
+    // ----- palettes ---------------------------------------------------------------------------
+    // Provisional contents; see docs/PALETTE-RESEARCH.md for the research that will refine them.
+    struct PaletteItem { QString label, detail, shortcut; bool checked = false; std::function<void()> run; };
+
+    void buildSidebar() {
+        m_sidebar = new QWidget;
+        m_sidebar->setObjectName(QStringLiteral("sidebar"));
+        m_sidebar->setAttribute(Qt::WA_StyledBackground);
+        m_sidebar->setFixedWidth(380);
+        auto *layout = new QVBoxLayout(m_sidebar); layout->setContentsMargins(12, 12, 12, 12); layout->setSpacing(8);
+        m_paletteTitle = new QLabel; m_paletteTitle->setObjectName(QStringLiteral("paletteTitle"));
+        layout->addWidget(m_paletteTitle);
+        m_filter = new QLineEdit; m_filter->setPlaceholderText(QStringLiteral("Type to filter · ↑↓ select · Enter run · Esc close"));
+        layout->addWidget(m_filter);
+        m_list = new QListWidget; m_list->setObjectName(QStringLiteral("paletteList"));
+        m_list->setUniformItemSizes(true); m_list->setFocusPolicy(Qt::NoFocus);
+        layout->addWidget(m_list, 1);
+        m_sidebar->hide();
+        connect(m_filter, &QLineEdit::textChanged, this, [this] { filterPalette(); });
+        connect(m_list, &QListWidget::itemActivated, this, [this](QListWidgetItem *) { runSelected(); });
+        connect(m_list, &QListWidget::itemClicked, this, [this](QListWidgetItem *) { runSelected(); });
+        m_filter->installEventFilter(this);
+    }
+
+    void togglePalette(const QString &kind) {
+        if (m_sidebar->isVisible() && m_paletteKind == kind) { closePalette(); return; }
+        m_paletteKind = kind;
+        m_returnPane = m_active;
+        m_returnFocus = QApplication::focusWidget();
+        m_filter->clear();
+        refreshPalette();
+        placeSidebar();
+        m_sidebar->show();
+        m_sidebar->raise();
+        m_filter->setFocus(Qt::ShortcutFocusReason);
+    }
+
+    void placeSidebar() {
+        if (!m_sidebar || !centralWidget()) return;
+        const QRect area = centralWidget()->rect();
+        const int width = std::min(380, area.width() - 40);
+        m_sidebar->setGeometry(area.right() - width - 8, area.top() + 36, width, std::max(200, area.height() - 48));
+    }
+
+    void closePalette() {
+        m_sidebar->hide();
+        // Return focus exactly where it was, e.g. to vim in the terminal, not to the composer.
+        if (m_returnFocus && m_returnFocus->window() == this && m_returnFocus != m_filter) m_returnFocus->setFocus(Qt::OtherFocusReason);
+        else if (Pane *pane = m_returnPane ? m_returnPane.data() : m_active.data()) pane->focusInput();
+    }
+
+    void refreshPalette() {
+        m_items.clear();
+        Pane *pane = m_active;
+        auto item = [this](const QString &label, const QString &detail, const QString &action, bool checked = false, std::function<void()> run = {}) {
+            PaletteItem entry;
+            entry.label = label; entry.detail = detail; entry.checked = checked;
+            entry.shortcut = action.isEmpty() ? QString() : Keymap::instance().shortcutText(action);
+            entry.run = run ? std::move(run) : std::function<void()>([this, action] { runAction(action); });
+            m_items.append(entry);
+        };
+        if (m_paletteKind == QStringLiteral("agent")) {
+            m_paletteTitle->setText(QStringLiteral("AGENT OPTIONS"));
+            if (pane) {
+                for (const auto &model : pane->storedModels()) {
+                    const QString id = model.first;
+                    item(QStringLiteral("Model: ") + model.second, QStringLiteral("Switch this pane's model; starts a new conversation"), QString(),
+                         pane->currentPreset() == id, [this, id] { if (m_active) m_active->selectModel(id); });
+                }
+                item(QStringLiteral("Input: Auto detect"), QStringLiteral("Commands to the terminal, everything else to the agent"), QStringLiteral("input.modeAuto"), pane->mode() == QStringLiteral("auto"));
+                item(QStringLiteral("Input: Terminal"), QStringLiteral("Always the terminal; the agent fixes failures"), QStringLiteral("input.modeTerminal"), pane->mode() == QStringLiteral("shell"));
+                item(QStringLiteral("Input: Agent"), QStringLiteral("Always the agent"), QStringLiteral("input.modeAgent"), pane->mode() == QStringLiteral("agent"));
+            }
+            item(QStringLiteral("New chat"), QStringLiteral("Start a new conversation in this pane"), QStringLiteral("agent.newChat"));
+            item(QStringLiteral("Stop agent"), QStringLiteral("Cancel the running turn"), QStringLiteral("agent.stop"));
+            item(QStringLiteral("Provider and API keys…"), QStringLiteral("Base URL, model ID, key, request options"), QStringLiteral("agent.provider"));
+            item(QStringLiteral("Import keys from Warp"), QStringLiteral("Copy Warp's custom-endpoint keys into the keyring"), QString(), false,
+                 [this] { if (m_active) m_active->importWarpKeys(); });
+        } else {
+            m_paletteTitle->setText(QStringLiteral("TERMINAL OPTIONS"));
+            item(QStringLiteral("Interrupt"), QStringLiteral("Send Ctrl+C to the running command"), QStringLiteral("terminal.interrupt"));
+            item(QStringLiteral("Native terminal input"), QStringLiteral("Type directly into Konsole"), QStringLiteral("terminal.native"), pane && pane->isNative());
+            item(QStringLiteral("Split right"), QString(), QStringLiteral("pane.splitRight"));
+            item(QStringLiteral("Split down"), QString(), QStringLiteral("pane.splitDown"));
+            item(QStringLiteral("New tab"), QString(), QStringLiteral("tab.new"));
+            item(QStringLiteral("New window"), QString(), QStringLiteral("window.new"));
+            item(QStringLiteral("Close pane"), QStringLiteral("Then the tab, then the window"), QStringLiteral("pane.close"));
+            item(QStringLiteral("Restore closed"), QStringLiteral("Last closed pane, tab or window"), QStringLiteral("closed.restore"));
+            item(QStringLiteral("Edit keyboard shortcuts…"), Keymap::instance().path(), QStringLiteral("keybindings.edit"));
+            item(QStringLiteral("Reload keyboard shortcuts"), QString(), QStringLiteral("keybindings.reload"));
+            const QString mode = Keymap::instance().programKeys();
+            auto programKeys = [this](const QString &label, const QString &detail, const QString &value, bool checked) {
+                PaletteItem entry; entry.label = label; entry.detail = detail; entry.checked = checked;
+                entry.run = [value] { Keymap::instance().setProgramKeys(value); };
+                m_items.append(entry);
+            };
+            programKeys(QStringLiteral("Keys in programs: Ctrl+Shift and F-keys only"), QStringLiteral("Other shortcuts reach vim, nano, less…"), QStringLiteral("shift-only"), mode == QStringLiteral("shift-only"));
+            programKeys(QStringLiteral("Keys in programs: all Relay shortcuts"), QStringLiteral("Relay shortcuts win inside programs"), QStringLiteral("all"), mode == QStringLiteral("all"));
+            programKeys(QStringLiteral("Keys in programs: none"), QStringLiteral("Programs receive every key"), QStringLiteral("none"), mode == QStringLiteral("none"));
+        }
+        filterPalette();
+    }
+
+    // Case-insensitive subsequence match; tighter and earlier matches rank higher.
+    static int fuzzyScore(const QString &needle, const QString &haystack) {
+        if (needle.isEmpty()) return 1;
+        const QString n = needle.toLower(), h = haystack.toLower();
+        const int direct = h.indexOf(n);
+        if (direct >= 0) return 10000 - direct;
+        int pos = 0, first = -1, last = -1;
+        for (const QChar c : n) {
+            if (c.isSpace()) continue;
+            pos = h.indexOf(c, pos);
+            if (pos < 0) return 0;
+            if (first < 0) first = pos;
+            last = pos++;
+        }
+        return std::max(1, 5000 - (last - first) * 10 - first);
+    }
+
+    void filterPalette() {
+        const QString needle = m_filter->text().trimmed();
+        QList<QPair<int, int>> ranked;
+        for (int i = 0; i < m_items.size(); ++i) {
+            const int score = std::max(fuzzyScore(needle, m_items[i].label), fuzzyScore(needle, m_items[i].detail) / 2);
+            if (score > 0) ranked.append({needle.isEmpty() ? -i : score, i});
+        }
+        if (!needle.isEmpty()) std::stable_sort(ranked.begin(), ranked.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+        m_list->clear();
+        for (const auto &entry : std::as_const(ranked)) {
+            const PaletteItem &item = m_items[entry.second];
+            QString text = (item.checked ? QStringLiteral("● ") : QStringLiteral("   ")) + item.label;
+            if (!item.shortcut.isEmpty()) text += QStringLiteral("    ") + item.shortcut;
+            auto *row = new QListWidgetItem(text, m_list);
+            row->setData(Qt::UserRole, entry.second);
+            row->setToolTip(item.detail);
+        }
+        if (m_list->count()) m_list->setCurrentRow(0);
+    }
+
+    void runSelected() {
+        QListWidgetItem *row = m_list->currentItem();
+        if (!row) return;
+        const int index = row->data(Qt::UserRole).toInt();
+        if (index < 0 || index >= m_items.size()) return;
+        const auto run = m_items[index].run;
+        closePalette();
+        if (run) QTimer::singleShot(0, this, run);
+    }
+
+    bool paletteKey(QKeyEvent *key) {
+        switch (key->key()) {
+        case Qt::Key_Escape: if (!m_filter->text().isEmpty()) m_filter->clear(); else closePalette(); return true;
+        case Qt::Key_Return: case Qt::Key_Enter: runSelected(); return true;
+        case Qt::Key_Down: case Qt::Key_Up: case Qt::Key_PageDown: case Qt::Key_PageUp: {
+            if (!m_list->count()) return true;
+            const int step = (key->key() == Qt::Key_PageDown || key->key() == Qt::Key_PageUp) ? 8 : 1;
+            const int direction = (key->key() == Qt::Key_Down || key->key() == Qt::Key_PageDown) ? 1 : -1;
+            m_list->setCurrentRow(std::clamp(m_list->currentRow() + step * direction, 0, m_list->count() - 1));
+            return true;
+        }
+        default:
+            if ((key->modifiers() & Qt::ControlModifier) && (key->key() == Qt::Key_N || key->key() == Qt::Key_P)) {
+                if (m_list->count()) m_list->setCurrentRow(std::clamp(m_list->currentRow() + (key->key() == Qt::Key_N ? 1 : -1), 0, m_list->count() - 1));
+                return true;
+            }
+            return false;
         }
     }
 
@@ -1487,8 +1951,15 @@ private:
 
     WindowManager *m_manager;
     QTabWidget *m_tabs = nullptr;
-    QComboBox *m_mode = nullptr, *m_modelPicker = nullptr;
-    QAction *m_nativeAction = nullptr;
+    QList<QPair<QAction *, QString>> m_toolbarActions;
+    QWidget *m_sidebar = nullptr;
+    QLabel *m_paletteTitle = nullptr;
+    QLineEdit *m_filter = nullptr;
+    QListWidget *m_list = nullptr;
+    QString m_paletteKind;
+    QPointer<Pane> m_returnPane;
+    QPointer<QWidget> m_returnFocus;
+    QList<PaletteItem> m_items;
     QPointer<Pane> m_active;
     QHash<QWidget *, QPointer<Pane>> m_lastActive;
     bool m_confirmedClose = false, m_skipRemember = false;

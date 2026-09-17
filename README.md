@@ -133,7 +133,9 @@ that arrives while a program is running waits until the next prompt.
 | F12 | Toggle native terminal input |
 | Escape in the composer | Focus native terminal input |
 | Up on the first line / Down on the last line | Composer history, preserving the current draft |
-| Ctrl+C / Ctrl+V; Ctrl+Shift+C / Ctrl+Shift+V | Copy / paste in the composer |
+| Ctrl+C / Ctrl+X / Ctrl+V; Ctrl+Shift+C / Ctrl+Shift+V | Copy / cut / paste in the composer |
+| Ctrl+C in the terminal | Copy when text is selected; otherwise interrupt |
+| Ctrl+V in the terminal | Paste at a shell prompt; passed to programs such as vim |
 | Ctrl+A, Shift+arrows, Ctrl+Shift+arrows | Normal text-editor selection |
 
 ### Windows, tabs and panes
@@ -149,14 +151,36 @@ that arrives while a program is running waits until the next prompt.
 | Alt+Left / Right / Up / Down | Move focus to the neighboring pane |
 | Ctrl+W | Close the pane; the tab if it is the last pane; the window, after a warning, if it is the last tab |
 | Ctrl+Shift+W | Restore the last closed pane, tab or window |
+| Ctrl+Shift+A | Agent options palette: model, input mode, new chat, stop, provider |
+| Ctrl+Shift+T | Terminal options palette: interrupt, native input, splits, tabs, shortcuts |
 
 Every pane has its own shell, composer, agent worker and conversation. The toolbar acts on
 the focused pane, which has an accent outline. Typing `exit` closes a pane. Restoring
 reopens panes in the same directories and layout with **new shells**: scrollback and
 programs that were running are not restored. These shortcuts take priority over the
-composer and over Konsole, including in native mode, so Readline's Ctrl+W, Ctrl+P, Ctrl+N
-and Ctrl+T are unavailable there. Most desktop window managers reserve Alt+Tab for
-themselves, in which case Relay never receives it.
+composer and the shell prompt. While a program such as vim, nano or less runs in the focused
+terminal, only Ctrl+Shift shortcuts and F-keys act; everything else reaches the program. Most
+desktop window managers reserve Alt+Tab for themselves, in which case Relay never receives it.
+
+Palettes float over the right edge without resizing the terminal. Type to filter, use the
+arrow keys or Ctrl+N / Ctrl+P, Enter to run, and Esc to clear the filter and then close. Focus
+returns to where it was. The input mode and model pickers and an interrupt button sit in each
+pane's input row.
+
+### Changing shortcuts
+
+All window shortcuts are named actions stored in
+`~/.config/RelayTerminal/relay/keybindings.json`, which reloads automatically:
+
+```json
+{"version": 1, "program_keys": "shift-only", "bindings": {"pane.close": ["Ctrl+W"], "agent.newChat": ["Ctrl+Shift+N"]}}
+```
+
+**Terminal options › Edit keyboard shortcuts** opens the file in `$VISUAL`, `$EDITOR` or
+nano in the focused pane. `program_keys` is `shift-only` (default), `all` or `none`. Conflicts
+and unknown keys are reported in the status bar. The agent can also change shortcuts: ask it,
+for example, to bind `agent.newChat` to Ctrl+Shift+N. Its `set_keybinding` tool edits only
+this file.
 
 Pasting never submits. In native mode, normal terminal keybindings apply (including
 Ctrl+C as interrupt). The toolbar also has **Interrupt shell**. Returning from

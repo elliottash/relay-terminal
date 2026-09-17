@@ -194,3 +194,21 @@ to the pane that took focus when it closed, if that pane still exists.
 
 Window shortcuts are handled in an application event filter on `ShortcutOverride` and
 `KeyPress` for widgets in that window, so they win over the composer and Konsole.
+
+## Keyboard shortcuts and palettes
+
+`Keymap` is a process-wide registry of named actions with defaults, loaded overrides from
+`keybindings.json`, conflict detection, and a `QFileSystemWatcher` on the file and its
+directory (atomic replacement drops a plain file watch). `RelayWindow`'s application event
+filter matches key events to action ids and runs them through `runAction`, which the toolbar
+and palettes also use. When a foreground program owns the focused terminal, `program_keys`
+decides whether a shortcut acts (default: only Ctrl+Shift combinations and F-keys).
+
+Each pane sends the action catalog to its worker at configure time and after reloads. The
+agent's `set_keybinding` tool (`backend/relay_core/keybindings.py`) validates the action id and
+key strings and rewrites only that binding atomically; the watcher reloads it everywhere.
+
+Terminal Ctrl+C calls the display's `copyToClipboard` slot and treats a clipboard change as
+proof of a selection, because KonsolePart exposes no selection query; otherwise the key
+reaches the shell as an interrupt. Palettes are an overlay child of the central widget, so
+opening one never resizes the terminal or makes a TUI redraw.

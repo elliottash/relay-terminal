@@ -10,6 +10,7 @@ import threading
 
 from relay_core import keystore
 from relay_core.agent import Agent
+from relay_core.keybindings import KeybindingCatalog, KeybindingError
 from relay_core.presets import PRESETS, match_preset
 from relay_core.queue import TurnSupervisor
 from relay_core.provider import ProviderConfig
@@ -71,8 +72,18 @@ def main():
                                         api_key, request.get("extra", {}),
                                         request.get("max_tokens", 8192))
                 config.validate()
-                turns.set_agent(Agent(config, request.get("workspace", os.getcwd()), turns.agent_emit))
+                catalog = KeybindingCatalog.from_request(request.get("keybindings"))
+                turns.set_agent(Agent(config, request.get("workspace", os.getcwd()), turns.agent_emit,
+                                      keybindings=catalog))
                 emit({"event": "configured", "model": config.model})
+            elif kind == "keybindings":
+                # Refresh the catalog after the GUI reloads keybindings.json; keeps the conversation.
+                catalog = KeybindingCatalog(request.get("path"), request.get("actions"))
+                agent = turns.agent
+                if agent is None:
+                    raise ValueError("Configure a provider before updating keybindings.")
+                agent.executor.keybindings = catalog
+                emit({"event": "keybindings_updated", "id": request.get("id")})
             elif kind == "presets":
                 stored = keystore.available()
                 emit({"event": "presets", "id": request.get("id"), "warp_default": keystore.warp_default_preset(),
