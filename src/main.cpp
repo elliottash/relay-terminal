@@ -28,6 +28,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QResizeEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -434,6 +435,12 @@ protected:
     }
 
     bool eventFilter(QObject *object, QEvent *event) override {
+        // Copy on select (off by default): after a left-button release that finishes a selection
+        // in this pane's terminal, copy it to the clipboard.
+        if (event->type() == QEvent::MouseButtonRelease && copyOnSelect()
+            && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && ownsTerminalWidget(qobject_cast<QWidget *>(object))) {
+            QTimer::singleShot(0, this, [this] { copySelection(); });
+        }
         if (event->type() == QEvent::KeyPress || event->type() == QEvent::ShortcutOverride) {
             auto *key = static_cast<QKeyEvent *>(event);
             auto *widget = qobject_cast<QWidget *>(object);
@@ -444,13 +451,7 @@ protected:
             if (event->type() == QEvent::KeyPress && ownsTerminalWidget(widget) && mods == Qt::ControlModifier && !key->isAutoRepeat()) {
                 QObject *display = terminalDisplay();
                 if (display && key->key() == Qt::Key_C) {
-                    // Konsole exposes no "has selection" query, and its copy does nothing without a
-                    // selection. Copy, and treat a clipboard change as proof that text was selected.
-                    bool copied = false;
-                    const auto connection = connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [&copied] { copied = true; });
-                    QMetaObject::invokeMethod(display, "copyToClipboard", Qt::DirectConnection);
-                    disconnect(connection);
-                    if (copied) { status(QStringLiteral("Copied selection. Ctrl+C without a selection interrupts.")); return true; }
+                    if (copySelection()) return true;
                 } else if (display && key->key() == Qt::Key_V && !processBusy()) {
                     QMetaObject::invokeMethod(display, "pasteFromClipboard", Qt::DirectConnection);
                     return true;
@@ -816,6 +817,42 @@ private:
             }
         });
         return true;
+    }
+
+    static bool copyOnSelect() { return QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool(); }
+
+    // Konsole exposes no "has selection" query, and its copy does nothing without a selection.
+    // Copy, and treat a clipboard change as proof that text was selected.
+    bool copySelection() {
+        QObject *display = terminalDisplay();
+        if (!display) return false;
+        bool copied = false;
+        const auto connection = connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [&copied] { copied = true; });
+        QMetaObject::invokeMethod(display, "copyToClipboard", Qt::DirectConnection);
+        disconnect(connection);
+        if (!copied) return false;
+        const int count = QApplication::clipboard()->text().toUcs4().size();
+        if (count > 0) toast(count == 1 ? QStringLiteral("1 character copied") : QStringLiteral("%L1 characters copied").arg(count));
+        return true;
+    }
+
+    // A small notice over the bottom-right of the terminal that fades after a moment.
+    void toast(const QString &text) {
+        if (!m_toast) {
+            m_toast = new QLabel(this);
+            m_toast->setObjectName(QStringLiteral("toast"));
+            m_toast->setAttribute(Qt::WA_TransparentForMouseEvents);
+            m_toastTimer.setSingleShot(true);
+            connect(&m_toastTimer, &QTimer::timeout, m_toast, &QLabel::hide);
+        }
+        m_toast->setText(text);
+        m_toast->adjustSize();
+        const QWidget *anchor = m_terminalHost ? m_terminalHost : this;
+        const QPoint corner = anchor->mapTo(this, QPoint(anchor->width(), anchor->height()));
+        m_toast->move(corner.x() - m_toast->width() - 16, corner.y() - m_toast->height() - 12);
+        m_toast->show();
+        m_toast->raise();
+        m_toastTimer.start(1600);
     }
 
     QObject *terminalDisplay() const {
@@ -1283,6 +1320,8 @@ private:
     QPointer<QObject> m_session;
     QList<QPair<QString, QString>> m_stored;
     QComboBox *m_modeBox = nullptr, *m_modelBox = nullptr;
+    QLabel *m_toast = nullptr;
+    QTimer m_toastTimer;
     QString m_currentPreset;
     bool m_cleanShell = false, m_closing = false;
     QJsonArray m_presets;
@@ -1661,6 +1700,15 @@ private:
 
         items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Send Ctrl+C to the running program") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
         items << actionItem(terminal, QStringLiteral("Native terminal input"), QStringLiteral("Type directly into Konsole"), QStringLiteral("terminal.native"), pane && pane->isNative());
+        {
+            PaletteItem copy;
+            const bool on = QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool();
+            copy.key = QStringLiteral("terminal.copyOnSelect"); copy.section = terminal;
+            copy.label = QStringLiteral("Copy on select"); copy.detail = on ? QStringLiteral("On: selecting terminal text copies it") : QStringLiteral("Off");
+            copy.checked = on; copy.stayOpen = true;
+            copy.run = [on] { QSettings().setValue(QStringLiteral("terminal/copy_on_select"), !on); };
+            items << copy;
+        }
 
         items << actionItem(panes, QStringLiteral("Split right"), QString(), QStringLiteral("pane.splitRight"));
         items << actionItem(panes, QStringLiteral("Split down"), QString(), QStringLiteral("pane.splitDown"));
@@ -1847,7 +1895,8 @@ private:
             item.run();
             // Toggles stay open and show their new state.
             QTimer::singleShot(150, this, [this] {
-                if (!m_sidebar->isVisible() || m_stack.isEmpty()) return;
+                if (!m_sidebar->isVisible()) return;
+                if (m_stack.isEmpty()) { const int row = m_list->indexOfTopLevelItem(m_list->currentItem()); renderPalette(); selectRow(row, 1); return; }
                 const QString title = m_stack.last().first;
                 m_stack.removeLast();
                 for (const auto &parent : rootItems()) if (parent.label == title && parent.children) m_stack.append({title, parent.children()});

@@ -152,6 +152,7 @@ QCheckBox::indicator:hover { border-color: @muted; }
 QCheckBox::indicator:checked { background: @accent; border-color: @accent; image: url(@icons/check.svg); }
 
 QSplitter::handle { background: @bg; }
+QLabel#toast { background: @raised; color: @text; border: 1px solid @accentBorder; border-radius: 8px; padding: 6px 12px; }
 QWidget#sidebar { background: @surface; border: 1px solid @border; border-radius: 10px; }
 QLabel#paletteTitle { color: @muted; font-weight: 600; letter-spacing: 1px; padding: 2px 4px; }
 QTreeWidget#paletteList { background: transparent; border: none; outline: none; font-size: 10pt; }

@@ -61,3 +61,15 @@ switching the file to `konsole` made Ctrl+Shift+( split. Evidence:
 
 Additional QA checks: each preset's pane, tab and window keys on a real desktop; Warp's
 Ctrl+Alt+arrows and Ctrl+Alt+T are usually grabbed by GNOME/KDE.
+
+## Update (2026-09-17): copy on select
+
+Owner decision: selecting terminal text copies it to the clipboard, off by default, with a
+"N characters copied" notice like Claude Code. Toggle: **Actions › Copy on select**
+(`terminal/copy_on_select` in QSettings). Ctrl+C copies show the same notice.
+
+Implementer check under Xvfb: off, a triple-click selection left the clipboard unchanged; on,
+it copied `select-me-please-42` and showed "20 characters copied" (a line selection includes its
+newline). Evidence: `docs/qa_evidence/2026-09-17-keyboard-and-palettes/implementer-copy-on-select.png`.
+
+QA: word (double-click), drag and line selections; a plain click copies nothing; Wayland session.

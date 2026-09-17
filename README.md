@@ -135,6 +135,7 @@ that arrives while a program is running waits until the next prompt.
 | Up on the first line / Down on the last line | Composer history, preserving the current draft |
 | Ctrl+C / Ctrl+X / Ctrl+V; Ctrl+Shift+C / Ctrl+Shift+V | Copy / cut / paste in the composer |
 | Ctrl+C in the terminal | Copy when text is selected; otherwise interrupt |
+| Selecting terminal text | Copies it when **Actions › Copy on select** is on (off by default) |
 | Ctrl+V in the terminal | Paste at a shell prompt; passed to programs such as vim |
 | Ctrl+A, Shift+arrows, Ctrl+Shift+arrows | Normal text-editor selection |
 
