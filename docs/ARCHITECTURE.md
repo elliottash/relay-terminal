@@ -495,10 +495,24 @@ provider. Saving makes no network call. Switching model starts a new conversatio
 
 `backend/relay_core/agent.py`. One conversation per worker. The system prompt tells the model
 that tools run without confirmation, that tool output is untrusted, and that `run_command` is a
-separate non-interactive shell. Per turn: at most 12 model requests and 24 tool calls. On cancel
-or error, the partial turn is removed from history and a note asks the model to reinspect state,
-because actions may already have run. Context is not counted or compacted; a request over
-8 MiB fails and the user must start a new chat.
+separate non-interactive shell. Per turn: at most 50 model requests and 150 tool calls by default
+(`max_steps`/`max_tool_calls`, configurable); hitting a limit ends the turn with
+`done {stop_reason: "limit"}`, which does not pause the queue. On cancel or error the user's prompt
+and delivered steers stay in history; only a half-finished tool-call group is completed with
+"not completed" results, and a note says the request is unfinished and state must be reinspected.
+Context accounting and compaction: `context.py` (protocol section 4 and 12.7).
+
+**Requests and todos** (`requests.py`, `todos.py`; protocol section 12). Every prompt becomes a
+ledger entry `R<n>` when it is submitted (queue, steer, interrupt, requeue, Relay-origin), saved in
+the session and never summarized. The model keeps a todo list with `update_todos` (linked to
+request ids); linked todos set request statuses. Steers are framed with their id and keep their
+attachments. When the model stops with open todos for the turn, the worker re-prompts at most twice
+(`completion_check`), then `done {open_items}`. After 8 steps without a todo update, a short
+reminder is added. Compaction inserts a deterministic carried block after the summary (requests
+verbatim, todos, plan, files, subagents, recent user messages up to ~20K tokens), and only
+`relay_kind: "prompt"` messages count as turn starts. An optional audit side call
+(`audit_requests`, route-assist model) only flags possibly unaddressed asks. Subagents have none of
+this (no ledger or todos).
 
 ### Tools
 
@@ -552,6 +566,8 @@ use ids `skills-N` so worker `error` events route to the dialog's status line.
 - `cancel` stops the turn, drops waiting interrupts and **pauses** the queue. A failed turn also
   pauses it. `resume_queue` continues. `now` and `interrupt` still run while paused.
 - At most 32 queued prompts. `configure` and `reset` clear the queue when idle.
+- Each accepted prompt is recorded in the agent's request ledger before it is queued
+  (`queued.ledger_id`); removing or clearing queued prompts marks them `cancelled_by_user`.
 
 GUI (`Pane::submitAgent`, `rebuildQueueStrip`): every agent prompt is sent with `when: "queue"`
 (or `now` while paused). The prompt is echoed when its turn starts (`agent_started`), not when
@@ -704,7 +720,7 @@ Other limits:
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
-| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `keystore`, `keybindings`, `skills` |
+| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills` |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `engine/` | libvterm spike, `TerminalBackend.h` |
 | `data/` | theme, Konsole profile, icons |

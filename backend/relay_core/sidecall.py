@@ -27,8 +27,11 @@ def call(provider, system: str, user: str, cancel: threading.Event | None = None
 
 
 def render_transcript(messages: list[dict], max_chars: int = 200_000,
-                      per_message: int = TRANSCRIPT_MESSAGE_CAP, keep: str = "tail") -> str:
-    """Plain-text rendering of chat messages (system prompt excluded). Keeps the tail when capped."""
+                      per_message: int = TRANSCRIPT_MESSAGE_CAP, keep: str = "tail", keep_user: bool = False) -> str:
+    """Plain-text rendering of chat messages (system prompt excluded). Keeps the tail when capped.
+
+    keep_user (compaction, research G7): user messages are never middle-trimmed, and when the whole
+    transcript is over max_chars the oldest non-user messages are dropped before any user message."""
     parts = []
     for message in messages:
         role = message.get("role")
@@ -46,10 +49,22 @@ def render_transcript(messages: list[dict], max_chars: int = 200_000,
                 content += f"\n[tool call {func.get('name')}: {str(func.get('arguments'))[:600]}]"
         else:
             label = "USER"
-        if len(content) > per_message:
+        if len(content) > per_message and not (keep_user and label == "USER"):
             content = content[: per_message // 2] + "\n[…trimmed…]\n" + content[-per_message // 2:]
-        parts.append(f"### {label}\n{content.strip()}")
-    text = "\n\n".join(parts)
+        parts.append((label, f"### {label}\n{content.strip()}"))
+    total = sum(len(text) + 2 for _, text in parts)
+    if keep_user and total > max_chars:
+        kept, dropped = [], 0
+        for label, text in parts:
+            if total > max_chars and label != "USER":
+                total -= len(text) + 2
+                dropped += 1
+                continue
+            kept.append((label, text))
+        if dropped:
+            kept.insert(0, ("NOTE", f"[…{dropped} older assistant and tool messages trimmed; user messages kept…]"))
+        parts = kept
+    text = "\n\n".join(t for _, t in parts)
     if len(text) > max_chars:
         text = ("[…earlier transcript trimmed…]\n" + text[-max_chars:]) if keep == "tail" else text[:max_chars]
     return text

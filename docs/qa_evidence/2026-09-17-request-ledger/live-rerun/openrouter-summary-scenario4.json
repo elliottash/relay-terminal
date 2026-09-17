@@ -1,0 +1,62 @@
+{
+  "preset": "openrouter",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "todo_tool": true,
+  "scenarios": {
+    "4": {
+      "asks": 2,
+      "completed": 2,
+      "checks": {
+        "quick.txt": true,
+        "long.txt": true
+      },
+      "elapsed_s": 22.7,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": "User said to skip the sleep when continuing the interrupted request",
+          "text": "First run `sleep 15` (timeout 60 seconds). After that, create long.txt with the numbers 1 to 5, one per line."
+        },
+        {
+          "id": "R2",
+          "source": "interrupt",
+          "status": "done",
+          "reason": null,
+          "text": "create quick.txt containing quick"
+        },
+        {
+          "id": "R3",
+          "source": "queue",
+          "status": "done",
+          "reason": null,
+          "text": "now continue the earlier request that I interrupted (you may skip the sleep)"
+        }
+      ],
+      "todos": [
+        {
+          "id": "T1",
+          "text": "Run `sleep 15` with a 60 second timeout",
+          "status": "cancelled",
+          "request_ids": [
+            "R1"
+          ],
+          "note": "User said to skip the sleep when continuing the interrupted request"
+        },
+        {
+          "id": "T2",
+          "text": "Create long.txt with the numbers 1 to 5, one per line",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        }
+      ],
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    }
+  }
+}

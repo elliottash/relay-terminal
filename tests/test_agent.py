@@ -78,7 +78,12 @@ class AgentTests(unittest.TestCase):
         self.assertTrue(running.wait(2)); time.sleep(0.2); agent.stop(); thread.join(5)
         self.assertFalse(thread.is_alive()); self.assertFalse((self.root/'sentinel').exists())
         self.assertEqual(events[-1]['event'],'cancelled')
-        self.assertFalse(any('tool_calls' in message for message in agent.messages))
+        # G2: the prompt stays; the interrupted tool-call group is completed with a "not completed" result.
+        self.assertEqual(agent.messages[1]['content'], 'do a thing')
+        calls=[c['id'] for m in agent.messages if m.get('tool_calls') for c in m['tool_calls']]
+        results=[m['tool_call_id'] for m in agent.messages if m['role']=='tool']
+        self.assertEqual(calls, results)
+        self.assertIn('not finished', agent.messages[-1]['content'])
 
 class WorkerTests(unittest.TestCase):
     def run_worker(self, messages):

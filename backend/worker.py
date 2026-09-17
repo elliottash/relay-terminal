@@ -9,7 +9,7 @@ import sys
 import threading
 
 from relay_core import __version__, keystore, observe_protocol, session_protocol, skills
-from relay_core.agent import Agent
+from relay_core.agent import Agent, validate_turn_options
 from relay_core import agents_defs
 from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog, KeybindingError
@@ -180,8 +180,11 @@ def main():
                 target = request.get("id")
                 emit({"event": "agent_stopped", "ids": subagents.stop("all" if target in (None, "all") else target)})
             elif kind == "set_agent_options":
-                emit({"event": "agent_options", "id": request.get("id"),
-                      **subagents.set_options(request.get("max_auto_turns"))})
+                validate_turn_options(request)  # refuse bad values before changing anything
+                fields = subagents.set_options(request.get("max_auto_turns"))
+                if turns.agent is not None:
+                    fields.update(turns.agent.set_options(request))  # protocol section 12
+                emit({"event": "agent_options", "id": request.get("id"), **fields})
             elif kind == "agents_status":
                 emit({"event": "agents_status", "items": subagents.list()})
             # --- end subagents ---

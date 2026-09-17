@@ -1,0 +1,257 @@
+{
+  "preset": "openrouter",
+  "model": "deepseek/deepseek-v4.1-flash",
+  "todo_tool": true,
+  "scenarios": {
+    "1": {
+      "asks": 5,
+      "completed": 5,
+      "checks": {
+        "a": true,
+        "b": true,
+        "c": true,
+        "d": true,
+        "e": true
+      },
+      "elapsed_s": 11.0,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Please do all five: 1) create a.txt containing alpha 2) create b.txt containing bravo 3) create c.txt containing charlie"
+        }
+      ],
+      "todos": [
+        {
+          "id": "T1",
+          "text": "create a.txt containing alpha",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T2",
+          "text": "create b.txt containing bravo",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T3",
+          "text": "create c.txt containing charlie",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T4",
+          "text": "create d.txt containing delta",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T5",
+          "text": "create e.txt containing echo",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        }
+      ],
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    },
+    "2": {
+      "asks": 3,
+      "completed": 3,
+      "checks": {
+        "fix.txt": true,
+        "renamed": true,
+        "readme": true
+      },
+      "elapsed_s": 16.5,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "create fix.txt containing fixed, and also rename old.txt to new.txt, oh and add a line saying updated at the end of READ"
+        }
+      ],
+      "todos": [
+        {
+          "id": "T1",
+          "text": "Create fix.txt containing \"fixed\"",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T2",
+          "text": "Rename old.txt to new.txt",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T3",
+          "text": "Add a line saying \"updated\" at the end of README.md",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        }
+      ],
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    },
+    "3": {
+      "asks": 4,
+      "completed": 4,
+      "checks": {
+        "slow.txt": true,
+        "s1.txt": true,
+        "s2.txt": true,
+        "s3.txt": true
+      },
+      "elapsed_s": 24.5,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "done",
+          "reason": null,
+          "text": "Run the command `sleep 12 && echo finished > slow.txt` (timeout 60 seconds), then tell me what slow.txt contains."
+        },
+        {
+          "id": "R2",
+          "source": "steer",
+          "status": "done",
+          "reason": null,
+          "text": "also create s1.txt containing one"
+        },
+        {
+          "id": "R3",
+          "source": "steer",
+          "status": "done",
+          "reason": null,
+          "text": "also create s2.txt containing two"
+        },
+        {
+          "id": "R4",
+          "source": "steer",
+          "status": "done",
+          "reason": null,
+          "text": "also create s3.txt containing three"
+        }
+      ],
+      "todos": [
+        {
+          "id": "T1",
+          "text": "Run `sleep 12 && echo finished > slow.txt` (timeout 60s) and report contents of slow.txt",
+          "status": "completed",
+          "request_ids": [
+            "R1"
+          ],
+          "note": null
+        },
+        {
+          "id": "T2",
+          "text": "Create s1.txt containing \"one\"",
+          "status": "completed",
+          "request_ids": [
+            "R2"
+          ],
+          "note": null
+        },
+        {
+          "id": "T3",
+          "text": "Create s2.txt containing \"two\"",
+          "status": "completed",
+          "request_ids": [
+            "R3"
+          ],
+          "note": null
+        },
+        {
+          "id": "T4",
+          "text": "Create s3.txt containing \"three\"",
+          "status": "completed",
+          "request_ids": [
+            "R4"
+          ],
+          "note": null
+        }
+      ],
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    },
+    "4": {
+      "asks": 2,
+      "completed": 2,
+      "checks": {
+        "quick.txt": true,
+        "long.txt": true
+      },
+      "elapsed_s": 26.2,
+      "ledger": [
+        {
+          "id": "R1",
+          "source": "ask",
+          "status": "cancelled",
+          "reason": "Turn was interrupted by the user before the sleep completed; user did not ask to resume it.; Part of the interrupted request; not asked to continue.",
+          "text": "First run `sleep 15` (timeout 60 seconds). After that, create long.txt with the numbers 1 to 5, one per line."
+        },
+        {
+          "id": "R2",
+          "source": "interrupt",
+          "status": "done",
+          "reason": null,
+          "text": "create quick.txt containing quick"
+        },
+        {
+          "id": "R3",
+          "source": "queue",
+          "status": "done",
+          "reason": null,
+          "text": "now continue the earlier request that I interrupted (you may skip the sleep)"
+        }
+      ],
+      "todos": [
+        {
+          "id": "T4",
+          "text": "Continue the interrupted request (skip the sleep): create long.txt with the numbers 1 to 5, one per line",
+          "status": "completed",
+          "request_ids": [
+            "R3"
+          ],
+          "note": null
+        }
+      ],
+      "completion_checks": 0,
+      "limits": 0,
+      "silent_drops": 0
+    }
+  }
+}

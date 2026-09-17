@@ -38,6 +38,13 @@ def _reasoning_text(part: dict) -> str:
     return ""
 
 
+def wire_messages(messages: list[dict]) -> list[dict]:
+    """Drop Relay's own bookkeeping keys (relay_kind, relay_request) before a message leaves the machine."""
+    if not any(isinstance(m, dict) and any(k.startswith("relay_") for k in m) for m in messages):
+        return messages
+    return [{k: v for k, v in m.items() if not k.startswith("relay_")} if isinstance(m, dict) else m for m in messages]
+
+
 class ProviderError(RuntimeError):
     pass
 
@@ -100,7 +107,7 @@ class ChatProvider:
         if cancel.is_set():
             raise Cancelled("Stopped.")
         started = time.monotonic()
-        payload = {"model": self.config.model, "messages": messages,
+        payload = {"model": self.config.model, "messages": wire_messages(messages),
                    "stream": True, "max_tokens": self.config.max_tokens, **self.config.extra}
         if tools:
             # Side calls (summaries, recaps, suggestions) send no tools; some APIs reject "tools": [].

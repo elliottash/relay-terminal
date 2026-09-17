@@ -140,8 +140,9 @@ class SubagentFactory:
                 config = dataclasses.replace(config, extra=extra)
         provider = self.provider_factory(config) if self.provider_factory else None
         skills = self.skills if "load_skill" in definition.tools else None
-        agent = Agent(config, self.workspace, emit, provider=provider,
-                      max_steps=min(definition.max_steps, MAX_STEPS), skills=skills)
+        steps = min(definition.max_steps, MAX_STEPS)
+        agent = Agent(config, self.workspace, emit, provider=provider, max_steps=steps,
+                      max_tool_calls=max(24, 3 * steps), skills=skills, track_requests=False)
         agent.executor = RestrictedExecutor(self.workspace, emit, agent.cancel_event, skills, definition.tools)
         agent.messages[0]["content"] += subagent_prompt(definition, agent_id)
         return agent, config.model, warnings

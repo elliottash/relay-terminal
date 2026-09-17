@@ -85,7 +85,7 @@ class SessionStore:
     def save(self, data: dict) -> None:
         session_id = check_id(data["id"])
         _atomic_json(self.path(session_id), data)
-        meta = {key: data.get(key) for key in ("id", "title", "created", "updated", "turns", "model", "preset")}
+        meta = {key: data.get(key) for key in ("id", "title", "created", "updated", "turns", "model", "preset", "open_requests")}
         _atomic_json(self.directory / f"{session_id}.meta.json", meta)
 
     def load(self, session_id: str) -> dict:
@@ -110,6 +110,7 @@ class SessionStore:
             except (OSError, ValueError, json.JSONDecodeError):
                 continue
             items.append({"id": meta["id"], "title": meta.get("title") or "", "updated": meta.get("updated"),
-                          "turns": meta.get("turns") or 0, "model": meta.get("model") or ""})
+                          "turns": meta.get("turns") or 0, "model": meta.get("model") or "",
+                          "open_requests": meta.get("open_requests") or 0})
         items.sort(key=lambda item: item.get("updated") or 0, reverse=True)
         return items[:MAX_LISTED]

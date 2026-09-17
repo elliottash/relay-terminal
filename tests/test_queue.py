@@ -359,7 +359,9 @@ class SteerTests(unittest.TestCase):
         roles = [m['role'] for m in second_call]
         # The steering prompt comes after the tool result, never between the tool call and its result.
         self.assertEqual(roles[-2:], ['tool', 'user'])
-        self.assertEqual(second_call[-1]['content'], 'also check README')
+        # G3: steers are framed with their ledger id and keep the verbatim text.
+        self.assertTrue(second_call[-1]['content'].startswith('[Sent by the user while you were working (R2,'))
+        self.assertTrue(second_call[-1]['content'].endswith('also check README'))
         self.assertFalse(self.rec.of('steer_returned'))
         self.assertEqual(p.calls, 2)
 
@@ -405,6 +407,6 @@ class SteerTests(unittest.TestCase):
         self.sup.steer(queued)
         self.rec.wait(lambda e: e['event'] == 'steer_delivered' and queued in e['ids'])
         self.rec.wait(lambda e: e['event'] == 'agent_finished')
-        self.assertEqual(p.seen[1][-1]['content'], 'upgrade me')
+        self.assertTrue(p.seen[1][-1]['content'].endswith('\nupgrade me'))
         with self.assertRaises(ValueError):
             self.sup.steer('nope')

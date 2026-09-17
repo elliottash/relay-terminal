@@ -13,6 +13,8 @@ import threading
 import uuid
 
 from . import attachments, instructions, keystore, planning, suggestions
+from .agent import validate_turn_options
+from .requests import check_ledger_id
 from .context import validate_threshold, validate_window
 from .presets import PRESETS, match_preset, resolve_preset, validate_effort
 from .provider import ProviderConfig, ProviderError
@@ -20,7 +22,9 @@ from .sessions import default_session_dir
 
 TYPES = {"set_model", "set_effort", "context", "compact", "checkpoints", "rewind", "fork", "load_state",
          "sessions", "resume", "recap_request", "set_mode", "plan_execute", "scan_instructions",
-         "synthesize_instructions", "suggest"}
+         "synthesize_instructions", "suggest",
+         # request ledger and todos (protocol section 12)
+         "requests", "request_get", "request_set", "request_reask", "todos"}
 
 
 def provider_config(request: dict) -> ProviderConfig:
@@ -64,7 +68,8 @@ def agent_options(request: dict, workspace: str) -> dict:
             "effort": validate_effort(effort) if effort is not None else None,
             "session_dir": session_dir,
             "plans_dir": _abs_dir(request.get("plans_dir"), "plans_dir"),
-            "instructions": instructions.load(request.get("instructions"), workspace)}
+            "instructions": instructions.load(request.get("instructions"), workspace),
+            **validate_turn_options(request)}
 
 
 def configured_fields(agent) -> dict:
@@ -72,7 +77,8 @@ def configured_fields(agent) -> dict:
               "limit_tokens": agent.context.limit, "effort": agent.effort, "mode": agent.mode,
               "instructions": list(agent.instructions.loaded) if agent.instructions else [],
               "session_id": agent.session_id, "plans_dir": str(agent.plans_dir),
-              "session_dir": str(agent.store.directory) if agent.store else None}
+              "session_dir": str(agent.store.directory) if agent.store else None,
+              **agent.options()}
     if agent.instructions:
         fields["instructions_max_bytes"] = agent.instructions.cap
         fields["instructions_bytes"] = len(agent.instructions.section.encode("utf-8"))
@@ -91,6 +97,18 @@ def load_attachments(request: dict, turns) -> list[dict] | None:
     if agent is None:
         raise ValueError("Configure a provider and workspace first.")
     return attachments.load(raw, agent.executor.workspace.root) or None
+
+
+def open_request_items(agent) -> list[dict]:
+    """Unfinished user requests for recaps (at most 20)."""
+    if not getattr(agent, "track_requests", False):
+        return []
+    out = []
+    for item in agent.requests.to_json()["items"]:
+        if item["requires_completion"] and item["status"] not in ("done", "cancelled", "cancelled_by_user"):
+            out.append({"id": item["id"], "status": item["status"], "reason": item["reason"],
+                        "preview": " ".join(item["text"].split())[:120]})
+    return out[-20:]
 
 
 class SessionCommands:
@@ -195,6 +213,7 @@ class SessionCommands:
         event = agent.load_state(request.get("state"))
         event["id"] = request.get("id")
         self.emit(event)
+        agent.announce_requests()
         self.emit({"event": "mode_changed", "mode": agent.mode})
         self.emit(agent.context_event())
 
@@ -210,6 +229,7 @@ class SessionCommands:
         # Protocol v1 names the session "id"; "session_id" is also accepted.
         event = agent.resume(request.get("session_id", request.get("id")))
         self.emit(event)
+        agent.announce_requests()
         self.emit({"event": "mode_changed", "mode": agent.mode})
         self.emit(agent.context_event())
         self._start_recap(agent, "resume", None)
@@ -223,10 +243,54 @@ class SessionCommands:
     def _start_recap(self, agent, reason: str, request_id) -> None:
         messages, turns = list(agent.messages), agent.turns
         provider = agent.side_provider(cheap=True)
-        self._background("recap", request_id,
-                         lambda: suggestions.recap(provider, messages, turns, reason),
+        open_items = open_request_items(agent)
+
+        def work():
+            event = suggestions.recap(provider, messages, turns, reason)
+            event["open_items"] = open_items
+            return event
+        self._background("recap", request_id, work,
                          lambda text: {"event": "recap", "id": request_id, "skipped": "failed", "error": text,
-                                       "reason": reason, "turns_covered": turns})
+                                       "reason": reason, "turns_covered": turns, "open_items": open_items})
+
+    # ----- request ledger and todos (protocol section 12) ------------------------------------
+    def _tracking_agent(self):
+        agent = self._agent()
+        if not agent.track_requests:
+            raise ValueError("Request tracking is off for this agent.")
+        return agent
+
+    def _requests(self, request):
+        agent = self._tracking_agent()
+        self.emit({**agent.requests.event(agent.todos.items), "id": request.get("id")})
+
+    def _request_get(self, request):
+        agent = self._tracking_agent()
+        item = agent.requests.get(check_ledger_id(request.get("ledger_id")))
+        self.emit({"event": "request", "id": request.get("id"),
+                   "item": agent.requests.entry(item, agent.todos.items, full=True)})
+
+    def _request_set(self, request):
+        agent = self._tracking_agent()
+        ledger_id = check_ledger_id(request.get("ledger_id"))
+        status = request.get("status")
+        agent.requests.set_status(ledger_id, status, request.get("reason"))
+        agent.autosave()
+
+    def _request_reask(self, request):
+        agent = self._tracking_agent()
+        item = agent.requests.get(check_ledger_id(request.get("ledger_id")))
+        if item["status"] == "in_progress" or self.turns.waiting(item["queue_item"]):
+            raise ValueError("That request is already running or queued.")
+        paths = [{"path": p} for p in item["attachments"]]
+        loaded = attachments.load(paths, agent.executor.workspace.root) if paths else None
+        self.turns.submit(item["text"], request.get("when", "queue"), request.get("id"), None, loaded or None,
+                          ledger_id=item["id"])
+        item["reasked"] += 1
+
+    def _todos(self, request):
+        agent = self._tracking_agent()
+        self.emit({**agent.todos.event(None), "id": request.get("id")})
 
     def _set_mode(self, request):
         agent = self._agent()

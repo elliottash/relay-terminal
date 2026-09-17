@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Callable
 
 from . import context as compaction
+from . import route_assist
+from . import todos as todo_tool
 from .attachments import format_block as format_attachments
 from .checkpoints import CheckpointStore
 from .context import DEFAULT_THRESHOLD, ContextTracker
@@ -20,6 +22,8 @@ from .planning import (PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, vali
 from .presets import (apply_effort, context_window_for, effort_style, infer_effort, resolve_preset,
                       validate_effort)
 from .provider import Cancelled, ChatProvider, ProviderConfig, ProviderError
+from .requests import OPEN as REQUEST_OPEN
+from .requests import AUDIT_MAX_TOKENS, RequestLedger, run_audit
 from .sessions import STATE_VERSION, SessionStore, validate_messages
 from .sessions import check_id as check_session_id
 from .sessions import new_id as new_session_id
@@ -29,6 +33,30 @@ MAX_SNAPSHOTS = 3
 MAX_TURN_LOG = 50           # turns whose tool results and transcript stay available (protocol 11)
 TRANSCRIPT_CONTENT_CAP = 8000
 SUMMARY_PREVIEW_CAP = 160
+# Turn limits (owner decision 2026-09-17: 50 model steps, 150 tool calls, configurable). Hitting one ends the
+# turn with `done {stop_reason: "limit"}`, which does not pause the queue.
+DEFAULT_MAX_STEPS = 50
+DEFAULT_MAX_TOOL_CALLS = 150
+MAX_COMPLETION_REMINDERS = 2   # owner decision: automatic re-prompts per turn
+STALE_TODO_STEPS = 8
+OPEN_ITEM_PREVIEW = 120
+
+
+def validate_turn_options(request: dict) -> dict:
+    """Agent options from configure / set_agent_options. Only keys present in the request are returned."""
+    out = {}
+    for key, low, high in (("max_steps", 1, 500), ("max_tool_calls", 1, 2000)):
+        if request.get(key) is not None:
+            value = request[key]
+            if type(value) is not int or not low <= value <= high:
+                raise ValueError(f"{key} must be an integer from {low} to {high}.")
+            out[key] = value
+    for key in ("completion_check", "audit_requests", "todo_tool"):
+        if request.get(key) is not None:
+            if type(request[key]) is not bool:
+                raise ValueError(f"{key} must be a boolean.")
+            out[key] = request[key]
+    return out
 # Turn ids for turns started outside the queue (subagents, tests). A counter, not uuid4: no syscall
 # (which would release the GIL) between a turn's start and its first message.
 _TURN_PREFIX = uuid.uuid4().hex[:8]
@@ -72,10 +100,12 @@ def format_context(context) -> str:
 
 class Agent:
     def __init__(self, config: ProviderConfig, workspace: str, emit: Callable[[dict], None],
-                 *, provider=None, max_steps: int = 12, keybindings=None, skills=None,
+                 *, provider=None, max_steps: int = DEFAULT_MAX_STEPS, keybindings=None, skills=None,
                  preset_id: str | None = None, context_window: int | None = None,
                  compact_threshold: float | None = None, effort: str | None = None,
-                 session_dir: str | None = None, plans_dir: str | None = None, instructions=None):
+                 session_dir: str | None = None, plans_dir: str | None = None, instructions=None,
+                 max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS, track_requests: bool = True,
+                 todo_tool: bool = True, completion_check: bool = True, audit_requests: bool = False):
         self.emit = emit
         self.cancel_event = threading.Event()
         self.config = config
@@ -84,6 +114,14 @@ class Agent:
         self.provider = provider or ChatProvider(config)
         self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings, skills)
         self.max_steps = max_steps
+        self.max_tool_calls = max_tool_calls
+        # Request ledger, todos, completion check and audit (research section 6 items 2-8). Off for subagents.
+        self.track_requests = track_requests
+        self.todo_tool = todo_tool
+        self.completion_check = completion_check
+        self.audit_requests = audit_requests
+        self._announce = False   # emit requests/todos events on change (after construction)
+        self._turn_ctx = None
         # --- subagents (relay_core.subagents) ---
         # subagents: SubagentManager giving this main agent the agent tools; None for subagents (no nesting).
         # inbox: object with drain()/restore(); its notes are added before each model call.
@@ -111,6 +149,7 @@ class Agent:
         self.turn_log: OrderedDict[str, dict] = OrderedDict()
         self._turn_record = None
         self._new_session()
+        self._announce = True
 
     # ----- session identity ------------------------------------------------
     def _new_session(self, session_id: str | None = None) -> None:
@@ -122,11 +161,42 @@ class Agent:
         self.checkpoints = CheckpointStore(self.store.blob_dir(self.session_id) if self.store else None)
         self._pending_note = ""
         self._turn = None
+        self.requests = RequestLedger(on_change=self._requests_changed)
+        self.todos = todo_tool.TodoList()
+        self.plan_path = None
         self.messages = [{"role": "system", "content": self.system_prompt()}]
         self.context_invalidate()
 
     def reset_conversation(self) -> None:
         self._new_session()
+        self.announce_requests()
+
+    # ----- requests and todos ------------------------------------------------------
+    def _requests_changed(self) -> None:
+        if self._announce and self.track_requests:
+            self.emit(self.requests.event(self.todos.items))
+
+    def announce_requests(self) -> None:
+        """Current ledger and todos, e.g. after a reset, load, resume or rewind."""
+        if self._announce and self.track_requests:
+            self.emit(self.requests.event(self.todos.items))
+            self.emit(self.todos.event(None))
+
+    def set_options(self, request: dict) -> dict:
+        """set_agent_options: turn limits and request tracking switches; applies from the next step."""
+        for key, value in validate_turn_options(request).items():
+            setattr(self, key, value)
+        if "todo_tool" in request:
+            self.refresh_system_prompt()
+        return self.options()
+
+    def options(self) -> dict:
+        return {"max_steps": self.max_steps, "max_tool_calls": self.max_tool_calls,
+                "completion_check": self.completion_check, "audit_requests": self.audit_requests,
+                "todo_tool": self.todo_tool}
+
+    def _todos_enabled(self) -> bool:
+        return self.track_requests and self.todo_tool
 
     def context_invalidate(self) -> None:
         if hasattr(self, "context"):
@@ -141,7 +211,9 @@ class Agent:
         skills_note = self.executor.skills.prompt_section() if self.executor.skills is not None else ""
         instructions = self.instructions.section if self.instructions is not None else ""
         plan = PLAN_MODE_NOTE if self.mode == "plan" else ""
-        return SYSTEM + "\nChosen workspace: " + str(self.executor.workspace.root) + skills_note + instructions + plan
+        todo_rules = todo_tool.RULES if getattr(self, "track_requests", False) and getattr(self, "todo_tool", False) else ""
+        return (SYSTEM + "\nChosen workspace: " + str(self.executor.workspace.root) + skills_note + instructions
+                + todo_rules + plan)
 
     def refresh_system_prompt(self) -> None:
         self.messages[0] = {"role": "system", "content": self.system_prompt()}
@@ -156,12 +228,13 @@ class Agent:
 
     def tools(self) -> list[dict]:
         tools = self.executor.tools()
+        extra = [todo_tool.SPEC] if self._todos_enabled() else []
         if self.mode == "plan":
             # Subagents may write files, so plan mode does not offer them either.
-            return [t for t in tools if t["function"]["name"] not in PLAN_BLOCKED_TOOLS] + [WRITE_PLAN_SPEC]
+            return [t for t in tools if t["function"]["name"] not in PLAN_BLOCKED_TOOLS] + [WRITE_PLAN_SPEC] + extra
         if self.subagents is not None:
             tools = tools + self.subagents.tool_specs()
-        return tools
+        return tools + extra
 
     def _effort_style(self) -> str:
         return effort_style(self.preset, self.config.extra, self.config.base_url)
@@ -260,9 +333,12 @@ class Agent:
             if "exit_code" in entry:
                 item["exit_code"] = entry["exit_code"]
             tools.append(item)
-        return {"event": "turn_summary", "turn_id": record["turn_id"], "elapsed_ms": record["elapsed_ms"],
-                "thinking_ms": record["thinking_ms"], "thinking_chars": record["thinking_chars"],
-                "outcome": record["outcome"], "tools": tools}
+        summary = {"event": "turn_summary", "turn_id": record["turn_id"], "elapsed_ms": record["elapsed_ms"],
+                   "thinking_ms": record["thinking_ms"], "thinking_chars": record["thinking_chars"],
+                   "outcome": record["outcome"], "tools": tools}
+        if record.get("stop_reason"):
+            summary["stop_reason"] = record["stop_reason"]
+        return summary
 
     def tool_output(self, turn_id, call_id) -> dict:
         with self._lock:
@@ -298,25 +374,60 @@ class Agent:
                 self.messages, self.side_provider(), manual=reason == "manual", focus=focus,
                 cancel=self.cancel_event,
                 over=lambda m: compaction.estimate_tokens(m) * ratio + compaction.estimate_tokens(tools) * ratio >= limit,
-                window_chars=max(20_000, min(400_000, self.context.window * compaction.CHARS_PER_TOKEN // 2)))
+                window_chars=max(20_000, min(400_000, self.context.window * compaction.CHARS_PER_TOKEN // 2)),
+                carry=self._carry if self.track_requests else None)
             boundary = result["boundary"]
             if boundary is not None:
-                self._move_epoch(boundary)
+                self._move_epoch(boundary, result["prefix"])
             self.messages = result["messages"]
             self.context.invalidate()
             after, _ = self.context.used(self.messages, tools)
             event = {"event": "compacted", "reason": reason, "before_tokens": before, "after_tokens": after,
                      "summary_chars": result["summary_chars"], "trimmed_tool_outputs": result["trimmed"]}
+            if result.get("carried") is not None:
+                event["carried"] = result["carried"]
             self.emit(event)
             self.emit(self.context_event())
             return event
 
-    def _move_epoch(self, boundary: int) -> None:
+    def _carry(self, region: list[dict], tail_ids=frozenset(), lean: bool = False) -> tuple[str, dict]:
+        """The deterministic post-compaction block: ledger requests, todos, plan, files, subagents and
+        recent user messages verbatim (research section 6 item 4)."""
+        window = self.context.window
+        user_budget = (min(compaction.CARRY_USER_TOKENS, window // compaction.CARRY_USER_WINDOW_DIVISOR)
+                       * compaction.CHARS_PER_TOKEN)
+        open_budget = (min(compaction.CARRY_OPEN_REQUEST_TOKENS, window // compaction.CARRY_OPEN_WINDOW_DIVISOR)
+                       * compaction.CHARS_PER_TOKEN)
+        # Queued prompts not delivered yet are not part of the conversation; the model must not act on them.
+        delivered = [i for i in self.requests.to_json()["items"] if i["delivered"]]
+        full = {i["id"] for i in delivered if i["status"] in REQUEST_OPEN}
+        recent, used, in_recent = compaction.recent_user_messages(region, 0 if lean else user_budget, full)
+        files: list[str] = []
+        for item in self.checkpoints.items:
+            for path, record in item["files"].items():
+                if record.get("after") and path not in files:
+                    files.append(path)
+        running = []
+        if self.subagents is not None:
+            try:
+                running = [s for s in self.subagents.list() if s.get("status") in ("running", "waiting")]
+            except Exception:
+                running = []
+        text = compaction.carried_block(delivered, self.todos.items, open_budget_chars=open_budget, recent=recent,
+                                        in_recent=in_recent, in_tail=tail_ids,
+                                        plan_path=self.plan_path, files=files, subagents=running)
+        stats = {"requests": len(delivered),
+                 "open": sum(1 for i in delivered if i["status"] in REQUEST_OPEN and i["requires_completion"]),
+                 "todos": len(self.todos.items), "user_messages": len(recent),
+                 "user_message_tokens": used // compaction.CHARS_PER_TOKEN, "block_chars": len(text), "lean": lean}
+        return text, stats
+
+    def _move_epoch(self, boundary: int, prefix: int = 3) -> None:
         old, new = str(self.epoch), str(self.epoch + 1)
         self.snapshots[old] = list(self.messages)
         for key in sorted(self.snapshots, key=int)[:-MAX_SNAPSHOTS]:
             del self.snapshots[key]
-        shift = 3 - boundary
+        shift = prefix - boundary
         for item in self.checkpoints.items:
             index = item["locations"].get(old)
             if index is not None and index >= boundary:
@@ -335,7 +446,7 @@ class Agent:
         self.provider.cancel()
 
     def ask(self, prompt: str, *, reset_cancellation: bool = True, context: dict | None = None,
-            attachments: list[dict] | None = None, turn_id: str | None = None):
+            attachments: list[dict] | None = None, turn_id: str | None = None, ledger_id: str | None = None):
         if not isinstance(prompt, str) or not prompt.strip() or len(prompt.encode('utf-8')) > 131072:
             raise ValueError("Prompt must contain 1–131072 bytes of text.")
         note = self._pending_note + format_context(context) + format_attachments(attachments)
@@ -346,6 +457,8 @@ class Agent:
         self._turn = turn
         record = self._begin_record(turn_id if isinstance(turn_id, str) and turn_id else f"t{_TURN_PREFIX}-{next(_TURN_COUNTER)}", prompt)
         turn_id = record["turn_id"]
+        ctx = {"turn_id": turn_id, "requests": [], "opening": [], "todos_touched": False, "since_todos": 0}
+        self._turn_ctx = ctx
 
         def add(message: dict) -> None:
             self.messages.append(message)
@@ -353,32 +466,54 @@ class Agent:
 
         if not self.title:
             self.title = " ".join(prompt.split())[:80]
-        add({"role": "user", "content": note + prompt})
+        message = {"role": "user", "content": note + prompt, "relay_kind": "prompt"}
+        if self.track_requests:
+            turn["todos_before"] = self.todos.snapshot()   # rewind restores the list as it was
+            item = self.requests.find(ledger_id) if ledger_id else None
+            if item is None:
+                item = self.requests.add(prompt, "ask", attachments=attachments)
+            self.requests.deliver(item["id"], turn_id, turn["turn"])
+            ctx["requests"].append(item["id"])
+            ctx["opening"] = [item["id"]]
+            message["relay_requests"] = [item["id"]]
+        add(message)
+        steps = 0
         calls_used = 0
-        delivered: list[str] = []  # subagents: inbox notes to restore if this turn is rolled back
+        over_budget_steps = 0
+        reminders = 0
         batch = None               # subagents: `agent` calls started for the current response
         try:
-            for step in range(self.max_steps):
+            while True:
                 if self.cancel_event.is_set():
                     raise Cancelled("Stopped.")
+                if steps >= self.max_steps or calls_used > self.max_tool_calls and over_budget_steps >= 1:
+                    self._stop_at_limit(record, ctx, steps, calls_used)
+                    return
+                if calls_used > self.max_tool_calls:
+                    over_budget_steps += 1   # one more model call to let it answer without tools
                 # Step boundary: every tool call of the previous response already has its result.
                 # --- subagents: background results and messages arrive at a step boundary ---
                 if self.inbox is not None:
                     notes = self.inbox.drain()
                     if notes:
-                        delivered += notes
-                        add({"role": "user", "content": "\n\n".join(notes)})
+                        add({"role": "user", "content": "\n\n".join(notes), "relay_kind": "note"})
                 # --- end subagents ---
                 # Steering: prompts the user sent "at the next tool call" join the conversation here,
                 # after every tool result of the previous response and before the next model request.
                 if self.steer_source is not None:
                     steered = self.steer_source()
                     if steered:
-                        add({"role": "user", "content": "\n\n".join(steered)})
+                        add(self._steer_message(steered, ctx, turn))
+                if self._todos_enabled() and ctx["since_todos"] >= STALE_TODO_STEPS and self.todos.open_items():
+                    add({"role": "user", "content": todo_tool.reminder_text(self.todos.open_items(), ctx["since_todos"]),
+                         "relay_kind": "note"})
+                    ctx["since_todos"] = 0
                 self._maybe_compact()
-                self.emit({"event": "status", "text": f"Requesting model · step {step + 1}/{self.max_steps}"})
+                self.emit({"event": "status", "text": f"Requesting model · step {steps + 1}/{self.max_steps}"})
                 self._last_usage = None
                 message = self.provider.complete(self.messages, self.tools(), self._provider_emit, self.cancel_event)
+                steps += 1
+                ctx["since_todos"] += 1
                 self._close_thinking(record)
                 add(message)
                 if self._last_usage:
@@ -386,10 +521,23 @@ class Agent:
                 self.emit(self.context_event())
                 calls = message.get("tool_calls", [])
                 if not calls:
-                    self._end_turn(record, {"event": "done", "turn_id": turn_id})
+                    open_items = self._open_items(ctx) if self.completion_check else []
+                    if open_items and reminders < MAX_COMPLETION_REMINDERS and steps < self.max_steps:
+                        reminders += 1
+                        self.emit({"event": "completion_check", "turn_id": turn_id, "open": open_items,
+                                   "reminder": reminders, "max_reminders": MAX_COMPLETION_REMINDERS})
+                        add({"role": "user", "content": self._completion_reminder(open_items, reminders),
+                             "relay_kind": "note"})
+                        continue
+                    if self.track_requests:
+                        self.requests.finish_turn(turn_id, True, self.todos.items)
+                    self._end_turn(record, {"event": "done", "turn_id": turn_id,
+                                            "open_items": self._open_items(ctx, final=True)})
+                    if self.track_requests and self.audit_requests:
+                        self._start_audit(ctx, message.get("content") or "")
                     return
                 # subagents: start every `agent` call of this response together so they run concurrently.
-                batch = (self.subagents.start_batch(calls, 24 - calls_used)
+                batch = (self.subagents.start_batch(calls, self.max_tool_calls - calls_used)
                          if self.subagents is not None and self.mode != "plan" else None)
                 for call in calls:
                     if self.cancel_event.is_set():
@@ -397,7 +545,7 @@ class Agent:
                     func = call["function"]
                     preview = ""
                     calls_used += 1
-                    if calls_used > 24:
+                    if calls_used > self.max_tool_calls:
                         result = {"error": "Tool budget reached. Do not request more tools this turn."}
                     else:
                         try:
@@ -424,26 +572,158 @@ class Agent:
                     self._record_tool(record, call["id"], func["name"], preview, result)
                     self.emit({"event": "tool_result", "tool": func["name"], "result": result,
                                "turn_id": turn_id, "call_id": call["id"]})
-            self._end_turn(record, {"event": "error", "turn_id": turn_id,
-                                    "text": "Stopped at the model-step limit. Review completed actions before continuing."})
+                batch = None
         except Cancelled:
-            self._subagents_rollback(batch, delivered)
-            # Avoid retaining an incomplete tool-call group, which breaks many providers.
-            self.messages = self.messages[:self._turn_start(turn)]
-            self.messages.append({"role": "user", "content": "The previous turn was cancelled. It may already have executed tool actions. Reinspect state before further changes."})
-            self._end_turn(record, {"event": "cancelled", "turn_id": turn_id})
+            # subagents: stop this turn's foreground subagents. Delivered notes stay in the conversation now.
+            self._subagents_rollback(batch, [])
+            self._keep_unfinished_turn("stopped by the user (cancel or interrupt)")
+            if self.track_requests:
+                self.requests.finish_turn(turn_id, False, self.todos.items)
+            self._end_turn(record, {"event": "cancelled", "turn_id": turn_id,
+                                    "open_items": self._open_items(ctx, final=True)})
         except Exception as exc:
-            self._subagents_rollback(batch, delivered)
-            self.messages = self.messages[:self._turn_start(turn)]
-            self.messages.append({"role": "user", "content": "The previous turn failed. Some tool actions may already have executed. Reinspect state before further changes."})
-            self._end_turn(record, {"event": "error", "turn_id": turn_id, "text": str(exc)[:2000] if isinstance(exc, (ValueError, ProviderError)) else f"Agent error ({type(exc).__name__})."})
+            self._subagents_rollback(batch, [])
+            text = str(exc)[:2000] if isinstance(exc, (ValueError, ProviderError)) else f"Agent error ({type(exc).__name__})."
+            self._keep_unfinished_turn(f"failed ({text[:300]})")
+            if self.track_requests:
+                self.requests.finish_turn(turn_id, False, self.todos.items)
+            self._end_turn(record, {"event": "error", "turn_id": turn_id, "text": text,
+                                    "open_items": self._open_items(ctx, final=True)})
         finally:
             self._turn = None
             self._turn_record = None
+            self._turn_ctx = None
             if record["elapsed_ms"] is None:
                 record["elapsed_ms"] = int((time.monotonic() - record["started"]) * 1000)
                 record["outcome"] = record["outcome"] or "error"
             self.autosave()
+
+    # ----- drop-path handling (research G1-G3) ----------------------------------------
+    def _stop_at_limit(self, record: dict, ctx: dict, steps: int, calls_used: int) -> None:
+        """G1: a turn limit is not an error; the queue keeps going and the request stays open."""
+        which = "tool_calls" if calls_used > self.max_tool_calls else "steps"
+        text = (f"Stopped at the turn limit ({steps} of {self.max_steps} model steps, "
+                f"{min(calls_used, self.max_tool_calls)} of {self.max_tool_calls} tool calls). "
+                "The request is not finished; ask the agent to continue.")
+        self.messages.append({"role": "user", "relay_kind": "note", "content": (
+            "[Relay note: the turn above stopped at Relay's turn limit before it finished. Its request is not "
+            "finished; continue it when the user asks.]")})
+        if self.track_requests:
+            self.requests.finish_turn(ctx["turn_id"], False, self.todos.items)
+        record["stop_reason"] = "limit"
+        self.emit({"event": "status", "text": text})
+        self._end_turn(record, {"event": "done", "turn_id": ctx["turn_id"], "stop_reason": "limit", "text": text,
+                                "limit": {"which": which, "steps": steps, "max_steps": self.max_steps,
+                                          "tool_calls": calls_used, "max_tool_calls": self.max_tool_calls},
+                                "open_items": self._open_items(ctx, final=True)})
+
+    def _keep_unfinished_turn(self, how: str) -> None:
+        """G2: keep the user's prompt and delivered steers; only complete a half-finished tool-call group
+        (providers reject an assistant tool call without results), then say the request is unfinished."""
+        for index in range(len(self.messages) - 1, 0, -1):
+            message = self.messages[index]
+            if message.get("role") == "tool":
+                continue
+            if message.get("role") == "assistant" and message.get("tool_calls"):
+                answered = {m.get("tool_call_id") for m in self.messages[index + 1:] if m.get("role") == "tool"}
+                for call in message["tool_calls"]:
+                    if call.get("id") not in answered:
+                        self.messages.append({"role": "tool", "tool_call_id": call.get("id"), "content": json.dumps(
+                            {"error": "Not completed: the turn stopped before this tool call finished. "
+                                      "It may have partly run; reinspect state."})})
+            break
+        self.messages.append({"role": "user", "relay_kind": "note", "content": (
+            f"[Relay note: the turn above was {how} before it finished. The request above is not finished. "
+            "Tool actions may already have run; reinspect state before further changes. Continue that request "
+            "only if the user asks.]")})
+
+    def _steer_message(self, steered: list, ctx: dict, turn: dict) -> dict:
+        """G3: frame steers, keep their attachments and context, and link them to the ledger."""
+        parts, ids = [], []
+        current = ", ".join(ctx["opening"])
+        for entry in steered:
+            if isinstance(entry, str):
+                entry = {"prompt": entry}
+            rid = entry.get("ledger_id")
+            if self.track_requests:
+                item = self.requests.find(rid) if rid else None
+                if item is None:
+                    item = self.requests.add(entry["prompt"], "steer", attachments=entry.get("attachments"))
+                rid = item["id"]
+                self.requests.deliver(rid, ctx["turn_id"], turn["turn"])
+                ctx["requests"].append(rid)
+                ids.append(rid)
+            label = f" ({rid}, {time.strftime('%H:%M')})" if rid else ""
+            task = f" ({current})" if current else ""
+            todo = " Add it to your todos if it is a new ask." if self._todos_enabled() else ""
+            header = (f"[Sent by the user while you were working{label}. Keep your current task{task} unless this "
+                      f"changes it.{todo} Say briefly how you handled it in your final answer.]\n")
+            try:
+                extra = format_context(entry.get("context"))
+            except ValueError:
+                extra = ""
+            parts.append(header + extra + format_attachments(entry.get("attachments")) + entry["prompt"])
+        message = {"role": "user", "content": "\n\n".join(parts), "relay_kind": "steer"}
+        if ids:
+            message["relay_requests"] = ids
+        return message
+
+    # ----- completion check, audit (items 5 and 8) --------------------------------------
+    def _open_items(self, ctx: dict, final: bool = False) -> list[dict]:
+        """Open requests and todos of this turn. Before the turn ends (final=False) a request only counts
+        when it has an open linked todo; at the end every unfinished request of the turn counts."""
+        if not self.track_requests:
+            return []
+        turn_ids = set(ctx["requests"])
+        # Todos of earlier, unfinished requests (e.g. an interrupted turn) do not hold this turn open.
+        todos = [t for t in self.todos.open_items()
+                 if set(t["request_ids"]) & turn_ids or (ctx["todos_touched"] and not t["request_ids"])]
+        linked = {rid for t in todos for rid in t["request_ids"]}
+        out = []
+        for item in self.requests.turn_requests(ctx["turn_id"]):
+            if item["status"] in REQUEST_OPEN and item["requires_completion"] and (final or item["id"] in linked):
+                out.append({"kind": "request", "id": item["id"], "status": item["status"],
+                            "preview": " ".join(item["text"].split())[:OPEN_ITEM_PREVIEW]})
+        out += [{"kind": "todo", "id": t["id"], "status": t["status"], "preview": t["text"][:OPEN_ITEM_PREVIEW],
+                 "request_ids": list(t["request_ids"])} for t in todos]
+        return out
+
+    @staticmethod
+    def _completion_reminder(open_items: list[dict], number: int) -> str:
+        listed = "; ".join(f'{i["id"]} "{i["preview"]}" ({i["status"]})' for i in open_items[:10])
+        return (f"[Relay completion check {number}/{MAX_COMPLETION_REMINDERS}: before finishing, these are still "
+                f"open: {listed}. Do them now, or call update_todos to mark each one cancelled, deferred or blocked "
+                "with a reason. Then give your final answer.]")
+
+    def _start_audit(self, ctx: dict, answer: str) -> None:
+        """Optional flag-only audit on a cheap model (route-assist model when available). Never re-prompts."""
+        requests = [dict(i) for i in self.requests.turn_requests(ctx["turn_id"]) if i["requires_completion"]]
+        if not requests:
+            return
+        ledger, todos, turn_id = self.requests, self.todos.snapshot(), ctx["turn_id"]
+
+        def work():
+            model = None
+            try:
+                provider = None
+                try:
+                    provider = route_assist.router_provider()
+                except Exception:
+                    provider = None
+                if provider is not None:
+                    provider.config.max_tokens = AUDIT_MAX_TOKENS
+                    model = route_assist.ROUTER_MODEL
+                else:
+                    provider, model = self.side_provider(cheap=True), self.config.model
+                flags = run_audit(provider, requests, answer, todos)
+                if ledger is self.requests:
+                    ledger.add_audit(flags, turn_id)
+                self.emit({"event": "request_audit", "turn_id": turn_id, "model": model, "unaddressed": flags})
+            except Exception as exc:
+                text = str(exc)[:300] if isinstance(exc, (ValueError, OSError, ProviderError)) else type(exc).__name__
+                self.emit({"event": "request_audit", "turn_id": turn_id, "model": model, "unaddressed": [],
+                           "error": text})
+        threading.Thread(target=work, name="relay-request-audit", daemon=True).start()
 
     def _close_thinking(self, record: dict) -> None:
         """A stream that stopped mid-reasoning still ends its thinking block for the GUI."""
@@ -469,6 +749,12 @@ class Agent:
         return turn["locations"].get(str(self.epoch), len(self.messages))
 
     def _prepare(self, name: str, args) -> Prepared:
+        if name == "update_todos" and self._todos_enabled():
+            if not isinstance(args, dict):
+                raise ValueError("Tool arguments must be an object.")
+            items = args.get("items") if isinstance(args.get("items"), list) else []
+            lines = [f"[{i.get('status')}] {str(i.get('text'))[:80]}" for i in items[:20] if isinstance(i, dict)]
+            return Prepared(name, args, "UPDATE TODOS\n\n" + ("\n".join(lines) or "(empty list)"))
         if name == "write_plan":
             if self.mode != "plan":
                 raise ValueError("write_plan is only available in plan mode.")
@@ -479,10 +765,19 @@ class Agent:
         return self.executor.prepare(name, args)
 
     def _execute(self, prepared: Prepared, turn: dict) -> dict:
+        if prepared.name == "update_todos":
+            ctx = self._turn_ctx or {"turn_id": None, "opening": [], "requests": []}
+            items = self.todos.replace(prepared.arguments, self.requests.ids(), ctx["turn_id"], ctx["opening"])
+            ctx["todos_touched"] = True
+            ctx["since_todos"] = 0
+            self.requests.apply_todos(items)
+            self.emit(self.todos.event(ctx["turn_id"]))
+            return {"ok": True, "items": items, "open": len(self.todos.open_items())}
         if prepared.name == "write_plan":
             if self.cancel_event.is_set():
                 raise Cancelled("Stopped.")
             path = write_plan(self.plans_dir, prepared.arguments["title"], prepared.arguments["content"])
+            self.plan_path = str(path)
             self.emit({"event": "plan_written", "path": str(path), "title": prepared.arguments["title"]})
             return {"path": str(path), "written": True}
         if prepared.name == "write_file" and prepared.path is not None:
@@ -528,6 +823,10 @@ class Agent:
                 for stale in [k for k in self.snapshots if int(k) >= self.epoch]:
                     del self.snapshots[stale]
                 self.checkpoints.truncate(turn)
+                if self.track_requests:
+                    self.todos.restore(item.get("todos_before") or [])
+                    self.requests.truncate(turn)
+                    self.emit(self.todos.event(None))
                 for other in self.checkpoints.items:
                     other["locations"] = {k: v for k, v in other["locations"].items() if int(k) <= self.epoch}
                 self.context.invalidate()
@@ -556,7 +855,12 @@ class Agent:
     def export_state(self, turn=None) -> dict:
         messages = self._state_messages(turn)
         turns = [i for i in self.checkpoints.items if turn is None or i["turn"] <= turn]
-        return {"version": STATE_VERSION, "kind": "relay_agent_state", "title": self.title,
+        later = [i for i in self.checkpoints.items if turn is not None and i["turn"] > turn]
+        todo_items = (later[0].get("todos_before") or []) if later else self.todos.snapshot()
+        extra = {"requests": self.requests.export(turn, {i["turn"]: n for n, i in enumerate(turns, 1)}),
+                 "todos": {"next_id": self.todos.next_id, "items": todo_items},
+                 "plan_path": self.plan_path} if self.track_requests else {}
+        return {**extra, "version": STATE_VERSION, "kind": "relay_agent_state", "title": self.title,
                 "model": self.config.model, "preset": self.preset.id if self.preset else None,
                 "effort": self.effort, "mode": self.mode,
                 "instructions": list(self.instructions.loaded) if self.instructions else [],
@@ -600,7 +904,7 @@ class Agent:
             else:
                 raise ValueError("Unsupported agent state.")
             return {"event": "state_loaded", "session_id": self.session_id, "turns": self.turns,
-                    "model": data.get("model"), "title": self.title}
+                    "model": data.get("model"), "title": self.title, "open_requests": self.requests.open_count()}
 
     def resume(self, session_id) -> dict:
         if self.store is None:
@@ -609,7 +913,7 @@ class Agent:
             data = self.store.load(check_session_id(session_id))
             self._apply_session(data, keep_id=True)
             return {"event": "state_loaded", "session_id": self.session_id, "turns": self.turns,
-                    "model": data.get("model"), "title": self.title}
+                    "model": data.get("model"), "title": self.title, "open_requests": self.requests.open_count()}
 
     def _apply_session(self, data: dict, keep_id: bool) -> None:
         messages = validate_messages(data.get("messages"))
@@ -624,6 +928,20 @@ class Agent:
             raise ValueError("Invalid session epoch.")
         self._new_session(check_session_id(data["id"]) if keep_id and data.get("id") else None)
         self.checkpoints.load_json(data.get("checkpoints") or {"items": []})
+        try:
+            if isinstance(data.get("requests"), dict):
+                self.requests.load_json(data["requests"])
+            else:  # saved before the ledger existed: rebuild it from the recorded prompts
+                self.requests.backfill(self.checkpoints.items)
+        except ValueError:
+            self.requests = RequestLedger(on_change=self._requests_changed)
+            self.requests.backfill(self.checkpoints.items)
+        try:
+            if isinstance(data.get("todos"), dict):
+                self.todos.load_json(data["todos"])
+        except ValueError:
+            self.todos = todo_tool.TodoList()
+        self.plan_path = data.get("plan_path") if isinstance(data.get("plan_path"), str) else None
         self.mode = mode
         self.title = str(data.get("title") or "")[:200]
         if keep_id and isinstance(data.get("created"), (int, float)):
@@ -641,7 +959,9 @@ class Agent:
                 "effort": self.effort, "mode": self.mode, "turns": self.turns, "epoch": self.epoch,
                 "messages": self.messages[1:],
                 "snapshots": {k: v[1:] for k, v in self.snapshots.items()},
-                "checkpoints": self.checkpoints.to_json()}
+                "checkpoints": self.checkpoints.to_json(),
+                "requests": self.requests.to_json(), "todos": self.todos.to_json(), "plan_path": self.plan_path,
+                "open_requests": self.requests.open_count()}
 
     def autosave(self) -> None:
         if self.store is None or (self.turns == 0 and not self.store.path(self.session_id).exists()):
@@ -665,7 +985,7 @@ def transcript_item(message: dict) -> dict:
 def _conversation_only_checkpoints(state: dict) -> dict:
     """Checkpoints for a fork/loaded state: turns stay listed, file pre-images stay with the source."""
     items, messages = [], state.get("messages") or []
-    starts = [i + 1 for i, m in enumerate(messages) if m.get("role") == "user"]
+    starts = [i + 1 for i, m in enumerate(messages) if compaction.is_turn_start(m)]
     prompts = state.get("prompts") or []
     # Match each recorded prompt to the user message that ends with it, in order.
     cursor = 0

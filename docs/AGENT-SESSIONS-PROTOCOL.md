@@ -190,3 +190,209 @@ tests in `tests/test_routing_thinking_skills.py`; live evidence in
 `google/gemini-3.5-flash-lite` on OpenRouter (0.6–0.9 s measured) regardless of the pane's model,
 and works before the pane's agent is configured. Without that key it falls back to the pane's model
 (reasoning models took 2–12 s; send a longer `timeout_ms`).
+
+## 12. Request ledger, todos, completion check, turn limits (v1.2, 2026-09-17)
+
+Implements items 1–5, 7 and 8 of `docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md` section 6 (owner decisions in its
+section 9). Backend: `backend/relay_core/{requests,todos,agent,queue,context,sidecall,session_protocol}.py`;
+tests: `tests/test_requests.py`; opt-in live scenarios: `scripts/eval-requests.py`. All changes are additive:
+existing events keep their fields and meaning. Deviations from the research sketches are listed in 12.9.
+
+### 12.1 Options
+
+`configure` and `set_agent_options` accept, all optional:
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `max_steps` | int 1–500 | 50 | model calls per turn |
+| `max_tool_calls` | int 1–2000 | 150 | tool calls per turn |
+| `completion_check` | bool | true | end-of-turn re-prompt for open todos (12.5) |
+| `audit_requests` | bool | false | flag-only audit side call after each finished turn (12.6) |
+| `todo_tool` | bool | true | offer `update_todos` and its prompt rules to the model |
+
+`configured` gains these five fields. `set_agent_options` applies them to the pane's agent at once (limits are
+read at every step boundary) and `agent_options` gains them when an agent is configured (without one, only
+`max_auto_turns`/`wakeups` as before). Invalid values → `error`, nothing changed. Subagents are not affected:
+they keep their definition's `max_steps`, get `max(24, 3 × max_steps)` tool calls and no ledger or todos.
+
+### 12.2 Turn limits (G1)
+
+When a turn reaches `max_steps` model calls, or makes more than `max_tool_calls` tool calls (the over-budget calls
+get an error result and the model gets one more call to answer), the worker emits
+`status {text}` and ends the turn with
+
+`done {turn_id, stop_reason: "limit", text, limit: {which: "steps"|"tool_calls", steps, max_steps, tool_calls, max_tool_calls}, open_items}`
+
+This is a `done`, not an `error`: `agent_finished {outcome: "done", stop_reason: "limit"}` follows and the queue is
+**not** paused. `turn_summary` also carries `stop_reason: "limit"`. The request stays `open` in the ledger and the
+model gets a note that the turn stopped at the limit. The GUI can offer "Continue" (send an ordinary `ask`).
+There is no "Stopped at the model-step limit" `error` any more.
+
+### 12.3 Request ledger
+
+Every accepted prompt gets a ledger entry **when it is submitted**, before it is queued or delivered:
+`ask` (any `when`), `queue_steer` upgrades (same entry), requeued steers (same entry), Relay-origin prompts such as
+subagent wake-ups (`source: "relay"`, `requires_completion: false`), and `plan_execute`. Ids are `R1`, `R2`, …
+per conversation (they continue after resume/fork; `reset`/new session starts at `R1`).
+
+Events that gain `ledger_id` (string, or null when tracking is off): `queued`, `steer_returned`.
+`steer_delivered` gains `ledger_ids` (list, parallel to `ids`).
+
+**Entry (as listed):**
+`{id, text_preview (≤200 chars, whitespace collapsed), source: "ask"|"queue"|"interrupt"|"steer"|"relay", origin: "user"|"relay", requires_completion, status, reason, turn_id, turn, queue_item, delivered, handled, todo_ids: [...], attachments: [paths], audit: [{turn_id, quote}], created, updated}`
+
+- `source` is the `when` the prompt was sent with (`now` → `ask`; an idle `steer` that was queued stays `steer`).
+- `turn_id`: the turn (queue item id) that last received it; `turn`: that turn's checkpoint number; `queue_item`: the
+  queue item id of its latest submission (matches `queued.id`/`queue_changed.items[].id`).
+- `delivered`: it reached the model at least once. `handled`: the turn that last received it ended normally.
+- `attachments`: paths only (contents are not stored in the ledger).
+
+**Statuses:** `open` (not finished: never started, or its turn was cancelled, failed or hit the limit),
+`in_progress` (its turn is running), `done`, `cancelled` (the model cancelled every linked todo; `reason` = notes),
+`cancelled_by_user`, `blocked`, `deferred` (from linked todos; `reason` = notes).
+Rules: delivery → `in_progress`. A turn that ends with `done` (not at the limit) marks its requests `done`, unless a
+linked todo is still pending/in progress (→ `open`). Linked todos override: all completed → `done`; all cancelled
+→ `cancelled`; any blocked → `blocked`; else any deferred → `deferred`. Cancel, error and limit → `open`.
+`queue_remove`, `queue_clear` and prompts dropped by `cancel` → `cancelled_by_user`. A status set by the user
+(`request_set` done/cancelled_by_user) is never changed by the worker until the user sets `open` or re-asks.
+
+**Event** `requests {id?, items: [entry…] (the newest 200), total, open, counts: {status: n}}`, where `open` counts
+`open` + `in_progress` entries with `requires_completion`. Emitted after **every** ledger change (submission, delivery,
+status change, todo update, turn end, audit flags) and after `reset`, `load_state`, `resume` and a conversation
+`rewind`; `id` is set only in the reply to the `requests` command. Chip text such as "Requests 3/5" can use
+`counts.done` and `total`.
+
+**Commands:**
+- `requests {id?}` → `requests {id, …}`.
+- `request_get {id?, ledger_id: "R7"}` → `request {id, item: {entry…, text (verbatim)}}`.
+- `request_set {id?, ledger_id, status: "open"|"done"|"cancelled_by_user", reason? (≤500 chars)}` → `requests` event
+  (no `id`); the session is saved.
+- `request_reask {id?, ledger_id, when?: "queue"(default)|"now"|"steer"|"interrupt"}` → submits the verbatim text
+  again with the same ledger entry (status → `open`, `reasked` + 1 in the session data), re-reading its attachment
+  paths. Replies are the usual `queued {request_id: <id>, ledger_id}` etc. Refused (`error`) while that request is
+  `in_progress` or still queued.
+All four answer `error` "Request tracking is off for this agent." for agents without a ledger, and
+"Configure a provider and workspace first." before `configure`.
+
+**Other events:** `state_loaded` gains `open_requests`; `sessions` items gain `open_requests` (0 for sessions saved
+before this version); `recap` gains `open_items: [{id, status, reason, preview}]` (unfinished user requests, ≤20).
+Sessions saved before the ledger existed get one rebuilt from their checkpoint prompts (all `done`).
+
+**Persistence:** the ledger, todo list and last plan path are saved in the session (`requests`, `todos`,
+`plan_path`). `fork {turn}` carries requests first delivered up to that turn (renumbered to the fork's turns, queue
+links dropped) and the todo list as it was before the next turn. `rewind` (conversation) drops requests first
+delivered at or after the turn and restores the todo list as it was when that turn started. Queued prompts that
+were never delivered are not part of a fork.
+
+### 12.4 Todos (`update_todos` tool)
+
+Model tool (build and plan mode, main agent only, when `todo_tool` is on):
+`update_todos {items: [{id?, text (≤500), status: pending|in_progress|completed|cancelled|deferred|blocked, request_ids?: ["R3"], note? (≤500)}]}`
+Each call replaces the whole list (≤50 items). At most one `in_progress`; `cancelled`/`deferred`/`blocked` need a
+`note`; unknown request ids are refused. Ids are `T<n>`: a known id is kept, anything else gets a new id. A new todo
+without `request_ids` is linked to the request that opened the current turn; a resent todo without them keeps its
+links. Invalid calls return `{error}` to the model and change nothing. The tool result is
+`{ok: true, items, open}`; `tool_started.preview` is `UPDATE TODOS` plus one line per item.
+
+**Event** `todos {id?, turn_id (null outside a turn), items: [{id, text, status, request_ids, note}], open}` after every
+successful update, and after `reset`, `load_state`, `resume` and a conversation `rewind`.
+**Command** `todos {id?}` → `todos {id, turn_id: null, …}`.
+
+The system prompt gains the todo rules (one todo per ask when a message has several asks or a message arrives
+mid-turn; keep going until each is completed or cancelled/deferred/blocked with a reason).
+
+**Stale reminder (item 7):** when open todos exist and `update_todos` has not been called for 8 model steps in the
+turn, the worker adds a short user note before the next model call ("update_todos has not been used for 8 steps
+while todos are open: … ignore this if it is current"). No event; no extra model call.
+
+### 12.5 Steers, cancel, interrupt, failure (G2, G3)
+
+- **Steers** reach the model as one user message per step boundary, each steer framed:
+  `[Sent by the user while you were working (R7, 14:02). Keep your current task (R5) unless this changes it. Add it to your todos if it is a new ask. Say briefly how you handled it in your final answer.]`
+  followed by the program-context note, the attachment blocks and the verbatim text. Steer `attachments` and
+  `context` are no longer dropped.
+- **Cancel, interrupt and failure** no longer remove the user's prompt, delivered steers or subagent notes from
+  the conversation. A half-finished tool-call group is completed with
+  `{"error": "Not completed: the turn stopped before this tool call finished. …"}` results, then a note says the
+  turn was stopped (or failed) and the request is not finished. `cancelled` and `error` for a turn gain
+  `open_items` (open item shape in 12.6). Delivered background-subagent results are not re-delivered.
+
+### 12.6 Completion check and audit
+
+**Completion check (item 5):** when the model answers without tool calls and todos linked to this turn's
+requests (or new unlinked todos touched this turn) are still `pending`/`in_progress`, the worker emits
+
+`completion_check {turn_id, open: [open item…], reminder: 1|2, max_reminders: 2}`
+
+appends a user note ("Relay completion check 1/2: before finishing, these are still open: … Do them now, or call
+update_todos to mark each one cancelled, deferred or blocked with a reason.") and calls the model again, at most
+twice per turn (and never past `max_steps`). The turn then ends normally.
+
+**Open item:** `{kind: "request"|"todo", id, status, preview (≤120 chars), request_ids? (todos only)}`.
+`done` gains `open_items: [open item…]` on every turn (empty when nothing is open): unfinished requests of the turn
+and the open todos described above. Todos of an earlier interrupted request do not hold a later turn open.
+
+**Audit (item 8, `audit_requests`, off by default):** after a turn ends with `done` (not at the limit), a background
+no-tools call receives the turn's user requests (verbatim, ids), the final answer and the todo list, and returns
+`{unaddressed: [{request_id, quote}]}`. Model: `route_assist.router_provider()` (the route-assist model, when an
+OpenRouter key is stored; output limit 1024 tokens), else the pane's model at low effort. Event, always **after**
+`done`/`agent_finished`:
+
+`request_audit {turn_id, model, unaddressed: [{request_id, quote (≤200 chars)}], error?}`
+
+Flags are also stored on the ledger entries (`audit`, last 5) and a `requests` event follows. The worker never
+re-prompts on a flag; the GUI shows "may be unaddressed: …". Unknown request ids in the reply are dropped; a reply
+without the JSON object gives `unaddressed: []` plus `error`.
+
+### 12.7 Compaction (G5, G7, item 4)
+
+- **Turn starts (G5).** Relay tags the user messages it adds with `relay_kind`: `prompt` (a turn-opening prompt),
+  `steer`, `note` (cancel/limit/reminder/subagent notes), `summary`, `carried`; and `relay_requests: ["R3"]` on
+  prompts and steers. Only `prompt` messages (and untagged messages from older sessions, except an old summary) count
+  as turn starts, so steers can no longer push the turn's original prompt into the summarized part. The provider
+  strips every `relay_*` key before a request leaves the machine. Session and fork `messages` keep them (additive).
+- **Summarizer input (G7).** User messages are no longer middle-trimmed at 4,000 characters, and when the
+  transcript is too long the oldest assistant/tool messages are dropped first. The previous carried block is left
+  out (it is rebuilt), and when a previous summary is present the model is told to merge it ("anything you do not
+  carry into the new summary is lost").
+- **Summary sections:** Requests and intent / Decisions and constraints / Files and code / Errors and fixes / Work
+  state (Completed, Active, Blocked) / Next step (quote the latest request).
+- **Carried block.** After the summary pair (`[system, summary, ack, …]`) the worker inserts a deterministic user
+  message `[Relay state carried across compaction: authoritative, not summarized]` plus an assistant ack, containing:
+  every **delivered** ledger request with status (open and in-progress requests verbatim up to
+  min(30K tokens, window/12); finished ones capped at 400 characters; handled steers marked "handled: do not act on
+  it again"; requests whose text is still in the kept conversation or in the recent-messages section are listed by
+  id only), the todo list, the last plan written this session, files written this session, running subagents, and
+  **recent user messages verbatim** from the summarized part, newest first, up to min(20K tokens, window/16)
+  (messages of open requests already shown in full are skipped). If the block would make the conversation larger
+  than what was summarized (tiny windows), it is rebuilt without the recent-messages section.
+- `compacted` gains `carried: {requests, open, todos, user_messages, user_message_tokens, block_chars, lean}` when a
+  block was inserted. The kept tail now starts at index 5 instead of 3 (checkpoint positions are adjusted).
+
+### 12.8 Event order for one turn (main agent)
+
+1. `requests` (new entry) → `queued {…, ledger_id}` → `queue_changed`
+2. `agent_started` → `requests` (entry `in_progress`)
+3. per step: `status`, thinking/`delta`, `context`; per tool: `tool_started` → `tool_result`. A successful
+   `update_todos` emits `requests` (when linked statuses change) and `todos` between the two. A delivered steer
+   emits `steer_delivered` → `requests`.
+4. optional `completion_check` (then back to 3), at most twice
+5. `requests` (turn end) → `turn_summary` → `done {open_items, stop_reason?}` | `cancelled {open_items}` |
+   `error {text, open_items}`
+6. `agent_finished {outcome, stop_reason?}` → [`steer_returned {ledger_id}` …] → `queue_changed`
+7. later, only with `audit_requests`: `requests` (flags) → `request_audit`
+
+### 12.9 Deviations from the research sketches
+
+- The limit outcome is `done {stop_reason: "limit"}` rather than a new outcome `limit`, so the current GUI keeps the
+  queue running without changes. Owner default is 50 steps / 150 tool calls (research suggested 60/150).
+- `queued` carries `ledger_id` (the sketch's `request_id` already means the GUI's ask id). Commands take
+  `ledger_id`, because `id` is the correlation id everywhere else in this protocol; `request_set` also accepts
+  `reason`, and `request_reask` was added.
+- Turn-opening prompts are not labelled with their id in the model-visible text (only steers are); new todos
+  without `request_ids` link to the turn's opening request instead, and the tool result shows the links.
+- Finished requests in the carried block have no "request_get" pointer for the model (it has no such tool); the
+  full text stays in the session and is available to the GUI via `request_get`.
+- On cancel/failure the interrupted tool group is completed with error results instead of being removed, so the
+  model still sees which tools ran.
+- Requests have one extra status, `cancelled` (model-cancelled via todos), distinct from `cancelled_by_user`.
