@@ -35,9 +35,11 @@ private Q_SLOTS:
         QVERIFY(!relay::parseEngineKind(QStringLiteral("xterm"), nullptr));
     }
 
-    // KonsolePart stays the default; the command line wins over the environment.
+    // The Relay engine is the default while it is being tested (owner, 2026-09-17);
+    // the command line still wins over the environment.
     void resolutionOrder() {
-        QCOMPARE(int(relay::resolveEngineKind(QString(), QString())), int(EngineKind::Konsole));
+        QCOMPARE(int(relay::resolveEngineKind(QString(), QString())),
+                 int(relay::engineAvailable() ? EngineKind::Relay : EngineKind::Konsole));
         QCOMPARE(int(relay::resolveEngineKind(QString(), QStringLiteral("konsole"))), int(EngineKind::Konsole));
         const EngineKind fromEnv = relay::resolveEngineKind(QString(), QStringLiteral("relay"));
         QCOMPARE(int(fromEnv), int(relay::engineAvailable() ? EngineKind::Relay : EngineKind::Konsole));
@@ -47,7 +49,8 @@ private Q_SLOTS:
 
     void reportsUnknownValuesAndFallsBack() {
         QString warning;
-        QCOMPARE(int(relay::resolveEngineKind(QStringLiteral("xterm"), QString(), &warning)), int(EngineKind::Konsole));
+        QCOMPARE(int(relay::resolveEngineKind(QStringLiteral("xterm"), QString(), &warning)),
+                 int(relay::engineAvailable() ? EngineKind::Relay : EngineKind::Konsole));
         QVERIFY(warning.contains(QStringLiteral("xterm")));
         // An unusable command-line value still lets the environment decide.
         warning.clear();
@@ -55,7 +58,8 @@ private Q_SLOTS:
                  int(EngineKind::Konsole));
         QVERIFY(!warning.isEmpty());
         warning.clear();
-        QCOMPARE(int(relay::resolveEngineKind(QString(), QString(), &warning)), int(EngineKind::Konsole));
+        QCOMPARE(int(relay::resolveEngineKind(QString(), QString(), &warning)),
+                 int(relay::engineAvailable() ? EngineKind::Relay : EngineKind::Konsole));
         QVERIFY(warning.isEmpty());
     }
 
@@ -67,7 +71,9 @@ private Q_SLOTS:
         QCOMPARE(relay::resolveEngineCore(QStringLiteral("libvterm"), QStringLiteral("ghostty")), QStringLiteral("libvterm"));
     }
 
-    void processDefaultIsKonsole() {
+    void processDefaultIsRelayEngine() {
+        QCOMPARE(int(relay::defaultEngineKind()), int(EngineKind::Relay));
+        relay::setDefaultEngineKind(EngineKind::Konsole);
         QCOMPARE(int(relay::defaultEngineKind()), int(EngineKind::Konsole));
         relay::setDefaultEngineKind(EngineKind::Relay);
         QCOMPARE(int(relay::defaultEngineKind()), int(EngineKind::Relay));

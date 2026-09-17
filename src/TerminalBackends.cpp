@@ -4,7 +4,9 @@
 namespace relay {
 
 namespace {
-EngineKind s_default = EngineKind::Konsole;
+// Owner decision 2026-09-17: the Relay engine is the default while it is being tested.
+// `--engine=konsole` or RELAY_ENGINE=konsole goes back.
+EngineKind s_default = EngineKind::Relay;
 QString s_defaultCore;
 } // namespace
 
@@ -47,7 +49,7 @@ EngineKind resolveEngineKind(const QString &commandLine, const QString &environm
         if (warning)
             *warning = QStringLiteral("Unknown engine \"%1\"; expected konsole or relay.").arg(value.trimmed());
     }
-    return EngineKind::Konsole;
+    return engineAvailable() ? EngineKind::Relay : EngineKind::Konsole;
 }
 
 QString resolveEngineCore(const QString &commandLine, const QString &environment)
