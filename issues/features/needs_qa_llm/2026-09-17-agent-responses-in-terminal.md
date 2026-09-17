@@ -1,6 +1,6 @@
 # Show agent responses inline in the terminal
 
-- **Status**: open
+- **Status**: needs-qa-llm
 - **Component**: gui, shell-integration
 - **Milestone**: desktop-alpha
 - **Workstream**: terminal
@@ -37,3 +37,35 @@ Constraints found while filing:
 2. Nothing is added to shell history, and no agent text is ever executed.
 3. Output is not injected into a running foreground program.
 4. Copying from the terminal yields the plain text without escape codes.
+
+## Owner decision (2026-09-17)
+
+The owner accepted the output-side colored rendering. The agent pane is removed. Tool
+output also goes inline.
+
+## Resolution (2026-09-17)
+
+Implemented by Claude Opus 5 (Claude Code session). Mechanism: `docs/ARCHITECTURE.md`,
+"Inline agent output". Relay writes to Konsole's session through its D-Bus-registered
+`onReceiveBlock` slot, then asks Readline to redraw the prompt. Nothing is typed into the shell.
+
+- User prompt in bold cyan, a model header, agent text, `⚙ $ command` / `⚙ read path` /
+  `⚙ write path` in amber, tool output in gray, diffs in green and red, errors in red.
+- C0 and C1 control characters are stripped from model and tool output.
+- Output that arrives while a foreground program runs is buffered until the next prompt.
+- New chat and Stop agent moved to the toolbar.
+
+Open question 3 is settled by the buffering rule. Known gaps: Konsole's semantic-shell
+margin marks sometimes color the left edge of inline lines; the D-Bus hook depends on
+Konsole internals and is unverified on KF6.
+
+Status: needs-qa-llm. Implementer evidence, not a QA verdict:
+`docs/qa_evidence/2026-09-17-inline-agent-output/implementer-inline-tools-and-diff.png`.
+
+QA checklist:
+
+1. A Ctrl+Enter question prints the prompt, model header and answer inline, then a clean prompt.
+2. A tool call shows a compact `⚙` line and its output; a write shows a colored diff.
+3. Nothing from the agent appears in `history`.
+4. During `sleep 10`, a Ctrl+Enter prompt's output appears only after the prompt returns.
+5. A model reply containing an escape sequence, such as `\x1b]0;title\x07`, does not change the window title.

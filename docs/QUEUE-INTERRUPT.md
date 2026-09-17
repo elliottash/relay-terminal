@@ -17,10 +17,8 @@ The GUI does not use it yet. The shell-command variant is a design only.
   The new prompt starts only after the old turn's thread has returned. A slow exit
   (a stalled read of up to 30 seconds, or a tool process being killed) delays it
   but never loses it. Several interrupts in a row run first-in, first-out.
-- A pending approval is resolved as cancelled when its turn is stopped. The worker
-  emits `approval_cancelled` with the approval id, and a later `approve` for it is stale.
 - `cancel` stops the running turn, drops interrupts waiting for it, and **pauses**
-  the queue. A failed turn (outcome `error`) also pauses the queue, because approved
+  the queue. A failed turn (outcome `error`) also pauses the queue, because tool
   actions may already have run. Queued prompts then wait for `resume_queue`.
   `now` and `interrupt` submissions still run while paused. The pause clears
   automatically once the queue is empty.
@@ -46,14 +44,13 @@ echoed on errors. Removing a prompt that already started is an error.
 ```json
 {"event":"queued","id":"<item>","request_id":"<request id>","when":"queue","position":1}
 {"event":"interrupting","id":"<running item>","by":"<new item>"}
-{"event":"approval_cancelled","id":"<approval id>"}
 {"event":"agent_started","id":"<item>"}
 {"event":"agent_finished","id":"<item>","outcome":"done|error|cancelled"}
 {"event":"queue_changed","running":"<item>|null","paused":false,
  "items":[{"id":"<item>","preview":"first 120 chars","forced":false}]}
 ```
 
-Existing `delta`, `approval`, `tool_*`, `done`, `error`, and `cancelled` events are
+Existing `delta`, `tool_*`, `done`, `error`, and `cancelled` events are
 unchanged. `done`/`error`/`cancelled` still end each turn, followed by `agent_finished`.
 Protocol errors still carry `agent_busy`.
 
@@ -66,9 +63,7 @@ Protocol errors still carry `agent_busy`.
 3. When busy, submitting asks for a choice (Warp style). Suggested bindings: Enter
    queues, Ctrl+Shift+Enter interrupts, with a one-time explanation. Never default to
    interrupt: it cancels work in progress.
-4. Close an open approval dialog on `approval_cancelled` for its id without sending
-   `approve`. The existing stale-approval error is harmless if a race still sends one.
-5. Say plainly in the log that an interrupt does not roll back completed actions.
+4. Say plainly in the log that an interrupt does not roll back completed actions.
 
 ## Shell commands while a foreground program runs (design only)
 

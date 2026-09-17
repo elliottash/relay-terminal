@@ -45,8 +45,11 @@ def main():
                 known = request.get("known_commands", [])
                 if not isinstance(known, list) or len(known) > 20000 or not all(isinstance(x, str) for x in known):
                     raise ValueError("Invalid command-name list.")
+                cwd = request.get("cwd")
+                if cwd is not None and (not isinstance(cwd, str) or not os.path.isdir(cwd)):
+                    cwd = None
                 decision = classify(request.get("text", ""), request.get("mode", "auto"), known,
-                                    request.get("path", os.environ.get("PATH", os.defpath)))
+                                    request.get("path", os.environ.get("PATH", os.defpath)), cwd)
                 emit({"event": "route", "id": request.get("id"), **decision.to_dict()})
             elif kind == "configure":
                 if turns.busy:
@@ -83,12 +86,6 @@ def main():
                       "imported": [item.to_dict() for item in imported], "skipped": skipped})
             elif kind == "ask":
                 turns.submit(request.get("text", ""), request.get("when", "now"), request.get("id"))
-            elif kind == "approve":
-                if type(request.get("allow")) is not bool:
-                    raise ValueError("Approval must be a boolean.")
-                agent = turns.agent
-                if agent is None or not agent.gate.decide(request.get("id", ""), request["allow"]):
-                    raise ValueError("This approval is stale or no action is pending.")
             elif kind == "cancel":
                 turns.cancel()
             elif kind == "resume_queue":

@@ -8,7 +8,7 @@ import time
 import unittest
 from pathlib import Path
 
-from relay_core.agent import Agent, ApprovalGate
+from relay_core.agent import Agent
 from relay_core.provider import ProviderConfig
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,46 +33,49 @@ class AgentTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(); self.root=Path(self.temp.name)
     def tearDown(self): self.temp.cleanup()
 
-    def test_requires_approval_before_command_execution(self):
+    def test_command_runs_without_approval(self):
         events=[]
         fake=FakeProvider(tool('run_command', {'command': 'printf HELLO; touch sentinel'}))
-        def emit(event):
-            events.append(event)
-            if event['event']=='approval':
-                self.assertFalse((self.root/'sentinel').exists())
-                self.assertFalse(agent.gate.decide('wrong-id', True))
-                self.assertTrue(agent.gate.decide(event['id'], True))
-                self.assertFalse(agent.gate.decide(event['id'], True))
-        agent=Agent(CONFIG,self.temp.name,emit,provider=fake)
+        agent=Agent(CONFIG,self.temp.name,events.append,provider=fake)
         agent.ask('create a sentinel')
         self.assertTrue((self.root/'sentinel').exists())
+        self.assertFalse(any(e['event']=='approval' for e in events))
+        started=[e for e in events if e['event']=='tool_started']
+        self.assertEqual(len(started),1)
+        self.assertIn('touch sentinel', started[0]['preview'])
         self.assertEqual(events[-1]['event'],'done')
         self.assertEqual(fake.messages[-2]['reasoning_content'],'provider reasoning to preserve')
         self.assertIn('HELLO', fake.messages[-1]['content'])
 
-    def test_denial_prevents_writes(self):
-        fake=FakeProvider(tool('write_file',{'path':'sentinel','content':'no'}))
-        def emit(event):
-            if event['event']=='approval': agent.gate.decide(event['id'],False)
-        agent=Agent(CONFIG,self.temp.name,emit,provider=fake); agent.ask('write something')
-        self.assertFalse((self.root/'sentinel').exists())
-        self.assertTrue(json.loads(fake.messages[-1]['content'])['denied'])
+    def test_write_runs_without_approval_and_shows_diff(self):
+        events=[]
+        fake=FakeProvider(tool('write_file',{'path':'note.txt','content':'hello\n'}))
+        agent=Agent(CONFIG,self.temp.name,events.append,provider=fake); agent.ask('write something')
+        self.assertEqual((self.root/'note.txt').read_text(),'hello\n')
+        preview=[e for e in events if e['event']=='tool_started'][0]['preview']
+        self.assertIn('+hello', preview)
 
     def test_unknown_tool_is_not_executed(self):
         fake=FakeProvider(tool('unknown',{})); events=[]
         agent=Agent(CONFIG,self.temp.name,events.append,provider=fake); agent.ask('hi')
-        self.assertFalse(any(e['event']=='approval' for e in events))
+        self.assertFalse(any(e['event']=='tool_started' for e in events))
         self.assertIn('error', json.loads(fake.messages[-1]['content']))
 
-    def test_cancel_while_waiting_for_approval(self):
-        fake=FakeProvider(tool('run_command',{'command':'touch sentinel'}))
-        events=[]; waiting=threading.Event()
+    def test_file_tools_still_confined_to_workspace(self):
+        fake=FakeProvider(tool('read_file',{'path':'../outside.txt'})); events=[]
+        agent=Agent(CONFIG,self.temp.name,events.append,provider=fake); agent.ask('read it')
+        self.assertFalse(any(e['event']=='tool_started' for e in events))
+        self.assertIn('error', json.loads(fake.messages[-1]['content']))
+
+    def test_cancel_while_command_runs(self):
+        fake=FakeProvider(tool('run_command',{'command':'sleep 20; touch sentinel','timeout_seconds':60}))
+        events=[]; running=threading.Event()
         def emit(event):
             events.append(event)
-            if event['event']=='approval': waiting.set()
+            if event['event']=='tool_started': running.set()
         agent=Agent(CONFIG,self.temp.name,emit,provider=fake)
         thread=threading.Thread(target=agent.ask,args=('do a thing',)); thread.start()
-        self.assertTrue(waiting.wait(2)); agent.stop(); thread.join(2)
+        self.assertTrue(running.wait(2)); time.sleep(0.2); agent.stop(); thread.join(5)
         self.assertFalse(thread.is_alive()); self.assertFalse((self.root/'sentinel').exists())
         self.assertEqual(events[-1]['event'],'cancelled')
         self.assertFalse(any('tool_calls' in message for message in agent.messages))

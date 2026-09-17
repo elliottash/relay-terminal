@@ -62,8 +62,17 @@ else
     PROMPT_COMMAND=(__relay_prompt_begin "${PROMPT_COMMAND:-:}" __relay_prompt_end)
 fi
 
+# Relay prints agent output directly to the terminal screen, then sends Ctrl+X Ctrl+P.
+# Running any bind -x function makes Readline redraw the prompt and current line.
+__relay_redraw() {
+    :
+}
+
 # Bind in all common Readline keymaps, without changing the user's editing mode.
 bind -m emacs-standard -x '"\C-x\C-r":__relay_load'
 bind -m vi-insert -x '"\C-x\C-r":__relay_load'
 bind -m vi-move -x '"\C-x\C-r":__relay_load'
+bind -m emacs-standard -x '"\C-x\C-p":__relay_redraw'
+bind -m vi-insert -x '"\C-x\C-p":__relay_redraw'
+bind -m vi-move -x '"\C-x\C-p":__relay_redraw'
 trap '__relay_debug' DEBUG

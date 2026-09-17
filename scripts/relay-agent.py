@@ -45,7 +45,7 @@ else:
     base, model, extra = preset.base_url, preset.model, dict(preset.extra)
 base, model = args.base_url or base, args.model or model
 print(f'Provider: {base}\nModel: {model}\nWorkspace: {Path(args.workspace).resolve()}')
-print('Submitted prompts and approved tool results go to this provider. Shell tools are NOT sandboxed.')
+print('Submitted prompts and tool results go to this provider. Tools run WITHOUT confirmation and shell commands are NOT sandboxed.')
 if input('Continue? [y/N] ').strip().lower() != 'y': sys.exit(0)
 key = keystore.lookup(args.provider) if args.provider != 'custom' else ''
 if key:
@@ -62,13 +62,11 @@ def emit(event):
     kind = event['event']
     if kind in {'delta','tool_output'}:
         print(event.get('text',''), end='', flush=True)
-    elif kind == 'approval':
-        print('\n\n' + event['preview'])
-        allow = input('\nApprove this action once? Type yes: ').strip() == 'yes'
-        agent.gate.decide(event['id'], allow)
+    elif kind == 'tool_started':
+        print('\n\n[running] ' + event.get('preview', event['tool'])[:4000])
     elif kind == 'tool_result':
         result = event['result']
-        print('\n[tool result]', result.get('error') or ('denied' if result.get('denied') else 'completed'))
+        print('\n[tool result]', result.get('error') or 'completed')
     elif kind in {'error','status','done','cancelled'}:
         print('\n[' + kind + '] ' + event.get('text',''))
 

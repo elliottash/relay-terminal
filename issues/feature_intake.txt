@@ -1,0 +1,36 @@
+allow new tabs and panes 
+
+allow top-side vertical tabs or a left side bar with horizontal tabs (vertical default)
+
+help me form the default hotkeys, try to make them like chrome / brave.
+
+ctrl+n new window
+alt+tab next window
+shit+alt+tab previous window
+
+ctrl+t new tab
+ctrl+tab next tab
+shift+ctrl+tab previous tab 
+
+ctrl+p for new pane (open at right)
+ctrl+shit+p for new pane (open below)
+alt+right/left/up/down  to navigate panes 
+
+ctrl+w close current pane, or tab if its the last pane, or window if its the last tab/pane (warn dialogue)
+ctrl+shift+w - restore last closed.
+
+ctrl+i toggle between agent and terminal
+
+up from the top line scans history (alt not needed)
+
+ctrl c copy
+ctrl v paste
+
+add 
+
+make changing hotkeys easy and allow the agent to change the hotkeys
+
+have a right side  bar w
+
+ 
+

@@ -33,7 +33,7 @@ fork later. No Warp source code was copied.
 | Real terminal | KonsolePart, with an explicit native-input toggle. Foreground programs receive normal terminal keystrokes. |
 | Bash integration | A separate rcfile loads the user's `.bashrc`, preserves prompt commands, reports cwd/exit status/aliases, checks Readline's tty state, and uses an acknowledged command-loading binding. No user dotfiles are edited. |
 | Agent | Streaming chat-completions transport, streamed tool-call assembly, provider reasoning-field preservation, multi-step tool loop, cancellation, output/time/step limits. |
-| Tools | `run_command`, `read_file`, `list_directory`, `write_file`, each requiring approval. Writes show a diff and reject a file changed after review. |
+| Tools | `run_command`, `read_file`, `list_directory`, `write_file`, run immediately without per-action confirmation. Each command, path, or write diff prints inline in the terminal as it runs. |
 | BYOK | Editable base URL/model/parameters; Kimi K3, GLM-5.3 standard API and Coding Plan presets; custom compatible endpoints. Keys are session-memory-only. |
 
 “Rich input” means rich **editing interactions**, not HTML or bold formatting in
@@ -103,16 +103,33 @@ cmake --install build
 | `find . -type f -size +100M` | Terminal |
 | `why is this build failing?` | Agent |
 | `find the largest files in this repo` | Agent |
-| An unrecognized command, with **Terminal first** on (default) | Runs in the terminal; if Bash reports not found (exit 127/126), the same text goes to the agent |
-| Unrecognized text that is not valid Bash, with **Terminal first** on | Agent |
-| An unknown/ambiguous phrase, with **Terminal first** off | Ask; execute/send nothing until a destination is chosen |
+| Anything that is not a runnable command: a syntax error, or any command word in a pipeline or list that does not resolve | Agent, without running anything |
+
+Validity is checked locally and never executes the input: `bash -n`, then every command
+word is resolved against builtins, `PATH`, live aliases and functions, and executable paths
+relative to the terminal's directory.
+
+**Terminal mode** (Ctrl+Shift+Enter, or the Terminal selector) always targets the terminal:
+
+- If the command is not valid, the agent fixes it and Relay runs the fix in your terminal.
+- If a command exits non-zero, the agent investigates, fixes it, and Relay re-runs the fix.
+- Up to 3 fix attempts. Ctrl+C (exit 130) stops the loop. Auto-mode commands are never auto-fixed.
+
+The agent cannot read the terminal's scrollback, so it reproduces a failure with its own
+`run_command` when it needs the error text. That re-runs the command a second time.
+
+**Agent output is inline.** There is no agent pane. Your prompt, the agent's reply, each
+tool call, tool output, and write diffs print in the terminal in distinct colors. They are
+written to the terminal display, not typed into the shell: they never enter shell history
+and are never executed. Control characters are stripped from model and tool output. Output
+that arrives while a program is running waits until the next prompt.
 
 | Shortcut | Action |
 |---|---|
 | Enter | Submit using the selected/detected destination |
 | Shift+Enter | Insert a newline |
-| Ctrl+Enter | Force Agent |
-| Ctrl+Shift+Enter | Force Terminal |
+| Ctrl+Enter | Always agent |
+| Ctrl+Shift+Enter | Always terminal; the agent fixes invalid or failing commands |
 | F12 | Toggle native terminal input |
 | Escape in the composer | Focus native terminal input |
 | Alt+Up / Alt+Down | Composer history, preserving the current draft |
@@ -134,7 +151,7 @@ The visible route and force overrides are intentional safeguards.
 ## Configure Kimi, GLM, or OpenRouter with your own key
 
 Open **Provider / BYOK…**, select a preset, choose an agent workspace, and confirm
-sharing submitted prompts and approved tool results with that provider. Either
+sharing submitted prompts and tool results with that provider. Either
 paste an API key or leave the key field empty to use the key stored in the
 desktop keyring for that preset. Saving settings makes no network call.
 
@@ -196,17 +213,20 @@ unexported variables; `cd` inside an agent command does not change the terminal'
 cwd. The chosen agent workspace does not silently follow terminal directory
 changes. Both paths are visible in the app.
 
-Every tool call asks for approval. Read approval also authorizes sending the
-result to your provider. A write approval shows a local diff first. A denied call
-is returned as denied, not executed. Tool output is shown in the agent pane, not
-injected into the live terminal. Commands time out (default 30s, maximum 120s) and
+**Tools run without asking.** When the model calls a tool, Relay runs it at once
+and sends the result to your provider. Each command, file path, or write diff prints
+inline in the terminal as it starts. Use **Stop agent** to cancel a turn; it does not undo
+actions that already ran. Agent tool commands run in a separate process, not in your
+interactive shell; only fixed commands from terminal mode run in your shell. Commands time out (default 30s, maximum 120s) and
 have a 32 KiB returned-output cap. A turn is limited to 12 model requests and
 24 tool calls. These are limits, not a dollar-denominated spending budget.
 
-**An approved shell command is not sandboxed.** It runs with your account's normal
+**Agent shell commands are not sandboxed.** It runs with your account's normal
 permissions, can access files beyond the chosen workspace, and can access the
 network. The workspace restriction and basic secret-file guard apply to the file
 tools, not arbitrary shell commands. Use a disposable project for initial testing.
+Text the agent reads from files or command output can try to steer it into
+running other commands, and nothing stops a command before it runs.
 Package scripts, build systems, and “read-only-looking” commands may execute code.
 
 Terminal history/output is **not automatically uploaded or available to the
@@ -231,7 +251,7 @@ python3 scripts/relay-agent.py --provider kimi --workspace /path/to/project
 python3 scripts/relay-agent.py --provider glm --workspace /path/to/project
 ```
 
-The diagnostic CLI uses the same actual agent backend and approval gate. It is
+The diagnostic CLI uses the same actual agent backend. It is
 not the rich-input desktop app. It prompts privately for the API key. `/new`
 clears conversation context and `/quit` exits. Using a real key incurs whatever
 usage charges the configured provider applies.
@@ -259,7 +279,7 @@ OS sandboxing; checkpoint/rollback; multiple agents; MCP; packaged desktop binar
 - `shell/`: Bash integration and atomic prompt-state events.
 - `backend/relay_core/`: router, provider transport, agent loop, tool execution.
 - `backend/worker.py`: private newline-delimited JSON over stdin/stdout.
-- `tests/`: backend, PTY, HTTP fixture, approval, and Qt editor tests.
+- `tests/`: backend, PTY, HTTP fixture, agent, queue, and Qt editor tests.
 - `data/theme/`: dark theme, Konsole profile and color scheme.
 - `scripts/`: build, tests, and a backend diagnostic CLI.
 - `docs/`: architecture, source research, validation, and next acceptance gates.

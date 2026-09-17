@@ -28,6 +28,9 @@ Two bugs were found only by running the real app:
 
 ## Coverage of the original 51 tests
 
+Approval tests in this table were replaced when approvals were removed: tools now
+run immediately, show a preview, and can be stopped mid-command.
+
 Later additions cover presets and keyring storage, Warp import, OpenRouter reasoning,
 the interrupt/queue dispatcher, and ambiguous-route syntax reporting.
 
@@ -60,15 +63,14 @@ provider-side compatibility, or end-to-end live coding performance.
 6. Test with the user's real prompt/plugins. An existing DEBUG trap intentionally
    uses native fallback; `--clean-shell` is the diagnostic configuration.
 7. In a disposable workspace, configure a provider key and verify one simple
-   response, one denied tool, one approved read, one command, one diff-reviewed
-   write, and cancellation. Inspect provider account usage independently.
+   response, one read, one command, one write, and cancellation mid-command. Inspect provider account usage independently.
 
 These are outstanding acceptance checks, not completed test results.
 
 ## Security boundaries and known functional gaps
 
-Every agent tool requires approval, but an approved shell command is **not
-sandboxed**. It has the user's normal filesystem and network permissions.
+Agent tools run without per-action approval (removed 2026-09-17), and shell
+commands are **not sandboxed**. It has the user's normal filesystem and network permissions.
 File-tool workspace checks and secret-file guards are limited defenses, not an
 OS-level sandbox or a guarantee against hostile same-user filesystem races.
 Cancellation does not undo a completed write or command; blocked network I/O can

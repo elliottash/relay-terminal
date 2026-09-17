@@ -8,7 +8,7 @@ same editor. Auto-routing must be visible and overridable. Normal terminal
 programs must retain raw/native interaction. The agent is BYOK and provider-agnostic.
 
 The implemented milestone is Linux, Bash, one embedded Konsole terminal, one
-composer, one conversation, explicit per-action approvals, and editable model
+composer, one conversation, tools that run without per-action approval, and editable model
 configuration. A source-level Konsole fork is not included in this milestone.
 
 ## Separation of concerns
@@ -27,7 +27,7 @@ Qt rich editor
     |                                +-- agent destination
     |                                      provider HTTP stream
     |                                      validated tool call
-    |                                      review / approve / deny
+    |                                      preview printed inline in the terminal
     |                                      separate tool process or file operation
     |                                      result -> provider -> final answer
     |
@@ -75,8 +75,29 @@ fails into native mode. It does not claim compatibility with all prompt framewor
 
 No remote classifier is used. The router considers explicit prefixes/modes,
 known shell builtins, executable resolution, live aliases/functions, natural-language
-patterns, and explicit shell constructs. Unknown input produces `ambiguous`, not
-an automatic speculative shell execution or hidden API request.
+patterns, and explicit shell constructs. Since 2026-09-17, input that is not a runnable
+command (syntax error, or an unresolved command word anywhere in a pipeline or list) goes
+to the agent in Auto mode instead of producing `ambiguous`. Terminal mode reports validity
+so the GUI can ask the agent to fix an invalid command.
+
+## Inline agent output
+
+The agent pane was removed on 2026-09-17. KonsolePart exposes no API to write to the
+display, but each Konsole `Session` registers on D-Bus at `/Sessions/N`. In-process,
+`QDBusConnection::objectRegisteredAt()` returns that QObject; Relay matches it by shell
+PID and invokes its `onReceiveBlock(const char*, int)` slot, which feeds bytes to the
+emulator exactly like program output. Relay clears the idle prompt line, prints colored
+text with C0/C1 controls stripped, then sends Ctrl+X Ctrl+P, bound in the Bash integration
+to a no-op `bind -x` function, so Readline redraws the prompt. Output that arrives while a
+foreground program runs is buffered until the next ready prompt. This depends on Konsole
+internals (verified on Konsole 23.08 / KF5) and must be re-verified on KF6.
+
+## Terminal-mode fix loop
+
+In terminal mode an invalid command, or a run whose ready-prompt exit status is non-zero
+(except 130), starts an agent turn with the command, cwd and problem. The agent must end
+with a fenced `relay-run` block. Relay stages that command through the normal hash-
+acknowledged Readline path and watches its exit status, up to 3 attempts.
 
 Syntax validity does not imply safety or even command intent. Natural-language
 strings can be valid Bash. Routing therefore does not use parsing alone.
@@ -96,11 +117,12 @@ BYOK does not imply account access. Configuration validates syntax and policy;
 only a real API request can validate a user's model entitlement. Live provider
 calls remain untested in this environment.
 
-## Agent tools and approvals
+## Agent tools
 
-Tools are prepared first, reviewed second, and executed only after an approval
-with the matching one-shot ID. Writes are previewed locally and re-check the
-original file before replacement. File tools reject parent traversal, absolute
+Per-action approvals were removed on 2026-09-17. A tool call is validated and
+prepared, its preview (command, path, or write diff) is emitted with
+`tool_started`, and it executes immediately. Writes re-check the original file
+between preparation and replacement. File tools reject parent traversal, absolute
 paths, symlinks, common secret-file locations, nonregular files, and oversized
 content. These checks reduce mistakes, but are not a hardened filesystem sandbox
 against concurrent hostile processes.
@@ -110,9 +132,12 @@ shell state. API-key-like environment names, shell-init hooks, and authenticatio
 agent variables are removed from their inherited environment. This reduces
 accidental leakage but cannot revoke filesystem or network permissions.
 
-All tool actions require approval in this preview. Do not add a “safe command”
-allowlist based only on the first command word: shell substitutions, redirects,
-build scripts, aliases, and interpreters make such a policy unreliable.
+With no approval step, the remaining controls are the system prompt, workspace
+checks on file tools, the secret-file guard, environment scrubbing, timeouts,
+output caps, per-turn step and tool limits, and Stop. None of these prevent a
+shell command from running. If a confirmation step returns, do not base it on a
+first-word “safe command” allowlist: shell substitutions, redirects, build
+scripts, aliases, and interpreters make such a policy unreliable.
 
 ## Next acceptance gates (not completed work)
 
@@ -124,8 +149,8 @@ Next test native terminal compatibility with vim/neovim, less, fzf, interactive
 Python, Ctrl+C/Ctrl+D, resize, alternate screen, Unicode, SSH, and tmux. Remote and
 multiplexer sessions should remain native until their integrations are explicit.
 
-Then validate a real Kimi key and GLM-5.3 key with streaming and a harmless approved
-tool call. Follow that with user-requested workspace/file edits, denied tool calls,
+Then validate a real Kimi key and GLM-5.3 key with streaming and a harmless
+tool call. Follow that with user-requested workspace/file edits,
 network failures, token exhaustion, and cancellation during each tool state.
 
 Only after those gates should the milestone be called a usable desktop alpha.

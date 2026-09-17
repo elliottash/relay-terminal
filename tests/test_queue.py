@@ -174,21 +174,8 @@ class SupervisorTests(unittest.TestCase):
         p.release.release(); self.finished(b)
         self.assertEqual(p.prompts, ['first', 'a', 'b'])
 
-    def test_interrupt_while_awaiting_approval(self):
-        self.use(ToolThenFinish({'command': 'touch should_not_exist'}))
-        first = self.sup.submit('tool please', 'now')
-        approval = self.rec.wait(lambda e: e['event'] == 'approval')
-        second = self.sup.submit('something else', 'interrupt')
-        self.assertEqual(self.rec.wait(lambda e: e['event'] == 'approval_cancelled')['id'], approval['id'])
-        self.assertEqual(self.finished(first)['outcome'], 'cancelled')
-        self.assertEqual(self.finished(second)['outcome'], 'done')
-        self.assertFalse(self.agent.gate.decide(approval['id'], True))
-        self.assertFalse((Path(self.temp.name) / 'should_not_exist').exists())
-        self.assertFalse(any('tool_calls' in m for m in self.agent.messages))
-
     def test_interrupt_while_tool_command_runs(self):
         self.use(ToolThenFinish({'command': 'sleep 20; touch late', 'timeout_seconds': 60}))
-        self.rec.hook = lambda e: e['event'] == 'approval' and self.agent.gate.decide(e['id'], True)
         first = self.sup.submit('tool please', 'now')
         self.rec.wait(lambda e: e['event'] == 'tool_started')
         time.sleep(0.2)

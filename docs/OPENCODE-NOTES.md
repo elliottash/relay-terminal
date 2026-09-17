@@ -11,6 +11,10 @@ opencode is **not installed locally**. `~/.opencode/bin` is on `PATH`, but
 There is no local provider config for GLM, Kimi or OpenRouter to port. Warp is the
 only source of those settings.
 
+> **Update 2026-09-17:** Relay removed per-action approvals; tools now run
+> immediately. P2 below and the approval trade-offs throughout describe the
+> earlier design.
+
 ## Relay today, in one paragraph
 
 A single conversation holds one fixed system prompt and four tools:

@@ -1,6 +1,6 @@
 # Run unrecognized input in the terminal first, then fall back to the agent
 
-- **Status**: needs-qa-llm
+- **Status**: done
 - **Component**: gui, router
 - **Milestone**: 0.1-preview
 - **Workstream**: routing
@@ -46,3 +46,12 @@ Build: the feature and the readiness fix are in commit `efc1228`. QA should reco
 
 Independence: the implementer is Claude. The QA session must be a different family, for
 example GLM-5.3 or Kimi K3, and record both identities.
+
+## Superseded (2026-09-17)
+
+The owner replaced this behavior before QA ran. The **Terminal first** toggle and the
+exit-127 fallback were removed. Invalid input now goes to the agent without running, and
+terminal mode fixes invalid or failing commands. Successors:
+`changes/needs_qa_llm/2026-09-17-pre-submit-run-check.md` and
+`features/needs_qa_llm/2026-09-17-fix-and-rerun-terminal-commands.md`.
+Nothing from this issue remains to check. Status: done, as a supersession.

@@ -156,11 +156,7 @@ class TurnSupervisor:
             yield item
 
     def _stop_locked(self) -> None:
-        agent = self._agent
-        pending = agent.gate.pending
-        agent.stop()
-        if pending is not None:
-            self._emit({"event": "approval_cancelled", "id": pending})
+        self._agent.stop()
 
     def _clear_locked(self) -> None:
         had = bool(self._queue) or self._paused
@@ -208,7 +204,7 @@ class TurnSupervisor:
                 self._emit({"event": "agent_finished", "id": item["id"], "outcome": outcome})
                 self._running = None
                 if outcome == "error" and any(not i["force"] for i in self._queue):
-                    # Approved actions may already have run; do not fire queued prompts blindly.
+                    # Tool actions may already have run; do not fire queued prompts blindly.
                     self._paused = True
                 self._changed_locked()
                 self._lock.notify_all()

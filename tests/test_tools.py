@@ -67,7 +67,7 @@ class ToolTests(unittest.TestCase):
         path = self.root / 'code.txt'; path.write_text('old')
         prepared = self.tools.prepare('write_file', {'path': 'code.txt', 'content': 'model edit'})
         path.write_text('user edit')
-        with self.assertRaisesRegex(ValueError, 'changed after approval'):
+        with self.assertRaisesRegex(ValueError, 'changed while the write was prepared'):
             self.tools.execute(prepared)
         self.assertEqual(path.read_text(), 'user edit')
 

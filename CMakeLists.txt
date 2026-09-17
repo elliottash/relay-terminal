@@ -43,7 +43,8 @@ if(RELAY_BUILD_APP)
     find_package(${RELAY_KF}CoreAddons REQUIRED)
     find_package(${RELAY_KF}Parts REQUIRED)
     add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h)
-    target_link_libraries(relay PRIVATE relay-editor ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons)
+    find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
+    target_link_libraries(relay PRIVATE relay-editor ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

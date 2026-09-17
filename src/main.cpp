@@ -39,6 +39,8 @@
 #include <QSaveFile>
 #include <QScreen>
 #include <QSettings>
+#include <QDBusConnection>
+#include <QMetaObject>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
@@ -101,7 +103,6 @@ public:
         connect(m_editor, &QPlainTextEdit::textChanged, this, [this] { m_debounce.start(); });
         connect(m_mode, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
             requestRoute(false, QStringLiteral("auto"));
-            if (m_mode->currentData().toString() == QStringLiteral("agent")) m_agentPanel->show();
         });
         m_editor->onSubmit = [this](const QString &destination) { requestRoute(true, destination); };
         m_editor->onNative = [this] { setNative(true); };
@@ -133,7 +134,7 @@ protected:
     bool eventFilter(QObject *object, QEvent *event) override {
         if (event->type() == QEvent::KeyPress || event->type() == QEvent::ShortcutOverride) {
             auto *key = static_cast<QKeyEvent *>(event);
-            // Only this window; do not steal F12 from approval/settings dialogs.
+            // Only this window; do not steal F12 from settings dialogs.
             auto *widget = qobject_cast<QWidget *>(object);
             if (widget && widget->window() == this && key->key() == Qt::Key_F12 && key->modifiers() == Qt::NoModifier) {
                 if (event->type() == QEvent::KeyPress) setNative(!m_native);
@@ -177,17 +178,12 @@ private:
         m_mode->addItem(QStringLiteral("Agent"), QStringLiteral("agent"));
         m_mode->setAccessibleName(QStringLiteral("Input destination"));
         toolbar->addWidget(m_mode);
-        m_terminalFirst = toolbar->addAction(QStringLiteral("Terminal first"));
-        m_terminalFirst->setCheckable(true);
-        m_terminalFirst->setChecked(QSettings().value(QStringLiteral("routing/terminal_first"), true).toBool());
-        m_terminalFirst->setToolTip(QStringLiteral("Auto mode: run unrecognized input in the terminal first. If Bash reports command not found, or the text is not valid Bash, send it to the agent instead."));
-        connect(m_terminalFirst, &QAction::toggled, this, [](bool on) { QSettings().setValue(QStringLiteral("routing/terminal_first"), on); });
         m_nativeAction = toolbar->addAction(QStringLiteral("Native terminal · F12"));
         m_nativeAction->setCheckable(true);
         connect(m_nativeAction, &QAction::triggered, this, [this](bool checked) { setNative(checked); });
         auto *interrupt = toolbar->addAction(QStringLiteral("Interrupt shell"));
         connect(interrupt, &QAction::triggered, this, [this] {
-            if (m_iface) { m_loading = false; m_promptReported = false; clearFallback(); m_iface->sendInput(QString(QChar(3))); focusTerminal(); }
+            if (m_iface) { m_loading = false; m_promptReported = false; clearFix(); m_iface->sendInput(QString(QChar(3))); focusTerminal(); }
         });
         toolbar->addSeparator();
         m_modelPicker = new QComboBox;
@@ -207,6 +203,18 @@ private:
             }
             configurePreset(id, true);
         });
+        auto *reset = toolbar->addAction(QStringLiteral("New chat"));
+        reset->setToolTip(QStringLiteral("Start a new agent conversation"));
+        connect(reset, &QAction::triggered, this, [this] {
+            if (m_agentBusy) { statusBar()->showMessage(QStringLiteral("Stop the current agent turn first.")); return; }
+            send({{"type", "reset"}}); clearFix();
+            printInline(QStringLiteral("New agent conversation"), Ink::Note); closeInline();
+        });
+        auto *stop = toolbar->addAction(QStringLiteral("Stop agent"));
+        connect(stop, &QAction::triggered, this, [this] {
+            send({{"type", "cancel"}}); clearFix();
+            statusBar()->showMessage(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
+        });
         auto *spacer = new QWidget; spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         toolbar->addWidget(spacer);
         auto *provider = toolbar->addAction(QStringLiteral("Provider / BYOK…"));
@@ -221,33 +229,6 @@ private:
         m_terminalHost = new QWidget;
         auto *terminalLayout = new QVBoxLayout(m_terminalHost); terminalLayout->setContentsMargins(0, 0, 0, 0);
         m_splitter->addWidget(m_terminalHost);
-        m_agentPanel = new QWidget;
-        auto *agentLayout = new QVBoxLayout(m_agentPanel); agentLayout->setContentsMargins(12, 0, 0, 0);
-        auto *agentHeader = new QHBoxLayout;
-        m_providerLabel = new QLabel(QStringLiteral("AGENT · configure BYOK to start"));
-        m_providerLabel->setTextFormat(Qt::PlainText);
-        agentHeader->addWidget(m_providerLabel, 1);
-        auto *reset = new QPushButton(QStringLiteral("New chat"));
-        auto *stop = new QPushButton(QStringLiteral("Stop"));
-        agentHeader->addWidget(reset); agentHeader->addWidget(stop);
-        agentLayout->addLayout(agentHeader);
-        connect(reset, &QPushButton::clicked, this, [this] {
-            if (!m_agentBusy) { send({{"type", "reset"}}); m_log->clear(); }
-        });
-        connect(stop, &QPushButton::clicked, this, [this] {
-            send({{"type", "cancel"}});
-            if (m_approval) m_approval->reject();
-            statusBar()->showMessage(QStringLiteral("Stopping. Approved commands may already have changed files; a network read can take up to its timeout to stop."));
-        });
-        m_log = new QPlainTextEdit;
-        m_log->setReadOnly(true); m_log->setMaximumBlockCount(5000);
-        m_log->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-        m_log->setAccessibleName(QStringLiteral("Agent conversation and tool output"));
-        agentLayout->addWidget(m_log, 1);
-        auto *privacy = new QLabel(QStringLiteral("Only submitted prompts and approved tool results are sent.\nTerminal history is not uploaded automatically."));
-        privacy->setWordWrap(true); agentLayout->addWidget(privacy);
-        m_splitter->addWidget(m_agentPanel); m_splitter->setSizes({780, 420});
-        m_agentPanel->hide();
         auto *composer = new QFrame; composer->setFrameShape(QFrame::StyledPanel);
         auto *composerLayout = new QVBoxLayout(composer);
         auto *routeRow = new QHBoxLayout;
@@ -270,7 +251,7 @@ private:
         connect(&m_worker, &QProcess::readyReadStandardOutput, this, [this] {
             m_workerBuffer += m_worker.readAllStandardOutput();
             if (m_workerBuffer.size() > 8 * 1024 * 1024) {
-                m_worker.kill(); appendLog(QStringLiteral("\nWorker protocol overflow; stopped.\n")); return;
+                m_worker.kill(); statusBar()->showMessage(QStringLiteral("Worker protocol overflow; stopped.")); return;
             }
             int index;
             while ((index = m_workerBuffer.indexOf('\n')) >= 0) {
@@ -289,7 +270,6 @@ private:
         });
         connect(&m_worker, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int, QProcess::ExitStatus) {
             m_workerReady = false; m_configured = false; m_agentBusy = false;
-            if (m_approval) m_approval->reject();
             statusBar()->showMessage(QStringLiteral("Local worker stopped. Native terminal remains available; restart Relay to restore routing and agents."));
         });
         connect(&m_worker, &QProcess::started, this, [this] {
@@ -354,10 +334,11 @@ private:
         const QString id = QString::number(++m_requestId);
         const QString mode = overrideMode == QStringLiteral("auto") ? m_mode->currentData().toString() : overrideMode;
         if (submit) {
+            m_submitMode = mode;
             m_pendingSubmit = id; m_submittedDraft = m_editor->toPlainText();
         } else m_previewId = id;
         send({{"type", "route"}, {"id", id}, {"text", m_editor->toPlainText()}, {"mode", mode},
-              {"known_commands", m_knownCommands}, {"path", m_shellPath}});
+              {"known_commands", m_knownCommands}, {"path", m_shellPath}, {"cwd", m_cwd}});
     }
 
     void handle(const QJsonObject &event) {
@@ -369,10 +350,9 @@ private:
             const QString id = event.value(QStringLiteral("id")).toString();
             const QString route = event.value(QStringLiteral("route")).toString();
             if (id == m_previewId || id == m_pendingSubmit) {
-                if (route == QStringLiteral("ambiguous") && m_terminalFirst->isChecked())
-                    m_routeLabel->setText(event.value(QStringLiteral("syntax_ok")).toBool(true)
-                        ? QStringLiteral("TERMINAL FIRST · agent if the command is not found")
-                        : QStringLiteral("AGENT · not valid shell syntax"));
+                if (route == QStringLiteral("shell") && !event.value(QStringLiteral("valid")).toBool(true))
+                    m_routeLabel->setText(QStringLiteral("TERMINAL · ") + event.value(QStringLiteral("invalid_reason")).toString()
+                                          + QStringLiteral(" · the agent will fix it"));
                 else
                     m_routeLabel->setText(route.toUpper() + QStringLiteral(" · ") + event.value(QStringLiteral("reason")).toString());
                 m_routeLabel->setToolTip(event.value(QStringLiteral("syntax_error")).toString());
@@ -382,13 +362,11 @@ private:
                 if (m_editor->toPlainText() != m_submittedDraft) {
                     statusBar()->showMessage(QStringLiteral("Input changed during routing; submit again to use the current text.")); return;
                 }
-                dispatch(event);
+                dispatch(event, m_submitMode);
             }
         } else if (type == QStringLiteral("configured")) {
             m_configured = true; m_configuring = false;
-            m_providerLabel->setText(QStringLiteral("AGENT · ") + event.value(QStringLiteral("model")).toString());
-            appendLog(QStringLiteral("\nAgent ready: %1. No API request has been made yet; agent prompts you submit go to this provider.\n")
-                      .arg(event.value(QStringLiteral("model")).toString()));
+            m_model = event.value(QStringLiteral("model")).toString();
             statusBar()->showMessage(QStringLiteral("Agent ready · ") + event.value(QStringLiteral("model")).toString());
             syncModelPicker();
         } else if (type == QStringLiteral("presets")) {
@@ -402,7 +380,7 @@ private:
             m_modelPicker->setEnabled(m_modelPicker->count() > 0);
             if (!m_modelPicker->count()) {
                 m_modelPicker->addItem(QStringLiteral("No stored keys"));
-                appendLog(QStringLiteral("No stored provider keys. Open Provider / BYOK… to import them from Warp or enter one.\n"));
+                statusBar()->showMessage(QStringLiteral("No stored provider keys. Open Provider / BYOK… to import them from Warp or enter one."));
                 return;
             }
             if (!m_configured && !m_configuring) {
@@ -415,113 +393,323 @@ private:
         } else if (type == QStringLiteral("warp_imported")) {
             const auto imported = event.value(QStringLiteral("imported")).toArray();
             const auto skipped = event.value(QStringLiteral("skipped")).toArray();
-            appendLog(QStringLiteral("\nImported %1 key(s) from Warp into the keyring.\n").arg(imported.size()));
-            for (const auto &item : imported) {
-                const auto o = item.toObject();
-                appendLog(QStringLiteral("  %1 · %2 -> preset %3\n").arg(o.value(QStringLiteral("name")).toString(),
-                          o.value(QStringLiteral("model")).toString(), o.value(QStringLiteral("preset")).toString()));
-            }
-            for (const auto &item : skipped) appendLog(QStringLiteral("  skipped: ") + item.toString() + '\n');
+            QStringList names;
+            for (const auto &item : imported) names << item.toObject().value(QStringLiteral("name")).toString();
+            QMessageBox::information(this, QStringLiteral("Warp import"),
+                QStringLiteral("Imported %1 key(s) into the keyring: %2\nSkipped: %3").arg(imported.size())
+                    .arg(names.join(QStringLiteral(", ")), skipped.isEmpty() ? QStringLiteral("none") : QString::number(skipped.size())));
             statusBar()->showMessage(QStringLiteral("Warp import finished. Leave the key field empty to use stored keys."));
             send({{"type", "presets"}});
         } else if (type == QStringLiteral("key_stored")) {
             statusBar()->showMessage(QStringLiteral("API key saved to the keyring for ") + event.value(QStringLiteral("preset")).toString());
         } else if (type == QStringLiteral("agent_started")) {
-            m_agentBusy = true;
-        } else if (type == QStringLiteral("delta") || type == QStringLiteral("tool_output")) {
-            appendLog(event.value(QStringLiteral("text")).toString());
-        } else if (type == QStringLiteral("approval")) {
-            showApproval(event);
+            m_agentBusy = true; m_turnHeader = false;
+        } else if (type == QStringLiteral("delta")) {
+            const QString text = event.value(QStringLiteral("text")).toString();
+            m_turnText += text;
+            turnHeader(); printInline(text, Ink::Agent);
+        } else if (type == QStringLiteral("tool_output")) {
+            turnHeader(); printInline(event.value(QStringLiteral("text")).toString(), Ink::ToolOutput);
         } else if (type == QStringLiteral("tool_started")) {
-            appendLog(QStringLiteral("\n\n[RUNNING ") + event.value(QStringLiteral("tool")).toString() + QStringLiteral("]\n"));
+            turnHeader();
+            const QString preview = event.value(QStringLiteral("preview")).toString();
+            // Compact the backend preview: "RUN COMMAND\n\nWorking directory: …\nTimeout: …\n\ncmd"
+            // becomes "⚙ $ cmd"; file tools become "⚙ read path" / "⚙ write path" plus the diff.
+            QStringList lines = preview.left(6000).split('\n');
+            const QString title = lines.isEmpty() ? QString() : lines.takeFirst().trimmed();
+            QStringList body;
+            for (const QString &line : std::as_const(lines)) {
+                if (line.startsWith(QStringLiteral("Working directory: ")) || line.startsWith(QStringLiteral("Timeout: "))
+                    || line.startsWith(QStringLiteral("Old bytes: "))) continue;
+                if (body.isEmpty() && line.trimmed().isEmpty()) continue;
+                body << line;
+            }
+            while (!body.isEmpty() && body.last().trimmed().isEmpty()) body.removeLast();
+            QString verb = title == QStringLiteral("RUN COMMAND") ? QStringLiteral("$")
+                         : title == QStringLiteral("READ FILE") ? QStringLiteral("read")
+                         : title == QStringLiteral("LIST DIRECTORY") ? QStringLiteral("list")
+                         : title == QStringLiteral("WRITE FILE") ? QStringLiteral("write")
+                         : event.value(QStringLiteral("tool")).toString();
+            QString head = body.isEmpty() ? QString() : body.takeFirst();
+            if (verb != QStringLiteral("$") && head.startsWith(m_workspace + '/')) head = head.mid(m_workspace.size() + 1);
+            ensureLineStart();
+            printInline(QStringLiteral("⚙ ") + verb + ' ' + head + '\n', Ink::Tool);
+            // Multi-line commands continue; write diffs are colored. Skip the diff's blank separator.
+            for (const QString &line : std::as_const(body)) {
+                if (line.trimmed().isEmpty()) continue;
+                Ink ink = Ink::ToolOutput;
+                if (line.startsWith('+') && !line.startsWith(QStringLiteral("+++"))) ink = Ink::DiffAdd;
+                else if (line.startsWith('-') && !line.startsWith(QStringLiteral("---"))) ink = Ink::DiffRemove;
+                printInline(line + '\n', ink);
+            }
         } else if (type == QStringLiteral("tool_result")) {
             const auto result = event.value(QStringLiteral("result")).toObject();
-            if (result.contains(QStringLiteral("error"))) appendLog(QStringLiteral("\nTool error: ") + result.value(QStringLiteral("error")).toString() + '\n');
-            else if (result.value(QStringLiteral("denied")).toBool()) appendLog(QStringLiteral("\n[Denied]\n"));
-            else if (result.contains(QStringLiteral("exit_code"))) appendLog(QStringLiteral("\n[exit %1%2%3]\n")
-                .arg(result.value(QStringLiteral("exit_code")).toInt())
-                .arg(result.value(QStringLiteral("timed_out")).toBool() ? QStringLiteral(" · timed out") : QString())
-                .arg(result.value(QStringLiteral("truncated")).toBool() ? QStringLiteral(" · output truncated") : QString()));
-            else appendLog(QStringLiteral("\n[Completed ") + event.value(QStringLiteral("tool")).toString() + QStringLiteral("]\n"));
+            ensureLineStart();
+            if (result.contains(QStringLiteral("error"))) printInline(QStringLiteral("✗ ") + result.value(QStringLiteral("error")).toString() + '\n', Ink::Error);
+            else if (result.contains(QStringLiteral("exit_code"))) {
+                const int code = result.value(QStringLiteral("exit_code")).toInt();
+                printInline(QStringLiteral("exit %1%2%3\n").arg(code)
+                    .arg(result.value(QStringLiteral("timed_out")).toBool() ? QStringLiteral(" · timed out") : QString())
+                    .arg(result.value(QStringLiteral("truncated")).toBool() ? QStringLiteral(" · output truncated") : QString()),
+                    code == 0 ? Ink::Note : Ink::Error);
+            } else printInline(QStringLiteral("✓ ") + event.value(QStringLiteral("tool")).toString() + '\n', Ink::Note);
         } else if (type == QStringLiteral("status")) {
             statusBar()->showMessage(event.value(QStringLiteral("text")).toString());
         } else if (type == QStringLiteral("done") || type == QStringLiteral("cancelled")) {
             m_agentBusy = false;
-            if (m_approval) m_approval->reject();
-            appendLog(type == QStringLiteral("done") ? QStringLiteral("\n\n[Turn complete]\n") : QStringLiteral("\n[Stopped — approved actions are not rolled back]\n"));
+            if (type == QStringLiteral("cancelled")) {
+                ensureLineStart(); printInline(QStringLiteral("Stopped. Actions that already ran are not rolled back.\n"), Ink::Error);
+            }
+            ensureLineStart(); closeInline();
             statusBar()->showMessage(QStringLiteral("Ready"));
+            finishFixTurn(type == QStringLiteral("done"));
         } else if (type == QStringLiteral("error")) {
             const auto text = event.value(QStringLiteral("text")).toString();
             if (event.value(QStringLiteral("id")).toString() == m_pendingSubmit) m_pendingSubmit.clear();
+            const bool wasBusy = m_agentBusy;
             // Route errors do not cancel a concurrent agent turn.
             m_agentBusy = event.value(QStringLiteral("agent_busy")).toBool(false);
             m_configuring = false;
-            appendLog(QStringLiteral("\nError: ") + text + '\n'); statusBar()->showMessage(text);
+            statusBar()->showMessage(text);
+            if (wasBusy && !m_agentBusy) {
+                ensureLineStart(); printInline(QStringLiteral("✗ ") + text + '\n', Ink::Error); closeInline();
+                finishFixTurn(false);
+            }
         }
     }
 
-    void dispatch(const QJsonObject &decision) {
-        QString route = decision.value(QStringLiteral("route")).toString();
+    void dispatch(const QJsonObject &decision, const QString &mode) {
+        const QString route = decision.value(QStringLiteral("route")).toString();
         const QString text = decision.value(QStringLiteral("text")).toString();
         if (route == QStringLiteral("empty")) return;
-        const bool terminalFirst = route == QStringLiteral("ambiguous") && m_terminalFirst->isChecked();
-        if (terminalFirst) {
-            if (!decision.value(QStringLiteral("syntax_ok")).toBool(true)) {
-                // Not valid Bash, so running it could only fail. Skip straight to the agent.
-                statusBar()->showMessage(QStringLiteral("Not valid shell syntax · sent to the agent"));
-                submitAgent(text, true);
+        if (route == QStringLiteral("shell")) {
+            const bool valid = decision.value(QStringLiteral("valid")).toBool(decision.value(QStringLiteral("syntax_ok")).toBool(true));
+            const QString problem = decision.value(QStringLiteral("invalid_reason")).toString(
+                decision.value(QStringLiteral("syntax_error")).toString());
+            if (mode == QStringLiteral("shell")) {
+                // Terminal mode (Ctrl+Shift+Enter): always the terminal. An invalid command
+                // goes to the agent to be fixed; a failing run is fixed and re-run.
+                m_editor->remember(text); m_editor->clear();
+                if (!valid) { startFix(text, problem.isEmpty() ? QStringLiteral("not a valid command") : problem, 1); return; }
+                runInTerminal(text, true, 0);
                 return;
             }
-            route = QStringLiteral("shell");
-        }
-        if (route == QStringLiteral("ambiguous")) {
-            QMessageBox box(this);
-            box.setWindowTitle(QStringLiteral("Choose where to send this input"));
-            box.setTextFormat(Qt::PlainText);
-            box.setText(QStringLiteral("Relay is not confident about this input. Nothing has been executed or sent to a provider.\n\n") + text.left(1500));
-            auto *shell = box.addButton(QStringLiteral("Terminal"), QMessageBox::ActionRole);
-            auto *agent = box.addButton(QStringLiteral("Agent"), QMessageBox::ActionRole);
-            auto *cancel = box.addButton(QMessageBox::Cancel); box.setDefaultButton(cancel);
-            box.exec();
-            if (box.clickedButton() == shell) requestRoute(true, QStringLiteral("shell"));
-            else if (box.clickedButton() == agent) requestRoute(true, QStringLiteral("agent"));
-            return;
-        }
-        if (route == QStringLiteral("shell")) {
-            if (!decision.value(QStringLiteral("syntax_ok")).toBool(true)) {
-                QMessageBox::warning(this, QStringLiteral("Incomplete or invalid Bash syntax"), decision.value(QStringLiteral("syntax_error")).toString()); return;
-            }
-            if (!m_iface || !m_shellReady || m_loading || m_native) {
-                statusBar()->showMessage(QStringLiteral("Shell is not at an integrated prompt. Use native input; Relay will not type into a running program.")); return;
-            }
-            if (m_iface->foregroundProcessId() > 0 && m_iface->foregroundProcessId() != m_iface->terminalProcessId()) {
-                m_shellReady = false; focusTerminal();
-                statusBar()->showMessage(QStringLiteral("A foreground program is running. Composer submission was not sent.")); return;
-            }
-            const auto data = text.toUtf8();
-            QSaveFile input(m_runtime.filePath(QStringLiteral("input.txt")));
-            if (!input.open(QIODevice::WriteOnly)) { statusBar()->showMessage(input.errorString()); return; }
-            input.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
-            if (input.write(data) != data.size() || !input.commit()) { statusBar()->showMessage(QStringLiteral("Could not stage command.")); return; }
-            m_pendingHash = QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
-            m_pendingCommand = text; m_loading = true; m_shellReady = false; m_promptReported = false;
-            clearFallback();
-            if (terminalFirst) m_fallbackText = text;
-            // Stage text via a bound Readline function. Enter is sent only after its hash acknowledgement.
-            m_iface->sendInput(QString(QChar(24)) + QChar(18));
-            const quint64 serial = ++m_loadSerial;
-            QTimer::singleShot(2500, this, [this, serial] {
-                if (m_loading && m_loadSerial == serial) {
-                    m_loading = false; clearFallback(); setNative(true);
-                    statusBar()->showMessage(QStringLiteral("Shell did not acknowledge the editor text. Enter was NOT sent. Inspect the native input line; try --clean-shell."));
-                }
-            });
-        } else if (route == QStringLiteral("agent")) {
-            submitAgent(text, true);
+            if (!valid) { submitAgent(text, true, problem); return; }
+            runInTerminal(text, false, 0);
+        } else {
+            // "agent", or a legacy "ambiguous" decision: the agent is the default for invalid input.
+            // Show why non-command input went to the agent, e.g. "command not found: foo".
+            const QString why = !decision.value(QStringLiteral("valid")).toBool(true) && mode != QStringLiteral("agent")
+                ? decision.value(QStringLiteral("invalid_reason")).toString() : QString();
+            submitAgent(text, true, why);
         }
     }
 
-    void clearFallback() { m_fallbackText.clear(); m_fallbackArmed = false; }
+    bool runInTerminal(const QString &text, bool watch, int attempt) {
+        if (!m_iface || !m_shellReady || m_loading || m_native) {
+            statusBar()->showMessage(QStringLiteral("Shell is not at an integrated prompt. Use native input; Relay will not type into a running program."));
+            return false;
+        }
+        if (m_iface->foregroundProcessId() > 0 && m_iface->foregroundProcessId() != m_iface->terminalProcessId()) {
+            m_shellReady = false; focusTerminal();
+            statusBar()->showMessage(QStringLiteral("A foreground program is running. Composer submission was not sent."));
+            return false;
+        }
+        const auto data = text.toUtf8();
+        QSaveFile input(m_runtime.filePath(QStringLiteral("input.txt")));
+        if (!input.open(QIODevice::WriteOnly)) { statusBar()->showMessage(input.errorString()); return false; }
+        input.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
+        if (input.write(data) != data.size() || !input.commit()) { statusBar()->showMessage(QStringLiteral("Could not stage command.")); return false; }
+        closeInline();
+        m_pendingHash = QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
+        m_pendingCommand = text; m_loading = true; m_shellReady = false; m_promptReported = false;
+        m_fixCommand = watch ? text : QString(); m_fixAttempt = attempt; m_fixWatch = watch; m_fixArmed = false;
+        // Stage text via a bound Readline function. Enter is sent only after its hash acknowledgement.
+        m_iface->sendInput(QString(QChar(24)) + QChar(18));
+        const quint64 serial = ++m_loadSerial;
+        QTimer::singleShot(2500, this, [this, serial] {
+            if (m_loading && m_loadSerial == serial) {
+                m_loading = false; clearFix(); setNative(true);
+                statusBar()->showMessage(QStringLiteral("Shell did not acknowledge the editor text. Enter was NOT sent. Inspect the native input line; try --clean-shell."));
+            }
+        });
+        return true;
+    }
+
+    // ----- fix and re-run loop (terminal mode) -----------------------------------------
+    static constexpr int kMaxFixAttempts = 3;
+
+    void clearFix() { m_fixCommand.clear(); m_fixWatch = false; m_fixArmed = false; m_fixAwaitingAgent = false; m_fixAttempt = 0; }
+
+    void startFix(const QString &command, const QString &problem, int attempt) {
+        if (attempt > kMaxFixAttempts) {
+            ensureLineStart();
+            printInline(QStringLiteral("✗ Still failing after %1 fix attempts. Stopping.\n").arg(kMaxFixAttempts), Ink::Error);
+            closeInline(); clearFix(); return;
+        }
+        if (!m_configured) {
+            printInline(QStringLiteral("✗ %1. No agent provider is configured to fix it.\n").arg(problem), Ink::Error);
+            closeInline(); clearFix(); return;
+        }
+        if (m_agentBusy) {
+            printInline(QStringLiteral("✗ %1. The agent is busy, so no fix was started.\n").arg(problem), Ink::Error);
+            closeInline(); clearFix(); return;
+        }
+        m_fixCommand = command; m_fixAttempt = attempt; m_fixAwaitingAgent = true; m_fixWatch = false; m_fixArmed = false;
+        ensureLineStart();
+        printInline(QStringLiteral("⟳ %1 · asking the agent to fix it (attempt %2 of %3)\n").arg(problem).arg(attempt).arg(kMaxFixAttempts), Ink::Note);
+        const QString prompt = QStringLiteral(
+            "Terminal fix request, attempt %1 of %2.\n"
+            "The user ran this command in their interactive Bash terminal, working directory %3:\n"
+            "```bash\n%4\n```\n"
+            "Problem: %5.\n"
+            "You cannot see the terminal's output. If you need the error message, reproduce it with run_command "
+            "(start the command with `cd %3 && `). Keep what the user meant; make the smallest change that fixes it.\n"
+            "End your reply with the corrected command in a fenced block tagged relay-run, for example:\n"
+            "```relay-run\nls -la\n```\n"
+            "Relay runs that block in the user's terminal. If it cannot be fixed, end with an empty relay-run block and a one-line reason before it.")
+            .arg(attempt).arg(kMaxFixAttempts).arg(shellQuote(m_cwd), command, problem);
+        m_turnText.clear(); m_turnHeader = false; m_agentBusy = true;
+        send({{"type", "ask"}, {"text", prompt}});
+    }
+
+    void finishFixTurn(bool completed) {
+        if (!m_fixAwaitingAgent) return;
+        m_fixAwaitingAgent = false;
+        if (!completed) { clearFix(); return; }
+        const QString marker = QStringLiteral("```relay-run");
+        const int start = m_turnText.lastIndexOf(marker);
+        QString fixed;
+        if (start >= 0) {
+            int bodyStart = m_turnText.indexOf('\n', start);
+            int end = bodyStart >= 0 ? m_turnText.indexOf(QStringLiteral("```"), bodyStart) : -1;
+            if (bodyStart >= 0 && end > bodyStart) fixed = m_turnText.mid(bodyStart + 1, end - bodyStart - 1).trimmed();
+        }
+        if (fixed.isEmpty()) {
+            printInline(QStringLiteral("✗ The agent did not produce a fixed command.\n"), Ink::Error);
+            closeInline(); clearFix(); return;
+        }
+        const int attempt = m_fixAttempt;
+        const QString command = fixed;
+        // Let Readline redraw its prompt before the fixed command is staged.
+        QTimer::singleShot(150, this, [this, command, attempt] {
+            if (!runInTerminal(command, true, attempt)) {
+                printInline(QStringLiteral("✗ The shell is busy, so the fixed command was not run:\n%1\n").arg(command), Ink::Error);
+                closeInline(); clearFix();
+            }
+        });
+    }
+
+    static QString shellQuote(const QString &value) {
+        QString quoted = value;
+        quoted.replace('\'', QStringLiteral("'\\''"));
+        return '\'' + quoted + '\'';
+    }
+
+    // ----- inline output in the terminal -------------------------------------------------
+    enum class Ink { Agent, User, Tool, ToolOutput, DiffAdd, DiffRemove, Error, Note };
+
+    static QByteArray inkCode(Ink ink) {
+        switch (ink) {
+        case Ink::Agent: return "\x1b[38;2;226;229;235m";
+        case Ink::User: return "\x1b[1;38;2;62;197;240m";
+        case Ink::Tool: return "\x1b[38;2;229;192;123m";
+        case Ink::ToolOutput: return "\x1b[38;2;128;135;150m";
+        case Ink::DiffAdd: return "\x1b[38;2;126;200;140m";
+        case Ink::DiffRemove: return "\x1b[38;2;232;120;128m";
+        case Ink::Error: return "\x1b[38;2;240;113;120m";
+        case Ink::Note: return "\x1b[3;38;2;128;135;150m";
+        }
+        return {};
+    }
+
+    // Konsole's Session is not reachable through KParts, but every session registers itself on
+    // D-Bus. In-process, objectRegisteredAt() returns the Session QObject, whose onReceiveBlock()
+    // slot feeds bytes to the terminal emulator exactly like program output. Nothing is typed
+    // into the shell, so agent text never reaches shell history and is never executed.
+    QObject *konsoleSession() {
+        if (m_session) return m_session;
+        if (!m_iface) return nullptr;
+        const int pid = m_iface->terminalProcessId();
+        for (int n = 1; n <= 256 && pid > 0; ++n) {
+            QObject *session = QDBusConnection::sessionBus().objectRegisteredAt(QStringLiteral("/Sessions/%1").arg(n));
+            if (!session) continue;
+            for (QObject *child : session->children()) {
+                int childPid = 0;
+                if (child->metaObject()->indexOfMethod("processId()") >= 0
+                    && QMetaObject::invokeMethod(child, "processId", Qt::DirectConnection, Q_RETURN_ARG(int, childPid))
+                    && childPid == pid) {
+                    m_session = session;
+                    return session;
+                }
+            }
+        }
+        return nullptr;
+    }
+
+    bool shellIdleAtPrompt() const {
+        return m_iface && m_promptReported && !m_loading && !m_native
+            && (m_iface->foregroundProcessId() <= 0 || m_iface->foregroundProcessId() == m_iface->terminalProcessId());
+    }
+
+    void writeTerminal(const QByteArray &bytes) {
+        QObject *session = konsoleSession();
+        if (!session) { fprintf(stderr, "%s", bytes.constData()); return; }
+        QMetaObject::invokeMethod(session, "onReceiveBlock", Qt::DirectConnection,
+                                  Q_ARG(const char *, bytes.constData()), Q_ARG(int, bytes.size()));
+    }
+
+    void printInline(const QString &text, Ink ink) {
+        if (text.isEmpty()) return;
+        if (!shellIdleAtPrompt()) { m_inlinePending.append({text, ink}); return; }
+        QString clean;
+        clean.reserve(text.size());
+        for (const QChar c : text) {
+            const ushort u = c.unicode();
+            // Model and tool output is untrusted: drop C0/C1 controls so it cannot emit
+            // escape sequences (clipboard writes, title changes, cursor games).
+            if (u == '\n' || u == '\t' || (u >= 0x20 && u != 0x7f && !(u >= 0x80 && u < 0xa0))) clean += c;
+        }
+        if (clean.isEmpty()) return;
+        QByteArray out;
+        if (!m_inlineOpen) {
+            // Erase the idle prompt line; closeInline() asks Readline to redraw it afterwards.
+            out += "\r\x1b[2K";
+            m_inlineOpen = true; m_atLineStart = true;
+        }
+        const QByteArray body = clean.toUtf8();
+        out += inkCode(ink);
+        for (const char ch : body) { if (ch == '\n') out += "\x1b[0m\r\n" + inkCode(ink); else out += ch; }
+        out += "\x1b[0m";
+        m_atLineStart = clean.endsWith('\n');
+        writeTerminal(out);
+    }
+
+    void ensureLineStart() { if (m_inlineOpen && !m_atLineStart) printInline(QStringLiteral("\n"), Ink::Note); }
+
+    void closeInline() {
+        if (!m_inlineOpen) return;
+        if (!m_atLineStart) writeTerminal("\r\n");
+        m_inlineOpen = false; m_atLineStart = true;
+        // Ctrl+X Ctrl+P is bound to a no-op shell function; Readline redraws the prompt after it.
+        if (m_iface && shellIdleAtPrompt()) m_iface->sendInput(QString(QChar(24)) + QChar(16));
+    }
+
+    void flushInline() {
+        if (m_inlinePending.isEmpty() || !shellIdleAtPrompt()) return;
+        const auto pending = m_inlinePending;
+        m_inlinePending.clear();
+        for (const auto &item : pending) printInline(item.first, item.second);
+        if (!m_agentBusy) { ensureLineStart(); closeInline(); }
+    }
+
+    void turnHeader() {
+        if (m_turnHeader) return;
+        m_turnHeader = true;
+        ensureLineStart();
+        printInline(QStringLiteral("▸ ") + (m_model.isEmpty() ? QStringLiteral("agent") : m_model) + '\n', Ink::User);
+    }
+
 
     QJsonObject presetById(const QString &id) const {
         for (const auto &item : m_presets)
@@ -547,7 +735,7 @@ private:
         settings.setValue("provider/model", preset.value(QStringLiteral("model")).toString());
         settings.setValue("provider/extra", QString::fromUtf8(QJsonDocument(preset.value(QStringLiteral("extra")).toObject()).toJson(QJsonDocument::Compact)));
         m_apiKey.clear(); m_configured = false; m_configuring = true;
-        if (announce) appendLog(QStringLiteral("\nSwitching model. This starts a new conversation.\n"));
+        if (announce) statusBar()->showMessage(QStringLiteral("Switching model. This starts a new conversation."));
         send({{"type", "configure"}, {"preset", id}, {"use_stored_key", true},
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
               {"model", preset.value(QStringLiteral("model")).toString()},
@@ -556,21 +744,21 @@ private:
         updatePaths();
     }
 
-    void submitAgent(const QString &text, bool fromEditor) {
-        m_agentPanel->show();
+    void submitAgent(const QString &text, bool fromEditor, const QString &why = QString()) {
         if (!m_configured) {
             if (fromEditor) { configure(); return; }
-            appendLog(QStringLiteral("\nCommand not found, and no agent provider is configured. Open Provider / BYOK… to enable the agent fallback.\n"));
+            statusBar()->showMessage(QStringLiteral("No agent provider is configured."));
             return;
         }
         if (m_agentBusy) {
-            statusBar()->showMessage(fromEditor ? QStringLiteral("An agent turn is active. Stop it or wait for completion before submitting another request.")
-                                                : QStringLiteral("Command not found. The agent is busy, so it was not sent. Resubmit with Ctrl+Enter."));
+            statusBar()->showMessage(QStringLiteral("An agent turn is active. Stop it or wait for completion before submitting another request."));
             return;
         }
-        appendLog(QStringLiteral("\nYOU\n") + text + QStringLiteral("\n\nRELAY\n"));
         if (fromEditor) { m_editor->remember(text); m_editor->clear(); }
-        m_agentBusy = true;
+        ensureLineStart();
+        printInline(QStringLiteral("› ") + text + '\n', Ink::User);
+        if (!why.isEmpty()) printInline(why + '\n', Ink::Note);
+        m_turnText.clear(); m_turnHeader = false; m_agentBusy = true;
         send({{"type", "ask"}, {"text", text}});
     }
 
@@ -630,16 +818,23 @@ private:
             m_shellPath = event.value(QStringLiteral("path")).toString();
             const int status = event.value(QStringLiteral("status")).toInt();
             if (!m_agentBusy) statusBar()->showMessage(QStringLiteral("Shell ready · exit %1").arg(status));
-            if (m_fallbackArmed) {
-                const QString text = m_fallbackText;
-                clearFallback();
-                // Only "not found" (127) and "not executable" (126) fall back. A real command
-                // that fails is left alone: the agent cannot see its terminal output.
-                if (status == 127 || status == 126) {
-                    statusBar()->showMessage(QStringLiteral("Not a shell command (exit %1) · sent to the agent").arg(status));
-                    submitAgent(text, false);
+            if (m_fixArmed) {
+                const QString command = m_fixCommand;
+                const int attempt = m_fixAttempt;
+                m_fixArmed = false; m_fixWatch = false;
+                if (status == 0) {
+                    if (attempt > 0) { printInline(QStringLiteral("✓ Fixed command succeeded.\n"), Ink::Note); closeInline(); }
+                    clearFix();
+                } else if (status == 130) {
+                    clearFix();  // Interrupted with Ctrl+C: the user stopped it on purpose.
+                } else {
+                    // Defer until Readline has drawn the prompt and put the tty in raw mode.
+                    QTimer::singleShot(200, this, [this, command, attempt, status] {
+                        startFix(command, QStringLiteral("exited with status %1").arg(status), attempt + 1);
+                    });
                 }
             }
+            QTimer::singleShot(120, this, [this] { flushInline(); });
         } else if (stage == QStringLiteral("running")) {
             m_shellReady = false; m_promptReported = false;
         } else if (stage == QStringLiteral("loaded") && m_loading && m_iface &&
@@ -648,7 +843,7 @@ private:
             m_editor->remember(m_pendingCommand);
             // Do not discard edits typed while waiting for the shell acknowledgement.
             if (m_editor->toPlainText() == m_submittedDraft) m_editor->clear();
-            m_fallbackArmed = !m_fallbackText.isEmpty();
+            m_fixArmed = m_fixWatch;
             m_iface->sendInput(QStringLiteral("\r")); focusTerminal();
         } else if (stage == QStringLiteral("unsupported")) {
             m_shellReady = false; m_promptReported = false; setNative(true);
@@ -677,37 +872,6 @@ private:
     void updatePaths() {
         m_cwdLabel->setText(QStringLiteral("TERMINAL  ") + m_cwd + QStringLiteral("     │     AGENT WORKSPACE  ") + m_workspace);
     }
-    void appendLog(const QString &text) {
-        auto cursor = m_log->textCursor(); cursor.movePosition(QTextCursor::End); cursor.insertText(text);
-        m_log->setTextCursor(cursor); m_log->ensureCursorVisible();
-    }
-
-    void showApproval(const QJsonObject &event) {
-        if (m_approval) { send({{"type", "approve"}, {"id", event.value("id")}, {"allow", false}}); return; }
-        auto *dialog = new QDialog(this); m_approval = dialog;
-        dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->setWindowModality(Qt::WindowModal);
-        dialog->setWindowTitle(QStringLiteral("Relay · Review agent action")); dialog->resize(820, 580);
-        auto *layout = new QVBoxLayout(dialog);
-        auto *label = new QLabel(QStringLiteral("No action runs until you approve. Approval applies to this action only."));
-        label->setWordWrap(true); layout->addWidget(label);
-        auto *preview = new QPlainTextEdit; preview->setReadOnly(true);
-        preview->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-        preview->setPlainText(event.value(QStringLiteral("preview")).toString()); layout->addWidget(preview);
-        auto *buttons = new QDialogButtonBox;
-        auto *approve = buttons->addButton(QStringLiteral("Approve once"), QDialogButtonBox::AcceptRole);
-        auto *deny = buttons->addButton(QStringLiteral("Deny"), QDialogButtonBox::RejectRole);
-        approve->setAutoDefault(false); deny->setDefault(true);
-        layout->addWidget(buttons);
-        connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
-        connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
-        const auto id = event.value(QStringLiteral("id")).toString();
-        connect(dialog, &QDialog::finished, this, [this, id](int result) {
-            send({{"type", "approve"}, {"id", id}, {"allow", result == QDialog::Accepted}});
-            m_approval = nullptr;
-        });
-        dialog->open();
-    }
-
     void configure() {
         if (m_agentBusy) { statusBar()->showMessage(QStringLiteral("Stop the current agent turn before changing provider settings.")); return; }
         QDialog dialog(this); dialog.setWindowTitle(QStringLiteral("Relay · Bring your own key")); dialog.resize(650, 520);
@@ -760,9 +924,9 @@ private:
         form->addRow(QString(), saveKey); form->addRow(QString(), importWarp);
         form->addRow(QStringLiteral("Extra request JSON"), extra); form->addRow(QStringLiteral("Output token limit"), tokens);
         form->addRow(QStringLiteral("Agent workspace"), workspaceRow); layout->addLayout(form);
-        auto *notice = new QLabel(QStringLiteral("Entered keys are kept in process memory unless you choose to save them to the desktop keyring. Keys are never written to settings files. Changing settings starts a new conversation. Provider access and billing depend on your account.\n\nApproving a shell command is NOT sandboxing it: the command has your user permissions. File tools are restricted to this workspace. Terminal history is not sent automatically."));
+        auto *notice = new QLabel(QStringLiteral("Entered keys are kept in process memory unless you choose to save them to the desktop keyring. Keys are never written to settings files. Changing settings starts a new conversation. Provider access and billing depend on your account.\n\nThe agent runs tools without asking. Shell commands are NOT sandboxed: they have your user permissions. File tools are restricted to this workspace. Terminal history is not sent automatically."));
         notice->setWordWrap(true); layout->addWidget(notice);
-        auto *consent = new QCheckBox(QStringLiteral("Send my submitted agent prompts and approved tool results to this provider."));
+        auto *consent = new QCheckBox(QStringLiteral("Send my submitted agent prompts and tool results to this provider."));
         layout->addWidget(consent);
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel); layout->addWidget(buttons);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -798,18 +962,20 @@ private:
     QTimer m_poll, m_debounce;
     QPointer<KParts::ReadOnlyPart> m_part;
     TerminalInterface *m_iface = nullptr;
-    QWidget *m_terminal = nullptr, *m_terminalHost = nullptr, *m_agentPanel = nullptr;
+    QWidget *m_terminal = nullptr, *m_terminalHost = nullptr;
     QSplitter *m_splitter = nullptr;
     RichEditor *m_editor = nullptr;
-    QPlainTextEdit *m_log = nullptr;
     QComboBox *m_mode = nullptr;
-    QLabel *m_routeLabel = nullptr, *m_cwdLabel = nullptr, *m_providerLabel = nullptr;
+    QLabel *m_routeLabel = nullptr, *m_cwdLabel = nullptr;
     QAction *m_nativeAction = nullptr;
-    QPointer<QDialog> m_approval;
     bool m_native = false, m_workerReady = false, m_shellReady = false, m_loading = false;
-    bool m_promptReported = false, m_fallbackArmed = false;
-    QString m_fallbackText;
-    QAction *m_terminalFirst = nullptr;
+    bool m_promptReported = false;
+    QString m_submitMode, m_model, m_turnText, m_fixCommand;
+    int m_fixAttempt = 0;
+    bool m_fixWatch = false, m_fixArmed = false, m_fixAwaitingAgent = false, m_turnHeader = false;
+    bool m_inlineOpen = false, m_atLineStart = true;
+    QList<QPair<QString, Ink>> m_inlinePending;
+    QPointer<QObject> m_session;
     QComboBox *m_modelPicker = nullptr;
     QJsonArray m_presets;
     bool m_configuring = false;

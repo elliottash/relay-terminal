@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Small tool surface. Every prepared operation needs explicit UI approval.
+"""Small tool surface. Tools run without a per-action user confirmation.
 
 Workspace checks protect the file tools from accidental path escape. They are NOT
-an OS sandbox: an approved shell command has the invoking user's permissions.
+an OS sandbox: a shell command has the invoking user's permissions.
 """
 from __future__ import annotations
 
@@ -35,14 +35,14 @@ def spec(name: str, description: str, properties: dict, required: list[str]) -> 
                            "additionalProperties": False}}}
 
 TOOLS = [
-    spec("run_command", "Run a non-interactive Bash command in the chosen workspace. Requires approval. NOT an OS sandbox. Does not share interactive shell variables or aliases.",
+    spec("run_command", "Run a non-interactive Bash command in the chosen workspace. NOT an OS sandbox. Does not share interactive shell variables or aliases.",
          {"command": {"type": "string"}, "cwd": {"type": "string", "description": "Workspace-relative directory; default '.'"},
           "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120}}, ["command"]),
-    spec("read_file", "Read a UTF-8 text file inside the workspace. Requires approval before contents are sent to the model.",
+    spec("read_file", "Read a UTF-8 text file inside the workspace.",
          {"path": {"type": "string"}}, ["path"]),
-    spec("list_directory", "List at most 200 entries in a workspace directory. Requires approval.",
+    spec("list_directory", "List at most 200 entries in a workspace directory.",
          {"path": {"type": "string"}}, ["path"]),
-    spec("write_file", "Create or replace one UTF-8 file. The user reviews a full diff. Existing-file changes fail if the file changes after review.",
+    spec("write_file", "Create or replace one UTF-8 file. The diff is shown to the user. Fails if the file changes while the write is prepared.",
          {"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]),
 ]
 
@@ -144,13 +144,12 @@ class ToolExecutor:
             if type(timeout) is not int or not 1 <= timeout <= 120:
                 raise ValueError("Timeout must be an integer from 1 to 120 seconds.")
             args["timeout_seconds"] = timeout
-            return Prepared(name, args, f"RUN COMMAND\n\nWorking directory: {cwd}\nTimeout: {timeout}s\n\n{command}\n\nWARNING: This command is not sandboxed. It can access files and the network with your user permissions. Its output is sent to your chosen model provider.", cwd)
+            return Prepared(name, args, f"RUN COMMAND\n\nWorking directory: {cwd}\nTimeout: {timeout}s\n\n{command}", cwd)
         path = self.workspace.resolve(self._text(args, "path", maximum=4096), allow_missing=name == "write_file")
         if name == "read_file":
-            # Contents are intentionally not opened until the user approves.
-            return Prepared(name, args, f"READ FILE\n\n{path}\n\nApprove sending this file's contents to your model provider.", path)
+            return Prepared(name, args, f"READ FILE\n\n{path}", path)
         if name == "list_directory":
-            return Prepared(name, args, f"LIST DIRECTORY\n\n{path}\n\nApprove sending up to 200 entry names to your model provider.", path)
+            return Prepared(name, args, f"LIST DIRECTORY\n\n{path}", path)
         content = self._text(args, "content")
         if not path.parent.is_dir():
             raise ValueError("Parent directory must already exist. Relay does not create directory trees automatically.")
@@ -169,7 +168,7 @@ class ToolExecutor:
             raise Cancelled("Stopped.")
         name, args = prepared.name, prepared.arguments
         if name == "run_command":
-            # Recheck paths after approval.
+            # Recheck paths at execution time.
             cwd = self.workspace.resolve(args.get("cwd", "."))
             return self._run(args["command"], cwd, args["timeout_seconds"])
         path = self.workspace.resolve(args["path"], allow_missing=name == "write_file")
@@ -187,10 +186,10 @@ class ToolExecutor:
                     entries.append({"name": entry.name, "type": "symlink" if entry.is_symlink() else "directory" if entry.is_dir(follow_symlinks=False) else "file"})
             return {"entries": sorted(entries, key=lambda x: x['name']), "truncated": False}
         if path.exists() != prepared.existed:
-            raise ValueError("File appeared or disappeared after approval. Request a new diff.")
+            raise ValueError("File appeared or disappeared while the write was prepared. Request a new diff.")
         old = self.workspace.read_bytes(path) if path.exists() else b""
         if hashlib.sha256(old).hexdigest() != prepared.old_sha:
-            raise ValueError("File changed after approval. Nothing was overwritten; request a fresh diff.")
+            raise ValueError("File changed while the write was prepared. Nothing was overwritten; request a fresh diff.")
         mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
         fd, tempname = tempfile.mkstemp(prefix=".relay-write-", dir=path.parent)
         try:
