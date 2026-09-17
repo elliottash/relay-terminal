@@ -475,31 +475,27 @@ QList<LedgerOpenItem> RequestLedgerModel::parseOpenItems(const QJsonArray &items
 }
 
 QString RequestLedgerModel::openItemsLine(const QList<LedgerOpenItem> &items, int maxChars) {
-    QStringList requests;
-    int todos = 0, requestCount = 0;
+    // Counted as tasks, like the chip: open todos, plus open requests that have no open todo of their own.
+    QSet<QString> requestsWithTodos;
+    for (const auto &item : items)
+        if (item.kind == QStringLiteral("todo"))
+            for (const QString &id : item.requestIds) requestsWithTodos.insert(id);
+    QStringList entries;
     for (const auto &item : items) {
-        if (item.kind == QStringLiteral("todo")) { ++todos; continue; }
-        ++requestCount;
-        requests << item.id + ' ' + quoted(item.preview, 48);
+        if (item.kind != QStringLiteral("todo") && requestsWithTodos.contains(item.id)) continue;
+        entries << item.id + ' ' + quoted(item.preview, 48);
     }
-    QString line;
-    if (requestCount > 0) {
-        line = QStringLiteral("%1 request%2 still open: ").arg(requestCount).arg(requestCount == 1 ? QString() : QStringLiteral("s"));
-        QString list;
-        int shown = 0;
-        for (const QString &entry : std::as_const(requests)) {
-            const QString next = list.isEmpty() ? entry : list + QStringLiteral(", ") + entry;
-            if (shown > 0 && line.size() + next.size() > maxChars) break;
-            list = next; ++shown;
-        }
-        if (shown < requests.size()) list += QStringLiteral(" +%1 more").arg(requests.size() - shown);
-        line += list;
+    if (entries.isEmpty()) return QString();
+    QString line = QStringLiteral("%1 task%2 still open: ").arg(entries.size()).arg(entries.size() == 1 ? QString() : QStringLiteral("s"));
+    QString list;
+    int shown = 0;
+    for (const QString &entry : std::as_const(entries)) {
+        const QString next = list.isEmpty() ? entry : list + QStringLiteral(", ") + entry;
+        if (shown > 0 && line.size() + next.size() > maxChars) break;
+        list = next; ++shown;
     }
-    if (todos > 0) {
-        const QString part = QStringLiteral("%1 todo%2 open").arg(todos).arg(todos == 1 ? QString() : QStringLiteral("s"));
-        line = line.isEmpty() ? part : line + QStringLiteral(" · ") + part;
-    }
-    return line;
+    if (shown < entries.size()) list += QStringLiteral(" +%1 more").arg(entries.size() - shown);
+    return line + list;
 }
 
 QString RequestLedgerModel::limitLine(const QJsonObject &done) {

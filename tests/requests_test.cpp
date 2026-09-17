@@ -298,7 +298,8 @@ private slots:
         QCOMPARE(items.size(), 3);
         QCOMPARE(items.at(2).requestIds, QStringList{QStringLiteral("R3")});
         QCOMPARE(RequestLedgerModel::openItemsLine(items),
-                 QStringLiteral("2 requests still open: R3 “also update the docs”, R4 “write tests” · 1 todo open"));
+                 QStringLiteral("2 tasks still open: R4 “write tests”, T2 “README”"));
+        QCOMPARE(RequestLedgerModel::openItemsLine(items.mid(1, 1)), QStringLiteral("1 task still open: R4 “write tests”"));
         QVERIFY(RequestLedgerModel::openItemsLine({}).isEmpty());
         // Long lists are cut with a count.
         QList<relay::LedgerOpenItem> many;

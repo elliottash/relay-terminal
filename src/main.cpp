@@ -1652,7 +1652,7 @@ private:
                 printInline(QStringLiteral("Session loaded%1 · %2 turn(s)\n").arg(title.isEmpty() ? QString() : QStringLiteral(": “") + title + QStringLiteral("”"))
                             .arg(m_turnsCompleted), Ink::Note);
             if (const int open = event.value(QStringLiteral("open_requests")).toInt(); open > 0)
-                printInline(QStringLiteral("○ %1 unfinished request%2 · /tasks\n").arg(open).arg(open == 1 ? QString() : QStringLiteral("s")), Ink::Note);
+                printInline(QStringLiteral("○ %1 task%2 still open · /tasks\n").arg(open).arg(open == 1 ? QString() : QStringLiteral("s")), Ink::Note);
             m_forkLoadPending = false;
             closeInline();
             clearAgentQueue();
