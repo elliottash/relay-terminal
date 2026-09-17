@@ -399,6 +399,45 @@ class SteerTests(unittest.TestCase):
         self.rec.wait(lambda e: e.get('text') == 'working on idle steer')
         p.release.release()
 
+    def test_unsteer_interrupts_the_turn_and_runs_the_prompt_itself(self):
+        p = self.use(GatedProvider())
+        first = self.sup.submit('first', 'now')
+        self.rec.wait(lambda e: e.get('text') == 'working on first')
+        steer = self.sup.submit('actually stop and do this', 'steer', request_id='s1', requeue=False)
+        self.rec.wait(lambda e: e['event'] == 'queue_changed' and e.get('steering'))
+        self.assertTrue(self.sup.unsteer('s1', 'i1'))
+        escalated = self.rec.wait(lambda e: e['event'] == 'steer_escalated')
+        self.assertEqual((escalated['request_id'], escalated['escalated'], escalated['new_request_id']),
+                         ('s1', True, 'i1'))
+        # The interrupt stops the running turn and carries the steer's ledger entry, not a new one.
+        self.assertEqual(self.rec.wait(lambda e: e['event'] == 'interrupting')['id'], first)
+        item = self.rec.wait(lambda e: e['event'] == 'queued' and e['request_id'] == 'i1')
+        self.assertEqual(item['when'], 'interrupt')
+        self.assertEqual(item['ledger_id'], escalated['ledger_id'])
+        self.assertEqual(self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == first)['outcome'],
+                         'cancelled')
+        self.rec.wait(lambda e: e.get('text') == 'working on actually stop and do this')
+        p.release.release()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == item['id'])
+        self.assertEqual(p.prompts, ['first', 'actually stop and do this'])
+        self.assertFalse(self.rec.of('steer_returned'))
+        # The queue is not paused by a cancel it asked for itself.
+        self.assertFalse(self.rec.of('queue_changed')[-1]['paused'])
+        self.assertNotEqual(steer, item['id'])
+
+    def test_unsteer_does_nothing_once_the_steer_was_delivered(self):
+        p = self.use(SlowToolThenAnswer())
+        self.sup.submit('tool please', 'now')
+        self.rec.wait(lambda e: e['event'] == 'tool_started')
+        self.sup.submit('also check README', 'steer', request_id='s1')
+        self.rec.wait(lambda e: e['event'] == 'steer_delivered')
+        self.assertFalse(self.sup.unsteer('s1', 'i1'))
+        escalated = self.rec.wait(lambda e: e['event'] == 'steer_escalated')
+        self.assertEqual((escalated['escalated'], escalated['ledger_id']), (False, None))
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        self.assertFalse(self.rec.of('interrupting'))
+        self.assertEqual(p.calls, 2)
+
     def test_queue_steer_upgrades_a_queued_prompt(self):
         p = self.use(SlowToolThenAnswer('sleep 1'))
         self.sup.submit('tool please', 'now')

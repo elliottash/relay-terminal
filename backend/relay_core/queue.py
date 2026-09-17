@@ -250,6 +250,40 @@ class TurnSupervisor:
                     return
             raise ValueError("That prompt is not queued (it may already have started).")
 
+    def unsteer(self, request_id, as_request_id=None) -> bool:
+        """Third Enter in the pane: a steering prompt the running turn has not taken yet stops that
+        turn and runs as its own prompt instead, keeping its ledger entry.
+
+        Nothing is escalated once the turn has taken the prompt (``steer_delivered``) or given it
+        back (``steer_returned``): the agent has it either way, so there is nothing to interrupt
+        for. ``steer_escalated {escalated: false}`` says so.
+        """
+        with self._lock:
+            item = next((i for i in self._steer if i.get("request_id") == request_id), None)
+            if item is None:
+                self._emit({"event": "steer_escalated", "request_id": request_id,
+                            "new_request_id": as_request_id, "escalated": False, "ledger_id": None})
+                return False
+            self._steer.remove(item)
+            self._changed_locked()
+        try:
+            self.submit(item["prompt"], "interrupt", as_request_id or request_id, item.get("context"),
+                        item.get("attachments"), origin=item.get("origin", "user"),
+                        ledger_id=item.get("ledger_id"))
+        except Exception:
+            # Never lose the prompt: it goes back to the head of the queue instead (the invariant
+            # at the top of this file), and the caller still sees the error.
+            with self._lock:
+                self._queue.appendleft({"id": item["id"], "prompt": item["prompt"], "force": False,
+                                        "context": item.get("context"), "attachments": item.get("attachments"),
+                                        "origin": item.get("origin", "user"), "ledger_id": item.get("ledger_id")})
+                self._changed_locked()
+                self._lock.notify_all()
+            raise
+        self._emit({"event": "steer_escalated", "request_id": request_id, "new_request_id": as_request_id,
+                    "escalated": True, "ledger_id": item.get("ledger_id")})
+        return True
+
     def _return_steer_locked(self) -> None:
         items, self._steer = self._steer, []
         front = []

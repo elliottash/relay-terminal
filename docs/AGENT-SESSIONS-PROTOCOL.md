@@ -231,7 +231,8 @@ There is no "Stopped at the model-step limit" `error` any more.
 ### 12.3 Request ledger
 
 Every accepted prompt gets a ledger entry **when it is submitted**, before it is queued or delivered:
-`ask` (any `when`), `queue_steer` upgrades (same entry), requeued steers (same entry), Relay-origin prompts such as
+`ask` (any `when`), `queue_steer` upgrades (same entry), requeued steers (same entry), `queue_unsteer`
+escalations (same entry), Relay-origin prompts such as
 subagent wake-ups (`source: "relay"`, `requires_completion: false`), and `plan_execute`. Ids are `R1`, `R2`, …
 per conversation (they continue after resume/fork; `reset`/new session starts at `R1`).
 
@@ -311,6 +312,16 @@ while todos are open: … ignore this if it is current"). No event; no extra mod
   `[Sent by the user while you were working (R7, 14:02). Keep your current task (R5) unless this changes it. Add it to your todos if it is a new ask. Say briefly how you handled it in your final answer.]`
   followed by the program-context note, the attachment blocks and the verbatim text. Steer `attachments` and
   `context` are no longer dropped.
+- **Escalating a steer** (`queue_unsteer {request, as_request}`, v1.5): a steer the running turn has not taken
+  yet leaves the hold, stops that turn and runs as its own prompt instead — the third Enter on an empty prompt
+  box, after the Enter that queued it and the Enter that made it a steer. The prompt is resubmitted with
+  `when: "interrupt"` under `as_request` (the GUI reserves that id so the prompt echo stays wired up), keeping
+  its ledger entry rather than opening a new one.
+  Reply: `steer_escalated {request_id, new_request_id, escalated, ledger_id}`. Once the turn has taken the
+  prompt (`steer_delivered`) or given it back (`steer_returned`) the agent has it either way and there is
+  nothing to interrupt for, so the worker answers `escalated: false, ledger_id: null` and nothing is stopped.
+  If the resubmit fails the prompt goes back to the head of the queue — a steer is never lost — and the caller
+  still sees the error.
 - **Cancel, interrupt and failure** no longer remove the user's prompt, delivered steers or subagent notes from
   the conversation. A half-finished tool-call group is completed with
   `{"error": "Not completed: the turn stopped before this tool call finished. …"}` results, then a note says the
@@ -375,7 +386,9 @@ without the JSON object gives `unaddressed: []` plus `error`.
 2. `agent_started` → `requests` (entry `in_progress`)
 3. per step: `status`, thinking/`delta`, `context`; per tool: `tool_started` → `tool_result`. A successful
    `update_todos` emits `requests` (when linked statuses change) and `todos` between the two. A delivered steer
-   emits `steer_delivered` → `requests`.
+   emits `steer_delivered` → `requests`. An escalated steer (12.5) instead emits
+   `steer_escalated {escalated: true}` → `interrupting` → `queued {when: "interrupt"}`, and this turn ends at 5
+   as `cancelled`; the escalated prompt then runs as the next turn.
 4. optional `completion_check` (then back to 3), at most twice
 5. `requests` (turn end) → `turn_summary` → `done {open_items, stop_reason?}` | `cancelled {open_items}` |
    `error {text, open_items}`

@@ -178,6 +178,8 @@ def main():
                              requeue=request.get("requeue", True))
             elif kind == "queue_steer":
                 turns.steer(request.get("item"))
+            elif kind == "queue_unsteer":
+                turns.unsteer(request.get("request"), request.get("as_request"))
             elif kind == "cancel":
                 turns.cancel()
             elif kind == "resume_queue":
