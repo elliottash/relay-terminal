@@ -362,6 +362,21 @@ Stopping does not undo completed actions. A blocked network operation may take u
 to its 30-second I/O timeout to return. Agent output and file content are untrusted
 and rendered as plain text, not executable HTML.
 
+### Skills
+
+The agent can use your Warp-style skills: folders in `~/.warp/skills/<name>/SKILL.md` with
+`name` and `description` frontmatter. At configure time the worker indexes them and adds a
+compact list of names and descriptions (capped at 6 KiB) to the system prompt. The agent loads
+a skill's full text with `load_skill` before following it, and reads files the skill references
+with `read_skill_file`. Skill text is treated as lower-priority guidance than your request.
+
+Only configured directories are read, symlinks and `..` cannot leave a skill folder, and binary
+files are refused, because agent tools run without per-action approval. Folders without a
+`SKILL.md` or without a description are skipped and reported in the worker's `configured` event.
+Worker protocol: `configure` accepts `"skills": {"enabled": true, "dirs": ["/abs/path"], "project": false}`;
+omit it for the default (`~/.warp/skills`). `project: true` also indexes `.warp/skills` in the agent
+workspace.
+
 ## Tests and backend-only diagnostic CLI
 
 ```bash

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Callable
 
 from .keybindings import KeybindingCatalog
+from .skills import TOOL_SPECS as SKILL_TOOLS, SkillIndex
 from .provider import Cancelled
 
 MAX_FILE = 131072
@@ -104,8 +105,10 @@ class Workspace:
 
 class ToolExecutor:
     def __init__(self, root: str, emit: Callable[[dict], None], cancel: threading.Event,
-                 keybindings: KeybindingCatalog | None = None):
+                 keybindings: KeybindingCatalog | None = None, skills: SkillIndex | None = None):
         self.workspace = Workspace(root)
+        # Skill folders are read only through the index, which confines paths to each skill.
+        self.skills = skills if skills is not None and skills.skills else None
         # Replaced wholesale by the worker's "keybindings" message; read once per call.
         self.keybindings = keybindings
         self.emit = emit
@@ -131,12 +134,24 @@ class ToolExecutor:
 
     def tools(self) -> list[dict]:
         catalog = self.keybindings
-        return TOOLS + [catalog.tool_spec()] if catalog is not None else list(TOOLS)
+        tools = TOOLS + [catalog.tool_spec()] if catalog is not None else list(TOOLS)
+        if self.skills is not None:
+            tools += SKILL_TOOLS
+        return tools
 
     def prepare(self, name: str, arguments: dict) -> Prepared:
         if not isinstance(arguments, dict):
             raise ValueError("Tool arguments must be an object.")
         args = dict(arguments)
+        if name in ("load_skill", "read_skill_file"):
+            if self.skills is None or set(args) - {"name", "path"} or (name == "load_skill" and "path" in args):
+                raise ValueError("Unknown tool or unexpected argument.")
+            skill = self.skills.get(args.get("name"))
+            if name == "load_skill":
+                return Prepared(name, {"name": skill.id}, f"LOAD SKILL\n\n{skill.id}")
+            if not isinstance(args.get("path"), str):
+                raise ValueError("path must be text.")
+            return Prepared(name, {"name": skill.id, "path": args["path"]}, f"READ SKILL FILE\n\n{skill.id}/{args['path']}")
         if name == "set_keybinding":
             catalog = self.keybindings
             if catalog is None:
@@ -181,6 +196,10 @@ class ToolExecutor:
         if self.cancel.is_set():
             raise Cancelled("Stopped.")
         name, args = prepared.name, prepared.arguments
+        if name == "load_skill":
+            return self.skills.load_skill(args["name"])
+        if name == "read_skill_file":
+            return self.skills.read_file(args["name"], args["path"])
         if name == "set_keybinding":
             catalog = self.keybindings
             if catalog is None or args["action"] not in catalog.actions:

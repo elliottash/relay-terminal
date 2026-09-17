@@ -46,12 +46,13 @@ def format_context(context) -> str:
 
 class Agent:
     def __init__(self, config: ProviderConfig, workspace: str, emit: Callable[[dict], None],
-                 *, provider=None, max_steps: int = 12, keybindings=None):
+                 *, provider=None, max_steps: int = 12, keybindings=None, skills=None):
         self.emit = emit
         self.cancel_event = threading.Event()
         self.provider = provider or ChatProvider(config)
-        self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings)
-        self.messages = [{"role": "system", "content": SYSTEM + "\nChosen workspace: " + str(self.executor.workspace.root)}]
+        self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings, skills)
+        skills_note = self.executor.skills.prompt_section() if self.executor.skills is not None else ""
+        self.messages = [{"role": "system", "content": SYSTEM + "\nChosen workspace: " + str(self.executor.workspace.root) + skills_note}]
         self.max_steps = max_steps
 
     def stop(self):

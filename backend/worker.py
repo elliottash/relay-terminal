@@ -8,7 +8,7 @@ import os
 import sys
 import threading
 
-from relay_core import keystore
+from relay_core import keystore, skills
 from relay_core.agent import Agent
 from relay_core.keybindings import KeybindingCatalog, KeybindingError
 from relay_core.presets import PRESETS, match_preset
@@ -95,9 +95,15 @@ def main():
                                         request.get("max_tokens", 8192))
                 config.validate()
                 catalog = KeybindingCatalog.from_request(request.get("keybindings"))
-                turns.set_agent(Agent(config, request.get("workspace", os.getcwd()), turns.agent_emit,
-                                      keybindings=catalog))
-                emit({"event": "configured", "model": config.model})
+                workspace = request.get("workspace", os.getcwd())
+                skill_index = skills.from_request(request.get("skills"), workspace)
+                agent = Agent(config, workspace, turns.agent_emit, keybindings=catalog, skills=skill_index)
+                turns.set_agent(agent)
+                event = {"event": "configured", "model": config.model,
+                         "skills": len(agent.executor.skills.skills) if agent.executor.skills is not None else 0}
+                if skill_index is not None and skill_index.skipped:
+                    event["skills_skipped"] = skill_index.skipped[:50]
+                emit(event)
             elif kind == "keybindings":
                 # Refresh the catalog after the GUI reloads keybindings.json; keeps the conversation.
                 catalog = KeybindingCatalog(request.get("path"), request.get("actions"))
