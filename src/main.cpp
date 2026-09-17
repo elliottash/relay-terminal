@@ -1108,7 +1108,7 @@ private:
         termios state{};
         const bool raw = ::tcgetattr(fd, &state) == 0 && !(state.c_lflag & ICANON);
         ::close(fd);
-        // tcgetpgrp() fails with ENOTTY on newer kernels unless the terminal is the caller's
+        // tcgetpgrp() fails with ENOTTY on any Linux kernel unless the terminal is the caller's
         // controlling tty, which it never is for Relay. /proc/<pid>/stat field 8 (tpgid)
         // reports the same foreground process group without that restriction.
         return raw && foregroundGroup(pid) == pid;

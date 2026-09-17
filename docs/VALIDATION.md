@@ -22,7 +22,7 @@ Two bugs were found only by running the real app:
 
 - Worker messages sent before `QProcess` reported `Running` were dropped, so the
   preset list and configuration were sometimes lost at startup.
-- `tcgetpgrp()` on the shell's terminal returns `ENOTTY` on this kernel because it is
+- `tcgetpgrp()` on the shell's terminal returns `ENOTTY`, as Linux always has, because it is
   not Relay's controlling terminal, so composer commands never reached the shell.
   Readiness now reads the foreground group from `/proc/<pid>/stat`.
 
