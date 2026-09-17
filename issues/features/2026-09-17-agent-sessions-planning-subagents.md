@@ -50,3 +50,10 @@ Source lines from `issues/feature_intake.txt` are quoted in the implementing iss
 20. **Voice transcription:** filed as `2026-09-17-voice-transcription.md` with an open local-vs-cloud decision.
 
 Workstreams: GUI F1 (hints, prefixes, thinking/tool UI, routing assist UI, skills UI, pane/tab buttons, drag/move, aliases), backend F2 (routing assist, thinking/turn/tool-output events, skills refine/import), research (scratchpad design).
+
+## Owner decisions, intake batch 3 (2026-09-17)
+
+21. **Memory and multiple requests:** research how Claude Code, Codex, opencode (and Warp) keep track of multiple requests and long conversations; `docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md` (pending).
+22. **Rewind split:** `rewind-chat` (default; never changes code) and `rewind-code` as separate options (GUI F1).
+23. **MVP scope:** delegate/take over, clickable paths, keyboard jump to links, portable engine + screen-text input detection, website and beta, voice transcription (recorded in `docs/ROADMAP.md`).
+24. **Scratchpad → board ("Switchboard" candidate name):** Ctrl+Shift+S opens it as a pane; Trello-like movable cards, each card like an issue and a thread with the agent; referable from the terminal thread; tabs with defaults (design, bugs, features, marketing, planning, deferred, done); kept in git for collaborators with a Markdown representation usable without Relay; Relay detects non-compliant issues/notes and converts them; the agent uses it autonomously (iterate with QA). Design v2: `docs/SWITCHBOARD-DESIGN.md` (pending).

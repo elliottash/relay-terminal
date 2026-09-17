@@ -6,6 +6,22 @@ are relative to the repository root.
 
 Estimates come from the research documents and are single-developer guesses, not measurements.
 
+## First MVP scope (owner, 2026-09-17)
+
+The owner named these as required for the first MVP, in addition to what already works:
+
+| MVP item | Issue | Depends on |
+|---|---|---|
+| Delegate and take over (agent drives the visible pane) | `issues/features/2026-09-17-agent-delegate-and-take-over.md` | Relay engine (screen text, alt-screen state) |
+| Clickable paths in the terminal | `issues/features/2026-09-17-clickable-paths.md` | Relay engine (link/path click events) |
+| Keyboard jumping to links in output | `issues/features/2026-09-17-keyboard-jump-to-output-links.md` | Relay engine (screen text) |
+| Portable engine and screen-text input detection | `issues/features/2026-09-17-portable-terminal-engine.md`, `issues/features/2026-09-17-screen-text-input-detection.md` | Engine phase 1 done (libghostty-vt core, `docs/ENGINE.md`); next: TerminalBackend around KonsolePart, `--engine=vterm` per pane, then default |
+| Website and beta release | `issues/features/2026-09-17-website-and-beta-release.md` | Owner actions in `docs/RELEASING.md` |
+| Voice transcription | `issues/features/2026-09-17-voice-transcription.md` | OpenRouter key; `google/gemini-3.5-flash-lite` |
+
+Consequence: the Relay engine becomes the MVP's terminal on Linux, not a later cross-platform
+milestone; four of six items depend on its integration.
+
 ## Goals
 
 1. A terminal where one prompt runs shell commands or asks an agent, and the agent's work
