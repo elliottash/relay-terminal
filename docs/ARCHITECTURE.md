@@ -463,6 +463,28 @@ Events: `ready`, `route`, `configured`, `presets`, `key_stored`, `warp_imported`
 `agent_finished`, `status`, `delta`, `usage`, `tool_started`, `tool_output`, `tool_result`,
 `done`, `cancelled`, `error`, `reset`. Errors carry `agent_busy`.
 
+### Model roles
+
+`backend/relay_core/roles.py`, protocol section 13. One configurable model per job: `main`,
+`terminal_use`, `subagent`, `switchboard`, `fast`, `chores`, `vision` and `route_assist`. Every role
+defaults to "same as the main agent"; the GUI stores the table under QSettings `roles/<role>/{preset,
+model,effort}` and sends it in `configure` / `set_agent_options`.
+
+- `RoleResolver` turns a role into a `ProviderConfig`, resolving its key through the keystore (the main
+  agent's in-memory key is reused when a role lands on the main preset). A role whose key is missing
+  falls back to the main agent with a one-line warning in `model_roles` — never a hard failure.
+- Built-in defaults: the fast agent per main provider (GLM → `glm-5.3-flash` with thinking off,
+  OpenRouter → `deepseek/deepseek-v4.1-flash`, Kimi → `kimi-k2.7-code-highspeed`, Kimi Code →
+  `kimi-for-coding-highspeed`), chores → `google/gemini-3.8-flash` on OpenRouter else the fast agent,
+  vision → `glm-5.3-flash` on GLM, route assist → `google/gemini-3.5-flash-lite`.
+- Used by: subagents that inherit (`SubagentFactory.base()`), compaction summaries, recaps and
+  suggestions (`fast`), the request audit (`chores`), routing assist (`route_assist`), and panes that
+  run the fast agent themselves (`configure {agent_role}` / `set_agent_role`).
+- GUI: Actions › Agent options › Model roles, "New panes use the fast agent" (on by default; the first
+  pane keeps the main agent), the pane's model chip (role and effective model, all roles in its
+  tooltip) and the palette action "Fast agent for this pane" (`agent.fastAgent`, Alt+F).
+- Difficulty-based routing between the main and fast agent is deliberately not implemented yet.
+
 ### Provider transport
 
 `backend/relay_core/provider.py`, standard library only.
@@ -752,7 +774,7 @@ Other limits:
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
-| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills` |
+| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `engine/` | libvterm spike, `TerminalBackend.h` |
 | `data/` | theme, Konsole profile, icons |

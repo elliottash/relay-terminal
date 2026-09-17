@@ -1,11 +1,11 @@
 # Model roles in settings: main, fast, terminal-use, subagent, Switchboard, chores, vision
 
-- **Status**: open
+- **Status**: needs-qa-llm
 - **Component**: worker, gui
 - **Milestone**: desktop-alpha
 - **Workstream**: agent
 - **Acceptance evidence**: each role's model is pickable in Agent options; unset roles follow the main agent; the fast agent's per-provider default is applied; side calls and subagents visibly use their role's model
-- **Assignee**: unassigned
+- **Assignee**: implemented by Claude Opus 5 (Claude Code, model-roles worktree), 2026-09-17
 - **Source**: owner in chat, 2026-09-17: "these should all be pickable in settings. main agent, terminal use agent, subagent, switchboad agent. the default is they are the same (the main agent). ... you can also designate a fast agent, which is used by default in the panes, which would be deepseek for example, or gemini 3.8 flash. later on we can add routing between the main agent and fast agent in the main terminal based on estimated task difficulty." and "if you have glm as your agent, the fast agent is glm 5.3 flash by default. if openrouter, you can pick deepseek v4.1 flash or gemini 3.8 flash. does kimi have a fast model?"
 
 ## Roles
@@ -38,3 +38,15 @@ Later: route between main and fast agent in the main terminal by estimated task 
 | Z.AI coding `glm-5.3-flash`, thinking on | 3.0–3.1 s | 3.1–19.2 s |
 | Z.AI coding `glm-5.3-flash`, thinking off | 1.7–3.4 s | 1.7–5.0 s |
 | Z.AI coding `glm-5-turbo` | 2.7–3.6 s | 3.9–15.9 s |
+
+## Implemented (2026-09-17)
+
+Landed as described above, except difficulty-based routing. Implementation notes, protocol summary and the
+QA checklist: `issues/features/needs_qa_llm/2026-09-17-model-roles.md`. Protocol:
+`docs/AGENT-SESSIONS-PROTOCOL.md` section 13. Evidence: `docs/qa_evidence/2026-09-17-model-roles/`.
+
+Deliberately left for later (owner: "later on we can add routing between the main agent and fast agent in
+the main terminal based on estimated task difficulty"): no difficulty estimate and no automatic main↔fast
+routing. A pane is on one agent at a time; the user switches with Alt+F or the palette, and new panes start
+on the fast agent. When that routing is picked up, it should build on `roles.RoleResolver.resolve("fast")`
+and the existing `set_agent_role` command rather than a second resolution path.

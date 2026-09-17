@@ -242,7 +242,7 @@ class SessionCommands:
 
     def _start_recap(self, agent, reason: str, request_id) -> None:
         messages, turns = list(agent.messages), agent.turns
-        provider = agent.side_provider(cheap=True)
+        provider = agent.side_provider(cheap=True, role="fast")
         open_items = open_request_items(agent)
 
         def work():
@@ -345,7 +345,7 @@ class SessionCommands:
         agent = self._agent()
         kind = request.get("kind")
         suggestion_id = request.get("id") if isinstance(request.get("id"), str) else uuid.uuid4().hex
-        provider = agent.side_provider(cheap=True)
+        provider = agent.side_provider(cheap=True, role="fast")
         if kind == "next_command":
             suggestions.validate_next_command(request)
             work = lambda: {**suggestions.next_command(provider, request), "id": suggestion_id}  # noqa: E731

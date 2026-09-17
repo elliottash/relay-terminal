@@ -34,6 +34,7 @@ from .agent import CONTEXT_CLOSE, CONTEXT_OPEN, Agent
 from .agents_defs import EFFORTS, MAX_STEPS, AgentCatalog, AgentDefinition
 from .presets import PRESETS, apply_effort, match_preset
 from .provider import Cancelled, ProviderConfig
+from .roles import ROLES
 from .tools import ToolExecutor, spec
 
 MAX_CONCURRENT = 4
@@ -97,35 +98,53 @@ class SubagentFactory:
 
     def __init__(self, config: ProviderConfig, workspace: str, *, skills=None, preset_id: str | None = None,
                  key_lookup: Callable[[str], str] | None = None, aliases: dict | None = None,
-                 provider_factory: Callable[[ProviderConfig], object] | None = None):
+                 provider_factory: Callable[[ProviderConfig], object] | None = None, roles=None):
         self.config = config
         self.workspace = workspace
         self.skills = skills
         match = match_preset(config.base_url, config.model)
         self.preset_id = preset_id if preset_id in PRESETS else (match.id if match else None)
+        # Model roles (protocol 13): a subagent that inherits uses the "subagent" role, which itself
+        # defaults to the main agent.
+        self.roles = roles
         self.key_lookup = key_lookup
+        self.user_aliases = {str(k).lower(): str(v) for k, v in (aliases or {}).items()}
         self.aliases = {"haiku": "inherit", "sonnet": "inherit", "opus": "inherit", "fast": "inherit",
-                        **{str(k).lower(): str(v) for k, v in (aliases or {}).items()}}
+                        **self.user_aliases}
         self.provider_factory = provider_factory
 
+    def base(self) -> tuple[ProviderConfig, str | None]:
+        """The config a subagent that does not name a model uses: the "subagent" role, else main."""
+        if self.roles is not None:
+            resolved = self.roles.resolve("subagent")
+            if not resolved.is_main:
+                return resolved.config, resolved.preset_id
+        return self.config, self.preset_id
+
     def resolve(self, model: str | None, warnings: list[str]) -> tuple[ProviderConfig, str | None]:
+        base_config, base_preset = self.base()
         spec_ = (model or "inherit").strip() or "inherit"
+        # With roles configured, a role name ("fast", "chores", ...) picks that role's model unless
+        # the user aliased the name to something else.
+        if self.roles is not None and spec_.lower() in ROLES and spec_.lower() not in self.user_aliases:
+            resolved = self.roles.resolve(spec_.lower())
+            return resolved.config, resolved.preset_id
         spec_ = self.aliases.get(spec_.lower(), spec_)
-        if spec_ == "inherit" or spec_ == self.config.model:
-            return self.config, self.preset_id
+        if spec_ == "inherit" or spec_ == base_config.model:
+            return base_config, base_preset
         preset = PRESETS.get(spec_)
         if preset is None:
             preset = next((p for p in PRESETS.values()
                            if spec_ == p.model or spec_.endswith("/" + p.model) or spec_ == f"{p.id}/{p.model}"), None)
         if preset is None:
             warnings.append(f"model {spec_!r} is not a Relay preset; using the main model")
-            return self.config, self.preset_id
-        if preset.id == self.preset_id:
-            return self.config, self.preset_id
+            return base_config, base_preset
+        if preset.id == base_preset:
+            return base_config, base_preset
         key = self.key_lookup(preset.id) if self.key_lookup else ""
         if not key:
             warnings.append(f"no stored key for preset {preset.id!r}; using the main model")
-            return self.config, self.preset_id
+            return base_config, base_preset
         return ProviderConfig(preset.base_url, preset.model, key, dict(preset.extra), self.config.max_tokens), preset.id
 
     def __call__(self, definition: AgentDefinition, model: str | None, effort: str | None,

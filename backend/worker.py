@@ -8,7 +8,7 @@ import os
 import sys
 import threading
 
-from relay_core import __version__, keystore, observe_protocol, session_protocol, skills
+from relay_core import __version__, keystore, observe_protocol, roles as model_roles, session_protocol, skills
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import agents_defs
 from relay_core.subagents import SubagentFactory, SubagentManager
@@ -52,6 +52,9 @@ def main():
 
     # Subagents observe main-turn endings to wake the main agent for background results.
     subagents = SubagentManager(emit)
+    # Which model role this pane's own agent runs (protocol 13): "main", or "fast" for panes that
+    # default to the fast agent.
+    state = {"agent_role": "main"}
 
     def turn_emit(obj: dict):
         emit(obj)
@@ -66,6 +69,11 @@ def main():
         if factory is not None:
             factory.config = agent.config
             factory.preset_id = agent.preset.id if agent.preset else None
+        # Model roles (protocol 13): per-provider defaults follow the pane's new main model.
+        if agent.roles is not None:
+            agent.roles.rebase(agent.config, agent.preset.id if agent.preset else None, agent.effort)
+            state["agent_role"] = "main"
+            emit(agent.roles.event("main"))
 
     sessions = session_protocol.SessionCommands(
         turns, emit, on_model_changed=model_changed,
@@ -103,16 +111,29 @@ def main():
                 catalog = KeybindingCatalog.from_request(request.get("keybindings"))
                 workspace = request.get("workspace", os.getcwd())
                 skill_index = skills.from_request(request.get("skills"), workspace)
+                # --- model roles (protocol 13) ---
+                role_table = model_roles.validate_roles(request.get("roles"))
+                agent_role = model_roles.validate_role(request.get("agent_role") or "main")
+                options = session_protocol.agent_options(request, workspace)
+                resolver = model_roles.RoleResolver(config, options.get("preset_id"), role_table,
+                                                    key_lookup=keystore.lookup, main_effort=options.get("effort"))
+                pane_role = resolver.resolve(agent_role)
+                if not pane_role.is_main:
+                    config, options["preset_id"] = pane_role.config, pane_role.preset_id
+                else:
+                    agent_role = "main"   # the role follows the main agent, or fell back to it
+                state["agent_role"] = agent_role
+                # --- end model roles ---
                 agent = Agent(config, workspace, turns.agent_emit, keybindings=catalog, skills=skill_index,
-                              **session_protocol.agent_options(request, workspace))
+                              roles=resolver, **options)
                 # --- subagents ---
                 agents_request = request.get("agents") or {}
                 if not isinstance(agents_request, dict):
                     raise ValueError("agents must be an object.")
                 agent_catalog = agents_defs.load_catalog(workspace, agents_request.get("dirs"))
-                subagent_factory = SubagentFactory(config, workspace, skills=skill_index,
-                                                   preset_id=request.get("preset"), key_lookup=keystore.lookup,
-                                                   aliases=agents_request.get("aliases"))
+                subagent_factory = SubagentFactory(resolver.main_config, workspace, skills=skill_index,
+                                                   preset_id=resolver.main_preset_id, key_lookup=keystore.lookup,
+                                                   aliases=agents_request.get("aliases"), roles=resolver)
                 if "max_auto_turns" in agents_request:
                     subagents.set_options(agents_request["max_auto_turns"])
                 turns.set_agent(agent)
@@ -121,11 +142,16 @@ def main():
                 # --- end subagents ---
                 event = {"event": "configured", "model": config.model,
                          "skills": len(agent.executor.skills.skills) if agent.executor.skills is not None else 0,
+                         "agent_role": agent_role, "roles": resolver.summary(),
                          **session_protocol.configured_fields(agent)}
                 event["agents"] = len(agent_catalog.definitions)  # subagents
                 if skill_index is not None and skill_index.skipped:
                     event["skills_skipped"] = skill_index.skipped[:50]
                 emit(event)
+                # Protocol 13: `configured` already carries the table; a separate model_roles event
+                # follows only when a role fell back, so its warnings reach the pane.
+                if resolver.warnings:
+                    emit(resolver.event(agent_role))
             elif kind == "keybindings":
                 # Refresh the catalog after the GUI reloads keybindings.json; keeps the conversation.
                 catalog = KeybindingCatalog(request.get("path"), request.get("actions"))
@@ -181,10 +207,33 @@ def main():
                 emit({"event": "agent_stopped", "ids": subagents.stop("all" if target in (None, "all") else target)})
             elif kind == "set_agent_options":
                 validate_turn_options(request)  # refuse bad values before changing anything
+                role_table = model_roles.validate_roles(request.get("roles")) if "roles" in request else None
                 fields = subagents.set_options(request.get("max_auto_turns"))
-                if turns.agent is not None:
-                    fields.update(turns.agent.set_options(request))  # protocol section 12
+                agent = turns.agent
+                if agent is not None:
+                    fields.update(agent.set_options(request))  # protocol section 12
+                    if role_table is not None and agent.roles is not None:
+                        agent.roles.set_roles(role_table)   # protocol 13: applies from the next call
+                        fields["roles"] = agent.roles.summary()
                 emit({"event": "agent_options", "id": request.get("id"), **fields})
+                if role_table is not None and agent is not None and agent.roles is not None:
+                    emit(agent.roles.event(state["agent_role"], request.get("id")))
+            elif kind == "set_agent_role":
+                # Protocol 13: switch this pane between the main agent and another role (the fast agent).
+                role = model_roles.validate_role(request.get("role"))
+                agent = turns.agent
+                if agent is None or agent.roles is None:
+                    raise ValueError("Configure a provider and workspace first.")
+                if turns.busy:
+                    raise ValueError("Stop the active agent turn before switching the pane's agent.")
+                resolved = agent.roles.resolve(role)
+                state["agent_role"] = "main" if resolved.is_main else role
+                agent.set_model(resolved.config, resolved.preset_id)
+                emit({"event": "model_changed", "id": request.get("id"), "model": resolved.config.model,
+                      "preset": resolved.preset_id, "context_window": agent.context.window,
+                      "effort": agent.effort, "agent_role": state["agent_role"],
+                      **({"warning": resolved.warning} if resolved.warning else {})})
+                emit(agent.context_event())
             elif kind == "agents_status":
                 emit({"event": "agents_status", "items": subagents.list()})
             # --- end subagents ---

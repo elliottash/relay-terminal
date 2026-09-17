@@ -1,0 +1,138 @@
+{
+  "workspace": "/tmp/relay-roles-qa-wn1p1e7x",
+  "main_preset": "glm-coding",
+  "subagent": {
+    "main_model": "glm-5.3",
+    "subagent_role": {
+      "role": "subagent",
+      "model": "kimi-k3",
+      "preset": "kimi",
+      "base_url": "https://api.moonshot.ai/v1",
+      "effort": null,
+      "source": "configured",
+      "label": "Subagent"
+    },
+    "subagent_started": [
+      {
+        "id": "a1",
+        "type": "prober",
+        "model": "kimi-k3"
+      }
+    ],
+    "subagent_results": [
+      [
+        "a1",
+        "SUBAGENT-OK"
+      ]
+    ],
+    "main_answer": "The prober subagent replied: `SUBAGENT-OK`",
+    "seconds": 11.86,
+    "stderr_tail": ""
+  },
+  "fast_pane": [
+    {
+      "agent_role": "fast",
+      "model": "glm-5.3-flash",
+      "fast_role": {
+        "role": "fast",
+        "model": "glm-5.3-flash",
+        "preset": "glm-coding",
+        "base_url": "https://api.z.ai/api/coding/paas/v4",
+        "effort": null,
+        "source": "default",
+        "label": "Fast agent"
+      },
+      "answer": "READY",
+      "first_token_s": 4.66,
+      "seconds": 4.66,
+      "stderr_tail": ""
+    },
+    {
+      "agent_role": "fast",
+      "model": "glm-5.3-flash",
+      "fast_role": {
+        "role": "fast",
+        "model": "glm-5.3-flash",
+        "preset": "glm-coding",
+        "base_url": "https://api.z.ai/api/coding/paas/v4",
+        "effort": null,
+        "source": "default",
+        "label": "Fast agent"
+      },
+      "answer": "READY",
+      "first_token_s": 4.7,
+      "seconds": 4.7,
+      "stderr_tail": ""
+    },
+    {
+      "agent_role": "fast",
+      "model": "glm-5.3-flash",
+      "fast_role": {
+        "role": "fast",
+        "model": "glm-5.3-flash",
+        "preset": "glm-coding",
+        "base_url": "https://api.z.ai/api/coding/paas/v4",
+        "effort": null,
+        "source": "default",
+        "label": "Fast agent"
+      },
+      "answer": "READY",
+      "first_token_s": 4.24,
+      "seconds": 4.24,
+      "stderr_tail": ""
+    }
+  ],
+  "main_pane": [
+    {
+      "agent_role": "main",
+      "model": "glm-5.3",
+      "fast_role": {
+        "role": "fast",
+        "model": "glm-5.3-flash",
+        "preset": "glm-coding",
+        "base_url": "https://api.z.ai/api/coding/paas/v4",
+        "effort": null,
+        "source": "default",
+        "label": "Fast agent"
+      },
+      "answer": "READY",
+      "first_token_s": 3.44,
+      "seconds": 3.44,
+      "stderr_tail": ""
+    },
+    {
+      "agent_role": "main",
+      "model": "glm-5.3",
+      "fast_role": {
+        "role": "fast",
+        "model": "glm-5.3-flash",
+        "preset": "glm-coding",
+        "base_url": "https://api.z.ai/api/coding/paas/v4",
+        "effort": null,
+        "source": "default",
+        "label": "Fast agent"
+      },
+      "answer": "READY",
+      "first_token_s": 4.13,
+      "seconds": 4.13,
+      "stderr_tail": ""
+    },
+    {
+      "agent_role": "main",
+      "model": "glm-5.3",
+      "fast_role": {
+        "role": "fast",
+        "model": "glm-5.3-flash",
+        "preset": "glm-coding",
+        "base_url": "https://api.z.ai/api/coding/paas/v4",
+        "effort": null,
+        "source": "default",
+        "label": "Fast agent"
+      },
+      "answer": "READY",
+      "first_token_s": 3.64,
+      "seconds": 3.64,
+      "stderr_tail": ""
+    }
+  ]
+}

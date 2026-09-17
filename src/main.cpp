@@ -313,6 +313,7 @@ private:
         add("agent.interrupt", "agent", "Send to the agent; while it is busy, interrupt it and send now (prompt box)",
             {QStringLiteral("Ctrl+Return"), QStringLiteral("Ctrl+Enter"), QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
         add("agent.provider", "agent", "Provider and API keys", {});
+        add("agent.fastAgent", "agent", "Switch this pane between the main agent and the fast agent", {QStringLiteral("Alt+F")});   // model roles
         add("input.modeAuto", "agent", "Input mode: auto detect", {});
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
         add("input.modeAgent", "agent", "Input mode: agent", {});
@@ -652,6 +653,9 @@ public:
         status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
     }
     void selectModel(const QString &id) {
+        if (id.startsWith(QStringLiteral("role:"))) return;   // the pane's own role chip entry
+        // Picking a model from the chip puts the pane back on the main agent (protocol 13).
+        if (m_agentRole != QStringLiteral("main")) { setAgentRole(QStringLiteral("main")); if (id == m_currentPreset) return; }
         if (id.isEmpty() || id == m_currentPreset) return;
         if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before switching models.")); changed(); return; }
         const auto preset = presetById(id);
@@ -666,6 +670,75 @@ public:
         m_currentPreset = id; changed();
     }
     void openProviderDialog() { configure(); }
+
+    // ----- model roles (protocol 13) -------------------------------------------------------
+    // Every role defaults to "same as the main agent". Settings live under roles/<id>/{preset,model,effort};
+    // a role is unset when it has no preset. The worker resolves keys and per-provider defaults.
+    static QStringList roleIds() {
+        return {QStringLiteral("terminal_use"), QStringLiteral("subagent"), QStringLiteral("switchboard"),
+                QStringLiteral("fast"), QStringLiteral("chores"), QStringLiteral("vision"),
+                QStringLiteral("route_assist")};
+    }
+    static QString roleLabel(const QString &role) {
+        static const QHash<QString, QString> labels{
+            {QStringLiteral("main"), QStringLiteral("Main agent")},
+            {QStringLiteral("terminal_use"), QStringLiteral("Terminal-use agent")},
+            {QStringLiteral("subagent"), QStringLiteral("Subagent")},
+            {QStringLiteral("switchboard"), QStringLiteral("Switchboard agent")},
+            {QStringLiteral("fast"), QStringLiteral("Fast agent")},
+            {QStringLiteral("chores"), QStringLiteral("Chores")},
+            {QStringLiteral("vision"), QStringLiteral("Vision")},
+            {QStringLiteral("route_assist"), QStringLiteral("Route assist")}};
+        return labels.value(role, role);
+    }
+    static QString roleSetting(const QString &role, const QString &field) {
+        return QStringLiteral("roles/") + role + '/' + field;
+    }
+    // The `roles` object of configure / set_agent_options; empty when every role follows the main agent.
+    static QJsonObject rolesObject() {
+        QSettings settings;
+        QJsonObject roles;
+        for (const QString &role : roleIds()) {
+            const QString preset = settings.value(roleSetting(role, QStringLiteral("preset"))).toString();
+            if (preset.isEmpty()) continue;   // same as the main agent
+            QJsonObject entry{{"preset", preset}};
+            const QString model = settings.value(roleSetting(role, QStringLiteral("model"))).toString().trimmed();
+            if (!model.isEmpty()) entry.insert(QStringLiteral("model"), model);
+            const QString effort = settings.value(roleSetting(role, QStringLiteral("effort"))).toString();
+            if (efforts().contains(effort)) entry.insert(QStringLiteral("effort"), effort);
+            roles.insert(role, entry);
+        }
+        return roles;
+    }
+    static bool newPanesUseFastAgent() {
+        return QSettings().value(QStringLiteral("agent/panes_fast"), true).toBool();
+    }
+    QString agentRole() const { return m_agentRole; }
+    // The model a role resolves to, as last reported by the worker.
+    QString roleModel(const QString &role) const {
+        return m_roleSummary.value(role).toObject().value(QStringLiteral("model")).toString();
+    }
+    void setAgentRole(const QString &role, bool announce = true) {
+        if (role == m_agentRole) return;
+        if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before switching the pane's agent.")); return; }
+        m_agentRole = role;
+        if (m_configured) send({{"type", "set_agent_role"}, {"role", role}});
+        if (announce) {
+            const QString model = roleModel(role);
+            toast(role == QStringLiteral("main") ? QStringLiteral("Main agent for this pane")
+                                                 : QStringLiteral("Fast agent for this pane%1").arg(model.isEmpty() ? QString() : QStringLiteral(" · ") + model));
+        }
+        changed();
+    }
+    // Before the first configure: the role a new or restored pane starts with.
+    void initAgentRole(const QString &role) { if (!m_configured) m_agentRole = role; }
+    void toggleFastAgent() {
+        setAgentRole(m_agentRole == QStringLiteral("fast") ? QStringLiteral("main") : QStringLiteral("fast"));
+    }
+    // Live update after the Roles section changed (applies to side calls and new subagents at once).
+    void rolesChanged() {
+        if (m_configured) send({{"type", "set_agent_options"}, {"roles", rolesObject()}});
+    }
     void toggleInputMode() {
         const QString next = m_modeValue == QStringLiteral("agent") ? QStringLiteral("shell") : QStringLiteral("agent");
         setMode(next);
@@ -836,6 +909,9 @@ public:
             if (m_configured) send({{"type", "set_agent_options"}, {"max_auto_turns", QSettings().value(QStringLiteral("agent/max_auto_turns"), 50).toInt()}});
             return;
         }
+        // Model roles apply to side calls and new subagents at once (protocol 13).
+        if (key.startsWith(QStringLiteral("roles/"))) { rolesChanged(); return; }
+        if (key == QStringLiteral("agent/panes_fast")) return;   // only affects panes opened later
         // Turn limits and the request audit apply to the running agent at once (protocol 12.1).
         if (key == QStringLiteral("agent/max_steps") || key == QStringLiteral("agent/max_tool_calls") || key == QStringLiteral("agent/audit_requests")) {
             if (m_configured) {
@@ -1187,6 +1263,10 @@ private:
         for (auto it = limits.begin(); it != limits.end(); ++it) request.insert(it.key(), it.value());
         const QStringList exclude = settings.value(QStringLiteral("skills/exclude")).toStringList();
         if (!exclude.isEmpty()) request.insert(QStringLiteral("skills"), QJsonObject{{"exclude", QJsonArray::fromStringList(exclude)}});
+        // Model roles (protocol 13): the table, and the role this pane's own agent runs.
+        const QJsonObject roles = rolesObject();
+        if (!roles.isEmpty()) request.insert(QStringLiteral("roles"), roles);
+        if (m_agentRole != QStringLiteral("main")) request.insert(QStringLiteral("agent_role"), m_agentRole);
         return request;
     }
 
@@ -1530,16 +1610,36 @@ private:
             QTimer::singleShot(0, this, [this] { pumpQueue(); });
             return true;
         }
+        if (type == QStringLiteral("model_roles")) {   // protocol 13
+            m_roleSummary = event.value(QStringLiteral("roles")).toObject();
+            const QString role = event.value(QStringLiteral("agent_role")).toString();
+            if (!role.isEmpty()) m_agentRole = role;
+            const QJsonArray warnings = event.value(QStringLiteral("warnings")).toArray();
+            for (const auto &warning : warnings) {
+                ensureLineStart();
+                printInline(warning.toString() + '\n', Ink::Note);
+                closeInline();
+            }
+            changed();
+            return true;
+        }
         if (type == QStringLiteral("model_changed")) {
             m_model = event.value(QStringLiteral("model")).toString();
             const QString preset = event.value(QStringLiteral("preset")).toString();
-            if (!preset.isEmpty()) { m_currentPreset = preset; QSettings().setValue(QStringLiteral("provider/preset"), preset); }
+            const QString role = event.value(QStringLiteral("agent_role")).toString();   // protocol 13
+            if (!role.isEmpty()) m_agentRole = role;
+            const QString warning = event.value(QStringLiteral("warning")).toString();
+            if (!warning.isEmpty()) { ensureLineStart(); printInline(warning + '\n', Ink::Note); closeInline(); }
+            // A role switch keeps the pane's main preset: only a set_model changes it.
+            if (!preset.isEmpty() && role.isEmpty()) { m_currentPreset = preset; QSettings().setValue(QStringLiteral("provider/preset"), preset); }
             const qint64 window = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
             if (window > 0) m_ctxWindow = window;
             const QString effort = event.value(QStringLiteral("effort")).toString();
             if (efforts().contains(effort)) m_effort = effort;
-            status(QStringLiteral("Model: %1 · conversation kept").arg(m_model));
-            toast(QStringLiteral("Model: %1 · conversation kept").arg(m_model));
+            const QString what = role.isEmpty() || role == QStringLiteral("main")
+                ? QStringLiteral("Model: %1 · conversation kept").arg(m_model)
+                : QStringLiteral("%1: %2 · conversation kept").arg(roleLabel(role), m_model);
+            status(what); toast(what);
             changed();
             return true;
         }
@@ -2085,8 +2185,7 @@ private:
             placeSubagentsPanel();
             for (const auto &view : std::as_const(m_subagentViews))
                 if (view) if (const auto *row = m_subagents.row(view->agentId())) view->setRow(*row, m_subagents.elapsedNow(*row));
-            if (m_modelBox) m_modelBox->setToolTip(QStringLiteral("Agent model for this pane. Switching keeps the conversation.\nTokens: ")
-                                                   + m_subagents.tokenSplit());
+            if (m_modelBox) m_modelBox->setToolTip(modelTooltip(QStringLiteral("Tokens: ") + m_subagents.tokenSplit()));
         };
         // Only one start and one finish line per subagent reach the terminal, never its tool activity.
         m_subagents.onInline = [this](const QString &line) {
@@ -2544,8 +2643,13 @@ private:
             m_configured = true; m_configuring = false;
             m_model = event.value(QStringLiteral("model")).toString();
             m_skillCount = event.value(QStringLiteral("skills")).toInt();
+            // Model roles (protocol 13): the worker reports the effective model of every role and
+            // which role this pane runs (a role that could not be used falls back to "main").
+            m_roleSummary = event.value(QStringLiteral("roles")).toObject();
+            m_agentRole = event.value(QStringLiteral("agent_role")).toString(QStringLiteral("main"));
             onSessionConfigured(event);
-            status(QStringLiteral("Agent ready · ") + event.value(QStringLiteral("model")).toString());
+            status(QStringLiteral("Agent ready · ") + (m_agentRole == QStringLiteral("main") ? QString() : roleLabel(m_agentRole) + QStringLiteral(" · "))
+                   + event.value(QStringLiteral("model")).toString());
             changed();
         } else if (type == QStringLiteral("presets")) {
             m_presets = event.value(QStringLiteral("presets")).toArray();
@@ -3028,6 +3132,32 @@ private:
         m_modelBox->setEnabled(!m_stored.isEmpty());
         const int index = m_modelBox->findData(m_currentPreset);
         if (index >= 0) m_modelBox->setCurrentIndex(index);
+        // Model roles (protocol 13): a pane on another role shows that role and its model, and
+        // picking a preset from the chip puts the pane back on the main agent.
+        if (m_agentRole != QStringLiteral("main")) {
+            const QString model = m_model.isEmpty() ? roleModel(m_agentRole) : m_model;
+            m_modelBox->insertItem(0, QStringLiteral("%1 · %2").arg(roleLabel(m_agentRole), model), QStringLiteral("role:") + m_agentRole);
+            m_modelBox->setCurrentIndex(0);
+            m_modelBox->setEnabled(true);
+        }
+        m_modelBox->setToolTip(modelTooltip());
+    }
+
+    // Chip tooltip: the pane's model plus every role's effective model (protocol 13).
+    QString modelTooltip(const QString &extra = QString()) const {
+        QStringList lines{QStringLiteral("Agent model for this pane. Switching keeps the conversation.")};
+        if (!extra.isEmpty()) lines << extra;
+        if (!m_roleSummary.isEmpty()) {
+            lines << QString();
+            for (const QString &role : QStringList{QStringLiteral("main")} + roleIds()) {
+                const QJsonObject entry = m_roleSummary.value(role).toObject();
+                if (entry.isEmpty()) continue;
+                const bool same = entry.value(QStringLiteral("source")).toString() == QStringLiteral("main");
+                lines << QStringLiteral("%1: %2%3").arg(roleLabel(role), entry.value(QStringLiteral("model")).toString(),
+                                                        same ? QStringLiteral(" (same as main)") : QString());
+            }
+        }
+        return lines.join('\n');
     }
 
     void clearFix() { m_fixCommand.clear(); m_fixWatch = false; m_fixArmed = false; m_fixAwaitingAgent = false; m_fixAttempt = 0; }
@@ -4412,6 +4542,9 @@ private:
     bool m_autoHuman = false, m_secretNotified = false;
     QTimer m_toastTimer;
     QString m_currentPreset;
+    // model roles (protocol 13): this pane's role and the worker's last role table
+    QString m_agentRole = QStringLiteral("main");
+    QJsonObject m_roleSummary;
     bool m_cleanShell = false, m_closing = false;
     QJsonArray m_presets;
     bool m_configuring = false;
@@ -5044,6 +5177,7 @@ private:
         else if (id == QStringLiteral("control.human")) pane->takeControl();
         else if (id == QStringLiteral("control.prompt")) pane->showPrompt();
         else if (id == QStringLiteral("input.toggle")) pane->toggleInputMode();
+        else if (id == QStringLiteral("agent.fastAgent")) pane->toggleFastAgent();   // model roles
         else if (id == QStringLiteral("agent.planToggle")) pane->togglePlanMode();
         else if (id == QStringLiteral("agent.effortUp")) pane->effortStep(1);
         else if (id == QStringLiteral("agent.effortDown")) pane->effortStep(-1);
@@ -5274,12 +5408,114 @@ private:
             };
             children << item;
         }
+        children << rolesMenu(section);
+        {
+            // "Panes default to the fast agent" (owner decision 2026-09-17): applies to panes opened
+            // from now on; the first pane of a window stays on the main agent.
+            PaletteItem item; item.key = QStringLiteral("option:agent/panes_fast"); item.section = section;
+            const bool on = Pane::newPanesUseFastAgent();
+            item.label = QStringLiteral("New panes use the fast agent");
+            item.detail = (on ? QStringLiteral("On · ") : QStringLiteral("Off · ")) + QStringLiteral("the first pane keeps the main agent");
+            item.checked = on; item.stayOpen = true;
+            item.run = [on] { QSettings().setValue(QStringLiteral("agent/panes_fast"), !on); };
+            children << item;
+        }
         toggle(QStringLiteral("agent/show_thinking"), QStringLiteral("Show thinking"), QStringLiteral("stream reasoning above the prompt; a one-line summary always prints"), true);
         toggle(QStringLiteral("hints/enabled"), QStringLiteral("Shortcut hints"), QStringLiteral("tips when a faster key exists"), true);
         toggle(QStringLiteral("suggestions/next_command"), QStringLiteral("AI next-command suggestions"), QStringLiteral("after a command finishes; uses your API key"), false);
         toggle(QStringLiteral("suggestions/next_prompt"), QStringLiteral("Suggested next prompts"), QStringLiteral("after an agent turn; uses your API key"), false);
         toggle(QStringLiteral("recap/away"), QStringLiteral("Recap when you come back"), QStringLiteral("after 3+ minutes away while the agent worked"), true);
         return children;
+    }
+
+    // Agent options › Model roles (protocol 13). Each role is "same as main agent" until a preset is
+    // picked here; the worker resolves keys and falls back to the main agent when one is missing.
+    PaletteItem rolesMenu(const QString &section) {
+        return submenu(QStringLiteral("menu:roles"), section, QStringLiteral("Model roles"),
+                       QStringLiteral("one model per job · unset roles follow the main agent"), [this] {
+            QList<PaletteItem> roles;
+            for (const QString &role : Pane::roleIds()) {
+                const QString preset = QSettings().value(Pane::roleSetting(role, QStringLiteral("preset"))).toString();
+                const QString model = QSettings().value(Pane::roleSetting(role, QStringLiteral("model"))).toString();
+                const QString effort = QSettings().value(Pane::roleSetting(role, QStringLiteral("effort"))).toString();
+                QString detail = preset.isEmpty() ? QStringLiteral("Same as main agent") : presetLabel(preset);
+                if (!preset.isEmpty() && !model.isEmpty()) detail += QStringLiteral(" · ") + model;
+                if (!preset.isEmpty() && !effort.isEmpty()) detail += QStringLiteral(" · ") + effort;
+                const QString effective = m_active ? m_active->roleModel(role) : QString();
+                if (preset.isEmpty() && !effective.isEmpty()) detail += QStringLiteral(" (") + effective + ')';
+                roles << submenu(QStringLiteral("role:") + role, QStringLiteral("Model roles"),
+                                 Pane::roleLabel(role), detail, [this, role] { return roleItems(role); });
+            }
+            return roles;
+        });
+    }
+
+    QString presetLabel(const QString &id) const {
+        if (m_active) for (const auto &model : m_active->storedModels()) if (model.first == id) return model.second;
+        return id;
+    }
+
+    QList<PaletteItem> roleItems(const QString &role) {
+        QList<PaletteItem> items;
+        const QString section = Pane::roleLabel(role);
+        QSettings settings;
+        const QString preset = settings.value(Pane::roleSetting(role, QStringLiteral("preset"))).toString();
+        auto apply = [this, role](const QString &field, const QVariant &value) {
+            if (value.toString().isEmpty()) QSettings().remove(Pane::roleSetting(role, field));
+            else QSettings().setValue(Pane::roleSetting(role, field), value);
+            if (m_active) m_active->agentOptionsChanged(Pane::roleSetting(role, field));
+        };
+        PaletteItem same; same.key = QStringLiteral("role:") + role + QStringLiteral(":same"); same.section = section;
+        same.label = QStringLiteral("Same as main agent"); same.detail = QStringLiteral("the default for every role");
+        same.checked = preset.isEmpty(); same.stayOpen = true;
+        same.run = [apply] { apply(QStringLiteral("preset"), QString()); apply(QStringLiteral("model"), QString()); };
+        items << same;
+        if (m_active) for (const auto &model : m_active->storedModels()) {
+            const QString id = model.first;
+            PaletteItem item; item.key = QStringLiteral("role:") + role + ':' + id; item.section = section;
+            item.label = model.second; item.detail = QStringLiteral("use this provider for this role");
+            item.checked = preset == id; item.stayOpen = true;
+            item.run = [apply, id] { apply(QStringLiteral("preset"), id); };
+            items << item;
+        }
+        {
+            PaletteItem item; item.key = QStringLiteral("role:") + role + QStringLiteral(":model"); item.section = section;
+            item.label = QStringLiteral("Model id…");
+            item.detail = settings.value(Pane::roleSetting(role, QStringLiteral("model"))).toString().isEmpty()
+                ? QStringLiteral("the preset's own model (empty)")
+                : settings.value(Pane::roleSetting(role, QStringLiteral("model"))).toString();
+            item.run = [this, role, apply] {
+                bool ok = false;
+                const QString value = QInputDialog::getText(this, Pane::roleLabel(role) + QStringLiteral(" · model"),
+                    QStringLiteral("Model id on the chosen provider (empty: the preset's model)"), QLineEdit::Normal,
+                    QSettings().value(Pane::roleSetting(role, QStringLiteral("model"))).toString(), &ok);
+                if (ok) apply(QStringLiteral("model"), value.trimmed());
+            };
+            items << item;
+        }
+        {
+            const QString effort = settings.value(Pane::roleSetting(role, QStringLiteral("effort"))).toString();
+            PaletteItem item; item.key = QStringLiteral("role:") + role + QStringLiteral(":effort"); item.section = section;
+            item.label = QStringLiteral("Reasoning effort");
+            item.detail = effort.isEmpty() ? QStringLiteral("the provider's default for this model") : effort;
+            item.children = [role, effort, apply] {
+                QList<PaletteItem> levels;
+                const QString section = Pane::roleLabel(role) + QStringLiteral(" · effort");
+                PaletteItem none; none.key = QStringLiteral("role:") + role + QStringLiteral(":effort:default");
+                none.section = section; none.label = QStringLiteral("Provider default"); none.checked = effort.isEmpty();
+                none.stayOpen = true; none.run = [apply] { apply(QStringLiteral("effort"), QString()); };
+                levels << none;
+                for (const QString &level : Pane::efforts()) {
+                    PaletteItem child; child.key = QStringLiteral("role:") + role + QStringLiteral(":effort:") + level;
+                    child.section = section; child.label = level; child.checked = effort == level; child.stayOpen = true;
+                    child.run = [apply, level] { apply(QStringLiteral("effort"), level); };
+                    levels << child;
+                }
+                return levels;
+            };
+            items << item;
+        }
+        return items;
     }
 
     QList<PaletteItem> rootItems() {
@@ -5302,6 +5538,15 @@ private:
             }
             return children;
         });
+        if (pane) {
+            // Model roles (protocol 13): flip this pane between the main agent and the fast agent.
+            const bool fast = pane->agentRole() == QStringLiteral("fast");
+            const QString fastModel = pane->roleModel(QStringLiteral("fast"));
+            items << actionItem(agent, QStringLiteral("Fast agent for this pane"),
+                                (fast ? QStringLiteral("On · ") : QStringLiteral("Off · "))
+                                    + (fastModel.isEmpty() ? QStringLiteral("a quick model for this pane; the conversation is kept") : fastModel),
+                                QStringLiteral("agent.fastAgent"), fast);
+        }
         const QString mode = pane ? pane->mode() : QStringLiteral("auto");
         const QString modeName = mode == QStringLiteral("shell") ? QStringLiteral("Terminal") : mode == QStringLiteral("agent") ? QStringLiteral("Agent") : QStringLiteral("Auto detect");
         items << submenu(QStringLiteral("menu:mode"), agent, QStringLiteral("Input mode"), modeName, [this, mode] {
@@ -5925,6 +6170,10 @@ private:
         QString workspace = spec.value(QStringLiteral("workspace")).toString();
         if (!QFileInfo(workspace).isDir()) workspace = m_manager->workspace();
         auto *pane = new Pane(workspace, cwd, m_manager->cleanShell());
+        // Model roles (protocol 13): panes opened after the first one default to the fast agent.
+        const QString savedRole = spec.value(QStringLiteral("agent_role")).toString();
+        if (!savedRole.isEmpty()) pane->initAgentRole(savedRole);
+        else if (Pane::newPanesUseFastAgent() && !allPanes().isEmpty()) pane->initAgentRole(QStringLiteral("fast"));
         QPointer<Pane> guard(pane);
         // Callbacks find the pane's current window, so panes and tabs can move between windows.
         pane->onStatus = [guard](const QString &text) { if (auto *w = windowOf(guard); w && guard == w->m_active) w->statusBar()->showMessage(text); };
@@ -5979,7 +6228,8 @@ private:
 
     QJsonObject serializeNode(QWidget *widget) const {
         if (auto *pane = dynamic_cast<Pane *>(widget))
-            return {{"pane", QJsonObject{{"cwd", pane->cwd()}, {"workspace", pane->workspace()}}}};
+            return {{"pane", QJsonObject{{"cwd", pane->cwd()}, {"workspace", pane->workspace()},
+                                         {"agent_role", pane->agentRole()}}}};
         if (auto *tool = dynamic_cast<ToolPane *>(widget)) return tool->node();
         if (auto *splitter = dynamic_cast<QSplitter *>(widget)) {
             QJsonArray children, sizes;

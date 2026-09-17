@@ -57,6 +57,10 @@ def lookup(preset_id: str) -> str:
     value = os.environ.get(env_name(preset_id), "").strip()
     if value:
         return value
+    # RELAY_KEYRING=off skips the desktop keyring entirely (tests and headless runs never prompt a
+    # real keyring); environment keys above still work.
+    if os.environ.get("RELAY_KEYRING", "").strip().lower() in ("off", "0", "no", "none"):
+        return ""
     if not shutil.which("secret-tool"):
         return ""
     result = _run(["lookup", "service", SERVICE, "provider", preset_id])
