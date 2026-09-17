@@ -9,7 +9,6 @@ public:
     explicit RichEditor(QWidget *parent = nullptr);
     // Destination: "auto", "shell", or "agent". Submission never executes here.
     std::function<void(const QString &)> onSubmit;
-    std::function<void()> onNative;
     void remember(const QString &text);
     const QStringList &history() const { return m_history; }
     // True unless Up/Down is browsing history (Down on the last line then has nothing to do).

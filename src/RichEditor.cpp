@@ -121,10 +121,6 @@ void RichEditor::keyPressEvent(QKeyEvent *event) {
         }
         return;
     }
-    if (event->key() == Qt::Key_Escape && mods == Qt::NoModifier && !m_preedit) {
-        if (onNative) onNative();
-        return;
-    }
     if (mods == (Qt::ControlModifier | Qt::ShiftModifier) && event->key() == Qt::Key_C) { copy(); return; }
     if (mods == (Qt::ControlModifier | Qt::ShiftModifier) && event->key() == Qt::Key_V) { paste(); return; }
     // History: Up on the first line and Down on the last line, like a shell prompt.

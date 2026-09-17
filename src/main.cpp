@@ -564,7 +564,6 @@ public:
         m_programPoll.setInterval(250);
         connect(&m_programPoll, &QTimer::timeout, this, [this] { pollProgram(); });
         m_editor->onSubmit = [this](const QString &destination) { requestRoute(true, destination); };
-        m_editor->onNative = [this] { setNative(true); };
         qApp->installEventFilter(this);
         QTimer::singleShot(5000, this, [this] {
             if (!m_seenShell && m_backend) {
@@ -3854,15 +3853,15 @@ private:
             toast(QStringLiteral("Interrupted %1").arg(foregroundProgramName().isEmpty() ? QStringLiteral("the program") : foregroundProgramName()));
             return true;
         }
-        // Esc Esc in an empty prompt box while the agent is idle opens Rewind; a single Esc keeps
-        // its usual meaning (take control of the terminal) after a short wait.
+        // Esc Esc in an empty prompt box while the agent is idle opens Rewind. A single Esc no
+        // longer takes control of the terminal (owner, 2026-09-17: Esc only interrupts); the
+        // keyboard goes to a program through Ctrl+H or the "Take control" button.
         if (mods == Qt::NoModifier && k == Qt::Key_Escape && !m_agentBusy && m_editor->toPlainText().isEmpty()
             && m_selected < 0 && !(m_atList && m_atList->isVisible()) && m_configured) {
             if (m_escTimer.isActive()) { m_escTimer.stop(); openRewind(); return true; }
             m_escTimer.setSingleShot(true);
             m_escTimer.setInterval(350);
             m_escTimer.disconnect();
-            connect(&m_escTimer, &QTimer::timeout, this, [this] { setNative(true); });
             m_escTimer.start();
             return true;
         }
