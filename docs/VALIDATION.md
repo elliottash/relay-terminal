@@ -23,7 +23,7 @@ Backend tests by module:
 
 | Module | Tests | What they check |
 |---|---:|---|
-| `tests/test_router.py` | 19 | Shell vs. language routing, explicit destinations and prefixes, live aliases/functions, every command word in pipelines, lists, subshells, groups and substitutions, assignments/wrappers/redirects, path words, syntax errors, control-character guard, validity fields, and that parsing and validity checks never execute input |
+| `tests/test_router.py` | 26 | Shell vs. language routing, explicit destinations and prefixes, live aliases/functions, every command word in pipelines, lists, subshells, groups and substitutions, assignments/wrappers/redirects, path words, syntax errors, control-character guard, validity fields, that parsing and validity checks never execute input, and a 99-input table of commands that are also English words (sentence vs. command) with false-positive sweeps |
 | `tests/test_tools.py` | 16 | Preparation never executes, output and exit capture, secret env removal, timeouts (including after stdout closes), output cap, read and diff, stale-write refusal, new-file race, path escape and secret guard, symlink swap, FIFO, cancel before and during a command, unknown tools, create and list |
 | `tests/test_keybindings.py` | 16 | Key normalization and validation, tool spec and enum, atomic write that keeps other content and reports conflicts, unbind, invalid existing file left alone, configure with and without a catalog, `keybindings` update keeps the conversation |
 | `tests/test_agent.py` | 14 | Commands and writes run without approval and show previews, unknown tools refused, file tools confined, cancel during a command, route without a provider, configure makes no network call and never echoes the key, malformed requests, program context note (labelled, validated, control characters stripped, passed through the queue) |
@@ -143,6 +143,7 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-program-control-policy.md`
 - `2026-09-17-queue-or-interrupt-agent-prompts.md`
 - `2026-09-17-request-ledger-todos-completion.md`
+- `2026-09-17-router-english-commands.md`
 - `2026-09-17-routing-assist-thinking-skills-backend.md`
 - `2026-09-17-windows-tabs-panes.md`
 

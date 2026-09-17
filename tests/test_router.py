@@ -2,7 +2,8 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from relay_core.router import classify, validate_input
+from relay_core.router import (ASSIST_THRESHOLD, BARE_WORD_ODD, ENGLISH_COMMANDS, LITERAL_TEXT,
+                               SIGNAL_WORDS, assist_signals, classify, validate_input)
 
 class RouterTests(unittest.TestCase):
     def test_shell_commands(self):
@@ -186,6 +187,170 @@ class ValidityTests(unittest.TestCase):
                 for mode in ("auto", "shell"):
                     classify(text, mode, path=PATH, cwd=d)
             self.assertFalse(sentinel.exists())
+
+
+# Words that are both installed commands and ordinary English, paired as a request and as the real
+# command (2026-09-17 review; derivation in docs/qa_evidence/2026-09-17-router-english-commands/).
+# Before the review this table scored 70/99; the words below that were missing from ENGLISH_COMMANDS
+# all read as shell commands.
+ROUTING_TABLE = [
+    # --- English sentences: the agent must see these -------------------------------------------
+    ("look at some of my other letters in ~/admin/Advisees.*.docx for my writing style", "agent"),
+    ("look for typos in the readme", "agent"),
+    ("watch the logs for errors", "agent"),
+    ("time the build and tell me what is slow", "agent"),
+    ("split the file by lines", "agent"),
+    ("find the config that sets the port", "agent"),
+    ("make the tests pass", "agent"),
+    ("test the new parser on my sample", "agent"),
+    ("sort these results by date", "agent"),
+    ("cut the preamble from the output", "agent"),
+    ("join the two csv files on the id column", "agent"),
+    ("install ripgrep", "agent"),
+    ("open the settings dialog", "agent"),
+    ("touch up the styling in the header", "agent"),
+    ("just run the tests again", "agent"),
+    ("from the logs tell me what failed", "agent"),
+    ("route the request through the proxy", "agent"),
+    ("at the top of the file add a comment", "agent"),
+    ("prove that the fix works", "agent"),
+    ("tidy up the imports in this module", "agent"),
+    ("dump the table to a csv", "agent"),
+    ("restore the backup from yesterday", "agent"),
+    ("suspend the running job right away", "agent"),
+    ("truncate the log file to zero", "agent"),
+    ("shred the old key files", "agent"),
+    ("sum the values in the second column", "agent"),
+    ("cancel the pending print job", "agent"),
+    ("eject the usb drive", "agent"),
+    ("browse the docs for this api", "agent"),
+    ("bind the shortcut to a new tab", "agent"),
+    ("prune the branches that are merged", "agent"),
+    ("transform the csv into json", "agent"),
+    ("zip up the build output", "agent"),
+    ("accept the changes in that patch", "agent"),
+    ("reject the parts that are unrelated", "agent"),
+    ("disable the pre commit hook", "agent"),
+    ("spell check the readme for me", "agent"),
+    ("talk to the api and summarise the reply", "agent"),
+    ("pass the output to the next step", "agent"),
+    ("sample the first thousand rows", "agent"),
+    ("resume the download where it stopped", "agent"),
+    ("batch the requests into groups of ten", "agent"),
+    ("bundle the assets for production", "agent"),
+    ("jot down the steps you took", "agent"),
+    ("wipe the build directory", "agent"),
+    ("tree the whole repo and summarise it", "agent"),
+    ("go to the end of the file", "agent"),
+    ("head over to the docs and check the api", "agent"),
+    ("patch the config so it uses the new port", "agent"),
+    ("log the output of every request", "agent"),
+    ("play the recording of that session", "agent"),
+    ("view the diff for this commit", "agent"),
+    ("column the output so it lines up", "agent"),
+    ("last time this worked it was on main", "agent"),
+    # --- The same words as real commands: the shell must keep these ----------------------------
+    ("ls", "shell"),
+    ("ls -la", "shell"),
+    ("git status", "shell"),
+    ("make -j", "shell"),
+    ("make test", "shell"),
+    ("find . -name x", "shell"),
+    ("grep -rn TODO src", "shell"),
+    ("watch -n1 ls", "shell"),
+    ("time make", "shell"),
+    ("time git push", "shell"),
+    ("split file.txt", "shell"),
+    ("sort -u words.txt", "shell"),
+    ("head -n 20 log.txt", "shell"),
+    ("cut -d: -f1 /etc/passwd", "shell"),
+    ("join a.txt b.txt", "shell"),
+    ("touch newfile.txt", "shell"),
+    ("date", "shell"),
+    ("tar -czf out.tar.gz dir", "shell"),
+    ("install -m 755 a b", "shell"),
+    ("open .", "shell"),
+    ("zip -r out.zip dir", "shell"),
+    ("unzip archive.zip", "shell"),
+    ("truncate -s 0 app.log", "shell"),
+    ("route -n", "shell"),
+    ("at 5pm", "shell"),
+    ("just build", "shell"),
+    ("prove t/basic.t", "shell"),
+    ("look ante", "shell"),
+    ("last reboot", "shell"),
+    ("test -f README.md", "shell"),
+    ("yes | head -3", "shell"),
+    ("top -b -n1", "shell"),
+    ("free -h", "shell"),
+    ("file README.md", "shell"),
+    ("which python3", "shell"),
+    ("sum data.bin", "shell"),
+    ("tree -L 2", "shell"),
+    ("go build ./...", "shell"),
+    ("say hello world", "shell"),
+    ("banner release", "shell"),
+    ("column -t data.tsv", "shell"),
+    ("dump 0uf /dev/nst0 /home", "shell"),
+    ("bundle exec rspec", "shell"),
+    ("disable printer1", "shell"),
+    ("shred -u secret.key", "shell"),
+]
+# Table words that are not installed on this machine but exist on macOS, BSD, other distributions or
+# in common toolchains. Passed as known_commands so the table tests routing, not the local package set.
+SIMULATED_COMMANDS = ["just", "tree", "go", "say", "tidy", "dump", "restore", "wipe", "spell",
+                      "accept", "reject", "disable", "talk", "pass", "sample", "resume", "batch",
+                      "bundle", "jot", "at", "banner", "play", "log"]
+
+
+class EnglishWordCommandTests(unittest.TestCase):
+    """Commands that are also ordinary English words, as sentences and as commands."""
+
+    def routes(self):
+        with tempfile.TemporaryDirectory() as cwd:
+            for text, expected in ROUTING_TABLE:
+                yield text, expected, classify(text, known_commands=SIMULATED_COMMANDS, path=PATH, cwd=cwd)
+
+    def test_table_routes_correctly(self):
+        wrong = [f"{text!r}: want {expected}, got {result.route} ({result.reason})"
+                 for text, expected, result in self.routes() if result.route != expected]
+        self.assertEqual(wrong, [], f"{len(wrong)}/{len(ROUTING_TABLE)} misrouted:\n" + "\n".join(wrong))
+
+    def test_ambiguous_sentences_ask_instead_of_guessing_silently(self):
+        # A sentence that would also run as a command must set needs_assist, so the model decides.
+        for text, expected, result in self.routes():
+            if expected == "agent" and result.valid:
+                self.assertTrue(result.needs_assist, f"{text!r} guessed agent without asking")
+                self.assertTrue(result.assist_reason, text)
+
+    def test_plain_commands_never_ask(self):
+        for text, expected, result in self.routes():
+            if expected == "shell":
+                self.assertFalse(result.needs_assist, f"{text!r} would ask the model")
+
+    def test_word_lists_are_lowercase_and_deduplicated(self):
+        for name, words in (("ENGLISH_COMMANDS", ENGLISH_COMMANDS), ("SIGNAL_WORDS", SIGNAL_WORDS),
+                            ("BARE_WORD_ODD", BARE_WORD_ODD), ("LITERAL_TEXT", LITERAL_TEXT)):
+            for word in words:
+                self.assertEqual(word, word.lower(), f"{name}: {word!r}")
+                self.assertTrue(word.isalpha() or "'" in word, f"{name}: {word!r}")
+        self.assertTrue(BARE_WORD_ODD <= ENGLISH_COMMANDS, BARE_WORD_ODD - ENGLISH_COMMANDS)
+        self.assertTrue(LITERAL_TEXT <= ENGLISH_COMMANDS, LITERAL_TEXT - ENGLISH_COMMANDS)
+
+    def test_ordinary_command_shapes_never_reach_the_assist_threshold(self):
+        # Every English-word command with ordinary arguments must score below the threshold.
+        shapes = ["", " -h", " --help", " -v", " file.txt", " /etc/passwd", " src/main.py", " out.log",
+                  " a.txt b.txt", " -n 5 log.txt", " 2", " x.o", " ./run.sh", " data/in.csv data/out.csv"]
+        with tempfile.TemporaryDirectory() as cwd:
+            asked = [word + shape for word in sorted(ENGLISH_COMMANDS) for shape in shapes
+                     if assist_signals(word + shape, cwd)[0] >= ASSIST_THRESHOLD]
+        self.assertEqual(asked, [])
+
+    def test_one_weak_signal_word_is_not_enough(self):
+        with tempfile.TemporaryDirectory() as cwd:
+            for text in ["shutdown now", "make all", "watch more", "last back", "time again", "test out"]:
+                score, reasons, _ = assist_signals(text, cwd)
+                self.assertLess(score, ASSIST_THRESHOLD, f"{text}: {reasons}")
 
 
 if __name__ == '__main__':

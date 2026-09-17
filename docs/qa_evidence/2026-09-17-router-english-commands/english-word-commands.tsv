@@ -1,0 +1,242 @@
+word	package	path
+acorn	node-acorn	/usr/bin/acorn
+aha	aha	/usr/bin/aha
+alias	bash builtin	/usr/bin/aha
+animate	imagemagick-6.q16	/usr/bin/animate
+apropos	man-db	/usr/bin/apropos
+apt	apt	/usr/bin/apt
+arch	coreutils	/usr/bin/arch
+ark	ark	/usr/bin/ark
+as	binutils-aarch64-linux-gnu	/usr/bin/as
+assistant	qtchooser	/usr/bin/assistant
+audacious	audacious	/usr/bin/audacious
+audacity	audacity	/usr/bin/audacity
+baobab	baobab	/usr/bin/baobab
+bash	bash	/usr/bin/bash
+bind	bash builtin	/usr/bin/bash
+bison	bison	/usr/bin/bison
+bitmap	x11-apps	/usr/bin/bitmap
+break	bash builtin	/usr/bin/bitmap
+bridge	(no package)	/usr/sbin/bridge
+browse	xdg-utils	/usr/bin/browse
+builtin	bash builtin	/usr/bin/browse
+caller	bash builtin	/usr/bin/browse
+cancel	cups-client	/usr/bin/cancel
+case	bash keyword	/usr/bin/cancel
+cat	coreutils	/usr/bin/cat
+cc	gcc-13-aarch64-linux-gnu	/usr/bin/cc
+chat	ppp	/usr/sbin/chat
+clear	ncurses-bin	/usr/bin/clear
+cluster	graphviz	/usr/bin/cluster
+codex	(no package)	/home/elliott/.npm-global/bin/codex
+col	bsdextrautils	/usr/bin/col
+column	bsdextrautils	/usr/bin/column
+comm	coreutils	/usr/bin/comm
+command	bash builtin	/usr/bin/comm
+compare	imagemagick-6.q16	/usr/bin/compare
+complete	bash builtin	/usr/bin/compare
+composite	imagemagick-6.q16	/usr/bin/composite
+conjure	imagemagick-6.q16	/usr/bin/conjure
+continue	bash builtin	/usr/bin/conjure
+convert	imagemagick-6.q16	/usr/bin/convert
+curl	curl	/usr/bin/curl
+cut	coreutils	/usr/bin/cut
+dash	dash	/usr/bin/dash
+date	coreutils	/usr/bin/date
+dd	coreutils	/usr/bin/dd
+declare	bash builtin	/usr/bin/dd
+defaults	gnustep-base-runtime	/usr/bin/defaults
+designer	qtchooser	/usr/bin/designer
+diff	diffutils	/usr/bin/diff
+dig	bind9-dnsutils	/usr/bin/dig
+disown	bash builtin	/usr/bin/dig
+display	imagemagick-6.q16	/usr/bin/display
+do	bash keyword	/usr/bin/display
+dolphin	dolphin	/usr/bin/dolphin
+done	bash keyword	/usr/bin/dolphin
+dot	libgvc6	/usr/bin/dot
+dotty	graphviz	/usr/bin/dotty
+dragon	dragonplayer	/usr/bin/dragon
+duplicity	duplicity	/usr/bin/duplicity
+ebb	texlive-binaries	/usr/bin/ebb
+echo	bash builtin	/usr/bin/ebb
+ed	(no package)	/usr/bin/ed
+editor	nano	/usr/bin/editor
+eject	eject	/usr/bin/eject
+else	bash keyword	/usr/bin/eject
+enable	bash builtin	/usr/bin/eject
+evince	evince	/usr/bin/evince
+ex	vim	/usr/bin/ex
+exec	bash builtin	/usr/bin/ex
+exit	bash builtin	/usr/bin/ex
+expand	coreutils	/usr/bin/expand
+expiry	passwd	/usr/bin/expiry
+export	bash builtin	/usr/bin/expiry
+factor	coreutils	/usr/bin/factor
+false	bash builtin	/usr/bin/factor
+file	file	/usr/bin/file
+find	findutils	/usr/bin/find
+flex	flex	/usr/bin/flex
+flock	util-linux	/usr/bin/flock
+fold	coreutils	/usr/bin/fold
+for	bash keyword	/usr/bin/fold
+free	procps	/usr/bin/free
+from	mailutils	/usr/bin/from
+ftp	tnftp	/usr/bin/ftp
+function	bash keyword	/usr/bin/ftp
+gawk	gawk	/usr/bin/gawk
+gem	ruby-rubygems	/usr/bin/gem
+gold	binutils-aarch64-linux-gnu	/usr/bin/gold
+grep	grep	/usr/bin/grep
+grog	groff-base	/usr/bin/grog
+groups	coreutils	/usr/bin/groups
+gs	ghostscript	/usr/bin/gs
+halt	systemd	/usr/sbin/halt
+hash	bash builtin	/usr/sbin/halt
+head	coreutils	/usr/bin/head
+help	bash builtin	/usr/bin/head
+history	bash builtin	/usr/bin/head
+host	bind9-host	/usr/bin/host
+ht	texlive-plain-generic	/usr/bin/ht
+id	coreutils	/usr/bin/id
+identify	imagemagick-6.q16	/usr/bin/identify
+if	bash keyword	/usr/bin/identify
+import	imagemagick-6.q16	/usr/bin/import
+in	bash keyword	/usr/bin/import
+info	info	/usr/bin/info
+install	coreutils	/usr/bin/install
+jar	openjdk-17-jdk-headless	/usr/bin/jar
+jobs	bash builtin	/usr/bin/jar
+join	coreutils	/usr/bin/join
+kill	bash builtin	/usr/bin/join
+last	util-linux	/usr/bin/last
+latex	texlive-binaries	/usr/bin/latex
+lefty	graphviz	/usr/bin/lefty
+less	less	/usr/bin/less
+let	bash builtin	/usr/bin/less
+linguist	qtchooser	/usr/bin/linguist
+link	coreutils	/usr/bin/link
+local	bash builtin	/usr/bin/link
+locale	libc-bin	/usr/bin/locale
+logger	bsdutils	/usr/bin/logger
+login	login	/usr/bin/login
+logout	bash builtin	/usr/bin/login
+look	bsdextrautils	/usr/bin/look
+ls	coreutils	/usr/bin/ls
+mail	mailutils	/usr/bin/mail
+make	make	/usr/bin/make
+man	man-db	/usr/bin/man
+manifest	byobu	/usr/bin/manifest
+messages	mailutils	/usr/bin/messages
+mingle	graphviz	/usr/bin/mingle
+montage	imagemagick-6.q16	/usr/bin/montage
+more	util-linux	/usr/bin/more
+mount	mount	/usr/bin/mount
+nautilus	nautilus	/usr/bin/nautilus
+net	samba-common-bin	/usr/bin/net
+nice	coreutils	/usr/bin/nice
+ninja	ninja-build	/usr/bin/ninja
+node	(no package)	/run/user/1000/fnm_multishells/982649_1789643557426/bin/node
+open	xdg-utils	/usr/bin/open
+pager	less	/usr/bin/pager
+parted	parted	/usr/sbin/parted
+paste	coreutils	/usr/bin/paste
+patch	patch	/usr/bin/patch
+patchwork	libgvc6	/usr/bin/patchwork
+ping	iputils-ping	/usr/bin/ping
+pinky	coreutils	/usr/bin/pinky
+pip	python3-pip	/usr/bin/pip
+pl	gnustep-base-runtime	/usr/bin/pl
+pollinate	pollinate	/usr/bin/pollinate
+pro	ubuntu-pro-client	/usr/bin/pro
+profiles	samba	/usr/bin/profiles
+prove	perl	/usr/bin/prove
+proxy	libproxy-tools	/usr/bin/proxy
+prune	graphviz	/usr/bin/prune
+python	python3.12-minimal	/usr/bin/python
+quota	quota	/usr/bin/quota
+rake	rake	/usr/bin/rake
+read	bash builtin	/usr/bin/rake
+red	(no package)	/usr/bin/red
+reset	ncurses-bin	/usr/bin/reset
+return	bash builtin	/usr/bin/reset
+rev	util-linux	/usr/bin/rev
+rm	coreutils	/usr/bin/rm
+route	(no package)	/usr/sbin/route
+ruby	ruby3.2	/usr/bin/ruby
+samba	samba	/usr/sbin/samba
+scalar	git	/usr/bin/scalar
+screen	screen	/usr/bin/screen
+script	bsdutils	/usr/bin/script
+select	bash keyword	/usr/bin/script
+service	init-system-helpers	/usr/sbin/service
+set	bash builtin	/usr/sbin/service
+sh	dash	/usr/bin/sh
+shift	bash builtin	/usr/bin/sh
+shred	coreutils	/usr/bin/shred
+shutdown	systemd	/usr/sbin/shutdown
+sieve	mailutils	/usr/bin/sieve
+size	binutils-aarch64-linux-gnu	/usr/bin/size
+skill	procps	/usr/bin/skill
+sleep	coreutils	/usr/bin/sleep
+snap	snapd	/usr/bin/snap
+sort	coreutils	/usr/bin/sort
+sos	sosreport	/usr/bin/sos
+source	bash builtin	/usr/bin/sos
+spectacle	kde-spectacle	/usr/bin/spectacle
+split	coreutils	/usr/bin/split
+stat	coreutils	/usr/bin/stat
+stream	imagemagick-6.q16	/usr/bin/stream
+strings	binutils-aarch64-linux-gnu	/usr/bin/strings
+strip	binutils-aarch64-linux-gnu	/usr/bin/strip
+sum	coreutils	/usr/bin/sum
+sushi	gnome-sushi	/usr/bin/sushi
+suspend	bash builtin	/usr/bin/sushi
+sweeper	sweeper	/usr/bin/sweeper
+swig	swig	/usr/bin/swig
+sync	coreutils	/usr/bin/sync
+tabs	ncurses-bin	/usr/bin/tabs
+tail	coreutils	/usr/bin/tail
+tangle	texlive-binaries	/usr/bin/tangle
+tar	tar	/usr/bin/tar
+tee	coreutils	/usr/bin/tee
+telnet	inetutils-telnet	/usr/bin/telnet
+test	bash builtin	/usr/bin/telnet
+then	bash keyword	/usr/bin/telnet
+tic	ncurses-bin	/usr/bin/tic
+tie	texlive-binaries	/usr/bin/tie
+time	bash keyword	/usr/bin/tie
+times	bash builtin	/usr/bin/tie
+toe	ncurses-bin	/usr/bin/toe
+top	procps	/usr/bin/top
+totem	totem	/usr/bin/totem
+touch	coreutils	/usr/bin/touch
+transform	libgts-bin	/usr/bin/transform
+trap	bash builtin	/usr/bin/transform
+true	bash builtin	/usr/bin/transform
+truncate	coreutils	/usr/bin/truncate
+trust	p11-kit	/usr/bin/trust
+twill	texlive-binaries	/usr/bin/twill
+type	bash builtin	/usr/bin/twill
+typeset	bash builtin	/usr/bin/twill
+unset	bash builtin	/usr/bin/twill
+until	bash keyword	/usr/bin/twill
+unzip	unzip	/usr/bin/unzip
+users	coreutils	/usr/bin/users
+vi	vim	/usr/bin/vi
+view	vim	/usr/bin/view
+vim	vim	/usr/bin/vim
+w	procps	/usr/bin/w
+wait	bash builtin	/usr/bin/w
+wall	bsdutils	/usr/bin/wall
+watch	procps	/usr/bin/watch
+weave	texlive-binaries	/usr/bin/weave
+which	debianutils	/usr/bin/which
+while	bash keyword	/usr/bin/which
+who	coreutils	/usr/bin/who
+wish	tk8.6	/usr/bin/wish
+write	bsdextrautils	/usr/bin/write
+xterm	xterm	/usr/bin/xterm
+yelp	yelp	/usr/bin/yelp
+yes	coreutils	/usr/bin/yes
+zip	zip	/usr/bin/zip

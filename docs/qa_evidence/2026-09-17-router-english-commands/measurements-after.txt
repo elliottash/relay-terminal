@@ -1,0 +1,103 @@
+ok  agent want=agent assist=1 score=7   look at some of my other letters in ~/admin/Advisees.*.docx for my writing style
+ok  agent want=agent assist=1 score=5   look for typos in the readme
+ok  agent want=agent assist=1 score=4   watch the logs for errors
+ok  agent want=agent assist=0 score=9   time the build and tell me what is slow
+ok  agent want=agent assist=1 score=4   split the file by lines
+ok  agent want=agent assist=1 score=5   find the config that sets the port
+ok  agent want=agent assist=1 score=2   make the tests pass
+ok  agent want=agent assist=1 score=6   test the new parser on my sample
+ok  agent want=agent assist=1 score=4   sort these results by date
+ok  agent want=agent assist=1 score=4   cut the preamble from the output
+ok  agent want=agent assist=1 score=4   join the two csv files on the id column
+ok  agent want=agent assist=1 score=2   install ripgrep
+ok  agent want=agent assist=1 score=4   open the settings dialog
+ok  agent want=agent assist=1 score=5   touch up the styling in the header
+ok  agent want=agent assist=1 score=4   just run the tests again
+ok  agent want=agent assist=1 score=7   from the logs tell me what failed
+ok  agent want=agent assist=1 score=4   route the request through the proxy
+ok  agent want=agent assist=1 score=6   at the top of the file add a comment
+ok  agent want=agent assist=1 score=5   prove that the fix works
+ok  agent want=agent assist=1 score=7   tidy up the imports in this module
+ok  agent want=agent assist=1 score=6   dump the table to a csv
+ok  agent want=agent assist=1 score=5   restore the backup from yesterday
+ok  agent want=agent assist=0 score=4   suspend the running job right away
+ok  agent want=agent assist=1 score=4   truncate the log file to zero
+ok  agent want=agent assist=1 score=3   shred the old key files
+ok  agent want=agent assist=1 score=4   sum the values in the second column
+ok  agent want=agent assist=1 score=3   cancel the pending print job
+ok  agent want=agent assist=1 score=2   eject the usb drive
+ok  agent want=agent assist=1 score=6   browse the docs for this api
+ok  agent want=agent assist=1 score=6   bind the shortcut to a new tab
+ok  agent want=agent assist=1 score=6   prune the branches that are merged
+ok  agent want=agent assist=1 score=4   transform the csv into json
+ok  agent want=agent assist=1 score=4   zip up the build output
+ok  agent want=agent assist=1 score=6   accept the changes in that patch
+ok  agent want=agent assist=1 score=6   reject the parts that are unrelated
+ok  agent want=agent assist=1 score=3   disable the pre commit hook
+ok  agent want=agent assist=1 score=6   spell check the readme for me
+ok  agent want=agent assist=1 score=5   talk to the api and summarise the reply
+ok  agent want=agent assist=1 score=4   pass the output to the next step
+ok  agent want=agent assist=1 score=3   sample the first thousand rows
+ok  agent want=agent assist=1 score=7   resume the download where it stopped
+ok  agent want=agent assist=1 score=5   batch the requests into groups of ten
+ok  agent want=agent assist=1 score=4   bundle the assets for production
+ok  agent want=agent assist=1 score=6   jot down the steps you took
+ok  agent want=agent assist=1 score=2   wipe the build directory
+ok  agent want=agent assist=1 score=6   tree the whole repo and summarise it
+ok  agent want=agent assist=1 score=7   go to the end of the file
+ok  agent want=agent assist=1 score=6   head over to the docs and check the api
+ok  agent want=agent assist=1 score=6   patch the config so it uses the new port
+ok  agent want=agent assist=1 score=5   log the output of every request
+ok  agent want=agent assist=1 score=6   play the recording of that session
+ok  agent want=agent assist=1 score=6   view the diff for this commit
+ok  agent want=agent assist=1 score=7   column the output so it lines up
+ok  agent want=agent assist=1 score=7   last time this worked it was on main
+ok  shell want=shell assist=0 score=0   ls
+ok  shell want=shell assist=0 score=0   ls -la
+ok  shell want=shell assist=0 score=0   git status
+ok  shell want=shell assist=0 score=0   make -j
+ok  shell want=shell assist=0 score=0   make test
+ok  shell want=shell assist=0 score=0   find . -name x
+ok  shell want=shell assist=0 score=0   grep -rn TODO src
+ok  shell want=shell assist=0 score=0   watch -n1 ls
+ok  shell want=shell assist=0 score=0   time make
+ok  shell want=shell assist=0 score=0   time git push
+ok  shell want=shell assist=0 score=0   split file.txt
+ok  shell want=shell assist=0 score=0   sort -u words.txt
+ok  shell want=shell assist=0 score=0   head -n 20 log.txt
+ok  shell want=shell assist=0 score=0   cut -d: -f1 /etc/passwd
+ok  shell want=shell assist=0 score=0   join a.txt b.txt
+ok  shell want=shell assist=0 score=0   touch newfile.txt
+ok  shell want=shell assist=0 score=0   date
+ok  shell want=shell assist=0 score=0   tar -czf out.tar.gz dir
+ok  shell want=shell assist=0 score=0   install -m 755 a b
+ok  shell want=shell assist=0 score=0   open .
+ok  shell want=shell assist=0 score=0   zip -r out.zip dir
+ok  shell want=shell assist=0 score=0   unzip archive.zip
+ok  shell want=shell assist=0 score=0   truncate -s 0 app.log
+ok  shell want=shell assist=0 score=0   route -n
+ok  shell want=shell assist=0 score=0   at 5pm
+ok  shell want=shell assist=0 score=0   just build
+ok  shell want=shell assist=0 score=0   prove t/basic.t
+ok  shell want=shell assist=0 score=0   look ante
+ok  shell want=shell assist=0 score=0   last reboot
+ok  shell want=shell assist=0 score=0   test -f README.md
+ok  shell want=shell assist=0 score=0   yes | head -3
+ok  shell want=shell assist=0 score=0   top -b -n1
+ok  shell want=shell assist=0 score=0   free -h
+ok  shell want=shell assist=0 score=0   file README.md
+ok  shell want=shell assist=0 score=0   which python3
+ok  shell want=shell assist=0 score=0   sum data.bin
+ok  shell want=shell assist=0 score=0   tree -L 2
+ok  shell want=shell assist=0 score=0   go build ./...
+ok  shell want=shell assist=0 score=0   say hello world
+ok  shell want=shell assist=0 score=0   banner release
+ok  shell want=shell assist=0 score=0   column -t data.tsv
+ok  shell want=shell assist=0 score=0   dump 0uf /dev/nst0 /home
+ok  shell want=shell assist=0 score=0   bundle exec rspec
+ok  shell want=shell assist=0 score=0   disable printer1
+ok  shell want=shell assist=0 score=0   shred -u secret.key
+
+sentences  (want agent): 54/54 correct
+commands   (want shell): 45/45 correct
+overall:                 99/99 correct

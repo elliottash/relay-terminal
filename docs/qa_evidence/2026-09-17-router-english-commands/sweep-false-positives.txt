@@ -1,0 +1,15 @@
+False-positive sweep of ENGLISH_COMMANDS against ordinary command shapes.
+A hit means assist_signals scores at or above ASSIST_THRESHOLD, i.e. Relay would ask the
+model instead of just running the command.
+
+1. command shapes: 232 words x 14 shapes = 3248 inputs -> 0 hits
+
+2. one weight-1 signal word as the only argument: 232 x 144 = 33408 inputs -> 5680 hits
+   of which explained by the pre-existing BARE_WORD_ODD / go-subcommand rules: 5680
+   caused by the weight-1 signal words alone: 0
+
+   (The BARE_WORD_ODD hits are inputs like `compare about` or `split away`: a command whose
+   argument must be a file, given a bare word that is no file here. Those are not commands a
+   person types, and they set needs_assist rather than deciding alone.)
+
+BARE_WORD_ODD (39): compare convert copy cut display edit file find fold head identify import install join less link more mount move nl od open patch prove see shred sort source spell split strip sum tac tail tidy transform truncate unlink view

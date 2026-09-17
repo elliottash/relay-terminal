@@ -318,41 +318,73 @@ def on_path(word: str, path: str) -> bool:
 # ----- Routing assist: commands that are also everyday English words -----------------------------------
 # Inclusive on purpose: a word only matters when it also resolves as a command on this machine (PATH,
 # builtin, alias or function), and only triggers an assist when the rest of the input reads like a
-# sentence. Checked 2026-09-17 on Ubuntu (coreutils, util-linux, bsdextrautils, bsdutils, procps,
-# psmisc, bind9-host, iputils, man-db, make, findutils, ImageMagick, xdg-utils) plus common developer tools.
+# sentence. The bar for membership is "a person could plausibly start a request with this word":
+# "sort these by date" is a request, while `as`, `col`, `dd`, `ed`, `gs`, `w` and application names
+# (`dolphin`, `evince`, `totem`) are English or word-like but nobody opens a sentence with them.
+# Checked 2026-09-17 against, on this Ubuntu machine, the 4327 executables on PATH intersected with
+# /usr/share/dict/{american,british}-english (241 hits), plus `compgen -b`, `compgen -k` and
+# `busybox --list`. Package families in that intersection: coreutils, util-linux, bsdextrautils,
+# bsdutils, procps, findutils, grep, diffutils, patch, tar, less, ncurses-bin, man-db, bind9-host,
+# bind9-dnsutils, iputils, mailutils, cups-client, xdg-utils, ImageMagick, binutils, texlive,
+# graphviz, git and the python/node/ruby toolchains. Words that are not installed here come from
+# documentation and are kept because Relay also runs elsewhere: macOS/BSD (say, banner, jot, sample,
+# apply, log, talk, fetch), other distros (tree, units, spell, tidy, wipe, dump, restore, at, batch,
+# accept, reject, disable), non-bash shells (where in zsh/csh, print in ksh) and common
+# developer tools (go, just, task, todo, note, plan, review, bundle, pass, code, chat).
+# Derivation and measurements: docs/qa_evidence/2026-09-17-router-english-commands/.
 ENGLISH_COMMANDS = frozenset("""
-    go install make find open test build start stop run time date help man watch sort head tail cut join split
-    which who whoami yes true false sleep kill top less more file fold look write wall last link unlink touch
-    mount umount echo print printf read apply dig host ping see say tree clear reset history source alias
-    export set unset env nice wait jobs type trap exit logout login script paste patch diff comm expand units
-    factor seq shuf tac tee tr cat copy move free id groups users ps pr nl od fmt locate update upgrade
-    shutdown reboot halt sync uptime logger mail view edit play record convert display import compare identify
-    montage animate stream composite fetch pull push commit merge search info check verify sign lock unlock log
-    list show new serve deploy lint format bench clean init add remove delete purge ask tell explain summarize
-    fix debug do done let local return break continue select case shift trust hash enable command builtin rename
-    column look grep split base dirname basename expr numfmt tsort timeout pinky stat sum rev hostname
-    whereis whatis apropos notify send chat code note notes todo task tasks plan review
+    accept add alias animate apply apropos ask at banner basename batch bench bind break browse build
+    builtin bundle cancel case cat chat check clean clear code column comm command commit compare
+    composite continue convert copy cut date debug delete deploy diff dig dirname disable display do done
+    dump echo edit eject enable env exit expand explain export expr factor false fetch file find fix fmt
+    fold format free from go grep groups halt hash head help history host hostname id identify import info
+    init install jobs join jot just kill last less let link lint list local locate lock log logger login
+    logout look mail make man merge montage more mount move new nice nl note notes notify numfmt od open
+    pass paste patch ping pinky plan play please pr print printf prove prune ps pull purge push read
+    reboot record reject remove rename reset restore resume return rev review route run sample say screen
+    script search see select send seq serve set shift show shred shuf shutdown sign sleep sort source
+    spell split start stat stop stream strip sum summarize suspend sync tac tail talk tar task tasks tee
+    tell test tidy time timeout todo top touch tr transform trap tree true truncate trust tsort type
+    umount units unlink unlock unset unzip update upgrade uptime users verify view wait wall watch whatis
+    where whereis which who whoami wipe write yes zip
 """.split())
 
-# Words that make an input read like a sentence, with weights.
+# Words that make an input read like a sentence, with weights. Two independent weight-1 words (or one
+# article or pronoun) are enough to ask; a lone weight-1 word is not, so `shutdown now` and `make all`
+# stay in the shell. Contractions are unreachable in practice — an apostrophe zeroes the score above,
+# and bash -n rejects the unbalanced quote first — but are kept for readers.
 SIGNAL_WORDS = {
     **{w: 2 for w in "a an the".split()},
     **{w: 2 for w in "i me my mine we us our you your it its this that these those them their they he she him her".split()},
     **{w: 2 for w in "what why how where when who whom whose which".split()},
+    **{w: 2 for w in ("myself yourself itself himself herself ourselves themselves everyone everybody someone "
+                      "somebody anyone anybody nobody everything something anything nothing").split()},
     **{w: 3 for w in "please thanks thank pls".split()},
     **{w: 1 for w in ("to and or but for from into onto with without about of in on at by is are was were be been "
                       "can could should would will does did not so then if all some any every why's what's "
                       "there here up out over under again").split()},
+    **{w: 1 for w in ("through between across against along among around before after behind below beside besides "
+                      "beyond during except inside outside per since than toward towards until upon via within "
+                      "near like off down back away together because while whether unless though although "
+                      "instead").split()},
+    **{w: 1 for w in ("have has had am being doing done might must shall need needs want wants let lets "
+                      "also just still only very too really actually maybe probably properly correctly "
+                      "now today tomorrow yesterday once ever never always often sometimes").split()},
+    **{w: 1 for w in ("much more most less least few many several each both another other others same such "
+                      "everywhere somewhere anywhere nowhere").split()},
 }
 # `go <word>` where <word> is not a go subcommand is English ("go to", "go ahead", "go home").
 GO_SUBCOMMANDS = frozenset("bug build clean doc env fix fmt generate get help install list mod run telemetry test "
                            "tool version vet work".split())
 # Commands whose arguments are files or options: a single bare word that is no file here is unusual
-# ("install ripgrep", "open settings").
+# ("install ripgrep", "open settings"). Left out on purpose: `make` and `watch` (targets and commands
+# are not files), `grep` (a bare pattern is normal), `look` (its argument is a word, not a file) and
+# `unzip` (`unzip archive` is normal: it appends .zip itself).
 BARE_WORD_ODD = frozenset("install open less more head tail file sort cut join split link unlink mount source "
-                          "see view edit display compare identify convert import copy move fold nl od tac".split())
+                          "see view edit display compare identify convert import copy move fold nl od tac "
+                          "find patch strip truncate shred prove tidy spell sum transform".split())
 # Their arguments are literal text, so a sentence after them is still most likely a shell command.
-LITERAL_TEXT = frozenset("echo printf print say logger wall write notify send".split())
+LITERAL_TEXT = frozenset("echo printf print say logger wall write notify send banner".split())
 ASSIST_THRESHOLD = 2
 # Operators and expansions that only appear in shell input. Globs (`*`, `[...]`) and `~` are left out
 # on purpose: "look at my letters in ~/admin/Advisees.*.docx for my style" is an English request that
