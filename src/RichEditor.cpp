@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "RichEditor.h"
+
+#include <algorithm>
+#include <cmath>
 #include <QApplication>
 #include <QFontDatabase>
 #include <QInputMethodEvent>
@@ -65,6 +68,21 @@ void RichEditor::remember(const QString &text) {
     }
     m_historyIndex = m_history.size();
     m_draft.clear();
+}
+
+void RichEditor::setAutoHeight(int minLines, int maxLines) {
+    m_minLines = std::max(1, minLines);
+    m_maxLines = std::max(m_minLines, maxLines);
+    auto apply = [this] {
+        const QFontMetrics metrics(font());
+        const int line = std::max(14, metrics.lineSpacing());
+        const int lines = std::clamp(int(std::ceil(document()->size().height())), m_minLines, m_maxLines);
+        const int chrome = int(document()->documentMargin()) * 2 + frameWidth() * 2 + 4;
+        setFixedHeight(lines * line + chrome);
+    };
+    connect(document(), &QTextDocument::contentsChanged, this, apply);
+    connect(this, &QPlainTextEdit::textChanged, this, apply);
+    apply();
 }
 
 void RichEditor::setGhost(const QString &remainder) {

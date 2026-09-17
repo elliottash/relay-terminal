@@ -1099,7 +1099,7 @@ protected:
         placeRequestsPanel();     // request ledger UI
         placeSubagentsPanel();
         QTimer::singleShot(0, this, [this] { placeSubagentsPanel(); });
-        if (m_transcript) m_transcript->setMaximumHeight(std::max(120, height() * 2 / 5));
+        updateTranscriptHeight();
         updatePaths();
     }
 
@@ -1265,7 +1265,9 @@ private:
         auto *submit = new QPushButton(QStringLiteral("Submit ↵"));
         connect(submit, &QPushButton::clicked, this, [this] { requestRoute(true, QStringLiteral("auto")); });
         routeRow->addWidget(submit); composerLayout->addLayout(routeRow);
-        m_editor = new RichEditor; composerLayout->addWidget(m_editor);
+        m_editor = new RichEditor;
+        m_editor->setAutoHeight(1, 8);   // one line when idle, growing with the text
+        composerLayout->addWidget(m_editor);
         // Password prompts (checkPasswordPrompt): the prompt box becomes a masked field whose
         // line goes to the running program. It is a separate widget so the password can never
         // reach the composer's document, its history, its undo stack or route assist.
@@ -3828,10 +3830,24 @@ private:
         if (ink == Ink::Note) format.setFontItalic(true);
         cursor.insertText(clean, format);
         m_transcriptView->verticalScrollBar()->setValue(m_transcriptView->verticalScrollBar()->maximum());
-        if (!m_transcriptDismissed && !m_transcript->isVisible()) {
-            m_transcript->setMaximumHeight(std::max(120, height() * 2 / 5));
-            m_transcript->show();
-        }
+        if (!m_transcriptDismissed && !m_transcript->isVisible()) m_transcript->show();
+        updateTranscriptHeight();
+    }
+
+    // The panel is as tall as its text, never taller than 40% of the pane: an empty box over the
+    // terminal is wasted space (owner, 2026-09-17), and agent output here is usually a few lines.
+    void updateTranscriptHeight() {
+        if (!m_transcript || !m_transcriptView || !m_transcript->isVisible()) return;
+        const QFontMetrics metrics(m_transcriptView->font());
+        const int line = std::max(14, metrics.lineSpacing());
+        const auto *document = m_transcriptView->document();
+        const int lines = std::max(1, int(std::ceil(document->size().height())));
+        const int chrome = m_transcript->layout()->contentsMargins().top() + m_transcript->layout()->contentsMargins().bottom()
+                           + m_transcriptHeader->sizeHint().height() + m_transcriptView->frameWidth() * 2 + 10;
+        const int wanted = lines * line + chrome;
+        const int cap = std::max(line * 3 + chrome, height() * 2 / 5);
+        m_transcript->setMaximumHeight(std::min(wanted, cap));
+        m_transcript->setMinimumHeight(0);
     }
 
     void resetTranscript() {
@@ -4184,6 +4200,8 @@ private:
     }
 
     void onComposerEdited() {
+        // The key hints are for an empty box; once you are typing the space is better spent on text.
+        if (m_help) m_help->setVisible(m_editor->toPlainText().isEmpty());
         if (!m_editor->toPlainText().isEmpty()) m_idleTip.stop();
         if (!m_editor->toPlainText().isEmpty()) clearAiGhost();
         updateSlashPopup();

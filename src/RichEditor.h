@@ -15,6 +15,8 @@ public:
     bool atDraft() const { return m_historyIndex == m_history.size(); }
 
     // Ghost text: a dim suggestion drawn after the cursor when it sits at the end of the text.
+    // Grow with the text instead of standing empty: one line when idle, up to maxLines, then scroll.
+    void setAutoHeight(int minLines, int maxLines);
     void setGhost(const QString &remainder);
     QString ghost() const { return m_ghost; }
     // Accept the whole suggestion, or only up to the end of the next word. False if none.
@@ -30,4 +32,5 @@ private:
     int m_historyIndex = 0;
     bool m_preedit = false;
     QString m_ghost;
+    int m_minLines = 0, m_maxLines = 0;
 };
