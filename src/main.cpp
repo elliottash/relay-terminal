@@ -339,7 +339,7 @@ private:
         add("input.modeAuto", "agent", "Input mode: auto detect", {});
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
         add("input.modeAgent", "agent", "Input mode: agent", {});
-        add("input.toggle", "agent", "Toggle input between terminal command and agent prompt (from the prompt box)", {QStringLiteral("Ctrl+I")});
+        add("input.toggle", "agent", "Cycle input: auto detect → terminal → agent (from the prompt box)", {QStringLiteral("Ctrl+I")});
         add("agent.planToggle", "agent", "Toggle plan mode (from the prompt box)", {QStringLiteral("Shift+Tab")});
         add("agent.effortUp", "agent", "Raise reasoning effort (from the prompt box)", {QStringLiteral("Alt+.")});
         add("agent.effortDown", "agent", "Lower reasoning effort (from the prompt box)", {QStringLiteral("Alt+,")});
@@ -826,6 +826,12 @@ public:
         if (m_configured)
             send({{"type", "set_agent_options"}, {"roles", rolesObject()}, {"tiers", tiersObject()}});
     }
+    // Where a new pane starts: Settings › Agent › "Default input for new sessions" (auto by default).
+    static QString defaultInputMode() {
+        const QString value = QSettings().value(QStringLiteral("input/default"), QStringLiteral("auto")).toString();
+        return (value == QStringLiteral("shell") || value == QStringLiteral("agent")) ? value : QStringLiteral("auto");
+    }
+
     void toggleInputMode() {
         // Ctrl+I at a password prompt leaves masked input and talks to the agent instead
         // (issue decision 4), e.g. "paste the password from my clipboard". The agent's typing
@@ -837,9 +843,14 @@ public:
             toast(QStringLiteral("Input: Agent · the password prompt is still waiting"));
             return;
         }
-        const QString next = m_modeValue == QStringLiteral("agent") ? QStringLiteral("shell") : QStringLiteral("agent");
+        // Three-way, in this order (owner, 2026-09-17): auto → terminal → agent → auto.
+        const QString next = m_modeValue == QStringLiteral("auto")  ? QStringLiteral("shell")
+                           : m_modeValue == QStringLiteral("shell") ? QStringLiteral("agent")
+                                                                    : QStringLiteral("auto");
         setMode(next);
-        toast(next == QStringLiteral("agent") ? QStringLiteral("Input: Agent") : QStringLiteral("Input: Terminal"));
+        toast(next == QStringLiteral("agent") ? QStringLiteral("Input: Agent · ! runs one line in the terminal")
+              : next == QStringLiteral("shell") ? QStringLiteral("Input: Terminal · * sends one line to the agent")
+                                                : QStringLiteral("Input: Auto detect"));
     }
 
     // ----- control policy for programs --------------------------------------------------
@@ -4391,6 +4402,8 @@ private:
         const int k = key->key();
         // `!` or `*` typed (not pasted) as the first character switches this submission to the
         // terminal or the agent, like Claude Code's `!`. Backspace in the empty box undoes it.
+        // `!` and `*` work from every mode: in Terminal mode `*` sends this one line to the agent,
+        // in Agent mode `!` runs this one line in the terminal (owner, 2026-09-17).
         if (m_prefixMode.isEmpty() && m_editor->toPlainText().isEmpty() && !(mods & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
             && (key->text() == QStringLiteral("!") || key->text() == QStringLiteral("*"))) {
             setPrefixMode(key->text() == QStringLiteral("!") ? QStringLiteral("shell") : QStringLiteral("agent"));
@@ -5488,7 +5501,7 @@ private:
     QString m_engineCore;
     QWidget *m_terminal = nullptr, *m_terminalHost = nullptr;
     RichEditor *m_editor = nullptr;
-    QString m_modeValue = QStringLiteral("auto");
+    QString m_modeValue = defaultInputMode();
     QLabel *m_routeLabel = nullptr, *m_cwdLabel = nullptr, *m_help = nullptr;
     bool m_native = false, m_workerReady = false, m_shellReady = false, m_loading = false;
     bool m_promptReported = false;
@@ -7004,6 +7017,18 @@ private:
         agent.title = QStringLiteral("Agent");
         agent.blurb = QStringLiteral("Instructions, skills and the limits of one turn. Most of these apply to the "
                                      "next conversation; the turn limits apply at once.");
+        {
+            // Where a new pane's prompt box starts; Ctrl+I cycles auto → terminal → agent in the pane.
+            const QString current = Pane::defaultInputMode();
+            agent.rows << choiceRow(QStringLiteral("option:input_default"),
+                                    QStringLiteral("Default input for new sessions"),
+                                    QStringLiteral("Ctrl+I cycles auto → terminal → agent; ! and * override one line"),
+                                    {QStringLiteral("auto"), QStringLiteral("shell"), QStringLiteral("agent")},
+                                    {QStringLiteral("Auto detect"), QStringLiteral("Terminal"), QStringLiteral("Agent")},
+                                    current, [](const QString &value) {
+                QSettings().setValue(QStringLiteral("input/default"), value);
+            });
+        }
         agent.rows << buttonRow(QStringLiteral("agent.instructions"), QStringLiteral("Instructions"),
                                 QStringLiteral("CLAUDE.md, AGENTS.md, WARP.md and other instruction files"),
                                 QStringLiteral("Choose…"), [this] { runAction(QStringLiteral("agent.instructions")); });
