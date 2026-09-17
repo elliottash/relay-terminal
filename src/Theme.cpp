@@ -192,6 +192,11 @@ QToolButton#interruptButton:hover { border-color: @accent; }
 QWidget#pane { background: @bg; border: 1px solid @border; border-radius: 6px; }
 QWidget#pane[relayActive="true"] { border: 1px solid @accent; }
 /* Pane button row, drop zones, tab bar controls */
+QFrame#helpCard { background: @raised; border: 1px solid @border; border-radius: 8px; }
+QLabel#keyCap { background: @surface; border: 1px solid @border; border-radius: 4px; padding: 1px 6px; color: @text; font-size: 11px; min-width: 14px; }
+QLabel#helpText { color: @muted; font-size: 12px; }
+QLabel#helpFooter { color: @muted; font-size: 11px; padding-top: 6px; border-top: 1px solid @border; }
+
 /* The composer's status strip: dim, flat, no dropdown chrome (Warp keeps its chips quiet). */
 QComboBox#statusPicker { border: none; background: transparent; color: @muted; padding: 1px 16px 1px 4px; font-size: 11px; }
 QComboBox#statusPicker:hover { color: @text; background: @raised; border-radius: 4px; }
@@ -203,6 +208,31 @@ QLabel#paneGrip:hover { color: @text; }
 QToolButton#paneChromeButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; min-width: 16px; }
 QToolButton#paneChromeButton:hover { color: @text; border-color: @border; background: @surface; }
 QFrame#dropZone { background: @accentSoft; border: 2px solid @accent; border-radius: 6px; }
+/* Window header: Relay's own title bar (frameless window). The tab row carries the Relay icon
+   on the left and the bell, the actions gear and the window buttons on the right. */
+QMainWindow#relayWindow { background: @bg; border: 1px solid @border; }
+QWidget#windowChromeLeft, QWidget#windowChromeRight { background: @bg; }
+QLabel#windowIcon { color: @accent; font-size: 13pt; padding: 0 2px; }
+/* ChromeButton paints its own glyph and hover; the stylesheet only clears the tool-button frame. */
+QToolButton#windowChromeButton, QToolButton#windowCloseButton { background: transparent; border: none; padding: 0; }
+/* Notification centre (the bell) */
+QFrame#notificationsPopup { background: @surface; border: 1px solid @border; border-radius: 10px; }
+QScrollArea#notificationsScroll { background: transparent; border: none; }
+QScrollArea#notificationsScroll > QWidget > QWidget { background: transparent; }
+QFrame#notificationRow { background: @bg; border: 1px solid @border; border-radius: 8px; }
+QFrame#notificationRow:hover { border-color: @accentBorder; }
+QLabel#notificationTitle { color: @text; font-weight: 600; }
+QLabel#notificationBody { color: @muted; font-size: 9pt; }
+QLabel#notificationTime { color: @muted; font-size: 8pt; padding-left: 8px; }
+QLabel#notificationDot { color: @muted; font-size: 8pt; }
+QLabel#notificationDot[kind="success"] { color: #7ec88c; }
+QLabel#notificationDot[kind="warning"] { color: #e5c07b; }
+QLabel#notificationDot[kind="error"] { color: #e06c75; }
+QToolButton#notificationDismiss { color: @muted; border: none; background: transparent; padding: 0 4px; font-size: 9pt; }
+QToolButton#notificationDismiss:hover { color: @text; }
+QToolButton#popupTextButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 2px 8px; font-size: 9pt; }
+QToolButton#popupTextButton:hover { color: @text; border-color: @border; background: @raised; }
+QToolButton#popupTextButton:disabled { color: @disabled; }
 QToolButton#newTabButton { color: @muted; border: 1px solid transparent; border-radius: 6px; font-size: 12pt; padding: 0; }
 QToolButton#newTabButton:hover { color: @text; border-color: @border; background: @raised; }
 QToolButton#tabDetachButton { color: @muted; border: none; background: transparent; padding: 0; }

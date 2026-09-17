@@ -49,7 +49,7 @@ RichEditor::RichEditor(QWidget *parent) : QPlainTextEdit(parent) {
     setAccessibleName(QStringLiteral("Relay command and agent input"));
     setAccessibleDescription(QStringLiteral("Multiline editor. Enter submits; Shift Enter inserts a newline. Control Enter forces Agent; Control Shift Enter forces Terminal."));
     setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    setPlaceholderText(QStringLiteral("Type a command, or describe what you need…"));
+    setPlaceholderText(QStringLiteral("Type a command, or describe what you need…      ?  for help"));
     setMinimumHeight(64);
     setMaximumHeight(260);
     setTabStopDistance(fontMetrics().horizontalAdvance(QLatin1Char(' ')) * 4);
@@ -124,7 +124,10 @@ void RichEditor::paintEvent(QPaintEvent *event) {
 
 void RichEditor::keyPressEvent(QKeyEvent *event) {
     if (isReadOnly()) { QPlainTextEdit::keyPressEvent(event); return; }
-    const auto mods = event->modifiers();
+    // Numpad Enter arrives as Qt::Key_Enter with Qt::KeypadModifier set; drop that flag so
+    // keypad Enter takes the same branches as Return, including Ctrl and Ctrl+Shift.
+    auto mods = event->modifiers();
+    mods.setFlag(Qt::KeypadModifier, false);
     if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) && !m_preedit) {
         if (mods == Qt::ShiftModifier) {
             insertPlainText(QStringLiteral("\n"));

@@ -87,6 +87,8 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QWindow>
+#include <QScrollArea>
+#include <QPainterPath>
 #include <QUuid>
 #include <QVBoxLayout>
 #include <QStyledItemDelegate>
@@ -2699,6 +2701,52 @@ private:
 
 public:
     bool requestsOpen() const { return m_requestsPanel && m_requestsPanel->isVisible(); }
+    // The short list people actually need, in the prompt box. Ctrl+? has the complete one.
+    void toggleHelpCard() {
+        if (m_helpCard && m_helpCard->isVisible()) { m_helpCard->hide(); return; }
+        if (!m_helpCard) {
+            m_helpCard = new QFrame(this);
+            m_helpCard->setObjectName(QStringLiteral("helpCard"));
+            m_helpCard->setAttribute(Qt::WA_StyledBackground);
+            auto *box = new QVBoxLayout(m_helpCard);
+            box->setContentsMargins(14, 10, 14, 10); box->setSpacing(4);
+            auto &keys = Keymap::instance();
+            auto row = [box](const QString &key, const QString &what) {
+                auto *line = new QHBoxLayout; line->setSpacing(8);
+                auto *chip = new QLabel(key); chip->setObjectName(QStringLiteral("keyCap"));
+                chip->setTextFormat(Qt::PlainText);
+                line->addWidget(chip);
+                auto *text = new QLabel(what); text->setObjectName(QStringLiteral("helpText"));
+                text->setTextFormat(Qt::PlainText);
+                line->addWidget(text, 1);
+                box->addLayout(line);
+            };
+            row(QStringLiteral("!"), QStringLiteral("run this line in the terminal"));
+            row(QStringLiteral("*"), QStringLiteral("send this line to the agent"));
+            row(QStringLiteral("/"), QStringLiteral("slash commands"));
+            row(QStringLiteral("@"), QStringLiteral("attach files and folders"));
+            row(keys.shortcutText(QStringLiteral("input.toggle")), QStringLiteral("switch terminal / agent"));
+            row(keys.shortcutText(QStringLiteral("palette.open")), QStringLiteral("actions palette"));
+            row(keys.shortcutText(QStringLiteral("agent.requests")).isEmpty() ? QStringLiteral("/tasks")
+                                                                             : keys.shortcutText(QStringLiteral("agent.requests")),
+                QStringLiteral("tasks in this session"));
+            row(QStringLiteral("Ctrl+Shift+O"), QStringLiteral("search past conversations"));
+            row(keys.shortcutText(QStringLiteral("control.human")), QStringLiteral("type into the terminal"));
+            row(QStringLiteral("Esc"), QStringLiteral("stop the agent or the program"));
+            row(keys.shortcutText(QStringLiteral("help.shortcuts")), QStringLiteral("show all shortcuts"));
+            auto *hide = new QLabel(QStringLiteral("?  to hide this"));
+            hide->setObjectName(QStringLiteral("helpFooter"));
+            box->addWidget(hide);
+        }
+        m_helpCard->adjustSize();
+        const QRect composer(m_composer->mapTo(this, QPoint(0, 0)), m_composer->size());
+        const int w = std::min(std::max(360, m_helpCard->sizeHint().width()), std::max(360, composer.width() - 24));
+        const int h = m_helpCard->sizeHint().height();
+        m_helpCard->setGeometry(composer.left() + 12, std::max(0, composer.top() - h - 6), w, h);
+        m_helpCard->show();
+        m_helpCard->raise();
+    }
+
     void toggleRequests() { if (requestsOpen()) closeRequests(); else openRequests(); }
 
     void openRequests() {
@@ -4105,6 +4153,15 @@ private:
             setPrefixMode(key->text() == QStringLiteral("!") ? QStringLiteral("shell") : QStringLiteral("agent"));
             return true;
         }
+        // Warp-style: "?" in an empty prompt box shows the main keys, "?" or Esc hides them again.
+        if (k == Qt::Key_Question && m_editor->toPlainText().isEmpty() && !(mods & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {
+            toggleHelpCard();
+            return true;
+        }
+        if (m_helpCard && m_helpCard->isVisible() && k == Qt::Key_Escape && mods == Qt::NoModifier) {
+            m_helpCard->hide();
+            return true;
+        }
         if (!m_prefixMode.isEmpty() && k == Qt::Key_Backspace && mods == Qt::NoModifier && m_editor->toPlainText().isEmpty()) {
             clearPrefixMode(true);
             return true;
@@ -5285,6 +5342,7 @@ private:
     // agent sessions UI
     QLabel *m_planChip = nullptr, *m_ctxLabel = nullptr;
     QToolButton *m_interruptButton = nullptr;
+    QFrame *m_helpCard = nullptr;
     QComboBox *m_effortBox = nullptr;
     QListWidget *m_slashList = nullptr;
     QListWidget *m_tabList = nullptr;   // Tab completion candidates
@@ -5555,6 +5613,8 @@ public:
         }
     }
     bool handleOpen(const QJsonObject &request);
+    // Notifications: go back to the pane that posted one, wherever it ended up.
+    void focusPane(const QString &token);
     // relay:// links launched by the desktop do not inherit RELAY_OPEN_SOCKET; relay-open reads
     // the most recent address from $XDG_RUNTIME_DIR/relay/open-socket (mode 0600) instead.
     static void publishSocketAddress(const QString &address) {
@@ -5619,22 +5679,290 @@ private:
     QJsonArray m_cascadeSnapshot;
 };
 
+// ----- window header (Relay draws its own title bar) ------------------------------------------
+// The window has no OS title bar: the tab row is the title bar, with the Relay icon on the left
+// and the bell, the actions button and minimize/maximize/close on the right. Dragging the empty
+// part of the row moves the window, a double-click maximizes it, and a few pixels of padding
+// around the window stay grabbable for resizing (see RelayWindow::edgesAt).
+//
+// "window/native_frame" (Actions › System title bar) gives the system decorations back for
+// desktops where they work better; it applies to windows opened after the change.
+
+// A header button. The glyphs are painted rather than typed: a text bell or gear lands in
+// whatever font the desktop happens to have (often a colour emoji), and these have to sit at
+// the same weight as the tab labels beside them.
+class ChromeButton final : public QToolButton {
+public:
+    enum class Glyph { Bell, Gear, Minimize, Maximize, Restore, Close };
+
+    explicit ChromeButton(Glyph glyph, QWidget *parent = nullptr) : QToolButton(parent), m_glyph(glyph) {
+        setObjectName(glyph == Glyph::Close ? QStringLiteral("windowCloseButton") : QStringLiteral("windowChromeButton"));
+        setAutoRaise(true);
+        setFocusPolicy(Qt::NoFocus);
+        setCursor(Qt::ArrowCursor);
+        setFixedSize(kSize, kSize);
+    }
+
+    void setGlyph(Glyph glyph) { if (m_glyph == glyph) return; m_glyph = glyph; update(); }
+    // Unseen notifications, drawn as a dot on the bell. 0 hides it.
+    void setBadge(int count) { if (m_badge == count) return; m_badge = count; update(); }
+
+    static constexpr int kSize = 26;
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        const bool hovered = underMouse() && isEnabled();
+        const bool closing = m_glyph == Glyph::Close;
+        if (hovered) {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(closing ? QColor(0xc0, 0x39, 0x2b) : relay::theme::SurfaceRaised);
+            painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 5, 5);
+        }
+        QColor ink = hovered ? (closing ? QColor(Qt::white) : relay::theme::Text) : relay::theme::TextMuted;
+        if (!isEnabled()) ink = relay::theme::TextMuted.darker(150);
+        painter.setPen(QPen(ink, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(Qt::NoBrush);
+        const QPointF centre(width() / 2.0, height() / 2.0);
+        switch (m_glyph) {
+        case Glyph::Bell: paintBell(painter, centre, ink); break;
+        case Glyph::Gear: paintGear(painter, centre); break;
+        case Glyph::Minimize: painter.drawLine(QPointF(centre.x() - 5, centre.y() + 3), QPointF(centre.x() + 5, centre.y() + 3)); break;
+        case Glyph::Maximize: painter.drawRect(QRectF(centre.x() - 4.5, centre.y() - 4.5, 9, 9)); break;
+        case Glyph::Restore:
+            painter.drawRect(QRectF(centre.x() - 5.5, centre.y() - 2.5, 8, 8));
+            painter.drawPolyline(QPolygonF({QPointF(centre.x() - 2.5, centre.y() - 5.5), QPointF(centre.x() + 5.5, centre.y() - 5.5),
+                                            QPointF(centre.x() + 5.5, centre.y() + 2.5)}));
+            break;
+        case Glyph::Close:
+            painter.drawLine(QPointF(centre.x() - 4.5, centre.y() - 4.5), QPointF(centre.x() + 4.5, centre.y() + 4.5));
+            painter.drawLine(QPointF(centre.x() + 4.5, centre.y() - 4.5), QPointF(centre.x() - 4.5, centre.y() + 4.5));
+            break;
+        }
+    }
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    void enterEvent(QEnterEvent *event) override
+#else
+    void enterEvent(QEvent *event) override
+#endif
+    { QToolButton::enterEvent(event); update(); }
+    void leaveEvent(QEvent *event) override { QToolButton::leaveEvent(event); update(); }
+
+private:
+    void paintBell(QPainter &painter, const QPointF &centre, const QColor &ink) const {
+        const qreal x = centre.x(), y = centre.y();
+        QPainterPath bell;
+        bell.moveTo(x - 5.5, y + 2.5);
+        bell.cubicTo(x - 4.2, y + 1.5, x - 4.0, y - 0.5, x - 4.0, y - 1.5);
+        bell.cubicTo(x - 4.0, y - 4.6, x - 2.2, y - 6.0, x, y - 6.0);
+        bell.cubicTo(x + 2.2, y - 6.0, x + 4.0, y - 4.6, x + 4.0, y - 1.5);
+        bell.cubicTo(x + 4.0, y - 0.5, x + 4.2, y + 1.5, x + 5.5, y + 2.5);
+        bell.closeSubpath();
+        painter.drawPath(bell);
+        painter.drawArc(QRectF(x - 2, y + 2.6, 4, 3.4), 200 * 16, 140 * 16);   // clapper
+        if (m_badge <= 0) return;
+        // Unread dot, top-right, over the bell's shoulder.
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(relay::theme::Accent);
+        const QRectF dot(width() - 11.0, 3.0, 8.0, 8.0);
+        painter.drawEllipse(dot);
+        if (m_badge > 1) {
+            QFont small = font();
+            small.setPixelSize(7);
+            small.setBold(true);
+            painter.setFont(small);
+            painter.setPen(relay::theme::AccentText);
+            painter.drawText(dot, Qt::AlignCenter, m_badge > 9 ? QStringLiteral("9+") : QString::number(m_badge));
+        }
+        Q_UNUSED(ink)
+    }
+
+    void paintGear(QPainter &painter, const QPointF &centre) const {
+        painter.drawEllipse(centre, 2.6, 2.6);
+        for (int step = 0; step < 8; ++step) {
+            const double angle = step * M_PI / 4.0;
+            const QPointF direction(std::cos(angle), std::sin(angle));
+            painter.drawLine(centre + direction * 4.4, centre + direction * 6.2);
+        }
+        painter.drawEllipse(centre, 4.4, 4.4);
+    }
+
+    Glyph m_glyph;
+    int m_badge = 0;
+};
+
+// The list behind the bell: newest first, one row per notification, click to go back to the pane
+// that posted it. Opening it marks everything as seen (that is what the badge counts).
+class NotificationsPopup final : public QFrame {
+public:
+    explicit NotificationsPopup(QWidget *parent) : QFrame(parent, Qt::Popup) {
+        setObjectName(QStringLiteral("notificationsPopup"));
+        setAttribute(Qt::WA_StyledBackground);
+        setFixedWidth(380);
+        auto *layout = new QVBoxLayout(this);
+        layout->setContentsMargins(10, 10, 10, 10);
+        layout->setSpacing(6);
+        auto *head = new QHBoxLayout;
+        head->setContentsMargins(2, 0, 2, 0);
+        auto *title = new QLabel(QStringLiteral("NOTIFICATIONS"));
+        title->setObjectName(QStringLiteral("paletteTitle"));
+        head->addWidget(title);
+        head->addStretch(1);
+        m_clear = new QToolButton;
+        m_clear->setObjectName(QStringLiteral("popupTextButton"));
+        m_clear->setText(QStringLiteral("Clear all"));
+        m_clear->setFocusPolicy(Qt::NoFocus);
+        connect(m_clear, &QToolButton::clicked, this, [] { relay::NotificationCenter::instance().clear(); });
+        head->addWidget(m_clear);
+        layout->addLayout(head);
+
+        m_scroll = new QScrollArea;
+        m_scroll->setObjectName(QStringLiteral("notificationsScroll"));
+        m_scroll->setWidgetResizable(true);
+        m_scroll->setFrameShape(QFrame::NoFrame);
+        m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        m_rows = new QWidget;
+        m_rowsLayout = new QVBoxLayout(m_rows);
+        m_rowsLayout->setContentsMargins(0, 0, 0, 0);
+        m_rowsLayout->setSpacing(4);
+        m_rowsLayout->addStretch(1);
+        m_scroll->setWidget(m_rows);
+        layout->addWidget(m_scroll, 1);
+
+        m_empty = new QLabel(QStringLiteral("Nothing yet.\nFinished agent turns, long commands, failures and\nprompts waiting for you show up here."));
+        m_empty->setObjectName(QStringLiteral("muted"));
+        m_empty->setAlignment(Qt::AlignCenter);
+        layout->addWidget(m_empty);
+
+        connect(&relay::NotificationCenter::instance(), &relay::NotificationCenter::changed, this, [this] { if (isVisible()) rebuild(); });
+    }
+
+    // Called with the pane token of the clicked notification, when it has one.
+    std::function<void(const QString &)> onOpenSource;
+
+    void popUpUnder(QWidget *anchor) {
+        rebuild();
+        const QPoint below = anchor->mapToGlobal(QPoint(anchor->width(), anchor->height() + 6));
+        QRect screen = anchor->screen() ? anchor->screen()->availableGeometry() : QRect(0, 0, 1280, 800);
+        int x = std::max(screen.left() + 8, below.x() - width());
+        x = std::min(x, screen.right() - width() - 8);
+        move(x, std::min(below.y(), screen.bottom() - height() - 8));
+        show();
+        relay::NotificationCenter::instance().markAllSeen();
+    }
+
+private:
+    void rebuild() {
+        for (QWidget *row : std::as_const(m_widgets)) row->deleteLater();
+        m_widgets.clear();
+        const auto entries = relay::NotificationCenter::instance().entries();
+        m_empty->setVisible(entries.isEmpty());
+        m_scroll->setVisible(!entries.isEmpty());
+        m_clear->setEnabled(!entries.isEmpty());
+        for (const relay::Notification &note : entries) m_widgets.append(addRow(note));
+        const int rows = std::min(6, int(entries.size()));
+        m_scroll->setFixedHeight(entries.isEmpty() ? 0 : std::max(64, rows * 56));
+        adjustSize();
+    }
+
+    QWidget *addRow(const relay::Notification &note) {
+        auto *row = new QFrame;
+        row->setObjectName(QStringLiteral("notificationRow"));
+        row->setAttribute(Qt::WA_StyledBackground);
+        row->setProperty("kind", note.kind);
+        row->setCursor(note.source.isEmpty() ? Qt::ArrowCursor : Qt::PointingHandCursor);
+        auto *layout = new QHBoxLayout(row);
+        layout->setContentsMargins(8, 6, 6, 6);
+        layout->setSpacing(8);
+        auto *dot = new QLabel(QStringLiteral("●"));
+        dot->setObjectName(QStringLiteral("notificationDot"));
+        dot->setProperty("kind", note.kind);
+        dot->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+        layout->addWidget(dot);
+        auto *text = new QVBoxLayout;
+        text->setContentsMargins(0, 0, 0, 0);
+        text->setSpacing(1);
+        auto *titleRow = new QHBoxLayout;
+        titleRow->setContentsMargins(0, 0, 0, 0);
+        auto *title = new QLabel(note.title);
+        title->setObjectName(QStringLiteral("notificationTitle"));
+        titleRow->addWidget(title, 1);
+        auto *when = new QLabel(relay::NotificationCenter::relativeTime(note.at));
+        when->setObjectName(QStringLiteral("notificationTime"));
+        titleRow->addWidget(when);
+        text->addLayout(titleRow);
+        if (!note.body.isEmpty()) {
+            auto *body = new QLabel(note.body.left(240));
+            body->setObjectName(QStringLiteral("notificationBody"));
+            body->setWordWrap(true);
+            text->addWidget(body);
+        }
+        layout->addLayout(text, 1);
+        auto *dismiss = new QToolButton;
+        dismiss->setObjectName(QStringLiteral("notificationDismiss"));
+        dismiss->setText(QStringLiteral("✕"));
+        dismiss->setFocusPolicy(Qt::NoFocus);
+        dismiss->setToolTip(QStringLiteral("Dismiss"));
+        const QString id = note.id;
+        connect(dismiss, &QToolButton::clicked, this, [id] { relay::NotificationCenter::instance().remove(id); });
+        layout->addWidget(dismiss, 0, Qt::AlignTop);
+        row->installEventFilter(this);
+        row->setProperty("relaySource", note.source);
+        m_rowsLayout->insertWidget(m_rowsLayout->count() - 1, row);
+        return row;
+    }
+
+protected:
+    bool eventFilter(QObject *object, QEvent *event) override {
+        if (event->type() == QEvent::MouseButtonRelease) {
+            const QString source = object->property("relaySource").toString();
+            if (!source.isEmpty() && onOpenSource) { hide(); onOpenSource(source); return true; }
+        }
+        return QFrame::eventFilter(object, event);
+    }
+    void keyPressEvent(QKeyEvent *event) override {
+        if (event->key() == Qt::Key_Escape) { hide(); return; }
+        QFrame::keyPressEvent(event);
+    }
+
+private:
+    QScrollArea *m_scroll = nullptr;
+    QWidget *m_rows = nullptr;
+    QVBoxLayout *m_rowsLayout = nullptr;
+    QLabel *m_empty = nullptr;
+    QToolButton *m_clear = nullptr;
+    QList<QWidget *> m_widgets;
+};
+
 class RelayWindow final : public QMainWindow {
 public:
     explicit RelayWindow(WindowManager *manager) : m_manager(manager) {
         setAttribute(Qt::WA_DeleteOnClose);
+        setObjectName(QStringLiteral("relayWindow"));
         setWindowTitle(QStringLiteral("Relay"));
         setMinimumSize(760, 520);
+        // No OS title bar: Relay draws its own in the tab row (see buildWindowChrome). The window
+        // keeps a few pixels of padding so its edges stay grabbable for resizing.
+        m_nativeFrame = nativeFrame();
+        if (!m_nativeFrame) {
+            setWindowFlag(Qt::FramelessWindowHint);
+            setAttribute(Qt::WA_Hover);
+            setMouseTracking(true);
+            applyFrameMargins();
+        }
         const QRect available = screen() ? screen()->availableGeometry() : QRect(0, 0, 1280, 860);
         resize(std::min(1320, available.width() * 9 / 10), std::min(860, available.height() * 9 / 10));
         // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+A).
-        Keymap::instance().listen(this, [this] { syncToolbar(); });
+        Keymap::instance().listen(this, [this] { syncToolbar(); syncChromeTooltips(); });
         m_tabs = new QTabWidget;
         m_tabs->setDocumentMode(true);
         m_tabs->setTabsClosable(true);
         m_tabs->setMovable(true);
         m_tabs->tabBar()->setExpanding(false);
         buildTabBarControls();
+        buildWindowChrome();
         auto *central = new QWidget;
         auto *row = new QHBoxLayout(central); row->setContentsMargins(0, 0, 0, 0); row->setSpacing(0);
         row->addWidget(m_tabs, 1);
@@ -5755,6 +6083,18 @@ public:
         return nullptr;
     }
 
+    // Bring a pane to the front: its tab, the focus and the window itself. Used when a
+    // notification is clicked.
+    void revealPane(Pane *pane) {
+        if (!pane || pane->window() != this) return;
+        if (QWidget *page = pageOf(pane)) m_tabs->setCurrentWidget(page);
+        setActiveLeaf(pane);
+        if (isMinimized()) showNormal();
+        raise();
+        activateWindow();
+        focusLeaf(pane);
+    }
+
     QWidget *activeLeaf() const { return m_activeLeaf; }
 
     // Open a folder in an explorer pane or a file in a preview pane, next to `anchor`. An existing
@@ -5830,6 +6170,7 @@ public:
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override {
+        if (headerDrag(object, event)) return true;
         if (event->type() == QEvent::Resize && object == centralWidget()) placeSidebar();
         if (event->type() == QEvent::Resize && isLeaf(qobject_cast<QWidget *>(object)))
             if (auto *chrome = chromeOf(static_cast<QWidget *>(object))) chrome->place();
@@ -5884,6 +6225,38 @@ protected:
     void moveEvent(QMoveEvent *event) override {
         QMainWindow::moveEvent(event);
         m_manager->scheduleSave();
+    }
+
+    // ----- frameless window: the padding around the window resizes it -----------------------------
+    void mousePressEvent(QMouseEvent *event) override {
+        const Qt::Edges edges = event->button() == Qt::LeftButton ? edgesAt(event->pos()) : Qt::Edges();
+        if (edges) { startWindowDrag(edges); event->accept(); return; }
+        QMainWindow::mousePressEvent(event);
+    }
+
+    void mouseMoveEvent(QMouseEvent *event) override {
+        if (!m_manualGeometry.isNull()) { continueManualDrag(event->globalPos()); event->accept(); return; }
+        if (!m_nativeFrame) {
+            const Qt::CursorShape shape = cursorForEdges(edgesAt(event->pos()));
+            if (shape == Qt::ArrowCursor) unsetCursor(); else setCursor(shape);
+        }
+        QMainWindow::mouseMoveEvent(event);
+    }
+
+    void mouseReleaseEvent(QMouseEvent *event) override {
+        endManualDrag();
+        QMainWindow::mouseReleaseEvent(event);
+    }
+
+    void leaveEvent(QEvent *event) override {
+        if (!m_nativeFrame && m_manualGeometry.isNull()) unsetCursor();
+        QMainWindow::leaveEvent(event);
+    }
+
+    // Maximizing hides the resize padding; the header button turns into "restore".
+    void changeEvent(QEvent *event) override {
+        QMainWindow::changeEvent(event);
+        if (event->type() == QEvent::WindowStateChange) updateChromeState();
     }
 
     void resizeEvent(QResizeEvent *event) override {
@@ -7411,6 +7784,194 @@ private:
         });
     }
 
+    // ----- window header: Relay icon, bell, actions, minimize/maximize/close -----------------------
+    // Both corner widgets sit on the tab row, so the tabs, the header buttons and the window
+    // controls share one line the way Warp does.
+    static bool nativeFrame() { return QSettings().value(QStringLiteral("window/native_frame"), false).toBool(); }
+
+    void buildWindowChrome() {
+        auto *left = new QWidget;
+        left->setObjectName(QStringLiteral("windowChromeLeft"));
+        auto *leftRow = new QHBoxLayout(left);
+        leftRow->setContentsMargins(10, 0, 8, 0);
+        leftRow->setSpacing(0);
+        auto *icon = new QLabel;
+        icon->setObjectName(QStringLiteral("windowIcon"));
+        const QIcon appIcon = QApplication::windowIcon();
+        if (appIcon.isNull()) icon->setText(QStringLiteral("◈"));
+        else icon->setPixmap(appIcon.pixmap(18, 18));
+        icon->setToolTip(QStringLiteral("Relay"));
+        icon->setAttribute(Qt::WA_TransparentForMouseEvents);   // the whole corner drags the window
+        leftRow->addWidget(icon);
+        left->installEventFilter(this);
+        m_tabs->setCornerWidget(left, Qt::TopLeftCorner);
+
+        auto *right = new QWidget;
+        right->setObjectName(QStringLiteral("windowChromeRight"));
+        auto *rightRow = new QHBoxLayout(right);
+        rightRow->setContentsMargins(6, 0, 6, 0);
+        rightRow->setSpacing(2);
+        m_bell = new ChromeButton(ChromeButton::Glyph::Bell);
+        connect(m_bell, &QToolButton::clicked, this, [this] { toggleNotifications(); });
+        rightRow->addWidget(m_bell);
+        m_settingsButton = new ChromeButton(ChromeButton::Glyph::Gear);
+        connect(m_settingsButton, &QToolButton::clicked, this, [this] {
+            togglePalette();
+            hint(QStringLiteral("chrome.settings"), relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("palette.open")), QStringLiteral("settings and every action")));
+        });
+        rightRow->addWidget(m_settingsButton);
+        if (!m_nativeFrame) {
+            rightRow->addSpacing(8);
+            m_minimize = new ChromeButton(ChromeButton::Glyph::Minimize);
+            m_minimize->setToolTip(QStringLiteral("Minimize"));
+            connect(m_minimize, &QToolButton::clicked, this, [this] { showMinimized(); });
+            rightRow->addWidget(m_minimize);
+            m_maximize = new ChromeButton(ChromeButton::Glyph::Maximize);
+            connect(m_maximize, &QToolButton::clicked, this, [this] { toggleMaximize(); });
+            rightRow->addWidget(m_maximize);
+            m_close = new ChromeButton(ChromeButton::Glyph::Close);
+            m_close->setToolTip(QStringLiteral("Close window"));
+            // close() asks first when panes are busy (closeEvent), exactly like the tab bar's last close.
+            connect(m_close, &QToolButton::clicked, this, [this] { close(); });
+            rightRow->addWidget(m_close);
+        }
+        right->installEventFilter(this);
+        m_tabs->setCornerWidget(right, Qt::TopRightCorner);
+
+        connect(&relay::NotificationCenter::instance(), &relay::NotificationCenter::changed, this, [this] { updateBell(); });
+        updateBell();
+        updateChromeState();
+        syncChromeTooltips();
+    }
+
+    void syncChromeTooltips() {
+        if (!m_settingsButton) return;
+        const QString keys = Keymap::instance().shortcutText(QStringLiteral("palette.open"));
+        m_settingsButton->setToolTip(keys.isEmpty() ? QStringLiteral("Settings and actions")
+                                                    : QStringLiteral("Settings and actions  (%1)").arg(keys));
+    }
+
+    void updateBell() {
+        if (!m_bell) return;
+        const int unseen = relay::NotificationCenter::instance().unseen();
+        const int total = relay::NotificationCenter::instance().count();
+        m_bell->setBadge(unseen);
+        m_bell->setToolTip(unseen > 0 ? QStringLiteral("Notifications · %1 new").arg(unseen)
+                                      : total > 0 ? QStringLiteral("Notifications · %1").arg(total)
+                                                  : QStringLiteral("Notifications"));
+    }
+
+    void toggleNotifications() {
+        if (!m_notifications) {
+            m_notifications = new NotificationsPopup(this);
+            m_notifications->onOpenSource = [this](const QString &token) { m_manager->focusPane(token); };
+        }
+        if (m_notifications->isVisible()) { m_notifications->hide(); return; }
+        m_notifications->popUpUnder(m_bell);
+        updateBell();
+    }
+
+    void toggleMaximize() {
+        if (isMaximized()) showNormal(); else showMaximized();
+        updateChromeState();
+    }
+
+    // Frameless windows have no resize border of their own, so the window keeps a few pixels of
+    // padding all round; edgesAt() turns a press there into a WM resize.
+    void applyFrameMargins() {
+        const int margin = (m_nativeFrame || isMaximized() || isFullScreen()) ? 0 : kFrameMargin;
+        setContentsMargins(margin, margin, margin, margin);
+    }
+
+    void updateChromeState() {
+        applyFrameMargins();
+        if (!m_maximize) return;
+        const bool maximized = isMaximized();
+        m_maximize->setGlyph(maximized ? ChromeButton::Glyph::Restore : ChromeButton::Glyph::Maximize);
+        m_maximize->setToolTip(maximized ? QStringLiteral("Restore") : QStringLiteral("Maximize"));
+    }
+
+    Qt::Edges edgesAt(const QPoint &pos) const {
+        if (m_nativeFrame || isMaximized() || isFullScreen()) return {};
+        const int grab = kFrameMargin + 2;
+        Qt::Edges edges;
+        if (pos.x() <= grab) edges |= Qt::LeftEdge;
+        if (pos.x() >= width() - grab) edges |= Qt::RightEdge;
+        if (pos.y() <= grab) edges |= Qt::TopEdge;
+        if (pos.y() >= height() - grab) edges |= Qt::BottomEdge;
+        return edges;
+    }
+
+    static Qt::CursorShape cursorForEdges(Qt::Edges edges) {
+        const bool left = edges & Qt::LeftEdge, right = edges & Qt::RightEdge;
+        const bool top = edges & Qt::TopEdge, bottom = edges & Qt::BottomEdge;
+        if ((left && top) || (right && bottom)) return Qt::SizeFDiagCursor;
+        if ((right && top) || (left && bottom)) return Qt::SizeBDiagCursor;
+        if (left || right) return Qt::SizeHorCursor;
+        if (top || bottom) return Qt::SizeVerCursor;
+        return Qt::ArrowCursor;
+    }
+
+    // Hand the drag to the window manager, so its snapping, tiling and edge magnetism still work.
+    // Should it refuse (older X11 setups), Relay moves or resizes the window itself.
+    bool startWindowDrag(Qt::Edges edges) {
+        QWindow *handle = windowHandle();
+        if (handle) {
+            if (!edges && handle->startSystemMove()) return true;
+            if (edges && handle->startSystemResize(edges)) return true;
+        }
+        m_manualEdges = edges;
+        m_manualFrom = QCursor::pos();
+        m_manualGeometry = geometry();
+        return false;
+    }
+
+    void continueManualDrag(const QPoint &global) {
+        if (m_manualGeometry.isNull()) return;
+        const QPoint delta = global - m_manualFrom;
+        if (!m_manualEdges) { move(m_manualGeometry.topLeft() + delta); return; }
+        QRect box = m_manualGeometry;
+        if (m_manualEdges & Qt::LeftEdge) box.setLeft(std::min(box.left() + delta.x(), box.right() - minimumWidth()));
+        if (m_manualEdges & Qt::RightEdge) box.setRight(std::max(box.right() + delta.x(), box.left() + minimumWidth()));
+        if (m_manualEdges & Qt::TopEdge) box.setTop(std::min(box.top() + delta.y(), box.bottom() - minimumHeight()));
+        if (m_manualEdges & Qt::BottomEdge) box.setBottom(std::max(box.bottom() + delta.y(), box.top() + minimumHeight()));
+        setGeometry(box);
+    }
+
+    void endManualDrag() { m_manualGeometry = QRect(); m_manualEdges = {}; }
+
+    // The empty part of the tab row is the title bar: dragging it moves the window, a
+    // double-click maximizes it. Presses on a tab, on + or on a header button are left alone.
+    bool headerDrag(QObject *object, QEvent *event) {
+        if (m_nativeFrame) return false;
+        const QEvent::Type type = event->type();
+        if (type != QEvent::MouseButtonPress && type != QEvent::MouseButtonDblClick
+            && type != QEvent::MouseMove && type != QEvent::MouseButtonRelease) return false;
+        auto *header = qobject_cast<QWidget *>(object);
+        if (!header || header->window() != this) return false;
+        const bool onTabBar = header == m_tabs->tabBar();
+        if (!onTabBar && header->objectName() != QLatin1String("windowChromeLeft")
+            && header->objectName() != QLatin1String("windowChromeRight")) return false;
+        auto *mouse = static_cast<QMouseEvent *>(event);
+        if (type == QEvent::MouseMove) {
+            if (m_manualGeometry.isNull()) return false;
+            continueManualDrag(mouse->globalPos());
+            return true;
+        }
+        if (type == QEvent::MouseButtonRelease) {
+            if (m_manualGeometry.isNull()) return false;
+            endManualDrag();
+            return true;
+        }
+        if (mouse->button() != Qt::LeftButton) return false;
+        if (onTabBar && m_tabs->tabBar()->tabAt(mouse->pos()) >= 0) return false;
+        if (onTabBar && m_newTabButton && m_newTabButton->geometry().contains(mouse->pos())) return false;
+        if (!onTabBar && header->childAt(mouse->pos())) return false;
+        if (type == QEvent::MouseButtonDblClick) { toggleMaximize(); return true; }
+        startWindowDrag({});
+        return true;
+    }
+
     void placeTabBarControls() {
         if (!m_newTabButton) return;
         QTabBar *bar = m_tabs->tabBar();
@@ -7828,6 +8389,14 @@ private:
     QPointer<QWidget> m_activeLeaf;
     QPointer<QWidget> m_hoverLeaf;
     QPointer<QToolButton> m_newTabButton;
+    // Window header (see buildWindowChrome). m_nativeFrame: this window kept the system title bar.
+    static constexpr int kFrameMargin = 5;
+    bool m_nativeFrame = false;
+    QPointer<ChromeButton> m_bell, m_settingsButton, m_minimize, m_maximize, m_close;
+    QPointer<NotificationsPopup> m_notifications;
+    Qt::Edges m_manualEdges;
+    QPoint m_manualFrom;
+    QRect m_manualGeometry;
     QPointer<QFrame> m_dropZone;
     bool m_confirmedClose = false, m_skipRemember = false;
 };
@@ -7986,6 +8555,17 @@ RelayWindow *WindowManager::newEmptyWindow(const QRect &geometry) {
 
 RelayWindow *WindowManager::newWindowAt(const QString &cwd) {
     return newWindow(QJsonArray{QJsonObject{{"pane", QJsonObject{{"cwd", cwd}, {"workspace", m_workspace}}}}});
+}
+
+void WindowManager::focusPane(const QString &token) {
+    m_windows.removeAll(nullptr);
+    if (token.isEmpty()) return;
+    for (RelayWindow *window : std::as_const(m_windows)) {
+        Pane *pane = window->findPaneByToken(token);
+        if (!pane) continue;
+        window->revealPane(pane);
+        return;
+    }
 }
 
 bool WindowManager::handleOpen(const QJsonObject &request) {
