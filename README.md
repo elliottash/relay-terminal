@@ -38,8 +38,10 @@ sudo apt install build-essential cmake ninja-build python3 libsecret-tools \
 `./scripts/build.sh -DRELAY_QT_MAJOR=5` (or `6`). KSyntaxHighlighting and Qt PDF are optional.
 `cmake --install build` installs to `~/.local` by default.
 
-Options: `--workspace PATH` sets the first terminal directory and the agent workspace.
-`--clean-shell` skips `~/.bashrc` for that session, for prompt plugins that conflict.
+Options: `--workspace PATH` sets the first terminal directory and the agent workspace (and, like
+`--fresh`, starts one new window instead of reopening the saved layout). `--fresh` ignores the
+saved window layout once. `--clean-shell` skips `~/.bashrc` for that session, for prompt plugins
+that conflict.
 
 ### Packages (coming)
 
@@ -178,6 +180,15 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
   `~/.config/relay/relay.md`. Change it later in Actions › Agent options › Instructions….
 - **AI suggestions (off by default).** Actions › Agent options: a suggested next command after a
   command finishes (→ or Tab accepts) and a suggested next prompt after an agent turn (Tab).
+- **Reopen where you left off.** Quit Relay and start it again: your windows come back with their
+  tabs, splits, sizes and screens, each pane in the directory it was in, on the same model and
+  agent settings, with its conversation reattached (the usual "Session loaded · N turn(s)" line;
+  a conversation that is no longer saved starts fresh with a note). Nothing is re-run and terminal
+  scrollback is not restored — the shells are new. The layout lives in
+  `~/.local/share/relay/state/windows.json` and is saved about a second after each change, so a
+  crash loses at most that. A window you close stays closed; quitting keeps what was open. Turn it
+  off with Actions › Reopen windows on start, skip it once with `relay --fresh`, or clear it with
+  Actions › Start a fresh window set.
 - **Windows, tabs and panes.** Each pane has its own shell, prompt, agent and conversation.
   Closed panes, tabs and windows restore in the same directories with new shells. Hovering a
   pane shows a button row: drag grip ⠿, split right, split down, move to a new tab, close. Drag

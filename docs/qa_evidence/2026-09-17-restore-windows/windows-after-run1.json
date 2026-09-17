@@ -1,0 +1,102 @@
+{
+    "saved": 1789671166,
+    "version": 1,
+    "windows": [
+        {
+            "current": 0,
+            "geometry": [
+                40,
+                30,
+                1100,
+                800
+            ],
+            "screen": "screen",
+            "tabs": [
+                {
+                    "children": [
+                        {
+                            "pane": {
+                                "agent_mode": "build",
+                                "agent_role": "main",
+                                "cwd": "/tmp/tmp.hi5MgwGy5B/alpha",
+                                "effort": "high",
+                                "engine": "relay",
+                                "input_mode": "auto",
+                                "model": "kimi-k3",
+                                "preset": "kimi",
+                                "session_id": "7076f98e9c404f64b84beca8ab8e7082",
+                                "workspace": "/tmp/tmp.hi5MgwGy5B/alpha"
+                            }
+                        },
+                        {
+                            "pane": {
+                                "agent_mode": "build",
+                                "agent_role": "fast",
+                                "cwd": "/tmp/tmp.hi5MgwGy5B/beta",
+                                "effort": "high",
+                                "engine": "relay",
+                                "input_mode": "auto",
+                                "model": "kimi-k2.7-code-highspeed",
+                                "preset": "kimi",
+                                "session_id": "c132b1cba10e4b87a85ae03548cc38f5",
+                                "workspace": "/tmp/tmp.hi5MgwGy5B/alpha"
+                            }
+                        }
+                    ],
+                    "sizes": [
+                        547,
+                        547
+                    ],
+                    "split": "h"
+                },
+                {
+                    "pane": {
+                        "agent_mode": "build",
+                        "agent_role": "fast",
+                        "cwd": "/tmp/tmp.hi5MgwGy5B/gamma",
+                        "effort": "high",
+                        "engine": "relay",
+                        "input_mode": "auto",
+                        "model": "kimi-k2.7-code-highspeed",
+                        "preset": "kimi",
+                        "session_id": "fcbc8202507a429b8e0f65fe3c9c630b",
+                        "workspace": "/tmp/tmp.hi5MgwGy5B/alpha"
+                    }
+                }
+            ],
+            "titles": [
+                "beta  ·  2",
+                "gamma"
+            ]
+        },
+        {
+            "current": 0,
+            "geometry": [
+                620,
+                260,
+                900,
+                640
+            ],
+            "screen": "screen",
+            "tabs": [
+                {
+                    "pane": {
+                        "agent_mode": "build",
+                        "agent_role": "main",
+                        "cwd": "/tmp/tmp.hi5MgwGy5B/beta",
+                        "effort": "high",
+                        "engine": "relay",
+                        "input_mode": "auto",
+                        "model": "kimi-k3",
+                        "preset": "kimi",
+                        "session_id": "10be55cc8c5348cabb6996c4c97db314",
+                        "workspace": "/tmp/tmp.hi5MgwGy5B/alpha"
+                    }
+                }
+            ],
+            "titles": [
+                "beta"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,11 @@
+$ ./broken-file.sh '{"version": 99, "windows": []}'
+relay: Saved window layout ignored: The saved window layout is version 99; this Relay writes version 1.
+This plugin does not support raise()
+--- state after:
+{
+
+$ ./broken-file.sh '{ not json at all'
+relay: Saved window layout ignored: unterminated object
+This plugin does not support raise()
+--- state after:
+{

@@ -13,6 +13,7 @@
 #include "RequestsPanel.h"
 #include "TerminalBackends.h"
 #include "TerminalBackend.h"
+#include "WindowState.h"   // saved window layout ("reopen where I left off")
 #include <iterator>
 #include <QAction>
 #include <QApplication>
@@ -79,6 +80,7 @@
 #include <QHeaderView>
 #include <QToolButton>
 #include <QTabBar>
+#include <QLockFile>
 #include <QTimer>
 #include <QToolBar>
 #include <QUuid>
@@ -296,6 +298,7 @@ private:
         add("pane.moveToNewTab", "pane", "Move pane to a new tab (keeps the shell and agent)", {});
         add("tab.moveToNewWindow", "tab", "Move tab to a new window (keeps its panes)", {});
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+W")});
+        add("windows.fresh", "window", "Start a fresh window set (forget the saved window layout)", {});
         add("palette.open", "palette", "Open the Relay actions palette", {QStringLiteral("Ctrl+Shift+A")});
         add("files.explorer", "pane", "Open this pane's folder in an explorer pane", {});
         add("files.open", "pane", "Open a file in a preview pane", {});
@@ -616,6 +619,24 @@ public:
     void sendShellInput(const QString &text) { if (m_backend) m_backend->sendText(text, false); }
     QList<QPair<QString, QString>> storedModels() const { return m_stored; }
     QString currentPreset() const { return m_currentPreset; }
+    QString model() const { return m_model; }
+    QString sessionId() const { return m_sessionId; }
+
+    // ----- saved window layout ("reopen where I left off", src/WindowState.h) ------------------
+    // Values a restored pane starts with, taken from the saved layout before its first `configure`.
+    // Nothing is re-run: the shell starts in the old directory and the conversation is reattached.
+    void initRestore(const QJsonObject &spec) {
+        const QString preset = spec.value(QStringLiteral("preset")).toString();
+        if (!preset.isEmpty()) m_restorePreset = preset;
+        const QString effort = spec.value(QStringLiteral("effort")).toString();
+        if (efforts().contains(effort)) m_effort = effort;
+        const QString agentMode = spec.value(QStringLiteral("agent_mode")).toString();
+        if (agentMode == QStringLiteral("plan") || agentMode == QStringLiteral("build")) m_agentMode = agentMode;
+        const QString input = spec.value(QStringLiteral("input_mode")).toString();
+        if (input == QStringLiteral("auto") || input == QStringLiteral("shell") || input == QStringLiteral("agent")) m_modeValue = input;
+        m_restoreSession = spec.value(QStringLiteral("session_id")).toString();
+        changed();
+    }
     void focusInput() { if (m_native) focusTerminal(); else m_editor->setFocus(Qt::OtherFocusReason); }
 
     void interruptShell() {
@@ -1315,6 +1336,7 @@ private:
             m_forkLoadPending = true;
             send({{"type", "load_state"}, {"state", state}});
         }
+        resumeRestoredSession();
         // First launch: offer to choose instruction files (once per installation).
         static bool offered = false;
         if (!offered && !QSettings().value(QStringLiteral("instructions/onboarded"), false).toBool()) {
@@ -1322,6 +1344,22 @@ private:
             m_onboarding = true;
             QTimer::singleShot(400, this, [this] { openInstructions(); });
         }
+    }
+
+    // Saved window layout: reattach the conversation this pane had when Relay was last quit.
+    // The worker replies with `state_loaded` (the "Session loaded: … · N turn(s)" line, plus the
+    // open-task count) and a recap; a session whose file is gone starts fresh with one note.
+    void resumeRestoredSession() {
+        if (m_restoreSession.isEmpty()) return;
+        const QString id = m_restoreSession;
+        m_restoreSession.clear();
+        if (m_sessionDir.isEmpty() || !QFileInfo::exists(m_sessionDir + '/' + id + QStringLiteral(".json"))) {
+            ensureLineStart();
+            printInline(QStringLiteral("Previous conversation is no longer saved · starting a new one\n"), Ink::Note);
+            return;
+        }
+        m_restoreRequest = QStringLiteral("restore-") + QString::number(++m_requestId);
+        send({{"type", "resume"}, {"session_id", id}, {"id", m_restoreRequest}});
     }
 
     // ----- routing assist: the model breaks ties the local rules cannot (protocol 11) ----------
@@ -1392,6 +1430,15 @@ private:
             }
             if (id.startsWith(QStringLiteral("turn-"))) {
                 status(QStringLiteral("Turn details: ") + event.value(QStringLiteral("text")).toString());
+                return true;
+            }
+            // Saved window layout: the conversation this pane was restored with could not be
+            // reopened (deleted, or written by another Relay). Start fresh with one line.
+            if (!id.isEmpty() && id == m_restoreRequest) {
+                m_restoreRequest.clear();
+                ensureLineStart();
+                printInline(QStringLiteral("Previous conversation could not be reopened (%1) · starting a new one\n")
+                                .arg(event.value(QStringLiteral("text")).toString()), Ink::Note);
                 return true;
             }
             return false;
@@ -2710,11 +2757,14 @@ private:
                 return;
             }
             if (!m_configured && !m_configuring) {
-                // Saved choice first, then Warp's default agent model, then the first stored key.
                 auto hasKey = [this](const QString &id) {
                     return std::any_of(m_stored.cbegin(), m_stored.cend(), [&](const auto &entry) { return entry.first == id; });
                 };
-                QString choice = QSettings().value(QStringLiteral("provider/preset")).toString();
+                // A restored pane keeps the model it had; otherwise the saved choice, then Warp's
+                // default agent model, then the first stored key.
+                QString choice = m_restorePreset;
+                m_restorePreset.clear();
+                if (!hasKey(choice)) choice = QSettings().value(QStringLiteral("provider/preset")).toString();
                 if (!hasKey(choice)) choice = event.value(QStringLiteral("warp_default")).toString();
                 if (!hasKey(choice)) choice = m_stored.first().first;
                 configurePreset(choice, false);
@@ -4678,6 +4728,8 @@ private:
     QString m_effort = QStringLiteral("high"), m_agentMode = QStringLiteral("build"), m_sessionId, m_sessionDir, m_forkTitle;
     QString m_aiGhost, m_aiGhostKind, m_suggestionId, m_savedPlaceholder;
     QJsonObject m_initialState;
+    // saved window layout: the preset and conversation this pane was restored with
+    QString m_restorePreset, m_restoreSession, m_restoreRequest;
     qint64 m_ctxUsed = 0, m_ctxWindow = 0, m_ctxLimit = 0;
     double m_ctxPercent = 0;
     bool m_ctxEstimated = false, m_compacting = false, m_contextNotePending = false;
@@ -4962,13 +5014,45 @@ public:
     }
     void restore(RelayWindow *requester);
     void forget(RelayWindow *window) { m_windows.removeAll(window); }
+
+    // ----- saved window layout: "reopen where I left off" (src/WindowState.h) -------------------
+    // Relay keeps one layout file per user and rewrites it, debounced, whenever the windows, tabs,
+    // panes, directories or models change, and once more when the last window goes away. A crash
+    // therefore loses at most the debounce window.
+    //
+    // Two Relays at once: the file has one owner at a time, held as a lock file for the life of the
+    // process. Only the owner restores on start and only the owner saves, so a second Relay opens a
+    // plain window and leaves the layout alone; if the owner quits, the next save by a still-running
+    // Relay takes the lock over and that instance's windows become the saved set from then on.
+    // Writes are atomic (temp file + rename, 0600), so the file is never seen half written.
+    static bool restoreEnabled() { return QSettings().value(QStringLiteral("windows/restore"), true).toBool(); }
+    void setUpLayoutSaving();
+    bool ownsLayout();
+    void scheduleSave();
+    void saveLayoutNow();
+    void noteWindowClosing();
+    int restoreSavedLayout();                 // windows reopened, 0 when there was nothing to reopen
+    void forgetSavedLayout(bool suspend);     // palette "Start a fresh window set" / setting turned off
+    void announceRestore();                   // the one status line about what did or did not reopen
+
 private:
+    QJsonArray captureWindows();
+    void writeWindows(const QJsonArray &windows);
+    void settleWindowClose();
+
     QString m_workspace;
     bool m_cleanShell = false;
     QList<QPointer<RelayWindow>> m_windows;
     QList<ClosedItem> m_closed;
     QTemporaryDir m_socketDir{QDir::tempPath() + QStringLiteral("/relay-open-XXXXXX")};
     QLocalServer m_server;
+    // saved window layout
+    QObject m_context;                        // owns the debounce timer and queued callbacks
+    QTimer m_saveTimer{&m_context};
+    QString m_statePath, m_restoreNote;
+    std::unique_ptr<QLockFile> m_stateLock;
+    bool m_owner = false, m_saveSuspended = false, m_cascadeActive = false;
+    QJsonArray m_cascadeSnapshot;
 };
 
 class RelayWindow final : public QMainWindow {
@@ -5060,6 +5144,29 @@ public:
         QJsonArray tabs;
         for (int i = 0; i < m_tabs->count(); ++i) tabs.append(serializeTab(i));
         return tabs;
+    }
+
+    // Saved window layout: tabs that hold nothing restorable (a lone subagent transcript) are
+    // left out, so the saved order matches the titles beside it.
+    QJsonArray restorableTabs(QStringList *titles, int *current) const {
+        QJsonArray tabs;
+        if (current) *current = 0;
+        for (int i = 0; i < m_tabs->count(); ++i) {
+            const QJsonObject node = serializeTab(i);
+            if (node.isEmpty()) continue;
+            if (current && i <= m_tabs->currentIndex()) *current = int(tabs.size());
+            tabs.append(node);
+            if (titles) titles->append(withoutMnemonic(m_tabs->tabText(i)));
+        }
+        return tabs;
+    }
+    int tabCount() const { return m_tabs->count(); }
+
+    // KDE's KAcceleratorManager adds "&" accelerators to tab texts; the saved titles are only read
+    // by people and tools, so they are stored the way the tab is shown.
+    static QString withoutMnemonic(QString text) {
+        return text.replace(QStringLiteral("&&"), QStringLiteral("\x01")).remove(QLatin1Char('&'))
+                   .replace(QStringLiteral("\x01"), QStringLiteral("&"));
     }
 
     QString activeCwd() const {
@@ -5205,6 +5312,17 @@ protected:
         return true;
     }
 
+    // Saved window layout: geometry changes are saved like any other layout change (debounced).
+    void moveEvent(QMoveEvent *event) override {
+        QMainWindow::moveEvent(event);
+        m_manager->scheduleSave();
+    }
+
+    void resizeEvent(QResizeEvent *event) override {
+        QMainWindow::resizeEvent(event);
+        m_manager->scheduleSave();
+    }
+
     void closeEvent(QCloseEvent *event) override {
         if (!m_confirmedClose) {
             const auto panes = allPanes();
@@ -5214,6 +5332,9 @@ protected:
             }
         }
         rememberWindow();
+        // Saved window layout: snapshot the whole set before this window leaves it, so quitting
+        // (every window closes at once) saves them all while closing one of several drops it.
+        m_manager->noteWindowClosing();
         m_manager->forget(this);
         event->accept();
     }
@@ -5303,12 +5424,24 @@ private:
         if (m_active) m_active->toast(text, 5000); else statusBar()->showMessage(text, 6000);
     }
 
+    // Saved window layout: forget it and stop saving for the rest of this session, so the next
+    // start opens one new window. The windows on screen are left alone.
+    void startFreshWindowSet() {
+        m_manager->forgetSavedLayout(true);
+        statusBar()->showMessage(QStringLiteral("Saved window layout cleared. This session is no longer saved; the next start opens one fresh window."), 9000);
+        const QString key = Keymap::instance().shortcutText(QStringLiteral("windows.fresh"));
+        hint(QStringLiteral("windows.fresh.palette"),
+             key.isEmpty() ? QStringLiteral("Next time: start Relay with --fresh to skip the saved layout once")
+                           : relay::ShortcutHints::nextTime(key, QStringLiteral("a fresh window set")));
+    }
+
     // ----- actions ----------------------------------------------------------------------------
     void runAction(const QString &id) {
         Pane *pane = m_active;
         if (id == QStringLiteral("window.new")) m_manager->newWindowAt(activeCwd());
         else if (id == QStringLiteral("window.next")) m_manager->cycle(this, 1);
         else if (id == QStringLiteral("window.previous")) m_manager->cycle(this, -1);
+        else if (id == QStringLiteral("windows.fresh")) startFreshWindowSet();
         else if (id == QStringLiteral("tab.new")) addTab(paneNode(activeCwd()), m_tabs->currentIndex() + 1);
         else if (id == QStringLiteral("tab.next")) cycleTab(1);
         else if (id == QStringLiteral("tab.previous")) cycleTab(-1);
@@ -5940,6 +6073,28 @@ private:
         items << actionItem(panes, QStringLiteral("Move pane up"), QString(), QStringLiteral("pane.moveUp"));
         items << actionItem(panes, QStringLiteral("Move pane down"), QString(), QStringLiteral("pane.moveDown"));
         items << actionItem(panes, QStringLiteral("Restore closed"), QStringLiteral("Last closed pane, tab or window"), QStringLiteral("closed.restore"));
+        {
+            // Saved window layout ("reopen where I left off"). The toggle only decides whether the
+            // layout is kept; Ctrl+Shift+W (restore last closed) works either way.
+            PaletteItem reopen; reopen.key = QStringLiteral("option:windows/restore"); reopen.section = panes;
+            const bool on = WindowManager::restoreEnabled();
+            reopen.label = QStringLiteral("Reopen windows on start");
+            reopen.detail = (on ? QStringLiteral("On · ") : QStringLiteral("Off · "))
+                + QStringLiteral("windows, tabs, panes, directories and conversations come back");
+            reopen.aliases = QStringLiteral("session persist startup warp layout remember where you left off");
+            reopen.checked = on; reopen.stayOpen = true;
+            reopen.run = [this, on] {
+                QSettings().setValue(QStringLiteral("windows/restore"), !on);
+                if (on) m_manager->forgetSavedLayout(false);   // turned off: drop what was saved
+                else m_manager->scheduleSave();
+                statusBar()->showMessage(on ? QStringLiteral("Relay will open one new window on start.")
+                                            : QStringLiteral("Relay will reopen this window set on start."), 6000);
+            };
+            items << reopen;
+            items << actionItem(panes, QStringLiteral("Start a fresh window set"),
+                                QStringLiteral("Forget the saved layout; the next start opens one new window"),
+                                QStringLiteral("windows.fresh"));
+        }
         items << actionItem(panes, QStringLiteral("Next tab"), QString(), QStringLiteral("tab.next"));
         items << actionItem(panes, QStringLiteral("Previous tab"), QString(), QStringLiteral("tab.previous"));
 
@@ -6042,6 +6197,7 @@ private:
             {QStringLiteral("native"), QStringLiteral("raw direct typing keyboard terminal control")},
             {QStringLiteral("interrupt"), QStringLiteral("ctrl+c kill stop signal")},
             {QStringLiteral("restore"), QStringLiteral("reopen undo close closed")},
+            {QStringLiteral("fresh window set"), QStringLiteral("forget saved layout startup session persist reopen")},
             {QStringLiteral("keyboard shortcuts"), QStringLiteral("keymap keybindings hotkeys edit reload")},
             {QStringLiteral("routing"), QStringLiteral("detect classify guess terminal agent")},
         };
@@ -6408,10 +6564,11 @@ private:
     }
 
     Pane *createPane(const QJsonObject &spec) {
-        QString cwd = spec.value(QStringLiteral("cwd")).toString();
-        if (!QFileInfo(cwd).isDir()) cwd = m_manager->workspace();
-        QString workspace = spec.value(QStringLiteral("workspace")).toString();
-        if (!QFileInfo(workspace).isDir()) workspace = m_manager->workspace();
+        // A directory that no longer exists falls back to the pane's workspace, then to this
+        // window's workspace, then to $HOME (src/WindowState.h).
+        const QString fallback = relay::windowstate::resolveDirectory(m_manager->workspace(), QString(), QDir::homePath());
+        const QString workspace = relay::windowstate::resolveDirectory(spec.value(QStringLiteral("workspace")).toString(), fallback, fallback);
+        const QString cwd = relay::windowstate::resolveDirectory(spec.value(QStringLiteral("cwd")).toString(), workspace, workspace);
         // Per-pane terminal engine: the spec (palette action or restored session), else the
         // process default from --engine / RELAY_ENGINE.
         relay::EngineKind engine = relay::defaultEngineKind();
@@ -6422,6 +6579,8 @@ private:
         const QString savedRole = spec.value(QStringLiteral("agent_role")).toString();
         if (!savedRole.isEmpty()) pane->initAgentRole(savedRole);
         else if (Pane::newPanesUseFastAgent() && !allPanes().isEmpty()) pane->initAgentRole(QStringLiteral("fast"));
+        // Saved window layout: model/effort/mode and the conversation to reattach.
+        pane->initRestore(spec);
         QPointer<Pane> guard(pane);
         // Callbacks find the pane's current window, so panes and tabs can move between windows.
         pane->onStatus = [guard](const QString &text) { if (auto *w = windowOf(guard); w && guard == w->m_active) w->statusBar()->showMessage(text); };
@@ -6467,19 +6626,33 @@ private:
         return createPane(node.value(QStringLiteral("pane")).toObject());
     }
 
-    static QSplitter *newSplitter(Qt::Orientation orientation) {
+    QSplitter *newSplitter(Qt::Orientation orientation) {
         auto *splitter = new QSplitter(orientation);
         splitter->setChildrenCollapsible(false);
         splitter->setHandleWidth(3);
+        // Saved window layout: dragging a divider changes the sizes that come back on restart.
+        connect(splitter, &QSplitter::splitterMoved, this, [this](int, int) { m_manager->scheduleSave(); });
         return splitter;
     }
 
     QJsonObject serializeNode(QWidget *widget) const {
-        if (auto *pane = dynamic_cast<Pane *>(widget))
-            return {{"pane", QJsonObject{{"cwd", pane->cwd()}, {"workspace", pane->workspace()},
-                                        {"engine", relay::engineKindName(pane->engine())},
-                                        {"engine_core", pane->engineCore()},
-                                        {"agent_role", pane->agentRole()}}}};
+        if (auto *pane = dynamic_cast<Pane *>(widget)) {
+            // One node shape for both users: "restore last closed" (Ctrl+Shift+W) and the saved
+            // window layout (src/WindowState.h). Everything a pane needs to come back lives here.
+            QJsonObject leaf{{"cwd", pane->cwd()}, {"workspace", pane->workspace()},
+                             {"engine", relay::engineKindName(pane->engine())},
+                             {"agent_role", pane->agentRole()},
+                             {"agent_mode", pane->agentMode()},
+                             {"input_mode", pane->mode()},
+                             {"effort", pane->effort()}};
+            // An empty core means "whatever the process default is"; storing it would pin the empty
+            // string and defeat --engine-core on the next start.
+            if (!pane->engineCore().isEmpty()) leaf.insert(QStringLiteral("engine_core"), pane->engineCore());
+            if (!pane->currentPreset().isEmpty()) leaf.insert(QStringLiteral("preset"), pane->currentPreset());
+            if (!pane->model().isEmpty()) leaf.insert(QStringLiteral("model"), pane->model());
+            if (!pane->sessionId().isEmpty()) leaf.insert(QStringLiteral("session_id"), pane->sessionId());
+            return {{"pane", leaf}};
+        }
         if (auto *tool = dynamic_cast<ToolPane *>(widget)) return tool->node();
         if (auto *splitter = dynamic_cast<QSplitter *>(widget)) {
             QJsonArray children, sizes;
@@ -6549,6 +6722,9 @@ private:
         QString where = m_activeLeaf ? leafCwd(m_activeLeaf) : QString();
         if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data())) where = tool->path();
         setWindowTitle(where.isEmpty() ? QStringLiteral("Relay") : QStringLiteral("Relay — ") + where);
+        // Saved window layout: this runs after every split, close, tab change, directory change
+        // and model change, so it is the one place the debounced save hangs off.
+        m_manager->scheduleSave();
     }
 
     void cycleTab(int delta) {
@@ -7066,6 +7242,135 @@ private:
     bool m_confirmedClose = false, m_skipRemember = false;
 };
 
+// ----- saved window layout: "reopen where I left off" ----------------------------------------
+// See the block comment on WindowManager. The file format and the pure rules live in
+// src/WindowState.h; everything below walks the live windows.
+
+void WindowManager::setUpLayoutSaving() {
+    m_statePath = relay::windowstate::defaultPath();
+    const QString lockPath = relay::windowstate::defaultLockPath();
+    if (!lockPath.isEmpty()) {
+        QDir().mkpath(QFileInfo(lockPath).absolutePath());
+        m_stateLock = std::make_unique<QLockFile>(lockPath);
+        // Never steal a lock because it is old; QLockFile still clears one left by a dead process.
+        m_stateLock->setStaleLockTime(0);
+    }
+    m_saveTimer.setSingleShot(true);
+    m_saveTimer.setInterval(1000);   // a crash loses at most this much
+    QObject::connect(&m_saveTimer, &QTimer::timeout, &m_context, [this] { saveLayoutNow(); });
+}
+
+bool WindowManager::ownsLayout() {
+    if (m_owner) return true;
+    if (!m_stateLock) return false;          // no lock file: fall back to last writer wins
+    m_owner = m_stateLock->tryLock(0);
+    return m_owner;
+}
+
+void WindowManager::scheduleSave() {
+    if (m_saveSuspended || !restoreEnabled() || m_statePath.isEmpty()) return;
+    m_saveTimer.start();
+}
+
+QJsonArray WindowManager::captureWindows() {
+    m_windows.removeAll(nullptr);
+    QJsonArray windows;
+    for (RelayWindow *window : std::as_const(m_windows)) {
+        if (!window || window->tabCount() == 0) continue;
+        QStringList titles;
+        int current = 0;
+        const QJsonArray tabs = window->restorableTabs(&titles, &current);
+        if (tabs.isEmpty()) continue;
+        const QScreen *screen = window->screen();
+        windows.append(relay::windowstate::windowRecord(window->geometry(), screen ? screen->name() : QString(),
+                                                        tabs, current, titles));
+    }
+    return windows;
+}
+
+void WindowManager::writeWindows(const QJsonArray &windows) {
+    m_saveTimer.stop();
+    // An empty set is never written: it would mean "open nothing next time", and quitting is not
+    // a request to forget the layout. "Start a fresh window set" and --fresh are.
+    if (windows.isEmpty() || m_saveSuspended || !restoreEnabled() || m_statePath.isEmpty()) return;
+    if (!ownsLayout() && m_stateLock) return;   // another Relay owns the file
+    QString error;
+    if (!relay::windowstate::write(m_statePath, relay::windowstate::document(windows), &error))
+        fprintf(stderr, "relay: could not save the window layout: %s\n", qPrintable(error));
+}
+
+void WindowManager::saveLayoutNow() { writeWindows(captureWindows()); }
+
+void WindowManager::noteWindowClosing() {
+    if (m_cascadeActive) return;
+    // Taken while the closing window is still in the list: if every window goes (a quit), this is
+    // the set that comes back; if others survive, the settled snapshot below wins instead.
+    m_cascadeActive = true;
+    m_cascadeSnapshot = captureWindows();
+    QTimer::singleShot(0, &m_context, [this] { settleWindowClose(); });
+}
+
+void WindowManager::settleWindowClose() {
+    if (!m_cascadeActive) return;
+    m_cascadeActive = false;
+    m_windows.removeAll(nullptr);
+    if (m_windows.isEmpty()) writeWindows(m_cascadeSnapshot);   // quit: keep what was open
+    else saveLayoutNow();                                       // one window closed: drop it
+    m_cascadeSnapshot = QJsonArray();
+}
+
+int WindowManager::restoreSavedLayout() {
+    if (!restoreEnabled() || m_statePath.isEmpty()) return 0;
+    if (m_stateLock && !ownsLayout()) {
+        m_restoreNote = QStringLiteral("Another Relay is running; this window set is not saved.");
+        return 0;
+    }
+    QString error;
+    const QJsonObject state = relay::windowstate::read(m_statePath, &error);
+    if (!error.isEmpty()) {
+        m_restoreNote = QStringLiteral("Saved window layout ignored: ") + error;
+        fprintf(stderr, "relay: %s\n", qPrintable(m_restoreNote));
+        return 0;
+    }
+    const QJsonArray windows = relay::windowstate::usableWindows(state);
+    if (windows.isEmpty()) return 0;
+    QList<relay::windowstate::Screen> screens;
+    for (const QScreen *screen : QGuiApplication::screens()) screens.append({screen->name(), screen->availableGeometry()});
+    // Wayland clients cannot place their own windows; the compositor decides, so only the size is
+    // worth asking for and even that may be ignored.
+    const bool wayland = QGuiApplication::platformName().startsWith(QStringLiteral("wayland"), Qt::CaseInsensitive);
+    int opened = 0;
+    for (const auto &value : windows) {
+        const QJsonObject record = value.toObject();
+        QRect geometry = relay::windowstate::clampToScreens(relay::windowstate::geometryOf(record),
+                                                            relay::windowstate::screenOf(record), screens);
+        RelayWindow *window = newWindow(relay::windowstate::tabsOf(record), relay::windowstate::currentOf(record),
+                                        wayland ? QRect() : geometry);
+        if (!window) continue;
+        ++opened;
+        if (wayland && geometry.isValid()) window->resize(geometry.size());
+    }
+    if (opened > 0)
+        m_restoreNote = QStringLiteral("Reopened %1 window(s) where you left off. Actions › Start a fresh window set, or relay --fresh.")
+                            .arg(opened);
+    return opened;
+}
+
+// One status line after a restore, so the reopened set never looks like a stuck old window.
+void WindowManager::announceRestore() {
+    m_windows.removeAll(nullptr);
+    if (m_restoreNote.isEmpty() || m_windows.isEmpty() || !m_windows.first()) return;
+    QPointer<RelayWindow> window = m_windows.first();
+    const QString note = m_restoreNote;
+    QTimer::singleShot(1200, &m_context, [window, note] { if (window) window->statusBar()->showMessage(note, 9000); });
+}
+
+void WindowManager::forgetSavedLayout(bool suspend) {
+    m_saveTimer.stop();
+    m_saveSuspended = suspend;
+    if (!m_statePath.isEmpty()) QFile::remove(m_statePath);
+}
+
 RelayWindow *WindowManager::newWindow(const QJsonArray &tabs, int current, const QRect &geometry) {
     auto *window = new RelayWindow(this);
     relay::theme::polishWindow(window);
@@ -7226,7 +7531,10 @@ int main(int argc, char **argv) {
     QCommandLineOption clean(QStringLiteral("clean-shell"), QStringLiteral("Do not source ~/.bashrc; useful for incompatible DEBUG/preexec prompt hooks."));
     QCommandLineOption engine(QStringLiteral("engine"), QStringLiteral("Terminal engine for new panes: konsole (default) or relay. Also RELAY_ENGINE."), QStringLiteral("name"));
     QCommandLineOption engineCore(QStringLiteral("engine-core"), QStringLiteral("Emulator core of Relay-engine panes: ghostty or libvterm. Also RELAY_ENGINE_CORE."), QStringLiteral("name"));
-    parser.addOption(workspace); parser.addOption(clean); parser.addOption(engine); parser.addOption(engineCore); parser.process(app);
+    // Saved window layout: --fresh ignores it this once (the file itself is kept).
+    QCommandLineOption fresh(QStringLiteral("fresh"), QStringLiteral("Start with one new window instead of reopening the saved window layout."));
+    parser.addOption(workspace); parser.addOption(clean); parser.addOption(engine); parser.addOption(engineCore);
+    parser.addOption(fresh); parser.process(app);
     // Per-pane terminal engine (docs/ENGINE.md); the palette can still pick the other one.
     QString engineWarning;
     relay::setDefaultEngineKind(relay::resolveEngineKind(parser.value(engine), qEnvironmentVariable("RELAY_ENGINE"), &engineWarning));
@@ -7241,8 +7549,17 @@ int main(int argc, char **argv) {
         qputenv("RELAY_OPEN_HELPER", (scripts + QStringLiteral("/relay-open")).toUtf8());
         qputenv("PATH", (scripts + ':' + qEnvironmentVariable("PATH")).toUtf8());
         WindowManager manager(path, parser.isSet(clean));
+        manager.setUpLayoutSaving();
+        // Quit without closing the windows (Ctrl+Q, session logout, SIGTERM through Qt) still
+        // saves; closing them goes through RelayWindow::closeEvent instead.
+        QObject::connect(&app, &QCoreApplication::aboutToQuit, &app, [&manager] { manager.saveLayoutNow(); });
         QTimer::singleShot(1500, &app, [] { registerUrlHandler(); });
-        if (!manager.newWindowAt(path)) return 1;
+        // "Reopen where I left off": on by default, unless --fresh or an explicit --workspace asks
+        // for a new window. A fresh profile, an unreadable file or a second Relay opens one window.
+        const bool startFresh = parser.isSet(fresh) || parser.isSet(workspace);
+        const int reopened = startFresh ? 0 : manager.restoreSavedLayout();
+        if (reopened == 0 && !manager.newWindowAt(path)) return 1;
+        manager.announceRestore();   // also explains a layout that was deliberately not reopened
         return app.exec();
     } catch (const std::exception &error) {
         QMessageBox::critical(nullptr, QStringLiteral("Relay could not start"), QString::fromUtf8(error.what()));
