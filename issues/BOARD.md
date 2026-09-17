@@ -28,7 +28,6 @@
 | `#JRWQ` | [The pane header is an agent-written summary of the session](features/2026-09-17-pane-title-summary.md) | ready |  |  |  |
 | `#78BN` | [One key for a new pane, with an arrow to choose the side](features/2026-09-17-new-pane-direction-by-arrow.md) | ready |  |  |  |
 | `#X2F1` | [Bring the useful Konsole context-menu items to the engine panes](features/2026-09-17-port-konsole-context-menus.md) | ready |  |  |  |
-| `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/2026-09-17-agent-sessions-planning-subagents.md) | in-progress | Claude Opus 5 (orchestrating) with subagents, 2026-09-17 |  |  |
 | `#YZTK` | [Clickable file and folder paths open Relay panes](features/2026-09-17-clickable-paths.md) | in-progress |  |  |  |
 | `#NY7Z` | [Voice transcription mode (microphone button, hold Right Alt)](features/needs_qa_llm/2026-09-17-voice-transcription.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
 | `#BPK3` | [Show agent output live while a program owns the terminal](features/needs_qa_llm/2026-09-17-agent-output-while-program-runs.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
@@ -78,6 +77,7 @@
 | `#QVVA` | [Thinking stream, "✦ thought for N s", "✦ N tool calls" links and the relay:// handler](features/needs_qa_llm/2026-09-17-thinking-and-tool-call-summaries.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17 |  |  |
 | `#80FZ` | [Windows, tabs and panes with Chrome-style shortcuts](features/needs_qa_llm/2026-09-17-windows-tabs-panes.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
 | `#5FY5` | [Ctrl+Shift alternates for the core shortcuts](features/needs_qa_llm/2026-09-17-in-app-shortcut-alternates.md) | needs-qa-llm |  |  |  |
+| `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | Claude Opus 5 (orchestrating) with subagents, 2026-09-17 |  |  |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | Claude Opus 5 research subagent, 2026-09-16 |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | implemented by Claude Opus 5 (Claude Code session), 2026-09-16 |  |  |
 

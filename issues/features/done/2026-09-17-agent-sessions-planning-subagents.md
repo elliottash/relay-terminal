@@ -1,7 +1,7 @@
 ---
 id: KJ44
 type: work
-status: in-progress
+status: done
 component: [agent, worker, gui]
 milestone: desktop-alpha
 workstream: agent
@@ -63,3 +63,30 @@ Workstreams: GUI F1 (hints, prefixes, thinking/tool UI, routing assist UI, skill
 22. **Rewind split:** `rewind-chat` (default; never changes code) and `rewind-code` as separate options (GUI F1).
 23. **MVP scope:** delegate/take over, clickable paths, keyboard jump to links, portable engine + screen-text input detection, website and beta, voice transcription (recorded in `docs/ROADMAP.md`).
 24. **Scratchpad → board ("Switchboard" candidate name):** Ctrl+Shift+S opens it as a pane; Trello-like movable cards, each card like an issue and a thread with the agent; referable from the terminal thread; tabs with defaults (design, bugs, features, marketing, planning, deferred, done); kept in git for collaborators with a Markdown representation usable without Relay; Relay detects non-compliant issues/notes and converts them; the agent uses it autonomously (iterate with QA). Design v2: `docs/SWITCHBOARD-DESIGN.md` (pending).
+
+## Closed 2026-09-17: where each decision landed
+
+This card recorded the owner's decisions before the work was split; nothing is built against it directly.
+Every workstream shipped under its own card, and those hold the implementer evidence and QA checklists.
+
+| Decisions | Card |
+|---|---|
+| 1 plan mode, 3 compaction threshold, 5–9 sessions/rewind/fork/recaps, instructions scan | `2026-09-17-backend-sessions.md` |
+| 2 instruction files, onboarding | `2026-09-17-onboarding-instructions.md` |
+| 4 one combined queue, ordering, steering | `2026-09-17-agent-queue-steering-and-editing.md`, `2026-09-17-steering-running-agent-turn.md` |
+| 10–11 subagents, automatic-turn limit | `2026-09-17-backend-subagents.md`, `2026-09-17-subagents-ui.md` |
+| 12 shortcut hints | `2026-09-17-shortcut-hints.md` |
+| 13 `!` and `*` prefixes | `2026-09-17-prefix-modes.md` |
+| 14 thinking and tool-call visibility | `2026-09-17-thinking-and-tool-call-summaries.md` |
+| 15 routing assist | `2026-09-17-routing-assist-ui.md`, `2026-09-17-routing-assist-thinking-skills-backend.md`, `2026-09-17-router-english-commands.md` |
+| 16 skills | `2026-09-17-skills-dialog.md` |
+| 17, 24 scratchpad → Switchboard | `docs/SWITCHBOARD-DESIGN.md`, `2026-09-17-switchboard-phase0.md`, phase 1 in flight |
+| 18 pane and tab buttons, drag, moves | `2026-09-17-pane-tab-buttons-and-moving.md`, `2026-09-17-pane-move-keys-and-drag-broken.md` |
+| 19 palette aliases | `2026-09-17-palette-search-aliases.md` |
+| 20 voice transcription | `2026-09-17-voice-transcription.md` |
+| 21 memory and multiple requests | `docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md`, `2026-09-17-request-ledger-todos-completion.md`, `2026-09-17-requests-ui.md` |
+| 22 rewind split | `2026-09-17-agent-sessions-ui.md` |
+| 23 MVP scope | `docs/ROADMAP.md`; the MVP cards are `#YZTK`, `#GWXM`, `#C1HH`, `#YR21`, `#P4GP`, `#NY7Z` |
+
+The three research documents it was waiting on all exist: `docs/SCRATCHPAD-DESIGN.md`,
+`docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md`, `docs/SWITCHBOARD-DESIGN.md`.
