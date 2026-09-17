@@ -32,6 +32,8 @@ typedef struct
   unsigned int protected_cell : 1;
   unsigned int dwl            : 1; /* on a DECDWL or DECDHL line */
   unsigned int dhl            : 2; /* on a DECDHL line (1=top 2=bottom) */
+
+  unsigned int link           : 24; /* RELAY PATCH: host hyperlink id */
 } ScreenPen;
 
 /* Internal representation of a screen cell */
@@ -67,6 +69,16 @@ struct VTermScreen
   /* buffer will == buffers[0] or buffers[1], depending on altscreen */
   ScreenCell *buffer;
 
+  /* RELAY PATCH: row pointer tables into buffers[0]/[1]. Full-width vertical
+   * scrolls rotate these pointers instead of memmove()ing every cell, which
+   * was the dominant cost of fast-scrolling output. rowptr == rowptrs[0] or
+   * rowptrs[1], matching buffer. */
+  ScreenCell **rowptrs[2];
+  ScreenCell **rowptr;
+  ScreenCell **rowtmp;
+
+  const VTermScreenRelayCallbacks *relay_callbacks;
+
   /* buffer for a single screen row used in scrollback storage callbacks */
   VTermScreenCell *sb_buffer;
 
@@ -77,6 +89,7 @@ static inline void clearcell(const VTermScreen *screen, ScreenCell *cell)
 {
   cell->chars[0] = 0;
   cell->pen = screen->pen;
+  cell->pen.link = 0; /* RELAY PATCH */
 }
 
 static inline ScreenCell *getcell(const VTermScreen *screen, int row, int col)
@@ -85,7 +98,70 @@ static inline ScreenCell *getcell(const VTermScreen *screen, int row, int col)
     return NULL;
   if(col < 0 || col >= screen->cols)
     return NULL;
-  return screen->buffer + (screen->cols * row) + col;
+  return screen->rowptr[row] + col; /* RELAY PATCH: via row pointers */
+}
+
+/* RELAY PATCH: identity row table for a contiguous buffer */
+static ScreenCell **alloc_rowptrs(VTermScreen *screen, ScreenCell *buffer, int rows, int cols)
+{
+  ScreenCell **ptrs = vterm_allocator_malloc(screen->vt, sizeof(ScreenCell *) * (rows > 0 ? rows : 1));
+  for(int row = 0; row < rows; row++)
+    ptrs[row] = buffer + row * cols;
+  return ptrs;
+}
+
+/* RELAY PATCH: copy a (possibly rotated) buffer back into row order so code
+ * that indexes buffers[] directly (resize/reflow) sees a contiguous grid */
+static void linearize_buffer(VTermScreen *screen, int bufidx)
+{
+  ScreenCell *old = screen->buffers[bufidx];
+  ScreenCell **ptrs = screen->rowptrs[bufidx];
+  if(!old || !ptrs)
+    return;
+  int identity = 1;
+  for(int row = 0; row < screen->rows; row++)
+    if(ptrs[row] != old + row * screen->cols) { identity = 0; break; }
+  if(identity)
+    return;
+  ScreenCell *lin = vterm_allocator_malloc(screen->vt, sizeof(ScreenCell) * screen->rows * screen->cols);
+  for(int row = 0; row < screen->rows; row++)
+    memcpy(lin + row * screen->cols, ptrs[row], sizeof(ScreenCell) * screen->cols);
+  for(int row = 0; row < screen->rows; row++)
+    ptrs[row] = lin + row * screen->cols;
+  if(screen->buffer == old)
+    screen->buffer = lin;
+  screen->buffers[bufidx] = lin;
+  vterm_allocator_free(screen->vt, old);
+}
+
+/* RELAY PATCH: fast internal -> external cell conversion for one row */
+static void row_to_external(const VTermScreen *screen, const ScreenCell *row, int cols, VTermScreenCell *out)
+{
+  for(int col = 0; col < cols; col++) {
+    const ScreenCell *intcell = row + col;
+    VTermScreenCell *cell = out + col;
+    int i;
+    for(i = 0; i < VTERM_MAX_CHARS_PER_CELL && intcell->chars[i]; i++)
+      cell->chars[i] = intcell->chars[i];
+    if(i < VTERM_MAX_CHARS_PER_CELL)
+      cell->chars[i] = 0;
+    cell->attrs.bold      = intcell->pen.bold;
+    cell->attrs.underline = intcell->pen.underline;
+    cell->attrs.italic    = intcell->pen.italic;
+    cell->attrs.blink     = intcell->pen.blink;
+    cell->attrs.reverse   = intcell->pen.reverse ^ screen->global_reverse;
+    cell->attrs.conceal   = intcell->pen.conceal;
+    cell->attrs.strike    = intcell->pen.strike;
+    cell->attrs.font      = intcell->pen.font;
+    cell->attrs.small     = intcell->pen.small;
+    cell->attrs.baseline  = intcell->pen.baseline;
+    cell->attrs.dwl       = intcell->pen.dwl;
+    cell->attrs.dhl       = intcell->pen.dhl;
+    cell->fg = intcell->pen.fg;
+    cell->bg = intcell->pen.bg;
+    cell->hyperlink = intcell->pen.link;
+    cell->width = (col < cols - 1 && row[col + 1].chars[0] == (uint32_t)-1) ? 2 : 1;
+  }
 }
 
 static ScreenCell *alloc_buffer(VTermScreen *screen, int rows, int cols)
@@ -205,29 +281,62 @@ static int putglyph(VTermGlyphInfo *info, VTermPos pos, void *user)
   return 1;
 }
 
-static void sb_pushline_from_row(VTermScreen *screen, int row)
+/* RELAY PATCH: takes the row's cells and line info explicitly */
+static void sb_pushline_from_row(VTermScreen *screen, const ScreenCell *rowcells, int cols, const VTermLineInfo *info)
 {
-  VTermPos pos = { .row = row };
-  for(pos.col = 0; pos.col < screen->cols; pos.col++)
-    vterm_screen_get_cell(screen, pos, screen->sb_buffer + pos.col);
+  row_to_external(screen, rowcells, cols, screen->sb_buffer);
 
-  (screen->callbacks->sb_pushline)(screen->cols, screen->sb_buffer, screen->cbdata);
+  if(screen->relay_callbacks && screen->relay_callbacks->sb_pushline4) {
+    VTermLineInfo zero = { 0 };
+    (screen->relay_callbacks->sb_pushline4)(cols, screen->sb_buffer, info ? info : &zero, screen->cbdata);
+    return;
+  }
+  if(screen->callbacks && screen->callbacks->sb_pushline)
+    (screen->callbacks->sb_pushline)(cols, screen->sb_buffer, screen->cbdata);
+}
+
+static int has_pushline(const VTermScreen *screen)
+{
+  return (screen->callbacks && screen->callbacks->sb_pushline) ||
+         (screen->relay_callbacks && screen->relay_callbacks->sb_pushline4);
 }
 
 static int moverect_internal(VTermRect dest, VTermRect src, void *user)
 {
   VTermScreen *screen = user;
 
-  if(screen->callbacks && screen->callbacks->sb_pushline &&
+  if(has_pushline(screen) &&
      dest.start_row == 0 && dest.start_col == 0 &&        // starts top-left corner
      dest.end_col == screen->cols &&                      // full width
      screen->buffer == screen->buffers[BUFIDX_PRIMARY]) { // not altscreen
+    VTermState *state = screen->state;
     for(int row = 0; row < src.start_row; row++)
-      sb_pushline_from_row(screen, row);
+      sb_pushline_from_row(screen, screen->rowptr[row], screen->cols,
+          row < state->relay_scrolled_count ? state->relay_scrolled_lineinfo + row : NULL);
   }
 
   int cols = src.end_col - src.start_col;
   int downward = src.start_row - dest.start_row;
+
+  /* RELAY PATCH: full-width vertical move: rotate row pointers. The rows that
+   * wrap around are erased by vterm_scroll_rect() right after this. */
+  if(dest.start_col == 0 && src.start_col == 0 && cols == screen->cols && downward != 0) {
+    ScreenCell **ptr = screen->rowptr;
+    if(downward > 0) {
+      /* rows [dest.start_row, src.end_row) shift up by downward */
+      memcpy(screen->rowtmp, ptr + dest.start_row, downward * sizeof(ScreenCell *));
+      memmove(ptr + dest.start_row, ptr + src.start_row, (dest.end_row - dest.start_row) * sizeof(ScreenCell *));
+      memcpy(ptr + dest.end_row, screen->rowtmp, downward * sizeof(ScreenCell *));
+    }
+    else {
+      int upward = -downward;
+      /* rows [src.start_row, dest.end_row) shift down by upward */
+      memcpy(screen->rowtmp, ptr + src.end_row, upward * sizeof(ScreenCell *));
+      memmove(ptr + dest.start_row, ptr + src.start_row, (src.end_row - src.start_row) * sizeof(ScreenCell *));
+      memcpy(ptr + src.start_row, screen->rowtmp, upward * sizeof(ScreenCell *));
+    }
+    return 1;
+  }
 
   int init_row, test_row, inc_row;
   if(downward < 0) {
@@ -462,6 +571,7 @@ static int settermprop(VTermProp prop, VTermValue *val, void *user)
       return 0;
 
     screen->buffer = val->boolean ? screen->buffers[BUFIDX_ALTSCREEN] : screen->buffers[BUFIDX_PRIMARY];
+    screen->rowptr = val->boolean ? screen->rowptrs[BUFIDX_ALTSCREEN] : screen->rowptrs[BUFIDX_PRIMARY]; /* RELAY PATCH */
     /* only send a damage event on disable; because during enable there's an
      * erase that sends a damage anyway
      */
@@ -536,11 +646,15 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
     /* TODO: Stop if dwl or dhl */
     while(REFLOW && old_lineinfo && old_row >= 0 && old_lineinfo[old_row].continuation)
       old_row--;
+    /* RELAY PATCH: a continuation at row 0 continues a scrollback line; do not
+     * run off the top of the buffer */
+    if(old_row < 0)
+      old_row = 0;
     int old_row_start = old_row;
 
     int width = 0;
     for(int row = old_row_start; row <= old_row_end; row++) {
-      if(REFLOW && row < (old_rows - 1) && old_lineinfo[row + 1].continuation)
+      if(REFLOW && old_lineinfo && row < (old_rows - 1) && old_lineinfo[row + 1].continuation)
         width += old_cols;
       else
         width += line_popcount(old_buffer, row, old_rows, old_cols);
@@ -645,6 +759,13 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
       }
 
       new_lineinfo[new_row].continuation = (new_row > new_row_start);
+      /* RELAY PATCH: keep line marks on the first row of the logical line, and
+       * a scrollback continuation on the first row */
+      if(old_lineinfo && new_row == new_row_start) {
+        new_lineinfo[new_row].relay_marks = old_lineinfo[old_row_start].relay_marks;
+        if(old_row_start == 0 && old_lineinfo[0].continuation)
+          new_lineinfo[new_row].continuation = 1;
+      }
     }
 
     old_row = old_row_start - 1;
@@ -667,21 +788,31 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
 
   if(old_row >= 0 && bufidx == BUFIDX_PRIMARY) {
     /* Push spare lines to scrollback buffer */
-    if(screen->callbacks && screen->callbacks->sb_pushline)
+    /* RELAY PATCH: push from old_buffer (not the active buffer) with line info */
+    if(has_pushline(screen))
       for(int row = 0; row <= old_row; row++)
-        sb_pushline_from_row(screen, row);
+        sb_pushline_from_row(screen, old_buffer + row * old_cols, old_cols, old_lineinfo ? old_lineinfo + row : NULL);
     if(active)
       statefields->pos.row -= (old_row + 1);
   }
+  const int relay_pop4 = screen->relay_callbacks && screen->relay_callbacks->sb_popline4; /* RELAY PATCH */
   if(new_row >= 0 && bufidx == BUFIDX_PRIMARY &&
-      screen->callbacks && screen->callbacks->sb_popline) {
+      (relay_pop4 || (screen->callbacks && screen->callbacks->sb_popline))) {
     /* Try to backfill rows by popping scrollback buffer */
     while(new_row >= 0) {
-      if(!(screen->callbacks->sb_popline(old_cols, screen->sb_buffer, screen->cbdata)))
+      /* RELAY PATCH: popline4 fills a new_cols-wide row and its line info */
+      int pop_cols = relay_pop4 ? new_cols : old_cols;
+      VTermLineInfo popinfo = { 0 };
+      if(relay_pop4) {
+        if(!(screen->relay_callbacks->sb_popline4(new_cols, screen->sb_buffer, &popinfo, screen->cbdata)))
+          break;
+      }
+      else if(!(screen->callbacks->sb_popline(old_cols, screen->sb_buffer, screen->cbdata)))
         break;
+      new_lineinfo[new_row] = popinfo;
 
       VTermPos pos = { .row = new_row };
-      for(pos.col = 0; pos.col < old_cols && pos.col < new_cols; pos.col += screen->sb_buffer[pos.col].width) {
+      for(pos.col = 0; pos.col < pop_cols && pos.col < new_cols; pos.col += (screen->sb_buffer[pos.col].width > 0 ? screen->sb_buffer[pos.col].width : 1)) {
         VTermScreenCell *src = &screen->sb_buffer[pos.col];
         ScreenCell *dst = &new_buffer[pos.row * new_cols + pos.col];
 
@@ -704,6 +835,7 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
 
         dst->pen.fg = src->fg;
         dst->pen.bg = src->bg;
+        dst->pen.link = src->hyperlink; /* RELAY PATCH */
 
         if(src->width == 2 && pos.col < (new_cols-1))
           (dst + 1)->chars[0] = (uint32_t) -1;
@@ -733,6 +865,9 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
 
   vterm_allocator_free(screen->vt, old_buffer);
   screen->buffers[bufidx] = new_buffer;
+  /* RELAY PATCH: fresh identity row table */
+  vterm_allocator_free(screen->vt, screen->rowptrs[bufidx]);
+  screen->rowptrs[bufidx] = alloc_rowptrs(screen, new_buffer, new_rows, new_cols);
 
   vterm_allocator_free(screen->vt, old_lineinfo);
   statefields->lineinfos[bufidx] = new_lineinfo;
@@ -751,6 +886,10 @@ static int resize(int new_rows, int new_cols, VTermStateFields *fields, void *us
 
   int old_rows = screen->rows;
   int old_cols = screen->cols;
+
+  /* RELAY PATCH: resize_buffer() indexes the buffers directly */
+  linearize_buffer(screen, BUFIDX_PRIMARY);
+  linearize_buffer(screen, BUFIDX_ALTSCREEN);
 
   if(new_cols > old_cols) {
     /* Ensure that ->sb_buffer is large enough for a new or and old row */
@@ -776,9 +915,14 @@ static int resize(int new_rows, int new_cols, VTermStateFields *fields, void *us
   }
 
   screen->buffer = altscreen_active ? screen->buffers[BUFIDX_ALTSCREEN] : screen->buffers[BUFIDX_PRIMARY];
+  screen->rowptr = altscreen_active ? screen->rowptrs[BUFIDX_ALTSCREEN] : screen->rowptrs[BUFIDX_PRIMARY]; /* RELAY PATCH */
 
   screen->rows = new_rows;
   screen->cols = new_cols;
+
+  /* RELAY PATCH */
+  vterm_allocator_free(screen->vt, screen->rowtmp);
+  screen->rowtmp = vterm_allocator_malloc(screen->vt, sizeof(ScreenCell *) * new_rows);
 
   if(new_cols <= old_cols) {
     if(screen->sb_buffer)
@@ -881,6 +1025,13 @@ static VTermScreen *screen_new(VTerm *vt)
 
   screen->buffer = screen->buffers[BUFIDX_PRIMARY];
 
+  /* RELAY PATCH */
+  screen->rowptrs[BUFIDX_PRIMARY] = alloc_rowptrs(screen, screen->buffers[BUFIDX_PRIMARY], rows, cols);
+  screen->rowptrs[BUFIDX_ALTSCREEN] = NULL;
+  screen->rowptr = screen->rowptrs[BUFIDX_PRIMARY];
+  screen->rowtmp = vterm_allocator_malloc(screen->vt, sizeof(ScreenCell *) * rows);
+  screen->relay_callbacks = NULL;
+
   screen->sb_buffer = vterm_allocator_malloc(screen->vt, sizeof(VTermScreenCell) * cols);
 
   vterm_state_set_callbacks(screen->state, &state_cbs, screen);
@@ -893,6 +1044,11 @@ INTERNAL void vterm_screen_free(VTermScreen *screen)
   vterm_allocator_free(screen->vt, screen->buffers[BUFIDX_PRIMARY]);
   if(screen->buffers[BUFIDX_ALTSCREEN])
     vterm_allocator_free(screen->vt, screen->buffers[BUFIDX_ALTSCREEN]);
+  /* RELAY PATCH */
+  vterm_allocator_free(screen->vt, screen->rowptrs[BUFIDX_PRIMARY]);
+  if(screen->rowptrs[BUFIDX_ALTSCREEN])
+    vterm_allocator_free(screen->vt, screen->rowptrs[BUFIDX_ALTSCREEN]);
+  vterm_allocator_free(screen->vt, screen->rowtmp);
 
   vterm_allocator_free(screen->vt, screen->sb_buffer);
 
@@ -996,6 +1152,7 @@ int vterm_screen_get_cell(const VTermScreen *screen, VTermPos pos, VTermScreenCe
 
   cell->fg = intcell->pen.fg;
   cell->bg = intcell->pen.bg;
+  cell->hyperlink = intcell->pen.link; /* RELAY PATCH */
 
   if(pos.col < (screen->cols - 1) &&
      getcell(screen, pos.row, pos.col + 1)->chars[0] == (uint32_t)-1)
@@ -1047,7 +1204,20 @@ void vterm_screen_enable_altscreen(VTermScreen *screen, int altscreen)
     vterm_get_size(screen->vt, &rows, &cols);
 
     screen->buffers[BUFIDX_ALTSCREEN] = alloc_buffer(screen, rows, cols);
+    screen->rowptrs[BUFIDX_ALTSCREEN] = alloc_rowptrs(screen, screen->buffers[BUFIDX_ALTSCREEN], rows, cols); /* RELAY PATCH */
   }
+}
+
+/* RELAY PATCH */
+void vterm_screen_relay_set_callbacks(VTermScreen *screen, const VTermScreenRelayCallbacks *callbacks)
+{
+  screen->relay_callbacks = callbacks;
+}
+
+/* RELAY PATCH */
+void vterm_screen_relay_set_hyperlink(VTermScreen *screen, uint32_t id)
+{
+  screen->pen.link = id & 0xFFFFFF;
 }
 
 void vterm_screen_set_callbacks(VTermScreen *screen, const VTermScreenCallbacks *callbacks, void *user)
@@ -1157,11 +1327,11 @@ void vterm_screen_convert_color_to_rgb(const VTermScreen *screen, VTermColor *co
   vterm_state_convert_color_to_rgb(screen->state, col);
 }
 
-static void reset_default_colours(VTermScreen *screen, ScreenCell *buffer)
+static void reset_default_colours(VTermScreen *screen, ScreenCell **rowptrs) /* RELAY PATCH: row table */
 {
   for(int row = 0; row <= screen->rows - 1; row++)
     for(int col = 0; col <= screen->cols - 1; col++) {
-      ScreenCell *cell = &buffer[row * screen->cols + col];
+      ScreenCell *cell = rowptrs[row] + col;
       if(VTERM_COLOR_IS_DEFAULT_FG(&cell->pen.fg))
         cell->pen.fg = screen->pen.fg;
       if(VTERM_COLOR_IS_DEFAULT_BG(&cell->pen.bg))
@@ -1185,7 +1355,7 @@ void vterm_screen_set_default_colors(VTermScreen *screen, const VTermColor *defa
                         | VTERM_COLOR_DEFAULT_BG;
   }
 
-  reset_default_colours(screen, screen->buffers[0]);
+  reset_default_colours(screen, screen->rowptrs[0]);
   if(screen->buffers[1])
-    reset_default_colours(screen, screen->buffers[1]);
+    reset_default_colours(screen, screen->rowptrs[1]);
 }

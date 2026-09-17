@@ -171,6 +171,14 @@ struct VTermState
     char *buffer;
     size_t buflen;
   } selection;
+
+  /* RELAY PATCH: line infos of the rows scrolled off the top by the last
+   * full-width upward scroll, captured before lineinfo is shifted, so the
+   * screen can hand them to sb_pushline4. */
+  VTermLineInfo *relay_scrolled_lineinfo;
+  int relay_scrolled_cap;
+  int relay_scrolled_count;
+  unsigned int relay_graphemes : 1;
 };
 
 struct VTerm

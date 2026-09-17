@@ -21,7 +21,8 @@ extern "C" {
 /* Any cell can contain at most one basic printing character and 5 combining
  * characters. This number could be changed but will be ABI-incompatible if
  * you do */
-#define VTERM_MAX_CHARS_PER_CELL 6
+/* RELAY PATCH: 10 instead of 6 so ZWJ emoji sequences (family, profession) fit in one cell */
+#define VTERM_MAX_CHARS_PER_CELL 10
 
 typedef struct VTerm VTerm;
 typedef struct VTermState VTermState;
@@ -301,6 +302,7 @@ typedef struct {
   unsigned int    doublewidth:1;     /* DECDWL or DECDHL line */
   unsigned int    doubleheight:2;    /* DECDHL line (1=top 2=bottom) */
   unsigned int    continuation:1;    /* Line is a flow continuation of the previous */
+  unsigned int    relay_marks:4;     /* RELAY PATCH: host line marks (e.g. OSC 133 A/B/C/D bits); scroll and reflow with the line */
 } VTermLineInfo;
 
 /* Copies of VTermState fields that the 'resize' callback might have reason to
@@ -475,6 +477,16 @@ void vterm_state_focus_in(VTermState *state);
 void vterm_state_focus_out(VTermState *state);
 const VTermLineInfo *vterm_state_get_lineinfo(const VTermState *state, int row);
 
+/* RELAY PATCH: OR `marks` into the relay_marks of the cursor's current line. */
+void vterm_state_relay_mark_cursor_line(VTermState *state, unsigned int marks);
+/* RELAY PATCH: when enabled (default off upstream-compatible), emoji modifier, ZWJ
+ * sequences, variation selectors, tag characters and regional-indicator pairs
+ * are stored as one cell cluster whose width is that of the base character
+ * (2 for a regional-indicator pair). */
+void vterm_state_relay_set_grapheme_clusters(VTermState *state, int enabled);
+/* RELAY PATCH: whether DEC mode 2004 (bracketed paste) is enabled */
+int vterm_state_relay_get_bracketpaste(const VTermState *state);
+
 /**
  * Makes sure that the given color `col` is indeed an RGB colour. After this
  * function returns, VTERM_COLOR_IS_RGB(col) will return true, while all other
@@ -529,6 +541,7 @@ typedef struct {
   char     width;
   VTermScreenCellAttrs attrs;
   VTermColor fg, bg;
+  uint32_t hyperlink; /* RELAY PATCH: host hyperlink id (0 = none), see vterm_screen_relay_set_hyperlink() */
 } VTermScreenCell;
 
 typedef struct {
@@ -557,6 +570,18 @@ void vterm_screen_enable_reflow(VTermScreen *screen, bool reflow);
 #define vterm_screen_set_reflow  vterm_screen_enable_reflow
 
 void vterm_screen_enable_altscreen(VTermScreen *screen, int altscreen);
+
+/* RELAY PATCH: scrollback callbacks that carry line info (soft-wrap continuation
+ * and relay_marks), so the host can reflow its scrollback. When set, they are
+ * used instead of sb_pushline / sb_popline. sb_popline4 is called with the
+ * current (new) width during a resize; `info` is zeroed before the call. */
+typedef struct {
+  int (*sb_pushline4)(int cols, const VTermScreenCell *cells, const VTermLineInfo *info, void *user);
+  int (*sb_popline4)(int cols, VTermScreenCell *cells, VTermLineInfo *info, void *user);
+} VTermScreenRelayCallbacks;
+void vterm_screen_relay_set_callbacks(VTermScreen *screen, const VTermScreenRelayCallbacks *callbacks);
+/* RELAY PATCH: glyphs written from now on carry this hyperlink id (0 = none). */
+void vterm_screen_relay_set_hyperlink(VTermScreen *screen, uint32_t id);
 
 typedef enum {
   VTERM_DAMAGE_CELL,    /* every cell */

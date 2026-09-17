@@ -106,6 +106,8 @@ INTERNAL void vterm_state_free(VTermState *state)
   if(state->lineinfos[BUFIDX_ALTSCREEN])
     vterm_allocator_free(state->vt, state->lineinfos[BUFIDX_ALTSCREEN]);
   vterm_allocator_free(state->vt, state->combine_chars);
+  if(state->relay_scrolled_lineinfo) /* RELAY PATCH */
+    vterm_allocator_free(state->vt, state->relay_scrolled_lineinfo);
   vterm_allocator_free(state->vt, state);
 }
 
@@ -131,6 +133,18 @@ static void scroll(VTermState *state, VTermRect rect, int downward, int rightwar
     int height = rect.end_row - rect.start_row - abs(downward);
 
     if(downward > 0) {
+      /* RELAY PATCH: remember the infos of rows that leave the top of the screen */
+      state->relay_scrolled_count = 0;
+      if(rect.start_row == 0) {
+        if(state->relay_scrolled_cap < downward) {
+          if(state->relay_scrolled_lineinfo)
+            vterm_allocator_free(state->vt, state->relay_scrolled_lineinfo);
+          state->relay_scrolled_cap = downward > state->rows ? downward : state->rows;
+          state->relay_scrolled_lineinfo = vterm_allocator_malloc(state->vt, state->relay_scrolled_cap * sizeof(VTermLineInfo));
+        }
+        memcpy(state->relay_scrolled_lineinfo, state->lineinfo, downward * sizeof(VTermLineInfo));
+        state->relay_scrolled_count = downward;
+      }
       memmove(state->lineinfo + rect.start_row,
               state->lineinfo + rect.start_row + downward,
               height * sizeof(state->lineinfo[0]));
@@ -269,6 +283,33 @@ static void set_lineinfo(VTermState *state, int row, int force, int dwl, int dhl
     state->lineinfo[row] = info;
 }
 
+/* RELAY PATCH: grapheme-cluster extension test used instead of plain
+ * vterm_unicode_is_combining() when state->relay_graphemes is set.
+ * `prev` is the previous codepoint of the cluster, `ri_run` the number of
+ * regional indicators at the end of the cluster so far. */
+static int relay_is_ri(uint32_t c) { return c >= 0x1F1E6 && c <= 0x1F1FF; }
+static int relay_extends(const VTermState *state, uint32_t prev, uint32_t c, int ri_run)
+{
+  if(vterm_unicode_is_combining(c))
+    return 1;
+  if(!state->relay_graphemes)
+    return 0;
+  if(c >= 0x1F3FB && c <= 0x1F3FF) /* emoji skin-tone modifiers */
+    return 1;
+  if(prev == 0x200D &&             /* ZWJ joins a following pictograph */
+     ((c >= 0x2190 && c <= 0x2BFF) || (c >= 0x1F000 && c <= 0x1FAFF)))
+    return 1;
+  if(relay_is_ri(c) && relay_is_ri(prev) && (ri_run % 2) == 1)
+    return 1;
+  return 0;
+}
+static int relay_ri_run(const uint32_t *chars, int n)
+{
+  int run = 0;
+  while(n > 0 && relay_is_ri(chars[n - 1])) { run++; n--; }
+  return run;
+}
+
 static int on_text(const char bytes[], size_t len, void *user)
 {
   VTermState *state = user;
@@ -304,7 +345,12 @@ static int on_text(const char bytes[], size_t len, void *user)
 
   /* This is a combining char. that needs to be merged with the previous
    * glyph output */
-  if(vterm_unicode_is_combining(codepoints[i])) {
+  int relay_saved_n = 0; /* RELAY PATCH */
+  while(state->combine_chars[relay_saved_n])
+    relay_saved_n++;
+  if(relay_saved_n > 0 &&
+     relay_extends(state, state->combine_chars[relay_saved_n - 1], codepoints[i],
+                   relay_ri_run(state->combine_chars, relay_saved_n))) {
     /* See if the cursor has moved since */
     if(state->pos.row == state->combine_pos.row && state->pos.col == state->combine_pos.col + state->combine_width) {
 #ifdef DEBUG_GLYPH_COMBINE
@@ -321,11 +367,15 @@ static int on_text(const char bytes[], size_t len, void *user)
         saved_i++;
 
       /* Add extra ones */
-      while(i < npoints && vterm_unicode_is_combining(codepoints[i])) {
+      while(i < npoints &&
+            relay_extends(state, state->combine_chars[saved_i - 1], codepoints[i], relay_ri_run(state->combine_chars, saved_i))) {
         if(saved_i >= state->combine_chars_size)
           grow_combine_buffer(state);
         state->combine_chars[saved_i++] = codepoints[i++];
       }
+      /* RELAY PATCH: cells hold at most VTERM_MAX_CHARS_PER_CELL chars; drop the rest */
+      if(saved_i > VTERM_MAX_CHARS_PER_CELL)
+        saved_i = VTERM_MAX_CHARS_PER_CELL;
       if(saved_i >= state->combine_chars_size)
         grow_combine_buffer(state);
       state->combine_chars[saved_i] = 0;
@@ -351,7 +401,8 @@ static int on_text(const char bytes[], size_t len, void *user)
     for(glyph_ends = i + 1;
         (glyph_ends < npoints) && (glyph_ends < glyph_starts + VTERM_MAX_CHARS_PER_CELL);
         glyph_ends++)
-      if(!vterm_unicode_is_combining(codepoints[glyph_ends]))
+      if(!relay_extends(state, codepoints[glyph_ends - 1], codepoints[glyph_ends],
+                        relay_ri_run(codepoints + glyph_starts, glyph_ends - glyph_starts)))
         break;
 
     int width = 0;
@@ -361,6 +412,9 @@ static int on_text(const char bytes[], size_t len, void *user)
     for( ; i < glyph_ends; i++) {
       chars[i - glyph_starts] = codepoints[i];
       int this_width = vterm_unicode_width(codepoints[i]);
+      /* RELAY PATCH: in cluster mode only the base character has width */
+      if(state->relay_graphemes && i > glyph_starts)
+        this_width = 0;
 #ifdef DEBUG
       if(this_width < 0) {
         fprintf(stderr, "Text with negative-width codepoint U+%04x\n", codepoints[i]);
@@ -370,7 +424,14 @@ static int on_text(const char bytes[], size_t len, void *user)
       width += this_width;
     }
 
-    while(i < npoints && vterm_unicode_is_combining(codepoints[i]))
+    /* RELAY PATCH: regional-indicator pair is two cells wide */
+    if(state->relay_graphemes && glyph_ends - glyph_starts == 2 &&
+       relay_is_ri(codepoints[glyph_starts]) && relay_is_ri(codepoints[glyph_starts + 1]))
+      width = 2;
+
+    /* skip any extenders that did not fit in the cell */
+    while(i < npoints && i > 0 &&
+          relay_extends(state, codepoints[i - 1], codepoints[i], relay_ri_run(codepoints + glyph_starts, i - glyph_starts)))
       i++;
 
     chars[glyph_ends - glyph_starts] = 0;
@@ -2251,6 +2312,25 @@ void vterm_state_focus_out(VTermState *state)
 const VTermLineInfo *vterm_state_get_lineinfo(const VTermState *state, int row)
 {
   return state->lineinfo + row;
+}
+
+/* RELAY PATCH */
+void vterm_state_relay_mark_cursor_line(VTermState *state, unsigned int marks)
+{
+  if(state->pos.row >= 0 && state->pos.row < state->rows)
+    state->lineinfo[state->pos.row].relay_marks |= (marks & 0xF);
+}
+
+/* RELAY PATCH */
+void vterm_state_relay_set_grapheme_clusters(VTermState *state, int enabled)
+{
+  state->relay_graphemes = enabled ? 1 : 0;
+}
+
+/* RELAY PATCH */
+int vterm_state_relay_get_bracketpaste(const VTermState *state)
+{
+  return state->mode.bracketpaste;
 }
 
 void vterm_state_set_selection_callbacks(VTermState *state, const VTermSelectionCallbacks *callbacks, void *user,
