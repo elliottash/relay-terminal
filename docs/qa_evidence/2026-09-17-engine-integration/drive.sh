@@ -86,33 +86,35 @@ sleep 0.5
 k ctrl+c; sleep 0.8
 shot 09-engine-pane-select-copy
 
-# Back to the composer, then "New chat": the note is written straight into the emulator
-# (writeToDisplay), not typed into the shell, and Readline redraws the prompt after it.
+# Back to the composer, then the palette's "New chat": the note is written straight into
+# the emulator (writeToDisplay), not typed into the shell, and Readline redraws the prompt.
 k F12; sleep 1
 place
-xdotool mousemove 290 27 click 1; sleep 2.5
+k ctrl+shift+a; sleep 1; t 'New chat'; sleep 1; k Return; sleep 2.5
 shot 10-engine-pane-inline-agent-output
 
-# A few commands through the composer (Relay's Bash bridge stages them with Readline).
+# Palette action "Clear terminal" (screen + scrollback through the backend).
+place
+k ctrl+shift+a; sleep 1; t 'Clear terminal'; sleep 1; k Return; sleep 2
+shot 11-engine-pane-cleared
+
+# One command with enough output to push its prompt into the scrollback, then the
+# palette's "Jump to previous prompt": it only finds the mark when OSC 133 arrived
+# (shell/relay-integration.bash).
 place
 xdotool mousemove 1000 800 click 1; sleep 0.5
-t 'echo one; echo two; echo three'; k Return; sleep 2.5
-
-# OSC 133 prompt marks from shell/relay-integration.bash: the palette's "Jump to previous
-# prompt" scrolls the engine pane to the mark; without marks it says so in the status bar.
+t 'seq 1 200'; k Return; sleep 3
 place
-k ctrl+shift+a; sleep 1
-t 'Jump to previous prompt'; sleep 1
-k Return; sleep 1.5
-shot 11-engine-pane-prompt-jump
+k ctrl+shift+a; sleep 1; t 'Jump to previous prompt'; sleep 1; k Return; sleep 1.5
+shot 12-engine-pane-prompt-jump
 
 # Back to the Konsole pane on the left: it must be unaffected.
 xdotool mousemove 300 500 click 1; sleep 0.8
 k F12; sleep 0.8
 t 'echo konsole pane still fine; ls | head -3'; k Return; sleep 1.5
-shot 12-konsole-pane-still-works
+shot 13-konsole-pane-still-works
 
 # Both panes side by side, final state.
 sleep 1
-shot 13-final-both-panes
+shot 14-final-both-panes
 echo "screenshots in $out"

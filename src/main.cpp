@@ -330,6 +330,7 @@ private:
         add("agent.continue", "agent", "Continue the agent turn after a step limit (/continue)", {});
         add("agent.instructions", "agent", "Choose agent instruction files", {});
         add("agent.export", "agent", "Export the conversation as Markdown", {});
+        add("help.shortcuts", "palette", "Show all keyboard shortcuts", {QStringLiteral("Ctrl+?"), QStringLiteral("F1")});
         add("keybindings.edit", "terminal", "Edit keyboard shortcuts", {});
         add("keybindings.reload", "terminal", "Reload keyboard shortcuts", {});
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
@@ -5116,6 +5117,54 @@ private:
         }
     }
 
+    // Ctrl+? (or F1): every action and its keys, so the window itself needs no shortcut bar.
+    void showShortcutsOverlay() {
+        QDialog dialog(this);
+        dialog.setWindowTitle(QStringLiteral("Keyboard shortcuts"));
+        dialog.resize(720, std::min(760, height() - 80));
+        auto *layout = new QVBoxLayout(&dialog);
+        auto *filter = new QLineEdit; filter->setPlaceholderText(QStringLiteral("Search shortcuts…"));
+        layout->addWidget(filter);
+        auto *tree = new QTreeWidget;
+        tree->setColumnCount(2);
+        tree->setHeaderLabels({QStringLiteral("Action"), QStringLiteral("Keys")});
+        tree->setRootIsDecorated(false);
+        tree->setAlternatingRowColors(true);
+        layout->addWidget(tree, 1);
+        auto *note = new QLabel(QStringLiteral("Unbound actions run from the palette (%1). Edit shortcuts: Actions › Edit keyboard shortcuts.")
+                                    .arg(Keymap::instance().shortcutText(QStringLiteral("palette.open"))));
+        note->setWordWrap(true); note->setObjectName(QStringLiteral("transcriptHeader"));
+        layout->addWidget(note);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        layout->addWidget(buttons);
+
+        auto fill = [tree](const QString &query) {
+            tree->clear();
+            QString section;
+            QTreeWidgetItem *group = nullptr;
+            for (const ActionDef &action : Keymap::instance().actions()) {
+                const QString keys = Keymap::instance().shortcutText(action.id);
+                if (!query.isEmpty() && !action.description.contains(query, Qt::CaseInsensitive)
+                    && !keys.contains(query, Qt::CaseInsensitive) && !action.id.contains(query, Qt::CaseInsensitive))
+                    continue;
+                if (action.category != section) {
+                    section = action.category;
+                    group = new QTreeWidgetItem(tree, {section.left(1).toUpper() + section.mid(1), QString()});
+                    QFont bold = group->font(0); bold.setBold(true); group->setFont(0, bold);
+                    group->setFirstColumnSpanned(true);
+                }
+                auto *row = new QTreeWidgetItem(tree, {action.description, keys.isEmpty() ? QStringLiteral("—") : keys});
+                row->setToolTip(0, action.id);
+            }
+            tree->resizeColumnToContents(0);
+        };
+        fill(QString());
+        connect(filter, &QLineEdit::textChanged, tree, [fill](const QString &text) { fill(text); });
+        filter->setFocus();
+        dialog.exec();
+    }
+
     void hint(const QString &id, const QString &text) {
         if (text.isEmpty() || !relay::ShortcutHints::instance().shouldShow(id)) return;
         if (m_active) m_active->toast(text, 5000); else statusBar()->showMessage(text, 6000);
@@ -5151,6 +5200,7 @@ private:
         }
         else if (id == QStringLiteral("palette.open")) togglePalette();
         else if (id == QStringLiteral("keybindings.reload")) Keymap::instance().reload();
+        else if (id == QStringLiteral("help.shortcuts")) showShortcutsOverlay();
         else if (id == QStringLiteral("keybindings.edit")) {
             Keymap::instance().ensureFile();
             const QString editor = qEnvironmentVariable("VISUAL", qEnvironmentVariable("EDITOR", QStringLiteral("nano")));
@@ -5499,6 +5549,7 @@ private:
         importKeys.run = [this] { if (m_active) m_active->importWarpKeys(); };
         items << importKeys;
 
+        items << actionItem(QStringLiteral("palette"), QStringLiteral("Keyboard shortcuts…"), QStringLiteral("Every action and its keys"), QStringLiteral("help.shortcuts"));
         items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Stop the running program · Esc in the prompt box") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
         items << actionItem(terminal, QStringLiteral("Take control"), QStringLiteral("Hide the prompt and type into the terminal"), QStringLiteral("control.human"), pane && pane->isNative());
         {
