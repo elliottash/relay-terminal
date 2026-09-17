@@ -1,0 +1,35 @@
+{
+    "saved": 1789671232,
+    "version": 1,
+    "windows": [
+        {
+            "current": 0,
+            "geometry": [
+                40,
+                30,
+                1100,
+                800
+            ],
+            "screen": "screen",
+            "tabs": [
+                {
+                    "pane": {
+                        "agent_mode": "build",
+                        "agent_role": "main",
+                        "cwd": "/tmp/tmp.hi5MgwGy5B/alpha",
+                        "effort": "high",
+                        "engine": "relay",
+                        "input_mode": "auto",
+                        "model": "kimi-k3",
+                        "preset": "kimi",
+                        "session_id": "6a5b0f33f67e44219aef17d5c25009db",
+                        "workspace": "/tmp/tmp.hi5MgwGy5B/alpha"
+                    }
+                }
+            ],
+            "titles": [
+                "alpha"
+            ]
+        }
+    ]
+}

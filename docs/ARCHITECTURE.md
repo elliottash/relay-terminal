@@ -80,7 +80,7 @@ Options: `--workspace/-w PATH` (initial terminal directory and agent workspace) 
 
 | Class | Role |
 |---|---|
-| `WindowManager` | Window list, a stack of up to 25 closed items (pane, tab or window), the `relay open` socket |
+| `WindowManager` | Window list, a stack of up to 25 closed items (pane, tab or window), the saved window layout, the `relay open` socket |
 | `RelayWindow` | `QMainWindow`: toolbar (Actions, New chat, Stop agent, Provider / BYOK…), a `QTabWidget`, the actions palette overlay, an application event filter for shortcuts |
 | Tab page | One root widget: a leaf or a tree of `QSplitter`s |
 | `Pane` (leaf) | Terminal pane: KonsolePart, Bash bridge, composer, its own worker and conversation |
@@ -101,10 +101,13 @@ Layout rules:
 - The focused leaf gets the `relayActive` property (accent outline). Agent and terminal
   actions use the last focused terminal `Pane` in that tab, even when a tool pane has focus.
 - Closed items are stored as JSON layout nodes:
-  `{"pane":{"cwd","workspace"}}`, `{"explorer":{"path"}}`, `{"preview":{"path"}}`,
-  `{"split":"h"|"v","sizes":[…],"children":[…]}`. Restoring starts **new shells** in the saved
-  directories (`RELAY_START_DIR`, applied by `shell/integration.bash` after `.bashrc`).
-  Scrollback and running programs are not restored.
+  `{"pane":{"cwd","workspace","engine","engine_core","agent_role","agent_mode","input_mode",
+  "effort","preset","model","session_id"}}`, `{"explorer":{"path"}}`, `{"preview":{"path"}}`,
+  `{"plan":{"path"}}`, `{"split":"h"|"v","sizes":[…],"children":[…]}`. Restoring starts **new
+  shells** in the saved directories (`RELAY_START_DIR`, applied by `shell/integration.bash` after
+  `.bashrc`). Scrollback and running programs are not restored. `serializeNode()` writes these
+  nodes and `buildNode()` / `createPane()` rebuild them; the saved window layout below uses the
+  same shapes, so there is only one layout format in the app.
 - Closing a window asks for confirmation when it has more than one pane or anything is busy.
 - **Pane button row** (`PaneChrome`, a child of each leaf created in `syncChrome()`): shown for
   the leaf under the mouse (application event filter, Enter/MouseMove). Buttons run the same
@@ -127,6 +130,50 @@ Layout rules:
   context menu run `tab.new` / `tab.moveToNewWindow`; the tab page moves to
   `WindowManager::newEmptyWindow()`.
 - Typing `exit` closes the pane. A shell stopped for memory keeps the pane open (section 13).
+
+### Reopen where I left off (saved window layout)
+
+`src/WindowState.h` + `WindowManager`. Relay keeps one layout file per user,
+`$XDG_DATA_HOME/relay/state/windows.json` (0600), and reopens it silently on start — no prompt,
+nothing is re-run.
+
+```json
+{"version": 1, "saved": 1758000000,
+ "windows": [{"geometry": [x, y, w, h], "screen": "DP-1", "current": 0,
+              "titles": ["alpha  ·  2", "gamma"], "tabs": [<layout node>, …]}]}
+```
+
+- **Tabs** are the same layout nodes as "restore last closed" above, so a restored pane comes back
+  with its directory, workspace, engine and engine core, model role, provider preset/model/effort,
+  agent mode, input mode, session id, and its tool panes (explorer/preview/plan) and their paths.
+  `titles` is informational: Relay derives tab titles from the panes.
+- **When it writes.** `RelayWindow::updateTitles()` (every split, close, tab change, directory
+  change and model change), `splitterMoved`, `moveEvent`/`resizeEvent` and `closeEvent` all call
+  `WindowManager::scheduleSave()`, a 1 s single-shot debounce; `aboutToQuit` flushes. A crash
+  therefore loses at most the debounce window. Writes go through `QSaveFile` (temp file + rename,
+  0600), so the file is never seen half written.
+- **Quit versus closing a window.** `closeEvent` snapshots the whole set *before* the window
+  leaves it and settles on the next event-loop turn: if no window is left (a quit) the whole
+  snapshot is written, otherwise the remaining windows are. So quitting reopens everything that
+  was open, while closing one window of several drops it for good. An empty set is never written.
+- **Two Relays at once.** The file has one owner, a `QLockFile` at
+  `$XDG_RUNTIME_DIR/relay/windows.lock` held for the life of the process. Only the owner restores
+  on start and only the owner saves, so a second Relay opens a plain window and leaves the layout
+  alone; if the owner quits, the next save by a still-running Relay takes the lock over. Without a
+  runtime directory there is no lock and the last writer wins — still atomically.
+- **Restoring.** `usableWindows()` drops records that cannot be rebuilt (unknown node kinds, empty
+  splits, trees nested deeper than `kMaxDepth`). `clampToScreens()` puts a window back on the
+  screen it was saved on, or, when that screen is gone, on one that still exists, shrinking it to
+  fit. Under Wayland only the size is applied (clients cannot place their own windows). A pane's
+  directory falls back to its workspace, then `$HOME` (`resolveDirectory()`). Each pane asks the
+  worker to `resume` its session id once the agent is configured and prints the usual
+  `Session loaded: "…" · N turn(s)` line plus the open-task count; a session whose file is gone
+  prints one note and starts fresh. Terminal scrollback is never restored — the shell is new.
+- **Controls.** The setting `windows/restore` ("Reopen windows on start" in the palette, default
+  on; turning it off deletes the file), `relay --fresh` (ignores the file once, keeps it), and the
+  palette action `windows.fresh` ("Start a fresh window set": deletes the file and stops saving for
+  the rest of the session, with a shortcut hint pointing at `--fresh`). Ctrl+Shift+W
+  (`closed.restore`) is a separate, in-session stack and is unaffected by any of them.
 
 ## 4. Keyboard: Keymap, presets, palette
 

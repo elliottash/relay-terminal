@@ -143,6 +143,7 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-program-control-policy.md`
 - `2026-09-17-queue-or-interrupt-agent-prompts.md`
 - `2026-09-17-request-ledger-todos-completion.md`
+- `2026-09-17-restore-windows-on-start.md`
 - `2026-09-17-router-english-commands.md`
 - `2026-09-17-routing-assist-thinking-skills-backend.md`
 - `2026-09-17-windows-tabs-panes.md`

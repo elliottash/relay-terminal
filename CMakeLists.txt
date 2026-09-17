@@ -75,6 +75,13 @@ target_link_libraries(relay-backends PUBLIC ${RELAY_QT}::Core)
 target_compile_definitions(relay-backends PUBLIC RELAY_HAVE_ENGINE)
 target_compile_options(relay-backends PRIVATE -Wall -Wextra -Wpedantic)
 
+# Saved window layout ("reopen where I left off"): reading/writing state/windows.json, screen
+# clamping and directory fallbacks. Plain QtCore so the rules can be tested without a window.
+add_library(relay-windowstate STATIC src/WindowState.cpp src/WindowState.h)
+target_include_directories(relay-windowstate PUBLIC src)
+target_link_libraries(relay-windowstate PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-windowstate PRIVATE -Wall -Wextra -Wpedantic)
+
 # Request ledger UI: model for requests/todos events and the expanded request list (plain Qt).
 add_library(relay-completion STATIC src/Completion.cpp src/Completion.h)
 target_include_directories(relay-completion PUBLIC src)
@@ -102,7 +109,7 @@ if(RELAY_BUILD_APP)
     add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/Hints.cpp src/Hints.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
         src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests relay-completion relay-backends relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests relay-completion relay-backends relay-windowstate relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -145,6 +152,9 @@ if(BUILD_TESTING)
     target_link_libraries(relay-requests-tests PRIVATE relay-requests ${RELAY_QT}::Test)
     add_test(NAME requests COMMAND relay-requests-tests)
     set_tests_properties(requests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-windowstate-tests tests/windowstate_test.cpp)
+    target_link_libraries(relay-windowstate-tests PRIVATE relay-windowstate ${RELAY_QT}::Test)
+    add_test(NAME windowstate COMMAND relay-windowstate-tests)
     add_executable(relay-backends-tests tests/backends_test.cpp)
     target_link_libraries(relay-backends-tests PRIVATE relay-backends ${RELAY_QT}::Test)
     add_test(NAME backends COMMAND relay-backends-tests)

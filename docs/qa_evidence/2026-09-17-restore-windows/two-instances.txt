@@ -1,0 +1,4 @@
+A saved: 1 window(s)
+lock file exists
+marked: 2 window(s)
+after B ran and quit: 2 window(s)  (2 = B left it alone)

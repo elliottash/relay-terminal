@@ -1,0 +1,200 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "WindowState.h"
+
+#include <QDateTime>
+#include <algorithm>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonValue>
+#include <QSaveFile>
+#include <QStandardPaths>
+
+namespace relay {
+namespace windowstate {
+namespace {
+
+const QLatin1String kVersion("version");
+const QLatin1String kSaved("saved");
+const QLatin1String kWindows("windows");
+const QLatin1String kGeometry("geometry");
+const QLatin1String kScreen("screen");
+const QLatin1String kTabs("tabs");
+const QLatin1String kCurrent("current");
+const QLatin1String kTitles("titles");
+
+}  // namespace
+
+QString defaultDirectory() {
+    const QString data = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    if (data.isEmpty()) return {};
+    return data + QStringLiteral("/relay/state");
+}
+
+QString defaultPath() {
+    const QString dir = defaultDirectory();
+    return dir.isEmpty() ? QString() : dir + QStringLiteral("/windows.json");
+}
+
+QString defaultLockPath() {
+    const QString runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    if (!runtime.isEmpty()) return runtime + QStringLiteral("/relay/windows.lock");
+    const QString dir = defaultDirectory();
+    return dir.isEmpty() ? QString() : dir + QStringLiteral("/windows.lock");
+}
+
+QJsonObject document(const QJsonArray &windows, qint64 savedAt) {
+    return {{kVersion, kSchemaVersion},
+            {kSaved, savedAt > 0 ? savedAt : QDateTime::currentSecsSinceEpoch()},
+            {kWindows, windows}};
+}
+
+QJsonArray windowsOf(const QJsonObject &document) { return document.value(kWindows).toArray(); }
+
+QJsonObject windowRecord(const QRect &geometry, const QString &screen, const QJsonArray &tabs,
+                         int current, const QStringList &titles) {
+    QJsonObject record{{kTabs, tabs}, {kCurrent, current}};
+    if (geometry.isValid())
+        record.insert(kGeometry, QJsonArray{geometry.x(), geometry.y(), geometry.width(), geometry.height()});
+    if (!screen.isEmpty()) record.insert(kScreen, screen);
+    if (!titles.isEmpty()) record.insert(kTitles, QJsonArray::fromStringList(titles));
+    return record;
+}
+
+QRect geometryOf(const QJsonObject &window) {
+    const QJsonArray values = window.value(kGeometry).toArray();
+    if (values.size() != 4) return {};
+    const int x = values.at(0).toInt(), y = values.at(1).toInt();
+    const int w = values.at(2).toInt(), h = values.at(3).toInt();
+    if (w <= 0 || h <= 0) return {};
+    return QRect(x, y, w, h);
+}
+
+QString screenOf(const QJsonObject &window) { return window.value(kScreen).toString(); }
+QJsonArray tabsOf(const QJsonObject &window) { return window.value(kTabs).toArray(); }
+int currentOf(const QJsonObject &window) { return window.value(kCurrent).toInt(); }
+
+QStringList titlesOf(const QJsonObject &window) {
+    QStringList titles;
+    for (const auto &value : window.value(kTitles).toArray()) titles << value.toString();
+    return titles;
+}
+
+bool write(const QString &path, const QJsonObject &state, QString *error) {
+    auto fail = [error](const QString &text) {
+        if (error) *error = text;
+        return false;
+    };
+    if (path.isEmpty()) return fail(QStringLiteral("No writable data directory for the window layout."));
+    const QString dir = QFileInfo(path).absolutePath();
+    if (!QDir().mkpath(dir)) return fail(QStringLiteral("Could not create %1.").arg(dir));
+    QFile::setPermissions(dir, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    QSaveFile file(path);
+    // QSaveFile writes a sibling temp file and renames it into place, so a reader (or a crash)
+    // never sees a half-written layout.
+    if (!file.open(QIODevice::WriteOnly)) return fail(file.errorString());
+    file.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
+    if (file.write(QJsonDocument(state).toJson(QJsonDocument::Indented)) < 0) {
+        file.cancelWriting();
+        return fail(file.errorString());
+    }
+    if (!file.commit()) return fail(file.errorString());
+    QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner);
+    if (error) error->clear();
+    return true;
+}
+
+QJsonObject read(const QString &path, QString *error) {
+    if (error) error->clear();
+    auto fail = [error](const QString &text) {
+        if (error) *error = text;
+        return QJsonObject();
+    };
+    if (path.isEmpty()) return {};
+    QFile file(path);
+    if (!file.exists()) return {};
+    if (!file.open(QIODevice::ReadOnly)) return fail(file.errorString());
+    QJsonParseError parse{};
+    const QJsonDocument parsed = QJsonDocument::fromJson(file.readAll(), &parse);
+    if (parse.error != QJsonParseError::NoError) return fail(parse.errorString());
+    if (!parsed.isObject()) return fail(QStringLiteral("The saved window layout is not a JSON object."));
+    const QJsonObject state = parsed.object();
+    const QJsonValue version = state.value(kVersion);
+    if (!version.isDouble()) return fail(QStringLiteral("The saved window layout has no schema version."));
+    if (version.toInt() != kSchemaVersion)
+        return fail(QStringLiteral("The saved window layout is version %1; this Relay writes version %2.")
+                        .arg(version.toInt())
+                        .arg(kSchemaVersion));
+    if (!state.value(kWindows).isArray()) return fail(QStringLiteral("The saved window layout has no window list."));
+    return state;
+}
+
+bool isUsableNode(const QJsonObject &node, int depth) {
+    if (depth > kMaxDepth || node.isEmpty()) return false;
+    if (node.contains(QStringLiteral("split"))) {
+        const QJsonArray children = node.value(QStringLiteral("children")).toArray();
+        if (children.isEmpty()) return false;
+        for (const auto &child : children)
+            if (!child.isObject() || !isUsableNode(child.toObject(), depth + 1)) return false;
+        return true;
+    }
+    if (node.contains(QStringLiteral("pane"))) return node.value(QStringLiteral("pane")).isObject();
+    for (const char *kind : {"explorer", "preview", "plan"}) {
+        const QString key = QString::fromLatin1(kind);
+        if (!node.contains(key)) continue;
+        // A tool pane whose file is gone still restores: buildNode() falls back to a terminal pane.
+        return node.value(key).isObject() && !node.value(key).toObject().value(QStringLiteral("path")).toString().isEmpty();
+    }
+    return false;
+}
+
+QJsonArray usableWindows(const QJsonObject &document) {
+    QJsonArray windows;
+    for (const auto &value : windowsOf(document)) {
+        if (!value.isObject()) continue;
+        const QJsonObject window = value.toObject();
+        QJsonArray tabs;
+        for (const auto &tab : tabsOf(window))
+            if (tab.isObject() && isUsableNode(tab.toObject())) tabs.append(tab);
+        if (tabs.isEmpty()) continue;
+        QJsonObject kept = window;
+        kept.insert(kTabs, tabs);
+        kept.insert(kCurrent, qBound(0, currentOf(window), int(tabs.size()) - 1));
+        windows.append(kept);
+    }
+    return windows;
+}
+
+QRect clampToScreens(const QRect &geometry, const QString &screenName, const QList<Screen> &screens) {
+    if (!geometry.isValid() || screens.isEmpty()) return geometry;
+    const Screen *target = nullptr;
+    for (const Screen &screen : screens)
+        if (!screenName.isEmpty() && screen.name == screenName && screen.available.isValid()) { target = &screen; break; }
+    if (!target)
+        for (const Screen &screen : screens)
+            if (screen.available.isValid() && screen.available.contains(geometry.center())) { target = &screen; break; }
+    if (!target)
+        for (const Screen &screen : screens)
+            if (screen.available.isValid() && screen.available.intersects(geometry)) { target = &screen; break; }
+    if (!target)
+        for (const Screen &screen : screens)
+            if (screen.available.isValid()) { target = &screen; break; }
+    if (!target) return geometry;
+    const QRect area = target->available;
+    QRect result = geometry;
+    result.setWidth(std::min(result.width(), area.width()));
+    result.setHeight(std::min(result.height(), area.height()));
+    result.moveLeft(qBound(area.left(), result.left(), area.right() - result.width() + 1));
+    result.moveTop(qBound(area.top(), result.top(), area.bottom() - result.height() + 1));
+    return result;
+}
+
+QString resolveDirectory(const QString &cwd, const QString &workspace, const QString &home) {
+    if (!cwd.isEmpty() && QFileInfo(cwd).isDir()) return cwd;
+    if (!workspace.isEmpty() && QFileInfo(workspace).isDir()) return workspace;
+    return home;
+}
+
+}  // namespace windowstate
+}  // namespace relay
