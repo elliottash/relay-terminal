@@ -152,6 +152,7 @@ Waiting for QA (`issues/changes/needs_qa_llm/`):
 
 - `2026-09-17-composer-page-scroll.md`
 - `2026-09-17-pre-submit-run-check.md`
+- `2026-09-17-terminal-not-directly-typable.md`
 
 Closed (`issues/features/done/`): `2026-09-17-review-opencode-agent-design.md` (research) and
 `2026-09-17-terminal-first-agent-fallback.md` (superseded before QA).

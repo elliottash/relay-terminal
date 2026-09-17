@@ -5,6 +5,7 @@
 #include "AgentUi.h"
 #include "Completion.h"
 #include "Hints.h"
+#include "InputPolicy.h"           // prompt-box-only input: where a submitted line goes
 #include "TurnTranscript.h"
 #include "SkillsDialog.h"
 #include "SubagentTranscript.h"   // subagents UI
@@ -302,9 +303,9 @@ private:
         add("palette.open", "palette", "Open the Relay actions palette", {QStringLiteral("Ctrl+Shift+A")});
         add("files.explorer", "pane", "Open this pane's folder in an explorer pane", {});
         add("files.open", "pane", "Open a file in a preview pane", {});
-        add("control.human", "terminal", "Take control of the terminal (hides the prompt; works from the prompt box)", {QStringLiteral("Ctrl+H")});
+        add("control.human", "terminal", "Take control of the terminal (the only way keys reach it; works from the prompt box)", {QStringLiteral("Ctrl+H")});
         add("control.prompt", "terminal", "Back to the Relay prompt (the agent is in control)", {QStringLiteral("Ctrl+Shift+H")});
-        add("terminal.native", "terminal", "Toggle native terminal input", {QStringLiteral("F12")});
+        add("terminal.native", "terminal", "Toggle native terminal input (keys go straight to the terminal)", {QStringLiteral("F12")});
         add("pane.restartShell", "terminal", "Restart this pane's shell or agent after it stopped", {QStringLiteral("Ctrl+Shift+R")});
         add("terminal.interrupt", "terminal", "Interrupt the running command (Esc)", {});
         add("agent.newChat", "agent", "Start a new agent conversation", {});
@@ -522,7 +523,8 @@ public:
 class Pane final : public QWidget {
 public:
     struct QueueEntry { quint64 id = 0; bool agent = false, fix = false, watch = false; QString text, why; QJsonArray attachments; };
-    enum class HideReason { None, AltScreen, Password, Remote, Manual };
+    // Why the prompt box is hidden, so it can come back by itself when the reason ends.
+    enum class HideReason { None, AltScreen, Remote, Manual };
     Pane(const QString &workspace, const QString &cwd, bool cleanShell,
          relay::EngineKind engine = relay::defaultEngineKind(), const QString &engineCore = relay::defaultEngineCore())
         : m_workspace(workspace), m_cwd(cwd.isEmpty() ? workspace : cwd), m_cleanShell(cleanShell) {
@@ -637,7 +639,13 @@ public:
         m_restoreSession = spec.value(QStringLiteral("session_id")).toString();
         changed();
     }
-    void focusInput() { if (m_native) focusTerminal(); else m_editor->setFocus(Qt::OtherFocusReason); }
+    void focusInput() {
+        if (m_native) { focusTerminal(); return; }
+        if (m_secretMode) { m_secretEdit->setFocus(Qt::OtherFocusReason); return; }
+        m_editor->setFocus(Qt::OtherFocusReason);
+    }
+    // The prompt box is masked and answers a password prompt (see checkPasswordPrompt()).
+    bool secretMode() const { return m_secretMode; }
 
     void interruptShell() {
         if (m_backend) { m_loading = false; m_promptReported = false; clearFix(); sendShellInput(QString(QChar(3))); focusTerminal(); }
@@ -762,15 +770,28 @@ public:
         if (m_configured) send({{"type", "set_agent_options"}, {"roles", rolesObject()}});
     }
     void toggleInputMode() {
+        // Ctrl+I at a password prompt leaves masked input and talks to the agent instead
+        // (issue decision 4), e.g. "paste the password from my clipboard". The agent's typing
+        // into the program follows the normal control rules and is not masked.
+        if (m_secretMode) {
+            m_secretDeclined = true;
+            leaveSecretMode();
+            setMode(QStringLiteral("agent"));
+            toast(QStringLiteral("Input: Agent · the password prompt is still waiting"));
+            return;
+        }
         const QString next = m_modeValue == QStringLiteral("agent") ? QStringLiteral("shell") : QStringLiteral("agent");
         setMode(next);
         toast(next == QStringLiteral("agent") ? QStringLiteral("Input: Agent") : QStringLiteral("Input: Terminal"));
     }
 
     // ----- control policy for programs --------------------------------------------------
+    // "agent" (the default since the prompt box became the only input): a full-screen or remote
+    // program leaves the keyboard in the prompt box and the pane offers "Take control".
+    // "human": the old behaviour, Relay switches to native input by itself.
     static QString defaultControl() {
-        return QSettings().value(QStringLiteral("control/default"), QStringLiteral("human")).toString() == QStringLiteral("agent")
-            ? QStringLiteral("agent") : QStringLiteral("human");
+        return QSettings().value(QStringLiteral("control/default"), QStringLiteral("agent")).toString() == QStringLiteral("human")
+            ? QStringLiteral("human") : QStringLiteral("agent");
     }
     static QString programControl(const QString &program) {
         const QString value = QSettings().value(QStringLiteral("control/programs")).toMap().value(program).toString();
@@ -812,14 +833,14 @@ public:
 
     bool ownsComposerWidget(QWidget *widget) const { return m_composer && widget && (widget == m_composer || m_composer->isAncestorOf(widget)); }
 
-    // Human control: the prompt box hides and keys go to the terminal.
+    // Human control (Ctrl+H, F12, the "Take control" button): the only way the terminal widget
+    // ever gets the keyboard. Everything else keeps it in the prompt box.
     void takeControl() {
-        // sudo & co.: the prompt box stays; Ctrl+H only hands the keyboard back to the program.
-        if (!m_opaqueProgram.isEmpty() && !m_native) { focusTerminal(); refreshOpaqueHint(); return; }
         // During a running program the prompt returns when it exits; at an idle shell you stay in control.
         m_autoHuman = processBusy() || !m_promptReported;
         if (!m_native) setNative(true);
-        m_hideReason = HideReason::Manual;
+        // A full-screen or remote program hands the prompt box back by itself when it exits.
+        m_hideReason = m_altScreen ? HideReason::AltScreen : m_remoteProgram ? HideReason::Remote : HideReason::Manual;
         toast(QStringLiteral("You're in control · %1 for the prompt").arg(Keymap::instance().shortcutText(QStringLiteral("control.prompt"))));
     }
 
@@ -827,13 +848,20 @@ public:
     void showPrompt() {
         m_autoHuman = false;
         if (m_native) setNative(false, !processBusy());
-        m_editor->setFocus(Qt::OtherFocusReason);
-        if (!m_opaqueProgram.isEmpty()) { refreshOpaqueHint(); return; }
+        focusInput();
+        if (!m_opaqueProgram.isEmpty()) { refreshProgramHint(); return; }
         if (processBusy())
             toast(QStringLiteral("Agent in control · %1 to take control").arg(Keymap::instance().shortcutText(QStringLiteral("control.human"))));
     }
 
     bool ownsTerminalWidget(QWidget *widget) const { return m_terminal && widget && (widget == m_terminal || m_terminal->isAncestorOf(widget)); }
+    // Widgets inside the terminal that are meant to be typed in (the Relay engine's Find bar)
+    // keep the focus; the terminal surface itself never does while the prompt box is shown.
+    static bool acceptsTypedInput(const QWidget *widget) {
+        return widget
+            && (widget->inherits("QLineEdit") || widget->inherits("QAbstractButton") || widget->inherits("QComboBox")
+                || widget->inherits("QAbstractItemView") || widget->inherits("QAbstractSpinBox"));
+    }
     // What this pane's engine can do (engine/TerminalBackend.h). Actions that need a
     // capability are only offered when the pane's backend reports it.
     bool terminalCan(int capability) const { return m_backend && (m_backend->capabilities() & capability); }
@@ -1048,6 +1076,7 @@ protected:
         // Split panes get narrow: drop the key hints and the agent workspace path first.
         if (m_help) m_help->setVisible(width() >= 900);
         placeQueueStrip();
+        placeTakeControl();
         placeSubagentOverlay();   // subagents UI
         placeRequestsPanel();     // request ledger UI
         placeSubagentsPanel();
@@ -1071,6 +1100,16 @@ protected:
             && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && ownsTerminalWidget(qobject_cast<QWidget *>(object))) {
             QTimer::singleShot(0, this, [this] { copySelection(); });
         }
+        // A plain click in the terminal (not a selection drag) used to give it the keyboard.
+        // It no longer does, so say which key still hands the keyboard over.
+        if (event->type() == QEvent::MouseButtonPress && ownsTerminalWidget(qobject_cast<QWidget *>(object)))
+            m_clickOrigin = static_cast<QMouseEvent *>(event)->pos();
+        if (event->type() == QEvent::MouseButtonRelease && !m_native
+            && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton
+            && ownsTerminalWidget(qobject_cast<QWidget *>(object))
+            && (static_cast<QMouseEvent *>(event)->pos() - m_clickOrigin).manhattanLength() < 6)
+            hint(QStringLiteral("terminal.click"), QStringLiteral("The prompt box is the input · %1 types into the terminal")
+                     .arg(Keymap::instance().shortcutText(QStringLiteral("control.human"))));
         if (m_queueList && object == m_queueList->viewport() && event->type() == QEvent::MouseButtonRelease) {
             // The × at the right edge of a queue row removes it.
             const QPoint pos = static_cast<QMouseEvent *>(event)->pos();
@@ -1081,10 +1120,24 @@ protected:
                 return true;
             }
         }
-        if (event->type() == QEvent::KeyPress && !m_opaqueProgram.isEmpty() && !m_native
-            && ownsTerminalWidget(qobject_cast<QWidget *>(object)) && Keymap::instance().match(static_cast<QKeyEvent *>(event)).isEmpty())
-            m_opaqueTyped = true;
-        if (event->type() == QEvent::FocusIn && !m_opaqueProgram.isEmpty()) QTimer::singleShot(0, this, [this] { refreshOpaqueHint(); });
+        // The prompt box is the only keyboard input: clicking the terminal selects text, scrolls
+        // and follows links, but anything that focuses the terminal surface hands the keyboard
+        // straight back. Real widgets inside the terminal (the engine's Find bar) keep it.
+        if (event->type() == QEvent::FocusIn && !m_native && m_composer && m_composer->isVisible()) {
+            auto *focused = qobject_cast<QWidget *>(object);
+            if (ownsTerminalWidget(focused) && !acceptsTypedInput(focused))
+                QTimer::singleShot(0, this, [this] { if (!m_native) focusInput(); });
+        }
+        if (event->type() == QEvent::FocusIn && !m_opaqueProgram.isEmpty()) QTimer::singleShot(0, this, [this] { refreshProgramHint(); });
+        // Esc in the masked prompt box gives up on answering: back to the normal prompt box.
+        if (event->type() == QEvent::KeyPress && object == m_secretEdit && m_secretMode
+            && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
+            m_secretDeclined = true;
+            leaveSecretMode();
+            toast(QStringLiteral("Masked input off · %1 types the password into the terminal")
+                      .arg(Keymap::instance().shortcutText(QStringLiteral("control.human"))));
+            return true;
+        }
         if (event->type() == QEvent::KeyPress && object == m_editor) {
             auto *key = static_cast<QKeyEvent *>(event);
             if (handleComposerKey(key)) return true;
@@ -1109,12 +1162,8 @@ protected:
                     return true;
                 }
             }
-            if (event->type() == QEvent::KeyPress && widget && m_terminal &&
-                (widget == m_terminal || m_terminal->isAncestorOf(widget)) && !m_loading && m_shellReady) {
-                // Directly typing in the terminal gives Readline ownership of its line.
-                // It must not later be overwritten by an unrelated composer submission.
-                setNative(true);
-            }
+            // Keys never reach the terminal outside native mode, so typing there can no longer
+            // take Readline's line away from the composer; nothing to do here.
         }
         return QWidget::eventFilter(object, event);
     }
@@ -1145,6 +1194,13 @@ private:
         m_prefixChip->setObjectName(QStringLiteral("prefixChip"));
         m_prefixChip->hide();
         routeRow->addWidget(m_prefixChip);
+        // "password for sudo" while the prompt box is masked.
+        m_secretChip = new QLabel;
+        m_secretChip->setObjectName(QStringLiteral("secretChip"));
+        m_secretChip->setTextFormat(Qt::PlainText);
+        m_secretChip->setToolTip(QStringLiteral("The line is written to the program and never stored"));
+        m_secretChip->hide();
+        routeRow->addWidget(m_secretChip);
         routeRow->addWidget(m_routeLabel, 1);
         m_opaqueHint = new QLabel;
         m_opaqueHint->setObjectName(QStringLiteral("opaqueHint"));
@@ -1192,7 +1248,18 @@ private:
         connect(submit, &QPushButton::clicked, this, [this] { requestRoute(true, QStringLiteral("auto")); });
         routeRow->addWidget(submit); composerLayout->addLayout(routeRow);
         m_editor = new RichEditor; composerLayout->addWidget(m_editor);
-        auto *help = new QLabel(QStringLiteral("Shift+Enter  newline     Ctrl+Enter  agent (interrupts when busy)     Ctrl+Shift+Enter  terminal     Esc  stop agent     @  files     ↑  queue / history"));
+        // Password prompts (checkPasswordPrompt): the prompt box becomes a masked field whose
+        // line goes to the running program. It is a separate widget so the password can never
+        // reach the composer's document, its history, its undo stack or route assist.
+        m_secretEdit = new QLineEdit;
+        m_secretEdit->setObjectName(QStringLiteral("secretEditor"));
+        m_secretEdit->setEchoMode(QLineEdit::Password);
+        m_secretEdit->setAccessibleName(QStringLiteral("Password for the running program"));
+        m_secretEdit->setPlaceholderText(QStringLiteral("Password · Enter sends it to the program, Esc cancels"));
+        m_secretEdit->hide();
+        connect(m_secretEdit, &QLineEdit::returnPressed, this, [this] { submitSecret(); });
+        composerLayout->addWidget(m_secretEdit);
+        auto *help = new QLabel(QStringLiteral("Shift+Enter  newline     Ctrl+Enter  agent (interrupts when busy)     Ctrl+Shift+Enter  terminal     Ctrl+H  type into the terminal     Esc  stop agent     @  files     ↑  queue / history"));
         help->setWordWrap(true); composerLayout->addWidget(help);
         m_help = help;
         buildTranscript();
@@ -1204,6 +1271,18 @@ private:
         m_queueStrip->setAttribute(Qt::WA_StyledBackground);
         auto *queueLayout = new QVBoxLayout(m_queueStrip); queueLayout->setContentsMargins(10, 6, 6, 6); queueLayout->setSpacing(2);
         m_queueStrip->hide();
+        // A full-screen program (vim, htop) or an ssh session owns the screen. Relay no longer
+        // switches to native input by itself; this button, or Ctrl+H, hands the keyboard over.
+        m_takeControl = new QPushButton(this);
+        m_takeControl->setObjectName(QStringLiteral("takeControlChip"));
+        m_takeControl->setCursor(Qt::PointingHandCursor);
+        m_takeControl->setFocusPolicy(Qt::NoFocus);
+        m_takeControl->hide();
+        connect(m_takeControl, &QPushButton::clicked, this, [this] {
+            takeControl();
+            hint(QStringLiteral("control.human.mouse"),
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("control.human")), QStringLiteral("take control")));
+        });
         layout->addWidget(composer);
         setupSubagentsUi(layout);   // subagents UI: running-agents list under the composer
         updatePaths();
@@ -2540,6 +2619,9 @@ private:
         m_backend = m_backendOwned.get();
         m_terminal = m_backend->widget();
         m_terminalHost->layout()->addWidget(m_terminal);
+        // The prompt box is the only keyboard input: the terminal does not take focus on click.
+        m_terminalFocusPolicy = Qt::NoFocus;
+        applyTerminalFocusPolicy();
         m_backend->onFinished = [this](int) {
             m_backend = nullptr; m_terminal = nullptr; m_shellReady = false;
             // The backend outlives this callback; drop it once the stack has unwound.
@@ -2622,7 +2704,8 @@ private:
 
     void requestRoute(bool submit, const QString &overrideMode) {
         if (m_native) {
-            if (submit) status(QStringLiteral("Native input is active. Press F12 to return to the composer."));
+            if (submit) status(QStringLiteral("Native input is active. Press %1 or F12 to return to the prompt box.")
+                                   .arg(Keymap::instance().shortcutText(QStringLiteral("control.prompt"))));
             return;
         }
         if (submit) {
@@ -2657,6 +2740,13 @@ private:
         QString mode = overrideMode == QStringLiteral("auto") ? m_modeValue : overrideMode;
         if (submit && overrideMode == QStringLiteral("auto") && !m_editKind.isEmpty()) mode = m_editKind;
         if (submit) m_editKind.clear();
+        // A program is blocked reading a line from the terminal: the prompt box answers it
+        // instead of queueing a command (issue decision 5). Agent submissions still go to the
+        // agent, so Ctrl+Enter and `*` keep working while a program waits.
+        if (submit && sendLineToProgram(mode)) {
+            if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
+            return;
+        }
         if (submit) {
             const QString typed = m_editor->toPlainText();
             if (typed.startsWith(QStringLiteral("/shell ")))
@@ -2669,6 +2759,27 @@ private:
         } else m_previewId = id;
         send({{"type", "route"}, {"id", id}, {"text", m_editor->toPlainText()}, {"mode", mode},
               {"known_commands", m_knownCommands}, {"path", m_shellPath}, {"cwd", m_cwd}});
+    }
+
+    // The rule for a submitted line while a foreground program is running: it is written to
+    // that program's stdin when the terminal is in canonical (line) mode and a process of the
+    // command is blocked reading it. Anything else keeps the existing behaviour — run it now,
+    // or queue it until the terminal is free. Never remembered (relay::input::retainable).
+    bool sendLineToProgram(const QString &mode) {
+        if (m_native || !m_backend || m_secretMode) return false;
+        if (relay::input::targetFor(inputState(), mode) != relay::input::LineTarget::Program) return false;
+        const QString text = m_editor->toPlainText();
+        if (text.contains('\n')) return false;   // a multi-line draft is not an answer to a prompt
+        const QString program = foregroundProgramName();
+        m_editor->clear();
+        hideAtPopup();
+        clearAiGhost();
+        sendShellInput(text + '\n');
+        m_waitTicks = 0;
+        endWaiting(false);
+        status(relay::input::sentToProgram(program));
+        toast(relay::input::sentToProgram(program));
+        return true;
     }
 
     void handle(const QJsonObject &event) {
@@ -3090,24 +3201,88 @@ public:
 
 private:
     // Warp's rule: a password prompt turns echo off but keeps canonical (line) input. Full-screen
-    // programs and Readline turn canonical input off, so they do not match.
+    // programs and Readline turn canonical input off, so they do not match. Relay no longer hands
+    // the keyboard to the terminal for one: the prompt box becomes a masked field whose line is
+    // written to the program (issue decision 3). Polled once a second, and every 250 ms while a
+    // command runs.
     void checkPasswordPrompt() {
-        if (m_promptReported || m_secretNotified || !m_backend) return;
-        const int pid = shellPid();
-        if (pid <= 0) return;
-        const auto name = QStringLiteral("/proc/%1/fd/0").arg(pid).toLocal8Bit();
-        const int fd = ::open(name.constData(), O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
-        if (fd < 0) return;
-        termios state{};
-        const bool secret = ::tcgetattr(fd, &state) == 0 && (state.c_lflag & ICANON) && !(state.c_lflag & ECHO);
-        ::close(fd);
-        if (!secret) return;
-        m_secretNotified = true;
-        endWaiting(false);
-        if (!m_native) { m_autoHuman = true; setNative(true); m_hideReason = HideReason::Password; m_echoTicks = 0; }
-        focusTerminal();
-        toast(QStringLiteral("Password prompt · you're in control"));
-        notifyIfAway(QStringLiteral("Password prompt"), QStringLiteral("A command in %1 is waiting for a password.").arg(m_cwd));
+        if (!m_backend) { leaveSecretMode(); return; }
+        if (relay::input::secretPrompt(inputState(false)) && !m_promptReported) {
+            m_echoTicks = 0;
+            if (m_secretMode || m_native || m_secretDeclined) return;
+            endWaiting(false);
+            enterSecretMode(foregroundProgramName());
+            if (!m_secretNotified) {
+                m_secretNotified = true;
+                notifyIfAway(QStringLiteral("Password prompt"), QStringLiteral("A command in %1 is waiting for a password.").arg(m_cwd));
+            }
+            return;
+        }
+        // Echo is back on: the password was answered, or the program moved on. Two ticks of
+        // agreement keep a single poll between write and echo from ending masked input early.
+        if ((m_secretMode || m_secretDeclined) && ++m_echoTicks >= 2) {
+            leaveSecretMode();
+            m_secretDeclined = false;
+            m_secretNotified = false;
+            m_echoTicks = 0;
+        }
+    }
+
+    // ----- masked prompt box (password prompts) -----------------------------------------------
+    void enterSecretMode(const QString &program) {
+        if (m_secretMode || !m_secretEdit) return;
+        m_secretMode = true;
+        m_secretProgram = program;
+        hideAtPopup(); hideSlashPopup(); hideTabPopup(); clearAiGhost();
+        m_secretChip->setText(relay::input::passwordChip(m_secretProgram));
+        m_secretChip->show();
+        m_routeLabel->setText(QStringLiteral("PASSWORD · the line goes to the program, not to Relay"));
+        scrubSecretEditor();
+        m_editor->hide();
+        m_secretEdit->show();
+        m_secretEdit->setFocus(Qt::OtherFocusReason);
+        refreshProgramHint();
+        changed();
+        toast(QStringLiteral("Password prompt · type it here · %1 asks the agent instead")
+                  .arg(Keymap::instance().shortcutText(QStringLiteral("input.toggle"))));
+    }
+
+    void leaveSecretMode() {
+        if (!m_secretMode) return;
+        m_secretMode = false;
+        m_secretProgram.clear();
+        scrubSecretEditor();
+        m_secretEdit->hide();
+        m_secretChip->hide();
+        m_editor->show();
+        if (!m_native) m_editor->setFocus(Qt::OtherFocusReason);
+        refreshProgramHint();
+        requestRoute(false, QStringLiteral("auto"));
+        changed();
+    }
+
+    // Overwrite whatever the masked field holds, then clear it. QLineEdit::setText() also drops
+    // its undo/redo history, so the characters are not recoverable from the widget.
+    void scrubSecretEditor() {
+        if (!m_secretEdit) return;
+        const int length = m_secretEdit->text().size();
+        if (length > 0) m_secretEdit->setText(QString(length, QLatin1Char('\0')));
+        m_secretEdit->clear();
+    }
+
+    // Enter in the masked prompt box: the line goes straight to the program's stdin. It is never
+    // remembered, queued, logged, routed, shown to a model or printed in the terminal.
+    void submitSecret() {
+        if (!m_secretMode) return;
+        relay::input::Secret secret;
+        secret.set(m_secretEdit->text());
+        scrubSecretEditor();
+        if (!m_backend) { secret.wipe(); return; }
+        QString line = secret.take();
+        m_backend->sendText(line, false);
+        relay::input::wipe(line);
+        m_echoTicks = 0;
+        status(QStringLiteral("Password sent to %1").arg(m_secretProgram.isEmpty() ? QStringLiteral("the program") : m_secretProgram));
     }
 
     void notifyIfAway(const QString &title, const QString &body) {
@@ -4069,19 +4244,27 @@ private:
         if (!primary) {
             if (m_native) return;
             const QString program = foregroundProgramName();
-            if (controlFor(program) == QStringLiteral("agent")) {
-                toast(QStringLiteral("Agent in control of %1 · %2 to take control")
-                      .arg(program.isEmpty() ? QStringLiteral("this program") : program,
-                           Keymap::instance().shortcutText(QStringLiteral("control.human"))));
+            endWaiting(false);
+            leaveSecretMode();
+            // Relay no longer takes the keyboard for a full-screen program (issue decision 2):
+            // the prompt box keeps it and the pane offers "Take control". People who want the
+            // old behaviour turn it back on per program or globally (control/default = human).
+            if (controlFor(program) == QStringLiteral("human")) {
+                m_autoHuman = true;
+                setNative(true);
+                m_hideReason = HideReason::AltScreen;
                 return;
             }
-            endWaiting(false);
-            m_autoHuman = true;
-            setNative(true);
-            m_hideReason = HideReason::AltScreen;
+            updateTakeControl();
+            toast(QStringLiteral("%1 is running · %2 to type into it")
+                  .arg(program.isEmpty() ? QStringLiteral("A full-screen program") : program,
+                       Keymap::instance().shortcutText(QStringLiteral("control.human"))));
         } else if (m_native && m_hideReason == HideReason::AltScreen) {
             m_autoHuman = false;
             setNative(false, false);
+            updateTakeControl();
+        } else {
+            updateTakeControl();
         }
     }
 
@@ -4092,37 +4275,35 @@ private:
     }
 
     void pollProgram() {
-        if (m_promptReported || !m_backend) { m_programPoll.stop(); endWaiting(true); updateOpaqueProgram(); return; }
+        if (m_promptReported || !m_backend) {
+            m_programPoll.stop(); endWaiting(true); updateOpaqueProgram(); checkPasswordPrompt(); updateTakeControl();
+            return;
+        }
         updateOpaqueProgram();
         checkPasswordPrompt();
-        if (m_native && m_hideReason == HideReason::Password) {
-            // The password was entered once echo is back on; show the prompt box again.
-            if (terminalMode() == TerminalMode::Echoing) {
-                if (++m_echoTicks >= 2) { m_secretNotified = false; m_autoHuman = false; setNative(false, false); }
-            } else {
-                m_echoTicks = 0;
-            }
-        }
-        if (!m_native && !m_altScreen && m_runningSince.isValid() && m_runningSince.elapsed() > 300) {
+        if (!m_native && !m_altScreen && !m_secretMode && m_runningSince.isValid() && m_runningSince.elapsed() > 300) {
             const QString program = foregroundProgramName();
-            if (remoteSessionProgram(program) && controlFor(program) != QStringLiteral("agent") && !m_remoteHandled) {
+            if (remoteSessionProgram(program) && !m_remoteHandled) {
+                // ssh and friends never switch screens, so a short list stands in for detection.
                 m_remoteHandled = true;
+                m_remoteProgram = true;
                 endWaiting(false);
-                m_autoHuman = true; setNative(true); m_hideReason = HideReason::Remote;
+                if (controlFor(program) == QStringLiteral("human")) {
+                    m_autoHuman = true; setNative(true); m_hideReason = HideReason::Remote;
+                    return;
+                }
+                updateTakeControl();
+                toast(QStringLiteral("%1 is running · %2 to type into it")
+                          .arg(program, Keymap::instance().shortcutText(QStringLiteral("control.human"))));
                 return;
             }
             if (!m_opaqueProgram.isEmpty()) {
-                // Relay cannot see whether sudo & co. are reading the terminal; focus went there in
-                // case it wants a password. Once the terminal echoes again the program is only
-                // printing, so the prompt box takes the keyboard back and the next command can be
-                // queued while it runs. Typing in the terminal keeps the focus there.
-                if (!m_opaqueTyped && terminalMode() == TerminalMode::Echoing
-                    && ownsTerminalWidget(QApplication::focusWidget())) {
-                    m_editor->setFocus(Qt::OtherFocusReason);
-                    hint(QStringLiteral("queue.whileRunning"),
-                         QStringLiteral("Tip: type the next command here while %1 runs · it is queued until the terminal is free")
-                             .arg(m_opaqueProgram));
-                }
+                // sudo & co.: Relay cannot read their syscalls, so it cannot see them waiting.
+                // A password prompt is still visible in the line discipline (checkPasswordPrompt);
+                // anything else queues, and the hint in the composer row says so.
+                hint(QStringLiteral("queue.whileRunning"),
+                     QStringLiteral("Tip: type the next command here while %1 runs · it is queued until the terminal is free")
+                         .arg(m_opaqueProgram));
             } else if (programWaitingForInput()) {
                 if (++m_waitTicks == 2) startWaiting();
             } else {
@@ -4130,9 +4311,10 @@ private:
                 m_waitTicks = 0;
             }
         }
+        updateTakeControl();
     }
 
-    enum class TerminalMode { Unknown, Raw, Echoing, Secret };
+    using TerminalMode = relay::input::TerminalMode;
     TerminalMode terminalMode() const {
         if (!m_backend) return TerminalMode::Unknown;
         const int pid = shellPid();
@@ -4146,6 +4328,19 @@ private:
         if (!ok) return TerminalMode::Unknown;
         if (!(state.c_lflag & ICANON)) return TerminalMode::Raw;
         return (state.c_lflag & ECHO) ? TerminalMode::Echoing : TerminalMode::Secret;
+    }
+
+    // Everything the input rules (src/InputPolicy.h) need about this pane. `live` also asks
+    // /proc whether a process of the running command is blocked reading the terminal; the
+    // 250 ms poll's answer (m_waiting) is used when that is too expensive.
+    relay::input::State inputState(bool live = true) const {
+        relay::input::State state;
+        state.mode = terminalMode();
+        state.programRunning = processBusy();
+        state.altScreen = m_altScreen;
+        state.native = m_native;
+        state.programReading = state.programRunning && (m_waiting || (live && programWaitingForInput()));
+        return state;
     }
 
     // A process of this pane's command is blocked in read() on the terminal. Reading
@@ -4214,47 +4409,43 @@ private:
     void updateOpaqueProgram() {
         const QString name = (m_promptReported || m_altScreen || !m_backend) ? QString() : opaqueForegroundProgram();
         if (name != m_opaqueProgram) {
-            const bool was = !m_opaqueProgram.isEmpty();
             m_opaqueProgram = name;
-            if (!was) {
-                endWaiting(false);
-                m_opaqueTyped = false;
-                if (!m_native) focusTerminal();
-            } else if (name.isEmpty()) {
-                // The user answered the program in the terminal: leave the focus there.
-                if (m_opaqueTyped) m_refocus = false;
-                else if (!m_native && ownsTerminalWidget(QApplication::focusWidget())) m_editor->setFocus(Qt::OtherFocusReason);
-            }
+            if (!name.isEmpty()) endWaiting(false);
         }
-        refreshOpaqueHint();
+        refreshProgramHint();
     }
 
-    void refreshOpaqueHint() {
+    // The line in the composer row that says who owns the terminal: a program Relay cannot
+    // inspect (sudo & co.), or one that is waiting for a line from the prompt box.
+    void refreshProgramHint() {
         if (!m_opaqueHint) return;
-        const bool show = !m_opaqueProgram.isEmpty() && !m_native;
-        if (show) {
-            const bool inComposer = ownsComposerWidget(QApplication::focusWidget());
-            m_opaqueHint->setText(inComposer
-                ? QStringLiteral("%1 is running · prompts queue until it exits · %2 or click the terminal to type into it")
-                      .arg(m_opaqueProgram, Keymap::instance().shortcutText(QStringLiteral("control.human")))
-                : QStringLiteral("%1 is running · typing goes to the program · %2 to type a prompt")
-                      .arg(m_opaqueProgram, Keymap::instance().shortcutText(QStringLiteral("control.prompt"))));
+        QString text;
+        if (!m_native && !m_secretMode) {
+            if (m_waiting)
+                text = QStringLiteral("%1 is waiting for input · Enter sends your line to it")
+                           .arg(foregroundProgramName().isEmpty() ? QStringLiteral("The program") : foregroundProgramName());
+            else if (!m_opaqueProgram.isEmpty())
+                text = QStringLiteral("%1 is running · prompts queue until it exits · %2 to type into it")
+                           .arg(m_opaqueProgram, Keymap::instance().shortcutText(QStringLiteral("control.human")));
         }
-        m_opaqueHint->setVisible(show);
-        m_routeLabel->setVisible(!show);
+        m_opaqueHint->setText(text);
+        m_opaqueHint->setVisible(!text.isEmpty());
+        m_routeLabel->setVisible(text.isEmpty());
     }
 
+    // A program is blocked reading a line (`apt`'s `[Y/n]`). The prompt box keeps the keyboard;
+    // what is submitted there answers the program instead of being queued (issue decision 5).
     void startWaiting() {
         m_waiting = true;
-        m_waitMovedFocus = m_editor->hasFocus();
-        focusTerminal();
-        toast(QStringLiteral("Waiting for input · typing goes to the program"));
+        refreshProgramHint();
+        toast(QStringLiteral("%1 is waiting for input · Enter here sends your answer to it")
+                  .arg(foregroundProgramName().isEmpty() ? QStringLiteral("The program") : foregroundProgramName()));
     }
 
-    void endWaiting(bool restoreFocus) {
-        if (m_waiting && restoreFocus && m_waitMovedFocus && !m_native && ownsTerminalWidget(QApplication::focusWidget()))
-            m_editor->setFocus(Qt::OtherFocusReason);
-        m_waiting = false; m_waitMovedFocus = false; m_waitTicks = 0;
+    void endWaiting(bool) {
+        const bool was = m_waiting;
+        m_waiting = false; m_waitTicks = 0;
+        if (was) refreshProgramHint();
     }
 
     struct PendingPrompt { QString text, why, program; bool fix = false; };
@@ -4369,6 +4560,34 @@ private:
         m_queueStrip->raise();
     }
 
+    // The "Take control (Ctrl+H)" button floats over the top-right of the terminal, so it does
+    // not take layout space away from the program drawing there.
+    void placeTakeControl() {
+        if (!m_takeControl || !m_takeControl->isVisible() || !m_terminalHost) return;
+        const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
+        const QSize size = m_takeControl->sizeHint();
+        m_takeControl->setGeometry(host.right() - size.width() - 10, host.top() + 8, size.width(), size.height());
+        m_takeControl->raise();
+    }
+
+    // Shown while a full-screen program (alternate screen) or a remote session owns the terminal
+    // and the prompt box still has the keyboard.
+    void updateTakeControl() {
+        if (!m_takeControl) return;
+        const bool show = relay::input::offerTakeControl(inputState(false), m_remoteProgram);
+        if (show) {
+            const QString keys = Keymap::instance().shortcutText(QStringLiteral("control.human"));
+            m_takeControl->setText(keys.isEmpty() ? QStringLiteral("Take control") : QStringLiteral("Take control (%1)").arg(keys));
+            const QString program = foregroundProgramName();
+            m_takeControl->setToolTip(program.isEmpty()
+                ? QStringLiteral("Hide the prompt box and type into the program")
+                : QStringLiteral("Hide the prompt box and type into %1").arg(program));
+            m_takeControl->adjustSize();
+        }
+        m_takeControl->setVisible(show);
+        placeTakeControl();
+    }
+
     bool readlineReady() const {
         if (!m_backend) return false;
         const int pid = shellPid();
@@ -4446,8 +4665,11 @@ private:
             m_programPoll.stop();
             endWaiting(true);
             updateOpaqueProgram();
-            m_remoteHandled = false;
+            m_remoteHandled = false; m_remoteProgram = false;
+            m_secretDeclined = false; m_secretNotified = false;
+            leaveSecretMode();
             if (m_native && m_autoHuman) { m_autoHuman = false; setNative(false, false); }
+            updateTakeControl();
             if (m_activeValid && !m_active.agent && m_activeLoaded) {
                 // The queued command finished; a failure pauses whatever is queued behind it.
                 m_activeValid = false; m_activeLoaded = false;
@@ -4477,7 +4699,7 @@ private:
             // The prompt box stays visible while ordinary programs run so more commands and prompts
             // can be queued. It hides for the alternate screen (Session signal), password prompts,
             // and remote sessions; a program blocked reading the terminal gets the focus instead.
-            m_waitTicks = 0; m_echoTicks = 0; m_remoteHandled = false;
+            m_waitTicks = 0; m_echoTicks = 0; m_remoteHandled = false; m_remoteProgram = false; m_secretDeclined = false;
             m_programPoll.start();
             QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
         } else if (stage == QStringLiteral("loaded") && m_loading && m_backend &&
@@ -4501,6 +4723,8 @@ private:
     }
 
     void setNative(bool enabled, bool cancelLine = true) {
+        // Taking control leaves masked input: the password is then typed into the program itself.
+        if (enabled && m_secretMode) { m_secretDeclined = true; leaveSecretMode(); }
         m_native = enabled;
         changed();
         m_editor->setReadOnly(enabled);
@@ -4509,6 +4733,7 @@ private:
         placeSubagentsPanel();   // subagents UI: hidden with the composer
         if (!enabled) m_hideReason = HideReason::None;
         if (enabled) hideAtPopup();
+        applyTerminalFocusPolicy();
         if (enabled) {
             m_routeLabel->setText(QStringLiteral("NATIVE · keystrokes go directly to the terminal."));
             focusTerminal();
@@ -4518,13 +4743,25 @@ private:
             if (cancelLine && m_shellReady && m_backend && (foregroundPid() <= 0 || foregroundPid() == shellPid())) {
                 sendShellInput(QString(QChar(3))); m_shellReady = false; m_promptReported = false; m_refocus = true;
             }
-            if (!m_opaqueProgram.isEmpty()) focusTerminal(); else m_editor->setFocus();
+            focusInput();
             requestRoute(false, QStringLiteral("auto"));
         }
-        refreshOpaqueHint();
+        refreshProgramHint();
+        updateTakeControl();
+    }
+
+    // The terminal widget only accepts the keyboard in native mode; in every other state the
+    // prompt box is the input, so a click must not be able to focus it.
+    void applyTerminalFocusPolicy() {
+        QWidget *target = m_backend ? m_backend->focusWidget() : nullptr;
+        if (!target) return;
+        if (m_terminalFocusPolicy == Qt::NoFocus) m_terminalFocusPolicy = target->focusPolicy();
+        target->setFocusPolicy(m_native ? m_terminalFocusPolicy : Qt::NoFocus);
     }
 
     void focusTerminal() {
+        // Only native input puts the keyboard in the terminal (issue decision 1).
+        if (!m_native) { focusInput(); return; }
         if (QWidget *target = m_backend ? m_backend->focusWidget() : nullptr) target->setFocus(Qt::OtherFocusReason);
     }
     void updatePaths() {
@@ -4702,7 +4939,15 @@ private:
     int m_lastMarkExitCode = -1;
     QTimer m_programPoll;
     HideReason m_hideReason = HideReason::None;
-    bool m_altScreen = false, m_waiting = false, m_waitMovedFocus = false, m_remoteHandled = false;
+    bool m_altScreen = false, m_waiting = false, m_remoteHandled = false, m_remoteProgram = false;
+    // prompt-box-only input: masked prompt box at a password prompt, and the take-control button
+    QLineEdit *m_secretEdit = nullptr;
+    QLabel *m_secretChip = nullptr;
+    QPushButton *m_takeControl = nullptr;
+    QString m_secretProgram;
+    bool m_secretMode = false, m_secretDeclined = false;
+    Qt::FocusPolicy m_terminalFocusPolicy = Qt::NoFocus;   // the terminal's own policy, for native mode
+    QPoint m_clickOrigin;
     int m_waitTicks = 0, m_echoTicks = 0;
     quint64 m_askSerial = 0;
     QFrame *m_queueStrip = nullptr;
@@ -4745,7 +4990,6 @@ private:
     // sudo & co. in the foreground
     QLabel *m_opaqueHint = nullptr;
     QString m_opaqueProgram;
-    bool m_opaqueTyped = false;
     quint64 m_requestId = 0, m_loadSerial = 0;
     // subagents UI
     relay::SubagentModel m_subagents;
@@ -5929,7 +6173,9 @@ private:
 
         items << actionItem(QStringLiteral("palette"), QStringLiteral("Keyboard shortcuts…"), QStringLiteral("Every action and its keys"), QStringLiteral("help.shortcuts"));
         items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Stop the running program · Esc in the prompt box") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
-        items << actionItem(terminal, QStringLiteral("Take control"), QStringLiteral("Hide the prompt and type into the terminal"), QStringLiteral("control.human"), pane && pane->isNative());
+        items << actionItem(terminal, QStringLiteral("Take control"),
+                            QStringLiteral("Hide the prompt box and type into the terminal · the only way keys reach it"),
+                            QStringLiteral("control.human"), pane && pane->isNative());
         {
             PaletteItem suggestions;
             const bool on = QSettings().value(QStringLiteral("composer/history_suggestions"), true).toBool();
@@ -5940,14 +6186,14 @@ private:
             suggestions.run = [on] { QSettings().setValue(QStringLiteral("composer/history_suggestions"), !on); };
             items << suggestions;
         }
-        items << actionItem(terminal, QStringLiteral("Show the Relay prompt"), QStringLiteral("The agent is in control of a running program"), QStringLiteral("control.prompt"), pane && !pane->isNative());
+        items << actionItem(terminal, QStringLiteral("Show the Relay prompt"), QStringLiteral("Back to the prompt box; it becomes the input again"), QStringLiteral("control.prompt"), pane && !pane->isNative());
         {
             const QString current = Pane::defaultControl();
             items << submenu(QStringLiteral("menu:control"), terminal, QStringLiteral("Control when a full-screen program starts"),
-                             current == QStringLiteral("agent") ? QStringLiteral("Agent stays in control") : QStringLiteral("You take control"), [current] {
+                             current == QStringLiteral("agent") ? QStringLiteral("The prompt box keeps the keyboard") : QStringLiteral("Relay takes control for you"), [current] {
                 QList<PaletteItem> children;
-                const QList<QStringList> options{{QStringLiteral("human"), QStringLiteral("You take control"), QStringLiteral("The prompt hides and keys go to the program")},
-                                                 {QStringLiteral("agent"), QStringLiteral("Agent stays in control"), QStringLiteral("The prompt stays; Ctrl+H takes control")}};
+                const QList<QStringList> options{{QStringLiteral("agent"), QStringLiteral("The prompt box keeps the keyboard"), QStringLiteral("A \"Take control\" button appears; Ctrl+H does the same")},
+                                                 {QStringLiteral("human"), QStringLiteral("Relay takes control for you"), QStringLiteral("The old behaviour: the prompt box hides and keys go to the program")}};
                 for (const auto &option : options) {
                     PaletteItem item;
                     const QString value = option[0];
@@ -5963,15 +6209,15 @@ private:
                 const QString override = Pane::programControl(program);
                 PaletteItem agentItem;
                 agentItem.key = QStringLiteral("control.program.agent"); agentItem.section = terminal;
-                agentItem.label = QStringLiteral("Always give the agent control of %1").arg(program);
-                agentItem.detail = QStringLiteral("The prompt stays when %1 starts").arg(program);
+                agentItem.label = QStringLiteral("Keep the prompt box when %1 starts").arg(program);
+                agentItem.detail = QStringLiteral("%1 gets a \"Take control\" button instead of the keyboard").arg(program);
                 agentItem.checked = override == QStringLiteral("agent"); agentItem.stayOpen = true;
                 agentItem.run = [program, override] { Pane::setProgramControl(program, override == QStringLiteral("agent") ? QString() : QStringLiteral("agent")); };
                 items << agentItem;
                 PaletteItem humanItem;
                 humanItem.key = QStringLiteral("control.program.human"); humanItem.section = terminal;
                 humanItem.label = QStringLiteral("Always take control of %1").arg(program);
-                humanItem.detail = QStringLiteral("The prompt hides when %1 starts").arg(program);
+                humanItem.detail = QStringLiteral("The prompt box hides as soon as %1 starts").arg(program);
                 humanItem.checked = override == QStringLiteral("human"); humanItem.stayOpen = true;
                 humanItem.run = [program, override] { Pane::setProgramControl(program, override == QStringLiteral("human") ? QString() : QStringLiteral("human")); };
                 items << humanItem;

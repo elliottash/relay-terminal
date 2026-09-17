@@ -88,6 +88,13 @@ target_include_directories(relay-completion PUBLIC src)
 target_link_libraries(relay-completion PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-completion PRIVATE -Wall -Wextra -Wpedantic)
 
+# Prompt-box-only input: where a submitted line goes, when "Take control" is offered, and how
+# a password typed into the masked prompt box is wiped. Pure rules, no terminal.
+add_library(relay-input STATIC src/InputPolicy.cpp src/InputPolicy.h)
+target_include_directories(relay-input PUBLIC src)
+target_link_libraries(relay-input PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-input PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
 target_include_directories(relay-requests PUBLIC src)
 target_link_libraries(relay-requests PUBLIC ${RELAY_QT}::Widgets)
@@ -109,7 +116,7 @@ if(RELAY_BUILD_APP)
     add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/Hints.cpp src/Hints.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
         src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests relay-completion relay-backends relay-windowstate relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests relay-completion relay-backends relay-windowstate relay-input relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -155,6 +162,9 @@ if(BUILD_TESTING)
     add_executable(relay-windowstate-tests tests/windowstate_test.cpp)
     target_link_libraries(relay-windowstate-tests PRIVATE relay-windowstate ${RELAY_QT}::Test)
     add_test(NAME windowstate COMMAND relay-windowstate-tests)
+    add_executable(relay-input-tests tests/inputpolicy_test.cpp)
+    target_link_libraries(relay-input-tests PRIVATE relay-input ${RELAY_QT}::Test)
+    add_test(NAME input COMMAND relay-input-tests)
     add_executable(relay-backends-tests tests/backends_test.cpp)
     target_link_libraries(relay-backends-tests PRIVATE relay-backends ${RELAY_QT}::Test)
     add_test(NAME backends COMMAND relay-backends-tests)
