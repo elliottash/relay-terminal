@@ -287,10 +287,11 @@ def load(settings, workspace: str | Path, cap: int | None = None) -> LoadedInstr
     blocks, size, seen_paths, seen_hashes = [], len(SECTION_HEADER.encode("utf-8")), set(), set()
     while queue:
         path, limit, parent, depth = queue.pop(0)
-        key = str(path.resolve()) if path.exists() else str(path)
-        if key in seen_paths:
+        key = str(path)  # reported as given, so the GUI can match scan results
+        resolved = str(path.resolve()) if path.exists() else key
+        if resolved in seen_paths:
             continue
-        seen_paths.add(key)
+        seen_paths.add(resolved)
         text = _read_text(path) if _is_file(path) else None
         if text is None:
             result.skipped.append(f"{path}: missing, unreadable or binary")
