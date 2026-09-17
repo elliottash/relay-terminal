@@ -75,8 +75,10 @@ class ChatProvider:
         if cancel.is_set():
             raise Cancelled("Stopped.")
         payload = {"model": self.config.model, "messages": messages,
-                   "stream": True, "max_tokens": self.config.max_tokens,
-                   "tools": tools, **self.config.extra}
+                   "stream": True, "max_tokens": self.config.max_tokens, **self.config.extra}
+        if tools:
+            # Side calls (summaries, recaps, suggestions) send no tools; some APIs reject "tools": [].
+            payload["tools"] = tools
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         if len(data) > MAX_RESPONSE:
             raise ProviderError("Conversation exceeds the local request size limit. Start a new conversation.")
@@ -102,6 +104,8 @@ class ChatProvider:
                         raise ProviderError("Provider returned no choices.")
                     if choices[0].get("finish_reason") in {"length", "content_filter"}:
                         raise ProviderError("Provider stopped before completing its response; no partial tools were executed.")
+                    if isinstance(obj.get("usage"), dict):
+                        emit({"event": "usage", "usage": obj["usage"]})
                     message = choices[0].get("message", {})
                     if message.get("content"):
                         emit({"event": "delta", "text": message["content"]})
@@ -154,6 +158,7 @@ class ChatProvider:
         got_done = False
         finish_reason = None
         reasoning_announced = False
+        usage = None
         event_lines: list[str] = []
         event_size = 0
         while True:
@@ -182,12 +187,15 @@ class ChatProvider:
             obj = json.loads(event)
             if "error" in obj:
                 raise ProviderError("Provider reported a streaming error. No partial tool call was executed.")
-            if obj.get("usage"):
-                emit({"event": "usage", "usage": obj["usage"]})
+            if isinstance(obj.get("usage"), dict):
+                usage = obj["usage"]
             choices = obj.get("choices", [])
             if not choices:
                 continue
             choice = choices[0]
+            # Kimi reports usage inside the final choice unless stream_options is sent.
+            if isinstance(choice.get("usage"), dict) and usage is None:
+                usage = choice["usage"]
             finish_reason = choice.get("finish_reason") or finish_reason
             delta = choice.get("delta", {})
             if isinstance(delta.get("content"), str):
@@ -219,6 +227,8 @@ class ChatProvider:
             raise ProviderError("Provider stream ended unexpectedly; partial tools were not executed.")
         if finish_reason in {"length", "content_filter"}:
             raise ProviderError("Response was truncated or filtered; partial tools were not executed. Increase output limit or narrow the task.")
+        if usage is not None:
+            emit({"event": "usage", "usage": usage})
         if calls:
             message["tool_calls"] = [calls[i] for i in sorted(calls)]
         return self._normalize(message)

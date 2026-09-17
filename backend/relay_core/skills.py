@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Index and read Warp-style skills: <dir>/<name>/SKILL.md with YAML frontmatter.
 
-Skills are reusable instructions the user keeps in ~/.warp/skills. The agent sees a compact
-list of names and descriptions and loads a skill's full text with a tool before following it.
-Only configured directories are read, and every path stays inside its skill folder, because
-agent tools run without a per-action approval.
+Skills are reusable instructions the user keeps in ~/.warp/skills (and Claude Code's ~/.claude/skills).
+The agent sees a compact list of names and descriptions and loads a skill's full text with a tool
+before following it. Only the default locations (see default_directories; this includes the
+workspace's .claude/skills at the owner's request) or configured directories are read, and every
+path stays inside its skill folder, because agent tools run without a per-action approval.
 """
 from __future__ import annotations
 
@@ -79,8 +80,9 @@ class SkillIndex:
     skipped: list[str] = field(default_factory=list)
 
     @classmethod
-    def load(cls, directories) -> "SkillIndex":
+    def load(cls, directories, exclude=()) -> "SkillIndex":
         index = cls()
+        excluded = set(exclude)
         for directory in directories:
             base = Path(os.path.expanduser(str(directory)))
             if not base.is_dir():
@@ -94,6 +96,10 @@ class SkillIndex:
                     continue
                 if not NAME.match(entry.name):
                     index.skipped.append(f"{entry.name}: unsupported folder name")
+                    continue
+                if entry.name in excluded:
+                    if (entry / "SKILL.md").is_file():
+                        index.skipped.append(f"{entry.name}: excluded ({base})")
                     continue
                 root = entry.resolve()
                 if root.parent != base:
@@ -204,23 +210,64 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
-def default_directories() -> list[Path]:
-    return [Path.home() / ".warp" / "skills"]
+# Warp-app-specific skills bundled with Warp; they drive Warp's own UI and make no sense in Relay.
+DEFAULT_EXCLUDE = ("warpctrl", "oz-platform", "create-tab-config", "update-tab-config", "modify-settings",
+                   "add-mcp-server", "factory-mcp")
+DISCOVERY_DEPTH = 6
+DISCOVERY_MAX_DIRS = 20000
+PRUNE = {"node_modules", ".git", "__pycache__"}
+
+
+def discover_bases(root: Path, max_depth: int = DISCOVERY_DEPTH, max_dirs: int = DISCOVERY_MAX_DIRS) -> list[Path]:
+    """Directories under root that hold <name>/SKILL.md folders. Symlinks are not followed while walking."""
+    if not root.is_dir():
+        return []
+    root = root.resolve()
+    bases: list[Path] = []
+    visited = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        visited += 1
+        if visited > max_dirs:
+            break
+        current = Path(dirpath)
+        depth = len(current.relative_to(root).parts)
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d not in PRUNE) if depth < max_depth else []
+        if depth >= 1 and "SKILL.md" in filenames:
+            if current.parent not in bases:
+                bases.append(current.parent)
+            dirnames[:] = []  # a skill folder's subfolders are its files, not more skills
+    return bases
+
+
+def default_directories(workspace=None) -> list[Path]:
+    """Default search order; for a duplicate name the earlier directory wins.
+
+    1. ~/.warp/skills (the user's Warp skills)  2. ~/.claude/skills  3. <workspace>/.claude/skills
+    4. every other folder under ~/.warp (depth <= 6) holding <name>/SKILL.md, e.g. Warp's bundled skills in
+       ~/.warp/remote-server/bundled_resources/bundled/skills.
+    """
+    home = Path.home()
+    directories = [home / ".warp" / "skills", home / ".claude" / "skills"]
+    if workspace is not None:
+        directories.append(Path(workspace) / ".claude" / "skills")
+    first = {d.resolve() for d in directories if d.is_dir()}
+    directories += [b for b in discover_bases(home / ".warp") if b not in first]
+    return directories
 
 
 def from_request(settings, workspace) -> SkillIndex | None:
     """Build an index from the worker's optional `skills` configure field."""
     if settings is None:
         settings = {}
-    if not isinstance(settings, dict) or set(settings) - {"enabled", "dirs", "project"}:
-        raise ValueError("skills must be an object with enabled, dirs and project.")
+    if not isinstance(settings, dict) or set(settings) - {"enabled", "dirs", "project", "exclude"}:
+        raise ValueError("skills must be an object with enabled, dirs, project and exclude.")
     if settings.get("enabled", True) is False:
         return None
     if type(settings.get("enabled", True)) is not bool or type(settings.get("project", False)) is not bool:
         raise ValueError("skills.enabled and skills.project must be booleans.")
     dirs = settings.get("dirs")
     if dirs is None:
-        directories = default_directories()
+        directories = default_directories(workspace)
     else:
         if not isinstance(dirs, list) or len(dirs) > 8 or not all(isinstance(d, str) and d.strip() for d in dirs):
             raise ValueError("skills.dirs must be a list of at most 8 directory paths.")
@@ -229,7 +276,10 @@ def from_request(settings, workspace) -> SkillIndex | None:
             raise ValueError("skills.dirs must be absolute paths.")
     if settings.get("project"):
         directories.append(Path(workspace) / ".warp" / "skills")
-    return SkillIndex.load(directories)
+    exclude = settings.get("exclude", DEFAULT_EXCLUDE)
+    if not isinstance(exclude, (list, tuple)) or len(exclude) > 200 or not all(isinstance(x, str) for x in exclude):
+        raise ValueError("skills.exclude must be a list of skill names.")
+    return SkillIndex.load(directories, exclude)
 
 
 TOOL_SPECS = [

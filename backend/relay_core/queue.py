@@ -74,11 +74,15 @@ class TurnSupervisor:
             if self._running is not None:
                 raise ValueError("Stop the active turn first.")
             if self._agent is not None:
-                self._agent.messages = self._agent.messages[:1]
+                if hasattr(self._agent, "reset_conversation"):
+                    self._agent.reset_conversation()  # new session; the old one stays saved
+                else:
+                    self._agent.messages = self._agent.messages[:1]
             self._clear_locked()
 
     # ----- requests -------------------------------------------------------
-    def submit(self, prompt, when: str = "now", request_id=None, context=None, origin: str = "user") -> str:
+    def submit(self, prompt, when: str = "now", request_id=None, context=None, attachments=None,
+               origin: str = "user") -> str:
         """origin "relay" marks prompts Relay queued itself (e.g. a background subagent finished)."""
         if when not in {"now", "queue", "interrupt"}:
             raise ValueError('"when" must be "now", "queue", or "interrupt".')
@@ -95,7 +99,7 @@ class TurnSupervisor:
             if when == "now" and busy:
                 raise ValueError("An agent turn is already active.")
             item = {"id": uuid.uuid4().hex, "prompt": prompt, "force": when != "queue", "context": context,
-                    "origin": origin}
+                    "attachments": attachments, "origin": origin}
             if item["force"]:
                 # Interrupts are FIFO among themselves, ahead of ordinary queued prompts.
                 position = sum(1 for _ in self._leading_forced())
@@ -111,6 +115,34 @@ class TurnSupervisor:
             self._changed_locked()
             self._lock.notify_all()
             return item["id"]
+
+    def run_exclusive(self, name: str, task: Callable) -> None:
+        """Run task(agent) on a background thread while no turn runs (compaction and other
+        conversation rewrites). The supervisor counts as busy meanwhile, so queued prompts wait."""
+        with self._lock:
+            if self._agent is None:
+                raise ValueError("Configure a provider and workspace first.")
+            if self._closed:
+                raise ValueError("Worker is shutting down.")
+            if self._running is not None or (self._queue and not self._paused):
+                raise ValueError("An agent turn is active; try again when it finishes.")
+            agent = self._agent
+            self._running = f"{name}-{uuid.uuid4().hex}"
+            agent.cancel_event.clear()
+
+        def runner():
+            try:
+                task(agent)
+            except Exception as exc:
+                self._emit({"event": "error", "source": name,
+                            "text": str(exc)[:2000] if isinstance(exc, (ValueError, OSError)) or type(exc).__name__ in {"ProviderError", "Cancelled"}
+                            else f"{name} failed ({type(exc).__name__})."})
+            finally:
+                with self._lock:
+                    self._running = None
+                    self._lock.notify_all()
+
+        threading.Thread(target=runner, name=f"relay-{name}", daemon=True).start()
 
     def cancel(self) -> None:
         """Stop the running turn and pause the queue (resume with resume_queue)."""
@@ -201,7 +233,8 @@ class TurnSupervisor:
                 self._emit({"event": "agent_started", "id": item["id"]})
                 self._changed_locked()
             try:
-                agent.ask(item["prompt"], reset_cancellation=False, context=item.get("context"))
+                extra = {"attachments": item["attachments"]} if item.get("attachments") else {}
+                agent.ask(item["prompt"], reset_cancellation=False, context=item.get("context"), **extra)
             except Exception as exc:  # ask() handles its own errors; this is defensive.
                 self._emit({"event": "error", "text": f"Agent error ({type(exc).__name__})."})
                 self._outcome = "error"
