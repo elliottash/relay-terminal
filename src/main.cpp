@@ -1280,6 +1280,13 @@ private:
         m_secretChip->hide();
         routeRow->addWidget(m_secretChip);
         routeRow->addWidget(m_routeLabel, 1);
+        auto *helpButton = new QToolButton;
+        helpButton->setObjectName(QStringLiteral("statusPicker"));
+        helpButton->setText(QStringLiteral("?"));
+        helpButton->setToolTip(QStringLiteral("The main keys (or type ? in an empty prompt box)"));
+        helpButton->setFocusPolicy(Qt::NoFocus);
+        connect(helpButton, &QToolButton::clicked, this, [this] { toggleHelpCard(); });
+        routeRow->addWidget(helpButton);
         m_opaqueHint = new QLabel;
         m_opaqueHint->setObjectName(QStringLiteral("opaqueHint"));
         m_opaqueHint->hide();
@@ -4410,7 +4417,8 @@ private:
             return true;
         }
         // Warp-style: "?" in an empty prompt box shows the main keys, "?" or Esc hides them again.
-        if (k == Qt::Key_Question && m_editor->toPlainText().isEmpty() && !(mods & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {
+        if ((k == Qt::Key_Question || key->text() == QStringLiteral("?"))
+            && m_editor->toPlainText().isEmpty() && !(mods & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {
             toggleHelpCard();
             return true;
         }
