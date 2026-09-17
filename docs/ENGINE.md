@@ -2,8 +2,8 @@
 
 Relay's own terminal engine (owner decision: no Konsole fork; KonsolePart stays the Linux default
 until parity). Long-term targets: Linux, macOS, Windows. Status on 2026-09-17: a reusable library
-with two emulator cores, a threaded PTY, a QPainter view, `TerminalBackend` implemented, 88 passing
-test-case runs in `relay-engine-tests`, and GUI checks with vim, less, htop and tmux. **Not wired into `src/main.cpp` yet.**
+with two emulator cores, a threaded PTY, a QPainter view, `TerminalBackend` implemented, 97 passing
+test-case runs in `relay-engine-tests` (both cores), and GUI checks with vim, less, htop and tmux. **Not wired into `src/main.cpp` yet.**
 
 Performance: [ENGINE-PERF.md](ENGINE-PERF.md). Evidence:
 [qa_evidence/2026-09-17-engine-phase1/](qa_evidence/2026-09-17-engine-phase1/) (this phase) and
