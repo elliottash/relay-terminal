@@ -8,7 +8,8 @@ import os
 import sys
 import threading
 
-from relay_core import __version__, keystore, observe_protocol, roles as model_roles, session_protocol, skills
+from relay_core import (__version__, keystore, keytest, observe_protocol, roles as model_roles,
+                        session_protocol, skills)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import agents_defs
 from relay_core.subagents import SubagentFactory, SubagentManager
@@ -113,10 +114,12 @@ def main():
                 skill_index = skills.from_request(request.get("skills"), workspace)
                 # --- model roles (protocol 13) ---
                 role_table = model_roles.validate_roles(request.get("roles"))
+                tier_table = model_roles.validate_tiers(request.get("tiers"))
                 agent_role = model_roles.validate_role(request.get("agent_role") or "main")
                 options = session_protocol.agent_options(request, workspace)
                 resolver = model_roles.RoleResolver(config, options.get("preset_id"), role_table,
-                                                    key_lookup=keystore.lookup, main_effort=options.get("effort"))
+                                                    key_lookup=keystore.lookup, main_effort=options.get("effort"),
+                                                    tiers=tier_table)
                 pane_role = resolver.resolve(agent_role)
                 if not pane_role.is_main:
                     config, options["preset_id"] = pane_role.config, pane_role.preset_id
@@ -143,6 +146,7 @@ def main():
                 event = {"event": "configured", "model": config.model,
                          "skills": len(agent.executor.skills.skills) if agent.executor.skills is not None else 0,
                          "agent_role": agent_role, "roles": resolver.summary(),
+                         "tiers": resolver.tier_summary(),
                          **session_protocol.configured_fields(agent)}
                 event["agents"] = len(agent_catalog.definitions)  # subagents
                 if skill_index is not None and skill_index.skipped:
@@ -161,15 +165,30 @@ def main():
                 agent.executor.keybindings = catalog
                 emit({"event": "keybindings_updated", "id": request.get("id")})
             elif kind == "presets":
-                stored = keystore.available()
+                # key_source says where each key comes from so the keys modal can show "from
+                # RELAY_*_API_KEY" instead of offering to remove something it cannot remove.
+                sources = keystore.sources()
                 emit({"event": "presets", "id": request.get("id"), "warp_default": keystore.warp_default_preset(),
-                      "presets": [{**p.to_dict(), "has_stored_key": stored[p.id]} for p in PRESETS.values()]})
+                      "tier_defaults": model_roles.tier_catalog(), "role_actions": model_roles.action_catalog(),
+                      "presets": [{**p.to_dict(), "has_stored_key": bool(sources[p.id]),
+                                   "key_source": sources[p.id]} for p in PRESETS.values()]})
             elif kind == "store_key":
                 keystore.store(request.get("preset", ""), request.get("api_key", ""))
                 emit({"event": "key_stored", "id": request.get("id"), "preset": request.get("preset")})
+            elif kind == "remove_key":
+                preset_id = request.get("preset", "")
+                removed = keystore.remove(preset_id)
+                emit({"event": "key_removed", "id": request.get("id"), "preset": preset_id, "removed": removed})
+            elif kind == "test_key":
+                # Protocol 13.8: one minimal call. The key is read here and never crosses the pipe.
+                keytest.run(request.get("preset", ""), emit, request.get("id"))
             elif kind == "import_warp":
                 imported, skipped = keystore.import_from_warp()
                 emit({"event": "warp_imported", "id": request.get("id"),
+                      "imported": [item.to_dict() for item in imported], "skipped": skipped})
+            elif kind == "import_agent_tools":
+                imported, skipped = keystore.import_from_agent_tools()
+                emit({"event": "agent_tools_imported", "id": request.get("id"),
                       "imported": [item.to_dict() for item in imported], "skipped": skipped})
             elif kind == "ask":
                 subagents.user_activity()
@@ -208,15 +227,23 @@ def main():
             elif kind == "set_agent_options":
                 validate_turn_options(request)  # refuse bad values before changing anything
                 role_table = model_roles.validate_roles(request.get("roles")) if "roles" in request else None
+                tier_table = model_roles.validate_tiers(request.get("tiers")) if "tiers" in request else None
                 fields = subagents.set_options(request.get("max_auto_turns"))
                 agent = turns.agent
+                changed_models = False
                 if agent is not None:
                     fields.update(agent.set_options(request))  # protocol section 12
-                    if role_table is not None and agent.roles is not None:
-                        agent.roles.set_roles(role_table)   # protocol 13: applies from the next call
+                    if agent.roles is not None and (role_table is not None or tier_table is not None):
+                        # Protocol 13: both tables apply from the next call.
+                        if tier_table is not None:
+                            agent.roles.set_tiers(tier_table)
+                        if role_table is not None:
+                            agent.roles.set_roles(role_table)
                         fields["roles"] = agent.roles.summary()
+                        fields["tiers"] = agent.roles.tier_summary()
+                        changed_models = True
                 emit({"event": "agent_options", "id": request.get("id"), **fields})
-                if role_table is not None and agent is not None and agent.roles is not None:
+                if changed_models:
                     emit(agent.roles.event(state["agent_role"], request.get("id")))
             elif kind == "set_agent_role":
                 # Protocol 13: switch this pane between the main agent and another role (the fast agent).

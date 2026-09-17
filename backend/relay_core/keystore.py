@@ -78,8 +78,36 @@ def store(preset_id: str, api_key: str) -> None:
         raise KeystoreError("Could not save the key to the keyring. Is it unlocked?")
 
 
+def remove(preset_id: str) -> bool:
+    """Delete a provider's keyring entry. True when one was removed."""
+    _check_id(preset_id)
+    if os.environ.get("RELAY_KEYRING", "").strip().lower() in ("off", "0", "no", "none"):
+        return False
+    if not shutil.which("secret-tool"):
+        return False
+    result = _run(["clear", "service", SERVICE, "provider", preset_id])
+    if result.returncode != 0:
+        raise KeystoreError("Could not remove the key from the keyring. Is it unlocked?")
+    return True
+
+
+def key_source(preset_id: str) -> str:
+    """Where a provider's key comes from: "env", "keyring" or "" when there is none.
+
+    Never returns key material. The environment always wins, as in lookup().
+    """
+    _check_id(preset_id)
+    if os.environ.get(env_name(preset_id), "").strip():
+        return "env"
+    return "keyring" if lookup(preset_id) else ""
+
+
 def available() -> dict[str, bool]:
     return {preset_id: bool(lookup(preset_id)) for preset_id in PRESETS}
+
+
+def sources() -> dict[str, str]:
+    return {preset_id: key_source(preset_id) for preset_id in PRESETS}
 
 
 @dataclass
@@ -184,6 +212,51 @@ def import_from_warp(settings_path: Path | None = None) -> tuple[list[ImportedEn
         else:
             store(preset.id, key)
             imported.append(ImportedEndpoint(preset.id, name, model or preset.model))
+    return imported, skipped
+
+
+# --- other agent tools ---------------------------------------------------------------------------
+# Claude Code and Codex normally sign in with OAuth, and an OAuth token is not an API key: it does not
+# work on the OpenAI-compatible endpoints Relay talks to, so it is never imported. Only a plain API key
+# that the user put in the tool's own config is copied, and only into the matching Relay preset.
+CLAUDE_SETTINGS = ".claude/settings.json"
+CODEX_AUTH = ".codex/auth.json"
+_SOURCES = (
+    # (label, path under $HOME, json path to the key, Relay preset)
+    ("Claude Code", CLAUDE_SETTINGS, ("env", "ANTHROPIC_API_KEY"), "anthropic"),
+    ("Codex", CODEX_AUTH, ("OPENAI_API_KEY",), "openai"),
+)
+
+
+def _json_at(path: Path, keys: tuple[str, ...]):
+    try:
+        if path.stat().st_size > 1024 * 1024:
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    for key in keys:
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    return value
+
+
+def import_from_agent_tools(home: Path | None = None) -> tuple[list[ImportedEndpoint], list[str]]:
+    """Copy API keys out of Claude Code's and Codex's config files. Never returns key material."""
+    base = Path(home) if home is not None else Path.home()
+    imported, skipped = [], []
+    for label, relative, keys, preset_id in _SOURCES:
+        path = base / relative
+        if not path.exists():
+            skipped.append(f"{label}: no {relative} in your home directory")
+            continue
+        value = _json_at(path, keys)
+        if not isinstance(value, str) or not value.strip() or any(c.isspace() for c in value.strip()):
+            skipped.append(f"{label}: no API key in {relative} (an OAuth login is not an API key)")
+            continue
+        store(preset_id, value)
+        imported.append(ImportedEndpoint(preset_id, label, PRESETS[preset_id].model))
     return imported, skipped
 
 
