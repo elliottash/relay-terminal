@@ -2,12 +2,13 @@
      edit the card files and regenerate. -->
 # Board
 
-65 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+70 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (61)
+## Features (63)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
+| `#5FY5` | [Ctrl+Shift alternates for the core shortcuts](features/2026-09-17-in-app-shortcut-alternates.md) | discussing |  |  |  |
 | `#C1HH` | [Agent drives interactive programs in the visible pane, with take-over](features/2026-09-17-agent-delegate-and-take-over.md) | ready |  |  |  |
 | `#G8DK` | [Aliased terminal commands and prompts (Warp workflows)](features/2026-09-17-aliases-and-workflows.md) | ready |  |  |  |
 | `#GDQN` | [Two-way sync between the Switchboard and GitHub Issues](features/2026-09-17-github-issues-sync.md) | ready |  |  |  |
@@ -21,6 +22,7 @@
 | `#FW77` | [Relay as a pure terminal (TUI) app](features/2026-09-17-terminal-only-tui-relay.md) | ready |  |  |  |
 | `#NY7Z` | [Voice transcription mode (microphone button, hold Right Alt)](features/2026-09-17-voice-transcription.md) | ready |  |  |  |
 | `#P4GP` | [Website and beta release](features/2026-09-17-website-and-beta-release.md) | ready |  |  |  |
+| `#78BN` | [One key for a new pane, with an arrow to choose the side](features/2026-09-17-new-pane-direction-by-arrow.md) | ready |  |  |  |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/2026-09-17-agent-sessions-planning-subagents.md) | in-progress | Claude Opus 5 (orchestrating) with subagents, 2026-09-17 |  |  |
 | `#YZTK` | [Clickable file and folder paths open Relay panes](features/2026-09-17-clickable-paths.md) | in-progress |  |  |  |
 | `#BPK3` | [Show agent output live while a program owns the terminal](features/needs_qa_llm/2026-09-17-agent-output-while-program-runs.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
@@ -70,11 +72,14 @@
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | Claude Opus 5 research subagent, 2026-09-16 |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | implemented by Claude Opus 5 (Claude Code session), 2026-09-16 |  |  |
 
-## Bugs (4)
+## Bugs (7)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#ERES` | [Ctrl+Alt+arrow pane moves and pane dragging do not work](changes/2026-09-17-pane-move-keys-and-drag-broken.md) | ready |  |  |  |
+| `#G152` | [Ctrl+H shrinks a pane to almost nothing](changes/2026-09-17-ctrl-h-shrinks-pane.md) | ready |  |  |  |
+| `#0C7V` | [Single click opens folders in the explorer pane (Dolphin style)](changes/2026-09-17-single-click-folders.md) | ready |  |  |  |
+| `#SQAM` | [Provider stalls have no visible progress, no retry and no log](changes/2026-09-17-provider-stalls-and-no-logs.md) | ready |  |  |  |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
 | `#90JF` | [Check that a terminal command will run before it is sent](changes/needs_qa_llm/2026-09-17-pre-submit-run-check.md) | needs-qa-llm |  |  |  |
 | `#AHS5` | [The prompt box is the only input; clicking the terminal does not type into it](changes/needs_qa_llm/2026-09-17-terminal-not-directly-typable.md) | needs-qa-llm | implemented by Claude Opus 5 (1M context) (Claude Code session), 2026-09-17 |  |  |
