@@ -169,6 +169,7 @@ struct GhosttyCore::Impl {
     bool clipboardAllowed = false;
     bool mouseButtonDown = false;
     int searchTotal = 0;
+    CursorShape lastCursorShape = CursorShape::Block;
     SelectionUnit selUnit = SelectionUnit::Cell;
     bool selRect = false;
     QString title;
@@ -401,6 +402,10 @@ GhosttyCore::GhosttyCore(int rows, int cols)
     ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_SIZE, fn(&Impl::onSize));
     ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_XTVERSION, fn(&Impl::onXtversion));
     ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_COLOR_SCHEME, fn(&Impl::onColorScheme));
+    // Grapheme clustering (DEC mode 2027) on by default, as in Ghostty: emoji
+    // modifiers, ZWJ sequences and flags occupy one cell cluster.
+    GhosttyTerminalModeConfig graphemes{GHOSTTY_MODE_GRAPHEME_CLUSTER, true};
+    ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_MODE_DEFAULT, &graphemes);
     // Clipboard reads (OSC 52 "?") stay unanswered: programs must not read the
     // user's clipboard without consent.
     d->applyScrollbackLimit();
@@ -651,6 +656,7 @@ bool GhosttyCore::updateFrame(ViewportFrame *frame, bool force)
     case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE: frame->cursor.shape = CursorShape::Underline; break;
     default: frame->cursor.shape = CursorShape::Block; break;
     }
+    d->lastCursorShape = frame->cursor.shape;
 
     const GhosttyTerminalScrollbar sb = d->scrollbar();
     frame->historyRows = int(sb.total > sb.len ? sb.total - sb.len : 0);
@@ -678,14 +684,13 @@ bool GhosttyCore::altScreen() const { return d->alt; }
 
 MouseTracking GhosttyCore::mouseTracking() const
 {
-    GhosttyMouseTrackingMode m = GHOSTTY_MOUSE_TRACKING_NONE;
-    ghostty_terminal_get(d->t, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &m);
-    switch (m) {
-    case GHOSTTY_MOUSE_TRACKING_NONE: return MouseTracking::None;
-    case GHOSTTY_MOUSE_TRACKING_BUTTON: return MouseTracking::Drag;
-    case GHOSTTY_MOUSE_TRACKING_ANY: return MouseTracking::Move;
-    default: return MouseTracking::Click;
-    }
+    if (modeValue(d->t, GHOSTTY_MODE_ANY_MOUSE))
+        return MouseTracking::Move;
+    if (modeValue(d->t, GHOSTTY_MODE_BUTTON_MOUSE))
+        return MouseTracking::Drag;
+    if (modeValue(d->t, GHOSTTY_MODE_NORMAL_MOUSE) || modeValue(d->t, GHOSTTY_MODE_X10_MOUSE))
+        return MouseTracking::Click;
+    return MouseTracking::None;
 }
 
 bool GhosttyCore::mouseSgrPixels() const { return modeValue(d->t, GHOSTTY_MODE_SGR_PIXELS_MOUSE); }
@@ -697,17 +702,13 @@ CursorState GhosttyCore::activeCursor() const
     CursorState c;
     uint16_t x = 0, y = 0;
     bool visible = true;
-    GhosttyTerminalCursorStyle style = GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK;
     ghostty_terminal_get(d->t, GHOSTTY_TERMINAL_DATA_CURSOR_X, &x);
     ghostty_terminal_get(d->t, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &y);
     ghostty_terminal_get(d->t, GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE, &visible);
-    ghostty_terminal_get(d->t, GHOSTTY_TERMINAL_DATA_CURSOR_STYLE, &style);
     c.row = y;
     c.col = x;
     c.visible = visible;
-    c.shape = style == GHOSTTY_TERMINAL_CURSOR_STYLE_BAR ? CursorShape::Bar
-        : style == GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE ? CursorShape::Underline
-                                                           : CursorShape::Block;
+    c.shape = d->lastCursorShape; // DATA_CURSOR_STYLE is the SGR style; the shape comes from the render state
     return c;
 }
 
@@ -938,7 +939,10 @@ void GhosttyCore::sendKey(const KeyInput &key)
     if ((key.modifiers & ModShift) && !key.text.isEmpty() && key.key == Key::None)
         consumed |= GHOSTTY_MODS_SHIFT;
     ghostty_key_event_set_consumed_mods(d->keyEvent, consumed);
-    const QByteArray utf8 = key.text.toUtf8();
+    // Qt reports Ctrl+C as text "\x03"; the encoder wants the printable text only.
+    QByteArray utf8 = key.text.toUtf8();
+    if (!utf8.isEmpty() && (uchar(utf8[0]) < 0x20 || uchar(utf8[0]) == 0x7f))
+        utf8.clear();
     ghostty_key_event_set_utf8(d->keyEvent, utf8.constData(), size_t(utf8.size()));
     uint32_t unshifted = key.codepoint;
     if (unshifted >= 'A' && unshifted <= 'Z')

@@ -28,10 +28,32 @@ if(RELAY_ENGINE_WITH_GHOSTTY)
     if(NOT RELAY_GHOSTTY_INCLUDE_DIR OR NOT RELAY_GHOSTTY_LIBRARY)
         message(FATAL_ERROR "RELAY_ENGINE_WITH_GHOSTTY=ON but libghostty-vt was not found under RELAY_GHOSTTY_VT_PREFIX='${RELAY_GHOSTTY_VT_PREFIX}'. Build it with engine/scripts/build-libghostty-vt.sh.")
     endif()
+    # The Zig-built archive bundles compiler_rt with *global* memcpy, memset,
+    # strlen, __memcpy_chk, __stack_chk_fail, ... which would silently replace
+    # glibc's for every object linked after it. On Linux, partially link the
+    # archive and keep only the ghostty_* API global.
+    set(RELAY_GHOSTTY_LINK_LIBRARY ${RELAY_GHOSTTY_LIBRARY})
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_OBJCOPY AND CMAKE_LINKER)
+        set(RELAY_GHOSTTY_LINK_LIBRARY ${CMAKE_CURRENT_BINARY_DIR}/libghostty-vt-relay.a)
+        add_custom_command(OUTPUT ${RELAY_GHOSTTY_LINK_LIBRARY}
+            COMMAND ${CMAKE_LINKER} -r --whole-archive ${RELAY_GHOSTTY_LIBRARY} -o ghostty-vt-all.o
+            COMMAND ${CMAKE_OBJCOPY} --wildcard --keep-global-symbol=ghostty_* ghostty-vt-all.o ghostty-vt-local.o
+            COMMAND ${CMAKE_COMMAND} -E rm -f ${RELAY_GHOSTTY_LINK_LIBRARY} ghostty-vt-all.o
+            COMMAND ${CMAKE_AR} rcs ${RELAY_GHOSTTY_LINK_LIBRARY} ghostty-vt-local.o
+            DEPENDS ${RELAY_GHOSTTY_LIBRARY}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            COMMENT "Localizing non-API symbols of libghostty-vt")
+        add_custom_target(relay-ghostty-vt-localize DEPENDS ${RELAY_GHOSTTY_LINK_LIBRARY})
+    else()
+        message(WARNING "Relay engine: linking libghostty-vt without symbol localization (TODO for this platform)")
+    endif()
     add_library(relay-ghostty-vt STATIC IMPORTED GLOBAL)
     set_target_properties(relay-ghostty-vt PROPERTIES
-        IMPORTED_LOCATION ${RELAY_GHOSTTY_LIBRARY}
+        IMPORTED_LOCATION ${RELAY_GHOSTTY_LINK_LIBRARY}
         INTERFACE_INCLUDE_DIRECTORIES ${RELAY_GHOSTTY_INCLUDE_DIR})
+    if(TARGET relay-ghostty-vt-localize)
+        add_dependencies(relay-ghostty-vt relay-ghostty-vt-localize)
+    endif()
     message(STATUS "Relay engine: libghostty-vt core enabled (${RELAY_GHOSTTY_LIBRARY})")
 endif()
 
@@ -57,3 +79,11 @@ endif()
 
 add_executable(relay-engine-bench bench/EngineBench.cpp)
 target_link_libraries(relay-engine-bench PRIVATE relay-terminal-engine)
+
+if(BUILD_TESTING)
+    find_package(${RELAY_QT} REQUIRED COMPONENTS Test)
+    add_executable(relay-engine-core-tests tests/CoreTest.cpp)
+    target_link_libraries(relay-engine-core-tests PRIVATE relay-terminal-engine ${RELAY_QT}::Test)
+    add_test(NAME engine-core COMMAND relay-engine-core-tests)
+    set_tests_properties(engine-core PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS engine)
+endif()
