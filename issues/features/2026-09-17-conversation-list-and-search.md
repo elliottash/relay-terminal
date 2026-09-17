@@ -36,3 +36,11 @@ search, no cross-project view, and no way to find the turn that mentioned a word
 2. Scope of the default view: this project (recommended) or all projects?
 3. Should terminal command history be searchable in the same list, or stay separate?
 4. Retention: keep everything (recommended) or prune after N months, with a setting?
+
+## Decisions (owner, 2026-09-17)
+- **Ctrl+Shift+O** opens the conversation list. Its search covers **both** terminal history (commands and
+  output) and agent threads; results say which they are.
+- **Ctrl+F** searches the current conversation and this pane's terminal scrollback (find in view, with
+  next/previous and a match count), separate from the global list.
+- Remaining recommendations stand unless the owner says otherwise: default view is this project, everything
+  is kept, and the index lives beside the sessions.
