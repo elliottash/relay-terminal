@@ -90,3 +90,35 @@ Verify against provider docs before shipping; keep the table in `backend/relay_c
 ## 10. Attachments
 
 `ask` accepts `attachments: [{path}]` (from `@file` in the composer). The worker reads each (text, capped, inside or outside the workspace if the user picked it) and prepends a labelled block to that user turn.
+
+## 11. Routing assist, thinking, tool outputs, skills (v1.1, 2026-09-17)
+
+Owner decisions: model-assisted routing is allowed; thinking and tool calls must be easy to
+observe; skills can be refined and imported with review. Scratchpad design is pending research.
+
+**Routing assist.** `route` results gain `needs_assist: bool` (local rules could not decide:
+command-like English words such as go, install, make, find, open, test, build, start, time, plus
+sentence signals) and `assist_reason`. The GUI then sends `route_assist {id, text, cwd, mode}` →
+`route_assisted {id, route: "shell"|"agent", confidence: 0..1, reason, elapsed_ms}` using the
+pane's configured model with no tools, low effort and a tiny max_tokens; errors or a 2 s timeout
+return `route_assisted {id, route: null, error}`. The GUI must never block typing on it.
+
+**Thinking.** The worker streams reasoning as `thinking_delta {turn_id, text}` (from provider
+reasoning fields) and ends with `thinking_done {turn_id, elapsed_ms, chars}`. `delta` stays
+answer text only.
+
+**Turn and tool summaries.** Each agent turn has a `turn_id` included in `agent_started`,
+`tool_started`, `tool_result` and `done`. At turn end the worker emits
+`turn_summary {turn_id, elapsed_ms, thinking_ms, tools: [{call_id, name, preview, ok, exit_code?}]}`.
+`tool_output_get {turn_id, call_id}` → `tool_output {turn_id, call_id, name, preview, result}`
+(the worker keeps results for the last 50 turns). `turn_transcript_get {turn_id}` →
+`turn_transcript {turn_id, items: [...]}` in the same shape as `subagent_transcript`.
+
+**Skills.** `skills_list` → `skills {items: [{name, description, path, source, excluded, refined_from?}]}`.
+`refine_skills {names: [...], target_dir?}` (default `~/.config/relay/skills`) writes refined copies
+without touching originals → `skills_refined {items: [{name, path, from}]}`.
+`import_skills_preview {url, ref?}` clones into a temporary dir and pins the commit →
+`skills_import_preview {url, commit, items: [{name, description, path, files}]}`;
+`import_skills_confirm {url, commit, names}` copies the chosen skills to
+`~/.local/share/relay/skill-imports/<repo>@<commit>/` and enables them → `skills_imported {items}`.
+No automatic updates; `skills_check_updates {url}` → `skills_updates {url, current, latest}`.
