@@ -425,9 +425,13 @@ Recommendations accepted for questions 1, 2, 3, 4, 7, 10 and 11. Changes:
   knows databases), each public (in git) or private.
 - **9. Instruction files:** Relay uses `RELAY.md` by default and may edit it, as well as `AGENTS.md`, `CLAUDE.md`,
   `WARP.md` and similar, as agents do. Edits to instruction files are surfaced as highlighted tool-call notifications.
-- **Plans spanning cards** (follow-up to 2.4): every plan belongs to exactly one card. A plan for part of a card is a
-  scoped `### Plan: <part>` under the card's `## Plan` with its steps as sub-items of that item, or the part is promoted
-  to a child card, following the user's preferences (decision 5). A plan over several cards lives on a parent card
-  whose items point to the child cards or their items; children get `parent:` and a "Part of plan" banner; Execute on
-  the parent seeds todos across children. A shared parent never names a private child in git; a card has at most one
-  parent and cycles are refused.
+- **Plans are their own objects (option C; supersedes 2.4 and the "plans on cards" part of Switchboard decision 12.4).**
+  People may use plans without cards. A plan is a Markdown file with front matter and its own `## Steps` checklist
+  (item ids and markers as in `## Tasks`): `issues/plans/<date>-<slug>.md` in a repo with a Switchboard,
+  `issues/.private/plans/` when private, `.relay/plans/` (configurable, as before) without a Switchboard. The Switchboard
+  shows plans in a **Plans** tab next to cards and memory. A plan links to zero or more cards (`cards: [#K7Q2, …]`) and a
+  card lists its plans (`links.plans`), so one plan can cover part of a card, one card or several. A step may point to a
+  card or a card item; finishing the step updates what it points to and logs a thread event on that card. Execute on a
+  plan seeds todos from its open steps; re-planning keeps done steps and marks removed ones dropped, and each revision
+  is logged in the plan's own history (like memory's `LOG.md`). A plan linked from a private card defaults to private;
+  a shared plan never names a private card in git.
