@@ -1,0 +1,26 @@
+test_a_runaway_reply_is_capped (tests.test_voice.CleanTests.test_a_runaway_reply_is_capped) ... ok
+test_silence_becomes_nothing (tests.test_voice.CleanTests.test_silence_becomes_nothing) ... ok
+test_strips_the_wrappers_models_add (tests.test_voice.CleanTests.test_strips_the_wrappers_models_add) ... ok
+test_a_missing_or_empty_recording_is_a_coded_failure (tests.test_voice.ClipTests.test_a_missing_or_empty_recording_is_a_coded_failure) ... ok
+test_an_oversized_clip_is_refused_before_it_is_read (tests.test_voice.ClipTests.test_an_oversized_clip_is_refused_before_it_is_read) ... ok
+test_reads_a_recorded_clip (tests.test_voice.ClipTests.test_reads_a_recorded_clip) ... ok
+test_rejects_paths_that_are_not_a_recorded_clip (tests.test_voice.ClipTests.test_rejects_paths_that_are_not_a_recorded_clip) ... ok
+test_a_bad_request_raises_for_the_worker_to_report (tests.test_voice.RunTests.test_a_bad_request_raises_for_the_worker_to_report) ... ok
+test_a_missing_key_answers_with_the_no_key_code (tests.test_voice.RunTests.test_a_missing_key_answers_with_the_no_key_code) ... ok
+test_a_transcript_comes_back_with_the_request_id (tests.test_voice.RunTests.test_a_transcript_comes_back_with_the_request_id) ... ok
+test_silence_is_an_empty_transcript_not_an_error (tests.test_voice.RunTests.test_silence_is_an_empty_transcript_not_an_error) ... ok
+test_a_provider_error_never_quotes_the_request (tests.test_voice.TranscribeTests.test_a_provider_error_never_quotes_the_request) ... ok
+test_an_unreachable_provider_is_a_coded_failure (tests.test_voice.TranscribeTests.test_an_unreachable_provider_is_a_coded_failure) ... ok
+test_every_offered_model_reaches_an_endpoint (tests.test_voice.TranscribeTests.test_every_offered_model_reaches_an_endpoint) ... ok
+test_model_ids_are_validated (tests.test_voice.TranscribeTests.test_model_ids_are_validated) ... ok
+test_no_key_is_a_coded_failure_and_nothing_is_sent (tests.test_voice.TranscribeTests.test_no_key_is_a_coded_failure_and_nothing_is_sent) ... ok
+test_the_default_model_sends_the_clip_as_an_input_audio_part (tests.test_voice.TranscribeTests.test_the_default_model_sends_the_clip_as_an_input_audio_part) ... ok
+test_the_key_comes_from_the_openrouter_entry_whatever_the_pane_runs (tests.test_voice.TranscribeTests.test_the_key_comes_from_the_openrouter_entry_whatever_the_pane_runs) ... ok
+test_the_system_prompt_forbids_acting_on_what_was_said (tests.test_voice.TranscribeTests.test_the_system_prompt_forbids_acting_on_what_was_said) ... ok
+test_whisper_uses_the_transcription_endpoint (tests.test_voice.TranscribeTests.test_whisper_uses_the_transcription_endpoint) ... ok
+test_worker_handles_transcribe (tests.test_voice.WorkerDispatchTests.test_worker_handles_transcribe) ... ok
+
+----------------------------------------------------------------------
+Ran 21 tests in 0.044s
+
+OK

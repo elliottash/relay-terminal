@@ -1,12 +1,18 @@
+---
+id: NK66
+type: work
+status: needs-qa-llm
+component: [gui, worker, providers]
+milestone: desktop-alpha
+workstream: providers
+assignee: implemented by Claude Opus 5 (Claude Code, model-settings worktree), 2026-09-17
+rank: i1
+created: '2026-09-17'
+acceptance: '`docs/qa_evidence/2026-09-17-model-settings/` (29 screenshots + `drive.sh`, live under Xvfb)'
+source: 'owner in chat, 2026-09-17: "i think we need to improve the model settings. make model keys a modal where it asks for GLM, Kimi, and Openrouter credentials. also add minimax coding plan, then openai / claude / gemini for PAYG keys. model roles is another modal where you can select which models come in and what they are used for. lets have main, flash, and lite presets. this should be accessible from the options menu and then also an option in the model selection dropdown: [gear] model options... first you pick default provider: glm, kimi, openrouter, anthropic, claude, gemini. recommended settings are glm + openrouter or kimi + openrouter. then you get defaults assigned: glm: glm 5.3, glm 5.3 flash, gemini 3.8 flash; kimi: kimi k3, kimi k2.7, gemini 3.8 flash. think through this to give me a good solution. and while you are at it, try to make the options menu better and more compact." Refined the same day: "have the three rows main, flash, lite, but then advanced options, which would then reveal the specific actions that could be further customized."'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Model settings: an API-keys modal, a Main/Flash/Lite roles modal, and a compact Settings window
-
-- **Status**: needs-qa-llm
-- **Component**: gui, worker, providers
-- **Milestone**: desktop-alpha
-- **Workstream**: providers
-- **Acceptance evidence**: `docs/qa_evidence/2026-09-17-model-settings/` (29 screenshots + `drive.sh`, live under Xvfb)
-- **Assignee**: implemented by Claude Opus 5 (Claude Code, model-settings worktree), 2026-09-17
-- **Source**: owner in chat, 2026-09-17: "i think we need to improve the model settings. make model keys a modal where it asks for GLM, Kimi, and Openrouter credentials. also add minimax coding plan, then openai / claude / gemini for PAYG keys. model roles is another modal where you can select which models come in and what they are used for. lets have main, flash, and lite presets. this should be accessible from the options menu and then also an option in the model selection dropdown: [gear] model options... first you pick default provider: glm, kimi, openrouter, anthropic, claude, gemini. recommended settings are glm + openrouter or kimi + openrouter. then you get defaults assigned: glm: glm 5.3, glm 5.3 flash, gemini 3.8 flash; kimi: kimi k3, kimi k2.7, gemini 3.8 flash. think through this to give me a good solution. and while you are at it, try to make the options menu better and more compact." Refined the same day: "have the three rows main, flash, lite, but then advanced options, which would then reveal the specific actions that could be further customized."
 
 ## What landed
 

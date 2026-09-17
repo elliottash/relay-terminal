@@ -2,9 +2,9 @@
      edit the card files and regenerate. -->
 # Board
 
-75 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+85 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (65)
+## Features (72)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -21,8 +21,14 @@
 | `#072Z` | [Choose tab placement: top tabs or a vertical tab sidebar](features/2026-09-17-tab-placement-vertical-tabs.md) | ready |  |  |  |
 | `#FW77` | [Relay as a pure terminal (TUI) app](features/2026-09-17-terminal-only-tui-relay.md) | ready |  |  |  |
 | `#P4GP` | [Website and beta release](features/2026-09-17-website-and-beta-release.md) | ready |  |  |  |
+| `#05J2` | [Export settings, and an optional sync across machines](features/2026-09-17-settings-export-and-sync.md) | ready |  |  |  |
+| `#0JA7` | [Colour themes](features/2026-09-17-color-themes.md) | ready |  |  |  |
+| `#D60R` | [File explorer: right-click menu, navigate here, and a toggle shortcut](features/2026-09-17-explorer-right-click-and-toggle.md) | ready |  |  |  |
+| `#K13B` | [Update the website for the new engine and features](features/2026-09-17-website-update-engine-features.md) | ready |  |  |  |
+| `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | ready |  |  |  |
 | `#JRWQ` | [The pane header is an agent-written summary of the session](features/2026-09-17-pane-title-summary.md) | ready |  |  |  |
 | `#78BN` | [One key for a new pane, with an arrow to choose the side](features/2026-09-17-new-pane-direction-by-arrow.md) | ready |  |  |  |
+| `#X2F1` | [Bring the useful Konsole context-menu items to the engine panes](features/2026-09-17-port-konsole-context-menus.md) | ready |  |  |  |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/2026-09-17-agent-sessions-planning-subagents.md) | in-progress | Claude Opus 5 (orchestrating) with subagents, 2026-09-17 |  |  |
 | `#YZTK` | [Clickable file and folder paths open Relay panes](features/2026-09-17-clickable-paths.md) | in-progress |  |  |  |
 | `#NY7Z` | [Voice transcription mode (microphone button, hold Right Alt)](features/needs_qa_llm/2026-09-17-voice-transcription.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
@@ -40,6 +46,7 @@
 | `#9VXF` | [Relay's own terminal engine, selectable per pane](features/needs_qa_llm/2026-09-17-engine-integration.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
 | `#CCKY` | [Conversation list with full-text search](features/needs_qa_llm/2026-09-17-conversation-list-and-search.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, conversation-search worktree), 2026-09-17 |  |  |
 | `#QQK4` | [Folder explorer and file preview panes (plain Qt)](features/needs_qa_llm/2026-09-17-file-explorer-and-preview-panes.md) | needs-qa-llm | widgets implemented by Claude Opus 5 (Claude Code subagent), 2026-09-17; integration into windows, tabs and panes is done by the main session |  |  |
+| `#NK66` | [Model settings: an API-keys modal, a Main/Flash/Lite roles modal, and a compact Settings window](features/needs_qa_llm/2026-09-17-model-settings.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, model-settings worktree), 2026-09-17 |  |  |
 | `#VH4B` | [Fix and re-run invalid or failing commands in terminal mode](features/needs_qa_llm/2026-09-17-fix-and-rerun-terminal-commands.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
 | `#FR72` | [Ghost-text command suggestions from history](features/needs_qa_llm/2026-09-17-history-suggestions.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI D subagent), 2026-09-17 |  |  |
 | `#9D0B` | [Human and agent control toggle, auto control for running programs, password detection](features/needs_qa_llm/2026-09-17-human-agent-control-and-password-prompts.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
@@ -74,10 +81,13 @@
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | Claude Opus 5 research subagent, 2026-09-16 |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | implemented by Claude Opus 5 (Claude Code session), 2026-09-16 |  |  |
 
-## Bugs (10)
+## Bugs (13)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
+| `#308N` | [Next command and next prompt suggestions never appear](changes/2026-09-17-suggestions-not-working.md) | ready |  |  |  |
+| `#RDQ7` | [A small second window opens when Relay starts](changes/2026-09-17-second-window-on-start.md) | ready |  |  |  |
+| `#T9ZS` | [Ctrl+? does not open the shortcuts overlay](changes/2026-09-17-ctrl-question-shortcuts.md) | ready |  |  |  |
 | `#G152` | [Ctrl+H shrinks a pane to almost nothing](changes/2026-09-17-ctrl-h-shrinks-pane.md) | ready |  |  |  |
 | `#0C7V` | [Single click opens folders in the explorer pane (Dolphin style)](changes/2026-09-17-single-click-folders.md) | ready |  |  |  |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |

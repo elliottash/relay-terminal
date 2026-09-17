@@ -10,7 +10,7 @@ import threading
 import urllib.parse
 
 from relay_core import (__version__, keystore, keytest, logs, observe_protocol, roles as model_roles,
-                        session_protocol, skills)
+                        session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import agents_defs
 from relay_core.subagents import SubagentFactory, SubagentManager
@@ -193,6 +193,10 @@ def main():
             elif kind == "test_key":
                 # Protocol 13.8: one minimal call. The key is read here and never crosses the pipe.
                 keytest.run(request.get("preset", ""), emit, request.get("id"))
+            elif kind == "transcribe":
+                # Protocol 16: the GUI recorded a clip and passes its path; the audio itself never
+                # crosses this pipe. One `transcribed` event follows, success or failure.
+                voice.run(request, emit)
             elif kind == "import_warp":
                 imported, skipped = keystore.import_from_warp()
                 emit({"event": "warp_imported", "id": request.get("id"),
