@@ -10,7 +10,6 @@ namespace {
 
 // One palette for both the caret and the tokens, so a shell line reads the same as the chip.
 const QColor kCommand{0x3e, 0xc5, 0xf0};   // Relay accent: the command word
-const QColor kUnknown{0xf0, 0x71, 0x78};   // a command that does not resolve
 const QColor kFlag{0xe5, 0xc0, 0x7b};      // -r, --force
 const QColor kString{0x7e, 0xc8, 0x8c};    // "quoted"
 const QColor kPath{0x66, 0xd0, 0xc0};      // paths and globs
@@ -95,8 +94,10 @@ void InputHighlighter::highlightShell(const QString &text) {
         if (inLiteral(start)) continue;
         const QString value = match.captured();
         if (expectCommand && !value.contains('=')) {
-            const bool known = m_known.isEmpty() || m_known.contains(value) || value.contains('/');
-            setFormat(start, value.size(), charFormat(known ? kCommand : kUnknown, true));
+            // Always the command colour. Marking an unfamiliar word red was wrong as often as not
+            // (builtins, aliases, anything installed since the pane started), and the pre-submit
+            // check already reports a command that will not run (owner, 2026-09-17).
+            setFormat(start, value.size(), charFormat(kCommand, true));
             expectCommand = false;
             continue;
         }
@@ -110,10 +111,8 @@ void InputHighlighter::highlightShell(const QString &text) {
         if (text.at(i) == '|' || text.at(i) == ';' || (text.at(i) == '&' && text.at(i + 1) == '&')) {
             static const QRegularExpression next(QStringLiteral("[^\\s|&;<>()]+"));
             const auto match = next.match(text, i + 1);
-            if (match.hasMatch()) {
-                const bool known = m_known.isEmpty() || m_known.contains(match.captured()) || match.captured().contains('/');
-                setFormat(match.capturedStart(), match.capturedLength(), charFormat(known ? kCommand : kUnknown, true));
-            }
+            if (match.hasMatch())
+                setFormat(match.capturedStart(), match.capturedLength(), charFormat(kCommand, true));
         }
     }
 
