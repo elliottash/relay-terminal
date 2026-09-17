@@ -47,6 +47,15 @@ Constraints found while filing:
 The owner accepted the output-side colored rendering. The agent pane is removed. Tool
 output also goes inline.
 
+## Owner correction (2026-09-17, later)
+
+"Tool output also goes inline" misread the decision: the owner meant the tool *calls* belong in the
+pane, not every byte they print. `docs/SWITCHBOARD-DESIGN.md` 4.3 is the correct model — output
+collapses and expands on demand. So a tool now prints its `⚙ …` call line and a result line carrying
+the size it did not show (`exit 0 · 214 lines`); a write tool's diff stops after 8 lines with
+"… N more lines"; the turn's "✦ N tool calls · T s" link opens the whole thing in the turn pane.
+Agent options › **Show tool output** (`agent/show_tool_output`, default off) restores the old stream.
+
 ## Resolution (2026-09-17)
 
 Implemented by Claude Opus 5 (Claude Code session). Mechanism: `docs/ARCHITECTURE.md`,

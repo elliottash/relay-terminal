@@ -1542,6 +1542,9 @@ private:
 
     // ----- thinking, turn summaries, tool outputs, routing assist, skills (protocol 11) --------
     static bool showThinking() { return QSettings().value(QStringLiteral("agent/show_thinking"), true).toBool(); }
+    // Off by default: tool output collapses to its size, and the turn pane holds the whole thing.
+    static bool showToolOutput() { return QSettings().value(QStringLiteral("agent/show_tool_output"), false).toBool(); }
+    static constexpr int kInlineDiffLines = 8;   // of a write tool's diff, before "… N more lines"
 
     bool handleObservabilityEvent(const QString &type, const QJsonObject &event) {
         if (type == QStringLiteral("error")) {
@@ -3287,9 +3290,17 @@ private:
             m_turnText += text;
             turnHeader(); printInline(text, Ink::Agent);
         } else if (type == QStringLiteral("tool_output")) {
-            turnHeader(); printInline(event.value(QStringLiteral("text")).toString(), Ink::ToolOutput);
+            // Collapsed by default (SWITCHBOARD-DESIGN.md 4.3): a tool's output is counted, not
+            // poured into the pane, and the turn's "✦ N tool calls" line opens it in full. Card
+            // #X5D1 read an earlier owner decision as "print all of it"; the owner corrected that
+            // on 2026-09-17. Agent options › Show tool output brings the stream back.
+            const QString text = event.value(QStringLiteral("text")).toString();
+            m_toolLines += text.count('\n');
+            m_toolPartialLine = !text.isEmpty() && !text.endsWith('\n');
+            if (showToolOutput()) { turnHeader(); printInline(text, Ink::ToolOutput); }
         } else if (type == QStringLiteral("tool_started")) {
             turnHeader();
+            m_toolLines = 0; m_toolPartialLine = false;
             const QString preview = event.value(QStringLiteral("preview")).toString();
             // Compact the backend preview: "RUN COMMAND\n\nWorking directory: …\nTimeout: …\n\ncmd"
             // becomes "⚙ $ cmd"; file tools become "⚙ read path" / "⚙ write path" plus the diff.
@@ -3313,24 +3324,36 @@ private:
             ensureLineStart();
             printInline(QStringLiteral("⚙ ") + verb + ' ' + head + '\n', Ink::Tool);
             // Multi-line commands continue; write diffs are colored. Skip the diff's blank separator.
+            // Bounded like the output above: a long diff belongs in the turn pane, not the terminal.
+            int shown = 0, skipped = 0;
             for (const QString &line : std::as_const(body)) {
                 if (line.trimmed().isEmpty()) continue;
+                if (!showToolOutput() && shown >= kInlineDiffLines) { ++skipped; continue; }
                 Ink ink = Ink::ToolOutput;
                 if (line.startsWith('+') && !line.startsWith(QStringLiteral("+++"))) ink = Ink::DiffAdd;
                 else if (line.startsWith('-') && !line.startsWith(QStringLiteral("---"))) ink = Ink::DiffRemove;
                 printInline(line + '\n', ink);
+                ++shown;
             }
+            if (skipped > 0) printInline(QStringLiteral("  … %1 more lines\n").arg(skipped), Ink::Note);
         } else if (type == QStringLiteral("tool_result")) {
             const auto result = event.value(QStringLiteral("result")).toObject();
             ensureLineStart();
+            // What the collapsed output cost: the result line carries the size the pane did not show.
+            const int lines = m_toolLines + (m_toolPartialLine ? 1 : 0);
+            const QString size = (lines > 0 && !showToolOutput())
+                ? QStringLiteral(" · %1 %2").arg(lines).arg(lines == 1 ? QStringLiteral("line") : QStringLiteral("lines"))
+                : QString();
+            m_toolLines = 0; m_toolPartialLine = false;
             if (result.contains(QStringLiteral("error"))) printInline(QStringLiteral("✗ ") + result.value(QStringLiteral("error")).toString() + '\n', Ink::Error);
             else if (result.contains(QStringLiteral("exit_code"))) {
                 const int code = result.value(QStringLiteral("exit_code")).toInt();
-                printInline(QStringLiteral("exit %1%2%3\n").arg(code)
+                printInline(QStringLiteral("exit %1%2%3%4\n").arg(code)
                     .arg(result.value(QStringLiteral("timed_out")).toBool() ? QStringLiteral(" · timed out") : QString())
-                    .arg(result.value(QStringLiteral("truncated")).toBool() ? QStringLiteral(" · output truncated") : QString()),
+                    .arg(result.value(QStringLiteral("truncated")).toBool() ? QStringLiteral(" · output truncated") : QString())
+                    .arg(size),
                     code == 0 ? Ink::Note : Ink::Error);
-            } else printInline(QStringLiteral("✓ ") + event.value(QStringLiteral("tool")).toString() + '\n', Ink::Note);
+            } else printInline(QStringLiteral("✓ ") + event.value(QStringLiteral("tool")).toString() + size + '\n', Ink::Note);
         } else if (type == QStringLiteral("status")) {
             status(event.value(QStringLiteral("text")).toString());
         } else if (type == QStringLiteral("done") || type == QStringLiteral("cancelled")) {
@@ -5264,6 +5287,8 @@ private:
     QHash<QString, QPointer<relay::TurnTranscriptView>> m_turnViews;
     QString m_lastTurnId;
     bool m_thinkingShown = false, m_thinkingDismissed = false, m_thinkingExpanded = false;
+    int m_toolLines = 0;              // lines of the running tool's collapsed output
+    bool m_toolPartialLine = false;   // its last chunk had no trailing newline
     QFrame *m_thinking = nullptr;
     QLabel *m_thinkingHeader = nullptr;
     QPlainTextEdit *m_thinkingView = nullptr;
@@ -6667,6 +6692,7 @@ private:
             children << item;
         }
         toggle(QStringLiteral("agent/show_thinking"), QStringLiteral("Show thinking"), QStringLiteral("stream reasoning above the prompt; a one-line summary always prints"), true);
+        toggle(QStringLiteral("agent/show_tool_output"), QStringLiteral("Show tool output"), QStringLiteral("pour every tool's output into the pane; off, it collapses to its size and opens from the turn summary"), false);
         toggle(QStringLiteral("hints/enabled"), QStringLiteral("Shortcut hints"), QStringLiteral("tips when a faster key exists"), true);
         toggle(QStringLiteral("suggestions/next_command"), QStringLiteral("AI next-command suggestions"), QStringLiteral("after a command finishes; uses your API key"), false);
         toggle(QStringLiteral("suggestions/next_prompt"), QStringLiteral("Suggested next prompts"), QStringLiteral("after an agent turn; uses your API key"), false);
