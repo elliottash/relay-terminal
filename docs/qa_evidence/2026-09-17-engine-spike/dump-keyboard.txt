@@ -1,0 +1,36 @@
+===== DUMP =====
+rows=30 cols=100 altScreen=0 scrollbackLines=0 cursor=7,45 fgpid=1402984 bytes=905 paints=48
+links=0
+--- scrollbackText(5) ---
+
+--- screenText() ---
+elliott@spark-dcc9:/tmp/claude-1000/sp/work$ echo one Ytwo Xthree
+one Ytwo Xthree
+elliott@spark-dcc9:/tmp/claude-1000/sp/work$ echo abc
+abc
+elliott@spark-dcc9:/tmp/claude-1000/sp/work$ cat -v
+^[[15~^[[24~^[[A^[[H^[[1;2A^[[1;5C^[x
+^[[15~^[[24~^[[A^[[H^[[1;2A^[[1;5C^[x
+elliott@spark-dcc9:/tmp/claude-1000/sp/work$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

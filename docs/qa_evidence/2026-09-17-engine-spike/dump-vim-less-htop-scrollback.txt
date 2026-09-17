@@ -1,0 +1,218 @@
+===== DUMP =====
+rows=30 cols=100 altScreen=1 scrollbackLines=0 cursor=1,26 fgpid=1404916 bytes=4183 paints=49
+links=0
+--- scrollbackText(5) ---
+
+--- screenText() ---
+hello from relay-vterm-spike
+second line with tab    end
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+
+===== DUMP =====
+rows=16 cols=66 altScreen=1 scrollbackLines=0 cursor=1,26 fgpid=1404916 bytes=5291 paints=52
+links=0
+--- scrollbackText(5) ---
+
+--- screenText() ---
+hello from relay-vterm-spike
+second line with tab    end
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+
+===== DUMP =====
+rows=33 cols=122 altScreen=0 scrollbackLines=0 cursor=4,45 fgpid=1404695 bytes=9836 paints=74
+links=0
+--- scrollbackText(5) ---
+
+--- screenText() ---
+elliott@spark-dcc9:/tmp/claude-1000/sp/work$ vim -u NONE -N vimtest.txt
+elliott@spark-dcc9:/tmp/claude-1000/sp/work$ cat -A vimtest.txt
+hello from relay-vterm-spike$
+second line with tab^Iend$
+elliott@spark-dcc9:/tmp/claude-1000/sp/work$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+===== DUMP =====
+rows=33 cols=122 altScreen=1 scrollbackLines=0 cursor=32,1 fgpid=1405906 bytes=13624 paints=93
+links=0
+--- scrollbackText(5) ---
+
+--- screenText() ---
+line number 4242
+line number 4243
+line number 4244
+line number 4245
+line number 4246
+line number 4247
+line number 4248
+line number 4249
+line number 4250
+line number 4251
+line number 4252
+line number 4253
+line number 4254
+line number 4255
+line number 4256
+line number 4257
+line number 4258
+line number 4259
+line number 4260
+line number 4261
+line number 4262
+line number 4263
+line number 4264
+line number 4265
+line number 4266
+line number 4267
+line number 4268
+line number 4269
+line number 4270
+line number 4271
+line number 4272
+line number 4273
+:
+===== DUMP =====
+rows=33 cols=122 altScreen=1 scrollbackLines=0 cursor=32,81 fgpid=1406312 bytes=17496 paints=103
+links=0
+--- scrollbackText(5) ---
+
+--- screenText() ---
+
+    0[||| 17.9%]   3[||| 20.3%]   6[||||41.8%]  9[||||34.2%]  10[||   7.8%]  13[|    0.7%]  16[|||100.0%]  19[|    2.0%]
+    1[||  11.9%]   4[||   2.6%]   7[||  10.5%]                11[|    0.7%]  14[||   9.2%]  17[|||100.0%]
+    2[||  15.7%]   5[||   7.2%]   8[||  12.6%]                12[||   3.3%]  15[||   9.7%]  18[||| 19.6%]
+  Mem[|||||||||||||||||||||||||||||||||||||||||||51.0G/122G] Tasks: 260, 1920 thr, 300 kthr; 6 running
+  Swp[|||||||                                   1.52G/16.0G] Load average: 5.83 5.77 4.89
+                                                             Uptime: 13:53:17
+
+  [Main] [I/O]
+    PID USER       PRI  NI  VIRT   RES   SHR S  CPU%▽MEM%   TIME+  Command
+1406312 elliott     20   0 26348  8368  3132 R   3.3  0.0  0:00.21 htop -F htop
+1404595 elliott     20   0 21252  3284  2860 S   0.0  0.0  0:00.00 /bin/bash -c source /home/elliott/.claude/shell-snapsho
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+F1Help  F2Setup F3SearchF4FILTERF5Tree  F6SortByF7Nice -F8Nice +F9Kill  F10Quit
+===== DUMP =====
+rows=33 cols=122 altScreen=0 scrollbackLines=279 cursor=32,45 fgpid=1404695 bytes=19513 paints=120
+links=0
+--- scrollbackText(5) ---
+264
+265
+266
+267
+268
+--- screenText() ---
+269
+270
+271
+272
+273
+274
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+elliott@spark-dcc9:/tmp/claude-1000/sp/work$
