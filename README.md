@@ -63,14 +63,14 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 | @ | Pick a file: `@name` alone opens it in a preview pane; inside an agent prompt it attaches the file |
 | → or Ctrl+F / Alt+→ | Accept the dim history suggestion / one word of it |
 | Shift+Enter | New line |
-| Ctrl+I | Toggle terminal / agent input (from the prompt box) |
-| Ctrl+H / Ctrl+Shift+H | Take control of the terminal / back to the prompt |
+| Ctrl+I | Toggle terminal / agent input (from the prompt box; at a password prompt it switches to the agent) |
+| Ctrl+H / Ctrl+Shift+H | Take control of the terminal (the only way keys reach it) / back to the prompt box |
 | Ctrl+Shift+A | Actions palette |
 | Ctrl+T, Ctrl+N | New tab, new window |
 | Ctrl+P, Ctrl+Shift+P | Split right, split down |
 | Alt+Arrows | Move between panes |
 | Ctrl+W, Ctrl+Shift+W | Close pane (then tab, then window); restore |
-| F12 | Toggle native terminal input |
+| F12 | Toggle native terminal input (same hand-over as Ctrl+H) |
 | Ctrl+Shift+R | Restart a pane's shell or agent after it was stopped |
 | Ctrl+Tab, Ctrl+Shift+Tab | Next, previous tab |
 | Up (empty prompt box, items queued) | Select queued items; Ctrl+Up/Down move, Enter edits, Delete removes, Esc leaves |
@@ -122,17 +122,29 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
   rows or use Ctrl+Up/Down to reorder, × or Delete to remove, Enter to edit (editing the next
   item holds the queue until you resubmit). A failing command or a stopped agent pauses the
   queue until **Resume**.
-- **The prompt box stays up.** While ordinary programs run (`sudo apt upgrade`, `make`,
-  `sleep`), the prompt box stays visible so you can queue more. It hides for full-screen programs
-  (Konsole reports the alternate screen: vim, less, htop, tmux), for password prompts (echo off
-  with line input on), and for `ssh`/`mosh`/`telnet` sessions. When a program is blocked reading
-  the terminal (for example `read -p "continue? [Y/n]"` or a Python REPL), Relay shows "Waiting
-  for input" and moves the focus to the terminal; focus returns to the prompt box when it stops
-  waiting. While `sudo`, `doas`, `pkexec`, `su` or a program running as another user is in the
-  foreground (Relay cannot see whether it is reading), the prompt box stays but the keys go to the
-  terminal, with a hint in the prompt row; Ctrl+Shift+H moves to the prompt box to queue items and
-  Ctrl+H or a click returns. Ctrl+H / Ctrl+Shift+H still hand control back and forth, and the
-  per-program policy in the palette decides who is in control of full-screen programs.
+- **The prompt box is the only keyboard input.** Clicking the terminal selects text, scrolls and
+  follows links, but never takes the keyboard: typed keys always reach the prompt box. **Ctrl+H**
+  (or F12) is the one deliberate exception — it hides the prompt box and types straight into the
+  terminal; Ctrl+Shift+H comes back.
+  - **Full-screen programs** (vim, less, htop, tmux, and `ssh`/`mosh`/`telnet` sessions) no longer
+    take the keyboard by themselves. A small **Take control (Ctrl+H)** button appears over the
+    terminal and the prompt box keeps the focus until you press it. Leaving the program returns to
+    the prompt box. Actions › "Control when a full-screen program starts" (or the per-program entry
+    below it) switches back to the old automatic hand-over.
+  - **Password prompts** (echo off with line input on: `sudo`, `su`, `ssh`, `git`) turn the prompt
+    box into a masked field with a `password for sudo` chip. Enter writes the line to the running
+    program's stdin, not to the shell. The text never enters prompt history, the queue, the request
+    ledger, the session file, logs, route assist, suggestions or any model prompt; it is wiped from
+    the editor and from memory as soon as it is written, and Relay prints nothing about it in the
+    terminal. Masked input ends when the program turns echo back on. **Ctrl+I** switches to the
+    agent instead ("paste the password from my clipboard") — that path is not masked and follows
+    the usual control rules; Esc leaves masked input without answering.
+  - **Ordinary programs reading a line** (`apt`'s `[Y/n]`, a Python REPL, `read` in a script):
+    what you submit is sent to that program with a short "Sent to apt", instead of being queued.
+    When nothing is reading, submissions keep the existing behaviour — run now, or queue until the
+    terminal is free. While `sudo`, `doas`, `pkexec`, `su` or a program running as another user is
+    in the foreground, Relay cannot see whether it is reading, so anything but a password prompt
+    queues; the prompt row says so.
 - **@ files.** Typing `@` lists files in the repository (git-tracked and untracked, respecting
   `.gitignore`) or a bounded walk of the directory, previewable files first, filtered as you type.
 - **History suggestions.** A dim completion from commands you ran in this directory, the prompt

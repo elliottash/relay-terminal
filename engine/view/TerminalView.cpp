@@ -918,7 +918,10 @@ void TerminalView::sendMouse(QMouseEvent *e, int action)
 
 void TerminalView::mousePressEvent(QMouseEvent *e)
 {
-    setFocus(Qt::MouseFocusReason);
+    // A host that gave the view Qt::NoFocus keeps the keyboard elsewhere (Relay's prompt box):
+    // clicking still selects, scrolls and follows links, but it does not grab the focus.
+    if (focusPolicy() != Qt::NoFocus)
+        setFocus(Qt::MouseFocusReason);
     if (mouseToProgram(e->modifiers())) {
         sendMouse(e, int(MouseInput::Action::Press));
         return;

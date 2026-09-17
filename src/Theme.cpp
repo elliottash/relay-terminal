@@ -202,6 +202,11 @@ QToolButton#tabDetachButton:hover { color: @accent; }
 QLabel#prefixChip { border-radius: 4px; padding: 1px 6px; font-weight: 700; font-size: 8pt; letter-spacing: 1px; }
 QLabel#prefixChip[kind="shell"] { color: #221a08; background: #e5c07b; }
 QLabel#prefixChip[kind="agent"] { color: #06222b; background: #3ec5f0; }
+/* Prompt-box-only input: masked password field and the take-control button over the terminal */
+QLabel#secretChip { color: #2a1206; background: #e5a06b; border-radius: 4px; padding: 1px 6px; font-weight: 700; font-size: 8pt; letter-spacing: 1px; }
+QLineEdit#secretEditor { background: @bg; color: @text; border: 1px solid #e5a06b; border-radius: 6px; padding: 8px; font-family: "@mono"; font-size: 10pt; }
+QPushButton#takeControlChip { color: @text; background: @raised; border: 1px solid @accentBorder; border-radius: 6px; padding: 3px 10px; font-size: 9pt; }
+QPushButton#takeControlChip:hover { border-color: @accent; }
 /* Turn details pane */
 QLabel#turnHeader { color: @text; font-weight: 600; padding: 4px 6px; }
 QTreeWidget#turnTools { background: @bg; color: @text; border: 1px solid @border; border-radius: 6px; outline: none; }

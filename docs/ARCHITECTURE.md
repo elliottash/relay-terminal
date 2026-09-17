@@ -183,7 +183,7 @@ Default window shortcuts:
 | New tab | Ctrl+T | Actions palette | Ctrl+Shift+A |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Take control (from composer) | Ctrl+H |
 | Split right / down | Ctrl+P / Ctrl+Shift+P | Back to the prompt | Ctrl+Shift+H |
-| Focus neighbor pane | Alt+Arrows | Native input toggle | F12 |
+| Focus neighbor pane | Alt+Arrows | Native input toggle (same hand-over as Ctrl+H) | F12 |
 | Toggle terminal/agent input | Ctrl+I | Restart stopped shell/agent | Ctrl+Shift+R |
 | Interrupt agent with prompt | Ctrl+Alt+Enter | | |
 
@@ -211,7 +211,7 @@ Pasting never submits.
 
 | Key in the composer | Destination sent to the router |
 |---|---|
-| Enter | selected input mode (`auto`, `shell`, `agent`) |
+| Enter | selected input mode (`auto`, `shell`, `agent`); a program reading a line gets it instead (section 9) |
 | Ctrl+Enter | `agent` |
 | Ctrl+Shift+Enter | `shell` (terminal mode) |
 | Ctrl+Alt+Enter | agent, `when: "interrupt"` (section 11) |
@@ -220,6 +220,9 @@ Pasting never submits.
 | PageUp / PageDown | scroll the terminal scrollback one page |
 
 Text changes trigger a debounced (150 ms) preview route; the route label shows the decision.
+
+At a password prompt the composer swaps `RichEditor` for a masked `QLineEdit` (section 9); nothing
+typed there is routed, remembered or previewed.
 
 **Prefixes.** `!` or `*` typed (not pasted) as the first character of an empty editor is consumed
 and switches the input mode to terminal or agent for one submission (`setPrefixMode`, chip
@@ -377,24 +380,70 @@ the restore (the backend skips files changed since and reports them in `rewound`
 
 ## 9. Human and agent control
 
+**The prompt box is the only keyboard input** (Warp-style). The terminal widget only holds the
+keyboard in native mode, which the user enters on purpose. The rules live in the Pane, not in a
+backend, so KonsolePart panes and Relay-engine panes behave the same; the decisions themselves are
+pure functions in `src/InputPolicy.{h,cpp}` (library `relay-input`, tests
+`tests/inputpolicy_test.cpp`).
+
+`relay::input::State` is what the Pane observes (`Pane::inputState`): the terminal's line
+discipline (`TerminalMode::{Unknown,Raw,Echoing,Secret}` from termios on `/proc/<shell>/fd/0`),
+whether a foreground process group other than the shell is running, whether a process of it is
+blocked in `read()` on the tty, whether the alternate screen is active, and whether the pane is in
+native mode.
+
 | Situation | Behavior (`Pane::pollShell`, `takeControl`, `showPrompt`) |
 |---|---|
-| A command is still running 150 ms after `running` | Read the foreground program's basename from `/proc/<tpgid>/cmdline`. Policy `human` (default): hide the composer, focus the terminal. Policy `agent`: keep the composer and show "Agent in control of <name>". |
-| Program exits (`ready`) | Automatic human control ends; the composer returns |
-| Ctrl+H from the composer | Human control: composer hidden, keys go to the terminal |
+| Clicking the terminal | Selects text, scrolls, follows links. It never takes the keyboard: the backend's focus widget is set to `Qt::NoFocus` while the composer is shown, and a `FocusIn` on the terminal surface hands the focus back to the prompt box (widgets meant to be typed in, such as the engine's Find bar, keep it). A plain click shows a hint naming Ctrl+H |
+| Full-screen program (alternate screen) or `ssh`/`mosh`/`telnet` | The prompt box keeps the keyboard. A floating **"Take control (Ctrl+H)"** button appears over the terminal (`updateTakeControl`, `relay::input::offerTakeControl`). Policy `human` restores the old automatic hand-over |
+| Program exits (`ready`) | Automatic human control ends; the composer returns; masked input and the button are cleared |
+| Ctrl+H from the composer, or the button | Human control: composer hidden, keys go to the terminal. Started from a full-screen or remote program, the prompt box comes back when the program exits |
 | Ctrl+Shift+H | Composer back. While a program runs, submissions go to the agent |
-| Typing directly into the terminal at a prompt | Switches to native input, so a later composer submission cannot overwrite Readline's line |
-| F12 | Toggles native input |
+| F12 (`terminal.native`) | Toggles native input, unchanged, for people who want the old behaviour |
 
-Policy lives in QSettings: `control/default` (`human` or `agent`) and `control/programs`
-(basename → `human` or `agent`), set from the palette.
+Policy lives in QSettings: `control/default` (`agent`, the default — the prompt box keeps the
+keyboard — or `human`, the old automatic hand-over) and `control/programs` (basename → `human` or
+`agent`), set from the palette.
 
-**Password prompts.** Once a second while a command runs, `checkPasswordPrompt` opens
-`/proc/<shell>/fd/0` and checks termios: `ICANON` on and `ECHO` off (full-screen programs
-and Readline turn `ICANON` off, so they do not match). A match forces human control, shows
-"Password prompt · you're in control", and, if the window is inactive, flashes the taskbar
-and runs `notify-send`. Commands that finish after more than 30 s notify the same way.
-Composer text never goes to a running program.
+**Where a submitted line goes** (`relay::input::targetFor`, applied in `Pane::sendLineToProgram`
+before the router is asked). An agent submission (`*`, Ctrl+Enter, agent mode) always reaches the
+agent. Otherwise, while a foreground program is running and the terminal is in canonical (line)
+mode, the line is written to that program's stdin:
+
+- `Secret` (`ICANON` on, `ECHO` off) — a password prompt: masked input, see below;
+- `Echoing` **and** a process of the command blocked in `read()` on the tty — an ordinary
+  question such as `apt`'s `[Y/n]`: the line is sent with a short "Sent to apt" status.
+
+Anything else keeps the existing behaviour: run in the shell now, or queue until the terminal is
+free. `sudo`, `doas`, `pkexec`, `su` and processes of another user do not expose
+`/proc/<pid>/syscall`, so Relay cannot see them waiting; only their password prompts are detected,
+and everything else queues (the composer row says so).
+
+**Password prompts.** Once a second, and every 250 ms while a command runs, `checkPasswordPrompt`
+opens `/proc/<shell>/fd/0` and checks termios: `ICANON` on and `ECHO` off (full-screen programs
+and Readline turn `ICANON` off, so they do not match). A match switches the prompt box to masked
+input: a separate `QLineEdit` with `QLineEdit::Password`, a `password for <program>` chip, and the
+composer's own editor hidden. Enter writes the line plus a newline to the backend
+(`relay::input::Secret::take`).
+
+Security rules, each covered by `tests/inputpolicy_test.cpp` where testable:
+
+- the password lives only in that field and in `relay::input::Secret`. It is never passed to
+  `RichEditor::remember`, the queue, the request ledger, the session file, logs, route assist,
+  suggestions or any model prompt — `relay::input::retainable` is false for it, and the masked
+  field is not the composer's document, so nothing it holds reaches `route`/`route_assist`;
+- after the write, `Secret::wipe` overwrites the characters in place and the field is overwritten
+  and cleared (`QLineEdit::setText` also drops its undo history);
+- masked input ends when echo returns for two polls, when the command exits, on Esc, or when the
+  user takes control; the chip disappears with it;
+- Relay prints nothing about it in the terminal (no `printInline`); the status line only names the
+  program.
+
+**Ctrl+I at a password prompt** (`input.toggle`) leaves masked input and switches the pane to agent
+mode, so the user can ask the agent to paste the password. That path is the normal agent path: not
+masked, and subject to the usual control rules. If the window is inactive, a password prompt
+flashes the taskbar and runs `notify-send`; commands that finish after more than 30 s notify the
+same way.
 
 **Program context for the agent.** A prompt submitted while a program runs carries
 `"context": {"foreground_program", "terminal_cwd"}`. The worker validates it
