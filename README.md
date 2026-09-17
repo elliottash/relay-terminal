@@ -188,6 +188,19 @@ If Relay's window is in the background, it flashes the taskbar and sends a deskt
 The agent cannot type into running programs yet; see
 `issues/features/2026-09-17-agent-delegate-and-take-over.md`.
 
+### Files and folders
+
+- Click a pane's directory line, or run **Actions › Open folder in explorer**, to open a folder pane.
+- `relay open PATH` in a Relay shell opens a folder in the explorer or a file in the preview pane.
+- File names in terminal output are underlined on hover. Ctrl+click a text or source file to preview
+  it in Relay, jumping to `file:LINE` when present. Konsole opens folders, images and PDFs with the
+  system default app; routing those clicks into Relay needs a patched Konsole (see
+  `issues/features/2026-09-17-clickable-paths.md`).
+- The explorer filters as you type; Enter opens, Backspace goes up. Previews cover text and code
+  (syntax highlighted), Markdown (rendered or source), and images. PDF preview is optional at build time.
+- An existing explorer or preview in the tab is reused. Both kinds of pane split, close, restore and
+  navigate like terminal panes.
+
 ### Changing shortcuts
 
 All window shortcuts are named actions stored in

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "RichEditor.h"
 #include "Theme.h"
+#include "FilePanes.h"
 #include <iterator>
 #include <KParts/ReadOnlyPart>
 #include <KPluginFactory>
@@ -54,6 +55,9 @@
 #include <QTabWidget>
 #include <QFileSystemWatcher>
 #include <QKeySequence>
+#include <QTreeView>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QElapsedTimer>
 #include <QListWidget>
 #include <QTreeWidget>
@@ -258,6 +262,8 @@ private:
         add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W")});
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+W")});
         add("palette.open", "palette", "Open the Relay actions palette", {QStringLiteral("Ctrl+Shift+A")});
+        add("files.explorer", "pane", "Open this pane's folder in an explorer pane", {});
+        add("files.open", "pane", "Open a file in a preview pane", {});
         add("control.human", "terminal", "Take control of the terminal (hides the prompt; works from the prompt box)", {QStringLiteral("Ctrl+H")});
         add("control.prompt", "terminal", "Back to the Relay prompt (the agent is in control)", {QStringLiteral("Ctrl+Shift+H")});
         add("terminal.native", "terminal", "Toggle native terminal input", {QStringLiteral("F12")});
@@ -392,8 +398,10 @@ public:
     std::function<void(const QString &)> onStatus;
     std::function<void()> onStateChanged;   // cwd, model list, native mode or busy state changed
     std::function<void()> onShellExited;
+    std::function<void(const QString &)> onOpenPath;   // open a folder or file in a Relay pane
 
     QString cwd() const { return m_cwd; }
+    QString sessionToken() const { return m_token; }
     QString workspace() const { return m_workspace; }
     bool cleanShell() const { return m_cleanShell; }
     QString mode() const { return m_modeValue; }
@@ -459,6 +467,11 @@ protected:
     }
 
     bool eventFilter(QObject *object, QEvent *event) override {
+        if (object == m_cwdLabel && event->type() == QEvent::MouseButtonRelease
+            && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && !m_cwdLabel->hasSelectedText()) {
+            if (onOpenPath) onOpenPath(m_cwd);
+            return false;
+        }
         // Copy on select (off by default): after a left-button release that finishes a selection
         // in this pane's terminal, copy it to the clipboard.
         if (event->type() == QEvent::MouseButtonRelease && copyOnSelect()
@@ -495,6 +508,10 @@ private:
     void buildUi() {
         auto *layout = new QVBoxLayout(this); layout->setContentsMargins(8, 6, 8, 8); layout->setSpacing(6);
         m_cwdLabel = new QLabel; m_cwdLabel->setTextFormat(Qt::PlainText);
+        // Clicking the directory line opens it in the explorer pane.
+        m_cwdLabel->setCursor(Qt::PointingHandCursor);
+        m_cwdLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        m_cwdLabel->installEventFilter(this);
         m_cwdLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
         layout->addWidget(m_cwdLabel);
         m_terminalHost = new QWidget;
@@ -506,6 +523,8 @@ private:
         auto *routeRow = new QHBoxLayout;
         m_routeLabel = new QLabel(QStringLiteral("AUTO · local detection"));
         m_routeLabel->setTextFormat(Qt::PlainText);
+        // Narrow split panes: labels may shrink instead of forcing a wide minimum width.
+        m_routeLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         routeRow->addWidget(m_routeLabel, 1);
         // Per-pane controls live under the terminal, next to the input they affect.
         m_modeBox = new QComboBox;
@@ -514,6 +533,8 @@ private:
         m_modeBox->addItem(QStringLiteral("Agent"), QStringLiteral("agent"));
         m_modeBox->setAccessibleName(QStringLiteral("Input destination"));
         m_modeBox->setFocusPolicy(Qt::TabFocus);
+        m_modeBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        m_modeBox->setMinimumContentsLength(6);
         connect(m_modeBox, qOverload<int>(&QComboBox::activated), this, [this](int) {
             setMode(m_modeBox->currentData().toString()); focusInput();
         });
@@ -521,7 +542,8 @@ private:
         m_modelBox = new QComboBox;
         m_modelBox->setAccessibleName(QStringLiteral("Agent model"));
         m_modelBox->setToolTip(QStringLiteral("Agent model for this pane. Switching starts a new conversation."));
-        m_modelBox->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+        m_modelBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        m_modelBox->setMinimumContentsLength(8);
         m_modelBox->setFocusPolicy(Qt::TabFocus);
         connect(m_modelBox, qOverload<int>(&QComboBox::activated), this, [this](int index) {
             selectModel(m_modelBox->itemData(index).toString()); focusInput();
@@ -1409,6 +1431,47 @@ private:
 };
 
 
+// A non-terminal pane: a folder explorer or a file preview. Lives in the same splitter layout
+// as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
+class ToolPane final : public QWidget {
+public:
+    enum class Kind { Explorer, Preview };
+
+    ToolPane(Kind kind, const QString &path) : m_kind(kind) {
+        setObjectName(QStringLiteral("pane"));
+        setAttribute(Qt::WA_StyledBackground);
+        auto *layout = new QVBoxLayout(this); layout->setContentsMargins(1, 1, 1, 1);
+        if (kind == Kind::Explorer) {
+            m_explorer = new relay::FileExplorer(path);
+            layout->addWidget(m_explorer);
+        } else {
+            m_preview = new relay::FilePreview;
+            layout->addWidget(m_preview);
+            m_preview->open(path);
+        }
+    }
+
+    Kind kind() const { return m_kind; }
+    relay::FileExplorer *explorer() const { return m_explorer; }
+    relay::FilePreview *preview() const { return m_preview; }
+    QString path() const { return m_explorer ? m_explorer->root() : m_preview->path(); }
+    QString cwd() const { return m_explorer ? m_explorer->root() : QFileInfo(m_preview->path()).absolutePath(); }
+    QString title() const {
+        const QString name = QFileInfo(path()).fileName();
+        return name.isEmpty() ? path() : name;
+    }
+    QJsonObject node() const { return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}}; }
+    void focusInput() {
+        if (m_explorer) m_explorer->view()->setFocus(Qt::OtherFocusReason);
+        else m_preview->setFocus(Qt::OtherFocusReason);
+    }
+
+private:
+    Kind m_kind;
+    relay::FileExplorer *m_explorer = nullptr;
+    relay::FilePreview *m_preview = nullptr;
+};
+
 // ----- windows, tabs and panes --------------------------------------------------------------
 //
 // Layout nodes (used to restore closed tabs and windows) are JSON:
@@ -1433,7 +1496,31 @@ struct ClosedItem {
 
 class WindowManager {
 public:
-    WindowManager(QString workspace, bool cleanShell) : m_workspace(std::move(workspace)), m_cleanShell(cleanShell) {}
+    WindowManager(QString workspace, bool cleanShell) : m_workspace(std::move(workspace)), m_cleanShell(cleanShell) {
+        // `relay open PATH` in Relay shells and Konsole's file-link editor command both reach
+        // this process through a private local socket. The directory is created mode 0700.
+        if (m_socketDir.isValid()) {
+            QFile::setPermissions(m_socketDir.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+            const QString address = m_socketDir.filePath(QStringLiteral("open.sock"));
+            if (m_server.listen(address)) {
+                qputenv("RELAY_OPEN_SOCKET", address.toUtf8());
+                QObject::connect(&m_server, &QLocalServer::newConnection, [this] {
+                    while (QLocalSocket *socket = m_server.nextPendingConnection()) {
+                        QObject::connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
+                        QObject::connect(socket, &QLocalSocket::readyRead, socket, [this, socket] {
+                            if (!socket->canReadLine()) { if (socket->bytesAvailable() > 65536) socket->abort(); return; }
+                            const auto request = QJsonDocument::fromJson(socket->readLine(65536)).object();
+                            const bool ok = handleOpen(request);
+                            socket->write(ok ? "ok\n" : "error\n");
+                            socket->flush();
+                            socket->disconnectFromServer();
+                        });
+                    }
+                });
+            }
+        }
+    }
+    bool handleOpen(const QJsonObject &request);
     QString workspace() const { return m_workspace; }
     bool cleanShell() const { return m_cleanShell; }
     RelayWindow *newWindow(const QJsonArray &tabs, int current = 0, const QRect &geometry = QRect());
@@ -1450,6 +1537,8 @@ private:
     bool m_cleanShell = false;
     QList<QPointer<RelayWindow>> m_windows;
     QList<ClosedItem> m_closed;
+    QTemporaryDir m_socketDir{QDir::tempPath() + QStringLiteral("/relay-open-XXXXXX")};
+    QLocalServer m_server;
 };
 
 class RelayWindow final : public QMainWindow {
@@ -1485,15 +1574,15 @@ public:
         connect(m_tabs, &QTabWidget::currentChanged, this, [this](int) {
             QWidget *page = m_tabs->currentWidget();
             if (!page) return;
-            Pane *pane = m_lastActive.value(page);
-            if (!pane) { const auto panes = panesIn(page); pane = panes.isEmpty() ? nullptr : panes.first(); }
-            if (pane) { setActive(pane); pane->focusInput(); }
+            QWidget *leaf = m_lastActive.value(page);
+            if (!leaf) { const auto leaves = leavesIn(page); leaf = leaves.isEmpty() ? nullptr : leaves.first(); }
+            if (leaf) { setActiveLeaf(leaf); focusLeaf(leaf); }
         });
         connect(m_tabs, &QTabWidget::tabCloseRequested, this, [this](int index) {
             if (m_tabs->count() > 1) closeTab(index, true); else closeWindowWithWarning();
         });
         connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *now) {
-            if (Pane *pane = paneOf(now); pane && pane->window() == this) setActive(pane);
+            if (QWidget *leaf = leafOf(now); leaf && leaf->window() == this) setActiveLeaf(leaf);
         });
         qApp->installEventFilter(this);
     }
@@ -1516,8 +1605,8 @@ public:
         index = index < 0 ? m_tabs->count() : std::min(index, m_tabs->count());
         m_tabs->insertTab(index, page, QString());
         m_tabs->setCurrentIndex(index);
-        const auto panes = panesIn(page);
-        if (!panes.isEmpty()) { setActive(panes.first()); QTimer::singleShot(0, panes.first(), [p = panes.first()] { p->focusInput(); }); }
+        const auto leaves = leavesIn(page);
+        if (!leaves.isEmpty()) { QWidget *first = leaves.first(); setActiveLeaf(first); QTimer::singleShot(0, first, [this, first] { focusLeaf(first); }); }
         updateTitles();
         return true;
     }
@@ -1532,19 +1621,58 @@ public:
         return tabs;
     }
 
-    QString activeCwd() const { return m_active ? m_active->cwd() : m_manager->workspace(); }
+    QString activeCwd() const {
+        if (m_activeLeaf) return leafCwd(m_activeLeaf);
+        return m_active ? m_active->cwd() : m_manager->workspace();
+    }
 
     // Restore a closed pane next to a sibling pane that still exists in this window.
-    bool restorePaneNextTo(QWidget *siblingWidget, Qt::Orientation orientation, bool before, const QJsonObject &node) {
-        Pane *sibling = dynamic_cast<Pane *>(siblingWidget);
-        if (!sibling || sibling->window() != this) return false;
-        Pane *pane = nullptr;
-        try { pane = createPane(node.value(QStringLiteral("pane")).toObject()); }
+    bool restorePaneNextTo(QWidget *sibling, Qt::Orientation orientation, bool before, const QJsonObject &node) {
+        if (!sibling || sibling->window() != this || !isLeaf(sibling)) return false;
+        QWidget *leaf = nullptr;
+        try { leaf = buildNode(node); }
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return true; }
-        insertBeside(sibling, pane, orientation, before);
-        m_tabs->setCurrentWidget(pageOf(pane));
-        setActive(pane); pane->focusInput();
+        insertBeside(sibling, leaf, orientation, before);
+        m_tabs->setCurrentWidget(pageOf(leaf));
+        setActiveLeaf(leaf); focusLeaf(leaf);
         return true;
+    }
+
+    Pane *findPaneByToken(const QString &token) const {
+        for (Pane *pane : allPanes()) if (pane->sessionToken() == token) return pane;
+        return nullptr;
+    }
+
+    QWidget *activeLeaf() const { return m_activeLeaf; }
+
+    // Open a folder in an explorer pane or a file in a preview pane, next to `anchor`. An existing
+    // explorer or preview in the same tab is reused, the way editors reuse a preview tab.
+    void openPath(const QString &path, int line, QWidget *anchor) {
+        const QFileInfo info(path);
+        if (!info.exists()) { statusBar()->showMessage(QStringLiteral("No such file or folder: ") + path); return; }
+        if (!anchor || !isLeaf(anchor) || anchor->window() != this) anchor = m_activeLeaf;
+        if (!anchor) return;
+        QWidget *page = pageOf(anchor);
+        m_tabs->setCurrentWidget(page);
+        const auto kind = info.isDir() ? ToolPane::Kind::Explorer : ToolPane::Kind::Preview;
+        ToolPane *target = nullptr;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == kind) target = tool;
+        if (target) {
+            if (kind == ToolPane::Kind::Explorer) target->explorer()->setRoot(info.absoluteFilePath());
+            else target->preview()->open(info.absoluteFilePath());
+        } else {
+            // A preview opens beside an explorer when there is one, otherwise beside the anchor.
+            if (kind == ToolPane::Kind::Preview)
+                for (QWidget *leaf : leavesIn(page))
+                    if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Explorer) anchor = tool;
+            target = createToolPane(kind, info.absoluteFilePath());
+            insertBeside(anchor, target, Qt::Horizontal, false);
+        }
+        if (kind == ToolPane::Kind::Preview && line > 0) target->preview()->goToLine(line);
+        setActiveLeaf(target);
+        focusLeaf(target);
+        updateTitles();
     }
 
 protected:
@@ -1645,6 +1773,11 @@ private:
         else if (id == QStringLiteral("pane.focusDown")) navigate(Qt::Key_Down);
         else if (id == QStringLiteral("pane.close")) closeActive();
         else if (id == QStringLiteral("closed.restore")) m_manager->restore(this);
+        else if (id == QStringLiteral("files.explorer")) openPath(activeCwd(), 0, m_activeLeaf);
+        else if (id == QStringLiteral("files.open")) {
+            const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("Open file in a preview pane"), activeCwd());
+            if (!file.isEmpty()) openPath(file, 0, m_activeLeaf);
+        }
         else if (id == QStringLiteral("palette.open")) togglePalette();
         else if (id == QStringLiteral("keybindings.reload")) Keymap::instance().reload();
         else if (id == QStringLiteral("keybindings.edit")) {
@@ -1794,6 +1927,8 @@ private:
             items << copy;
         }
 
+        items << actionItem(panes, QStringLiteral("Open folder in explorer"), QStringLiteral("This pane's directory"), QStringLiteral("files.explorer"));
+        items << actionItem(panes, QStringLiteral("Open file…"), QStringLiteral("Preview a file in a pane"), QStringLiteral("files.open"));
         items << actionItem(panes, QStringLiteral("Split right"), QString(), QStringLiteral("pane.splitRight"));
         items << actionItem(panes, QStringLiteral("Split down"), QString(), QStringLiteral("pane.splitDown"));
         items << actionItem(panes, QStringLiteral("New tab"), QString(), QStringLiteral("tab.new"));
@@ -2026,6 +2161,53 @@ private:
         return nullptr;
     }
 
+    static bool isLeaf(QWidget *widget) { return dynamic_cast<Pane *>(widget) || dynamic_cast<ToolPane *>(widget); }
+
+    static QWidget *leafOf(QWidget *widget) {
+        for (QWidget *w = widget; w; w = w->parentWidget())
+            if (isLeaf(w)) return w;
+        return nullptr;
+    }
+
+    // Terminal and tool panes in visual order.
+    static QList<QWidget *> leavesIn(QWidget *root) {
+        QList<QWidget *> leaves;
+        if (!root) return leaves;
+        if (isLeaf(root)) { leaves.append(root); return leaves; }
+        if (auto *splitter = dynamic_cast<QSplitter *>(root)) {
+            for (int i = 0; i < splitter->count(); ++i) leaves += leavesIn(splitter->widget(i));
+            return leaves;
+        }
+        const auto children = root->findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly);
+        for (QWidget *child : children) leaves += leavesIn(child);
+        return leaves;
+    }
+
+    static void focusLeaf(QWidget *leaf) {
+        if (auto *pane = dynamic_cast<Pane *>(leaf)) pane->focusInput();
+        else if (auto *tool = dynamic_cast<ToolPane *>(leaf)) tool->focusInput();
+    }
+
+    static QString leafCwd(QWidget *leaf) {
+        if (auto *pane = dynamic_cast<Pane *>(leaf)) return pane->cwd();
+        if (auto *tool = dynamic_cast<ToolPane *>(leaf)) return tool->cwd();
+        return {};
+    }
+
+    ToolPane *createToolPane(ToolPane::Kind kind, const QString &path) {
+        auto *tool = new ToolPane(kind, path);
+        QPointer<ToolPane> guard(tool);
+        if (tool->explorer()) {
+            tool->explorer()->onOpenFile = [this, guard](const QString &file) { if (guard) openPath(file, 0, guard); };
+            tool->explorer()->onDirectoryChanged = [this](const QString &) { updateTitles(); };
+        } else {
+            tool->preview()->onTitleChanged = [this](const QString &) { updateTitles(); };
+        }
+        relay::theme::polishWindow(tool);
+        tool->setObjectName(QStringLiteral("pane"));
+        return tool;
+    }
+
     QWidget *pageOf(QWidget *widget) const {
         for (QWidget *w = widget; w; w = w->parentWidget())
             if (m_tabs->indexOf(w) >= 0) return w;
@@ -2066,6 +2248,7 @@ private:
             updateTitles();
         };
         pane->onShellExited = [this, guard] { if (guard) closePane(guard, false); };
+        pane->onOpenPath = [this, guard](const QString &path) { if (guard) openPath(path, 0, guard); };
         relay::theme::polishWindow(pane);
         return pane;
     }
@@ -2080,6 +2263,12 @@ private:
             if (sizes.size() == splitter->count()) splitter->setSizes(sizes);
             return splitter;
         }
+        if (node.contains(QStringLiteral("explorer")) || node.contains(QStringLiteral("preview"))) {
+            const bool explorer = node.contains(QStringLiteral("explorer"));
+            const QString path = node.value(explorer ? QStringLiteral("explorer") : QStringLiteral("preview")).toObject().value(QStringLiteral("path")).toString();
+            if (QFileInfo::exists(path)) return createToolPane(explorer ? ToolPane::Kind::Explorer : ToolPane::Kind::Preview, path);
+            return createPane({{"cwd", m_manager->workspace()}, {"workspace", m_manager->workspace()}});
+        }
         return createPane(node.value(QStringLiteral("pane")).toObject());
     }
 
@@ -2093,6 +2282,7 @@ private:
     QJsonObject serializeNode(QWidget *widget) const {
         if (auto *pane = dynamic_cast<Pane *>(widget))
             return {{"pane", QJsonObject{{"cwd", pane->cwd()}, {"workspace", pane->workspace()}}}};
+        if (auto *tool = dynamic_cast<ToolPane *>(widget)) return tool->node();
         if (auto *splitter = dynamic_cast<QSplitter *>(widget)) {
             QJsonArray children, sizes;
             for (int i = 0; i < splitter->count(); ++i) children.append(serializeNode(splitter->widget(i)));
@@ -2108,15 +2298,25 @@ private:
         return serializeNode(root);
     }
 
-    void setActive(Pane *pane) {
-        if (!pane) return;
-        if (m_active != pane) {
-            if (m_active) m_active->setProperty("relayActive", false);
-            m_active = pane;
-            pane->setProperty("relayActive", true);
-            for (Pane *p : allPanes()) { p->style()->unpolish(p); p->style()->polish(p); }
+    void setActive(Pane *pane) { setActiveLeaf(pane); }
+
+    // Any pane can be the focused leaf; agent and terminal actions use the last terminal pane.
+    void setActiveLeaf(QWidget *leaf) {
+        if (!leaf) return;
+        if (m_activeLeaf != leaf) {
+            if (m_activeLeaf) m_activeLeaf->setProperty("relayActive", false);
+            m_activeLeaf = leaf;
+            leaf->setProperty("relayActive", true);
+            for (int i = 0; i < m_tabs->count(); ++i)
+                for (QWidget *w : leavesIn(m_tabs->widget(i))) { w->style()->unpolish(w); w->style()->polish(w); }
         }
-        if (QWidget *page = pageOf(pane)) m_lastActive.insert(page, pane);
+        QWidget *page = pageOf(leaf);
+        if (auto *pane = dynamic_cast<Pane *>(leaf)) m_active = pane;
+        else if (!m_active || pageOf(m_active) != page) {
+            const auto panes = panesIn(page);
+            m_active = panes.isEmpty() ? nullptr : panes.first();
+        }
+        if (page) m_lastActive.insert(page, leaf);
         syncToolbar();
         updateTitles();
     }
@@ -2131,15 +2331,19 @@ private:
     void updateTitles() {
         for (int i = 0; i < m_tabs->count(); ++i) {
             QWidget *page = m_tabs->widget(i);
-            Pane *pane = m_lastActive.value(page);
-            const auto panes = panesIn(page);
-            if (!pane && !panes.isEmpty()) pane = panes.first();
-            QString title = pane ? shortPath(pane->cwd()) : QStringLiteral("Relay");
-            if (panes.size() > 1) title += QStringLiteral("  ·  %1").arg(panes.size());
+            const auto leaves = leavesIn(page);
+            QWidget *leaf = m_lastActive.value(page);
+            if (!leaf && !leaves.isEmpty()) leaf = leaves.first();
+            QString title = QStringLiteral("Relay");
+            if (auto *pane = dynamic_cast<Pane *>(leaf)) title = shortPath(pane->cwd());
+            else if (auto *tool = dynamic_cast<ToolPane *>(leaf)) title = tool->title();
+            if (leaves.size() > 1) title += QStringLiteral("  ·  %1").arg(leaves.size());
             m_tabs->setTabText(i, title);
-            m_tabs->setTabToolTip(i, pane ? pane->cwd() : QString());
+            m_tabs->setTabToolTip(i, leaf ? leafCwd(leaf) : QString());
         }
-        setWindowTitle(m_active ? QStringLiteral("Relay — ") + m_active->cwd() : QStringLiteral("Relay"));
+        QString where = m_activeLeaf ? leafCwd(m_activeLeaf) : QString();
+        if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data())) where = tool->path();
+        setWindowTitle(where.isEmpty() ? QStringLiteral("Relay") : QStringLiteral("Relay — ") + where);
     }
 
     void cycleTab(int delta) {
@@ -2149,7 +2353,7 @@ private:
 
     // Put `pane` beside `anchor` in the given orientation, reusing the anchor's splitter when
     // it already runs that way, otherwise wrapping the anchor in a new splitter.
-    void insertBeside(Pane *anchor, Pane *pane, Qt::Orientation orientation, bool before) {
+    void insertBeside(QWidget *anchor, QWidget *pane, Qt::Orientation orientation, bool before) {
         QWidget *parent = anchor->parentWidget();
         if (auto *splitter = dynamic_cast<QSplitter *>(parent); splitter && splitter->orientation() == orientation) {
             const int index = splitter->indexOf(anchor);
@@ -2167,18 +2371,25 @@ private:
             }
             wrapper->addWidget(before ? static_cast<QWidget *>(pane) : static_cast<QWidget *>(anchor));
             wrapper->addWidget(before ? static_cast<QWidget *>(anchor) : static_cast<QWidget *>(pane));
-            wrapper->setSizes({1000, 1000});
             anchor->show(); wrapper->show();
+            // Size after the layout settles; sizes set on a hidden splitter follow size hints instead.
+            QPointer<QSplitter> guard(wrapper);
+            QTimer::singleShot(0, wrapper, [guard] {
+                if (!guard) return;
+                const int total = guard->orientation() == Qt::Horizontal ? guard->width() : guard->height();
+                guard->setSizes({total / 2, total - total / 2});
+            });
         }
         pane->show();
         updateTitles();
     }
 
     void split(Qt::Orientation orientation) {
-        Pane *anchor = m_active;
+        QWidget *anchor = m_activeLeaf;
         if (!anchor) return;
         Pane *pane = nullptr;
-        try { pane = createPane({{"cwd", anchor->cwd()}, {"workspace", anchor->workspace()}}); }
+        const QString workspace = m_active ? m_active->workspace() : m_manager->workspace();
+        try { pane = createPane({{"cwd", leafCwd(anchor)}, {"workspace", workspace}}); }
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
         insertBeside(anchor, pane, orientation, false);
         setActive(pane);
@@ -2186,13 +2397,13 @@ private:
     }
 
     void navigate(int key) {
-        Pane *current = m_active;
+        QWidget *current = m_activeLeaf;
         QWidget *page = current ? pageOf(current) : nullptr;
         if (!page) return;
         const QRect from(current->mapTo(page, QPoint(0, 0)), current->size());
-        Pane *best = nullptr;
+        QWidget *best = nullptr;
         double bestScore = 1e18;
-        for (Pane *pane : panesIn(page)) {
+        for (QWidget *pane : leavesIn(page)) {
             if (pane == current) continue;
             const QRect to(pane->mapTo(page, QPoint(0, 0)), pane->size());
             double gap = 0, offset = 0;
@@ -2207,23 +2418,23 @@ private:
             const double score = std::max(0.0, gap) * 4 + offset;
             if (score < bestScore) { bestScore = score; best = pane; }
         }
-        if (best) { setActive(best); best->focusInput(); }
+        if (best) { setActiveLeaf(best); focusLeaf(best); }
     }
 
     void closeActive() {
-        Pane *pane = m_active;
+        QWidget *pane = m_activeLeaf;
         if (!pane) return;
         QWidget *page = pageOf(pane);
-        if (panesIn(page).size() > 1) closePane(pane, true);
+        if (leavesIn(page).size() > 1) closePane(pane, true);
         else if (m_tabs->count() > 1) closeTab(m_tabs->indexOf(page), true);
         else closeWindowWithWarning();
     }
 
 public:
-    void closePane(Pane *pane, bool record) {
+    void closePane(QWidget *pane, bool record) {
         QWidget *page = pageOf(pane);
         if (!page) return;
-        if (panesIn(page).size() <= 1) {
+        if (leavesIn(page).size() <= 1) {
             // Last pane of its tab: close the tab, or the window when it is the last tab.
             if (m_tabs->count() > 1) closeTab(m_tabs->indexOf(page), record);
             else { if (record) { m_confirmedClose = true; } else { m_confirmedClose = true; m_skipRemember = true; } close(); }
@@ -2233,8 +2444,8 @@ public:
         if (!splitter) return;
         const int index = splitter->indexOf(pane);
         QWidget *neighbor = splitter->widget(index > 0 ? index - 1 : index + 1);
-        const auto neighborPanes = panesIn(neighbor);
-        Pane *focusNext = neighborPanes.isEmpty() ? nullptr : (index > 0 ? neighborPanes.last() : neighborPanes.first());
+        const auto neighborPanes = leavesIn(neighbor);
+        QWidget *focusNext = neighborPanes.isEmpty() ? nullptr : (index > 0 ? neighborPanes.last() : neighborPanes.first());
         if (record && focusNext) {
             ClosedItem item;
             item.kind = ClosedItem::PaneItem; item.window = this; item.sibling = focusNext;
@@ -2242,7 +2453,9 @@ public:
             item.layout = serializeNode(pane);
             m_manager->remember(item);
         }
-        pane->onStatus = nullptr; pane->onStateChanged = nullptr; pane->onShellExited = nullptr;
+        if (auto *terminal = dynamic_cast<Pane *>(pane)) {
+            terminal->onStatus = nullptr; terminal->onStateChanged = nullptr; terminal->onShellExited = nullptr; terminal->onOpenPath = nullptr;
+        }
         pane->hide();
         pane->setParent(nullptr);
         pane->deleteLater();
@@ -2256,9 +2469,10 @@ public:
             splitter->hide();
             splitter->deleteLater();
         }
-        if (m_active == pane || !m_active) m_active = nullptr;
+        if (m_active.data() == pane) m_active = nullptr;
+        if (m_activeLeaf.data() == pane) m_activeLeaf = nullptr;
         if (m_lastActive.value(page) == pane) m_lastActive.remove(page);
-        if (focusNext) { setActive(focusNext); focusNext->focusInput(); }
+        if (focusNext) { setActiveLeaf(focusNext); focusLeaf(focusNext); }
         updateTitles();
     }
 
@@ -2273,6 +2487,7 @@ public:
         }
         for (Pane *pane : panesIn(page)) { pane->onStatus = nullptr; pane->onStateChanged = nullptr; pane->onShellExited = nullptr; }
         if (m_active && pageOf(m_active) == page) m_active = nullptr;
+        if (m_activeLeaf && pageOf(m_activeLeaf) == page) m_activeLeaf = nullptr;
         m_lastActive.remove(page);
         m_tabs->removeTab(index);
         page->deleteLater();
@@ -2284,7 +2499,9 @@ private:
     bool confirmClose() {
         const auto panes = allPanes();
         const bool busy = std::any_of(panes.cbegin(), panes.cend(), [](Pane *p) { return p->agentBusy() || p->processBusy(); });
-        QString text = QStringLiteral("Close this window and its %1 tab(s) and %2 pane(s)?").arg(m_tabs->count()).arg(panes.size());
+        int leafCount = 0;
+        for (int i = 0; i < m_tabs->count(); ++i) leafCount += leavesIn(m_tabs->widget(i)).size();
+        QString text = QStringLiteral("Close this window and its %1 tab(s) and %2 pane(s)?").arg(m_tabs->count()).arg(leafCount);
         if (busy) text += QStringLiteral("\n\nA program or agent turn is still running and will be stopped.");
         text += QStringLiteral("\n\nCtrl+Shift+W reopens it in the same directories, with new shells.");
         return QMessageBox::warning(this, QStringLiteral("Close window?"), text,
@@ -2320,7 +2537,8 @@ private:
     QPointer<Pane> m_returnPane;
     QPointer<QWidget> m_returnFocus;
     QPointer<Pane> m_active;
-    QHash<QWidget *, QPointer<Pane>> m_lastActive;
+    QHash<QWidget *, QPointer<QWidget>> m_lastActive;
+    QPointer<QWidget> m_activeLeaf;
     bool m_confirmedClose = false, m_skipRemember = false;
 };
 
@@ -2340,6 +2558,25 @@ RelayWindow *WindowManager::newWindow(const QJsonArray &tabs, int current, const
 
 RelayWindow *WindowManager::newWindowAt(const QString &cwd) {
     return newWindow(QJsonArray{QJsonObject{{"pane", QJsonObject{{"cwd", cwd}, {"workspace", m_workspace}}}}});
+}
+
+bool WindowManager::handleOpen(const QJsonObject &request) {
+    const QString path = request.value(QStringLiteral("path")).toString();
+    if (path.isEmpty() || !QFileInfo::exists(path)) return false;
+    const int line = request.value(QStringLiteral("line")).toInt();
+    const QString token = request.value(QStringLiteral("token")).toString();
+    m_windows.removeAll(nullptr);
+    // A shell names its pane; a Konsole link click comes from the focused window.
+    if (!token.isEmpty()) {
+        for (RelayWindow *window : std::as_const(m_windows))
+            if (Pane *pane = window->findPaneByToken(token)) { window->openPath(path, line, pane); return true; }
+    }
+    RelayWindow *target = dynamic_cast<RelayWindow *>(QApplication::activeWindow());
+    if (!target && !m_windows.isEmpty()) target = m_windows.last();
+    if (!target) return false;
+    target->openPath(path, line, target->activeLeaf());
+    target->raise(); target->activateWindow();
+    return true;
 }
 
 void WindowManager::cycle(RelayWindow *from, int delta) {
@@ -2391,6 +2628,10 @@ int main(int argc, char **argv) {
     if (path.isEmpty() || !QFileInfo(path).isDir()) { QMessageBox::critical(nullptr, QStringLiteral("Relay"), QStringLiteral("Workspace must be an existing directory.")); return 1; }
     QDir::setCurrent(path);
     try {
+        // Make relay-open available to Konsole's file-link command and to Relay shells.
+        const QString scripts = dataRoot() + QStringLiteral("/scripts");
+        qputenv("RELAY_OPEN_HELPER", (scripts + QStringLiteral("/relay-open")).toUtf8());
+        qputenv("PATH", (scripts + ':' + qEnvironmentVariable("PATH")).toUtf8());
         WindowManager manager(path, parser.isSet(clean));
         if (!manager.newWindowAt(path)) return 1;
         return app.exec();

@@ -185,6 +185,23 @@ QMenu::separator { height: 1px; background: @border; margin: 4px 6px; }
 QTabWidget::pane { border: 1px solid @border; }
 QTabBar::tab { background: @bg; color: @muted; padding: 6px 12px; border: none; }
 QTabBar::tab:selected { color: @text; border-bottom: 2px solid @accent; }
+
+/* File panes */
+QWidget#fileExplorer, QWidget#filePreview { background: @bg; }
+QLabel#fileExplorerPath, QLabel#filePreviewTitle { color: @text; font-weight: 600; padding: 2px 4px; }
+QLabel#filePreviewNotice { color: @muted; background: @surface; border: 1px solid @border; border-radius: 6px; padding: 4px 8px; }
+QTreeView#fileExplorerView { background: @bg; color: @text; border: 1px solid @border; border-radius: 6px; outline: none; }
+QTreeView#fileExplorerView::item { padding: 3px 2px; }
+QTreeView#fileExplorerView::item:selected { background: @raised; color: @text; }
+QTreeView#fileExplorerView::item:hover { background: @surface; }
+QTreeView#fileExplorerView QHeaderView::section { background: @bg; color: @muted; border: none; border-bottom: 1px solid @border; padding: 4px 6px; }
+QPlainTextEdit#filePreviewText, QTextBrowser#filePreviewMarkdown { background: @surface; color: @text; border: 1px solid @border; border-radius: 6px; padding: 6px; }
+QScrollArea#filePreviewImageArea { background: @surface; border: 1px solid @border; border-radius: 6px; }
+QLabel#filePreviewImage { background: transparent; }
+QLabel#filePreviewInfo { color: @text; }
+QWidget#fileExplorer QToolButton, QWidget#filePreview QToolButton { color: @muted; border: 1px solid transparent; border-radius: 6px; padding: 3px 8px; }
+QWidget#fileExplorer QToolButton:hover, QWidget#filePreview QToolButton:hover { color: @text; border-color: @border; background: @raised; }
+QToolButton#fileExplorerHidden:checked { color: @accent; border-color: @accentBorder; }
 )");
     QColor accentSoft = Accent; accentSoft.setAlpha(40);
     QColor accentBorder = Accent; accentBorder.setAlpha(150);

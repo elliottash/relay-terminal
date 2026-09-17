@@ -20,3 +20,8 @@ ScrollBarPosition=2
 
 [Terminal Features]
 BlinkingCursorEnabled=true
+
+[Interaction Options]
+UnderlineFilesEnabled=true
+TextEditorCmd=6
+TextEditorCmdCustom=relay-open PATH:LINE:COLUMN

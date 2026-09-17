@@ -16,6 +16,20 @@ if [[ -n ${RELAY_START_DIR:-} && -d $RELAY_START_DIR ]]; then
 fi
 unset RELAY_START_DIR
 
+# `relay open [PATH]` opens a folder in Relay's explorer pane or a file in its preview pane.
+relay() {
+    case ${1:-} in
+        open)
+            local target=${2:-.}
+            RELAY_OPEN_FROM_SHELL=1 command "${RELAY_PYTHON:-python3}" "${RELAY_OPEN_HELPER:-relay-open}" "$target"
+            ;;
+        *)
+            printf 'usage: relay open [PATH]\n' >&2
+            return 2
+            ;;
+    esac
+}
+
 __relay_event() {
     command "${RELAY_PYTHON:-python3}" -S "$RELAY_SHELL_EVENT" "$1" "${2:-0}" "$PWD" "$$"
 }

@@ -217,3 +217,22 @@ a section, and either a run function or a submenu builder; searching flattens su
 Presets (`relay`, `warp`, `vscode`, `konsole`) are embedded tables; loading applies the Relay
 defaults, then the chosen preset, then user overrides. Symbol keys match with or without
 Shift, because shifted punctuation differs between keyboard layouts.
+
+## File and preview panes
+
+`src/FilePanes.{h,cpp}` (static library `relay-filepanes`) holds two plain-Qt widgets with no KDE
+requirement, so they are the portable path for macOS and Windows:
+
+- `relay::FileExplorer` lists one folder through `QFileSystemModel` (folders first, hidden-file
+  toggle, type-to-filter via name filters). Enter or double-click opens: folders navigate, files
+  call `onOpenFile`. Backspace or Alt+Up goes up; `onDirectoryChanged` reports the new root.
+- `relay::FilePreview::open(path)` picks a viewer by MIME type: text and code in a read-only
+  `QPlainTextEdit`, highlighted by KSyntaxHighlighting ("Breeze Dark") when built in; Markdown in
+  a `QTextBrowser` with a Rendered/Source toggle; images via `QImageReader` with Fit/100%; PDF via
+  Qt PDF when built in; anything else, or a "text" file containing NUL bytes, as a file-info panel
+  with Open externally. Text is capped at 2 MiB with a notice; images over 64 MiB are refused.
+
+Both optional dependencies are detected at configure time (`RELAY_HAVE_SYNTAX_HIGHLIGHTING`,
+`RELAY_HAVE_QTPDF`). Neither widget uses `Q_OBJECT`; callbacks are `std::function` members, like
+`Pane`. Styling uses object names targeted by the "File panes" block in `Theme.cpp`. Tests:
+`tests/filepanes_test.cpp` (`relay-filepanes-tests`).

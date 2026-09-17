@@ -1,6 +1,6 @@
 # Clickable file and folder paths open Relay panes
 
-- **Status**: open
+- **Status**: in-progress
 - **Component**: gui, shell-integration
 - **Milestone**: desktop-alpha
 - **Workstream**: terminal
@@ -25,3 +25,13 @@ the profile's `TextEditorCmd` when set. KonsolePart emits no click signal and ex
    `issues/features/2026-09-17-portable-terminal-engine.md`.
 
 Option 1 is being implemented with the plain-Qt file panes.
+
+## Progress (2026-09-17)
+
+Option 1 implemented by Claude Opus 5: `scripts/relay-open` talks to the running Relay over a
+private local socket (`RELAY_OPEN_SOCKET`); `relay open PATH` in Relay shells; the pane's
+directory line opens the explorer; Relay's Konsole profile underlines files and sets
+`TextEditorCmdCustom=relay-open PATH:LINE:COLUMN`. Verified under Xvfb: Ctrl+click on `code.py`
+in `ls` output opened Relay's preview; `relay open sub` switched the explorer; Ctrl+click on
+`img.png` opened the system image viewer (expected: KonsolePart sends non-text files to KIO).
+Remaining: folders and non-text files from terminal clicks need option 2 or 3.

@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Ask the running Relay to open a file or folder in a pane.
+
+Used by `relay open PATH` in Relay shells and by Konsole's file-link "text editor command"
+(PATH:LINE:COLUMN). Falls back to the desktop's default app when Relay is not reachable.
+"""
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print("usage: relay-open PATH[:LINE[:COLUMN]]", file=sys.stderr)
+        return 2
+    raw = sys.argv[1]
+    line = 0
+    path = raw
+    if not os.path.exists(path):
+        match = re.match(r"^(.*?):(\d+)(?::(\d+))?:?$", raw)
+        if match and os.path.exists(match.group(1)):
+            path, line = match.group(1), int(match.group(2))
+    path = os.path.abspath(os.path.expanduser(path))
+    if not os.path.exists(path):
+        print(f"relay-open: no such file or directory: {path}", file=sys.stderr)
+        return 1
+    request = {"path": path, "line": line}
+    # Only a shell inside Relay knows which pane asked; Konsole link clicks use the focused pane.
+    if os.environ.get("RELAY_OPEN_FROM_SHELL") == "1" and os.environ.get("RELAY_SESSION_TOKEN"):
+        request["token"] = os.environ["RELAY_SESSION_TOKEN"]
+    address = os.environ.get("RELAY_OPEN_SOCKET", "")
+    if address:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+                conn.settimeout(3)
+                conn.connect(address)
+                conn.sendall((json.dumps(request) + "\n").encode("utf-8"))
+                reply = conn.recv(256).decode("utf-8", "replace").strip()
+                if reply == "ok":
+                    return 0
+        except OSError:
+            pass
+    try:
+        subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        return 0
+    except OSError:
+        print("relay-open: Relay is not reachable and xdg-open is unavailable", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
