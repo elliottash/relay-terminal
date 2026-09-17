@@ -605,6 +605,9 @@ public:
         m_closing = true;
         delete m_subagentOverlay.data();   // subagents UI: its destroyed() handler uses members
         qApp->removeEventFilter(this);
+        // Voice: a clip whose transcript never came back would otherwise outlive the pane.
+        if (m_voiceCapture) m_voiceCapture->cancel();
+        if (!m_voiceClip.isEmpty()) QFile::remove(m_voiceClip);
         m_poll.stop();
         // Destroy the terminal before its private shell state directory is removed.
         m_backend = nullptr;
@@ -1375,6 +1378,7 @@ private:
         routeRow->setSpacing(6);
         m_editor = new RichEditor;
         m_highlighter = new relay::InputHighlighter(m_editor->document());
+        QTimer::singleShot(0, this, [this] { refreshDestinationColor(); });
         m_editor->setAutoHeight(1, 8);   // one line when idle, growing with the text
         composerLayout->addWidget(m_editor);
         // Password prompts (checkPasswordPrompt): the prompt box becomes a masked field whose
@@ -4138,9 +4142,11 @@ private:
     void applyDestinationColor(relay::InputHighlighter::Destination destination) {
         if (!m_highlighter || !m_editor) return;
         m_highlighter->setDestination(destination);
-        QPalette palette = m_editor->palette();
-        palette.setColor(QPalette::Text, relay::InputHighlighter::colorFor(destination));
-        m_editor->setPalette(palette);
+        // Qt draws the caret in the widget's *stylesheet* colour, so the palette alone does nothing
+        // here (the app stylesheet sets one). The highlighter gives every character an explicit
+        // colour, so this only shows up in the caret and the placeholder.
+        const QString color = relay::InputHighlighter::colorFor(destination).name();
+        m_editor->setStyleSheet(QStringLiteral("QPlainTextEdit { color: %1; }").arg(color));
         if (m_modeChip) {
             const bool decided = destination != relay::InputHighlighter::Destination::Auto;
             m_modeChip->setProperty("dest", decided ? (destination == relay::InputHighlighter::Destination::Shell
