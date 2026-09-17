@@ -41,3 +41,13 @@ Both keys appear in the Ctrl+? overlay, and presets (Warp, VS Code, Konsole) kee
 ## Open questions
 1. Confirm restore-last-closed moving from Ctrl+Shift+W to Ctrl+Shift+Z.
 2. Should the alternates be active always (recommended) or only while a program owns the keyboard?
+
+## Partial fix already shipped (2026-09-17)
+
+Owner report: "i am running a claude terminal in relay, and it seems like i cant change over to the other
+pane". Inside a program only F-keys and Ctrl+Shift+… reached Relay, and pane focus is Alt+arrows, so a
+full-screen TUI trapped the keyboard in its pane. `Keymap::actsInsidePrograms` now also keeps **Alt+arrows**,
+so pane focus works while a program runs. The `program_keys` setting (`all` / `none`) still overrides.
+
+Note for the alternates above: Ctrl+Shift+Left/Right also mean "select the previous/next word" in the prompt
+box, so binding them to pane focus needs the owner's call (open question 2).

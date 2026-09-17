@@ -189,7 +189,14 @@ public:
         if (m_programKeys == QStringLiteral("none")) return false;
         const auto mods = event->modifiers();
         const bool fkey = event->key() >= Qt::Key_F1 && event->key() <= Qt::Key_F35;
-        return fkey || ((mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier));
+        // Alt+arrows move between panes. A terminal cannot send Ctrl+Shift+letter to a program, and
+        // few TUIs use Alt+arrows, so these stay Relay's while a program owns the keyboard —
+        // otherwise a full-screen program (Claude Code, vim) traps the keyboard in its pane
+        // (owner report 2026-09-17).
+        const bool arrow = event->key() == Qt::Key_Left || event->key() == Qt::Key_Right
+                           || event->key() == Qt::Key_Up || event->key() == Qt::Key_Down;
+        const bool altArrow = arrow && (mods & Qt::AltModifier) && !(mods & Qt::ControlModifier);
+        return fkey || altArrow || ((mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier));
     }
 
     void setProgramKeys(const QString &mode) { writeSetting(QStringLiteral("program_keys"), mode); }
@@ -1759,6 +1766,22 @@ private:
             rebuildQueueStrip();
             return true;
         }
+        if (type == QStringLiteral("steer_escalated")) {
+            const QString requestId = event.value(QStringLiteral("request_id")).toString();
+            if (event.value(QStringLiteral("escalated")).toBool()) {
+                for (int i = 0; i < m_steering.size(); ++i)
+                    if (m_steering[i].requestId == requestId) { m_steering.removeAt(i); break; }
+                ensureLineStart();
+                printInline(QStringLiteral("Interrupting the current turn; completed actions are not rolled back.\n"), Ink::Note);
+            } else {
+                // Delivered (or already back in the queue) before the third Enter reached the worker.
+                m_interruptPending = false;
+                m_pendingPrompts.remove(event.value(QStringLiteral("new_request_id")).toString());
+                toast(QStringLiteral("The agent already has it · nothing was interrupted"));
+            }
+            rebuildQueueStrip(); changed();
+            return true;
+        }
         if (type == QStringLiteral("steer_returned")) {
             const QString requestId = event.value(QStringLiteral("request_id")).toString();
             for (int i = 0; i < m_steering.size(); ++i) {
@@ -2481,8 +2504,29 @@ private:
         QJsonObject request{{"type", "ask"}, {"id", steer.requestId}, {"text", entry.text}, {"when", "steer"}, {"requeue", false}};
         if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
         send(request);
+        m_lastSteerRequest = steer.requestId; m_lastSteeredAt.start();
         rebuildQueueStrip(); changed();
-        toast(QStringLiteral("Steering · delivered at the agent's next tool call"));
+        toast(QStringLiteral("Steering · delivered at the agent's next tool call · Enter again to interrupt and send now"));
+        return true;
+    }
+
+    // A third Enter on the empty prompt box, right after the steer: stop the running turn and run
+    // that prompt as its own turn instead. The worker decides: once the turn has taken the steer
+    // (or given it back) the agent already has the prompt and there is nothing to interrupt for,
+    // so it answers steer_escalated {escalated: false}. The reply carries the request id reserved
+    // here, which keeps the prompt echo wired up the way startAgentEntry() does.
+    bool escalateSteerToInterrupt() {
+        if (!m_agentBusy || !m_lastSteeredAt.isValid() || m_lastSteeredAt.elapsed() > 15000) return false;
+        const auto pending = std::find_if(m_steering.cbegin(), m_steering.cend(),
+            [this](const SteerEntry &steer) { return steer.requestId == m_lastSteerRequest; });
+        if (pending == m_steering.cend()) return false;
+        m_lastSteeredAt.invalidate();
+        PendingPrompt prompt; prompt.text = pending->text;
+        const QString requestId = QStringLiteral("ask-%1").arg(++m_askSerial);
+        m_pendingPrompts.insert(requestId, prompt);
+        m_interruptPending = true;   // set before the stop, so agent_finished does not pause the queue
+        send({{"type", "queue_unsteer"}, {"request", pending->requestId}, {"as_request", requestId}});
+        status(QStringLiteral("Interrupting the current turn to send it now…"));
         return true;
     }
 
@@ -4043,7 +4087,10 @@ private:
             m_editor->moveCursor(QTextCursor::End);
             return true;
         }
-        if (mods == Qt::NoModifier && enter && m_editor->toPlainText().trimmed().isEmpty() && upgradeLastQueuedToSteer()) return true;
+        // Enter queues; Enter again steers at the next tool call; Enter a third time interrupts.
+        if (mods == Qt::NoModifier && enter && m_editor->toPlainText().trimmed().isEmpty()
+            && (upgradeLastQueuedToSteer() || escalateSteerToInterrupt()))
+            return true;
         // Esc stops a running program, so Ctrl+C is left to copying.
         if (mods == Qt::NoModifier && k == Qt::Key_Escape && !m_agentBusy && m_editor->toPlainText().isEmpty()
             && processBusy() && m_backend) {
@@ -4711,7 +4758,8 @@ private:
         for (const auto &steer : std::as_const(m_steering)) {
             auto *label = new QLabel(QStringLiteral("↪ next tool call  ✦ ") + fontMetrics().elidedText(steer.text.simplified(), Qt::ElideRight, std::max(160, width() - 220)));
             label->setObjectName(QStringLiteral("queueSteer"));
-            label->setToolTip(QStringLiteral("Delivered inside the running turn at the agent's next tool call"));
+            label->setToolTip(QStringLiteral("Delivered inside the running turn at the agent's next tool call"
+                                            " · Enter on the empty prompt box interrupts the turn and sends it now"));
             layout->addWidget(label);
         }
         if (!m_queueList) {
@@ -5192,7 +5240,8 @@ private:
     int m_turnsCompleted = 0, m_lastRecapTurns = -1, m_skillCount = 0;
     QList<SteerEntry> m_steering;
     quint64 m_lastQueuedEntryId = 0;
-    QElapsedTimer m_lastQueuedAt, m_awaySince;
+    QString m_lastSteerRequest;
+    QElapsedTimer m_lastQueuedAt, m_lastSteeredAt, m_awaySince;
     QTimer m_escTimer;
     // sudo & co. in the foreground
     QLabel *m_opaqueHint = nullptr;
