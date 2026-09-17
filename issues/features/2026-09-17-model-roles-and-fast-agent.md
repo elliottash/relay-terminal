@@ -21,7 +21,9 @@
 | Route assist | `google/gemini-3.5-flash-lite` (unchanged, latency budget under 1 s) |
 
 Fast agent defaults by main provider: GLM → `glm-5.3-flash`; OpenRouter → `deepseek/deepseek-v4.1-flash` (alternative
-`google/gemini-3.8-flash`); Kimi → `kimi-k2.7-code-highspeed` (proposed, pending owner).
+`google/gemini-3.8-flash`); Kimi → owner asked for "kimi k2.8" (2026-09-17), but no K2.8 exists on the Kimi API for this key (`kimi-k2.8`, `-code`,
+`-code-highspeed` all 404) or on OpenRouter; the key lists `kimi-k2.6`, `kimi-k2.7-code`, `kimi-k2.7-code-highspeed`,
+`kimi-k3`. Pending owner: use `kimi-k2.7-code-highspeed` until K2.8 appears, then switch.
 
 Later: route between main and fast agent in the main terminal by estimated task difficulty.
 
