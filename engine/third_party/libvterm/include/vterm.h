@@ -484,6 +484,10 @@ void vterm_state_relay_mark_cursor_line(VTermState *state, unsigned int marks);
  * are stored as one cell cluster whose width is that of the base character
  * (2 for a regional-indicator pair). */
 void vterm_state_relay_set_grapheme_clusters(VTermState *state, int enabled);
+/* RELAY PATCH: true when the input parser is between sequences (not inside an
+ * ESC/CSI/OSC/DCS sequence or a partial UTF-8 character), i.e. host bytes can
+ * be injected without corrupting the program's output */
+int vterm_relay_parser_at_ground(const VTerm *vt);
 /* RELAY PATCH: whether DEC mode 2004 (bracketed paste) is enabled */
 int vterm_state_relay_get_bracketpaste(const VTermState *state);
 

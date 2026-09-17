@@ -36,6 +36,11 @@ bool mapKeyEvent(int k, Qt::KeyboardModifiers modifiers, const QString &text, bo
     *out = KeyInput();
     out->modifiers = mapModifiers(modifiers, options);
     out->repeat = autoRepeat;
+    // Super (Cmd on macOS, Meta/Windows key elsewhere) combinations belong to
+    // the application and the desktop, not the program in the terminal.
+    // TODO: pass them through when a program enables the kitty keyboard protocol.
+    if (out->modifiers & ModSuper)
+        return false;
     const bool keypad = modifiers & Qt::KeypadModifier;
 
     switch (k) {

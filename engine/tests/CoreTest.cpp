@@ -276,6 +276,11 @@ private slots:
         QCOMPARE(int(f.lines[1].selectionEnd), 5);
         h.vt->selectionBegin(0, 7, SelectionUnit::Word, false);
         QCOMPARE(h.vt->selectedText(), QStringLiteral("world"));
+        // Double-click drag extends by whole words in both directions.
+        h.vt->selectionExtend(0, 13);
+        QCOMPARE(h.vt->selectedText(), QStringLiteral("world foo"));
+        h.vt->selectionExtend(0, 1);
+        QCOMPARE(h.vt->selectedText(), QStringLiteral("hello world"));
         h.vt->selectionBegin(1, 2, SelectionUnit::Line, false);
         QCOMPARE(h.vt->selectedText(), QStringLiteral("second line"));
         h.vt->selectionClear();
@@ -362,6 +367,12 @@ private slots:
         QVERIFY(h.vt->bracketedPaste());
         h.vt->paste(QStringLiteral("x"));
         QCOMPARE(h.replies, QByteArray("\x1b[200~x\x1b[201~"));
+        // A paste cannot end the bracket early or smuggle control codes.
+        h.replies.clear();
+        h.vt->paste(QStringLiteral("a\x1b[20\x1b[201~1~b\x03"));
+        QCOMPARE(h.replies.count("\x1b[201~"), 1);
+        QVERIFY(h.replies.endsWith("\x1b[201~"));
+        QVERIFY(!h.replies.contains('\x03'));
         h.replies.clear();
         h.vt->focusChanged(true);
         QVERIFY(h.replies.isEmpty());

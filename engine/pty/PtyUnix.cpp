@@ -16,6 +16,8 @@
 
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
+#include <sys/time.h>
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <termios.h>
@@ -102,6 +104,9 @@ public:
             argv.push_back(a.data());
         argv.push_back(nullptr);
 
+        // Inherited environment, minus unset names and names given in
+        // o.environment; within o.environment the last entry for a name wins
+        // (so a caller's TERM=... overrides a default earlier in the list).
         QStringList overrideNames = o.unsetEnvironment;
         for (const QString &kv : o.environment)
             overrideNames << kv.section(QLatin1Char('='), 0, 0);
@@ -112,8 +117,14 @@ public:
             if (!overrideNames.contains(name))
                 envStore.push_back(entry);
         }
-        for (const QString &kv : o.environment)
-            envStore.push_back(kv.toLocal8Bit());
+        for (int i = 0; i < o.environment.size(); ++i) {
+            const QString name = o.environment[i].section(QLatin1Char('='), 0, 0);
+            bool laterWins = false;
+            for (int j = i + 1; j < o.environment.size() && !laterWins; ++j)
+                laterWins = o.environment[j].section(QLatin1Char('='), 0, 0) == name;
+            if (!laterWins && !o.unsetEnvironment.contains(name))
+                envStore.push_back(o.environment[i].toLocal8Bit());
+        }
         std::vector<char *> envp;
         for (QByteArray &e : envStore)
             envp.push_back(e.data());
@@ -122,13 +133,26 @@ public:
         const QByteArray exe = path.toLocal8Bit();
         const QByteArray cwd = o.workingDirectory.toLocal8Bit();
 
-        if (::pipe(m_wake) != 0) {
-            m_error = QString::fromLocal8Bit(std::strerror(errno));
-            return false;
-        }
-        for (int fd : m_wake) {
-            ::fcntl(fd, F_SETFD, FD_CLOEXEC);
-            ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) | O_NONBLOCK);
+        // Upper bound for closing inherited descriptors in the child.
+        struct rlimit rl {};
+        const int maxFd = (::getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY)
+            ? int(std::min<rlim_t>(rl.rlim_cur, 65536))
+            : 65536;
+
+        if (m_wake[0] < 0) {
+#if defined(__linux__)
+            if (::pipe2(m_wake, O_CLOEXEC | O_NONBLOCK) != 0) {
+#else
+            if (::pipe(m_wake) != 0) {
+#endif
+                m_error = QString::fromLocal8Bit(std::strerror(errno));
+                m_wake[0] = m_wake[1] = -1;
+                return false;
+            }
+            for (int fd : m_wake) {
+                ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+                ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) | O_NONBLOCK);
+            }
         }
 
         struct winsize ws {};
@@ -155,9 +179,11 @@ public:
             sigemptyset(&none);
             ::sigprocmask(SIG_SETMASK, &none, nullptr);
 #if defined(__linux__) && defined(SYS_close_range)
-            ::syscall(SYS_close_range, 3U, ~0U, 0U);
+            if (::syscall(SYS_close_range, 3U, ~0U, 0U) != 0) // ENOSYS before Linux 5.9
+                for (int fd = 3; fd < maxFd; ++fd)
+                    ::close(fd);
 #else
-            for (int fd = 3; fd < 1024; ++fd)
+            for (int fd = 3; fd < maxFd; ++fd)
                 ::close(fd);
 #endif
             ::execve(exe.constData(), argv.data(), envp.data());
@@ -169,6 +195,18 @@ public:
 
         m_pid = pid;
         m_master = master;
+#if defined(__APPLE__)
+        if (m_master >= FD_SETSIZE || m_wake[0] >= FD_SETSIZE) {
+            // select() cannot watch these descriptors. TODO(macos): kqueue.
+            m_error = QStringLiteral("pty descriptor above FD_SETSIZE");
+            ::kill(pid, SIGHUP);
+            reapLater(pid);
+            ::close(m_master);
+            m_master = -1;
+            m_pid = -1;
+            return false;
+        }
+#endif
         ::fcntl(m_master, F_SETFD, FD_CLOEXEC);
         ::fcntl(m_master, F_SETFL, ::fcntl(m_master, F_GETFL) | O_NONBLOCK);
         m_running = true;
@@ -353,11 +391,27 @@ private:
             }
         }
         m_running = false;
+        // EOF means no process holds the slave any more; the child itself can
+        // still be alive (it may have redirected its descriptors). Wait for it
+        // without blocking a destructor that wants this thread to stop.
         int status = 0;
         int code = -1;
-        if (m_pid > 0 && ::waitpid(m_pid, &status, 0) == m_pid) {
-            code = exitCodeFromStatus(status);
-            m_reaped = true;
+        while (m_pid > 0) {
+            const pid_t r = ::waitpid(m_pid, &status, WNOHANG);
+            if (r == m_pid) {
+                code = exitCodeFromStatus(status);
+                m_reaped = true;
+                break;
+            }
+            if (r < 0 && errno != EINTR)
+                break;
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            FD_SET(m_wake[0], &rfds);
+            struct timeval tv {0, 50000};
+            ::select(m_wake[0] + 1, &rfds, nullptr, nullptr, &tv);
+            if (m_stop.load())
+                return; // the destructor hangs up and reaps
         }
         if (onFinished)
             onFinished(code);

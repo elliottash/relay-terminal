@@ -293,6 +293,12 @@ private slots:
         // AltGr composition on Windows arrives as Ctrl+Alt with printable text.
         QVERIFY(mapKeyEvent(Qt::Key_At, Qt::ControlModifier | Qt::AltModifier, QStringLiteral("@"), false, &k));
         QCOMPARE(int(k.modifiers), int(ModNone));
+        // Super/Cmd combinations are application shortcuts, not program input.
+#if defined(Q_OS_MACOS)
+        QVERIFY(!mapKeyEvent(Qt::Key_K, Qt::ControlModifier, QStringLiteral("k"), false, &k));
+#else
+        QVERIFY(!mapKeyEvent(Qt::Key_K, Qt::MetaModifier, QStringLiteral("k"), false, &k));
+#endif
     }
 
     void hostShortcutFilter()

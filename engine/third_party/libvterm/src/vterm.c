@@ -428,3 +428,18 @@ void vterm_check_version(int major, int minor)
 
   // Happy
 }
+
+/* RELAY PATCH */
+int vterm_relay_parser_at_ground(const VTerm *vt)
+{
+  if(vt->parser.state != NORMAL || vt->parser.in_esc)
+    return 0;
+  if(vt->state) {
+    int remaining;
+    /* UTF8DecoderData (encoding.c) starts with `int bytes_remaining` */
+    memcpy(&remaining, vt->state->encoding_utf8.data, sizeof remaining);
+    if(remaining)
+      return 0;
+  }
+  return 1;
+}

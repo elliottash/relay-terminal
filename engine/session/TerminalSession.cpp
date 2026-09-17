@@ -39,24 +39,71 @@ TerminalSession::TerminalSession(const QString &coreName, QObject *parent)
     };
     ev.titleChanged = [this](const QString &t) {
         m_title = t;
-        m_events.push_back({Event::Title, t, {}, {}, 0, 0});
+        if (m_titleEvent >= 0) {
+            m_events[size_t(m_titleEvent)].a = t; // only the latest title matters
+        } else {
+            m_titleEvent = int(m_events.size());
+            pushEvent({Event::Title, t, {}, {}, 0, 0});
+        }
     };
     ev.cwdChanged = [this](const QString &path, const QString &host) {
         m_cwd = path;
-        m_events.push_back({Event::Cwd, path, host, {}, 0, 0});
+        if (m_cwdEvent >= 0) {
+            m_events[size_t(m_cwdEvent)].a = path;
+            m_events[size_t(m_cwdEvent)].b = host;
+        } else {
+            m_cwdEvent = int(m_events.size());
+            pushEvent({Event::Cwd, path, host, {}, 0, 0});
+        }
     };
-    ev.bell = [this] { m_events.push_back({Event::Bell, {}, {}, {}, 0, 0}); };
+    ev.bell = [this] {
+        if (m_bellPending)
+            return; // `cat binary` can ring thousands of times per second
+        m_bellPending = true;
+        pushEvent({Event::Bell, {}, {}, {}, 0, 0});
+    };
     ev.altScreenChanged = [this](bool a) {
         m_alt = a;
-        m_events.push_back({Event::Alt, {}, {}, {}, a ? 1 : 0, 0});
+        pushEvent({Event::Alt, {}, {}, {}, a ? 1 : 0, 0});
     };
-    ev.promptMark = [this](PromptMark k, int row, int code) {
-        m_events.push_back({Event::Mark, {}, {}, {}, int(k) | (row << 8), code});
-    };
+    ev.promptMark = [this](PromptMark k, int row, int code) { pushEvent({Event::Mark, {}, {}, {}, int(k) | (row << 8), code}); };
     ev.clipboardWrite = [this](const QString &target, const QByteArray &data) {
-        m_events.push_back({Event::Clipboard, target, {}, data, 0, 0});
+        pushEvent({Event::Clipboard, target, {}, data, 0, 0});
     };
-    ev.notification = [this](const QString &t, const QString &b) { m_events.push_back({Event::Notify, t, b, {}, 0, 0}); };
+    ev.notification = [this](const QString &t, const QString &b) { pushEvent({Event::Notify, t, b, {}, 0, 0}); };
+
+    m_displayRetry.setSingleShot(true);
+    m_displayRetry.setInterval(20);
+    connect(&m_displayRetry, &QTimer::timeout, this, [this] {
+        bool again = false;
+        {
+            GuiLock lock(this);
+            flushDisplayQueue(m_pendingDisplaySince.isValid() && m_pendingDisplaySince.elapsed() > 500);
+            again = !m_pendingDisplay.isEmpty();
+        }
+        m_contentDirty = true;
+        scheduleDelivery();
+        if (again)
+            m_displayRetry.start();
+    });
+}
+
+void TerminalSession::pushEvent(Event e)
+{
+    // Bounded: a hostile or broken program must not grow memory or stall the
+    // GUI with events (prompt marks, alt-screen toggles, notifications).
+    if (m_events.size() >= 4096)
+        return;
+    m_events.push_back(std::move(e));
+}
+
+void TerminalSession::flushDisplayQueue(bool force)
+{
+    if (m_pendingDisplay.isEmpty() || (!force && !m_core->atGround()))
+        return;
+    m_core->feed(m_pendingDisplay.constData(), size_t(m_pendingDisplay.size()));
+    m_pendingDisplay.clear();
+    m_pendingDisplaySince.invalidate();
 }
 
 TerminalSession::~TerminalSession()
@@ -119,6 +166,8 @@ void TerminalSession::onPtyOutput(const char *data, size_t len)
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_core->feed(data, len);
+        if (!m_pendingDisplay.isEmpty())
+            flushDisplayQueue(false);
         if (m_outputSignal.load() && m_pendingOutput.size() < (64 << 20))
             m_pendingOutput.append(data, int(len));
     }
@@ -146,6 +195,9 @@ void TerminalSession::deliver()
         GuiLock lock(this);
         events.swap(m_events);
         out.swap(m_pendingOutput);
+        m_bellPending = false;
+        m_titleEvent = -1;
+        m_cwdEvent = -1;
     }
     QPointer<TerminalSession> self(this);
     if (!out.isEmpty())
@@ -208,10 +260,17 @@ void TerminalSession::sendInput(const QByteArray &bytes)
 
 void TerminalSession::writeToDisplay(const QByteArray &bytes)
 {
+    bool waiting = false;
     {
         GuiLock lock(this);
-        m_core->feed(bytes.constData(), size_t(bytes.size()));
+        if (!m_pendingDisplaySince.isValid())
+            m_pendingDisplaySince.start();
+        m_pendingDisplay += bytes;
+        flushDisplayQueue(false);
+        waiting = !m_pendingDisplay.isEmpty();
     }
+    if (waiting && !m_displayRetry.isActive())
+        m_displayRetry.start();
     m_contentDirty = true;
     scheduleDelivery();
 }

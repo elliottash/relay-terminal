@@ -22,3 +22,4 @@ with `RELAY PATCH` comments and listed below; everything else is byte-identical 
 | 6 | `vterm.h`, `state.c` | Optional grapheme clusters (`vterm_state_relay_set_grapheme_clusters()`): emoji skin-tone modifiers, ZWJ + pictograph, regional-indicator pairs (2 cells) join the previous cell; width of the base character. `VTERM_MAX_CHARS_PER_CELL` 6 -> 10. |
 | 7 | `vterm.h`, `state.c` | `vterm_state_relay_get_bracketpaste()`. |
 | 8 | `screen.c` | Reflow no longer indexes row -1 when row 0 is a continuation line. |
+| 9 | `vterm.h`, `vterm.c` | `vterm_relay_parser_at_ground()` so the host can inject display bytes between sequences. |

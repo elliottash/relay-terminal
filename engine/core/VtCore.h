@@ -60,6 +60,9 @@ public:
     virtual int rows() const = 0;
     virtual int columns() const = 0;
     virtual void setScrollbackLines(int lines) = 0;
+    // True when the parser is between sequences (no partial ESC/CSI/OSC/UTF-8),
+    // so host bytes (writeToDisplay) can be fed without corrupting program output.
+    virtual bool atGround() const = 0;
 
     // ---- rendering
     // Copy the viewport into `frame` (only dirty rows unless frame->full is

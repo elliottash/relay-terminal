@@ -209,7 +209,7 @@ TerminalView::TerminalView(TerminalSession *session, QWidget *parent)
     });
     connect(m_session, &TerminalSession::bell, this, [this] {
         emit bellRang();
-        if (!m_visualBell)
+        if (!m_visualBell || m_flash)
             return;
         m_flash = true;
         update();
@@ -705,6 +705,21 @@ bool TerminalView::event(QEvent *e)
         auto *ke = static_cast<QKeyEvent *>(e);
         if (m_shortcutFilter && m_shortcutFilter(ke))
             return QWidget::event(e); // not accepted: the host shortcut fires
+        // Super/Cmd combinations stay application shortcuts (Cmd+Q, Cmd+W),
+        // except the view's own Cmd+C/V/F/... on macOS handled in keyPressEvent.
+        if (mapModifiers(ke->modifiers(), m_keyOptions) & ModSuper) {
+#if defined(Q_OS_MACOS)
+            switch (ke->key()) {
+            case Qt::Key_C: case Qt::Key_V: case Qt::Key_F: case Qt::Key_A:
+            case Qt::Key_Plus: case Qt::Key_Equal: case Qt::Key_Minus: case Qt::Key_0:
+                e->accept();
+                return true;
+            default:
+                break;
+            }
+#endif
+            return QWidget::event(e);
+        }
         e->accept(); // the terminal owns every other key while focused
         return true;
     }
@@ -1171,19 +1186,22 @@ void TerminalView::contextMenuEvent(QContextMenuEvent *e)
         e->ignore();
         return;
     }
-    QMenu menu(this);
-    QAction *copy = menu.addAction(tr("Copy"), this, &TerminalView::copySelection);
+    // Heap-allocated and non-blocking: a nested exec() loop could delete this
+    // view (e.g. the shell exits and the host closes the pane) under a stack menu.
+    auto *menu = new QMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    QAction *copy = menu->addAction(tr("Copy"), this, &TerminalView::copySelection);
     copy->setEnabled(m_session->withCore([](VtCore &c) { return c.hasSelection(); }));
-    menu.addAction(tr("Paste"), this, &TerminalView::pasteClipboard);
-    menu.addAction(tr("Select All"), this, &TerminalView::selectAll);
-    menu.addSeparator();
-    menu.addAction(tr("Find..."), this, &TerminalView::showSearchBar);
-    menu.addAction(tr("Clear Scrollback"), this, [this] {
+    menu->addAction(tr("Paste"), this, &TerminalView::pasteClipboard);
+    menu->addAction(tr("Select All"), this, &TerminalView::selectAll);
+    menu->addSeparator();
+    menu->addAction(tr("Find..."), this, &TerminalView::showSearchBar);
+    menu->addAction(tr("Clear Scrollback"), this, [this] {
         m_session->withCore([](VtCore &c) { c.clearScrollback(); });
         m_forceFull = true;
         scheduleFrame();
     });
-    menu.exec(e->globalPos());
+    menu->popup(e->globalPos());
 }
 
 // ---------------------------------------------------------------- focus

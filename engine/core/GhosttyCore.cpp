@@ -172,6 +172,7 @@ struct GhosttyCore::Impl {
     CursorShape lastCursorShape = CursorShape::Block;
     SelectionUnit selUnit = SelectionUnit::Cell;
     bool selRect = false;
+    bool selAnchorOnAlt = false; // grid refs are only valid on the screen they came from
     QString title;
     SequenceScanner scanner;
 
@@ -357,9 +358,35 @@ struct GhosttyCore::Impl {
         const bool nowAlt = screen == GHOSTTY_TERMINAL_SCREEN_ALTERNATE;
         if (nowAlt != alt) {
             alt = nowAlt;
+            // A selection anchor from the other screen must not reach the
+            // selection API (refs must belong to the active screen; unchecked).
+            if (selAnchor && selAnchorOnAlt != alt) {
+                ghostty_tracked_grid_ref_free(selAnchor);
+                selAnchor = nullptr;
+                setSelection(nullptr);
+            }
             if (q->events.altScreenChanged)
                 q->events.altScreenChanged(alt);
         }
+    }
+
+    // Hyperlink URI of a grid ref, growing the buffer when needed.
+    static bool hyperlinkUri(const GhosttyGridRef &ref, std::string *out)
+    {
+        char small[1024];
+        size_t len = 0;
+        GhosttyResult r = ghostty_grid_ref_hyperlink_uri(&ref, reinterpret_cast<uint8_t *>(small), sizeof small, &len);
+        if (r == GHOSTTY_SUCCESS) {
+            out->assign(small, len);
+            return true;
+        }
+        if (r != GHOSTTY_OUT_OF_SPACE || len == 0 || len > (1u << 20))
+            return false;
+        out->resize(len);
+        if (ghostty_grid_ref_hyperlink_uri(&ref, reinterpret_cast<uint8_t *>(&(*out)[0]), len, &len) != GHOSTTY_SUCCESS)
+            return false;
+        out->resize(len);
+        return true;
     }
 
     GhosttyTerminalScrollbar scrollbar() const
@@ -470,6 +497,13 @@ void GhosttyCore::setScrollbackLines(int lines)
     d->applyScrollbackLimit();
 }
 
+bool GhosttyCore::atGround() const
+{
+    bool ground = true;
+    ghostty_terminal_get(d->t, GHOSTTY_TERMINAL_DATA_VT_GROUND, &ground);
+    return ground;
+}
+
 void GhosttyCore::setCellPixelSize(int w, int h, int, int)
 {
     d->cellW = std::max(1, w);
@@ -505,9 +539,15 @@ bool GhosttyCore::updateFrame(ViewportFrame *frame, bool force)
     bool haveCurrent = false;
     if (d->search && d->searchTotal > 0) {
         ghostty_search_feed(d->search);
-        GhosttySelection storage[256];
-        GhosttySelectionBuffer buf{storage, 256, 0};
-        if (ghostty_search_get(d->search, GHOSTTY_SEARCH_DATA_VIEWPORT_MATCHES, &buf) == GHOSTTY_SUCCESS) {
+        std::vector<GhosttySelection> storage(256, GHOSTTY_INIT_SIZED(GhosttySelection));
+        GhosttySelectionBuffer buf{storage.data(), storage.size(), 0};
+        GhosttyResult r = ghostty_search_get(d->search, GHOSTTY_SEARCH_DATA_VIEWPORT_MATCHES, &buf);
+        if (r == GHOSTTY_OUT_OF_SPACE && buf.len > storage.size()) {
+            storage.assign(buf.len, GHOSTTY_INIT_SIZED(GhosttySelection));
+            buf = GhosttySelectionBuffer{storage.data(), storage.size(), 0};
+            r = ghostty_search_get(d->search, GHOSTTY_SEARCH_DATA_VIEWPORT_MATCHES, &buf);
+        }
+        if (r == GHOSTTY_SUCCESS) {
             for (size_t i = 0; i < buf.len; ++i) {
                 GhosttyPointCoordinate s, e;
                 if (ghostty_terminal_point_from_grid_ref(d->t, &storage[i].start, GHOSTTY_POINT_TAG_VIEWPORT, &s) == GHOSTTY_SUCCESS
@@ -636,12 +676,9 @@ bool GhosttyCore::updateFrame(ViewportFrame *frame, bool force)
             ghostty_cell_get(rawCell, GHOSTTY_CELL_DATA_HAS_HYPERLINK, &hasLink);
             if (hasLink) {
                 GhosttyGridRef ref;
-                if (d->gridRef(GHOSTTY_POINT_TAG_VIEWPORT, x, y, &ref)) {
-                    char ubuf[2048];
-                    size_t ulen = 0;
-                    if (ghostty_grid_ref_hyperlink_uri(&ref, reinterpret_cast<uint8_t *>(ubuf), sizeof ubuf, &ulen) == GHOSTTY_SUCCESS)
-                        c.link = d->internLink(std::string(ubuf, ulen));
-                }
+                std::string uri;
+                if (d->gridRef(GHOSTTY_POINT_TAG_VIEWPORT, x, y, &ref) && Impl::hyperlinkUri(ref, &uri))
+                    c.link = d->internLink(uri);
             }
         }
     }
@@ -785,13 +822,10 @@ bool GhosttyCore::scrollToPrompt(int direction)
 QString GhosttyCore::hyperlinkAt(int row, int col) const
 {
     GhosttyGridRef ref;
-    if (!d->gridRef(GHOSTTY_POINT_TAG_VIEWPORT, col, row, &ref))
+    std::string uri;
+    if (!d->gridRef(GHOSTTY_POINT_TAG_VIEWPORT, col, row, &ref) || !Impl::hyperlinkUri(ref, &uri))
         return QString();
-    char buf[4096];
-    size_t len = 0;
-    if (ghostty_grid_ref_hyperlink_uri(&ref, reinterpret_cast<uint8_t *>(buf), sizeof buf, &len) != GHOSTTY_SUCCESS)
-        return QString();
-    return QString::fromUtf8(buf, int(len));
+    return QString::fromStdString(uri);
 }
 
 void GhosttyCore::selectionBegin(int row, int col, SelectionUnit unit, bool rectangle)
@@ -806,6 +840,7 @@ void GhosttyCore::selectionBegin(int row, int col, SelectionUnit unit, bool rect
         ghostty_tracked_grid_ref_free(d->selAnchor);
     d->selAnchor = nullptr;
     ghostty_terminal_grid_ref_track(d->t, p, &d->selAnchor);
+    d->selAnchorOnAlt = d->alt;
     if (unit == SelectionUnit::Cell) {
         d->setSelection(nullptr);
         return;
@@ -815,7 +850,7 @@ void GhosttyCore::selectionBegin(int row, int col, SelectionUnit unit, bool rect
 
 void GhosttyCore::selectionExtend(int row, int col)
 {
-    if (!d->selAnchor || !ghostty_tracked_grid_ref_has_value(d->selAnchor))
+    if (!d->selAnchor || !ghostty_tracked_grid_ref_has_value(d->selAnchor) || d->selAnchorOnAlt != d->alt)
         return;
     GhosttyGridRef anchor = GHOSTTY_INIT_SIZED(GhosttyGridRef);
     if (ghostty_tracked_grid_ref_snapshot(d->selAnchor, &anchor) != GHOSTTY_SUCCESS)
@@ -826,14 +861,32 @@ void GhosttyCore::selectionExtend(int row, int col)
 
     GhosttySelection sel = GHOSTTY_INIT_SIZED(GhosttySelection);
     if (d->selUnit == SelectionUnit::Word) {
-        GhosttyTerminalSelectWordBetweenOptions o = GHOSTTY_INIT_SIZED(GhosttyTerminalSelectWordBetweenOptions);
-        o.start = anchor;
-        o.end = here;
+        // Nearest word from the click towards the pointer and from the pointer
+        // back towards the click; the selection spans both (upstream recipe).
         static const uint32_t boundaries[] = {' ', '\t', '"', '\'', '`', '(', ')', '[', ']', '{', '}', '<', '>', '|', ',', ';', 0x2502};
+        GhosttyTerminalSelectWordBetweenOptions o = GHOSTTY_INIT_SIZED(GhosttyTerminalSelectWordBetweenOptions);
         o.boundary_codepoints = boundaries;
         o.boundary_codepoints_len = sizeof boundaries / sizeof boundaries[0];
-        if (ghostty_terminal_select_word_between(d->t, &o, &sel) != GHOSTTY_SUCCESS)
+        GhosttySelection fromAnchor = GHOSTTY_INIT_SIZED(GhosttySelection);
+        GhosttySelection fromHere = GHOSTTY_INIT_SIZED(GhosttySelection);
+        o.start = anchor;
+        o.end = here;
+        const bool haveA = ghostty_terminal_select_word_between(d->t, &o, &fromAnchor) == GHOSTTY_SUCCESS;
+        o.start = here;
+        o.end = anchor;
+        const bool haveH = ghostty_terminal_select_word_between(d->t, &o, &fromHere) == GHOSTTY_SUCCESS;
+        if (!haveA && !haveH)
             return;
+        if (haveA && haveH) {
+            GhosttyPointCoordinate pa, ph;
+            ghostty_terminal_point_from_grid_ref(d->t, &fromAnchor.start, GHOSTTY_POINT_TAG_SCREEN, &pa);
+            ghostty_terminal_point_from_grid_ref(d->t, &fromHere.start, GHOSTTY_POINT_TAG_SCREEN, &ph);
+            const bool forward = pa.y < ph.y || (pa.y == ph.y && pa.x <= ph.x);
+            sel.start = forward ? fromAnchor.start : fromHere.start;
+            sel.end = forward ? fromHere.end : fromAnchor.end;
+        } else {
+            sel = haveA ? fromAnchor : fromHere;
+        }
     } else if (d->selUnit == SelectionUnit::Line) {
         GhosttySelection a = GHOSTTY_INIT_SIZED(GhosttySelection);
         GhosttySelection b = GHOSTTY_INIT_SIZED(GhosttySelection);
@@ -1054,8 +1107,11 @@ void GhosttyCore::focusChanged(bool focused)
 
 void GhosttyCore::clearScrollback()
 {
-    static const char ed3[] = "\x1b[3J";
-    ghostty_terminal_vt_write(d->t, reinterpret_cast<const uint8_t *>(ed3), sizeof ed3 - 1);
+    // Out of band (not ED 3 through the parser, which may be mid-sequence):
+    // a zero byte budget erases retained history, then restore the budget.
+    const size_t zero = 0;
+    ghostty_terminal_set(d->t, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &zero);
+    d->applyScrollbackLimit();
 }
 
 void GhosttyCore::reset()

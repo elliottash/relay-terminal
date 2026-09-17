@@ -154,6 +154,25 @@ private slots:
         QVERIFY(!pty->errorString().isEmpty());
     }
 
+    void destructorDoesNotWaitForDetachedChild()
+    {
+        // The child closes its tty descriptors (like nohup) and keeps running:
+        // the reader sees EOF but must not block the destructor on waitpid.
+        QElapsedTimer t;
+        {
+            auto pty = Pty::create();
+            Collector c;
+            c.attach(pty.get());
+            Pty::StartOptions o;
+            o.program = QStringLiteral("/bin/sh");
+            o.arguments = QStringList{QStringLiteral("-c"), QStringLiteral("exec </dev/null >/dev/null 2>&1; trap '' HUP; sleep 3")};
+            QVERIFY(pty->start(o));
+            QTest::qWait(300);
+            t.start();
+        }
+        QVERIFY2(t.elapsed() < 1000, qPrintable(QString::number(t.elapsed())));
+    }
+
     void terminateHangsUp()
     {
         auto pty = Pty::create();

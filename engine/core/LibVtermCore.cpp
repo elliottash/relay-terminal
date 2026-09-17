@@ -132,7 +132,7 @@ struct LibVtermCore::Impl {
     bool alt = false;
     int mouseMode = VTERM_PROP_MOUSE_NONE;
     QString title;
-    QString titleBuf;
+    QByteArray titleBuf;
     QByteArray oscBuf;
     std::unordered_map<std::string, uint32_t> linkIds;
     std::vector<QString> linkUris{QString()};
@@ -522,9 +522,10 @@ struct LibVtermCore::Impl {
         case VTERM_PROP_TITLE:
             if (val->string.initial)
                 d->titleBuf.clear();
-            d->titleBuf += QString::fromUtf8(val->string.str, int(val->string.len));
+            if (d->titleBuf.size() < 4096) // bytes; decoded once complete (UTF-8 may split across fragments)
+                d->titleBuf.append(val->string.str, int(val->string.len));
             if (val->string.final) {
-                d->title = d->titleBuf;
+                d->title = QString::fromUtf8(d->titleBuf);
                 if (d->q->events.titleChanged)
                     d->q->events.titleChanged(d->title);
             }
@@ -554,10 +555,10 @@ struct LibVtermCore::Impl {
         auto it = linkIds.find(key);
         if (it != linkIds.end())
             return it->second;
-        if (linkUris.size() >= 0xFFFFFF) {
-            linkIds.clear();
-            linkUris.assign(1, QString());
-        }
+        // Ids are never reused (cells in scrollback keep them); once the 24-bit
+        // space is exhausted, new links are simply not clickable.
+        if (linkUris.size() >= 0xFFFFFF)
+            return 0;
         const uint32_t id = uint32_t(linkUris.size());
         linkUris.push_back(QString::fromUtf8(uri));
         linkIds.emplace(key, id);
@@ -893,6 +894,11 @@ void LibVtermCore::setScrollbackLines(int lines)
     d->allDirty = true;
 }
 
+bool LibVtermCore::atGround() const
+{
+    return vterm_relay_parser_at_ground(d->vt);
+}
+
 void LibVtermCore::setReflow(bool enabled)
 {
     d->reflow = enabled;
@@ -1180,7 +1186,14 @@ void LibVtermCore::paste(const QString &text)
     QString t = text;
     t.replace(QStringLiteral("\r\n"), QStringLiteral("\r"));
     t.replace(QLatin1Char('\n'), QLatin1Char('\r'));
-    t.remove(QStringLiteral("\x1b[201~")); // cannot terminate the bracket early
+    // Like libghostty-vt's paste encoder: control characters other than tab and
+    // CR become spaces, so a paste can neither end the bracket (ESC[201~) nor
+    // smuggle other sequences or signals.
+    for (QChar &ch : t) {
+        const ushort u = ch.unicode();
+        if ((u < 0x20 && u != '\t' && u != '\r') || u == 0x7f || (u >= 0x80 && u < 0xa0))
+            ch = QLatin1Char(' ');
+    }
     const QByteArray utf8 = t.toUtf8();
     vterm_keyboard_start_paste(d->vt);
     if (events.reply)

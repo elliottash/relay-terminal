@@ -11,7 +11,9 @@
 #include "core/VtCore.h"
 #include "pty/Pty.h"
 
+#include <QElapsedTimer>
 #include <QObject>
+#include <QTimer>
 
 #include <atomic>
 #include <mutex>
@@ -49,7 +51,9 @@ public:
     // Raw bytes to the program (keys already encoded, or text).
     void sendInput(const QByteArray &bytes);
     // Bytes into the emulator as if the program printed them (never reaches
-    // the program). Relay's inline agent output uses this.
+    // the program). Relay's inline agent output uses this. If the program's
+    // output stopped in the middle of an escape sequence or UTF-8 character,
+    // the bytes wait until the parser is back at ground (at most ~500 ms).
     void writeToDisplay(const QByteArray &bytes);
 
     // Run `f(core)` with the session lock held. Events raised inside are
@@ -76,7 +80,8 @@ public:
     void setScrollbackLines(int lines);
     void setClipboardWriteAllowed(bool allowed);
     // Emit output() with raw PTY bytes (GUI thread, batched). Off by default:
-    // copying a 200 MB flood to the GUI thread is not free.
+    // copying a 200 MB flood to the GUI thread is not free. If more than 64 MiB
+    // accumulate before the GUI thread takes them, the excess is dropped.
     void setOutputSignalEnabled(bool enabled);
 
 signals:
@@ -119,8 +124,17 @@ private:
     std::atomic<bool> m_alt{false};
     std::atomic<quint64> m_bytes{0};
     std::atomic<bool> m_contentDirty{false};
-    std::vector<Event> m_events;  // guarded by m_mutex
-    QByteArray m_pendingOutput;   // guarded by m_mutex
+    void pushEvent(Event e);      // m_mutex held
+    void flushDisplayQueue(bool force); // m_mutex held
+
+    std::vector<Event> m_events;  // guarded by m_mutex; coalesced and capped
+    bool m_bellPending = false;   // guarded by m_mutex
+    int m_titleEvent = -1;        // index of the pending title event, guarded by m_mutex
+    int m_cwdEvent = -1;          // index of the pending cwd event, guarded by m_mutex
+    QByteArray m_pendingOutput;   // guarded by m_mutex; capped at 64 MiB (excess output() data is dropped)
+    QByteArray m_pendingDisplay;  // writeToDisplay bytes waiting for the parser to reach ground, guarded by m_mutex
+    QElapsedTimer m_pendingDisplaySince; // guarded by m_mutex
+    QTimer m_displayRetry;
     QString m_title;              // guarded by m_mutex
     QString m_cwd;                // guarded by m_mutex
     QString m_error;

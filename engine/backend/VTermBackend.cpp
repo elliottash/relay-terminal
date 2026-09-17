@@ -25,12 +25,13 @@ VTermBackend::VTermBackend(const QString &coreName, QWidget *parent)
     layout->addWidget(m_scrollBar);
     m_container->setFocusProxy(m_view);
 
-    // The container owns the widgets; the backend dies with the container
-    // unless the host deletes it first.
+    // The container owns the widgets; the backend (with its session and shell)
+    // dies with the container unless the host deletes the backend first.
     connect(m_container, &QObject::destroyed, this, [this] {
         m_container = nullptr;
         m_view = nullptr;
         m_scrollBar = nullptr;
+        deleteLater();
     });
 
     connect(m_view, &TerminalView::scrollPositionChanged, this, [this](int top, int history, int rows) {
@@ -159,35 +160,79 @@ void VTermBackend::resizeTerminal(int rows, int columns)
 
 QWidget *VTermBackend::widget() { return m_container; }
 QWidget *VTermBackend::focusWidget() { return m_view; }
-void VTermBackend::setTerminalFont(const QFont &font) { m_view->setTerminalFont(font); }
 
-void VTermBackend::copySelection() { m_view->copySelection(); }
-void VTermBackend::paste() { m_view->pasteClipboard(); }
-QString VTermBackend::selectedText() const { return m_view->selectedText(); }
-void VTermBackend::selectAll() { m_view->selectAll(); }
+// The methods below are no-ops once the host destroyed widget().
+void VTermBackend::setTerminalFont(const QFont &font)
+{
+    if (m_view)
+        m_view->setTerminalFont(font);
+}
+
+void VTermBackend::copySelection()
+{
+    if (m_view)
+        m_view->copySelection();
+}
+
+void VTermBackend::paste()
+{
+    if (m_view)
+        m_view->pasteClipboard();
+}
+
+QString VTermBackend::selectedText() const
+{
+    return m_session->withCore([](VtCore &c) { return c.selectedText(); });
+}
+
+void VTermBackend::selectAll()
+{
+    if (m_view)
+        m_view->selectAll();
+}
 
 void VTermBackend::clearScrollback()
 {
     m_session->withCore([](VtCore &c) { c.clearScrollback(); });
-    m_view->scrollToBottom();
+    if (m_view)
+        m_view->scrollToBottom();
 }
 
 void VTermBackend::clear()
 {
-    m_session->withCore([](VtCore &c) {
-        c.clearScrollback();
-        static const char home[] = "\x1b[H\x1b[2J";
-        c.feed(home, sizeof home - 1);
-    });
-    m_view->scrollToBottom();
+    m_session->withCore([](VtCore &c) { c.clearScrollback(); });
+    m_session->writeToDisplay(QByteArrayLiteral("\x1b[H\x1b[2J"));
+    if (m_view)
+        m_view->scrollToBottom();
 }
 
-void VTermBackend::scrollLines(int lines) { m_view->scrollLines(lines); }
-void VTermBackend::scrollPages(int pages) { m_view->scrollPages(pages); }
-void VTermBackend::scrollToBottom() { m_view->scrollToBottom(); }
-bool VTermBackend::scrollToPrompt(int direction) { return m_view->scrollToPrompt(direction); }
+void VTermBackend::scrollLines(int lines)
+{
+    if (m_view)
+        m_view->scrollLines(lines);
+}
 
-int VTermBackend::find(const QString &text, bool backwards) { return m_view->find(text, backwards); }
+void VTermBackend::scrollPages(int pages)
+{
+    if (m_view)
+        m_view->scrollPages(pages);
+}
+
+void VTermBackend::scrollToBottom()
+{
+    if (m_view)
+        m_view->scrollToBottom();
+}
+
+bool VTermBackend::scrollToPrompt(int direction)
+{
+    return m_view && m_view->scrollToPrompt(direction);
+}
+
+int VTermBackend::find(const QString &text, bool backwards)
+{
+    return m_view ? m_view->find(text, backwards) : 0;
+}
 
 void VTermBackend::setOutputCallbackEnabled(bool enabled) { m_session->setOutputSignalEnabled(enabled); }
 

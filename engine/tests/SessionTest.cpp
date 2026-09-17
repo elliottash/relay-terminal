@@ -72,6 +72,58 @@ private slots:
         s.terminate();
     }
 
+    void bellFloodIsCoalesced()
+    {
+        QFETCH_GLOBAL(QString, core);
+        TerminalSession s(core);
+        s.resize(10, 40, 8, 16);
+        QSignalSpy finished(&s, &TerminalSession::finished);
+        QSignalSpy bells(&s, &TerminalSession::bell);
+        TerminalSession::StartOptions o;
+        o.program = QStringLiteral("/bin/sh");
+        o.arguments = QStringList{QStringLiteral("-c"), QStringLiteral("i=0; while [ $i -lt 2000 ]; do printf '\\a\\a\\a\\a\\a'; i=$((i+1)); done")};
+        QVERIFY(s.start(o));
+        QVERIFY(finished.wait(10000));
+        QVERIFY(bells.size() >= 1);
+        QVERIFY2(bells.size() < 2000, qPrintable(QString::number(bells.size())));
+    }
+
+    void displayInjectionWaitsForGround()
+    {
+        QFETCH_GLOBAL(QString, core);
+        TerminalSession s(core);
+        s.resize(6, 40, 8, 16);
+        QSignalSpy finished(&s, &TerminalSession::finished);
+        TerminalSession::StartOptions o;
+        o.program = QStringLiteral("/bin/sh");
+        // The program stops in the middle of an SGR sequence for 300 ms.
+        o.arguments = QStringList{QStringLiteral("-c"), QStringLiteral("printf 'x\\033[3'; sleep 0.3; printf '1mRED\\033[0m\\n'; sleep 0.2")};
+        QVERIFY(s.start(o));
+        QTest::qWait(120);
+        s.writeToDisplay("AGENT");
+        QVERIFY(finished.wait(5000));
+        QTest::qWait(100);
+        const QString text = s.screenText();
+        QVERIFY2(text.contains(QStringLiteral("RED")), qPrintable(text));
+        QVERIFY2(text.contains(QStringLiteral("AGENT")), qPrintable(text));
+        QVERIFY2(!text.contains(QStringLiteral("1mRED")) && !text.contains(QStringLiteral("AGENT1m")), qPrintable(text));
+    }
+
+    void callerEnvironmentWins()
+    {
+        QFETCH_GLOBAL(QString, core);
+        TerminalSession s(core);
+        s.resize(6, 40, 8, 16);
+        QSignalSpy finished(&s, &TerminalSession::finished);
+        TerminalSession::StartOptions o;
+        o.program = QStringLiteral("/bin/sh");
+        o.arguments = QStringList{QStringLiteral("-c"), QStringLiteral("echo TERM=$TERM")};
+        o.environment = QStringList{QStringLiteral("TERM=dumb")};
+        QVERIFY(s.start(o));
+        QVERIFY(finished.wait(5000));
+        QTRY_VERIFY_WITH_TIMEOUT(s.screenText().contains(QStringLiteral("TERM=dumb")), 2000);
+    }
+
     void floodIsParsedOffTheGuiThread()
     {
         QFETCH_GLOBAL(QString, core);

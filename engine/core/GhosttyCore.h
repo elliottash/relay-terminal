@@ -19,6 +19,7 @@ public:
     int rows() const override;
     int columns() const override;
     void setScrollbackLines(int lines) override;
+    bool atGround() const override;
 
     bool updateFrame(ViewportFrame *frame, bool force) override;
 
