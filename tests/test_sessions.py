@@ -360,6 +360,17 @@ class PlanModeTests(Base):
             agent.set_mode('yolo')
 
 
+    def test_plan_mode_hides_subagent_tools(self):
+        class FakeSubagents:
+            def tool_specs(self):
+                return [{'type': 'function', 'function': {'name': 'agent', 'parameters': {}}}]
+        agent = self.agent(ScriptedProvider())
+        agent.subagents = FakeSubagents()
+        self.assertIn('agent', [t['function']['name'] for t in agent.tools()])
+        agent.set_mode('plan')
+        self.assertNotIn('agent', [t['function']['name'] for t in agent.tools()])
+
+
 class AttachmentTests(Base):
     def test_attachment_prepended(self):
         outside = Path(self.temp.name) / 'notes.md'

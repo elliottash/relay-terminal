@@ -29,6 +29,14 @@ Implementer evidence, not a QA verdict. Claude Opus 5 (backend workstream A).
 | `resume {id}` | `state_loaded {turns: 4}` then `recap {text, next_action, turns_covered: 4, reason: resume}`; text mentions the codeword recall, the plan path, "not been implemented or tested yet" |
 | Turn after resume (Kimi on GLM history) | "TANGERINE-42"; Kimi accepted GLM's assistant messages |
 
+## Re-run after rebasing onto main with the subagents backend (dec2d2d)
+
+Same script, same checks, all passed again: Kimi → GLM switch recalled TANGERINE-42; plan mode wrote
+`.relay/plans/2026-09-17-0954-…md` using `read_file`, `run_command`, `write_plan` with `hello.py` unchanged;
+manual compaction (`summary_chars` 734) kept the codeword; resume on Kimi gave `state_loaded {turns: 4}`, a recap
+with `next_action`, and recalled the codeword. `configured` reported 45 skills. The committed `live-*` files are from
+the pre-rebase run.
+
 ## Bug found and fixed during the check
 
 First run: after manual compaction GLM-5.3 (effort low) wrote a summary saying the codeword "should not be

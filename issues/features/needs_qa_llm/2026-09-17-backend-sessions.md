@@ -65,7 +65,8 @@ Worker protocol (all additive; GUI not wired yet):
 
 ## Implementer check (not a QA verdict)
 
-- `./scripts/test.sh`: 166 tests pass (39 new). `test.sh` now points `XDG_DATA_HOME` at a temp dir so worker tests do not
+- Rebased onto main after the subagents merge (dec2d2d); `./scripts/test.sh`: 200 tests pass (41 new in this workstream,
+  1 subagents test updated for the shared effort table: OpenRouter max → `xhigh`). `test.sh` now points `XDG_DATA_HOME` at a temp dir so worker tests do not
   write sessions into the real home.
 - Live run with stored keys (Kimi K3 → GLM-5.3 Coding Plan → resume on Kimi): see
   `docs/qa_evidence/2026-09-17-backend-sessions/NOTES.md`. Model switch kept memory, plan file written with the source file
@@ -94,6 +95,10 @@ Worker protocol (all additive; GUI not wired yet):
 ## Known gaps
 
 - GUI wiring (workstream E) not done; `agents`/`agents_list` belong to workstream B.
+- Subagent integration: `subagents.effort_extra` now uses `presets.apply_effort`; `set_model` updates the subagent
+  factory so `inherit` subagents follow the switch; `resume`/`load_state`/`plan_execute fresh` stop subagents and drop
+  their pending results. Plan mode does not offer the `agent` tools (subagents could write files). Subagent file writes
+  are not checkpointed.
 - Checkpoints cover `write_file` only (not `run_command` effects or `set_keybinding` writes). Forked/loaded sessions keep conversation checkpoints but not file pre-images.
 - A single turn larger than the limit can only be trimmed, not summarized. Compaction does not re-inject recently read files.
 - Only the last 3 pre-compaction snapshots are kept; older turns lose conversation rewind (`conversation: false`).

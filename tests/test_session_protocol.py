@@ -264,6 +264,20 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.cmds.handle('load_state', {'state': state, 'id': 'l'})
         self.assertEqual(self.rec.wait(lambda e: e['event'] == 'state_loaded')['turns'], 1)
 
+    def test_hooks_for_model_switch_and_replaced_conversation(self):
+        seen = []
+        cmds = SessionCommands(self.sup, self.rec, on_model_changed=lambda agent: seen.append(('model', agent.config.model)),
+                               on_conversation_replaced=lambda: seen.append('replaced'))
+        agent = self.make_agent(ScriptedProvider())
+        self.run_turn('one')
+        cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'next'})
+        cmds.handle('fork', {})
+        state = self.rec.wait(lambda e: e['event'] == 'fork_state')['state']
+        cmds.handle('load_state', {'state': state})
+        self.assertEqual(seen, [('model', 'next'), 'replaced'])
+        from relay_core.subagents import effort_extra
+        self.assertEqual(effort_extra('glm-coding', {}, 'max'), {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'max'})
+
     def test_suggest_and_set_mode(self):
         self.make_agent(ScriptedProvider(side_reply='{"command": "make test", "reason": "build passed"}'))
         self.cmds.handle('suggest', {'kind': 'next_command', 'command': 'make', 'exit_status': 0, 'id': 's1'})
