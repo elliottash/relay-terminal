@@ -24,6 +24,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [CONTROL-AND-FILE-PANES-RESEARCH.md](CONTROL-AND-FILE-PANES-RESEARCH.md) | How Warp and others hand control between human and agent, password detection, file pane options |
 | [INTAKE-CLARIFICATION-RESEARCH.md](INTAKE-CLARIFICATION-RESEARCH.md) | Recaps, command suggestions, @ files, compaction thresholds, background handoff, instruction and agent file conventions, full-screen and input detection |
 | [SCRATCHPAD-DESIGN.md](SCRATCHPAD-DESIGN.md) | Proposed per-project user–agent scratchpad: format, review loop, actions, merge rules, protocol |
+| [MEMORY-AND-MULTI-REQUEST-RESEARCH.md](MEMORY-AND-MULTI-REQUEST-RESEARCH.md) | How Claude Code, Codex, opencode and Warp keep track of multiple requests and long conversations; Relay drop paths and fixes |
 | [SWITCHBOARD-DESIGN.md](SWITCHBOARD-DESIGN.md) | Board (Switchboard) v2: issues/ as Trello-like cards with agent threads, git format, agent tools and autonomy, conversion, phases |
 | [TERMINAL-ENGINE-OPTIONS.md](TERMINAL-ENGINE-OPTIONS.md) | Permissively licensed, cross-platform terminal cores and widgets compared (libghostty-vt, Contour, alacritty_terminal, xterm.js, libvterm, GPL references) |
 | [AGENT-FEATURES-RESEARCH.md](AGENT-FEATURES-RESEARCH.md) | Session, planning, model/effort, command and subagent UX in Warp, opencode, Claude Code and Codex; recommendations and a subagent design for Relay |
