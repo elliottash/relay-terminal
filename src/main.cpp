@@ -4,6 +4,7 @@
 #include "FilePanes.h"
 #include "AgentUi.h"
 #include "Completion.h"
+#include "ShellHighlighter.h"
 #include "Hints.h"
 #include "Notifications.h"        // window header: the bell and its list
 #include "InputPolicy.h"           // prompt-box-only input: where a submitted line goes
@@ -20,6 +21,7 @@
 #include "TerminalBackends.h"
 #include "TerminalBackend.h"
 #include "WindowState.h"   // saved window layout ("reopen where I left off")
+#include "Voice.h"          // voice transcription: capture, the hold key, the transcript
 #include <iterator>
 #include <QAction>
 #include <QApplication>
@@ -329,6 +331,9 @@ private:
         add("agent.stop", "agent", "Stop the agent turn", {});
         add("agent.stopAllSubagents", "agent", "Stop all running subagents", {QStringLiteral("Ctrl+Shift+X")});   // subagents UI
         add("agent.agentsMenu", "agent", "Agents: definitions and running subagents", {});
+        // Voice transcription: the hold key is its own setting (Settings › Voice), because a
+        // push-to-talk key is held rather than pressed and is not a shortcut the keymap can bind.
+        add("voice.toggle", "agent", "Voice transcription: start or finish recording", {});
         add("agent.interrupt", "agent", "Send to the agent; while it is busy, interrupt it and send now (prompt box)",
             {QStringLiteral("Ctrl+Return"), QStringLiteral("Ctrl+Enter"), QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
         add("agent.provider", "agent", "Provider and API keys (advanced endpoint settings)", {});
@@ -629,7 +634,9 @@ public:
     relay::EngineKind engine() const { return m_engine; }
     QString engineCore() const { return m_engineCore; }
     QString mode() const { return m_modeValue; }
-    void setMode(const QString &mode) { m_modeValue = mode; requestRoute(false, QStringLiteral("auto")); changed(); }
+    void setMode(const QString &mode) {
+        m_modeValue = mode; requestRoute(false, QStringLiteral("auto")); refreshDestinationColor(); changed();
+    }
     bool isNative() const { return m_native; }
     void toggleNative() { setNative(!m_native); }
     bool agentBusy() const { return m_agentBusy; }
@@ -901,6 +908,13 @@ public:
 
     bool ownsComposerWidget(QWidget *widget) const { return m_composer && widget && (widget == m_composer || m_composer->isAncestorOf(widget)); }
 
+    // Whether the keyboard is in this pane. The pane's event filter sits on qApp, so every pane
+    // sees every key event; voice push-to-talk must only act in the one being typed in.
+    bool ownsKeyboard() const {
+        QWidget *focus = QApplication::focusWidget();
+        return focus && (focus == this || isAncestorOf(focus));
+    }
+
     // Human control (Ctrl+H, F12, the "Take control" button): the only way the terminal widget
     // ever gets the keyboard. Everything else keeps it in the prompt box.
     void takeControl() {
@@ -1045,6 +1059,8 @@ public:
 
     // Settings changed in Actions › Agent options.
     void agentOptionsChanged(const QString &key) {
+        // Voice settings are the GUI's own: the recorder, the chip and its tooltip, never the agent.
+        if (key.startsWith(QStringLiteral("voice/"))) { updateVoiceChip(); return; }
         if (key == QStringLiteral("agent/max_auto_turns")) {
             if (m_configured) send({{"type", "set_agent_options"}, {"max_auto_turns", QSettings().value(QStringLiteral("agent/max_auto_turns"), 50).toInt()}});
             return;
@@ -1216,6 +1232,21 @@ protected:
                       .arg(Keymap::instance().shortcutText(QStringLiteral("control.human"))));
             return true;
         }
+        // Voice push-to-talk. The filter is on qApp, so only the pane holding the keyboard acts,
+        // and the event is never consumed: Right Alt is AltGr on most layouts and must keep typing.
+        // F9 is the exception — it is not a modifier, so it is swallowed while voice uses it.
+        if ((event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease) && ownsKeyboard()) {
+            auto *key = static_cast<QKeyEvent *>(event);
+            const QString hold = voiceHoldKey();
+            const bool isVoiceKey = voiceEnabled()
+                && relay::voice::isHoldKey(hold, key->key(), key->nativeVirtualKey(), key->nativeScanCode());
+            if (isVoiceKey && !key->isAutoRepeat()) {
+                if (event->type() == QEvent::KeyPress) voiceKeyPressed(); else voiceKeyReleased();
+                if (hold == QStringLiteral("f9")) return true;
+            } else if (!isVoiceKey && event->type() == QEvent::KeyPress && m_voiceHold) {
+                voiceInterrupted();
+            }
+        }
         if (event->type() == QEvent::KeyPress && object == m_editor) {
             auto *key = static_cast<QKeyEvent *>(event);
             if (handleComposerKey(key)) return true;
@@ -1318,16 +1349,16 @@ private:
             hint(QStringLiteral("model.mouse"), QStringLiteral("Tip: /model switches models from the prompt box"));
         });
         routeRow->addWidget(m_modelBox);
-        auto *mic = new QToolButton;
-        mic->setObjectName(QStringLiteral("stripChip"));
-        mic->setFocusPolicy(Qt::NoFocus);
-        mic->setIcon(stripIcon(QStringLiteral("mic")));
-        mic->setIconSize(QSize(14, 14));
-        mic->setToolTip(QStringLiteral("Voice transcription (not built yet)"));
-        connect(mic, &QToolButton::clicked, this, [this] {
-            status(QStringLiteral("Voice transcription is not built yet."));
-        });
-        routeRow->addWidget(mic);
+        // Voice transcription: the chip toggles recording, the hold key is push-to-talk.
+        m_mic = new QToolButton;
+        m_mic->setObjectName(QStringLiteral("stripChip"));
+        m_mic->setFocusPolicy(Qt::NoFocus);
+        m_mic->setIcon(stripIcon(QStringLiteral("mic")));
+        m_mic->setIconSize(QSize(14, 14));
+        m_mic->setAccessibleName(QStringLiteral("Voice transcription"));
+        connect(m_mic, &QToolButton::clicked, this, [this] { toggleVoice(false); });
+        routeRow->addWidget(m_mic);
+        updateVoiceChip();
         auto *cancel = new QToolButton;
         cancel->setObjectName(QStringLiteral("interruptButton"));
         const QString cancelIcon = relay::theme::themeDataDir() + QStringLiteral("/icons/cancel.svg");
@@ -1343,6 +1374,7 @@ private:
         routeRow->setContentsMargins(2, 0, 2, 0);
         routeRow->setSpacing(6);
         m_editor = new RichEditor;
+        m_highlighter = new relay::InputHighlighter(m_editor->document());
         m_editor->setAutoHeight(1, 8);   // one line when idle, growing with the text
         composerLayout->addWidget(m_editor);
         // Password prompts (checkPasswordPrompt): the prompt box becomes a masked field whose
@@ -1816,6 +1848,211 @@ public:
         m_skillsDialog->refresh();
     }
 
+    // ----- voice transcription (issue NY7Z, protocol 16) -------------------------------------
+    // Hold the voice key (Right Alt by default, Warp's binding) or click the microphone chip, speak,
+    // and the transcript is inserted at the cursor in the prompt box — never submitted, so a
+    // misheard word is fixed before anything runs. Recording is a capture tool the desktop already
+    // has (src/Voice.cpp); the worker does the transcribing with an OpenRouter key of its own.
+public:
+    static bool voiceEnabled() { return QSettings().value(QStringLiteral("voice/enabled"), true).toBool(); }
+    static QString voiceModel() {
+        const QString value = QSettings().value(QStringLiteral("voice/model")).toString();
+        return value.isEmpty() ? QStringLiteral("google/gemini-3.5-flash-lite") : value;
+    }
+    static int voiceSeconds() {
+        return relay::voice::clampSeconds(QSettings().value(QStringLiteral("voice/max_seconds")).toInt());
+    }
+
+    // The hold key, defaulted once from the keyboard layout: Right Alt is AltGr wherever the layout
+    // types with it, and a key that types é must not also start recording.
+    static QString voiceHoldKey() {
+        QSettings settings;
+        const QString stored = settings.value(QStringLiteral("voice/hold_key")).toString();
+        if (relay::voice::holdKeys().contains(stored)) return stored;
+        QString layouts;
+        QFile file(QStringLiteral("/etc/default/keyboard"));
+        if (file.exists() && file.size() < 64 * 1024 && file.open(QIODevice::ReadOnly | QIODevice::Text))
+            layouts = QString::fromUtf8(file.readAll());
+        const QString chosen = relay::voice::defaultHoldKey(relay::voice::layoutsFromKeyboardConfig(layouts));
+        settings.setValue(QStringLiteral("voice/hold_key"), chosen);
+        return chosen;
+    }
+
+    // The microphone chip and the palette action: start, or finish a recording that is running.
+    void toggleVoice(bool fromKeyboard) {
+        if (m_voiceCapture && m_voiceCapture->recording()) { stopVoice(); return; }
+        startVoice(false);
+        if (!fromKeyboard && voiceHoldKey() != QStringLiteral("off"))
+            hint(QStringLiteral("voice.hold"), QStringLiteral("Next time: hold %1 and speak")
+                     .arg(relay::voice::holdKeyLabel(voiceHoldKey())));
+    }
+
+    // Push-to-talk, from the pane's event filter. Auto-repeat never reaches these.
+    void voiceKeyPressed() {
+        if (m_voiceHold || (m_voiceCapture && m_voiceCapture->recording())) return;
+        m_voiceHold = true;
+        startVoice(true);
+        if (!(m_voiceCapture && m_voiceCapture->recording())) m_voiceHold = false;   // it did not start
+    }
+    void voiceKeyReleased() {
+        if (!m_voiceHold) return;
+        m_voiceHold = false;
+        if (m_voiceCapture && m_voiceCapture->recording()) stopVoice();
+    }
+    // Any other key while the voice key is held: the user is typing (AltGr types é on most
+    // layouts), so the recording is dropped rather than sent.
+    void voiceInterrupted() {
+        if (!m_voiceHold) return;
+        m_voiceHold = false;
+        if (m_voiceCapture && m_voiceCapture->recording()) {
+            m_voiceCapture->cancel();
+            updateVoiceChip();
+            status(QStringLiteral("Recording cancelled."));
+        }
+    }
+    bool voiceRecording() const { return m_voiceCapture && m_voiceCapture->recording(); }
+
+private:
+    void startVoice(bool hold) {
+        if (!voiceEnabled()) { status(QStringLiteral("Voice transcription is off (Settings › Voice).")); return; }
+        if (m_native) { status(QStringLiteral("Voice types into the prompt box; leave native input first.")); return; }
+        if (m_secretMode) { status(QStringLiteral("Not while a password prompt is open.")); return; }
+        if (m_voiceTranscribing) { status(QStringLiteral("Still transcribing the last clip…")); return; }
+        // Nothing is recorded without a key: the clip would have nowhere to go.
+        if (!voiceKeyStored()) { offerVoiceKey(); return; }
+        if (!m_workerReady) { status(QStringLiteral("Relay's worker is not ready yet.")); return; }
+        ensureCapture();
+        relay::voice::Options options;
+        options.tool = QSettings().value(QStringLiteral("voice/tool")).toString();
+        options.device = QSettings().value(QStringLiteral("voice/device")).toString();
+        options.seconds = voiceSeconds();
+        QString error;
+        if (!m_voiceCapture->start(options, &error)) {
+            status(error);
+            toast(error, 6000);
+            updateVoiceChip();
+            return;
+        }
+        updateVoiceChip();
+        toast(hold ? QStringLiteral("Listening… release %1 to transcribe").arg(relay::voice::holdKeyLabel(voiceHoldKey()))
+                   : QStringLiteral("Listening… click the microphone again to transcribe"), 4000);
+    }
+
+    void stopVoice() {
+        if (!m_voiceCapture || !m_voiceCapture->recording()) return;
+        m_voiceCapture->stop();
+        status(QStringLiteral("Transcribing…"));
+        updateVoiceChip();
+    }
+
+    void ensureCapture() {
+        if (m_voiceCapture) return;
+        m_voiceCapture = new relay::voice::Capture(this);
+        connect(m_voiceCapture, &relay::voice::Capture::ready, this, [this](const QString &path, qint64 ms) {
+            m_voiceClip = path;
+            m_voiceTranscribing = true;
+            m_voiceRequest = QStringLiteral("voice-") + QString::number(++m_requestId);
+            updateVoiceChip();
+            Q_UNUSED(ms);
+            send({{"type", "transcribe"}, {"id", m_voiceRequest}, {"path", path}, {"model", voiceModel()}});
+        });
+        connect(m_voiceCapture, &relay::voice::Capture::failed, this, [this](const QString &message) {
+            m_voiceHold = false;
+            updateVoiceChip();
+            status(message);
+            toast(message, 5000);
+        });
+        connect(m_voiceCapture, &relay::voice::Capture::elapsed, this, [this] { updateVoiceChip(); });
+    }
+
+    // The openrouter row of the worker's `presets` event. Before it arrives nothing is known, and
+    // the worker answers with the no_key code instead.
+    bool voiceKeyStored() const {
+        if (m_presets.isEmpty()) return true;
+        for (const auto &item : m_presets) {
+            const auto preset = item.toObject();
+            if (preset.value(QStringLiteral("id")).toString() == QStringLiteral("openrouter"))
+                return preset.value(QStringLiteral("has_stored_key")).toBool();
+        }
+        return false;
+    }
+
+    void offerVoiceKey() {
+        m_voiceHold = false;
+        status(QStringLiteral("Voice needs an OpenRouter key."));
+        QMessageBox box(window());
+        box.setIcon(QMessageBox::Information);
+        box.setWindowTitle(QStringLiteral("Voice transcription"));
+        box.setText(QStringLiteral("Voice needs an OpenRouter key."));
+        box.setInformativeText(QStringLiteral(
+            "Relay transcribes with %1 on OpenRouter, whatever model this pane's agent runs, so voice needs an "
+            "OpenRouter key of its own. Recordings are sent to OpenRouter and Google; nothing is recorded or "
+            "sent until a key is stored.").arg(voiceModel()));
+        QPushButton *keys = box.addButton(QStringLiteral("API keys…"), QMessageBox::AcceptRole);
+        QPushButton *warp = box.addButton(QStringLiteral("Import from Warp"), QMessageBox::ActionRole);
+        box.addButton(QMessageBox::Cancel);
+        box.exec();
+        if (box.clickedButton() == keys) openKeysDialog();
+        else if (box.clickedButton() == warp) send({{"type", "import_warp"}});
+    }
+
+    void onTranscribed(const QJsonObject &event) {
+        // The clip has done its work; Relay keeps no audio.
+        if (!m_voiceClip.isEmpty()) { QFile::remove(m_voiceClip); m_voiceClip.clear(); }
+        m_voiceTranscribing = false;
+        m_voiceRequest.clear();
+        updateVoiceChip();
+        if (!event.value(QStringLiteral("ok")).toBool()) {
+            const QString message = event.value(QStringLiteral("error")).toString();
+            if (event.value(QStringLiteral("code")).toString() == QStringLiteral("no_key")) { offerVoiceKey(); return; }
+            status(QStringLiteral("Voice: ") + message);
+            toast(message, 5000);
+            return;
+        }
+        const QString text = event.value(QStringLiteral("text")).toString();
+        if (text.isEmpty()) {
+            status(QStringLiteral("Nothing was said."));
+            toast(QStringLiteral("Nothing was said."), 2500);
+            return;
+        }
+        // Inserted with the cursor, not by replacing the document, so Ctrl+Z still undoes it.
+        QTextCursor cursor = m_editor->textCursor();
+        const QString before = m_editor->toPlainText();
+        const auto insertion = relay::voice::insertTranscript(before, cursor.position(), text);
+        const int at = qBound(0, cursor.position(), before.size());
+        cursor.setPosition(at);
+        cursor.insertText(insertion.text.mid(at, insertion.text.size() - before.size()));
+        cursor.setPosition(qBound(0, insertion.cursor, insertion.text.size()));
+        m_editor->setTextCursor(cursor);
+        focusInput();
+        status(QStringLiteral("Transcribed %1 character%2 · Enter sends it")
+                   .arg(text.size()).arg(text.size() == 1 ? QString() : QStringLiteral("s")));
+    }
+
+    void updateVoiceChip() {
+        if (!m_mic) return;
+        const bool recording = m_voiceCapture && m_voiceCapture->recording();
+        m_mic->setProperty("recording", recording);
+        m_mic->style()->unpolish(m_mic);
+        m_mic->style()->polish(m_mic);
+        if (recording) {
+            const qint64 seconds = m_voiceCapture->elapsedMs() / 1000;
+            m_mic->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+            m_mic->setText(QStringLiteral(" %1:%2").arg(seconds / 60).arg(seconds % 60, 2, 10, QLatin1Char('0')));
+            m_mic->setToolTip(QStringLiteral("Listening… click to transcribe"));
+        } else {
+            m_mic->setToolButtonStyle(Qt::ToolButtonIconOnly);
+            m_mic->setText(QString());
+            const QString hold = voiceHoldKey();
+            m_mic->setToolTip(m_voiceTranscribing
+                ? QStringLiteral("Transcribing…")
+                : QStringLiteral("Voice transcription%1").arg(
+                      hold == QStringLiteral("off") ? QString()
+                          : QStringLiteral(" · hold %1 and speak").arg(relay::voice::holdKeyLabel(hold))));
+        }
+    }
+
+public:
     // ----- provider and model modals -------------------------------------------------------
     // Both are non-modal windows fed by the worker's `presets` / `model_roles` events. No key
     // material passes through either of them in the read direction: keys only go out, to the
@@ -3337,6 +3574,8 @@ private:
                     .arg(names.join(QStringLiteral(", ")), skipped.isEmpty() ? QStringLiteral("none") : QString::number(skipped.size())));
             status(QStringLiteral("Warp import finished. Leave the key field empty to use stored keys."));
             send({{"type", "presets"}});
+        } else if (type == QStringLiteral("transcribed")) {
+            onTranscribed(event);
         } else if (type == QStringLiteral("keybindings_updated")) {
         } else if (type == QStringLiteral("key_stored")) {
             status(QStringLiteral("API key saved to the keyring for ") + event.value(QStringLiteral("preset")).toString());
@@ -3894,12 +4133,42 @@ private:
     void changed() { refreshPickers(); refreshSessionControls(); if (onStateChanged) onStateChanged(); }
 
     // The strip stays quiet: one word ("TERMINAL", "AGENT", "COMMAND"), the full sentence on hover.
+    // The caret and the syntax colouring follow the destination: white while auto has not decided,
+    // cyan for the terminal, violet for the agent (owner design, 2026-09-17).
+    void applyDestinationColor(relay::InputHighlighter::Destination destination) {
+        if (!m_highlighter || !m_editor) return;
+        m_highlighter->setDestination(destination);
+        QPalette palette = m_editor->palette();
+        palette.setColor(QPalette::Text, relay::InputHighlighter::colorFor(destination));
+        m_editor->setPalette(palette);
+        if (m_modeChip) {
+            const bool decided = destination != relay::InputHighlighter::Destination::Auto;
+            m_modeChip->setProperty("dest", decided ? (destination == relay::InputHighlighter::Destination::Shell
+                                                       ? QStringLiteral("shell") : QStringLiteral("agent"))
+                                                    : QString());
+            m_modeChip->style()->unpolish(m_modeChip); m_modeChip->style()->polish(m_modeChip);
+        }
+    }
+
+    // The fixed modes decide on their own; auto waits for the router's verdict on this text.
+    void refreshDestinationColor(const QString &verdict = QString()) {
+        using Destination = relay::InputHighlighter::Destination;
+        if (m_modeValue == QStringLiteral("shell")) { applyDestinationColor(Destination::Shell); return; }
+        if (m_modeValue == QStringLiteral("agent")) { applyDestinationColor(Destination::Agent); return; }
+        if (m_editor && m_editor->toPlainText().trimmed().isEmpty()) { applyDestinationColor(Destination::Auto); return; }
+        if (verdict.startsWith(QStringLiteral("TERMINAL")) || verdict.startsWith(QStringLiteral("SHELL")))
+            applyDestinationColor(Destination::Shell);
+        else if (verdict.startsWith(QStringLiteral("AGENT")) || verdict.startsWith(QStringLiteral("COMMAND")))
+            applyDestinationColor(Destination::Agent);
+    }
+
     void setRouteText(const QString &full) {
         if (!m_routeLabel) return;
         if (full.startsWith(QStringLiteral("EMPTY"))) { m_routeLabel->clear(); m_routeLabel->setToolTip(QString()); return; }
         const QString head = full.section(QStringLiteral(" · "), 0, 0).trimmed();
         m_routeLabel->setText(head.isEmpty() ? full : head);
         m_routeLabel->setToolTip(full);
+        refreshDestinationColor(head);
     }
 
     // ----- diagnostics log and the in-flight turn clock (issue SQAM) --------------------------
@@ -4575,6 +4844,7 @@ private:
     }
 
     void onComposerEdited() {
+        if (m_editor->toPlainText().trimmed().isEmpty()) refreshDestinationColor();
         if (!m_editor->toPlainText().isEmpty()) m_idleTip.stop();
         if (!m_editor->toPlainText().isEmpty()) clearAiGhost();
         updateSlashPopup();
@@ -5285,6 +5555,7 @@ private:
             m_promptReported = true;
             refreshShellReady();
             m_knownCommands = event.value(QStringLiteral("known_commands")).toArray();
+            if (m_highlighter) m_highlighter->setKnownCommands(knownCommandNames());
             m_shellPath = event.value(QStringLiteral("path")).toString();
             const int status = event.value(QStringLiteral("status")).toInt();
             if (!m_agentBusy) this->status(QStringLiteral("Shell ready · exit %1").arg(status));
@@ -5541,6 +5812,7 @@ private:
     QList<QPair<QString, QString>> m_stored;
     QComboBox *m_modelBox = nullptr;
     QToolButton *m_cwdChip = nullptr, *m_modeChip = nullptr;
+    relay::InputHighlighter *m_highlighter = nullptr;
     QLabel *m_toast = nullptr;
     QLabel *m_prefixChip = nullptr;
     QPointer<relay::SkillsDialog> m_skillsDialog;
@@ -5638,6 +5910,11 @@ private:
     // agent sessions UI
     QLabel *m_planChip = nullptr, *m_ctxLabel = nullptr;
     QToolButton *m_interruptButton = nullptr;
+    // voice transcription (issue NY7Z): the chip, the recorder, and the clip in flight
+    QToolButton *m_mic = nullptr;
+    relay::voice::Capture *m_voiceCapture = nullptr;
+    QString m_voiceRequest, m_voiceClip;
+    bool m_voiceHold = false, m_voiceTranscribing = false;
     QFrame *m_helpCard = nullptr;
     QComboBox *m_effortBox = nullptr;
     QListWidget *m_slashList = nullptr;
@@ -6750,6 +7027,7 @@ private:
         else if (id == QStringLiteral("agent.stop")) pane->stopAgent();
         else if (id == QStringLiteral("agent.stopAllSubagents")) pane->stopAllSubagents();   // subagents UI
         else if (id == QStringLiteral("agent.agentsMenu")) openAgentsMenu();
+        else if (id == QStringLiteral("voice.toggle")) pane->toggleVoice(true);
         else if (id == QStringLiteral("agent.provider")) pane->openProviderDialog();
         else if (id == QStringLiteral("agent.modelKeys")) {
             pane->openKeysDialog();
@@ -6875,7 +7153,7 @@ private:
     }
 
     relay::SettingRow numberRow(const QString &key, const QString &label, const QString &detail,
-                                int fallback, int minimum, int maximum) {
+                                int fallback, int minimum, int maximum, const QString &suffix = QString()) {
         relay::SettingRow row;
         row.kind = relay::SettingRow::Number;
         row.id = QStringLiteral("option:") + key;
@@ -6884,6 +7162,7 @@ private:
         row.number = QSettings().value(key, fallback).toInt();
         row.minimum = minimum;
         row.maximum = maximum;
+        row.suffix = suffix;
         row.onNumber = [this, key](int value) {
             QSettings().setValue(key, value);
             if (m_active) m_active->agentOptionsChanged(key);
@@ -7098,6 +7377,64 @@ private:
                                 QStringLiteral("A small side call flags asks that may be unaddressed"), false);
         sections << agent;
 
+        // Voice transcription (issue NY7Z). The section names the model and says where the audio
+        // goes, because that is the one thing a microphone button must not leave implicit.
+        relay::SettingsSection voice;
+        voice.id = QStringLiteral("voice");
+        voice.title = QStringLiteral("Voice");
+        voice.blurb = QStringLiteral("Hold the voice key or click the microphone in the prompt strip, speak, and the "
+                                     "transcript is inserted into the prompt box. Recordings are sent to OpenRouter "
+                                     "(and from there to the model's provider) and are deleted as soon as they come "
+                                     "back as text; voice needs an OpenRouter key whatever model your panes use.");
+        voice.rows << toggleRow(QStringLiteral("voice/enabled"), QStringLiteral("Voice transcription"),
+                                QStringLiteral("The microphone chip and the voice key"), true);
+        {
+            QStringList ids = relay::voice::holdKeys(), labels;
+            for (const QString &id : ids) labels << relay::voice::holdKeyLabel(id);
+            voice.rows << choiceRow(QStringLiteral("option:voice_hold_key"), QStringLiteral("Voice key"),
+                                    QStringLiteral("Held down while you speak; released, it transcribes"),
+                                    ids, labels, Pane::voiceHoldKey(), [this](const QString &value) {
+                QSettings().setValue(QStringLiteral("voice/hold_key"), value);
+                if (m_active) m_active->agentOptionsChanged(QStringLiteral("voice/hold_key"));
+            });
+        }
+        {
+            // The three that were live-tested (issue NY7Z); the ids match backend/relay_core/voice.py.
+            const QStringList ids{QStringLiteral("google/gemini-3.5-flash-lite"), QStringLiteral("google/gemini-3.8-flash"),
+                                  QStringLiteral("openai/whisper-1")};
+            const QStringList labels{QStringLiteral("Gemini 3.5 Flash-Lite — fastest, ~$0.00006 a clip"),
+                                     QStringLiteral("Gemini 3.8 Flash — most accurate, ~$0.0004 a clip"),
+                                     QStringLiteral("Whisper — transcription endpoint, ~$0.0003 a clip")};
+            voice.rows << choiceRow(QStringLiteral("option:voice_model"), QStringLiteral("Transcription model"),
+                                    QStringLiteral("Runs on OpenRouter with your OpenRouter key"),
+                                    ids, labels, Pane::voiceModel(), [](const QString &value) {
+                QSettings().setValue(QStringLiteral("voice/model"), value);
+            });
+        }
+        voice.rows << numberRow(QStringLiteral("voice/max_seconds"), QStringLiteral("Longest recording"),
+                                QStringLiteral("Recording stops by itself after this many seconds"),
+                                relay::voice::kDefaultSeconds, 5, 600, QStringLiteral(" s"));
+        voice.rows << textRow(QStringLiteral("voice/device"), QStringLiteral("Microphone"),
+                              QStringLiteral("The capture tool's own source name (empty: the desktop default)"),
+                              QStringLiteral("default"));
+        voice.rows << buttonRow(QStringLiteral("agent.modelKeys"), QStringLiteral("OpenRouter key"),
+                                QStringLiteral("Voice needs one of its own, whatever model your panes run"),
+                                QStringLiteral("API keys…"), [this] { runAction(QStringLiteral("agent.modelKeys")); });
+        {
+            relay::SettingRow info;
+            info.kind = relay::SettingRow::Info;
+            info.id = QStringLiteral("option:voice_recorder");
+            const QString tool = relay::voice::chooseTool(QSettings().value(QStringLiteral("voice/tool")).toString(),
+                                                          relay::voice::toolOnPath);
+            // An Info row renders its label only, so the whole sentence goes there.
+            info.label = tool.isEmpty()
+                ? relay::voice::missingToolsMessage()
+                : QStringLiteral("Recorder: %1 · 16 kHz mono WAV in a temporary file, deleted once it comes back "
+                                 "as text.").arg(tool);
+            voice.rows << info;
+        }
+        sections << voice;
+
         relay::SettingsSection privacy;
         privacy.id = QStringLiteral("privacy");
         privacy.title = QStringLiteral("Privacy");
@@ -7309,6 +7646,17 @@ private:
                 actionItem(QStringLiteral("Input mode"), QStringLiteral("Agent"), QStringLiteral("Always the agent"), QStringLiteral("input.modeAgent"), mode == QStringLiteral("agent"))};
         });
         items << actionItem(agent, QStringLiteral("Toggle terminal / agent input"), QStringLiteral("From the prompt box"), QStringLiteral("input.toggle"));
+        {
+            // Voice transcription: the same action the microphone chip runs.
+            const bool recording = pane && pane->voiceRecording();
+            const QString hold = Pane::voiceHoldKey();
+            items << actionItem(agent, recording ? QStringLiteral("Finish the recording") : QStringLiteral("Voice transcription"),
+                                recording ? QStringLiteral("Transcribe what you said into the prompt box")
+                                          : QStringLiteral("Record and transcribe into the prompt box%1").arg(
+                                                hold == QStringLiteral("off") ? QString()
+                                                    : QStringLiteral(" · hold %1").arg(relay::voice::holdKeyLabel(hold))),
+                                QStringLiteral("voice.toggle"));
+        }
         if (pane) {
             const QString effort = pane->effort();
             items << submenu(QStringLiteral("menu:effort"), agent, QStringLiteral("Reasoning effort"), effort, [this, effort] {

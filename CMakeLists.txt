@@ -123,6 +123,21 @@ target_include_directories(relay-panes PUBLIC src)
 target_link_libraries(relay-panes PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-panes PRIVATE -Wall -Wextra -Wpedantic)
 
+# Voice transcription (issue NY7Z): which capture tool to run, which key event is the hold key,
+# where the transcript lands in the composer, and WAV repair. Plain QtCore so every rule can be
+# tested without a microphone or a window; the worker does the transcribing (protocol 16).
+add_library(relay-voice STATIC src/Voice.cpp src/Voice.h)
+target_include_directories(relay-voice PUBLIC src)
+target_link_libraries(relay-voice PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-voice PRIVATE -Wall -Wextra -Wpedantic)
+
+# Prompt-box colouring: shell syntax when the line is going to the shell, plain text for an agent
+# prompt, and the caret colour that shows which (owner design, 2026-09-17).
+add_library(relay-highlight STATIC src/ShellHighlighter.cpp src/ShellHighlighter.h src/Theme.cpp src/Theme.h)
+target_include_directories(relay-highlight PUBLIC src)
+target_link_libraries(relay-highlight PUBLIC ${RELAY_QT}::Gui ${RELAY_QT}::Widgets)
+target_compile_options(relay-highlight PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
 target_include_directories(relay-requests PUBLIC src)
 target_link_libraries(relay-requests PUBLIC ${RELAY_QT}::Widgets)
@@ -145,7 +160,7 @@ if(RELAY_BUILD_APP)
         src/ModelSettings.cpp src/ModelSettings.h
         src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -213,6 +228,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-notifications-tests PRIVATE relay-notifications ${RELAY_QT}::Test)
     add_test(NAME notifications COMMAND relay-notifications-tests)
     set_tests_properties(notifications PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-voice-tests tests/voice_test.cpp)
+    target_link_libraries(relay-voice-tests PRIVATE relay-voice ${RELAY_QT}::Test)
+    add_test(NAME voice COMMAND relay-voice-tests)
+    set_tests_properties(voice PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-hints-tests tests/hints_test.cpp src/Hints.cpp)
     target_include_directories(relay-hints-tests PRIVATE src)
     target_link_libraries(relay-hints-tests PRIVATE ${RELAY_QT}::Test)

@@ -201,7 +201,12 @@ QLabel#helpFooter { color: @muted; font-size: 11px; padding-top: 6px; border-top
 QToolButton#stripChip { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px;
                         color: @muted; font-size: 11px; }
 QToolButton#stripChip:hover { color: @text; border-color: @accent; }
+/* The mode chip takes the destination's colour, like the caret. */
+QToolButton#stripChip[dest="shell"] { color: #3ec5f0; border-color: #3ec5f0; }
+QToolButton#stripChip[dest="agent"] { color: #b48ef7; border-color: #b48ef7; }
 QToolButton#stripChip::menu-indicator { image: none; width: 0; }
+/* Voice: the microphone chip while a recording is running, with the elapsed time beside it. */
+QToolButton#stripChip[recording="true"] { color: #f7768e; border-color: #f7768e; }
 QLabel#stripChipLabel { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px;
                         color: @muted; font-size: 11px; }
 QLabel#stripChipLabel[warn="true"] { color: #e0af68; border-color: #e0af68; }
