@@ -49,7 +49,7 @@ RichEditor::RichEditor(QWidget *parent) : QPlainTextEdit(parent) {
     setAccessibleName(QStringLiteral("Relay command and agent input"));
     setAccessibleDescription(QStringLiteral("Multiline editor. Enter submits; Shift Enter inserts a newline. Control Enter forces Agent; Control Shift Enter forces Terminal."));
     setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    setPlaceholderText(QStringLiteral("Type a command, or describe what you need…      ?  for help"));
+    setPlaceholderText(QStringLiteral("Type a shell command or agent prompt…      ?  for help"));
     setMinimumHeight(64);
     setMaximumHeight(260);
     setTabStopDistance(fontMetrics().horizontalAdvance(QLatin1Char(' ')) * 4);

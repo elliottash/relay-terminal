@@ -1263,10 +1263,29 @@ private:
         m_composer = composer;
         auto *composerLayout = new QVBoxLayout(composer);
         auto *routeRow = new QHBoxLayout;
-        m_routeLabel = new QLabel(QStringLiteral("AUTO · local detection"));
-        m_routeLabel->setTextFormat(Qt::PlainText);
-        // Narrow split panes: labels may shrink instead of forcing a wide minimum width.
-        m_routeLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        // The strip under the prompt box (owner design, 2026-09-17): directory and mode on the
+        // left, context left / model / microphone on the right, each in a Warp-style chip.
+        m_cwdChip = new QToolButton;
+        m_cwdChip->setObjectName(QStringLiteral("stripChip"));
+        m_cwdChip->setFocusPolicy(Qt::NoFocus);
+        m_cwdChip->setCursor(Qt::PointingHandCursor);
+        connect(m_cwdChip, &QToolButton::clicked, this, [this] { if (onOpenPath) onOpenPath(m_cwd); });
+        routeRow->addWidget(m_cwdChip);
+        m_modeChip = new QToolButton;
+        m_modeChip->setObjectName(QStringLiteral("stripChip"));
+        m_modeChip->setFocusPolicy(Qt::NoFocus);
+        m_modeChip->setCursor(Qt::PointingHandCursor);
+        m_modeChip->setPopupMode(QToolButton::InstantPopup);
+        {
+            auto *menu = new QMenu(m_modeChip);
+            for (const auto &pair : {std::pair<const char *, const char *>{"auto", "auto detect"},
+                                     {"shell", "terminal"}, {"agent", "agent"}}) {
+                const QString value = QString::fromLatin1(pair.first);
+                menu->addAction(QString::fromLatin1(pair.second), this, [this, value] { setMode(value); focusInput(); });
+            }
+            m_modeChip->setMenu(menu);
+        }
+        routeRow->addWidget(m_modeChip);
         // `!` / `*` typed first in an empty prompt: terminal / agent mode for this submission.
         m_prefixChip = new QLabel;
         m_prefixChip->setObjectName(QStringLiteral("prefixChip"));
@@ -1279,60 +1298,36 @@ private:
         m_secretChip->setToolTip(QStringLiteral("The line is written to the program and never stored"));
         m_secretChip->hide();
         routeRow->addWidget(m_secretChip);
-        routeRow->addWidget(m_routeLabel, 1);
-        auto *helpButton = new QToolButton;
-        helpButton->setObjectName(QStringLiteral("statusPicker"));
-        helpButton->setText(QStringLiteral("?"));
-        helpButton->setToolTip(QStringLiteral("The main keys (or type ? in an empty prompt box)"));
-        helpButton->setFocusPolicy(Qt::NoFocus);
-        connect(helpButton, &QToolButton::clicked, this, [this] { toggleHelpCard(); });
-        routeRow->addWidget(helpButton);
+        // The routing verdict has no chip of its own: it is the mode chip's tooltip.
+        m_routeLabel = new QLabel;
+        m_routeLabel->hide();
         m_opaqueHint = new QLabel;
         m_opaqueHint->setObjectName(QStringLiteral("opaqueHint"));
         m_opaqueHint->hide();
         routeRow->addWidget(m_opaqueHint, 1);
-        // Per-pane controls live under the terminal, next to the input they affect.
-        m_modeBox = new QComboBox;
-        // Icons, not words: ✶ auto-detect, ›_ terminal, ✦ agent. The tooltip names the current one.
-        m_modeBox->addItem(stripIcon(QStringLiteral("auto")), QString(), QStringLiteral("auto"));
-        m_modeBox->addItem(stripIcon(QStringLiteral("terminal")), QString(), QStringLiteral("shell"));
-        m_modeBox->addItem(stripIcon(QStringLiteral("agent")), QString(), QStringLiteral("agent"));
-        m_modeBox->setIconSize(QSize(14, 14));
-        m_modeBox->setFixedWidth(40);   // icon plus its chevron; the label is the tooltip
-        m_modeBox->setObjectName(QStringLiteral("statusPicker"));
-        m_modeBox->setAccessibleName(QStringLiteral("Input destination"));
-        m_modeBox->setFocusPolicy(Qt::TabFocus);
-        m_modeBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        m_modeBox->setMinimumContentsLength(0);
-        connect(m_modeBox, qOverload<int>(&QComboBox::activated), this, [this](int) {
-            setMode(m_modeBox->currentData().toString()); focusInput();
-            hint(QStringLiteral("mode.mouse"), QStringLiteral("Next time: type ! for the terminal or * for the agent · %1 toggles")
-                 .arg(Keymap::instance().shortcutText(QStringLiteral("input.toggle"))));
-        });
-        routeRow->addWidget(m_modeBox);
+        routeRow->addStretch(1);
+        buildSessionControls(routeRow);        // context chip
+        setupRequestsUi(routeRow);             // tasks chip, hidden unless something is unfinished
         m_modelBox = new QComboBox;
         m_modelBox->setObjectName(QStringLiteral("statusPicker"));
         m_modelBox->setAccessibleName(QStringLiteral("Agent model"));
-        m_modelBox->setToolTip(QStringLiteral("Agent model for this pane. Switching keeps the conversation."));
-        m_modelBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        m_modelBox->setMinimumContentsLength(8);
+        m_modelBox->setSizeAdjustPolicy(QComboBox::AdjustToContents);
         m_modelBox->setFocusPolicy(Qt::TabFocus);
         connect(m_modelBox, qOverload<int>(&QComboBox::activated), this, [this](int index) {
-            const QString data = m_modelBox->itemData(index).toString();
-            // Gear entry at the bottom of the list: the model options modal, not a model.
-            if (data == QStringLiteral("gear:modelOptions")) {
-                refreshPickers();
-                openRolesDialog();
-                hint(QStringLiteral("model.options.mouse"),
-                     QStringLiteral("Tip: Actions › Settings › Models opens the same modals"));
-                return;
-            }
-            selectModel(data); focusInput();
+            selectModel(m_modelBox->itemData(index).toString()); focusInput();
             hint(QStringLiteral("model.mouse"), QStringLiteral("Tip: /model switches models from the prompt box"));
         });
         routeRow->addWidget(m_modelBox);
-        buildSessionControls(routeRow);
-        setupRequestsUi(routeRow);   // request ledger UI: the Tasks chip
+        auto *mic = new QToolButton;
+        mic->setObjectName(QStringLiteral("stripChip"));
+        mic->setFocusPolicy(Qt::NoFocus);
+        mic->setIcon(stripIcon(QStringLiteral("mic")));
+        mic->setIconSize(QSize(14, 14));
+        mic->setToolTip(QStringLiteral("Voice transcription (not built yet)"));
+        connect(mic, &QToolButton::clicked, this, [this] {
+            status(QStringLiteral("Voice transcription is not built yet."));
+        });
+        routeRow->addWidget(mic);
         auto *cancel = new QToolButton;
         cancel->setObjectName(QStringLiteral("interruptButton"));
         const QString cancelIcon = relay::theme::themeDataDir() + QStringLiteral("/icons/cancel.svg");
@@ -1341,14 +1336,12 @@ private:
         cancel->setAccessibleName(QStringLiteral("Interrupt shell"));
         cancel->setFocusPolicy(Qt::NoFocus);
         connect(cancel, &QToolButton::clicked, this, [this] { interruptShell(); });
-        cancel->hide();   // only while something is running
+        cancel->hide();
         m_interruptButton = cancel;
         routeRow->addWidget(cancel);
         refreshPickers();
-        // Warp/Claude-style: the box holds only the text, and one dim strip under it carries the
-        // destination, model, effort, context and tasks. Enter submits, so there is no button.
         routeRow->setContentsMargins(2, 0, 2, 0);
-        routeRow->setSpacing(8);
+        routeRow->setSpacing(6);
         m_editor = new RichEditor;
         m_editor->setAutoHeight(1, 8);   // one line when idle, growing with the text
         composerLayout->addWidget(m_editor);
@@ -1405,8 +1398,8 @@ private:
         m_planChip->hide();
         row->insertWidget(1, m_planChip);
         m_ctxLabel = new QLabel;
-        m_ctxLabel->setObjectName(QStringLiteral("contextLabel"));
-        m_ctxLabel->setTextFormat(Qt::RichText);
+        m_ctxLabel->setObjectName(QStringLiteral("stripChipLabel"));
+        m_ctxLabel->setTextFormat(Qt::PlainText);
         m_ctxLabel->hide();
         row->insertWidget(2, m_ctxLabel);
         m_effortBox = new QComboBox;
@@ -1453,10 +1446,10 @@ private:
         if (!m_ctxLabel) return;
         if (m_ctxWindow <= 0) { m_ctxLabel->hide(); return; }
         if (m_compacting) {
-            m_ctxLabel->setText(iconText(QStringLiteral("context"), QStringLiteral("compacting…")));
+            m_ctxLabel->setText(QStringLiteral("compacting…"));
         } else {
-            m_ctxLabel->setText(iconText(QStringLiteral("context"), QStringLiteral("%1%")
-                .arg(QString::number(m_ctxPercent, 'f', m_ctxPercent > 0 && m_ctxPercent < 10 ? 1 : 0))));
+            const double left = std::max(0.0, 100.0 - m_ctxPercent);
+            m_ctxLabel->setText(QStringLiteral("%1% left").arg(QString::number(left, 'f', left < 10 ? 1 : 0)));
         }
         const bool near = m_ctxLimit > 0 && m_ctxUsed >= m_ctxLimit * 9 / 10;
         m_ctxLabel->setProperty("warn", near);
@@ -3969,11 +3962,18 @@ private:
     }
 
     void refreshPickers() {
-        if (!m_modeBox || !m_modelBox) return;
-        const QSignalBlocker modeBlock(m_modeBox), modelBlock(m_modelBox);
-        m_modeBox->setCurrentIndex(std::max(0, m_modeBox->findData(m_modeValue)));
+        if (!m_modelBox) return;
+        const QSignalBlocker modelBlock(m_modelBox);
+        if (m_modeChip) {
+            m_modeChip->setText(m_modeValue == QStringLiteral("shell") ? QStringLiteral("terminal")
+                                : m_modeValue == QStringLiteral("agent") ? QStringLiteral("agent")
+                                                                         : QStringLiteral("auto"));
+            m_modeChip->setToolTip(QStringLiteral("Where this line goes (%1 cycles). %2")
+                                       .arg(Keymap::instance().shortcutText(QStringLiteral("input.toggle")),
+                                            m_routeLabel ? m_routeLabel->toolTip() : QString()).trimmed());
+        }
         m_modelBox->clear();
-        for (const auto &model : std::as_const(m_stored)) m_modelBox->addItem(model.second, model.first);
+        for (const auto &model : std::as_const(m_stored)) m_modelBox->addItem(conciseModel(model.first, model.second), model.first);
         if (m_stored.isEmpty()) m_modelBox->addItem(QStringLiteral("No stored keys"));
         const int index = m_modelBox->findData(m_currentPreset);
         if (index >= 0) m_modelBox->setCurrentIndex(index);
@@ -3992,6 +3992,18 @@ private:
             m_modelBox->setEnabled(true);
         }
         m_modelBox->setToolTip(modelTooltip());
+    }
+
+    // "glm-5.3", not "Z.AI · GLM-5.3 · Coding Plan": the model id from the worker's preset list,
+    // which is what a person recognises. Falls back to the preset label.
+    QString conciseModel(const QString &presetId, const QString &label) const {
+        for (const auto &item : m_presets) {
+            const QJsonObject preset = item.toObject();
+            if (preset.value(QStringLiteral("id")).toString() != presetId) continue;
+            const QString model = preset.value(QStringLiteral("model")).toString();
+            if (!model.isEmpty()) return model.section('/', -1).toLower();
+        }
+        return label;
     }
 
     // Chip tooltip: the pane's model plus every role's effective model (protocol 13).
@@ -5398,6 +5410,14 @@ private:
         if (QWidget *target = m_backend ? m_backend->focusWidget() : nullptr) target->setFocus(Qt::OtherFocusReason);
     }
     void updatePaths() {
+        if (m_cwdChip) {
+            const QString home = QDir::homePath();
+            const QString shown = m_cwd.startsWith(home) ? QStringLiteral("~") + m_cwd.mid(home.size()) : m_cwd;
+            const QFontMetrics metrics(m_cwdChip->font());
+            m_cwdChip->setText(metrics.elidedText(shown, Qt::ElideLeft, 260));
+            m_cwdChip->setToolTip(QStringLiteral("Terminal: ") + m_cwd + QStringLiteral("\nAgent workspace: ") + m_workspace
+                                  + QStringLiteral("\nClick to open it in an explorer pane"));
+        }
         if (!m_cwdLabel) return;
         const QString home = QDir::homePath();
         auto tilde = [&home](const QString &path) { return path.startsWith(home) ? QStringLiteral("~") + path.mid(home.size()) : path; };
@@ -5519,7 +5539,8 @@ private:
     bool m_inlineOpen = false, m_atLineStart = true;
     QList<QPair<QString, Ink>> m_inlinePending;
     QList<QPair<QString, QString>> m_stored;
-    QComboBox *m_modeBox = nullptr, *m_modelBox = nullptr;
+    QComboBox *m_modelBox = nullptr;
+    QToolButton *m_cwdChip = nullptr, *m_modeChip = nullptr;
     QLabel *m_toast = nullptr;
     QLabel *m_prefixChip = nullptr;
     QPointer<relay::SkillsDialog> m_skillsDialog;

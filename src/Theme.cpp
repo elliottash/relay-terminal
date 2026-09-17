@@ -197,9 +197,18 @@ QLabel#keyCap { background: @surface; border: 1px solid @border; border-radius: 
 QLabel#helpText { color: @muted; font-size: 12px; }
 QLabel#helpFooter { color: @muted; font-size: 11px; padding-top: 6px; border-top: 1px solid @border; }
 
+/* Warp-style chips in the composer's status strip: a slightly raised rectangle each. */
+QToolButton#stripChip { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px;
+                        color: @muted; font-size: 11px; }
+QToolButton#stripChip:hover { color: @text; border-color: @accent; }
+QToolButton#stripChip::menu-indicator { image: none; width: 0; }
+QLabel#stripChipLabel { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px;
+                        color: @muted; font-size: 11px; }
+QLabel#stripChipLabel[warn="true"] { color: #e0af68; border-color: #e0af68; }
+
 /* The composer's status strip: dim, flat, no dropdown chrome (Warp keeps its chips quiet). */
-QComboBox#statusPicker { border: none; background: transparent; color: @muted; padding: 1px 16px 1px 4px; font-size: 11px; }
-QComboBox#statusPicker:hover { color: @text; background: @raised; border-radius: 4px; }
+QComboBox#statusPicker { background: @raised; border: 1px solid @border; border-radius: 6px; color: @muted; padding: 2px 18px 2px 8px; font-size: 11px; }
+QComboBox#statusPicker:hover { color: @text; border-color: @accent; }
 QComboBox#statusPicker::drop-down { border: none; width: 12px; }
 QComboBox#statusPicker QAbstractItemView { background: @raised; color: @text; selection-background-color: @accent; }
 QFrame#paneChrome { background: @raised; border: 1px solid @border; border-radius: 6px; }
