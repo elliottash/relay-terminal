@@ -30,7 +30,12 @@ class StreamTests(unittest.TestCase):
         result = self.parse(data)
         self.assertEqual(result['reasoning_content'], 'some provider reasoning')
         self.assertEqual(json.loads(result['tool_calls'][0]['function']['arguments']), {'command':'pwd'})
-        self.assertFalse(any(e.get('text') == 'some provider reasoning' for e in self.events))
+        # Reasoning is never answer text; it streams as thinking_delta (protocol 11).
+        self.assertFalse(any(e.get('text') == 'some provider reasoning' for e in self.events if e['event'] == 'delta'))
+        self.assertIn({'event': 'thinking_delta', 'text': 'some provider reasoning'}, self.events)
+        done = [e for e in self.events if e['event'] == 'thinking_done']
+        self.assertEqual(len(done), 1)
+        self.assertEqual(done[0]['chars'], len('some provider reasoning'))
 
     def test_multiple_tool_calls(self):
         data = event({'tool_calls':[
@@ -120,5 +125,6 @@ class OpenRouterReasoningTests(unittest.TestCase):
         result = provider._stream(io.BytesIO(data), events.append, threading.Event())
         self.assertEqual(result['reasoning'], 'thinking hard')
         self.assertEqual(result['content'], 'Done.')
-        self.assertFalse(any(e.get('text') == 'thinking hard' for e in events))
+        self.assertFalse(any(e.get('text') == 'thinking hard' for e in events if e['event'] == 'delta'))
+        self.assertIn({'event': 'thinking_delta', 'text': 'thinking hard'}, events)
         self.assertTrue(any(e.get('event') == 'status' for e in events))

@@ -78,11 +78,19 @@ class Skill:
 class SkillIndex:
     skills: dict[str, Skill] = field(default_factory=dict)
     skipped: list[str] = field(default_factory=list)
+    # How the index was built, so skills_list and a reload after refine/import can repeat it.
+    directories: list[Path] = field(default_factory=list)
+    exclude: tuple[str, ...] = ()
+    defaults: bool = False
+    project: bool = False
+    workspace: str | None = None
 
     @classmethod
-    def load(cls, directories, exclude=()) -> "SkillIndex":
-        index = cls()
+    def load(cls, directories, exclude=(), defaults: bool = False) -> "SkillIndex":
+        directories = [Path(os.path.expanduser(str(d))) for d in directories]
+        index = cls(directories=list(directories), exclude=tuple(exclude), defaults=defaults)
         excluded = set(exclude)
+        refined = refined_dir().resolve() if refined_dir().is_dir() else None
         for directory in directories:
             base = Path(os.path.expanduser(str(directory)))
             if not base.is_dir():
@@ -124,7 +132,10 @@ class SkillIndex:
                     index.skipped.append(f"{entry.name}: no description")
                     continue
                 if entry.name in index.skills:
-                    index.skipped.append(f"{entry.name}: duplicate skill name (first directory wins)")
+                    if refined is not None and index.skills[entry.name].root.parent == refined:
+                        index.skipped.append(f"{entry.name}: refined copy in {refined} overrides {root}")
+                    else:
+                        index.skipped.append(f"{entry.name}: duplicate skill name (first directory wins)")
                     continue
                 index.skills[entry.name] = Skill(entry.name, fields.get("name", entry.name) or entry.name, description, root)
         return index
@@ -239,19 +250,43 @@ def discover_bases(root: Path, max_depth: int = DISCOVERY_DEPTH, max_dirs: int =
     return bases
 
 
+def refined_dir() -> Path:
+    """Where refine_skills writes refined copies: ~/.config/relay/skills (XDG_CONFIG_HOME aware)."""
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "relay" / "skills"
+
+
+def imports_root() -> Path:
+    """Where import_skills_confirm copies skills: ~/.local/share/relay/skill-imports (XDG_DATA_HOME aware)."""
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "relay" / "skill-imports"
+
+
+def import_directories() -> list[Path]:
+    """Every <repo>@<commit> folder of imported skills, newest first."""
+    root = imports_root()
+    if not root.is_dir():
+        return []
+    found = [d for d in root.iterdir() if d.is_dir() and not d.is_symlink() and "@" in d.name]
+    return sorted(found, key=lambda d: d.stat().st_mtime, reverse=True)
+
+
 def default_directories(workspace=None) -> list[Path]:
     """Default search order; for a duplicate name the earlier directory wins.
 
+    0. ~/.config/relay/skills (refined copies made by refine_skills win over their originals)
     1. ~/.warp/skills (the user's Warp skills)  2. ~/.claude/skills  3. <workspace>/.claude/skills
     4. every other folder under ~/.warp (depth <= 6) holding <name>/SKILL.md, e.g. Warp's bundled skills in
        ~/.warp/remote-server/bundled_resources/bundled/skills.
+    5. imported skills, ~/.local/share/relay/skill-imports/<repo>@<commit> (newest import first).
     """
     home = Path.home()
-    directories = [home / ".warp" / "skills", home / ".claude" / "skills"]
+    directories = [refined_dir(), home / ".warp" / "skills", home / ".claude" / "skills"]
     if workspace is not None:
         directories.append(Path(workspace) / ".claude" / "skills")
     first = {d.resolve() for d in directories if d.is_dir()}
     directories += [b for b in discover_bases(home / ".warp") if b not in first]
+    directories += import_directories()
     return directories
 
 
@@ -268,18 +303,23 @@ def from_request(settings, workspace) -> SkillIndex | None:
     dirs = settings.get("dirs")
     if dirs is None:
         directories = default_directories(workspace)
+        defaults = True
     else:
         if not isinstance(dirs, list) or len(dirs) > 8 or not all(isinstance(d, str) and d.strip() for d in dirs):
             raise ValueError("skills.dirs must be a list of at most 8 directory paths.")
         directories = [Path(os.path.expanduser(d)) for d in dirs]
         if any(not d.is_absolute() for d in directories):
             raise ValueError("skills.dirs must be absolute paths.")
+        defaults = False
     if settings.get("project"):
         directories.append(Path(workspace) / ".warp" / "skills")
     exclude = settings.get("exclude", DEFAULT_EXCLUDE)
     if not isinstance(exclude, (list, tuple)) or len(exclude) > 200 or not all(isinstance(x, str) for x in exclude):
         raise ValueError("skills.exclude must be a list of skill names.")
-    return SkillIndex.load(directories, exclude)
+    index = SkillIndex.load(directories, exclude, defaults=defaults)
+    index.project = bool(settings.get("project"))
+    index.workspace = workspace
+    return index
 
 
 TOOL_SPECS = [

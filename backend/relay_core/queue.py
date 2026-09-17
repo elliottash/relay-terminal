@@ -300,11 +300,13 @@ class TurnSupervisor:
                 agent.cancel_event.clear()
                 if not self._queue:
                     self._paused = False
-                self._emit({"event": "agent_started", "id": item["id"]})
+                # The queue item id doubles as the turn id (protocol 11).
+                self._emit({"event": "agent_started", "id": item["id"], "turn_id": item["id"]})
                 self._changed_locked()
             try:
                 extra = {"attachments": item["attachments"]} if item.get("attachments") else {}
-                agent.ask(item["prompt"], reset_cancellation=False, context=item.get("context"), **extra)
+                agent.ask(item["prompt"], reset_cancellation=False, context=item.get("context"),
+                          turn_id=item["id"], **extra)
             except Exception as exc:  # ask() handles its own errors; this is defensive.
                 self._emit({"event": "error", "text": f"Agent error ({type(exc).__name__})."})
                 self._outcome = "error"

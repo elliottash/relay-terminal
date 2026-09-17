@@ -49,7 +49,8 @@ MAX_TASK_BYTES = 64 * 1024
 MAX_RESULT_CHARS = 32 * 1024
 SUMMARY_CHARS = 2000
 AGENT_TOOLS = ("agent", "agent_message", "agent_wait")
-FORWARDED = {"delta", "tool_started", "tool_output", "tool_result", "status"}
+FORWARDED = {"delta", "tool_started", "tool_output", "tool_result", "status", "thinking_delta", "thinking_done",
+             "turn_summary"}
 PROGRESS_INTERVAL = 1.0
 
 def effort_extra(preset_id: str | None, extra: dict, effort: str) -> dict | None:

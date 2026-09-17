@@ -8,7 +8,7 @@ import os
 import sys
 import threading
 
-from relay_core import __version__, keystore, session_protocol, skills
+from relay_core import __version__, keystore, observe_protocol, session_protocol, skills
 from relay_core.agent import Agent
 from relay_core import agents_defs
 from relay_core.subagents import SubagentFactory, SubagentManager
@@ -70,6 +70,8 @@ def main():
     sessions = session_protocol.SessionCommands(
         turns, emit, on_model_changed=model_changed,
         on_conversation_replaced=lambda: subagents.stop_all(reset=True))
+
+    observe = observe_protocol.ObserveCommands(turns, emit)  # protocol 11
 
     emit({"event": "ready", "version": __version__})
     while True:
@@ -185,6 +187,8 @@ def main():
             # --- end subagents ---
             elif sessions.handles(kind):
                 sessions.handle(kind, request)
+            elif observe.handles(kind):
+                observe.handle(kind, request)
             elif kind == "shutdown":
                 break
             else:
@@ -194,6 +198,7 @@ def main():
                   "agent_busy": turns.busy,
                   "text": str(exc)[:2000] if isinstance(exc, (ValueError, OSError, keystore.KeystoreError)) else f"Protocol error ({type(exc).__name__})."})
     subagents.shutdown()
+    observe.shutdown()
     turns.shutdown(timeout=1)
 
 if __name__ == "__main__":
