@@ -114,18 +114,35 @@ Layout rules:
   actions as the keys (`pane.splitRight`, `pane.splitDown`, `pane.moveToNewTab`, `pane.close`).
   `PaneChrome` has no `Q_OBJECT`, so it is found with `dynamic_cast` (`chromeOf`), never
   `findChild<PaneChrome*>` (that matches any `QFrame`, such as the transcript panel).
+  `showChromeFor()` records the wanted leaf **before** hiding or showing anything: `hide()` and
+  `show()` make Qt deliver synthetic enter/leave events for whatever the change put under the
+  cursor, and those re-enter the same filter. Acting on them with the old state still in place
+  recursed until the stack ran out (a crash when the ⇱ button moved a pane out from under the
+  mouse), so a nested call only notes what it wants and a bounded loop applies it.
 - **Moving without destroying.** `takeLeaf()` detaches a leaf (collapsing a one-child splitter,
   removing an emptied tab, closing an emptied window) and leaves it parentless;
   `insertBeside()` / `adoptLeafAsTab()` / `adoptPage()` put it back. Shells, workers and
   conversations keep running. Pane callbacks resolve their window at call time
-  (`windowOf(pane)`), so nothing has to be rebound when a pane or tab changes window.
+  (`windowOf(pane)`), so nothing has to be rebound when a pane or tab changes window. A leaf is
+  hidden, reparented and shown again inside one turn of the event loop, and Qt gives it several
+  sizes on the way, so a terminal view must not follow the size it has while hidden —
+  `TerminalView` applies its grid from a zero-timer (`scheduleGeometry()`), or the emulator is
+  reflowed to one row and the pane comes back blank.
 - **Keyboard moves** (`pane.moveLeft/Right/Up/Down`, default Ctrl+Alt+arrows, unbound in the
   Warp preset where those keys focus panes): the neighbor is found like focus movement; adjacent
   siblings in a splitter of that orientation swap, otherwise the pane docks on the neighbor's
   near side, so repeating keeps moving it.
+- **Layout rules** live in `src/PaneLayout.{h,cpp}` (library `relay-panes`, tests
+  `tests/panelayout_test.cpp`): `neighborIndex()` (which pane is on that side, used by focus and
+  by moves), `swapInSplitter()` and `dropEdge()`. `swapInSplitter()` is one
+  `QSplitter::insertWidget` call in either direction, because that call **moves** a child the
+  splitter already owns and numbers the index as if it had been taken out first — "finishing" a
+  move toward the end with a second insert of the neighbour puts both back where they started,
+  which is what made Ctrl+Alt+Right and Ctrl+Alt+Down do nothing.
 - **Drag:** the grip tracks the mouse itself (no `QDrag`, because KonsolePart accepts text
   drops). `dropTarget()` picks the nearest edge of the leaf under the cursor or a `QTabBar`; a
-  translucent `dropZone` frame shows the half that will be taken. Esc cancels.
+  translucent `dropZone` frame shows the half that will be taken. Esc cancels. Dropping on the
+  half two neighbours already share means "stay here", so nothing moves.
 - **Tabs:** a "+" button placed after the last tab, a ⧉ left-side tab button shown on hover and a
   context menu run `tab.new` / `tab.moveToNewWindow`; the tab page moves to
   `WindowManager::newEmptyWindow()`.
