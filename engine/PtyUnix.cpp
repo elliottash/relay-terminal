@@ -3,6 +3,7 @@
 
 #include <QElapsedTimer>
 #include <QSocketNotifier>
+#include <QTimer>
 
 #include <cerrno>
 #include <csignal>
@@ -67,7 +68,14 @@ public:
             if (!cwd.isEmpty() && ::chdir(cwd.constData()) != 0) {
                 // keep inherited cwd
             }
-            ::signal(SIGPIPE, SIG_DFL);
+            // Reset every signal disposition and the mask: SIG_IGN survives exec,
+            // so a Relay started from a script with `&` (SIGINT/SIGQUIT ignored)
+            // would otherwise give the shell's children an unkillable Ctrl+C.
+            for (int sig = 1; sig < NSIG; ++sig)
+                ::signal(sig, SIG_DFL);
+            sigset_t none;
+            sigemptyset(&none);
+            ::sigprocmask(SIG_SETMASK, &none, nullptr);
             ::execvp(argv[0], argv.data());
             ::_exit(127);
         }
@@ -123,7 +131,17 @@ private:
         char buf[65536];
         QElapsedTimer t;
         t.start();
-        while (t.elapsed() < 20) {
+        for (;;) {
+            if (t.elapsed() >= 12) {
+                // Budget used: yield one event-loop pass (input, timers, paint)
+                // before reading more, so a flood cannot monopolise the GUI thread.
+                m_notifier->setEnabled(false);
+                QTimer::singleShot(0, m_notifier, [this] {
+                    if (m_fd >= 0)
+                        m_notifier->setEnabled(true);
+                });
+                return;
+            }
             ssize_t n = ::read(m_fd, buf, sizeof buf);
             if (n > 0) {
                 if (onOutput)

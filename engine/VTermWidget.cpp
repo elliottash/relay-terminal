@@ -3,6 +3,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -82,7 +83,7 @@ VTermWidget::VTermWidget(QWidget *parent)
     vterm_output_set_callback(m_vt, &VTermWidget::cbOutput, this);
     vterm_screen_set_damage_merge(m_screen, VTERM_DAMAGE_ROW);
     vterm_screen_enable_altscreen(m_screen, 1);
-    vterm_screen_enable_reflow(m_screen, true);
+    vterm_screen_enable_reflow(m_screen, !qEnvironmentVariableIsSet("RELAY_SPIKE_NO_REFLOW"));
     vterm_screen_reset(m_screen, 1);
 
     m_repaintTimer.setSingleShot(true);
@@ -91,6 +92,7 @@ VTermWidget::VTermWidget(QWidget *parent)
         if (!m_pendingDamage.isEmpty())
             update(m_pendingDamage);
         m_pendingDamage = QRegion();
+        m_bytesAtLastFlush = m_bytes;
     });
 
     resize(m_cols * m_cw, m_rows * m_ch);
@@ -162,8 +164,12 @@ void VTermWidget::onPtyOutput(const char *data, qint64 len)
 void VTermWidget::cbOutput(const char *s, size_t len, void *user)
 {
     auto *self = static_cast<VTermWidget *>(user);
-    if (self->m_pty)
-        self->m_pty->write(s, qint64(len));
+    if (self->m_pty) {
+        const qint64 n = self->m_pty->write(s, qint64(len));
+        if (qEnvironmentVariableIsSet("RELAY_SPIKE_TRACE_KEYS"))
+            qWarning("wrote %lld/%zu bytes (first %02x) at %lld", (long long)n, len, (unsigned char)s[0],
+                     (long long)QDateTime::currentMSecsSinceEpoch());
+    }
 }
 
 // ---------------------------------------------------------------- vterm callbacks
@@ -323,8 +329,13 @@ QRect VTermWidget::cellRect(int row, int col, int width) const
 void VTermWidget::scheduleRepaint(const QRect &r)
 {
     m_pendingDamage += r;
-    if (!m_repaintTimer.isActive())
-        m_repaintTimer.start();
+    if (!m_repaintTimer.isActive()) {
+        // Under a flood, repaint at ~15 fps: every full-window paint is an image
+        // upload to the X server, and at 125 fps the server itself saturates and
+        // input events (Ctrl+C) queue behind it.
+        const bool flooding = m_bytes - m_bytesAtLastFlush > 256 * 1024;
+        m_repaintTimer.start(flooding ? 66 : 8);
+    }
 }
 
 void VTermWidget::resizeEvent(QResizeEvent *)
@@ -619,6 +630,8 @@ void VTermWidget::setScrollOffset(int off)
 void VTermWidget::keyPressEvent(QKeyEvent *e)
 {
     const Qt::KeyboardModifiers qm = e->modifiers();
+    if (qEnvironmentVariableIsSet("RELAY_SPIKE_TRACE_KEYS"))
+        qWarning("key %x mods %x at %lld", e->key(), int(qm), (long long)QDateTime::currentMSecsSinceEpoch());
     const bool ctrlShift = (qm & Qt::ControlModifier) && (qm & Qt::ShiftModifier);
     if (ctrlShift && e->key() == Qt::Key_C) {
         copySelection(true);

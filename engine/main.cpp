@@ -11,6 +11,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
+#include <QElapsedTimer>
 #include <QTextStream>
 
 #include <cstdio>
@@ -53,6 +54,26 @@ int main(int argc, char **argv)
         if (f.open(QIODevice::Append))
             f.write(s.toUtf8());
     };
+
+    // --bench FILE [SCROLLBACK]: parse FILE through the widget without a PTY or
+    // painting, to separate emulator cost from I/O and rendering.
+    if (a.size() >= 3 && a[1] == QLatin1String("--bench")) {
+        QFile f(a[2]);
+        if (!f.open(QIODevice::ReadOnly))
+            return 2;
+        const QByteArray data = f.readAll();
+        relay::VTermWidget bench;
+        bench.resizeTerminal(30, 100);
+        bench.setScrollbackLimit(a.size() >= 4 ? a[3].toInt() : 10000);
+        QElapsedTimer t;
+        t.start();
+        for (qint64 off = 0; off < data.size(); off += 65536)
+            bench.feedForBenchmark(data.constData() + off, std::min<qint64>(65536, data.size() - off));
+        std::printf("bench bytes=%lld scrollback=%s ms=%lld MBps=%.1f\n", (long long)data.size(),
+                    a.size() >= 4 ? qPrintable(a[3]) : "10000", (long long)t.elapsed(),
+                    data.size() / 1048576.0 / (t.elapsed() / 1000.0));
+        return 0;
+    }
 
     relay::VTermWidget term;
     term.setWindowTitle(QStringLiteral("relay-vterm-spike"));

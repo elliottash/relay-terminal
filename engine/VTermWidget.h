@@ -50,6 +50,7 @@ public:
     quint64 bytesProcessed() const { return m_bytes; }
     quint64 paintCount() const { return m_paints; }
     void setScrollbackLimit(int lines) { m_sbLimit = lines; }
+    void feedForBenchmark(const char *data, qint64 len) { onPtyOutput(data, len); }
     QSize sizeForGrid(int rows, int cols) const { return QSize(cols * m_cw, rows * m_ch); }
 
 signals:
@@ -159,6 +160,7 @@ private:
     QString m_titleText;
 
     quint64 m_bytes = 0;
+    quint64 m_bytesAtLastFlush = 0;
     quint64 m_paints = 0;
     QString m_preedit;
 };
