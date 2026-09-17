@@ -211,6 +211,10 @@ private slots:
         QVERIFY(!h.vt->altScreen());
         QCOMPARE(h.alt, (QList<bool>{true, false}));
         QCOMPARE(h.row(0), QStringLiteral("shell"));
+        // Enter and leave within one chunk still reports both transitions.
+        Harness quick(core);
+        quick.feed("\x1b[?1049hfull\x1b[?1049l");
+        QCOMPARE(quick.alt, (QList<bool>{true, false}));
     }
 
     void scrollbackAndViewport()
@@ -416,5 +420,9 @@ private slots:
     }
 };
 
-QTEST_GUILESS_MAIN(CoreTest)
+QObject *makeCoreTest()
+{
+    return new CoreTest;
+}
+
 #include "CoreTest.moc"

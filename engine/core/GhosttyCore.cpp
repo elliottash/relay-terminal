@@ -6,7 +6,7 @@
 // and this adapter is the only code that has to follow API changes.
 #include "GhosttyCore.h"
 
-#include "Osc133Scanner.h"
+#include "SequenceScanner.h"
 
 #include <QUrl>
 
@@ -173,7 +173,7 @@ struct GhosttyCore::Impl {
     SelectionUnit selUnit = SelectionUnit::Cell;
     bool selRect = false;
     QString title;
-    Osc133Scanner scanner;
+    SequenceScanner scanner;
 
     std::unordered_map<std::string, uint32_t> linkIds;
     std::vector<QString> linkUris{QString()};
@@ -430,16 +430,18 @@ GhosttyCore::~GhosttyCore()
 void GhosttyCore::feed(const char *data, size_t len)
 {
     size_t off = 0;
-    Osc133Scanner::Hit hit;
+    SequenceScanner::Hit hit;
     while (off < len && d->scanner.next(data, len, off, &hit)) {
         ghostty_terminal_vt_write(d->t, reinterpret_cast<const uint8_t *>(data + off), hit.end - off);
         off = hit.end;
-        if (events.promptMark) {
+        if (hit.kind == SequenceScanner::Hit::AltScreen) {
+            d->checkAltScreen();
+        } else if (events.promptMark) {
             uint16_t y = 0;
             ghostty_terminal_get(d->t, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &y);
-            const PromptMark kind = hit.kind == 'A' ? MarkPromptStart
-                : hit.kind == 'B'                   ? MarkCommandStart
-                : hit.kind == 'C'                   ? MarkOutputStart
+            const PromptMark kind = hit.mark == 'A' ? MarkPromptStart
+                : hit.mark == 'B'                   ? MarkCommandStart
+                : hit.mark == 'C'                   ? MarkOutputStart
                                                     : MarkCommandFinished;
             events.promptMark(kind, int(y), hit.exitCode);
         }
@@ -913,7 +915,7 @@ int GhosttyCore::searchStep(bool backwards)
     if (!d->search)
         return -1;
     ghostty_search_run(d->search);
-    if (ghostty_search_set(d->search, backwards ? GHOSTTY_SEARCH_OPT_SELECT_PREV : GHOSTTY_SEARCH_OPT_SELECT_NEXT, nullptr)
+    if (ghostty_search_set(d->search, backwards ? GHOSTTY_SEARCH_OPT_SELECT_NEXT : GHOSTTY_SEARCH_OPT_SELECT_PREV, nullptr)
         != GHOSTTY_SUCCESS)
         return -1;
     size_t total = 0, idx = 0;

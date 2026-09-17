@@ -103,8 +103,10 @@ public:
     // ---- search (scrollback + screen)
     // Sets the needle (empty clears) and returns the number of matches.
     virtual int searchSet(const QString &needle) = 0;
-    // Selects the next/previous match and scrolls it into view. Returns the
-    // 0-based index of the selected match or -1.
+    // Selects the next match towards older content (backwards = true, i.e. up
+    // into history) or newer content, wrapping, and scrolls it into view.
+    // Returns the index of the selected match counted from the newest (0), or -1.
+    // Matching is case-insensitive for ASCII letters.
     virtual int searchStep(bool backwards) = 0;
     virtual int searchMatchCount() const = 0;
 

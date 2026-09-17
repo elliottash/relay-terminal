@@ -59,18 +59,35 @@ endif()
 
 # ---- engine library
 set(RELAY_ENGINE_SOURCES
+    TerminalBackend.h
     core/CellTypes.h core/CellTypes.cpp
     core/VtCore.h core/VtCoreFactory.cpp
     core/LibVtermCore.h core/LibVtermCore.cpp
-    core/Osc133Scanner.h
+    core/SequenceScanner.h
+    pty/Pty.h
+    session/TerminalSession.h session/TerminalSession.cpp
+    view/ColorScheme.h
+    view/BoxDrawing.h view/BoxDrawing.cpp
+    view/KeyMapper.h view/KeyMapper.cpp
+    view/TerminalView.h view/TerminalView.cpp
+    backend/VTermBackend.h backend/VTermBackend.cpp
 )
+if(WIN32)
+    list(APPEND RELAY_ENGINE_SOURCES pty/PtyWin.cpp)
+else()
+    list(APPEND RELAY_ENGINE_SOURCES pty/PtyUnix.cpp)
+endif()
 if(RELAY_ENGINE_WITH_GHOSTTY)
     list(APPEND RELAY_ENGINE_SOURCES core/GhosttyCore.h core/GhosttyCore.cpp)
 endif()
 
 add_library(relay-terminal-engine STATIC ${RELAY_ENGINE_SOURCES})
 target_include_directories(relay-terminal-engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(relay-terminal-engine PUBLIC ${RELAY_QT}::Widgets PRIVATE relay-vterm-c)
+find_package(Threads REQUIRED)
+target_link_libraries(relay-terminal-engine PUBLIC ${RELAY_QT}::Widgets PRIVATE relay-vterm-c Threads::Threads)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(relay-terminal-engine PRIVATE util) # forkpty
+endif()
 target_compile_options(relay-terminal-engine PRIVATE -Wall -Wextra)
 if(RELAY_ENGINE_WITH_GHOSTTY)
     target_link_libraries(relay-terminal-engine PRIVATE relay-ghostty-vt)
@@ -80,10 +97,14 @@ endif()
 add_executable(relay-engine-bench bench/EngineBench.cpp)
 target_link_libraries(relay-engine-bench PRIVATE relay-terminal-engine)
 
+add_executable(relay-vterm-spike main.cpp)
+target_link_libraries(relay-vterm-spike PRIVATE relay-terminal-engine)
+
 if(BUILD_TESTING)
     find_package(${RELAY_QT} REQUIRED COMPONENTS Test)
-    add_executable(relay-engine-core-tests tests/CoreTest.cpp)
-    target_link_libraries(relay-engine-core-tests PRIVATE relay-terminal-engine ${RELAY_QT}::Test)
-    add_test(NAME engine-core COMMAND relay-engine-core-tests)
-    set_tests_properties(engine-core PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS engine)
+    add_executable(relay-engine-tests
+        tests/main.cpp tests/CoreTest.cpp tests/PtyTest.cpp tests/SessionTest.cpp tests/ViewTest.cpp)
+    target_link_libraries(relay-engine-tests PRIVATE relay-terminal-engine ${RELAY_QT}::Test)
+    add_test(NAME relay-engine-tests COMMAND relay-engine-tests)
+    set_tests_properties(relay-engine-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS engine TIMEOUT 120)
 endif()

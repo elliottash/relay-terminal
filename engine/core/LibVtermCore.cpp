@@ -746,7 +746,7 @@ struct LibVtermCore::Impl {
         matchesAt = changeCounter;
         if (needle.isEmpty())
             return;
-        const Qt::CaseSensitivity cs = needle.toLower() == needle ? Qt::CaseInsensitive : Qt::CaseSensitive;
+        const Qt::CaseSensitivity cs = Qt::CaseInsensitive; // same as libghostty-vt (ASCII case-insensitive)
         Line tmp;
         std::u32string cps;
         const qint64 end = pushed + rowsN;
@@ -1112,7 +1112,7 @@ int LibVtermCore::searchStep(bool backwards)
         d->current = (d->current + (backwards ? n - 1 : 1)) % n;
     d->scrollLineIntoView(d->matches[size_t(d->current)].line);
     d->decorDirty = true;
-    return d->current;
+    return n - 1 - d->current; // newest match is index 0
 }
 
 int LibVtermCore::searchMatchCount() const { return int(d->matches.size()); }
