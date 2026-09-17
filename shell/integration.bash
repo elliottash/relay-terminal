@@ -10,6 +10,12 @@ if [[ -z ${RELAY_RUNTIME_DIR:-} || -z ${RELAY_SHELL_EVENT:-} || -z ${RELAY_SESSI
     return
 fi
 
+# Each Relay pane starts in its own directory (new tab, split, or restored pane).
+if [[ -n ${RELAY_START_DIR:-} && -d $RELAY_START_DIR ]]; then
+    builtin cd -- "$RELAY_START_DIR" || :
+fi
+unset RELAY_START_DIR
+
 __relay_event() {
     command "${RELAY_PYTHON:-python3}" -S "$RELAY_SHELL_EVENT" "$1" "${2:-0}" "$PWD" "$$"
 }

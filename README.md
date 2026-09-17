@@ -132,9 +132,31 @@ that arrives while a program is running waits until the next prompt.
 | Ctrl+Shift+Enter | Always terminal; the agent fixes invalid or failing commands |
 | F12 | Toggle native terminal input |
 | Escape in the composer | Focus native terminal input |
-| Alt+Up / Alt+Down | Composer history, preserving the current draft |
+| Up on the first line / Down on the last line | Composer history, preserving the current draft |
 | Ctrl+C / Ctrl+V; Ctrl+Shift+C / Ctrl+Shift+V | Copy / paste in the composer |
 | Ctrl+A, Shift+arrows, Ctrl+Shift+arrows | Normal text-editor selection |
+
+### Windows, tabs and panes
+
+| Shortcut | Action |
+|---|---|
+| Ctrl+N | New window, in the focused pane's directory |
+| Alt+Tab / Alt+Shift+Tab | Next / previous Relay window |
+| Ctrl+T | New tab, in the focused pane's directory |
+| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
+| Ctrl+P | New pane to the right |
+| Ctrl+Shift+P | New pane below |
+| Alt+Left / Right / Up / Down | Move focus to the neighboring pane |
+| Ctrl+W | Close the pane; the tab if it is the last pane; the window, after a warning, if it is the last tab |
+| Ctrl+Shift+W | Restore the last closed pane, tab or window |
+
+Every pane has its own shell, composer, agent worker and conversation. The toolbar acts on
+the focused pane, which has an accent outline. Typing `exit` closes a pane. Restoring
+reopens panes in the same directories and layout with **new shells**: scrollback and
+programs that were running are not restored. These shortcuts take priority over the
+composer and over Konsole, including in native mode, so Readline's Ctrl+W, Ctrl+P, Ctrl+N
+and Ctrl+T are unavailable there. Most desktop window managers reserve Alt+Tab for
+themselves, in which case Relay never receives it.
 
 Pasting never submits. In native mode, normal terminal keybindings apply (including
 Ctrl+C as interrupt). The toolbar also has **Interrupt shell**. Returning from

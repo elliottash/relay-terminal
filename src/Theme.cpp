@@ -152,7 +152,10 @@ QCheckBox::indicator:hover { border-color: @muted; }
 QCheckBox::indicator:checked { background: @accent; border-color: @accent; image: url(@icons/check.svg); }
 
 QSplitter::handle { background: @bg; }
-QSplitter::handle:horizontal { width: 6px; }
+QWidget#pane { background: @bg; border: 1px solid @border; border-radius: 6px; }
+QWidget#pane[relayActive="true"] { border: 1px solid @accent; }
+QSplitter::handle:horizontal { width: 4px; }
+QSplitter::handle:vertical { height: 4px; }
 QSplitter::handle:hover { background: @border; }
 
 QStatusBar { background: @bg; color: @muted; border-top: 1px solid @border; }
@@ -224,13 +227,11 @@ void polishWindow(QWidget *window) {
         else if (text.startsWith(QStringLiteral("Only submitted prompts"))) label->setObjectName(QStringLiteral("privacy"));
         else if (label->textInteractionFlags() & Qt::TextSelectableByMouse) label->setObjectName(QStringLiteral("cwd"));
     }
-    // Proportional splitter: terminal keeps ~60% and the agent pane never collapses to nothing.
-    for (auto *splitter : window->findChildren<QSplitter *>()) {
-        if (splitter->count() == 2) {
-            splitter->setStretchFactor(0, 3); splitter->setStretchFactor(1, 2);
-            splitter->setChildrenCollapsible(false);
-            splitter->widget(1)->setMinimumWidth(300);
-            splitter->widget(0)->setMinimumWidth(360);
+    // Panes: a thin frame, accented on the focused pane (RelayWindow sets relayActive).
+    if (window->property("relayActive").isValid() || QString::fromLatin1(window->metaObject()->className()) == QStringLiteral("QWidget")) {
+        if (window->findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"))) {
+            window->setObjectName(QStringLiteral("pane"));
+            window->setAttribute(Qt::WA_StyledBackground);
         }
     }
     // Re-polish so object-name selectors apply to already-created widgets.

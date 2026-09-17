@@ -174,3 +174,23 @@ Relay restores both variables before starting Bash, so the user's shell and the
 programs it launches see their original XDG paths. No file in `~/.config` or
 `~/.local/share/konsole` is written. Theme data is installed to
 `share/relay/theme` and found from the source tree during development.
+
+## Windows, tabs and panes
+
+`Pane` owns everything that used to belong to the single window: a KonsolePart shell, its
+private runtime directory and Bash bridge, a composer, and a Python worker with its own agent
+conversation. `RelayWindow` is a `QMainWindow` with the toolbar and a `QTabWidget`; each tab
+page holds one root widget, either a `Pane` or a tree of `QSplitter`s. `WindowManager` keeps
+the window list and a stack of up to 25 closed items.
+
+Splitting reuses the anchor's splitter when its orientation matches, otherwise wraps the
+anchor in a new splitter. Closing a pane collapses a splitter left with one child. Pane
+navigation is geometric: the nearest pane on the requested side, then the best aligned.
+
+Closed panes, tabs and windows are stored as JSON layout nodes with each pane's directory.
+Restoring rebuilds the layout with new shells started in those directories
+(`RELAY_START_DIR`, applied by the Bash integration after `.bashrc`). A pane is restored next
+to the pane that took focus when it closed, if that pane still exists.
+
+Window shortcuts are handled in an application event filter on `ShortcutOverride` and
+`KeyPress` for widgets in that window, so they win over the composer and Konsole.

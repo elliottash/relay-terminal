@@ -45,14 +45,14 @@ RichEditor::RichEditor(QWidget *parent) : QPlainTextEdit(parent) {
     setAccessibleDescription(QStringLiteral("Multiline editor. Enter submits; Shift Enter inserts a newline. Control Enter forces Agent; Control Shift Enter forces Terminal."));
     setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     setPlaceholderText(QStringLiteral("Type a command, or describe what you need…"));
-    setMinimumHeight(100);
+    setMinimumHeight(64);
     setMaximumHeight(260);
     setTabStopDistance(fontMetrics().horizontalAdvance(QLatin1Char(' ')) * 4);
     setUndoRedoEnabled(true);
     setLineWrapMode(QPlainTextEdit::WidgetWidth);
     new ShellHighlighter(document());
     connect(document(), &QTextDocument::blockCountChanged, this, [this] {
-        setFixedHeight(std::clamp(document()->blockCount() * fontMetrics().lineSpacing() + 30, 100, 260));
+        setFixedHeight(std::clamp(document()->blockCount() * fontMetrics().lineSpacing() + 30, 64, 260));
     });
 }
 
@@ -88,7 +88,12 @@ void RichEditor::keyPressEvent(QKeyEvent *event) {
     }
     if (mods == (Qt::ControlModifier | Qt::ShiftModifier) && event->key() == Qt::Key_C) { copy(); return; }
     if (mods == (Qt::ControlModifier | Qt::ShiftModifier) && event->key() == Qt::Key_V) { paste(); return; }
-    if (mods == Qt::AltModifier && (event->key() == Qt::Key_Up || event->key() == Qt::Key_Down)) {
+    // History: Up on the first line and Down on the last line, like a shell prompt.
+    // Alt+arrows are reserved for moving between panes.
+    const bool up = event->key() == Qt::Key_Up, down = event->key() == Qt::Key_Down;
+    if (mods == Qt::NoModifier && (up || down) && !textCursor().hasSelection() && !m_history.isEmpty()
+        && ((up && textCursor().blockNumber() == 0) || (down && textCursor().blockNumber() == document()->blockCount() - 1))
+        && !(down && m_historyIndex == m_history.size())) {
         if (m_historyIndex == m_history.size()) m_draft = toPlainText();
         m_historyIndex = std::clamp(m_historyIndex + (event->key() == Qt::Key_Up ? -1 : 1), 0, int(m_history.size()));
         setPlainText(m_historyIndex == m_history.size() ? m_draft : m_history[m_historyIndex]);

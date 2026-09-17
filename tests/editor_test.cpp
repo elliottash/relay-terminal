@@ -75,10 +75,18 @@ private Q_SLOTS:
     void historyPreservesDraft() {
         RichEditor editor; editor.remember(QStringLiteral("git status"));
         editor.setPlainText(QStringLiteral("unfinished draft"));
-        QTest::keyClick(&editor, Qt::Key_Up, Qt::AltModifier);
+        QTest::keyClick(&editor, Qt::Key_Up);
         QCOMPARE(editor.toPlainText(), QStringLiteral("git status"));
-        QTest::keyClick(&editor, Qt::Key_Down, Qt::AltModifier);
+        QTest::keyClick(&editor, Qt::Key_Down);
         QCOMPARE(editor.toPlainText(), QStringLiteral("unfinished draft"));
+    }
+    void upInsideMultilineTextMovesCursor() {
+        RichEditor editor; editor.remember(QStringLiteral("git status"));
+        editor.setPlainText(QStringLiteral("line one\nline two"));
+        editor.moveCursor(QTextCursor::End);
+        QTest::keyClick(&editor, Qt::Key_Up);
+        QCOMPARE(editor.toPlainText(), QStringLiteral("line one\nline two"));
+        QCOMPARE(editor.textCursor().blockNumber(), 0);
     }
 };
 QTEST_MAIN(EditorTests)

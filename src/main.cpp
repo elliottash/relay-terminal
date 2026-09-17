@@ -28,6 +28,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeyEvent>
+#include <QResizeEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
@@ -48,11 +49,15 @@
 #include <QStatusBar>
 #include <QTemporaryDir>
 #include <QTextCursor>
+#include <QTabWidget>
+#include <QTabBar>
 #include <QTimer>
 #include <QToolBar>
 #include <QUuid>
 #include <QVBoxLayout>
 #include <algorithm>
+#include <functional>
+#include <cmath>
 #include <stdexcept>
 #include <fcntl.h>
 #include <termios.h>
@@ -76,22 +81,18 @@ static QString dataRoot() {
     throw std::runtime_error("Relay's backend and shell data files were not found.");
 }
 
-class RelayWindow final : public QMainWindow {
+// One terminal pane: a KonsolePart shell, its Bash bridge, a composer, and its own agent worker
+// and conversation. Windows arrange panes in tabs and splits; the toolbar acts on the active pane.
+class Pane final : public QWidget {
 public:
-    RelayWindow(const QString &workspace, bool cleanShell) : m_workspace(workspace), m_cwd(workspace) {
+    Pane(const QString &workspace, const QString &cwd, bool cleanShell)
+        : m_workspace(workspace), m_cwd(cwd.isEmpty() ? workspace : cwd), m_cleanShell(cleanShell) {
         m_data = dataRoot();
         m_python = QStandardPaths::findExecutable(QStringLiteral("python3"));
         if (m_python.isEmpty()) throw std::runtime_error("Python 3 is required.");
         if (!m_runtime.isValid()) throw std::runtime_error("Could not create a private shell runtime directory.");
         QFile::setPermissions(m_runtime.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
         m_token = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        setWindowTitle(QStringLiteral("Relay · Terminal + Agent · 0.1 preview"));
-        setMinimumSize(760, 520);
-        {
-            // Fit the default size to the available screen instead of overflowing small displays.
-            const QRect available = screen() ? screen()->availableGeometry() : QRect(0, 0, 1280, 860);
-            resize(std::min(1320, available.width() * 9 / 10), std::min(860, available.height() * 9 / 10));
-        }
         buildUi();
         startWorker();
         startTerminal(cleanShell);
@@ -101,26 +102,25 @@ public:
         m_debounce.setInterval(150);
         connect(&m_debounce, &QTimer::timeout, this, [this] { requestRoute(false, QStringLiteral("auto")); });
         connect(m_editor, &QPlainTextEdit::textChanged, this, [this] { m_debounce.start(); });
-        connect(m_mode, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
-            requestRoute(false, QStringLiteral("auto"));
-        });
         m_editor->onSubmit = [this](const QString &destination) { requestRoute(true, destination); };
         m_editor->onNative = [this] { setNative(true); };
         qApp->installEventFilter(this);
         QTimer::singleShot(5000, this, [this] {
-            if (!m_seenShell) {
+            if (!m_seenShell && m_iface) {
                 setNative(true);
-                statusBar()->showMessage(QStringLiteral("Shell integration did not initialize. Native terminal remains available; try --clean-shell."));
+                status(QStringLiteral("Shell integration did not initialize. Native terminal remains available; try --clean-shell."));
             }
         });
     }
 
-    ~RelayWindow() override {
+    ~Pane() override {
+        m_closing = true;
         qApp->removeEventFilter(this);
         m_poll.stop();
         // Destroy the part before its private shell state directory is removed.
         if (m_part) delete m_part.data();
         if (m_worker.state() != QProcess::NotRunning) {
+            send({{"type", "cancel"}});
             send({{"type", "shutdown"}});
             m_worker.closeWriteChannel();
             if (!m_worker.waitForFinished(1500)) {
@@ -130,13 +130,60 @@ public:
         }
     }
 
+    // ----- interface used by RelayWindow ----------------------------------------------------
+    std::function<void(const QString &)> onStatus;
+    std::function<void()> onStateChanged;   // cwd, model list, native mode or busy state changed
+    std::function<void()> onShellExited;
+
+    QString cwd() const { return m_cwd; }
+    QString workspace() const { return m_workspace; }
+    bool cleanShell() const { return m_cleanShell; }
+    QString mode() const { return m_modeValue; }
+    void setMode(const QString &mode) { m_modeValue = mode; requestRoute(false, QStringLiteral("auto")); }
+    bool isNative() const { return m_native; }
+    void toggleNative() { setNative(!m_native); }
+    bool agentBusy() const { return m_agentBusy; }
+    bool processBusy() const {
+        return m_iface && m_iface->foregroundProcessId() > 0 && m_iface->foregroundProcessId() != m_iface->terminalProcessId();
+    }
+    QList<QPair<QString, QString>> storedModels() const { return m_stored; }
+    QString currentPreset() const { return m_currentPreset; }
+    void focusInput() { if (m_native) focusTerminal(); else m_editor->setFocus(Qt::OtherFocusReason); }
+
+    void interruptShell() {
+        if (m_iface) { m_loading = false; m_promptReported = false; clearFix(); m_iface->sendInput(QString(QChar(3))); focusTerminal(); }
+    }
+    void newChat() {
+        if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn first.")); return; }
+        send({{"type", "reset"}}); clearFix();
+        printInline(QStringLiteral("New agent conversation\n"), Ink::Note); closeInline();
+    }
+    void stopAgent() {
+        send({{"type", "cancel"}}); clearFix();
+        status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
+    }
+    void selectModel(const QString &id) {
+        if (id.isEmpty() || id == m_currentPreset) return;
+        if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before switching models.")); changed(); return; }
+        configurePreset(id, true);
+    }
+    void openProviderDialog() { configure(); }
+
 protected:
+    void resizeEvent(QResizeEvent *event) override {
+        QWidget::resizeEvent(event);
+        // Split panes get narrow: drop the key hints and the agent workspace path first.
+        if (m_help) m_help->setVisible(width() >= 900);
+        updatePaths();
+    }
+
     bool eventFilter(QObject *object, QEvent *event) override {
         if (event->type() == QEvent::KeyPress || event->type() == QEvent::ShortcutOverride) {
             auto *key = static_cast<QKeyEvent *>(event);
-            // Only this window; do not steal F12 from settings dialogs.
             auto *widget = qobject_cast<QWidget *>(object);
-            if (widget && widget->window() == this && key->key() == Qt::Key_F12 && key->modifiers() == Qt::NoModifier) {
+            // Only widgets inside this pane; do not steal F12 from dialogs.
+            const bool inside = widget && (widget == this || isAncestorOf(widget));
+            if (inside && key->key() == Qt::Key_F12 && key->modifiers() == Qt::NoModifier) {
                 if (event->type() == QEvent::KeyPress) setNative(!m_native);
                 event->accept();
                 return true;
@@ -148,87 +195,18 @@ protected:
                 setNative(true);
             }
         }
-        return QMainWindow::eventFilter(object, event);
-    }
-
-    void closeEvent(QCloseEvent *event) override {
-        const bool processBusy = m_iface && m_iface->foregroundProcessId() > 0 &&
-                                 m_iface->foregroundProcessId() != m_iface->terminalProcessId();
-        if (m_agentBusy || processBusy || !m_editor->toPlainText().isEmpty()) {
-            const auto choice = QMessageBox::question(this, QStringLiteral("Close Relay?"),
-                QStringLiteral("An active task, terminal process, or unsent draft may be lost. Close this window?"),
-                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-            if (choice != QMessageBox::Yes) { event->ignore(); return; }
-        }
-        send({{"type", "cancel"}});
-        event->accept();
+        return QWidget::eventFilter(object, event);
     }
 
 private:
     void buildUi() {
-        auto *toolbar = addToolBar(QStringLiteral("Relay"));
-        toolbar->setMovable(false);
-        auto *brand = new QLabel(QStringLiteral("  RELAY  "));
-        auto font = brand->font(); font.setBold(true); font.setPointSize(13); brand->setFont(font);
-        toolbar->addWidget(brand);
-        toolbar->addSeparator();
-        m_mode = new QComboBox;
-        m_mode->addItem(QStringLiteral("Auto detect"), QStringLiteral("auto"));
-        m_mode->addItem(QStringLiteral("Terminal"), QStringLiteral("shell"));
-        m_mode->addItem(QStringLiteral("Agent"), QStringLiteral("agent"));
-        m_mode->setAccessibleName(QStringLiteral("Input destination"));
-        toolbar->addWidget(m_mode);
-        m_nativeAction = toolbar->addAction(QStringLiteral("Native terminal · F12"));
-        m_nativeAction->setCheckable(true);
-        connect(m_nativeAction, &QAction::triggered, this, [this](bool checked) { setNative(checked); });
-        auto *interrupt = toolbar->addAction(QStringLiteral("Interrupt shell"));
-        connect(interrupt, &QAction::triggered, this, [this] {
-            if (m_iface) { m_loading = false; m_promptReported = false; clearFix(); m_iface->sendInput(QString(QChar(3))); focusTerminal(); }
-        });
-        toolbar->addSeparator();
-        m_modelPicker = new QComboBox;
-        m_modelPicker->setAccessibleName(QStringLiteral("Agent model"));
-        m_modelPicker->setToolTip(QStringLiteral("Agent model. Keys come from the desktop keyring; switching starts a new conversation."));
-        m_modelPicker->setSizeAdjustPolicy(QComboBox::AdjustToContents);
-        m_modelPicker->addItem(QStringLiteral("No stored keys"));
-        m_modelPicker->setEnabled(false);
-        toolbar->addWidget(m_modelPicker);
-        connect(m_modelPicker, qOverload<int>(&QComboBox::activated), this, [this](int index) {
-            const QString id = m_modelPicker->itemData(index).toString();
-            if (id.isEmpty()) return;
-            if (m_agentBusy) {
-                syncModelPicker();
-                statusBar()->showMessage(QStringLiteral("Stop the current agent turn before switching models."));
-                return;
-            }
-            configurePreset(id, true);
-        });
-        auto *reset = toolbar->addAction(QStringLiteral("New chat"));
-        reset->setToolTip(QStringLiteral("Start a new agent conversation"));
-        connect(reset, &QAction::triggered, this, [this] {
-            if (m_agentBusy) { statusBar()->showMessage(QStringLiteral("Stop the current agent turn first.")); return; }
-            send({{"type", "reset"}}); clearFix();
-            printInline(QStringLiteral("New agent conversation"), Ink::Note); closeInline();
-        });
-        auto *stop = toolbar->addAction(QStringLiteral("Stop agent"));
-        connect(stop, &QAction::triggered, this, [this] {
-            send({{"type", "cancel"}}); clearFix();
-            statusBar()->showMessage(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
-        });
-        auto *spacer = new QWidget; spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        toolbar->addWidget(spacer);
-        auto *provider = toolbar->addAction(QStringLiteral("Provider / BYOK…"));
-        connect(provider, &QAction::triggered, this, [this] { configure(); });
-        auto *central = new QWidget;
-        auto *layout = new QVBoxLayout(central); layout->setContentsMargins(12, 10, 12, 10); layout->setSpacing(10);
+        auto *layout = new QVBoxLayout(this); layout->setContentsMargins(8, 6, 8, 8); layout->setSpacing(6);
         m_cwdLabel = new QLabel; m_cwdLabel->setTextFormat(Qt::PlainText);
         m_cwdLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
         layout->addWidget(m_cwdLabel);
-        m_splitter = new QSplitter(Qt::Horizontal);
-        layout->addWidget(m_splitter, 1);
         m_terminalHost = new QWidget;
         auto *terminalLayout = new QVBoxLayout(m_terminalHost); terminalLayout->setContentsMargins(0, 0, 0, 0);
-        m_splitter->addWidget(m_terminalHost);
+        layout->addWidget(m_terminalHost, 1);
         auto *composer = new QFrame; composer->setFrameShape(QFrame::StyledPanel);
         auto *composerLayout = new QVBoxLayout(composer);
         auto *routeRow = new QHBoxLayout;
@@ -239,11 +217,10 @@ private:
         connect(submit, &QPushButton::clicked, this, [this] { requestRoute(true, QStringLiteral("auto")); });
         routeRow->addWidget(submit); composerLayout->addLayout(routeRow);
         m_editor = new RichEditor; composerLayout->addWidget(m_editor);
-        auto *help = new QLabel(QStringLiteral("Shift+Enter  newline     Ctrl+Enter  agent     Ctrl+Shift+Enter  terminal     Alt+↑/↓  history     F12  native input"));
+        auto *help = new QLabel(QStringLiteral("Shift+Enter  newline     Ctrl+Enter  agent     Ctrl+Shift+Enter  terminal     ↑/↓  history     F12  native input"));
         help->setWordWrap(true); composerLayout->addWidget(help);
+        m_help = help;
         layout->addWidget(composer);
-        setCentralWidget(central);
-        statusBar()->showMessage(QStringLiteral("Starting native Konsole terminal and local router…"));
         updatePaths();
     }
 
@@ -251,7 +228,7 @@ private:
         connect(&m_worker, &QProcess::readyReadStandardOutput, this, [this] {
             m_workerBuffer += m_worker.readAllStandardOutput();
             if (m_workerBuffer.size() > 8 * 1024 * 1024) {
-                m_worker.kill(); statusBar()->showMessage(QStringLiteral("Worker protocol overflow; stopped.")); return;
+                m_worker.kill(); status(QStringLiteral("Worker protocol overflow; stopped.")); return;
             }
             int index;
             while ((index = m_workerBuffer.indexOf('\n')) >= 0) {
@@ -266,11 +243,11 @@ private:
             m_worker.readAllStandardError();
         });
         connect(&m_worker, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
-            statusBar()->showMessage(QStringLiteral("Local worker failed: ") + m_worker.errorString());
+            status(QStringLiteral("Local worker failed: ") + m_worker.errorString());
         });
         connect(&m_worker, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int, QProcess::ExitStatus) {
             m_workerReady = false; m_configured = false; m_agentBusy = false;
-            statusBar()->showMessage(QStringLiteral("Local worker stopped. Native terminal remains available; restart Relay to restore routing and agents."));
+            status(QStringLiteral("Local worker stopped. Native terminal remains available; restart Relay to restore routing and agents."));
         });
         connect(&m_worker, &QProcess::started, this, [this] {
             for (const auto &line : std::as_const(m_workerPending)) m_worker.write(line);
@@ -305,10 +282,14 @@ private:
         m_terminalHost->layout()->addWidget(m_terminal);
         connect(m_part.data(), &QObject::destroyed, this, [this] {
             m_iface = nullptr; m_terminal = nullptr; m_shellReady = false;
-            statusBar()->showMessage(QStringLiteral("Shell exited. Close and reopen Relay to start another session."));
+            // Like other terminals, a pane closes when its shell exits.
+            if (!m_closing && onShellExited) QTimer::singleShot(0, this, [this] { if (onShellExited) onShellExited(); });
         });
         // The part has loaded Relay's profile; the shell should see the user's own XDG paths.
         relay::theme::restoreXdgEnvironment();
+        // Konsole starts new sessions in its own default directory, so the Bash integration
+        // changes to this pane's directory after loading the user's configuration.
+        qputenv("RELAY_START_DIR", m_cwd.toUtf8());
         m_iface->startProgram(QStringLiteral("/bin/bash"), {QStringLiteral("/bin/bash"), QStringLiteral("--noprofile"),
             QStringLiteral("--rcfile"), m_data + QStringLiteral("/shell/integration.bash"), QStringLiteral("-i")});
     }
@@ -323,16 +304,16 @@ private:
 
     void requestRoute(bool submit, const QString &overrideMode) {
         if (m_native) {
-            if (submit) statusBar()->showMessage(QStringLiteral("Native input is active. Press F12 to return to the composer."));
+            if (submit) status(QStringLiteral("Native input is active. Press F12 to return to the composer."));
             return;
         }
         if (!m_workerReady) {
-            if (submit) statusBar()->showMessage(QStringLiteral("Local router is not ready; use the native terminal or restart Relay."));
+            if (submit) status(QStringLiteral("Local router is not ready; use the native terminal or restart Relay."));
             return;
         }
         if (submit && (!m_pendingSubmit.isEmpty() || m_loading)) return;
         const QString id = QString::number(++m_requestId);
-        const QString mode = overrideMode == QStringLiteral("auto") ? m_mode->currentData().toString() : overrideMode;
+        const QString mode = overrideMode == QStringLiteral("auto") ? m_modeValue : overrideMode;
         if (submit) {
             m_submitMode = mode;
             m_pendingSubmit = id; m_submittedDraft = m_editor->toPlainText();
@@ -360,36 +341,38 @@ private:
             if (id == m_pendingSubmit) {
                 m_pendingSubmit.clear();
                 if (m_editor->toPlainText() != m_submittedDraft) {
-                    statusBar()->showMessage(QStringLiteral("Input changed during routing; submit again to use the current text.")); return;
+                    status(QStringLiteral("Input changed during routing; submit again to use the current text.")); return;
                 }
                 dispatch(event, m_submitMode);
             }
         } else if (type == QStringLiteral("configured")) {
             m_configured = true; m_configuring = false;
             m_model = event.value(QStringLiteral("model")).toString();
-            statusBar()->showMessage(QStringLiteral("Agent ready · ") + event.value(QStringLiteral("model")).toString());
-            syncModelPicker();
+            status(QStringLiteral("Agent ready · ") + event.value(QStringLiteral("model")).toString());
+            changed();
         } else if (type == QStringLiteral("presets")) {
             m_presets = event.value(QStringLiteral("presets")).toArray();
-            m_modelPicker->clear();
+            m_stored.clear();
             for (const auto &item : m_presets) {
                 const auto preset = item.toObject();
                 if (preset.value(QStringLiteral("has_stored_key")).toBool())
-                    m_modelPicker->addItem(preset.value(QStringLiteral("label")).toString(), preset.value(QStringLiteral("id")).toString());
+                    m_stored.append({preset.value(QStringLiteral("id")).toString(), preset.value(QStringLiteral("label")).toString()});
             }
-            m_modelPicker->setEnabled(m_modelPicker->count() > 0);
-            if (!m_modelPicker->count()) {
-                m_modelPicker->addItem(QStringLiteral("No stored keys"));
-                statusBar()->showMessage(QStringLiteral("No stored provider keys. Open Provider / BYOK… to import them from Warp or enter one."));
+            changed();
+            if (m_stored.isEmpty()) {
+                status(QStringLiteral("No stored provider keys. Open Provider / BYOK… to import them from Warp or enter one."));
                 return;
             }
             if (!m_configured && !m_configuring) {
                 // Saved choice first, then Warp's default agent model, then the first stored key.
+                auto hasKey = [this](const QString &id) {
+                    return std::any_of(m_stored.cbegin(), m_stored.cend(), [&](const auto &entry) { return entry.first == id; });
+                };
                 QString choice = QSettings().value(QStringLiteral("provider/preset")).toString();
-                if (m_modelPicker->findData(choice) < 0) choice = event.value(QStringLiteral("warp_default")).toString();
-                if (m_modelPicker->findData(choice) < 0) choice = m_modelPicker->itemData(0).toString();
+                if (!hasKey(choice)) choice = event.value(QStringLiteral("warp_default")).toString();
+                if (!hasKey(choice)) choice = m_stored.first().first;
                 configurePreset(choice, false);
-            } else syncModelPicker();
+            }
         } else if (type == QStringLiteral("warp_imported")) {
             const auto imported = event.value(QStringLiteral("imported")).toArray();
             const auto skipped = event.value(QStringLiteral("skipped")).toArray();
@@ -398,10 +381,10 @@ private:
             QMessageBox::information(this, QStringLiteral("Warp import"),
                 QStringLiteral("Imported %1 key(s) into the keyring: %2\nSkipped: %3").arg(imported.size())
                     .arg(names.join(QStringLiteral(", ")), skipped.isEmpty() ? QStringLiteral("none") : QString::number(skipped.size())));
-            statusBar()->showMessage(QStringLiteral("Warp import finished. Leave the key field empty to use stored keys."));
+            status(QStringLiteral("Warp import finished. Leave the key field empty to use stored keys."));
             send({{"type", "presets"}});
         } else if (type == QStringLiteral("key_stored")) {
-            statusBar()->showMessage(QStringLiteral("API key saved to the keyring for ") + event.value(QStringLiteral("preset")).toString());
+            status(QStringLiteral("API key saved to the keyring for ") + event.value(QStringLiteral("preset")).toString());
         } else if (type == QStringLiteral("agent_started")) {
             m_agentBusy = true; m_turnHeader = false;
         } else if (type == QStringLiteral("delta")) {
@@ -454,14 +437,14 @@ private:
                     code == 0 ? Ink::Note : Ink::Error);
             } else printInline(QStringLiteral("✓ ") + event.value(QStringLiteral("tool")).toString() + '\n', Ink::Note);
         } else if (type == QStringLiteral("status")) {
-            statusBar()->showMessage(event.value(QStringLiteral("text")).toString());
+            status(event.value(QStringLiteral("text")).toString());
         } else if (type == QStringLiteral("done") || type == QStringLiteral("cancelled")) {
             m_agentBusy = false;
             if (type == QStringLiteral("cancelled")) {
                 ensureLineStart(); printInline(QStringLiteral("Stopped. Actions that already ran are not rolled back.\n"), Ink::Error);
             }
             ensureLineStart(); closeInline();
-            statusBar()->showMessage(QStringLiteral("Ready"));
+            status(QStringLiteral("Ready"));
             finishFixTurn(type == QStringLiteral("done"));
         } else if (type == QStringLiteral("error")) {
             const auto text = event.value(QStringLiteral("text")).toString();
@@ -470,7 +453,7 @@ private:
             // Route errors do not cancel a concurrent agent turn.
             m_agentBusy = event.value(QStringLiteral("agent_busy")).toBool(false);
             m_configuring = false;
-            statusBar()->showMessage(text);
+            status(text);
             if (wasBusy && !m_agentBusy) {
                 ensureLineStart(); printInline(QStringLiteral("✗ ") + text + '\n', Ink::Error); closeInline();
                 finishFixTurn(false);
@@ -507,19 +490,19 @@ private:
 
     bool runInTerminal(const QString &text, bool watch, int attempt) {
         if (!m_iface || !m_shellReady || m_loading || m_native) {
-            statusBar()->showMessage(QStringLiteral("Shell is not at an integrated prompt. Use native input; Relay will not type into a running program."));
+            status(QStringLiteral("Shell is not at an integrated prompt. Use native input; Relay will not type into a running program."));
             return false;
         }
         if (m_iface->foregroundProcessId() > 0 && m_iface->foregroundProcessId() != m_iface->terminalProcessId()) {
             m_shellReady = false; focusTerminal();
-            statusBar()->showMessage(QStringLiteral("A foreground program is running. Composer submission was not sent."));
+            status(QStringLiteral("A foreground program is running. Composer submission was not sent."));
             return false;
         }
         const auto data = text.toUtf8();
         QSaveFile input(m_runtime.filePath(QStringLiteral("input.txt")));
-        if (!input.open(QIODevice::WriteOnly)) { statusBar()->showMessage(input.errorString()); return false; }
+        if (!input.open(QIODevice::WriteOnly)) { status(input.errorString()); return false; }
         input.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
-        if (input.write(data) != data.size() || !input.commit()) { statusBar()->showMessage(QStringLiteral("Could not stage command.")); return false; }
+        if (input.write(data) != data.size() || !input.commit()) { status(QStringLiteral("Could not stage command.")); return false; }
         closeInline();
         m_pendingHash = QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
         m_pendingCommand = text; m_loading = true; m_shellReady = false; m_promptReported = false;
@@ -530,7 +513,7 @@ private:
         QTimer::singleShot(2500, this, [this, serial] {
             if (m_loading && m_loadSerial == serial) {
                 m_loading = false; clearFix(); setNative(true);
-                statusBar()->showMessage(QStringLiteral("Shell did not acknowledge the editor text. Enter was NOT sent. Inspect the native input line; try --clean-shell."));
+                status(QStringLiteral("Shell did not acknowledge the editor text. Enter was NOT sent. Inspect the native input line; try --clean-shell."));
             }
         });
         return true;
@@ -538,6 +521,9 @@ private:
 
     // ----- fix and re-run loop (terminal mode) -----------------------------------------
     static constexpr int kMaxFixAttempts = 3;
+
+    void status(const QString &text) { if (onStatus) onStatus(text); }
+    void changed() { if (onStateChanged) onStateChanged(); }
 
     void clearFix() { m_fixCommand.clear(); m_fixWatch = false; m_fixArmed = false; m_fixAwaitingAgent = false; m_fixAttempt = 0; }
 
@@ -717,12 +703,6 @@ private:
         return {};
     }
 
-    void syncModelPicker() {
-        const QSignalBlocker blocker(m_modelPicker);
-        const int index = m_modelPicker->findData(QSettings().value(QStringLiteral("provider/preset")).toString());
-        if (index >= 0) m_modelPicker->setCurrentIndex(index);
-    }
-
     // Configure a built-in preset using its key from the keyring. The key never enters this process.
     void configurePreset(const QString &id, bool announce) {
         const auto preset = presetById(id);
@@ -734,8 +714,8 @@ private:
         settings.setValue("provider/base", preset.value(QStringLiteral("base_url")).toString());
         settings.setValue("provider/model", preset.value(QStringLiteral("model")).toString());
         settings.setValue("provider/extra", QString::fromUtf8(QJsonDocument(preset.value(QStringLiteral("extra")).toObject()).toJson(QJsonDocument::Compact)));
-        m_apiKey.clear(); m_configured = false; m_configuring = true;
-        if (announce) statusBar()->showMessage(QStringLiteral("Switching model. This starts a new conversation."));
+        m_apiKey.clear(); m_configured = false; m_configuring = true; m_currentPreset = id; changed();
+        if (announce) status(QStringLiteral("Switching model. This starts a new conversation."));
         send({{"type", "configure"}, {"preset", id}, {"use_stored_key", true},
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
               {"model", preset.value(QStringLiteral("model")).toString()},
@@ -747,11 +727,11 @@ private:
     void submitAgent(const QString &text, bool fromEditor, const QString &why = QString()) {
         if (!m_configured) {
             if (fromEditor) { configure(); return; }
-            statusBar()->showMessage(QStringLiteral("No agent provider is configured."));
+            status(QStringLiteral("No agent provider is configured."));
             return;
         }
         if (m_agentBusy) {
-            statusBar()->showMessage(QStringLiteral("An agent turn is active. Stop it or wait for completion before submitting another request."));
+            status(QStringLiteral("An agent turn is active. Stop it or wait for completion before submitting another request."));
             return;
         }
         if (fromEditor) { m_editor->remember(text); m_editor->clear(); }
@@ -810,14 +790,15 @@ private:
         if (sequence.isEmpty() || sequence == m_shellSequence) return;
         m_shellSequence = sequence; m_seenShell = true;
         const QString stage = event.value(QStringLiteral("event")).toString();
-        m_cwd = event.value(QStringLiteral("cwd")).toString(m_cwd); updatePaths();
+        const QString newCwd = event.value(QStringLiteral("cwd")).toString(m_cwd);
+        if (newCwd != m_cwd) { m_cwd = newCwd; updatePaths(); changed(); }
         if (stage == QStringLiteral("ready")) {
             m_promptReported = true;
             refreshShellReady();
             m_knownCommands = event.value(QStringLiteral("known_commands")).toArray();
             m_shellPath = event.value(QStringLiteral("path")).toString();
             const int status = event.value(QStringLiteral("status")).toInt();
-            if (!m_agentBusy) statusBar()->showMessage(QStringLiteral("Shell ready · exit %1").arg(status));
+            if (!m_agentBusy) this->status(QStringLiteral("Shell ready · exit %1").arg(status));
             if (m_fixArmed) {
                 const QString command = m_fixCommand;
                 const int attempt = m_fixAttempt;
@@ -847,13 +828,13 @@ private:
             m_iface->sendInput(QStringLiteral("\r")); focusTerminal();
         } else if (stage == QStringLiteral("unsupported")) {
             m_shellReady = false; m_promptReported = false; setNative(true);
-            statusBar()->showMessage(QStringLiteral("Your shell already has a DEBUG hook. It was left untouched; use native mode or relaunch with --clean-shell."));
+            status(QStringLiteral("Your shell already has a DEBUG hook. It was left untouched; use native mode or relaunch with --clean-shell."));
         }
     }
 
     void setNative(bool enabled) {
         m_native = enabled;
-        m_nativeAction->setChecked(enabled);
+        changed();
         m_editor->setReadOnly(enabled);
         if (enabled) {
             m_routeLabel->setText(QStringLiteral("NATIVE · keystrokes go directly to Konsole. F12 returns to the composer."));
@@ -870,10 +851,16 @@ private:
 
     void focusTerminal() { if (m_terminal) m_terminal->setFocus(Qt::OtherFocusReason); }
     void updatePaths() {
-        m_cwdLabel->setText(QStringLiteral("TERMINAL  ") + m_cwd + QStringLiteral("     │     AGENT WORKSPACE  ") + m_workspace);
+        if (!m_cwdLabel) return;
+        const QString home = QDir::homePath();
+        auto tilde = [&home](const QString &path) { return path.startsWith(home) ? QStringLiteral("~") + path.mid(home.size()) : path; };
+        m_cwdLabel->setText(width() >= 1000 || m_cwd == m_workspace
+            ? QStringLiteral("TERMINAL  ") + tilde(m_cwd) + (m_cwd == m_workspace ? QString() : QStringLiteral("     │     AGENT WORKSPACE  ") + tilde(m_workspace))
+            : tilde(m_cwd));
+        m_cwdLabel->setToolTip(QStringLiteral("Terminal: ") + m_cwd + QStringLiteral("\nAgent workspace: ") + m_workspace);
     }
     void configure() {
-        if (m_agentBusy) { statusBar()->showMessage(QStringLiteral("Stop the current agent turn before changing provider settings.")); return; }
+        if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before changing provider settings.")); return; }
         QDialog dialog(this); dialog.setWindowTitle(QStringLiteral("Relay · Bring your own key")); dialog.resize(650, 520);
         QSettings settings;
         auto *layout = new QVBoxLayout(&dialog);
@@ -939,7 +926,7 @@ private:
             const QString presetId = preset->currentData().toString();
             m_apiKey = key->text().trimmed(); m_workspace = QFileInfo(workspace->text()).canonicalFilePath();
             m_configured = false;
-            settings.setValue("provider/preset", presetId);
+            settings.setValue("provider/preset", presetId); m_currentPreset = presetId; changed();
             settings.setValue("provider/base", base->text().trimmed()); settings.setValue("provider/model", model->text().trimmed());
             settings.setValue("provider/extra", extra->toPlainText()); settings.setValue("provider/max_tokens", tokens->value());
             if (saveKey->isChecked() && !m_apiKey.isEmpty() && presetId != QStringLiteral("custom"))
@@ -963,11 +950,9 @@ private:
     QPointer<KParts::ReadOnlyPart> m_part;
     TerminalInterface *m_iface = nullptr;
     QWidget *m_terminal = nullptr, *m_terminalHost = nullptr;
-    QSplitter *m_splitter = nullptr;
     RichEditor *m_editor = nullptr;
-    QComboBox *m_mode = nullptr;
-    QLabel *m_routeLabel = nullptr, *m_cwdLabel = nullptr;
-    QAction *m_nativeAction = nullptr;
+    QString m_modeValue = QStringLiteral("auto");
+    QLabel *m_routeLabel = nullptr, *m_cwdLabel = nullptr, *m_help = nullptr;
     bool m_native = false, m_workerReady = false, m_shellReady = false, m_loading = false;
     bool m_promptReported = false;
     QString m_submitMode, m_model, m_turnText, m_fixCommand;
@@ -976,12 +961,587 @@ private:
     bool m_inlineOpen = false, m_atLineStart = true;
     QList<QPair<QString, Ink>> m_inlinePending;
     QPointer<QObject> m_session;
-    QComboBox *m_modelPicker = nullptr;
+    QList<QPair<QString, QString>> m_stored;
+    QString m_currentPreset;
+    bool m_cleanShell = false, m_closing = false;
     QJsonArray m_presets;
     bool m_configuring = false;
     bool m_seenShell = false, m_refocus = true, m_configured = false, m_agentBusy = false;
     quint64 m_requestId = 0, m_loadSerial = 0;
 };
+
+
+// ----- windows, tabs and panes --------------------------------------------------------------
+//
+// Layout nodes (used to restore closed tabs and windows) are JSON:
+//   {"pane": {"cwd": "...", "workspace": "..."}}
+//   {"split": "h" | "v", "sizes": [..], "children": [node, ...]}
+// Restoring recreates shells in the same directories; scrollback and running programs
+// of a closed pane are not preserved, because closing a pane ends its shell.
+
+class RelayWindow;
+
+struct ClosedItem {
+    enum Kind { PaneItem, TabItem, WindowItem } kind = PaneItem;
+    QPointer<RelayWindow> window;
+    QPointer<QWidget> sibling;           // PaneItem: the pane that took focus
+    Qt::Orientation orientation = Qt::Horizontal;
+    bool before = false;                 // PaneItem: restored pane goes before the sibling
+    int index = 0;                       // TabItem: tab position; WindowItem: current tab
+    QJsonObject layout;                  // PaneItem / TabItem: a layout node
+    QJsonArray tabs;                     // WindowItem
+    QRect geometry;                      // WindowItem
+};
+
+class WindowManager {
+public:
+    WindowManager(QString workspace, bool cleanShell) : m_workspace(std::move(workspace)), m_cleanShell(cleanShell) {}
+    QString workspace() const { return m_workspace; }
+    bool cleanShell() const { return m_cleanShell; }
+    RelayWindow *newWindow(const QJsonArray &tabs, int current = 0, const QRect &geometry = QRect());
+    RelayWindow *newWindowAt(const QString &cwd);
+    void cycle(RelayWindow *from, int delta);
+    void remember(ClosedItem item) {
+        m_closed.append(std::move(item));
+        while (m_closed.size() > 25) m_closed.removeFirst();
+    }
+    void restore(RelayWindow *requester);
+    void forget(RelayWindow *window) { m_windows.removeAll(window); }
+private:
+    QString m_workspace;
+    bool m_cleanShell = false;
+    QList<QPointer<RelayWindow>> m_windows;
+    QList<ClosedItem> m_closed;
+};
+
+class RelayWindow final : public QMainWindow {
+public:
+    explicit RelayWindow(WindowManager *manager) : m_manager(manager) {
+        setAttribute(Qt::WA_DeleteOnClose);
+        setWindowTitle(QStringLiteral("Relay"));
+        setMinimumSize(760, 520);
+        const QRect available = screen() ? screen()->availableGeometry() : QRect(0, 0, 1280, 860);
+        resize(std::min(1320, available.width() * 9 / 10), std::min(860, available.height() * 9 / 10));
+        buildToolbar();
+        m_tabs = new QTabWidget;
+        m_tabs->setDocumentMode(true);
+        m_tabs->setTabsClosable(true);
+        m_tabs->setMovable(true);
+        m_tabs->tabBar()->setExpanding(false);
+        setCentralWidget(m_tabs);
+        connect(m_tabs, &QTabWidget::currentChanged, this, [this](int) {
+            QWidget *page = m_tabs->currentWidget();
+            if (!page) return;
+            Pane *pane = m_lastActive.value(page);
+            if (!pane) { const auto panes = panesIn(page); pane = panes.isEmpty() ? nullptr : panes.first(); }
+            if (pane) { setActive(pane); pane->focusInput(); }
+        });
+        connect(m_tabs, &QTabWidget::tabCloseRequested, this, [this](int index) {
+            if (m_tabs->count() > 1) closeTab(index, true); else closeWindowWithWarning();
+        });
+        connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *now) {
+            if (Pane *pane = paneOf(now); pane && pane->window() == this) setActive(pane);
+        });
+        qApp->installEventFilter(this);
+    }
+
+    ~RelayWindow() override { qApp->removeEventFilter(this); }
+
+    // Build a tab from a layout node. Returns false if no pane could be created.
+    bool addTab(const QJsonObject &node, int index = -1) {
+        auto *page = new QWidget;
+        auto *layout = new QVBoxLayout(page); layout->setContentsMargins(0, 0, 0, 0);
+        QWidget *root = nullptr;
+        try {
+            root = buildNode(node);
+        } catch (const std::exception &error) {
+            delete page;
+            QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what()));
+            return false;
+        }
+        layout->addWidget(root);
+        index = index < 0 ? m_tabs->count() : std::min(index, m_tabs->count());
+        m_tabs->insertTab(index, page, QString());
+        m_tabs->setCurrentIndex(index);
+        const auto panes = panesIn(page);
+        if (!panes.isEmpty()) { setActive(panes.first()); QTimer::singleShot(0, panes.first(), [p = panes.first()] { p->focusInput(); }); }
+        updateTitles();
+        return true;
+    }
+
+    QJsonObject paneNode(const QString &cwd) const {
+        return {{"pane", QJsonObject{{"cwd", cwd}, {"workspace", m_active ? m_active->workspace() : m_manager->workspace()}}}};
+    }
+
+    QJsonArray serializeTabs() const {
+        QJsonArray tabs;
+        for (int i = 0; i < m_tabs->count(); ++i) tabs.append(serializeTab(i));
+        return tabs;
+    }
+
+    QString activeCwd() const { return m_active ? m_active->cwd() : m_manager->workspace(); }
+
+    // Restore a closed pane next to a sibling pane that still exists in this window.
+    bool restorePaneNextTo(QWidget *siblingWidget, Qt::Orientation orientation, bool before, const QJsonObject &node) {
+        Pane *sibling = dynamic_cast<Pane *>(siblingWidget);
+        if (!sibling || sibling->window() != this) return false;
+        Pane *pane = nullptr;
+        try { pane = createPane(node.value(QStringLiteral("pane")).toObject()); }
+        catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return true; }
+        insertBeside(sibling, pane, orientation, before);
+        m_tabs->setCurrentWidget(pageOf(pane));
+        setActive(pane); pane->focusInput();
+        return true;
+    }
+
+protected:
+    bool eventFilter(QObject *object, QEvent *event) override {
+        if (event->type() != QEvent::KeyPress && event->type() != QEvent::ShortcutOverride)
+            return QMainWindow::eventFilter(object, event);
+        auto *widget = qobject_cast<QWidget *>(object);
+        if (!widget || widget->window() != this) return QMainWindow::eventFilter(object, event);
+        auto *key = static_cast<QKeyEvent *>(event);
+        const auto mods = key->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
+        const int k = key->key();
+        const bool ctrl = mods == Qt::ControlModifier, ctrlShift = mods == (Qt::ControlModifier | Qt::ShiftModifier);
+        const bool alt = mods == Qt::AltModifier, altShift = mods == (Qt::AltModifier | Qt::ShiftModifier);
+        std::function<void()> action;
+        if (ctrl && k == Qt::Key_N) action = [this] { m_manager->newWindowAt(activeCwd()); };
+        else if (alt && k == Qt::Key_Tab) action = [this] { m_manager->cycle(this, 1); };
+        else if (altShift && (k == Qt::Key_Backtab || k == Qt::Key_Tab)) action = [this] { m_manager->cycle(this, -1); };
+        else if (ctrl && k == Qt::Key_T) action = [this] { addTab(paneNode(activeCwd()), m_tabs->currentIndex() + 1); };
+        else if (ctrl && k == Qt::Key_Tab) action = [this] { cycleTab(1); };
+        else if (ctrlShift && (k == Qt::Key_Backtab || k == Qt::Key_Tab)) action = [this] { cycleTab(-1); };
+        else if (ctrl && k == Qt::Key_P) action = [this] { split(Qt::Horizontal); };
+        else if (ctrlShift && k == Qt::Key_P) action = [this] { split(Qt::Vertical); };
+        else if (alt && (k == Qt::Key_Left || k == Qt::Key_Right || k == Qt::Key_Up || k == Qt::Key_Down)) action = [this, k] { navigate(k); };
+        else if (ctrl && k == Qt::Key_W) action = [this] { closeActive(); };
+        else if (ctrlShift && k == Qt::Key_W) action = [this] { m_manager->restore(this); };
+        if (!action) return QMainWindow::eventFilter(object, event);
+        // Accept the override so neither the composer nor Konsole consumes the key,
+        // then act on the key press itself. Auto-repeat does not open a burst of tabs.
+        event->accept();
+        if (event->type() == QEvent::KeyPress && !key->isAutoRepeat()) QTimer::singleShot(0, this, action);
+        return true;
+    }
+
+    void closeEvent(QCloseEvent *event) override {
+        if (!m_confirmedClose) {
+            const auto panes = allPanes();
+            const bool busy = std::any_of(panes.cbegin(), panes.cend(), [](Pane *p) { return p->agentBusy() || p->processBusy(); });
+            if (busy || panes.size() > 1) {
+                if (!confirmClose()) { event->ignore(); return; }
+            }
+        }
+        rememberWindow();
+        m_manager->forget(this);
+        event->accept();
+    }
+
+private:
+    // ----- toolbar ----------------------------------------------------------------------------
+    void buildToolbar() {
+        auto *toolbar = addToolBar(QStringLiteral("Relay"));
+        toolbar->setMovable(false);
+        auto *brand = new QLabel(QStringLiteral("  RELAY  "));
+        auto font = brand->font(); font.setBold(true); font.setPointSize(13); brand->setFont(font);
+        toolbar->addWidget(brand);
+        toolbar->addSeparator();
+        m_mode = new QComboBox;
+        m_mode->addItem(QStringLiteral("Auto detect"), QStringLiteral("auto"));
+        m_mode->addItem(QStringLiteral("Terminal"), QStringLiteral("shell"));
+        m_mode->addItem(QStringLiteral("Agent"), QStringLiteral("agent"));
+        m_mode->setAccessibleName(QStringLiteral("Input destination"));
+        toolbar->addWidget(m_mode);
+        connect(m_mode, qOverload<int>(&QComboBox::activated), this, [this](int) {
+            if (m_active) { m_active->setMode(m_mode->currentData().toString()); m_active->focusInput(); }
+        });
+        m_nativeAction = toolbar->addAction(QStringLiteral("Native terminal · F12"));
+        m_nativeAction->setCheckable(true);
+        connect(m_nativeAction, &QAction::triggered, this, [this](bool) { if (m_active) m_active->toggleNative(); });
+        auto *interrupt = toolbar->addAction(QStringLiteral("Interrupt shell"));
+        connect(interrupt, &QAction::triggered, this, [this] { if (m_active) m_active->interruptShell(); });
+        toolbar->addSeparator();
+        m_modelPicker = new QComboBox;
+        m_modelPicker->setAccessibleName(QStringLiteral("Agent model"));
+        m_modelPicker->setToolTip(QStringLiteral("Agent model for this pane. Keys come from the desktop keyring; switching starts a new conversation."));
+        m_modelPicker->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+        toolbar->addWidget(m_modelPicker);
+        connect(m_modelPicker, qOverload<int>(&QComboBox::activated), this, [this](int index) {
+            if (m_active) { m_active->selectModel(m_modelPicker->itemData(index).toString()); m_active->focusInput(); }
+        });
+        auto *reset = toolbar->addAction(QStringLiteral("New chat"));
+        connect(reset, &QAction::triggered, this, [this] { if (m_active) m_active->newChat(); });
+        auto *stop = toolbar->addAction(QStringLiteral("Stop agent"));
+        connect(stop, &QAction::triggered, this, [this] { if (m_active) m_active->stopAgent(); });
+        auto *spacer = new QWidget; spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        toolbar->addWidget(spacer);
+        auto *provider = toolbar->addAction(QStringLiteral("Provider / BYOK…"));
+        connect(provider, &QAction::triggered, this, [this] { if (m_active) m_active->openProviderDialog(); });
+        syncToolbar();
+    }
+
+    void syncToolbar() {
+        const QSignalBlocker modeBlock(m_mode), modelBlock(m_modelPicker);
+        const Pane *pane = m_active;
+        m_mode->setCurrentIndex(std::max(0, m_mode->findData(pane ? pane->mode() : QStringLiteral("auto"))));
+        m_nativeAction->setChecked(pane && pane->isNative());
+        m_modelPicker->clear();
+        const auto models = pane ? pane->storedModels() : QList<QPair<QString, QString>>();
+        for (const auto &model : models) m_modelPicker->addItem(model.second, model.first);
+        if (models.isEmpty()) m_modelPicker->addItem(QStringLiteral("No stored keys"));
+        m_modelPicker->setEnabled(!models.isEmpty());
+        if (pane) {
+            const int index = m_modelPicker->findData(pane->currentPreset());
+            if (index >= 0) m_modelPicker->setCurrentIndex(index);
+        }
+    }
+
+    // ----- panes ------------------------------------------------------------------------------
+    static Pane *paneOf(QWidget *widget) {
+        for (QWidget *w = widget; w; w = w->parentWidget())
+            if (auto *pane = dynamic_cast<Pane *>(w)) return pane;
+        return nullptr;
+    }
+
+    QWidget *pageOf(QWidget *widget) const {
+        for (QWidget *w = widget; w; w = w->parentWidget())
+            if (m_tabs->indexOf(w) >= 0) return w;
+        return nullptr;
+    }
+
+    static QList<Pane *> panesIn(QWidget *root) {
+        QList<Pane *> panes;
+        if (!root) return panes;
+        if (auto *pane = dynamic_cast<Pane *>(root)) { panes.append(pane); return panes; }
+        // Walk the layout tree in visual order (splitter child order).
+        if (auto *splitter = dynamic_cast<QSplitter *>(root)) {
+            for (int i = 0; i < splitter->count(); ++i) panes += panesIn(splitter->widget(i));
+            return panes;
+        }
+        const auto children = root->findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly);
+        for (QWidget *child : children) panes += panesIn(child);
+        return panes;
+    }
+
+    QList<Pane *> allPanes() const {
+        QList<Pane *> panes;
+        for (int i = 0; i < m_tabs->count(); ++i) panes += panesIn(m_tabs->widget(i));
+        return panes;
+    }
+
+    Pane *createPane(const QJsonObject &spec) {
+        QString cwd = spec.value(QStringLiteral("cwd")).toString();
+        if (!QFileInfo(cwd).isDir()) cwd = m_manager->workspace();
+        QString workspace = spec.value(QStringLiteral("workspace")).toString();
+        if (!QFileInfo(workspace).isDir()) workspace = m_manager->workspace();
+        auto *pane = new Pane(workspace, cwd, m_manager->cleanShell());
+        QPointer<Pane> guard(pane);
+        pane->onStatus = [this, guard](const QString &text) { if (guard && guard == m_active) statusBar()->showMessage(text); };
+        pane->onStateChanged = [this, guard] {
+            if (!guard) return;
+            if (guard == m_active) syncToolbar();
+            updateTitles();
+        };
+        pane->onShellExited = [this, guard] { if (guard) closePane(guard, false); };
+        relay::theme::polishWindow(pane);
+        return pane;
+    }
+
+    QWidget *buildNode(const QJsonObject &node) {
+        if (node.contains(QStringLiteral("split"))) {
+            auto *splitter = newSplitter(node.value(QStringLiteral("split")).toString() == QStringLiteral("v") ? Qt::Vertical : Qt::Horizontal);
+            const auto children = node.value(QStringLiteral("children")).toArray();
+            for (const auto &child : children) splitter->addWidget(buildNode(child.toObject()));
+            QList<int> sizes;
+            for (const auto &size : node.value(QStringLiteral("sizes")).toArray()) sizes.append(size.toInt());
+            if (sizes.size() == splitter->count()) splitter->setSizes(sizes);
+            return splitter;
+        }
+        return createPane(node.value(QStringLiteral("pane")).toObject());
+    }
+
+    static QSplitter *newSplitter(Qt::Orientation orientation) {
+        auto *splitter = new QSplitter(orientation);
+        splitter->setChildrenCollapsible(false);
+        splitter->setHandleWidth(3);
+        return splitter;
+    }
+
+    QJsonObject serializeNode(QWidget *widget) const {
+        if (auto *pane = dynamic_cast<Pane *>(widget))
+            return {{"pane", QJsonObject{{"cwd", pane->cwd()}, {"workspace", pane->workspace()}}}};
+        if (auto *splitter = dynamic_cast<QSplitter *>(widget)) {
+            QJsonArray children, sizes;
+            for (int i = 0; i < splitter->count(); ++i) children.append(serializeNode(splitter->widget(i)));
+            for (int size : splitter->sizes()) sizes.append(size);
+            return {{"split", splitter->orientation() == Qt::Vertical ? "v" : "h"}, {"children", children}, {"sizes", sizes}};
+        }
+        return {};
+    }
+
+    QJsonObject serializeTab(int index) const {
+        QWidget *page = m_tabs->widget(index);
+        QWidget *root = page && page->layout() && page->layout()->count() ? page->layout()->itemAt(0)->widget() : nullptr;
+        return serializeNode(root);
+    }
+
+    void setActive(Pane *pane) {
+        if (!pane) return;
+        if (m_active != pane) {
+            if (m_active) m_active->setProperty("relayActive", false);
+            m_active = pane;
+            pane->setProperty("relayActive", true);
+            for (Pane *p : allPanes()) { p->style()->unpolish(p); p->style()->polish(p); }
+        }
+        if (QWidget *page = pageOf(pane)) m_lastActive.insert(page, pane);
+        syncToolbar();
+        updateTitles();
+    }
+
+    static QString shortPath(const QString &path) {
+        const QString home = QDir::homePath();
+        if (path == home) return QStringLiteral("~");
+        const QString name = QFileInfo(path).fileName();
+        return name.isEmpty() ? path : name;
+    }
+
+    void updateTitles() {
+        for (int i = 0; i < m_tabs->count(); ++i) {
+            QWidget *page = m_tabs->widget(i);
+            Pane *pane = m_lastActive.value(page);
+            const auto panes = panesIn(page);
+            if (!pane && !panes.isEmpty()) pane = panes.first();
+            QString title = pane ? shortPath(pane->cwd()) : QStringLiteral("Relay");
+            if (panes.size() > 1) title += QStringLiteral("  ·  %1").arg(panes.size());
+            m_tabs->setTabText(i, title);
+            m_tabs->setTabToolTip(i, pane ? pane->cwd() : QString());
+        }
+        setWindowTitle(m_active ? QStringLiteral("Relay — ") + m_active->cwd() : QStringLiteral("Relay"));
+    }
+
+    void cycleTab(int delta) {
+        if (m_tabs->count() < 2) return;
+        m_tabs->setCurrentIndex((m_tabs->currentIndex() + delta + m_tabs->count()) % m_tabs->count());
+    }
+
+    // Put `pane` beside `anchor` in the given orientation, reusing the anchor's splitter when
+    // it already runs that way, otherwise wrapping the anchor in a new splitter.
+    void insertBeside(Pane *anchor, Pane *pane, Qt::Orientation orientation, bool before) {
+        QWidget *parent = anchor->parentWidget();
+        if (auto *splitter = dynamic_cast<QSplitter *>(parent); splitter && splitter->orientation() == orientation) {
+            const int index = splitter->indexOf(anchor);
+            splitter->insertWidget(before ? index : index + 1, pane);
+            QList<int> equal;
+            for (int i = 0; i < splitter->count(); ++i) equal.append(1000);
+            splitter->setSizes(equal);
+        } else {
+            auto *wrapper = newSplitter(orientation);
+            if (auto *outer = dynamic_cast<QSplitter *>(parent)) {
+                const int index = outer->indexOf(anchor);
+                outer->replaceWidget(index, wrapper);
+            } else if (parent && parent->layout()) {
+                delete parent->layout()->replaceWidget(anchor, wrapper);
+            }
+            wrapper->addWidget(before ? static_cast<QWidget *>(pane) : static_cast<QWidget *>(anchor));
+            wrapper->addWidget(before ? static_cast<QWidget *>(anchor) : static_cast<QWidget *>(pane));
+            wrapper->setSizes({1000, 1000});
+            anchor->show(); wrapper->show();
+        }
+        pane->show();
+        updateTitles();
+    }
+
+    void split(Qt::Orientation orientation) {
+        Pane *anchor = m_active;
+        if (!anchor) return;
+        Pane *pane = nullptr;
+        try { pane = createPane({{"cwd", anchor->cwd()}, {"workspace", anchor->workspace()}}); }
+        catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
+        insertBeside(anchor, pane, orientation, false);
+        setActive(pane);
+        QTimer::singleShot(0, pane, [pane] { pane->focusInput(); });
+    }
+
+    void navigate(int key) {
+        Pane *current = m_active;
+        QWidget *page = current ? pageOf(current) : nullptr;
+        if (!page) return;
+        const QRect from(current->mapTo(page, QPoint(0, 0)), current->size());
+        Pane *best = nullptr;
+        double bestScore = 1e18;
+        for (Pane *pane : panesIn(page)) {
+            if (pane == current) continue;
+            const QRect to(pane->mapTo(page, QPoint(0, 0)), pane->size());
+            double gap = 0, offset = 0;
+            // A candidate must lie on the requested side; prefer the nearest, then the most aligned.
+            switch (key) {
+            case Qt::Key_Right: if (to.left() < from.right() - 4) continue; gap = to.left() - from.right(); offset = std::abs(to.center().y() - from.center().y()); break;
+            case Qt::Key_Left: if (to.right() > from.left() + 4) continue; gap = from.left() - to.right(); offset = std::abs(to.center().y() - from.center().y()); break;
+            case Qt::Key_Down: if (to.top() < from.bottom() - 4) continue; gap = to.top() - from.bottom(); offset = std::abs(to.center().x() - from.center().x()); break;
+            case Qt::Key_Up: if (to.bottom() > from.top() + 4) continue; gap = from.top() - to.bottom(); offset = std::abs(to.center().x() - from.center().x()); break;
+            default: continue;
+            }
+            const double score = std::max(0.0, gap) * 4 + offset;
+            if (score < bestScore) { bestScore = score; best = pane; }
+        }
+        if (best) { setActive(best); best->focusInput(); }
+    }
+
+    void closeActive() {
+        Pane *pane = m_active;
+        if (!pane) return;
+        QWidget *page = pageOf(pane);
+        if (panesIn(page).size() > 1) closePane(pane, true);
+        else if (m_tabs->count() > 1) closeTab(m_tabs->indexOf(page), true);
+        else closeWindowWithWarning();
+    }
+
+public:
+    void closePane(Pane *pane, bool record) {
+        QWidget *page = pageOf(pane);
+        if (!page) return;
+        if (panesIn(page).size() <= 1) {
+            // Last pane of its tab: close the tab, or the window when it is the last tab.
+            if (m_tabs->count() > 1) closeTab(m_tabs->indexOf(page), record);
+            else { if (record) { m_confirmedClose = true; } else { m_confirmedClose = true; m_skipRemember = true; } close(); }
+            return;
+        }
+        auto *splitter = dynamic_cast<QSplitter *>(pane->parentWidget());
+        if (!splitter) return;
+        const int index = splitter->indexOf(pane);
+        QWidget *neighbor = splitter->widget(index > 0 ? index - 1 : index + 1);
+        const auto neighborPanes = panesIn(neighbor);
+        Pane *focusNext = neighborPanes.isEmpty() ? nullptr : (index > 0 ? neighborPanes.last() : neighborPanes.first());
+        if (record && focusNext) {
+            ClosedItem item;
+            item.kind = ClosedItem::PaneItem; item.window = this; item.sibling = focusNext;
+            item.orientation = splitter->orientation(); item.before = index == 0;
+            item.layout = serializeNode(pane);
+            m_manager->remember(item);
+        }
+        pane->onStatus = nullptr; pane->onStateChanged = nullptr; pane->onShellExited = nullptr;
+        pane->hide();
+        pane->setParent(nullptr);
+        pane->deleteLater();
+        if (splitter->count() == 1) {
+            // Collapse a splitter that now holds a single child into its parent.
+            QWidget *only = splitter->widget(0);
+            QWidget *outerWidget = splitter->parentWidget();
+            if (auto *outer = dynamic_cast<QSplitter *>(outerWidget)) outer->replaceWidget(outer->indexOf(splitter), only);
+            else if (outerWidget && outerWidget->layout()) delete outerWidget->layout()->replaceWidget(splitter, only);
+            only->show();
+            splitter->hide();
+            splitter->deleteLater();
+        }
+        if (m_active == pane || !m_active) m_active = nullptr;
+        if (m_lastActive.value(page) == pane) m_lastActive.remove(page);
+        if (focusNext) { setActive(focusNext); focusNext->focusInput(); }
+        updateTitles();
+    }
+
+    void closeTab(int index, bool record) {
+        QWidget *page = m_tabs->widget(index);
+        if (!page) return;
+        if (record) {
+            ClosedItem item;
+            item.kind = ClosedItem::TabItem; item.window = this; item.index = index;
+            item.layout = serializeTab(index);
+            m_manager->remember(item);
+        }
+        for (Pane *pane : panesIn(page)) { pane->onStatus = nullptr; pane->onStateChanged = nullptr; pane->onShellExited = nullptr; }
+        if (m_active && pageOf(m_active) == page) m_active = nullptr;
+        m_lastActive.remove(page);
+        m_tabs->removeTab(index);
+        page->deleteLater();
+        if (m_tabs->count() == 0) { m_confirmedClose = true; close(); return; }
+        updateTitles();
+    }
+
+private:
+    bool confirmClose() {
+        const auto panes = allPanes();
+        const bool busy = std::any_of(panes.cbegin(), panes.cend(), [](Pane *p) { return p->agentBusy() || p->processBusy(); });
+        QString text = QStringLiteral("Close this window and its %1 tab(s) and %2 pane(s)?").arg(m_tabs->count()).arg(panes.size());
+        if (busy) text += QStringLiteral("\n\nA program or agent turn is still running and will be stopped.");
+        text += QStringLiteral("\n\nCtrl+Shift+W reopens it in the same directories, with new shells.");
+        return QMessageBox::warning(this, QStringLiteral("Close window?"), text,
+                                    QMessageBox::Close | QMessageBox::Cancel, QMessageBox::Cancel) == QMessageBox::Close;
+    }
+
+    void closeWindowWithWarning() {
+        if (!confirmClose()) return;
+        m_confirmedClose = true;
+        close();
+    }
+
+    void rememberWindow() {
+        if (m_skipRemember || m_tabs->count() == 0) return;
+        ClosedItem item;
+        item.kind = ClosedItem::WindowItem;
+        item.tabs = serializeTabs();
+        item.index = m_tabs->currentIndex();
+        item.geometry = geometry();
+        m_manager->remember(item);
+    }
+
+    WindowManager *m_manager;
+    QTabWidget *m_tabs = nullptr;
+    QComboBox *m_mode = nullptr, *m_modelPicker = nullptr;
+    QAction *m_nativeAction = nullptr;
+    QPointer<Pane> m_active;
+    QHash<QWidget *, QPointer<Pane>> m_lastActive;
+    bool m_confirmedClose = false, m_skipRemember = false;
+};
+
+RelayWindow *WindowManager::newWindow(const QJsonArray &tabs, int current, const QRect &geometry) {
+    auto *window = new RelayWindow(this);
+    relay::theme::polishWindow(window);
+    int added = 0;
+    for (const auto &tab : tabs) added += window->addTab(tab.toObject()) ? 1 : 0;
+    if (!added) { window->deleteLater(); return nullptr; }
+    if (geometry.isValid()) window->setGeometry(geometry);
+    m_windows.append(window);
+    window->show();
+    if (auto *tabsWidget = window->findChild<QTabWidget *>()) tabsWidget->setCurrentIndex(std::clamp(current, 0, tabsWidget->count() - 1));
+    window->raise(); window->activateWindow();
+    return window;
+}
+
+RelayWindow *WindowManager::newWindowAt(const QString &cwd) {
+    return newWindow(QJsonArray{QJsonObject{{"pane", QJsonObject{{"cwd", cwd}, {"workspace", m_workspace}}}}});
+}
+
+void WindowManager::cycle(RelayWindow *from, int delta) {
+    m_windows.removeAll(nullptr);
+    if (m_windows.size() < 2) return;
+    int index = m_windows.indexOf(from);
+    if (index < 0) index = 0;
+    RelayWindow *next = m_windows.at((index + delta + m_windows.size()) % m_windows.size());
+    next->showNormal(); next->raise(); next->activateWindow();
+}
+
+void WindowManager::restore(RelayWindow *requester) {
+    while (!m_closed.isEmpty()) {
+        ClosedItem item = m_closed.takeLast();
+        switch (item.kind) {
+        case ClosedItem::PaneItem:
+            if (item.window && item.sibling && item.window->restorePaneNextTo(item.sibling, item.orientation, item.before, item.layout)) return;
+            if (item.window) { item.window->addTab(item.layout); return; }
+            if (requester) { requester->addTab(item.layout); return; }
+            newWindow(QJsonArray{item.layout});
+            return;
+        case ClosedItem::TabItem:
+            if (item.window) { item.window->addTab(item.layout, item.index); return; }
+            newWindow(QJsonArray{item.layout});
+            return;
+        case ClosedItem::WindowItem:
+            newWindow(item.tabs, item.index, item.geometry);
+            return;
+        }
+    }
+    if (requester) requester->statusBar()->showMessage(QStringLiteral("Nothing to restore."));
+}
 
 int main(int argc, char **argv) {
     // Must precede QApplication: KDE platform plugins may open relayrc during construction.
@@ -1001,9 +1561,8 @@ int main(int argc, char **argv) {
     if (path.isEmpty() || !QFileInfo(path).isDir()) { QMessageBox::critical(nullptr, QStringLiteral("Relay"), QStringLiteral("Workspace must be an existing directory.")); return 1; }
     QDir::setCurrent(path);
     try {
-        RelayWindow window(path, parser.isSet(clean));
-        relay::theme::polishWindow(&window);
-        window.show();
+        WindowManager manager(path, parser.isSet(clean));
+        if (!manager.newWindowAt(path)) return 1;
         return app.exec();
     } catch (const std::exception &error) {
         QMessageBox::critical(nullptr, QStringLiteral("Relay could not start"), QString::fromUtf8(error.what()));
