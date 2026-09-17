@@ -1,0 +1,239 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "VTermBackend.h"
+
+#include "session/TerminalSession.h"
+#include "view/TerminalView.h"
+
+#include <QDir>
+#include <QFileInfo>
+#include <QHBoxLayout>
+#include <QScrollBar>
+
+namespace relay {
+
+VTermBackend::VTermBackend(const QString &coreName, QWidget *parent)
+    : QObject(parent)
+{
+    m_container = new QWidget(parent);
+    m_session = new TerminalSession(coreName, this);
+    m_view = new TerminalView(m_session, m_container);
+    m_scrollBar = new QScrollBar(Qt::Vertical, m_container);
+    auto *layout = new QHBoxLayout(m_container);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    layout->addWidget(m_view, 1);
+    layout->addWidget(m_scrollBar);
+    m_container->setFocusProxy(m_view);
+
+    // The container owns the widgets; the backend (with its session and shell)
+    // dies with the container unless the host deletes the backend first.
+    connect(m_container, &QObject::destroyed, this, [this] {
+        m_container = nullptr;
+        m_view = nullptr;
+        m_scrollBar = nullptr;
+        deleteLater();
+    });
+
+    connect(m_view, &TerminalView::scrollPositionChanged, this, [this](int top, int history, int rows) {
+        m_updatingScrollBar = true;
+        m_scrollBar->setRange(0, history);
+        m_scrollBar->setPageStep(rows);
+        m_scrollBar->setValue(top);
+        m_updatingScrollBar = false;
+    });
+    connect(m_scrollBar, &QScrollBar::valueChanged, this, [this](int value) {
+        if (!m_updatingScrollBar && m_view)
+            m_view->scrollToRow(value);
+    });
+    connect(m_view, &TerminalView::linkActivated, this, [this](const QString &target, int line, int column) {
+        if (onLinkActivated)
+            onLinkActivated(target, line, column);
+    });
+    connect(m_view, &TerminalView::bellRang, this, [this] {
+        if (onBell)
+            onBell();
+    });
+    connect(m_session, &TerminalSession::titleChanged, this, [this](const QString &t) {
+        if (onTitleChanged)
+            onTitleChanged(t);
+    });
+    connect(m_session, &TerminalSession::cwdChanged, this, [this](const QString &path, const QString &) {
+        if (onCwdChanged)
+            onCwdChanged(path);
+    });
+    connect(m_session, &TerminalSession::altScreenChanged, this, [this](bool a) {
+        if (onAltScreenChanged)
+            onAltScreenChanged(a);
+    });
+    connect(m_session, &TerminalSession::promptMark, this, [this](PromptMark k, int, int exitCode) {
+        if (!onPromptMark)
+            return;
+        const char kind = k == MarkPromptStart ? 'A' : k == MarkCommandStart ? 'B' : k == MarkOutputStart ? 'C' : 'D';
+        onPromptMark(kind, exitCode);
+    });
+    connect(m_session, &TerminalSession::output, this, [this](const QByteArray &b) {
+        if (onOutput)
+            onOutput(b);
+    });
+    connect(m_session, &TerminalSession::finished, this, [this](int code) {
+        if (onFinished)
+            onFinished(code);
+    });
+}
+
+VTermBackend::~VTermBackend()
+{
+    delete m_container; // view first, then the session (child QObject) with its PTY thread
+}
+
+bool VTermBackend::startProgram(const QString &program, const QStringList &args, const QString &workingDirectory,
+                                const QStringList &extraEnvironment)
+{
+    TerminalSession::StartOptions o;
+    o.program = program;
+    o.arguments = args;
+    o.workingDirectory = workingDirectory;
+    o.environment = extraEnvironment;
+    return m_session->start(o);
+}
+
+void VTermBackend::sendInput(const QByteArray &bytes) { m_session->sendInput(bytes); }
+
+void VTermBackend::sendText(const QString &text, bool asPaste)
+{
+    if (asPaste)
+        m_session->withCore([&](VtCore &c) { c.paste(text); });
+    else
+        m_session->withCore([&](VtCore &c) { c.sendText(text); });
+}
+
+qint64 VTermBackend::shellPid() const { return m_session->shellPid(); }
+qint64 VTermBackend::foregroundProcessId() const { return m_session->foregroundPid(); }
+bool VTermBackend::isRunning() const { return m_session->isRunning(); }
+
+void VTermBackend::writeToDisplay(const QByteArray &bytes) { m_session->writeToDisplay(bytes); }
+
+void VTermBackend::redrawPrompt()
+{
+    if (!m_redrawSequence.isEmpty())
+        m_session->sendInput(m_redrawSequence);
+}
+
+int VTermBackend::capabilities() const
+{
+    return ScreenText | Scrollback | AltScreenState | LinkClicks | Osc8Links | PromptMarks | CwdTracking | DisplayInjection
+        | Search | ScrollControl;
+}
+
+QString VTermBackend::screenText() const { return m_session->screenText(); }
+QStringList VTermBackend::scrollbackText(int maxLines) const { return m_session->scrollbackText(maxLines); }
+bool VTermBackend::altScreen() const { return m_session->altScreen(); }
+int VTermBackend::rows() const { return m_session->rows(); }
+int VTermBackend::columns() const { return m_session->columns(); }
+QString VTermBackend::title() const { return m_session->title(); }
+
+QString VTermBackend::currentDirectory() const
+{
+    const QString osc7 = m_session->currentDirectory();
+    if (!osc7.isEmpty())
+        return osc7;
+#if defined(Q_OS_LINUX)
+    qint64 pid = m_session->foregroundPid();
+    if (pid <= 0)
+        pid = m_session->shellPid();
+    if (pid > 0)
+        return QFileInfo(QStringLiteral("/proc/%1/cwd").arg(pid)).symLinkTarget();
+#endif
+    return QString();
+}
+
+void VTermBackend::resizeTerminal(int rows, int columns)
+{
+    if (!m_view)
+        return;
+    const QSize grid = m_view->sizeForGrid(rows, columns);
+    m_view->setMinimumSize(grid);
+    m_view->resize(grid);
+    m_container->resize(grid.width() + m_scrollBar->sizeHint().width(), grid.height());
+    m_view->setMinimumSize(QSize(m_view->cellWidth() * 2, m_view->cellHeight()));
+}
+
+QWidget *VTermBackend::widget() { return m_container; }
+QWidget *VTermBackend::focusWidget() { return m_view; }
+
+// The methods below are no-ops once the host destroyed widget().
+void VTermBackend::setTerminalFont(const QFont &font)
+{
+    if (m_view)
+        m_view->setTerminalFont(font);
+}
+
+void VTermBackend::copySelection()
+{
+    if (m_view)
+        m_view->copySelection();
+}
+
+void VTermBackend::paste()
+{
+    if (m_view)
+        m_view->pasteClipboard();
+}
+
+QString VTermBackend::selectedText() const
+{
+    return m_session->withCore([](VtCore &c) { return c.selectedText(); });
+}
+
+void VTermBackend::selectAll()
+{
+    if (m_view)
+        m_view->selectAll();
+}
+
+void VTermBackend::clearScrollback()
+{
+    m_session->withCore([](VtCore &c) { c.clearScrollback(); });
+    if (m_view)
+        m_view->scrollToBottom();
+}
+
+void VTermBackend::clear()
+{
+    m_session->withCore([](VtCore &c) { c.clearScrollback(); });
+    m_session->writeToDisplay(QByteArrayLiteral("\x1b[H\x1b[2J"));
+    if (m_view)
+        m_view->scrollToBottom();
+}
+
+void VTermBackend::scrollLines(int lines)
+{
+    if (m_view)
+        m_view->scrollLines(lines);
+}
+
+void VTermBackend::scrollPages(int pages)
+{
+    if (m_view)
+        m_view->scrollPages(pages);
+}
+
+void VTermBackend::scrollToBottom()
+{
+    if (m_view)
+        m_view->scrollToBottom();
+}
+
+bool VTermBackend::scrollToPrompt(int direction)
+{
+    return m_view && m_view->scrollToPrompt(direction);
+}
+
+int VTermBackend::find(const QString &text, bool backwards)
+{
+    return m_view ? m_view->find(text, backwards) : 0;
+}
+
+void VTermBackend::setOutputCallbackEnabled(bool enabled) { m_session->setOutputSignalEnabled(enabled); }
+
+} // namespace relay

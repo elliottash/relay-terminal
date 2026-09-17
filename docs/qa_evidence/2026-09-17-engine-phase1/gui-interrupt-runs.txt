@@ -1,0 +1,9 @@
+ghostty ctrl+c->cat exit: .031979812 s
+libvterm ctrl+c->cat exit: .031593842 s
+konsole ctrl+c->cat exit: .031339520 s
+ghostty ctrl+c->cat exit: .030751805 s
+libvterm ctrl+c->cat exit: .030917853 s
+konsole ctrl+c->cat exit: .032510464 s
+ghostty ctrl+c->cat exit: .030721451 s
+libvterm ctrl+c->cat exit: .032480382 s
+konsole ctrl+c->cat exit: .031676651 s

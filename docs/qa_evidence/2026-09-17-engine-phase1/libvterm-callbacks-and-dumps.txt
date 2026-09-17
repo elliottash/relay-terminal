@@ -1,0 +1,251 @@
+CALLBACK cwdChanged /tmp/claude-1000/-home-elliott-repos-relay-terminal/ea11ece1-7ec2-4597-8639-32fb1f43f073/scratchpad/scen/work
+CALLBACK linkActivated https://example.com/docs line=-1 col=-1
+CALLBACK linkActivated /tmp/claude-1000/-home-elliott-repos-relay-terminal/ea11ece1-7ec2-4597-8639-32fb1f43f073/scratchpad/scen/work/big.txt line=42 col=7
+CALLBACK linkActivated https://relay.test/x line=-1 col=-1
+CALLBACK promptMark A exit=-1
+===== DUMP =====
+core=libvterm rows=32 cols=110 altScreen=0 history=0 viewportTop=0 cursor=12,10 fgpid=2459986 bytes=1397 paints=431
+title= cwd=/tmp/claude-1000/-home-elliott-repos-relay-terminal/ea11ece1-7ec2-4597-8639-32fb1f43f073/scratchpad/scen/work
+--- historyText(5) ---
+
+--- screenText() ---
+OSC8-link big.txt:42:7 https://relay.test/x
+bash-5.2$ printf "\e]133;A\a"; ls -la --color=always
+total 92
+drwxrwxr-x 2 elliott elliott  4096 Sep 17 10:41 .
+drwxrwxr-x 3 elliott elliott  4096 Sep 17 10:41 ..
+-rw-rw-r-- 1 elliott elliott 83893 Sep 17 10:41 big.txt
+bash-5.2$ printf "\e[1mbold\e[0m \e[3mitalic\e[0m \e[4munder\e[0m \e[4:3mcurly\e[0m \e[7mreverse\e[0m \e[9mstr
+ike\e[0m \e[2mfaint\e[0m \e[38;5;208m256-orange\e[0m \e[48;2;120;40;160mtruecolor-bg\e[0m\n"
+bold italic under curly reverse strike faint 256-orange truecolor-bg
+bash-5.2$ printf "CJK: 漢字한글| emoji: \U1F389\U1F44D\U1F3FD\U1F468‍\U1F469‍\U1F467| flag: \U1F1EF\U1F1F5| é| b
+ox: ┌─┬─┐ ╔═╗ ▀▄█░▒▓\n"
+CJK: 漢字한글| emoji: 🎉👍🏽👨‍👩‍👧| flag: 🇯🇵| é| box: ┌─┬─┐ ╔═╗ ▀▄█░▒▓
+bash-5.2$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+CALLBACK altScreenChanged 1
+===== DUMP =====
+core=libvterm rows=17 cols=63 altScreen=1 history=1 viewportTop=1 cursor=1,26 fgpid=2460836 bytes=10611 paints=503
+title= cwd=/tmp/claude-1000/-home-elliott-repos-relay-terminal/ea11ece1-7ec2-4597-8639-32fb1f43f073/scratchpad/scen/work
+--- historyText(5) ---
+OSC8-link big.txt:42:7 https://relay.test/x
+--- screenText() ---
+hello from relay engine
+second line with tab    end
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+
+CALLBACK altScreenChanged 0
+===== DUMP =====
+core=libvterm rows=37 cols=119 altScreen=0 history=0 viewportTop=0 cursor=16,10 fgpid=2459986 bytes=15261 paints=529
+title= cwd=/tmp/claude-1000/-home-elliott-repos-relay-terminal/ea11ece1-7ec2-4597-8639-32fb1f43f073/scratchpad/scen/work
+--- historyText(5) ---
+
+--- screenText() ---
+OSC8-link big.txt:42:7 https://relay.test/x
+bash-5.2$ printf "\e]133;A\a"; ls -la --color=always
+total 92
+drwxrwxr-x 2 elliott elliott  4096 Sep 17 10:41 .
+drwxrwxr-x 3 elliott elliott  4096 Sep 17 10:41 ..
+-rw-rw-r-- 1 elliott elliott 83893 Sep 17 10:41 big.txt
+bash-5.2$ printf "\e[1mbold\e[0m \e[3mitalic\e[0m \e[4munder\e[0m \e[4:3mcurly\e[0m \e[7mreverse\e[0m \e[9mstrike\e[0m
+\e[2mfaint\e[0m \e[38;5;208m256-orange\e[0m \e[48;2;120;40;160mtruecolor-bg\e[0m\n"
+bold italic under curly reverse strike faint 256-orange truecolor-bg
+bash-5.2$ printf "CJK: 漢字한글| emoji: \U1F389\U1F44D\U1F3FD\U1F468‍\U1F469‍\U1F467| flag: \U1F1EF\U1F1F5| é| box: ┌─┬─┐
+ ╔═╗ ▀▄█░▒▓\n"
+CJK: 漢字한글| emoji: 🎉👍🏽👨‍👩‍👧| flag: 🇯🇵| é| box: ┌─┬─┐ ╔═╗ ▀▄█░▒▓
+bash-5.2$ vim -u NONE -N vimtest.txt
+bash-5.2$ cat -A vimtest.txt
+hello from relay engine$
+second line with tab^Iend$
+bash-5.2$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+CALLBACK altScreenChanged 1
+===== DUMP =====
+core=libvterm rows=37 cols=119 altScreen=1 history=0 viewportTop=0 cursor=36,1 fgpid=2461567 bytes=19524 paints=562
+title= cwd=/tmp/claude-1000/-home-elliott-repos-relay-terminal/ea11ece1-7ec2-4597-8639-32fb1f43f073/scratchpad/scen/work
+--- historyText(5) ---
+
+--- screenText() ---
+line number 4242
+line number 4243
+line number 4244
+line number 4245
+line number 4246
+line number 4247
+line number 4248
+line number 4249
+line number 4250
+line number 4251
+line number 4252
+line number 4253
+line number 4254
+line number 4255
+line number 4256
+line number 4257
+line number 4258
+line number 4259
+line number 4260
+line number 4261
+line number 4262
+line number 4263
+line number 4264
+line number 4265
+line number 4266
+line number 4267
+line number 4268
+line number 4269
+line number 4270
+line number 4271
+line number 4272
+line number 4273
+line number 4274
+line number 4275
+line number 4276
+line number 4277
+:
+CALLBACK altScreenChanged 0
+CALLBACK altScreenChanged 1
+CALLBACK altScreenChanged 0
+CALLBACK altScreenChanged 1
+===== DUMP =====
+core=libvterm rows=37 cols=119 altScreen=1 history=0 viewportTop=0 cursor=35,118 fgpid=2462255 bytes=45440 paints=702
+title= cwd=/tmp/claude-1000/-home-elliott-repos-relay-terminal/ea11ece1-7ec2-4597-8639-32fb1f43f073/scratchpad/scen/work
+--- historyText(5) ---
+
+--- screenText() ---
+/scen/work$ ls --color=always -la                          │line number 1
+total 96                                                   │line number 2
+drwxrwxr-x 2 elliott elliott  4096 Sep 17 10:41 .          │line number 3
+drwxrwxr-x 3 elliott elliott  4096 Sep 17 10:41 ..         │line number 4
+-rw-rw-r-- 1 elliott elliott 83893 Sep 17 10:41 big.txt    │line number 5
+-rw-rw-r-- 1 elliott elliott    49 Sep 17 10:41 vimtest.txt│line number 6
+elliott@spark-dcc9:/tmp/claude-1000/-home-elliott-repos-rel│line number 7
+elliott@spark-dcc9:/tmp/claude-1000/-home-elliott-repos-rel│line number 8
+ay-terminal/ea11ece1-7ec2-4597-8639-32fb1f43f073/scratchpad│line number 9
+/scen/work$                                                │line number 10
+                                                           │line number 11
+                                                           │line number 12
+                                                           │line number 13
+                                                           │line number 14
+                                                           │line number 15
+                                                           │line number 16
+                                                           │line number 17
+                                                           │
+                                                           ├───────────────────────────────────────────────────────────
+                                                           │
+                                                           │    0[1]   3[1]   6[1]   9[1]  10[9]  13[1]  16[1]  19[1]
+                                                           │    1[2]   4[1]   7[1]         11[1]  14[1]  17[2]
+                                                           │    2[1]   5[3]   8[1]         12[1]  15[2]  18[1]
+                                                           │  Mem[||||||||||||65.6G/122G] Tasks: 258, 1979 thr, 293 k
+                                                           │  Swp[|||        1.20G/16.0G] Load average: 4.91 5.18 5.2
+                                                           │                              Uptime: 16:02:46
+                                                           │
+                                                           │  [Main] [I/O]
+                                                           │    PID USER       PRI  NI  VIRT   RES   SHR S  CPU%▽MEM%
+                                                           │2435548 elliott     20   0 40.5G 26.0G  101M R 102.3 21.4
+                                                           │2449044 elliott     20   0 40.5G 21.9G  101M R 102.3 18.0
+                                                           │ 373602 elliott     20   0 53.1G  298M  210M R  88.5  0.2 2
+                                                           │2160190 elliott     20   0 1534G 1515M  242M R  23.0  1.2
+                                                           │2367633 elliott     20   0 52.4G 99.9M 86088 R  14.4  0.1
+                                                           │ 976520 elliott     20   0 13.9G 3733M  461M S  13.8  3.0 4
+                                                           │F1Help  F2Setup F3SearchF4FilterF5Tree  F6SortByF7Nice -F8N
+[engine] 0:htop*                                                                           "spark-dcc9" 10:41 17-Sep-26
+CALLBACK altScreenChanged 0
+===== DUMP =====
+core=libvterm rows=37 cols=119 altScreen=0 history=269 viewportTop=269 cursor=36,10 fgpid=2459986 bytes=47439 paints=764
+title= cwd=/tmp/claude-1000/-home-elliott-repos-relay-terminal/ea11ece1-7ec2-4597-8639-32fb1f43f073/scratchpad/scen/work
+--- historyText(5) ---
+265
+266
+267
+268
+269
+--- screenText() ---
+270
+271
+272
+273
+274
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+bash-5.2$ echo one Ytwo Xthree
+one Ytwo Xthree
+bash-5.2$ cat -v
+^[[15~^[[24~^[[A^[[H^[[1;2A^[[1;5C^[x
+^[[15~^[[24~^[[A^[[H^[[1;2A^[[1;5C^[x
+bash-5.2$
+CALLBACK bell

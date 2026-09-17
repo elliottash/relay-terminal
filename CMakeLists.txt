@@ -93,8 +93,10 @@ if(RELAY_BUILD_APP)
     include(packaging/cpack.cmake)
 endif()
 
-option(RELAY_BUILD_ENGINE_SPIKE "Build the experimental libvterm engine spike (relay-vterm-spike)" OFF)
-if(RELAY_BUILD_ENGINE_SPIKE)
+# Relay-owned terminal engine (engine/, docs/ENGINE.md). Not used by the app yet.
+option(RELAY_BUILD_ENGINE "Build the Relay terminal engine library, harness, bench and tests" OFF)
+option(RELAY_BUILD_ENGINE_SPIKE "Deprecated alias for RELAY_BUILD_ENGINE" OFF)
+if(RELAY_BUILD_ENGINE OR RELAY_BUILD_ENGINE_SPIKE)
     add_subdirectory(engine)
 endif()
 
