@@ -54,6 +54,12 @@ class Agent:
         skills_note = self.executor.skills.prompt_section() if self.executor.skills is not None else ""
         self.messages = [{"role": "system", "content": SYSTEM + "\nChosen workspace: " + str(self.executor.workspace.root) + skills_note}]
         self.max_steps = max_steps
+        # --- subagents (relay_core.subagents) ---
+        # subagents: SubagentManager giving this main agent the agent tools; None for subagents (no nesting).
+        # inbox: object with drain()/restore(); its notes are added before each model call.
+        self.subagents = None
+        self.inbox = None
+        # --- end subagents ---
 
     def stop(self):
         self.cancel_event.set()
@@ -70,17 +76,29 @@ class Agent:
         checkpoint = len(self.messages)
         self.messages.append({"role": "user", "content": note + prompt})
         calls_used = 0
+        delivered: list[str] = []  # subagents: inbox notes to restore if this turn is rolled back
+        batch = None               # subagents: `agent` calls started for the current response
         try:
             for step in range(self.max_steps):
                 if self.cancel_event.is_set():
                     raise Cancelled("Stopped.")
+                # --- subagents: background results and messages arrive at a step boundary ---
+                if self.inbox is not None:
+                    notes = self.inbox.drain()
+                    if notes:
+                        delivered += notes
+                        self.messages.append({"role": "user", "content": "\n\n".join(notes)})
+                # --- end subagents ---
                 self.emit({"event": "status", "text": f"Requesting model · step {step + 1}/{self.max_steps}"})
-                message = self.provider.complete(self.messages, self.executor.tools(), self.emit, self.cancel_event)
+                tools = self.executor.tools() + (self.subagents.tool_specs() if self.subagents is not None else [])
+                message = self.provider.complete(self.messages, tools, self.emit, self.cancel_event)
                 self.messages.append(message)
                 calls = message.get("tool_calls", [])
                 if not calls:
                     self.emit({"event": "done"})
                     return
+                # subagents: start every `agent` call of this response together so they run concurrently.
+                batch = self.subagents.start_batch(calls, 24 - calls_used) if self.subagents is not None else None
                 for call in calls:
                     if self.cancel_event.is_set():
                         raise Cancelled("Stopped.")
@@ -91,6 +109,14 @@ class Agent:
                     else:
                         try:
                             args = json.loads(func["arguments"])
+                            if batch is not None and self.subagents.handles(func["name"]):
+                                self.emit({"event": "tool_started", "tool": func["name"],
+                                           "preview": self.subagents.preview(func["name"], args)})
+                                result = self.subagents.run_tool(func["name"], args, call["id"], batch, self.cancel_event)
+                                self.messages.append({"role": "tool", "tool_call_id": call["id"],
+                                                      "content": json.dumps(result, ensure_ascii=False)})
+                                self.emit({"event": "tool_result", "tool": func["name"], "result": result})
+                                continue
                             prepared = self.executor.prepare(func["name"], args)
                             self.emit({"event": "tool_started", "tool": prepared.name, "preview": prepared.preview})
                             result = self.executor.execute(prepared)
@@ -101,11 +127,20 @@ class Agent:
                     self.emit({"event": "tool_result", "tool": func["name"], "result": result})
             self.emit({"event": "error", "text": "Stopped at the model-step limit. Review completed actions before continuing."})
         except Cancelled:
+            self._subagents_rollback(batch, delivered)
             # Avoid retaining an incomplete tool-call group, which breaks many providers.
             self.messages = self.messages[:checkpoint]
             self.messages.append({"role": "user", "content": "The previous turn was cancelled. It may already have executed tool actions. Reinspect state before further changes."})
             self.emit({"event": "cancelled"})
         except Exception as exc:
+            self._subagents_rollback(batch, delivered)
             self.messages = self.messages[:checkpoint]
             self.messages.append({"role": "user", "content": "The previous turn failed. Some tool actions may already have executed. Reinspect state before further changes."})
             self.emit({"event": "error", "text": str(exc)[:2000] if isinstance(exc, (ValueError, ProviderError)) else f"Agent error ({type(exc).__name__})."})
+
+    def _subagents_rollback(self, batch, delivered) -> None:
+        """Subagents: a rolled-back turn stops its foreground subagents and keeps undelivered results."""
+        if batch and self.subagents is not None:
+            self.subagents.release_batch(batch)
+        if delivered and self.inbox is not None:
+            self.inbox.restore(delivered)
