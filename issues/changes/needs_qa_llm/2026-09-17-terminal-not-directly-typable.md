@@ -1,12 +1,18 @@
+---
+id: AHS5
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: desktop-alpha
+workstream: terminal
+assignee: implemented by Claude Opus 5 (1M context) (Claude Code session), 2026-09-17
+rank: r1
+created: '2026-09-17'
+acceptance: '`docs/qa_evidence/2026-09-17-prompt-box-only-input/` (implementer run, both engines); a non-Claude model QA session runs the checklist below and records it there'
+source: '`issues/feature_intake.txt`, 2026-09-17: "you shouldnt be able to click into the terminal and type there. it should be like warp where the prompt box is the input."'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # The prompt box is the only input; clicking the terminal does not type into it
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: `docs/qa_evidence/2026-09-17-prompt-box-only-input/` (implementer run, both engines); a non-Claude model QA session runs the checklist below and records it there
-- **Assignee**: implemented by Claude Opus 5 (1M context) (Claude Code session), 2026-09-17
-- **Source**: `issues/feature_intake.txt`, 2026-09-17: "you shouldnt be able to click into the terminal and type there. it should be like warp where the prompt box is the input."
 
 ## Today
 

@@ -1,12 +1,17 @@
+---
+id: SSRQ
+type: work
+status: ready
+component: [worker]
+milestone: post-mvp
+workstream: agent
+rank: '58'
+created: '2026-09-17'
+acceptance: a configured MCP server's tools are available to pane agents
+source: '`issues/feature_intake.txt`, 2026-09-17: "MCPs?"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # MCP server support
-
-- **Status**: open
-- **Component**: worker
-- **Milestone**: post-mvp
-- **Workstream**: agent
-- **Acceptance evidence**: a configured MCP server's tools are available to pane agents
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, 2026-09-17: "MCPs?"
 
 ## Notes
 Possibly configured in the global Switchboard (TASKS-AND-MEMORY-DESIGN.md section 9, decision 6).

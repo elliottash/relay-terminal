@@ -1,17 +1,18 @@
+---
+id: CW8D
+type: work
+status: needs-qa-llm
+component: [router, worker, agent, providers]
+milestone: desktop-alpha
+workstream: routing, agent (F2, backend)
+assignee: implemented by Claude Opus 5 (Claude Code, backend F2 worktree), 2026-09-17
+rank: ur
+created: '2026-09-17'
+acceptance: '`tests/test_routing_thinking_skills.py` (25 tests), updated `tests/test_provider.py`, live run in `docs/qa_evidence/2026-09-17-routing-thinking-skills/NOTES.md`'
+source: '`docs/AGENT-SESSIONS-PROTOCOL.md` section 11. Owner: "make sure we have a perfect list of shell commands, that also updates automatically based on what programs you have. lets make an inclusive list of commands that are often used in natural language, eg go, install, etc -- in those cases, the agent reads your command and guesses whether you meant terminal or an agent" (model-assisted routing approved); thinking and tool calls must be easy to observe; skills can be refined and imported with review.'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Backend: routing assist, thinking events, turn records, skill refine and import
-
-- **Status**: needs-qa-llm
-- **Component**: router, worker, agent, providers
-- **Milestone**: desktop-alpha
-- **Workstream**: routing, agent (F2, backend)
-- **Acceptance evidence**: `tests/test_routing_thinking_skills.py` (25 tests), updated `tests/test_provider.py`,
-  live run in `docs/qa_evidence/2026-09-17-routing-thinking-skills/NOTES.md`
-- **Assignee**: implemented by Claude Opus 5 (Claude Code, backend F2 worktree), 2026-09-17
-- **Source**: `docs/AGENT-SESSIONS-PROTOCOL.md` section 11. Owner: "make sure we have a perfect list of shell
-  commands, that also updates automatically based on what programs you have. lets make an inclusive list of
-  commands that are often used in natural language, eg go, install, etc -- in those cases, the agent reads your
-  command and guesses whether you meant terminal or an agent" (model-assisted routing approved); thinking and tool
-  calls must be easy to observe; skills can be refined and imported with review.
 
 ## Behavior
 

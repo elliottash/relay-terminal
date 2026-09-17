@@ -1,13 +1,17 @@
+---
+id: 90JF
+type: work
+status: needs-qa-llm
+component: [router, gui]
+milestone: desktop-alpha
+workstream: routing
+rank: i1
+created: '2026-09-17'
+acceptance: router unit tests for each check, plus a GUI run showing the indicator for a runnable command, a missing command and a syntax error
+source: '`issues/feature_intake.txt`, "can you parse the terminal code before i send it, to check it will run, and if not,"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Check that a terminal command will run before it is sent
-
-- **Status**: needs-qa-llm
-- **Component**: router, gui
-- **Milestone**: desktop-alpha
-- **Workstream**: routing
-- **Acceptance evidence**: router unit tests for each check, plus a GUI run showing the indicator
-  for a runnable command, a missing command and a syntax error
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, "can you parse the terminal code before i send it, to check it will run, and if not,"
 
 ## Context
 

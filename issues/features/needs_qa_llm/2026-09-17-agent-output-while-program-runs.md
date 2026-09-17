@@ -1,12 +1,18 @@
+---
+id: BPK3
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: desktop-alpha
+workstream: agent
+assignee: implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17
+rank: b1
+created: '2026-09-17'
+acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
+source: owner report 2026-09-17 ("i opened vim, went into agent mode, and said 'type something interesting', but nothing happened"); owner approved the fix
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Show agent output live while a program owns the terminal
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Workstream**: agent
-- **Milestone**: desktop-alpha
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17
-- **Acceptance evidence**: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
-- **Source**: owner report 2026-09-17 ("i opened vim, went into agent mode, and said 'type something interesting', but nothing happened"); owner approved the fix
 
 ## Behavior as implemented
 

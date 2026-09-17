@@ -1,12 +1,18 @@
+---
+id: WGAR
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: desktop-alpha
+workstream: agent
+assignee: implemented by Claude Opus 5 (Claude Code), 2026-09-17; reworked into Tasks the same day
+rank: t1
+created: '2026-09-17'
+acceptance: a non-Claude model QA session on a real desktop runs the checklist and records it under `docs/qa_evidence/`
+source: '`docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md` section 6 item 6 and section 9; contract `docs/AGENT-SESSIONS-PROTOCOL.md` section 12 (backend commit 8a18a11)'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Tasks UI: Tasks 3/5 chip, task list, Continue after the step limit, end-of-turn task line
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Milestone**: desktop-alpha
-- **Workstream**: agent
-- **Acceptance evidence**: a non-Claude model QA session on a real desktop runs the checklist and records it under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (Claude Code), 2026-09-17; reworked into Tasks the same day
-- **Source**: `docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md` section 6 item 6 and section 9; contract `docs/AGENT-SESSIONS-PROTOCOL.md` section 12 (backend commit 8a18a11)
 
 ## Rework: Tasks (owner request, 2026-09-17)
 

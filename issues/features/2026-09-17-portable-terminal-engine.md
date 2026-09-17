@@ -1,12 +1,17 @@
+---
+id: YJK8
+type: work
+status: ready
+component: [gui]
+milestone: cross-platform
+workstream: terminal
+rank: 5t
+created: '2026-09-17'
+acceptance: Relay runs on macOS and Windows with tabs, panes, composer, inline agent output and clickable paths
+source: 'owner, 2026-09-17: "relay having to work on mac and windows (not necessarily now)"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Portable terminal engine for macOS and Windows
-
-- **Status**: open
-- **Component**: gui
-- **Milestone**: cross-platform
-- **Workstream**: terminal
-- **Acceptance evidence**: Relay runs on macOS and Windows with tabs, panes, composer, inline agent output and clickable paths
-- **Assignee**: unassigned
-- **Source**: owner, 2026-09-17: "relay having to work on mac and windows (not necessarily now)"
 
 ## Context
 

@@ -1,12 +1,17 @@
+---
+id: EM1E
+type: work
+status: ready
+component: [gui, worker]
+milestone: desktop-alpha
+workstream: agent
+rank: '42'
+created: '2026-09-17'
+acceptance: an image pasted or dropped into the composer reaches the model; on GLM 5.3 the turn is sent to GLM 5.3 Flash automatically; presets without vision say so instead of failing
+source: '`issues/feature_intake.txt`, 2026-09-17: "we need image context (glm 5.3 swaps to glm 5.3 flash for that)"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Image context in agent prompts
-
-- **Status**: open
-- **Component**: gui, worker
-- **Milestone**: desktop-alpha
-- **Workstream**: agent
-- **Acceptance evidence**: an image pasted or dropped into the composer reaches the model; on GLM 5.3 the turn is sent to GLM 5.3 Flash automatically; presets without vision say so instead of failing
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, 2026-09-17: "we need image context (glm 5.3 swaps to glm 5.3 flash for that)"
 
 ## Open questions
 1. Inputs: paste, drag-and-drop, file path, and a "screenshot this pane" action?

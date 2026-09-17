@@ -1,12 +1,18 @@
+---
+id: ZK66
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: desktop-alpha
+workstream: terminal
+assignee: implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17
+rank: q4
+created: '2026-09-17'
+acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
+source: '`issues/feature_intake.txt` ("have an option for ''agent stays in control with programs'', and also allow that to be set separately by program")'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # "Agent stays in control" option, per program
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Workstream**: terminal
-- **Milestone**: desktop-alpha
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17
-- **Acceptance evidence**: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
-- **Source**: `issues/feature_intake.txt` ("have an option for 'agent stays in control with programs', and also allow that to be set separately by program")
 
 ## Behavior as implemented
 

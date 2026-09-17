@@ -1,14 +1,18 @@
+---
+id: 4WHD
+type: work
+status: needs-qa-llm
+component: [worker, gui]
+milestone: desktop-alpha
+workstream: agent
+assignee: implemented by Claude Opus 5 (Claude Code, model-roles worktree), 2026-09-17
+rank: mn
+created: '2026-09-17'
+acceptance: '`tests/test_roles.py` (25 tests, `./scripts/test.sh` 298 total), live worker and GUI runs in `docs/qa_evidence/2026-09-17-model-roles/`'
+source: '`issues/features/needs_qa_llm/2026-09-17-model-roles-and-fast-agent.md` (owner in chat, 2026-09-17), `docs/AGENT-SESSIONS-PROTOCOL.md` section 13'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Model roles: a configurable model per job, fast agent in panes
-
-- **Status**: needs-qa-llm
-- **Component**: worker, gui
-- **Milestone**: desktop-alpha
-- **Workstream**: agent
-- **Acceptance evidence**: `tests/test_roles.py` (25 tests, `./scripts/test.sh` 298 total), live worker and GUI runs in
-  `docs/qa_evidence/2026-09-17-model-roles/`
-- **Assignee**: implemented by Claude Opus 5 (Claude Code, model-roles worktree), 2026-09-17
-- **Source**: `issues/features/needs_qa_llm/2026-09-17-model-roles-and-fast-agent.md` (owner in chat, 2026-09-17),
-  `docs/AGENT-SESSIONS-PROTOCOL.md` section 13
 
 ## Behavior
 

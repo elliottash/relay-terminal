@@ -1,12 +1,18 @@
+---
+id: KJ44
+type: work
+status: in-progress
+component: [agent, worker, gui]
+milestone: desktop-alpha
+workstream: agent
+assignee: Claude Opus 5 (orchestrating) with subagents, 2026-09-17
+rank: '15'
+created: '2026-09-17'
+acceptance: per-workstream issues filed by the implementing agents, each with implementer evidence and a QA checklist
+source: '`docs/AGENT-FEATURES-RESEARCH.md` recommendations and `issues/feature_intake.txt` (2026-09-17): "how to open files by typing their names, maybe @? any file that can be previewed in a pane will then start showing up with a type text filter."; "command suggestion (see how warp / claude do this)"; "add claude style recaps"; "allow queueing of terminal commands and agent commands -- make them colored or show up differently in the queue eg a different icon."; "dont hide the prompt box when any program is running, eg sudo apt upgrade, so i can queue agent / terminal commands. i would say, only hide the prompt box for full screen apps and for password input."'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Agent sessions, planning, instructions, subagents, suggestions and unified queue
-
-- **Status**: in-progress
-- **Component**: agent, worker, gui
-- **Milestone**: desktop-alpha
-- **Workstream**: agent
-- **Acceptance evidence**: per-workstream issues filed by the implementing agents, each with implementer evidence and a QA checklist
-- **Assignee**: Claude Opus 5 (orchestrating) with subagents, 2026-09-17
-- **Source**: `docs/AGENT-FEATURES-RESEARCH.md` recommendations and `issues/feature_intake.txt` (2026-09-17): "how to open files by typing their names, maybe @? any file that can be previewed in a pane will then start showing up with a type text filter."; "command suggestion (see how warp / claude do this)"; "add claude style recaps"; "allow queueing of terminal commands and agent commands -- make them colored or show up differently in the queue eg a different icon."; "dont hide the prompt box when any program is running, eg sudo apt upgrade, so i can queue agent / terminal commands. i would say, only hide the prompt box for full screen apps and for password input."
 
 ## Owner decisions (2026-09-17)
 

@@ -1,12 +1,18 @@
+---
+id: RBVK
+type: work
+status: needs-qa-llm
+component: [gui, agent]
+milestone: desktop-alpha
+workstream: terminal
+assignee: implemented by Claude Opus 5 (Claude Code session) and a backend subagent, 2026-09-17
+rank: kw
+created: '2026-09-17'
+acceptance: a non-Claude model QA session on a real desktop runs the checklist and records it under `docs/qa_evidence/`
+source: '`issues/feature_intake.txt` items: Ctrl+C/X/V, "make changing hotkeys easy and allow the agent to change the hotkeys", Ctrl+Shift+A and Ctrl+Shift+T palettes, Esc to close sidebars, move mode and model selectors beneath the terminal, remove the F12 labels, replace Interrupt shell with a cancel icon'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Configurable shortcuts, program pass-through, palettes, and per-pane controls
-
-- **Status**: needs-qa-llm
-- **Component**: gui, agent
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: a non-Claude model QA session on a real desktop runs the checklist and records it under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session) and a backend subagent, 2026-09-17
-- **Source**: `issues/feature_intake.txt` items: Ctrl+C/X/V, "make changing hotkeys easy and allow the agent to change the hotkeys", Ctrl+Shift+A and Ctrl+Shift+T palettes, Esc to close sidebars, move mode and model selectors beneath the terminal, remove the F12 labels, replace Interrupt shell with a cancel icon
 
 ## Behavior as implemented
 

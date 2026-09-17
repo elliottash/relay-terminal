@@ -1,12 +1,17 @@
+---
+id: 072Z
+type: work
+status: ready
+component: [gui]
+milestone: desktop-alpha
+workstream: terminal
+rank: 7j
+created: '2026-09-17'
+acceptance: a setting that switches placement at runtime, with screenshots of both layouts
+source: '`issues/feature_intake.txt`, "allow top-side vertical tabs or a left side bar with horizontal tabs (vertical default)"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Choose tab placement: top tabs or a vertical tab sidebar
-
-- **Status**: open
-- **Component**: gui
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: a setting that switches placement at runtime, with screenshots of both layouts
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, "allow top-side vertical tabs or a left side bar with horizontal tabs (vertical default)"
 
 ## Context
 

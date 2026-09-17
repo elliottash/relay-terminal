@@ -1,12 +1,18 @@
+---
+id: VSDH
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: desktop-alpha
+workstream: routing
+assignee: implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17
+rank: gu
+created: '2026-09-17'
+acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
+source: '`issues/feature_intake.txt` ("i think ctrl+I should toggle terminal command vs agent prompt")'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Ctrl+I toggles terminal command vs agent prompt
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Workstream**: routing
-- **Milestone**: desktop-alpha
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17
-- **Acceptance evidence**: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
-- **Source**: `issues/feature_intake.txt` ("i think ctrl+I should toggle terminal command vs agent prompt")
 
 ## Behavior as implemented
 

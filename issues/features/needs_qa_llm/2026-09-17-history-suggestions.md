@@ -1,12 +1,18 @@
+---
+id: FR72
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: desktop-alpha
+workstream: terminal
+assignee: implemented by Claude Opus 5 (GUI D subagent), 2026-09-17
+rank: j5
+created: '2026-09-17'
+acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
+source: '`issues/feature_intake.txt` (2026-09-17): "command suggestion (see how warp / claude do this)"; owner decision 7 (this issue covers suggestion kind (a), ghost text from history; AI next-command and next-prompt suggestions are backend work tracked in `2026-09-17-agent-sessions-planning-subagents.md`)'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Ghost-text command suggestions from history
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (GUI D subagent), 2026-09-17
-- **Source**: `issues/feature_intake.txt` (2026-09-17): "command suggestion (see how warp / claude do this)"; owner decision 7 (this issue covers suggestion kind (a), ghost text from history; AI next-command and next-prompt suggestions are backend work tracked in `2026-09-17-agent-sessions-planning-subagents.md`)
 
 ## Behavior as implemented
 

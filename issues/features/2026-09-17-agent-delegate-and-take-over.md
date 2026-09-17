@@ -1,13 +1,17 @@
+---
+id: C1HH
+type: work
+status: ready
+component: [agent, gui, shell-integration]
+milestone: desktop-alpha
+workstream: agent
+rank: 0k
+created: '2026-09-17'
+acceptance: a recorded run where the agent edits a file in vim in the visible pane, the user takes over mid-session with a keystroke, and hands control back
+source: '`issues/feature_intake.txt`, "check that i can run programs, eg nano / vim. i need the delegate / take over functionality like warp."'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Agent drives interactive programs in the visible pane, with take-over
-
-- **Status**: open
-- **Component**: agent, gui, shell-integration
-- **Milestone**: desktop-alpha
-- **Workstream**: agent
-- **Acceptance evidence**: a recorded run where the agent edits a file in vim in the visible pane,
-  the user takes over mid-session with a keystroke, and hands control back
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, "check that i can run programs, eg nano / vim. i need the delegate / take over functionality like warp."
 
 ## Owner decision (2026-09-17)
 

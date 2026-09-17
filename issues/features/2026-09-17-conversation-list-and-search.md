@@ -1,12 +1,17 @@
+---
+id: GAAR
+type: work
+status: ready
+component: [gui, worker]
+milestone: desktop-alpha
+workstream: agent
+rank: 2w
+created: '2026-09-17'
+acceptance: a list of past conversations across panes and projects, searchable by any word in any message or tool output, opening the match in context and resuming it in a pane
+source: '`issues/feature_intake.txt`, 2026-09-17: "need a conversation list. this needs to be full text searchable (that is a big downside of warp / codex / etc, finding old convos is so hard). lets plan a much better system." and "what hot key for that? ctrl shift y is warp. see what the others do or what would be a chrome like hotkey."'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Conversation list with full-text search
-
-- **Status**: open
-- **Component**: gui, worker
-- **Milestone**: desktop-alpha
-- **Workstream**: agent
-- **Acceptance evidence**: a list of past conversations across panes and projects, searchable by any word in any message or tool output, opening the match in context and resuming it in a pane
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, 2026-09-17: "need a conversation list. this needs to be full text searchable (that is a big downside of warp / codex / etc, finding old convos is so hard). lets plan a much better system." and "what hot key for that? ctrl shift y is warp. see what the others do or what would be a chrome like hotkey."
 
 ## Today
 

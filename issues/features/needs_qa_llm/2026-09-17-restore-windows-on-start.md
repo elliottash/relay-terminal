@@ -1,12 +1,18 @@
+---
+id: 64KE
+type: work
+status: needs-qa-llm
+component: [gui, worker]
+milestone: desktop-alpha
+workstream: terminal
+assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+rank: tm
+created: '2026-09-17'
+acceptance: quitting Relay with several windows, tabs and split panes and reopening it brings back the same layout, each pane in its old directory with its agent conversation reattached; a fresh profile still opens a single pane
+source: 'owner in chat, 2026-09-17: "i want it to save and persist, and when you re-open, its back to where you were, like in warp"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Restore windows, tabs, panes and their conversations on start
-
-- **Status**: needs-qa-llm
-- **Component**: gui, worker
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: quitting Relay with several windows, tabs and split panes and reopening it brings back the same layout, each pane in its old directory with its agent conversation reattached; a fresh profile still opens a single pane
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
-- **Source**: owner in chat, 2026-09-17: "i want it to save and persist, and when you re-open, its back to where you were, like in warp"
 
 ## Today
 

@@ -1,17 +1,18 @@
+---
+id: QQK4
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: desktop-alpha
+workstream: terminal
+assignee: widgets implemented by Claude Opus 5 (Claude Code subagent), 2026-09-17; integration into windows, tabs and panes is done by the main session
+rank: i1
+created: '2026-09-17'
+acceptance: a non-Claude model QA session runs the checklist against the widgets inside Relay's windows and records it under `docs/qa_evidence/`
+source: '`issues/feature_intake.txt`, "clicking a directory or the terminal working directory opens a dolphin-like file explorer pane with the folder" and "clicking a previewable file opens it in a pane"; owner decision (2026-09-17) to use plain Qt rather than KDE parts, for macOS and Windows later (`docs/CONTROL-AND-FILE-PANES-RESEARCH.md`, option 2)'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Folder explorer and file preview panes (plain Qt)
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: a non-Claude model QA session runs the checklist against the widgets inside
-  Relay's windows and records it under `docs/qa_evidence/`
-- **Assignee**: widgets implemented by Claude Opus 5 (Claude Code subagent), 2026-09-17; integration
-  into windows, tabs and panes is done by the main session
-- **Source**: `issues/feature_intake.txt`, "clicking a directory or the terminal working directory opens
-  a dolphin-like file explorer pane with the folder" and "clicking a previewable file opens it in a pane";
-  owner decision (2026-09-17) to use plain Qt rather than KDE parts, for macOS and Windows later
-  (`docs/CONTROL-AND-FILE-PANES-RESEARCH.md`, option 2)
 
 ## Behavior as implemented
 

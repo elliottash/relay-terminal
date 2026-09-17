@@ -1,14 +1,18 @@
+---
+id: 80FZ
+type: work
+status: needs-qa-llm
+component: [gui, shell-integration]
+milestone: desktop-alpha
+workstream: terminal
+assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+rank: zf
+created: '2026-09-17'
+acceptance: a non-Claude model QA session on a real desktop session with a window manager runs the checklist and records it under `docs/qa_evidence/`
+source: '`issues/feature_intake.txt` ("allow new tabs and panes", the window, tab and pane hotkey list, "up from the top line scans history (alt not needed)") and the owner''s request of 2026-09-17'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Windows, tabs and panes with Chrome-style shortcuts
-
-- **Status**: needs-qa-llm
-- **Component**: gui, shell-integration
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: a non-Claude model QA session on a real desktop session with a window
-  manager runs the checklist and records it under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
-- **Source**: `issues/feature_intake.txt` ("allow new tabs and panes", the window, tab and pane
-  hotkey list, "up from the top line scans history (alt not needed)") and the owner's request of 2026-09-17
 
 ## Behavior as implemented
 

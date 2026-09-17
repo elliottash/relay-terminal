@@ -1,15 +1,17 @@
+---
+id: AGN8
+type: work
+status: needs-qa-llm
+component: [gui, worker, agent]
+milestone: desktop-alpha
+workstream: agent
+rank: c6
+created: '2026-09-17'
+acceptance: a recorded run showing Esc interrupt, queue-after-turn, steer-at-next-tool-call, interrupt-and-send, and keyboard reordering/editing of queued prompts
+source: '`issues/feature_intake.txt`, 2026-09-17: - "pressing escape interrupts the agent thinking." - "pressing enter while an agent is thinking / working queues the command. to discuss -- should we send at the next tool call (claude style) or wait until agent is done (warp style)? one idea is, its warp style by default, but press enter again to do claude style and send at next tool call, and then ctrl+enter to interrupt and send immediately." - "press up to start highlighting queued commands. ctrl up/down to move a command up/down the queue (can also drag and drop). press enter on a highlighted queued command to edit it in the prompt box (if its the top command, that will pause queuing). help me think through the various" (the sentence was unfinished when filed)'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Queue steering, Esc to interrupt, and keyboard editing of queued prompts
-
-- **Status**: needs-qa-llm
-- **Component**: gui, worker, agent
-- **Milestone**: desktop-alpha
-- **Workstream**: agent
-- **Acceptance evidence**: a recorded run showing Esc interrupt, queue-after-turn, steer-at-next-tool-call, interrupt-and-send, and keyboard reordering/editing of queued prompts
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, 2026-09-17:
-  - "pressing escape interrupts the agent thinking."
-  - "pressing enter while an agent is thinking / working queues the command. to discuss -- should we send at the next tool call (claude style) or wait until agent is done (warp style)? one idea is, its warp style by default, but press enter again to do claude style and send at next tool call, and then ctrl+enter to interrupt and send immediately."
-  - "press up to start highlighting queued commands. ctrl up/down to move a command up/down the queue (can also drag and drop). press enter on a highlighted queued command to edit it in the prompt box (if its the top command, that will pause queuing). help me think through the various" (the sentence was unfinished when filed)
 
 ## Current behavior (commit eaf9f0d)
 

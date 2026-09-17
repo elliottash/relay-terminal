@@ -1,12 +1,18 @@
+---
+id: KH72
+type: work
+status: needs-qa-llm
+component: [worker, gui]
+milestone: desktop-alpha
+workstream: agent
+assignee: implemented by Claude Opus 5 (Claude Code, model-roles worktree), 2026-09-17
+rank: m2
+created: '2026-09-17'
+acceptance: each role's model is pickable in Agent options; unset roles follow the main agent; the fast agent's per-provider default is applied; side calls and subagents visibly use their role's model
+source: 'owner in chat, 2026-09-17: "these should all be pickable in settings. main agent, terminal use agent, subagent, switchboad agent. the default is they are the same (the main agent). ... you can also designate a fast agent, which is used by default in the panes, which would be deepseek for example, or gemini 3.8 flash. later on we can add routing between the main agent and fast agent in the main terminal based on estimated task difficulty." and "if you have glm as your agent, the fast agent is glm 5.3 flash by default. if openrouter, you can pick deepseek v4.1 flash or gemini 3.8 flash. does kimi have a fast model?"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Model roles in settings: main, fast, terminal-use, subagent, Switchboard, chores, vision
-
-- **Status**: needs-qa-llm
-- **Component**: worker, gui
-- **Milestone**: desktop-alpha
-- **Workstream**: agent
-- **Acceptance evidence**: each role's model is pickable in Agent options; unset roles follow the main agent; the fast agent's per-provider default is applied; side calls and subagents visibly use their role's model
-- **Assignee**: implemented by Claude Opus 5 (Claude Code, model-roles worktree), 2026-09-17
-- **Source**: owner in chat, 2026-09-17: "these should all be pickable in settings. main agent, terminal use agent, subagent, switchboad agent. the default is they are the same (the main agent). ... you can also designate a fast agent, which is used by default in the panes, which would be deepseek for example, or gemini 3.8 flash. later on we can add routing between the main agent and fast agent in the main terminal based on estimated task difficulty." and "if you have glm as your agent, the fast agent is glm 5.3 flash by default. if openrouter, you can pick deepseek v4.1 flash or gemini 3.8 flash. does kimi have a fast model?"
 
 ## Roles
 | Role | Default |

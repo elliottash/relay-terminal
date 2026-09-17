@@ -1,14 +1,18 @@
+---
+id: BXPG
+type: work
+status: needs-qa-llm
+component: [worker, agent]
+milestone: desktop-alpha
+workstream: agent (A, backend sessions)
+assignee: implemented by Claude Opus 5 (Claude Code, backend sessions worktree), 2026-09-17
+rank: f3
+created: '2026-09-17'
+acceptance: '`tests/test_sessions.py`, `tests/test_session_protocol.py`, updated `tests/test_skills.py`; live worker run in `docs/qa_evidence/2026-09-17-backend-sessions/`'
+source: '`issues/features/2026-09-17-agent-sessions-planning-subagents.md`, protocol `docs/AGENT-SESSIONS-PROTOCOL.md` sections 1-7 (without subagents), 9, 10; research defaults from `docs/INTAKE-CLARIFICATION-RESEARCH.md`'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Agent sessions backend: model/effort, context and compaction, checkpoints, sessions, recaps, plan mode, instructions, suggestions
-
-- **Status**: needs-qa-llm
-- **Component**: worker, agent
-- **Milestone**: desktop-alpha
-- **Workstream**: agent (A, backend sessions)
-- **Acceptance evidence**: `tests/test_sessions.py`, `tests/test_session_protocol.py`, updated `tests/test_skills.py`;
-  live worker run in `docs/qa_evidence/2026-09-17-backend-sessions/`
-- **Assignee**: implemented by Claude Opus 5 (Claude Code, backend sessions worktree), 2026-09-17
-- **Source**: `issues/features/2026-09-17-agent-sessions-planning-subagents.md`, protocol `docs/AGENT-SESSIONS-PROTOCOL.md`
-  sections 1-7 (without subagents), 9, 10; research defaults from `docs/INTAKE-CLARIFICATION-RESEARCH.md`
 
 ## Behavior
 

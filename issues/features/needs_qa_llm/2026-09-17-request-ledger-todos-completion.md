@@ -1,16 +1,18 @@
+---
+id: 9PGA
+type: work
+status: needs-qa-llm
+component: [agent, worker]
+milestone: desktop-alpha
+workstream: agent
+assignee: implemented by Claude Opus 5 (Claude Code, backend), 2026-09-17. Not committed.
+rank: sg
+created: '2026-09-17'
+acceptance: '`tests/test_requests.py` (39 tests; full suite 272 tests OK), updated `tests/test_agent.py` and `tests/test_queue.py`; live scenarios in `docs/qa_evidence/2026-09-17-request-ledger/` (see `NOTES.md`)'
+source: 'owner request 2026-09-17 ("make sure things dont get missed when i type multiple requests, and across long convos"); research and owner decisions in `docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md` sections 6, 7 and 9 (items 1, 2, 3, 4, 5, 7, 8; backend only). Protocol: `docs/AGENT-SESSIONS-PROTOCOL.md` section 12.'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Backend: request ledger, todos, completion check, drop-path fixes, compaction that keeps asks
-
-- **Status**: needs-qa-llm
-- **Component**: agent, worker
-- **Milestone**: desktop-alpha
-- **Workstream**: agent
-- **Acceptance evidence**: `tests/test_requests.py` (39 tests; full suite 272 tests OK), updated
-  `tests/test_agent.py` and `tests/test_queue.py`; live scenarios in
-  `docs/qa_evidence/2026-09-17-request-ledger/` (see `NOTES.md`)
-- **Assignee**: implemented by Claude Opus 5 (Claude Code, backend), 2026-09-17. Not committed.
-- **Source**: owner request 2026-09-17 ("make sure things dont get missed when i type multiple requests, and across
-  long convos"); research and owner decisions in `docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md` sections 6, 7 and 9
-  (items 1, 2, 3, 4, 5, 7, 8; backend only). Protocol: `docs/AGENT-SESSIONS-PROTOCOL.md` section 12.
 
 ## Behavior
 

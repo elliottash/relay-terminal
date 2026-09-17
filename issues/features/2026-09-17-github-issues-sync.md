@@ -1,12 +1,17 @@
+---
+id: GDQN
+type: work
+status: ready
+component: [worker, gui]
+milestone: post-mvp
+workstream: switchboard
+rank: 3h
+created: '2026-09-17'
+acceptance: a shared work card and its GitHub issue stay in sync both ways (body, comments, status, labels) across edits on either side, with conflicts surfaced rather than lost
+source: '`issues/feature_intake.txt`, 2026-09-17: "set up syncing the switchboar with github issues."'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Two-way sync between the Switchboard and GitHub Issues
-
-- **Status**: open
-- **Component**: worker, gui
-- **Milestone**: post-mvp
-- **Workstream**: switchboard
-- **Acceptance evidence**: a shared work card and its GitHub issue stay in sync both ways (body, comments, status, labels) across edits on either side, with conflicts surfaced rather than lost
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, 2026-09-17: "set up syncing the switchboar with github issues."
 
 ## Decisions (owner, 2026-09-17)
 1. Two-way sync.

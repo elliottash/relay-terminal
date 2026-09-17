@@ -1,13 +1,18 @@
+---
+id: K1YZ
+type: work
+status: needs-qa-llm
+component: [gui, worker]
+milestone: desktop-alpha
+workstream: agent
+assignee: unassigned (backend implemented by Claude Opus 5, 2026-09-16)
+rank: ra
+created: '2026-09-17'
+acceptance: 'backend: `tests/test_queue.py`; GUI: a recorded run where a prompt submitted mid-turn is queued, another interrupts, and the queue panel shows both'
+source: '`issues/feature_intake.txt`, "the interrupt vs queue feature for new commands"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Queue or interrupt agent prompts sent while the agent is busy
-
-- **Status**: needs-qa-llm
-- **Component**: gui, worker
-- **Milestone**: desktop-alpha
-- **Workstream**: agent
-- **Acceptance evidence**: backend: `tests/test_queue.py`; GUI: a recorded run where a prompt
-  submitted mid-turn is queued, another interrupts, and the queue panel shows both
-- **Assignee**: unassigned (backend implemented by Claude Opus 5, 2026-09-16)
-- **Source**: `issues/feature_intake.txt`, "the interrupt vs queue feature for new commands"
 
 ## Context
 

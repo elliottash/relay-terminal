@@ -1,13 +1,17 @@
+---
+id: X5D1
+type: work
+status: needs-qa-llm
+component: [gui, shell-integration]
+milestone: desktop-alpha
+workstream: terminal
+rank: cr
+created: '2026-09-17'
+acceptance: a recorded GUI run where an agent answer appears in the terminal stream in a distinct color, without entering shell history or disturbing a running program
+source: '`issues/feature_intake.txt`, "put the agent responses in the terminal, as different colored echo commands?"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Show agent responses inline in the terminal
-
-- **Status**: needs-qa-llm
-- **Component**: gui, shell-integration
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: a recorded GUI run where an agent answer appears in the terminal
-  stream in a distinct color, without entering shell history or disturbing a running program
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, "put the agent responses in the terminal, as different colored echo commands?"
 
 ## Context
 

@@ -1,12 +1,17 @@
+---
+id: NY7Z
+type: work
+status: ready
+component: [gui, worker]
+milestone: desktop-alpha
+workstream: agent
+rank: 8p
+created: '2026-09-17'
+acceptance: holding Right Alt records speech and inserts the transcript into the composer; the microphone button toggles the same; works offline or with the chosen provider per the owner's decision
+source: '`issues/feature_intake.txt`, 2026-09-17: "add voice transcribe mode (microphone icon). and hold right alt to transcribe. (like warp)"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Voice transcription mode (microphone button, hold Right Alt)
-
-- **Status**: open
-- **Component**: gui, worker
-- **Milestone**: desktop-alpha
-- **Workstream**: agent
-- **Acceptance evidence**: holding Right Alt records speech and inserts the transcript into the composer; the microphone button toggles the same; works offline or with the chosen provider per the owner's decision
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, 2026-09-17: "add voice transcribe mode (microphone icon). and hold right alt to transcribe. (like warp)"
 
 ## Notes
 

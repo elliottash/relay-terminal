@@ -1,0 +1,2 @@
+# Card threads are append-only; a union merge keeps both sides' entries.
+issues/threads/*.md merge=union

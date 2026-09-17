@@ -1,12 +1,18 @@
+---
+id: 16QX
+type: work
+status: done
+component: [agent]
+milestone: 0.1-preview
+workstream: agent
+assignee: Claude Opus 5 research subagent, 2026-09-16
+rank: 9v
+created: '2026-09-17'
+acceptance: '`docs/OPENCODE-NOTES.md`'
+source: '`issues/feature_intake.txt`, "can also look at opencode for features / logic on how the agent should work"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Review opencode for agent features and logic
-
-- **Status**: done
-- **Component**: agent
-- **Milestone**: 0.1-preview
-- **Workstream**: agent
-- **Acceptance evidence**: `docs/OPENCODE-NOTES.md`
-- **Assignee**: Claude Opus 5 research subagent, 2026-09-16
-- **Source**: `issues/feature_intake.txt`, "can also look at opencode for features / logic on how the agent should work"
 
 ## Context
 

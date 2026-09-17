@@ -1,14 +1,18 @@
+---
+id: VH4B
+type: work
+status: needs-qa-llm
+component: [gui, agent]
+milestone: desktop-alpha
+workstream: routing
+assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+rank: ik
+created: '2026-09-17'
+acceptance: a non-Claude model QA session drives the app through the checklist and records it under `docs/qa_evidence/`
+source: 'owner direction, 2026-09-17: "ctrl+shift+enter is always terminal -- if the command is invalid, the agent will fix it and, if it throws an error, the agent will try to fix it and re-run it"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Fix and re-run invalid or failing commands in terminal mode
-
-- **Status**: needs-qa-llm
-- **Component**: gui, agent
-- **Milestone**: desktop-alpha
-- **Workstream**: routing
-- **Acceptance evidence**: a non-Claude model QA session drives the app through the checklist
-  and records it under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
-- **Source**: owner direction, 2026-09-17: "ctrl+shift+enter is always terminal -- if the command
-  is invalid, the agent will fix it and, if it throws an error, the agent will try to fix it and re-run it"
 
 ## Behavior as implemented
 

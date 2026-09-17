@@ -1,12 +1,17 @@
+---
+id: P4GP
+type: work
+status: ready
+component: [gui]
+milestone: desktop-alpha
+workstream: terminal
+rank: 9a
+created: '2026-09-17'
+acceptance: a public project web page with screenshots and install instructions; a downloadable beta build for at least one Linux channel, installed and launched on a clean machine; the platform plan for Windows and macOS recorded
+source: '`issues/feature_intake.txt`, "produce a nice app icon, make a web site and publish a beta build -- help me decide how to get it on windows / mac / linux / etc"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Website and beta release
-
-- **Status**: open
-- **Component**: gui
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: a public project web page with screenshots and install instructions; a downloadable beta build for at least one Linux channel, installed and launched on a clean machine; the platform plan for Windows and macOS recorded
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, "produce a nice app icon, make a web site and publish a beta build -- help me decide how to get it on windows / mac / linux / etc"
 
 ## Context
 

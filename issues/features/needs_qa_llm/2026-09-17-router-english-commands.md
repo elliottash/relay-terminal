@@ -1,12 +1,18 @@
+---
+id: 9DYD
+type: work
+status: needs-qa-llm
+component: [router]
+milestone: 0.1-preview
+workstream: routing
+assignee: implemented by Claude Opus 5 (1M context), 2026-09-17
+rank: u6
+created: '2026-09-17'
+acceptance: a non-Claude model QA session runs the checklist below and records it under `docs/qa_evidence/`
+source: owner report 2026-09-17 — "'look' is the classic example of a command i mentioned that would also show up in natural language. double check there arent others like that -- try to deploy a subagent to make an inclusive list." Follows the glob fix in commit 9a915b7.
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Router: an inclusive list of commands that are also English words
-
-- **Status**: needs-qa-llm
-- **Component**: router
-- **Milestone**: 0.1-preview
-- **Acceptance evidence**: a non-Claude model QA session runs the checklist below and records it under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (1M context), 2026-09-17
-- **Source**: owner report 2026-09-17 — "'look' is the classic example of a command i mentioned that would also show up in natural language. double check there arent others like that -- try to deploy a subagent to make an inclusive list." Follows the glob fix in commit 9a915b7.
-- **Workstream**: routing
 
 ## Problem
 

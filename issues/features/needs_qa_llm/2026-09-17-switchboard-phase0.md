@@ -1,15 +1,18 @@
+---
+id: 23XM
+type: work
+status: needs-qa-llm
+component: [worker]
+milestone: desktop-alpha
+workstream: switchboard
+assignee: Claude Opus 5 (1M context), 2026-09-17
+rank: y9
+created: '2026-09-17'
+acceptance: '`docs/qa_evidence/2026-09-17-switchboard-phase0/` (migration dry run and apply over a copy of the 57 real issue files, `check` output, body-fidelity and determinism verification, full test run); 76 new tests in `tests/test_board.py`, suite at 349 tests'
+source: '`docs/SWITCHBOARD-DESIGN.md` section 10 phase 0 and owner decisions in section 12; `docs/TASKS-AND-MEMORY-DESIGN.md` section 9 (plans and memories are card types, private root)'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Switchboard phase 0: card format, tasks, threads and `relay-board` tooling
-
-- **Status**: needs-qa-llm
-- **Component**: worker
-- **Milestone**: desktop-alpha
-- **Workstream**: switchboard
-- **Acceptance evidence**: `docs/qa_evidence/2026-09-17-switchboard-phase0/` (migration dry run and apply over a copy
-  of the 57 real issue files, `check` output, body-fidelity and determinism verification, full test run);
-  76 new tests in `tests/test_board.py`, suite at 349 tests
-- **Assignee**: Claude Opus 5 (1M context), 2026-09-17
-- **Source**: `docs/SWITCHBOARD-DESIGN.md` section 10 phase 0 and owner decisions in section 12;
-  `docs/TASKS-AND-MEMORY-DESIGN.md` section 9 (plans and memories are card types, private root)
 
 ## What landed
 

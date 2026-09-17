@@ -1,12 +1,18 @@
+---
+id: AM2Z
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: desktop-alpha
+workstream: terminal
+assignee: implemented by Claude Opus 5 (GUI D subagent), 2026-09-17
+rank: ei
+created: '2026-09-17'
+acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
+source: '`issues/feature_intake.txt` (2026-09-17): "how to open files by typing their names, maybe @? any file that can be previewed in a pane will then start showing up with a type text filter."; owner decision 6'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # @ file picker in the prompt box
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (GUI D subagent), 2026-09-17
-- **Source**: `issues/feature_intake.txt` (2026-09-17): "how to open files by typing their names, maybe @? any file that can be previewed in a pane will then start showing up with a type text filter."; owner decision 6
 
 ## Behavior as implemented
 

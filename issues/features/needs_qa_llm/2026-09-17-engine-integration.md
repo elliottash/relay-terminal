@@ -1,12 +1,18 @@
+---
+id: 9VXF
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: cross-platform
+workstream: terminal
+assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+rank: hf
+created: '2026-09-17'
+acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
+source: '`docs/ENGINE.md` ("Integration plan for `src/main.cpp`"), `issues/features/2026-09-17-portable-terminal-engine.md`'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Relay's own terminal engine, selectable per pane
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Workstream**: terminal
-- **Milestone**: cross-platform
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
-- **Acceptance evidence**: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
-- **Source**: `docs/ENGINE.md` ("Integration plan for `src/main.cpp`"), `issues/features/2026-09-17-portable-terminal-engine.md`
 
 ## Behavior as implemented
 

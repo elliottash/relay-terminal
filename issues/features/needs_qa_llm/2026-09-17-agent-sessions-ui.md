@@ -1,12 +1,18 @@
+---
+id: AE08
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: desktop-alpha
+workstream: agent
+assignee: implemented by Claude Opus 5 (GUI E1 subagent), 2026-09-17
+rank: dc
+created: '2026-09-17'
+acceptance: a non-Claude model QA session on a real desktop runs the checklist and records it under `docs/qa_evidence/`
+source: owner decisions in `issues/features/2026-09-17-agent-sessions-planning-subagents.md`; contract `docs/AGENT-SESSIONS-PROTOCOL.md`
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Agent sessions UI: model and effort, context, slash commands, rewind, fork, resume, recaps, export
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Milestone**: desktop-alpha
-- **Workstream**: agent
-- **Acceptance evidence**: a non-Claude model QA session on a real desktop runs the checklist and records it under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (GUI E1 subagent), 2026-09-17
-- **Source**: owner decisions in `issues/features/2026-09-17-agent-sessions-planning-subagents.md`; contract `docs/AGENT-SESSIONS-PROTOCOL.md`
 
 ## Behavior as implemented
 

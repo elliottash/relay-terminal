@@ -1,12 +1,17 @@
+---
+id: G8DK
+type: work
+status: ready
+component: [gui, worker]
+milestone: desktop-alpha
+workstream: terminal
+rank: 1q
+created: '2026-09-17'
+acceptance: a saved command or prompt with parameters can be defined globally or per project, found in the palette and run by name
+source: '`issues/feature_intake.txt`, 2026-09-17: "add a good version of aliased terminal commands / prompts that can be added globally or locally (sort of like warp \"workflows\")"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Aliased terminal commands and prompts (Warp workflows)
-
-- **Status**: open
-- **Component**: gui, worker
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: a saved command or prompt with parameters can be defined globally or per project, found in the palette and run by name
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, 2026-09-17: "add a good version of aliased terminal commands / prompts that can be added globally or locally (sort of like warp \"workflows\")"
 
 ## Notes
 Owner decision (TASKS-AND-MEMORY-DESIGN.md section 9): global aliases live in the global Switchboard, local ones in the repo Switchboard.

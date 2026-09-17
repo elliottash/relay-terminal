@@ -1,12 +1,17 @@
+---
+id: YZTK
+type: work
+status: in-progress
+component: [gui, shell-integration]
+milestone: desktop-alpha
+workstream: terminal
+rank: 2b
+created: '2026-09-17'
+acceptance: clicking a directory path in terminal output opens the explorer pane; clicking a file opens the preview pane
+source: '`issues/feature_intake.txt`, "parse all folders and filenames and highlight them", "clicking a directory or the terminal working directory opens a dolphin-like file explorer pane", "clicking a previewable file opens it in a pane"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Clickable file and folder paths open Relay panes
-
-- **Status**: in-progress
-- **Component**: gui, shell-integration
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: clicking a directory path in terminal output opens the explorer pane; clicking a file opens the preview pane
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, "parse all folders and filenames and highlight them", "clicking a directory or the terminal working directory opens a dolphin-like file explorer pane", "clicking a previewable file opens it in a pane"
 
 ## Findings (2026-09-17)
 

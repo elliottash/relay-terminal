@@ -1,13 +1,18 @@
+---
+id: AK6B
+type: work
+status: needs-qa-llm
+component: [agent]
+milestone: desktop-alpha
+workstream: agent
+assignee: implemented by Claude Opus 5 (Claude Code session, skills subagent), 2026-09-17
+rank: lh
+created: '2026-09-17'
+acceptance: backend tests with a fixture skills directory, plus a live run where the agent loads `issue-tracking` for a triage request and follows it
+source: '`issues/feature_intake.txt`, "access global .warp skills"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Let the agent use global Warp skills
-
-- **Status**: needs-qa-llm
-- **Component**: agent
-- **Milestone**: desktop-alpha
-- **Workstream**: agent
-- **Acceptance evidence**: backend tests with a fixture skills directory, plus a live run where
-  the agent loads `issue-tracking` for a triage request and follows it
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session, skills subagent), 2026-09-17
-- **Source**: `issues/feature_intake.txt`, "access global .warp skills"
 
 ## Context
 

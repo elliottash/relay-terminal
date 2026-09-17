@@ -1,14 +1,18 @@
+---
+id: 2JY7
+type: work
+status: needs-qa-llm
+component: [agent, worker]
+milestone: desktop-alpha
+workstream: agent (B, backend subagents)
+assignee: implemented by Claude Opus 5 (Claude Code, backend B worktree), 2026-09-17
+rank: fo
+created: '2026-09-17'
+acceptance: '`tests/test_agents_defs.py`, `tests/test_subagents.py`, live run in `docs/qa_evidence/2026-09-17-backend-subagents/`'
+source: '`issues/features/2026-09-17-agent-sessions-planning-subagents.md` (owner decisions 4 and 5), `docs/AGENT-SESSIONS-PROTOCOL.md` sections 7 and 8'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Backend: subagents and agent definitions from all tools
-
-- **Status**: needs-qa-llm
-- **Component**: agent, worker
-- **Milestone**: desktop-alpha
-- **Workstream**: agent (B, backend subagents)
-- **Acceptance evidence**: `tests/test_agents_defs.py`, `tests/test_subagents.py`, live run in
-  `docs/qa_evidence/2026-09-17-backend-subagents/`
-- **Assignee**: implemented by Claude Opus 5 (Claude Code, backend B worktree), 2026-09-17
-- **Source**: `issues/features/2026-09-17-agent-sessions-planning-subagents.md` (owner decisions 4 and 5),
-  `docs/AGENT-SESSIONS-PROTOCOL.md` sections 7 and 8
 
 ## Behavior
 

@@ -1,12 +1,18 @@
+---
+id: W011
+type: work
+status: needs-qa-llm
+component: [gui, worker, agent]
+milestone: desktop-alpha
+workstream: agent
+assignee: implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17
+rank: bm
+created: '2026-09-17'
+acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
+source: owner report 2026-09-17 (agent ran unrelated echo animations instead of typing into vim); owner approved the fix
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Tell the agent which program owns the terminal
-
-- **Status**: needs-qa-llm
-- **Component**: gui, worker, agent
-- **Workstream**: agent
-- **Milestone**: desktop-alpha
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17
-- **Acceptance evidence**: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
-- **Source**: owner report 2026-09-17 (agent ran unrelated echo animations instead of typing into vim); owner approved the fix
 
 ## Behavior as implemented
 

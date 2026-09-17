@@ -1,15 +1,18 @@
+---
+id: M9T4
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: desktop-alpha
+workstream: agent (E2, subagents UI)
+assignee: implemented by Claude Opus 5 (Claude Code, GUI E2 worktree), 2026-09-17
+rank: xo
+created: '2026-09-17'
+acceptance: '`tests/subagents_test.cpp` (ctest `subagents`), live run in `docs/qa_evidence/2026-09-17-subagents-ui/`'
+source: '`issues/features/2026-09-17-agent-sessions-planning-subagents.md`, `docs/AGENT-FEATURES-RESEARCH.md` (design C, Claude Code style), `docs/AGENT-SESSIONS-PROTOCOL.md` section 8, `issues/features/needs_qa_llm/2026-09-17-backend-subagents.md` (event names and deviations)'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Subagents UI: running-agents list, live transcripts, stop keys
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Milestone**: desktop-alpha
-- **Workstream**: agent (E2, subagents UI)
-- **Acceptance evidence**: `tests/subagents_test.cpp` (ctest `subagents`), live run in
-  `docs/qa_evidence/2026-09-17-subagents-ui/`
-- **Assignee**: implemented by Claude Opus 5 (Claude Code, GUI E2 worktree), 2026-09-17
-- **Source**: `issues/features/2026-09-17-agent-sessions-planning-subagents.md`,
-  `docs/AGENT-FEATURES-RESEARCH.md` (design C, Claude Code style), `docs/AGENT-SESSIONS-PROTOCOL.md` section 8,
-  `issues/features/needs_qa_llm/2026-09-17-backend-subagents.md` (event names and deviations)
 
 ## Behavior
 

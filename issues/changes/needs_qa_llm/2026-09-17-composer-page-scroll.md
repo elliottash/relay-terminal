@@ -1,12 +1,18 @@
+---
+id: 1BK1
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: desktop-alpha
+workstream: terminal
+assignee: implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17
+rank: '91'
+created: '2026-09-17'
+acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
+source: '`issues/feature_intake.txt` ("check that page up and page down scroll the terminal window up and down")'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # PageUp / PageDown scroll the terminal from the prompt box
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Workstream**: terminal
-- **Milestone**: desktop-alpha
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17
-- **Acceptance evidence**: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
-- **Source**: `issues/feature_intake.txt` ("check that page up and page down scroll the terminal window up and down")
 
 ## Findings and behavior
 

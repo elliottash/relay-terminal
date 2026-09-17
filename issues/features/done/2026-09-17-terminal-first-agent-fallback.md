@@ -1,13 +1,18 @@
+---
+id: KX82
+type: work
+status: done
+component: [gui, router]
+milestone: 0.1-preview
+workstream: routing
+assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-16
+rank: ag
+created: '2026-09-17'
+acceptance: a model QA session from a non-Claude family drives the built app and records the checks below under `docs/qa_evidence/`
+source: '`issues/feature_intake.txt`, "try something as a terminal command first, if it fails, run it as the agent"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Run unrecognized input in the terminal first, then fall back to the agent
-
-- **Status**: done
-- **Component**: gui, router
-- **Milestone**: 0.1-preview
-- **Workstream**: routing
-- **Acceptance evidence**: a model QA session from a non-Claude family drives the built app
-  and records the checks below under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session), 2026-09-16
-- **Source**: `issues/feature_intake.txt`, "try something as a terminal command first, if it fails, run it as the agent"
 
 ## Behavior as implemented
 

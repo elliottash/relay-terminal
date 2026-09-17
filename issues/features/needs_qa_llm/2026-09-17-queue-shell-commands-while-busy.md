@@ -1,13 +1,17 @@
+---
+id: 4TZD
+type: work
+status: needs-qa-llm
+component: [gui, shell-integration]
+milestone: desktop-alpha
+workstream: terminal
+rank: rv
+created: '2026-09-17'
+acceptance: 'a recorded GUI run: submit two commands during `sleep 5`; both run in order after the prompt returns; an interrupt sends one Ctrl+C'
+source: '`issues/feature_intake.txt`, "the interrupt vs queue feature for new commands"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Queue or interrupt shell commands while a foreground program runs
-
-- **Status**: needs-qa-llm
-- **Component**: gui, shell-integration
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: a recorded GUI run: submit two commands during `sleep 5`; both run
-  in order after the prompt returns; an interrupt sends one Ctrl+C
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, "the interrupt vs queue feature for new commands"
 
 ## Context
 

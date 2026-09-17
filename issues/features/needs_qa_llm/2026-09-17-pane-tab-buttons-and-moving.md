@@ -1,12 +1,18 @@
+---
+id: WDVD
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: desktop-alpha
+workstream: windows
+assignee: implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17
+rank: od
+created: '2026-09-17'
+acceptance: a non-Claude model QA session on a real desktop runs the checklist and records it under `docs/qa_evidence/`
+source: owner decisions (intake batch 2) relayed by the coordinator; `docs/AGENT-SESSIONS-PROTOCOL.md` section 11
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Pane and tab buttons, moving panes and tabs
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Milestone**: desktop-alpha
-- **Acceptance evidence**: a non-Claude model QA session on a real desktop runs the checklist and records it under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17
-- **Source**: owner decisions (intake batch 2) relayed by the coordinator; `docs/AGENT-SESSIONS-PROTOCOL.md` section 11
-- **Workstream**: windows
 
 ## Behavior as implemented
 

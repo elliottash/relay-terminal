@@ -1,12 +1,18 @@
+---
+id: TP3W
+type: work
+status: needs-qa-llm
+component: [gui, shell-integration]
+milestone: desktop-alpha
+workstream: terminal
+assignee: implemented by Claude Opus 5 (GUI D subagent), 2026-09-17
+rank: qp
+created: '2026-09-17'
+acceptance: a non-Claude model QA session on a real desktop runs the checklist and records it under `docs/qa_evidence/`
+source: '`issues/feature_intake.txt` (2026-09-17): "dont hide the prompt box when any program is running, eg sudo apt upgrade, so i can queue agent / terminal commands. i would say, only hide the prompt box for full screen apps and for password input."; owner decision 10 (supersedes "all programs hide the prompt")'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Prompt box stays visible for ordinary programs; hides for full-screen, password and remote sessions; waiting-for-input focus
-
-- **Status**: needs-qa-llm
-- **Component**: gui, shell-integration
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: a non-Claude model QA session on a real desktop runs the checklist and records it under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (GUI D subagent), 2026-09-17
-- **Source**: `issues/feature_intake.txt` (2026-09-17): "dont hide the prompt box when any program is running, eg sudo apt upgrade, so i can queue agent / terminal commands. i would say, only hide the prompt box for full screen apps and for password input."; owner decision 10 (supersedes "all programs hide the prompt")
 
 ## Behavior as implemented
 

@@ -1,12 +1,18 @@
+---
+id: F9SD
+type: work
+status: needs-qa-llm
+component: [gui, worker, shell-integration]
+milestone: desktop-alpha
+workstream: terminal
+assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+rank: nt
+created: '2026-09-17'
+acceptance: in one pane, a command that allocates memory past the pane limit (for example `python3 -c "b=bytearray(1<<40)"` or `stress-ng --vm 1 --vm-bytes 90%`) is killed; other panes, their shells and agents, and the Relay window keep running; `systemd-cgls --user` shows one scope per pane
+source: '`issues/feature_intake.txt`, "make processes pane-specific, so if something blows up with memory, it doesnt crash the full terminal"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Pane-specific processes so one runaway pane cannot take down Relay
-
-- **Status**: needs-qa-llm
-- **Component**: gui, worker, shell-integration
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: in one pane, a command that allocates memory past the pane limit (for example `python3 -c "b=bytearray(1<<40)"` or `stress-ng --vm 1 --vm-bytes 90%`) is killed; other panes, their shells and agents, and the Relay window keep running; `systemd-cgls --user` shows one scope per pane
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
-- **Source**: `issues/feature_intake.txt`, "make processes pane-specific, so if something blows up with memory, it doesnt crash the full terminal"
 
 ## Context
 

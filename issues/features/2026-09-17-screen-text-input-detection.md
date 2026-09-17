@@ -1,12 +1,17 @@
+---
+id: YR21
+type: work
+status: ready
+component: [gui, terminal engine]
+milestone: cross-platform
+workstream: terminal
+rank: 6y
+created: '2026-09-17'
+acceptance: with the Relay engine, `sudo apt upgrade` reaching "Do you want to continue? [Y/n]" shows the waiting-for-input hint and moves focus to the terminal within about a second, without false hints during downloads
+source: 'owner, 2026-09-17: "lets do the first option now, and then reading the last line with the new engine later"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Detect programs waiting for input from the screen text (new engine)
-
-- **Status**: open
-- **Component**: gui, terminal engine
-- **Milestone**: cross-platform
-- **Workstream**: terminal
-- **Acceptance evidence**: with the Relay engine, `sudo apt upgrade` reaching "Do you want to continue? [Y/n]" shows the waiting-for-input hint and moves focus to the terminal within about a second, without false hints during downloads
-- **Assignee**: unassigned
-- **Source**: owner, 2026-09-17: "lets do the first option now, and then reading the last line with the new engine later"
 
 ## Context
 

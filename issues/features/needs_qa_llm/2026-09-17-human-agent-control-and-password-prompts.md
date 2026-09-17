@@ -1,12 +1,18 @@
+---
+id: 9D0B
+type: work
+status: needs-qa-llm
+component: [gui, shell-integration]
+milestone: desktop-alpha
+workstream: terminal
+assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+rank: jq
+created: '2026-09-17'
+acceptance: a non-Claude model QA session runs the checklist on a real desktop and records it under `docs/qa_evidence/`
+source: '`issues/feature_intake.txt` control items; `issues/bug_intake.txt` "when i was in vim, i couldnt get back to the terminal with a keyboard shortcut"; owner decisions of 2026-09-17'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Human and agent control toggle, auto control for running programs, password detection
-
-- **Status**: needs-qa-llm
-- **Component**: gui, shell-integration
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: a non-Claude model QA session runs the checklist on a real desktop and records it under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
-- **Source**: `issues/feature_intake.txt` control items; `issues/bug_intake.txt` "when i was in vim, i couldnt get back to the terminal with a keyboard shortcut"; owner decisions of 2026-09-17
 
 ## Owner decisions (2026-09-17)
 

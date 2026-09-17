@@ -1,12 +1,18 @@
+---
+id: 4C94
+type: work
+status: needs-qa-llm
+component: [gui]
+milestone: desktop-alpha
+workstream: terminal
+assignee: implemented by Claude Opus 5 (GUI D subagent), 2026-09-17
+rank: g9
+created: '2026-09-17'
+acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
+source: '`issues/feature_intake.txt` (2026-09-17): "allow queueing of terminal commands and agent commands -- make them colored or show up differently in the queue eg a different icon."; owner decision 9 in `issues/features/2026-09-17-agent-sessions-planning-subagents.md`'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # One combined queue for terminal commands and agent prompts
-
-- **Status**: needs-qa-llm
-- **Component**: gui
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (GUI D subagent), 2026-09-17
-- **Source**: `issues/feature_intake.txt` (2026-09-17): "allow queueing of terminal commands and agent commands -- make them colored or show up differently in the queue eg a different icon."; owner decision 9 in `issues/features/2026-09-17-agent-sessions-planning-subagents.md`
 
 ## Behavior as implemented
 

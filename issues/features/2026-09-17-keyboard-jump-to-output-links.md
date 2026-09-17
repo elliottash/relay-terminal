@@ -1,12 +1,17 @@
+---
+id: GWXM
+type: work
+status: ready
+component: [gui]
+milestone: desktop-alpha
+workstream: terminal
+rank: 4n
+created: '2026-09-17'
+acceptance: after `ls`, `grep -n` or a compiler error, Alt+PageUp / Alt+PageDown (or the chosen binding) highlights the previous / next path or URL in the pane, scrolling scrollback as needed; Enter opens it with the same routing as a click (explorer, preview, browser); Esc cancels
+source: '`issues/feature_intake.txt`, "add a shortcut to scroll through files / folders / links in the output, maybe alt page up / alt page down."'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
 # Keyboard shortcut to step through files, folders and links in output
-
-- **Status**: open
-- **Component**: gui
-- **Milestone**: desktop-alpha
-- **Workstream**: terminal
-- **Acceptance evidence**: after `ls`, `grep -n` or a compiler error, Alt+PageUp / Alt+PageDown (or the chosen binding) highlights the previous / next path or URL in the pane, scrolling scrollback as needed; Enter opens it with the same routing as a click (explorer, preview, browser); Esc cancels
-- **Assignee**: unassigned
-- **Source**: `issues/feature_intake.txt`, "add a shortcut to scroll through files / folders / links in the output, maybe alt page up / alt page down."
 
 ## Dependency
 
