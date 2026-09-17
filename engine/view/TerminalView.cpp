@@ -8,6 +8,7 @@
 #include <QAccessibleWidget>
 #include <QApplication>
 #include <QClipboard>
+#include <QCursor>
 #include <QDir>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -43,11 +44,13 @@ bool wantsEmojiFont(const std::u32string &cps, int width)
 {
     if (cps.empty())
         return false;
-    for (char32_t c : cps) {
-        if (c == 0xFE0F || c == 0x200D || (c >= 0x1F3FB && c <= 0x1F3FF) || isRegionalIndicator(c))
-            return true;
-    }
     const char32_t base = cps[0];
+    for (char32_t c : cps) {
+        if (c == 0xFE0F || isRegionalIndicator(c))
+            return true; // emoji presentation selector (also keycaps like #️⃣), flags
+        if ((c == 0x200D || (c >= 0x1F3FB && c <= 0x1F3FF)) && base >= 0x2190)
+            return true; // ZWJ sequences and skin tones on pictographs
+    }
     return width == 2 && ((base >= 0x1F000 && base <= 0x1FAFF) || (base >= 0x2600 && base <= 0x27BF) || (base >= 0x2B00 && base <= 0x2BFF));
 }
 
@@ -251,7 +254,7 @@ void TerminalView::updateMetrics()
     m_ch = std::max(1, qCeil(fm.height() - 0.01));
     m_ascent = qCeil(fm.ascent() - 0.01);
     m_descent = std::max(1, m_ch - m_ascent);
-    m_emojiFont.setPixelSize(std::max(6, int(m_ch * 0.78)));
+    m_emojiFont.setPixelSize(std::max(6, int(m_ch * 0.88)));
     m_glyphCache.clear();
 }
 
@@ -386,6 +389,12 @@ void TerminalView::pullFrame()
     const bool changed = m_session->withCore([&](VtCore &c) { return c.updateFrame(&m_frame, force); });
     if (!changed)
         return;
+
+    // A link underline belongs to the content it was computed for.
+    if (m_hoverRow >= 0 && (m_frame.full || (m_hoverRow < int(m_frame.dirty.size()) && m_frame.dirty[size_t(m_hoverRow)]))) {
+        m_hoverRow = m_hoverStart = m_hoverEnd = -1;
+        setCursor(Qt::IBeamCursor);
+    }
 
     if (m_frame.full || force) {
         update();
@@ -751,6 +760,10 @@ void TerminalView::keyPressEvent(QKeyEvent *e)
         e->ignore();
         return;
     }
+    if (e->key() == Qt::Key_Control)
+        updateHover(mapFromGlobal(QCursor::pos()), e->modifiers() | Qt::ControlModifier);
+    else if (m_hoverRow >= 0)
+        updateHover(QPoint(-1, -1), Qt::NoModifier);
     if (m_builtinShortcuts && handleBuiltinShortcut(e))
         return;
     KeyInput k;
@@ -763,6 +776,8 @@ void TerminalView::keyPressEvent(QKeyEvent *e)
 
 void TerminalView::keyReleaseEvent(QKeyEvent *e)
 {
+    if (e->key() == Qt::Key_Control && m_hoverRow >= 0)
+        updateHover(QPoint(-1, -1), Qt::NoModifier);
     // Release events matter only for the kitty keyboard protocol's event
     // reporting; the core drops them otherwise.
     KeyInput k;
