@@ -99,6 +99,7 @@ class ChatProvider:
                  emit: Callable[[dict], None], cancel: threading.Event) -> dict:
         if cancel.is_set():
             raise Cancelled("Stopped.")
+        started = time.monotonic()
         payload = {"model": self.config.model, "messages": messages,
                    "stream": True, "max_tokens": self.config.max_tokens, **self.config.extra}
         if tools:
@@ -139,7 +140,7 @@ class ChatProvider:
                     if message.get("content"):
                         emit({"event": "delta", "text": message["content"]})
                     return self._normalize(message)
-                return self._stream(response, emit, cancel)
+                return self._stream(response, emit, cancel, started)
         except urllib.error.HTTPError as exc:
             # Providers can echo submitted secrets/prompts in error bodies. Do not log them.
             raise ProviderError(f"Provider HTTP {exc.code}. Check endpoint, model access, key, quota, and parameters.") from None
@@ -180,7 +181,9 @@ class ChatProvider:
             normalized["tool_calls"] = calls
         return normalized
 
-    def _stream(self, response, emit, cancel) -> dict:
+    def _stream(self, response, emit, cancel, started: float | None = None) -> dict:
+        """started: when the request was sent. thinking_done.elapsed_ms counts from then, because some
+        providers (GLM) buffer reasoning and deliver it in one burst just before the answer."""
         message = {"content": "", "reasoning_content": ""}
         calls: dict[int, dict] = {}
         total = 0
@@ -246,7 +249,7 @@ class ChatProvider:
                     emit({"event": "status", "text": "Model is reasoning…"})
                     reasoning_announced = True
                 if thinking_started is None:
-                    thinking_started = time.monotonic()
+                    thinking_started = started if started is not None else time.monotonic()
                 thinking_chars += len(thinking)
                 emit({"event": "thinking_delta", "text": thinking})
             if thinking_started is not None and not thinking_closed and (

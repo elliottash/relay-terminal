@@ -254,6 +254,14 @@ class ThinkingStreamTests(unittest.TestCase):
         _, events = self.parse(sse({'reasoning_content': 'hmm'}) + sse(finish='stop') + b'data: [DONE]\n\n')
         self.assertEqual(events[-1]['event'], 'thinking_done')
 
+    def test_elapsed_counts_from_request_start(self):
+        # GLM buffers reasoning and sends it in one burst; the time before the burst is thinking time too.
+        provider = ChatProvider(ProviderConfig('http://127.0.0.1:1/v1', 'm', ''))
+        events = []
+        data = sse({'reasoning_content': 'x'}) + sse({'content': 'y'}) + sse(finish='stop') + b'data: [DONE]\n\n'
+        provider._stream(io.BytesIO(data), events.append, threading.Event(), time.monotonic() - 1.5)
+        self.assertGreaterEqual([e for e in events if e['event'] == 'thinking_done'][0]['elapsed_ms'], 1500)
+
 
 class ThinkingProvider:
     """Streams reasoning through emit like ChatProvider, then answers or calls a tool."""

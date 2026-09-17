@@ -1,0 +1,6 @@
+openrouter None 0.85 go build ./... shell 0.99
+openrouter None 1.97 go to the docs folder and summarize agent 0.98
+openrouter None 11.27 make the tests pass agent 0.98
+openrouter None 0.98 install ripgrep agent 0.95
+openrouter None 11.44 find where the config is loaded agent 0.98
+openrouter None 1.82 kill it agent 0.85

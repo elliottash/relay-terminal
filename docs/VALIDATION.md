@@ -140,6 +140,7 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-pane-process-isolation.md`
 - `2026-09-17-program-control-policy.md`
 - `2026-09-17-queue-or-interrupt-agent-prompts.md`
+- `2026-09-17-routing-assist-thinking-skills-backend.md`
 - `2026-09-17-windows-tabs-panes.md`
 
 Waiting for QA (`issues/changes/needs_qa_llm/`):

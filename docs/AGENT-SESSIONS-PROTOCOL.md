@@ -122,3 +122,66 @@ without touching originals → `skills_refined {items: [{name, path, from}]}`.
 `import_skills_confirm {url, commit, names}` copies the chosen skills to
 `~/.local/share/relay/skill-imports/<repo>@<commit>/` and enables them → `skills_imported {items}`.
 No automatic updates; `skills_check_updates {url}` → `skills_updates {url, current, latest}`.
+
+### 11.1 Backend implementation notes and deviations (2026-09-17)
+
+Implemented in `backend/relay_core/{router,route_assist,provider,agent,queue,skills,skill_manage,observe_protocol}.py`;
+tests in `tests/test_routing_thinking_skills.py`; live evidence in
+`docs/qa_evidence/2026-09-17-routing-thinking-skills/`. Where this differs from the text above:
+
+- **Routing list and signals.** `router.ENGLISH_COMMANDS` is an inclusive list of commands that are English words;
+  a word only matters when it also resolves (PATH, builtin, alias or function). Signals: articles, pronouns,
+  question words, please/thanks (weighted), connectives (to, and, for, is, ...), a trailing `?`, trailing sentence
+  punctuation, more than 4 plain words with no path, `go <word>` that is not a go subcommand, and a bare non-file
+  word after file-taking commands (`install ripgrep`, `open settings`). Flags, operators, `$`, globs, `=` and
+  quotes mean no assist. Score ≥ 2 sets `needs_assist`. The local guess is `agent`, except for literal-text commands
+  (echo, printf, say, ...), where it stays `shell`. Phrases the older natural-language rule already routed to the
+  agent ("make the tests pass", "find the config") also get `needs_assist: true` when the first word is a real
+  English-word command; their route stays `agent`.
+- **PATH scan.** Executables are scanned per PATH directory and cached by (device, inode, mtime), so an install or
+  removal shows up on the next `route`; a cache miss still falls back to a direct lookup (a `chmod +x` does not
+  change the directory mtime).
+- **`route_assist` output limit is 256 tokens, not ~20.** Kimi K3 cannot turn thinking off and GLM/DeepSeek reason
+  first; live, 20 tokens truncated both Kimi and GLM, 64 truncated Kimi, 128 truncated OpenRouter DeepSeek. The JSON
+  reply itself is ~20 tokens.
+- **`route_assist` accepts optional `timeout_ms`** (100–15000, default 2000 as specified). Live on 2026-09-17 the
+  2 s default timed out for 6/6 Kimi and 4/6 GLM Coding calls (Kimi answers took 2.9–8.9 s, GLM 1.7–11.7 s); with
+  15 s all 12 answered correctly. The GUI should keep its local guess and may send a longer `timeout_ms`.
+  Without a configured agent the reply is `route_assisted {route: null, error: "not_configured"}`.
+- **`tool_output` name collision.** Streaming command output already uses `tool_output {text}`. The stored reply to
+  `tool_output_get` is `tool_output {stored: true, turn_id, call_id, name, preview, result, ok, exit_code?}` with no
+  `text`; the GUI must branch on `stored`.
+- **Turn ids.** `turn_id` is the queue item id (same as `agent_started.id`); turns started outside the queue
+  (subagents) get a generated id. `turn_id` is also on `error` and `cancelled`, and `call_id` on `tool_started` and
+  `tool_result`.
+- **`turn_summary`** is emitted for every outcome, immediately *before* the terminal `done`/`error`/`cancelled`
+  (so those stay the last event of a turn). Extra fields: `outcome`, `thinking_chars`. `tools[].preview` is the last
+  non-empty line of the tool preview (the command or path), at most 160 characters.
+- **`thinking_done.elapsed_ms`** counts from when the request was sent, not from the first reasoning chunk: GLM
+  buffers reasoning and delivers it in one burst just before the answer (live: 0 ms vs 9.4 s). If a stream stops
+  mid-reasoning (error or cancel), the worker still sends `thinking_done {elapsed_ms: 0, chars: 0}`.
+  `reasoning_details` text/summary items are used only when neither `reasoning_content` nor `reasoning` is present.
+  Subscribed subagents also forward `thinking_delta`, `thinking_done` and `turn_summary` in `subagent_event`.
+- **`turn_transcript`** is `{turn_id, outcome, running, items}`; each item has the `subagent_transcript` message shape
+  `{role, content (≤ 8000 chars), tool_calls?: [names]}` plus `tool_call_id` on tool results. Items are recorded as
+  the turn runs, so a cancelled or failed turn keeps its transcript even though the conversation rolls it back.
+- **Skills search order** (default directories only; an explicit `configure.skills.dirs` list is used as given):
+  `~/.config/relay/skills` (refined copies, `XDG_CONFIG_HOME` aware) first, then the existing locations, then
+  `~/.local/share/relay/skill-imports/<repo>@<commit>/` (newest first, `XDG_DATA_HOME` aware). A clash is reported
+  in `configured.skills_skipped` as "refined copy in … overrides …".
+- **`skills_list`** items also carry `shadowed_by` (the winning SKILL.md) for duplicates; the event adds `skipped`.
+- **`refine_skills`** writes `<target_dir>/<name>/SKILL.md` and copies the skill's other files (no symlinks, no dot
+  files). The model's body and description are used; `name` and all other frontmatter keys come from the original,
+  plus `refined_from` (the original path; refining a refined copy keeps pointing at the original). A reply without
+  frontmatter or instructions is rejected. Event: `skills_refined {items, errors: [{name, error}], reloaded}`;
+  `reloaded` means the idle agent picked up the new index and system prompt.
+- **Import.** URLs: `https://`, `ssh://` and `git@host:path` (no credentials in https URLs); `file://` only when
+  `skill_manage.ALLOW_FILE_URLS` is set (tests). Instead of `git clone --depth 1`, the worker runs `git init` plus
+  `git fetch --depth 1 origin <ref|HEAD>` and checks out `FETCH_HEAD`, so `ref` may be a branch, tag or commit. Git
+  runs with only the https/ssh(/file) protocols allowed, hooks disabled, `core.symlinks=false`, no prompts and a
+  120 s timeout. `skills_import_preview` adds `ref` and `skipped` (symlinked folders, missing descriptions,
+  duplicates); `items[].path` is relative to the repository. The preview clone stays in a temp directory until
+  confirmed or the worker exits; `import_skills_confirm` re-fetches the pinned commit if needed. Copies go to
+  `skill-imports/<repo>@<full commit>/<name>/` with a `.relay-import.json` manifest; `skills_imported` adds `url`,
+  `commit`, `dir`, `reloaded`. `skills_check_updates {url, ref?}` → `skills_updates {url, ref, current, latest,
+  update_available}`, where `current` is the newest imported commit for that URL.

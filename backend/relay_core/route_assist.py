@@ -16,9 +16,10 @@ from . import sidecall
 MAX_TEXT = 2000
 DEFAULT_TIMEOUT_MS = 2000
 MAX_TIMEOUT_MS = 15000
-# Thinking models spend output tokens on reasoning first (Kimi K3 cannot turn thinking off); a
-# 20-token limit truncates them, so the limit is small but not 20. See the protocol doc, section 11.
-MAX_TOKENS = 64
+# Thinking models spend output tokens on reasoning before the JSON (Kimi K3 cannot turn thinking off).
+# Live 2026-09-17: 20 tokens truncated Kimi and GLM, 64 truncated Kimi once, 128 truncated OpenRouter
+# DeepSeek at low effort; 256 answered every example. The reply itself is ~20 tokens.
+MAX_TOKENS = 256
 
 SYSTEM = """You route text typed into a Linux terminal's input box. It either runs as a Bash command in the user's shell, or goes to a coding agent as a natural-language request.
 The first word is an installed command that is also an English word, so both readings are possible.
