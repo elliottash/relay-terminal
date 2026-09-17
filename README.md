@@ -153,6 +153,8 @@ that arrives while a program is running waits until the next prompt.
 | Ctrl+W | Close the pane; the tab if it is the last pane; the window, after a warning, if it is the last tab |
 | Ctrl+Shift+W | Restore the last closed pane, tab or window |
 | Ctrl+Shift+A | Actions palette: agent, terminal, panes and tabs, shortcuts |
+| Ctrl+H (from the prompt box) | Take control: hide the prompt and type into the terminal |
+| Ctrl+Shift+H | Back to the Relay prompt; while a program runs, the agent is in control |
 
 Every pane has its own shell, composer, agent worker and conversation. The toolbar acts on
 the focused pane, which has an accent outline. Typing `exit` closes a pane. Restoring
@@ -168,6 +170,23 @@ searches everything, including submenu entries: "deep" finds Model › DeepSeek.
 keys or Ctrl+N / Ctrl+P to move, Right or Enter to open a submenu, Left to go back, Enter to
 run, and Esc to clear the filter, go back, then close. Focus returns to where it was. The input mode and model pickers and an interrupt button sit in each
 pane's input row.
+
+### Human and agent control
+
+When any command keeps running for more than a moment, Relay hides the prompt box and your
+keys go to the program: passwords, REPLs, vim, long builds. When the command ends, the prompt
+returns. **Ctrl+Shift+H** brings the prompt back while a program runs; anything you submit then
+goes to the agent. **Ctrl+H** from the prompt box gives control back to you; in the terminal,
+Ctrl+H stays Backspace.
+
+Password prompts are detected from the terminal mode, not the text on screen: echo off with
+line input on, checked once a second while a command runs. Relay then puts you in control and
+shows "Password prompt · you're in control". Prompt-box text never goes to a running program.
+If Relay's window is in the background, it flashes the taskbar and sends a desktop notification
+(`notify-send`) for password prompts and for commands that finish after more than 30 seconds.
+
+The agent cannot type into running programs yet; see
+`issues/features/2026-09-17-agent-delegate-and-take-over.md`.
 
 ### Changing shortcuts
 

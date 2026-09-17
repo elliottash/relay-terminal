@@ -54,6 +54,7 @@
 #include <QTabWidget>
 #include <QFileSystemWatcher>
 #include <QKeySequence>
+#include <QElapsedTimer>
 #include <QListWidget>
 #include <QTreeWidget>
 #include <QHeaderView>
@@ -257,6 +258,8 @@ private:
         add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W")});
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+W")});
         add("palette.open", "palette", "Open the Relay actions palette", {QStringLiteral("Ctrl+Shift+A")});
+        add("control.human", "terminal", "Take control of the terminal (hides the prompt; works from the prompt box)", {QStringLiteral("Ctrl+H")});
+        add("control.prompt", "terminal", "Back to the Relay prompt (the agent is in control)", {QStringLiteral("Ctrl+Shift+H")});
         add("terminal.native", "terminal", "Toggle native terminal input", {QStringLiteral("F12")});
         add("terminal.interrupt", "terminal", "Interrupt the running command (Ctrl+C)", {});
         add("agent.newChat", "agent", "Start a new agent conversation", {});
@@ -350,6 +353,8 @@ public:
         startWorker();
         startTerminal(cleanShell);
         connect(&m_poll, &QTimer::timeout, this, [this] { pollShell(); });
+        connect(&m_secretPoll, &QTimer::timeout, this, [this] { checkPasswordPrompt(); });
+        m_secretPoll.start(1000);
         m_poll.start(80);
         m_debounce.setSingleShot(true);
         m_debounce.setInterval(150);
@@ -421,6 +426,25 @@ public:
         configurePreset(id, true);
     }
     void openProviderDialog() { configure(); }
+    bool ownsComposerWidget(QWidget *widget) const { return m_composer && widget && (widget == m_composer || m_composer->isAncestorOf(widget)); }
+
+    // Human control: the prompt box hides and keys go to the terminal.
+    void takeControl() {
+        // During a running program the prompt returns when it exits; at an idle shell you stay in control.
+        m_autoHuman = processBusy() || !m_promptReported;
+        if (!m_native) setNative(true);
+        toast(QStringLiteral("You're in control · %1 for the prompt").arg(Keymap::instance().shortcutText(QStringLiteral("control.prompt"))));
+    }
+
+    // Back to the prompt. While a program runs, the prompt talks to the agent, which is in control.
+    void showPrompt() {
+        m_autoHuman = false;
+        if (m_native) setNative(false, !processBusy());
+        else m_editor->setFocus(Qt::OtherFocusReason);
+        if (processBusy())
+            toast(QStringLiteral("Agent in control · %1 to take control").arg(Keymap::instance().shortcutText(QStringLiteral("control.human"))));
+    }
+
     bool ownsTerminalWidget(QWidget *widget) const { return m_terminal && widget && (widget == m_terminal || m_terminal->isAncestorOf(widget)); }
     bool runCommand(const QString &command) { return runInTerminal(command, false, 0); }
     void sendKeybindings() { if (m_configured) send(QJsonObject{{"type", "keybindings"}, {"path", Keymap::instance().path()}, {"actions", Keymap::instance().catalog().value(QStringLiteral("actions"))}}); }
@@ -477,6 +501,7 @@ private:
         auto *terminalLayout = new QVBoxLayout(m_terminalHost); terminalLayout->setContentsMargins(0, 0, 0, 0);
         layout->addWidget(m_terminalHost, 1);
         auto *composer = new QFrame; composer->setFrameShape(QFrame::StyledPanel);
+        m_composer = composer;
         auto *composerLayout = new QVBoxLayout(composer);
         auto *routeRow = new QHBoxLayout;
         m_routeLabel = new QLabel(QStringLiteral("AUTO · local detection"));
@@ -765,6 +790,11 @@ private:
         const QString route = decision.value(QStringLiteral("route")).toString();
         const QString text = decision.value(QStringLiteral("text")).toString();
         if (route == QStringLiteral("empty")) return;
+        if (route == QStringLiteral("shell") && processBusy() && mode != QStringLiteral("shell")) {
+            // A program owns the terminal; the prompt talks to the agent.
+            submitAgent(text, true, QStringLiteral("A program is running in this pane, so this went to the agent."));
+            return;
+        }
         if (route == QStringLiteral("shell")) {
             const bool valid = decision.value(QStringLiteral("valid")).toBool(decision.value(QStringLiteral("syntax_ok")).toBool(true));
             const QString problem = decision.value(QStringLiteral("invalid_reason")).toString(
@@ -817,6 +847,33 @@ private:
             }
         });
         return true;
+    }
+
+    // Warp's rule: a password prompt turns echo off but keeps canonical (line) input. Full-screen
+    // programs and Readline turn canonical input off, so they do not match.
+    void checkPasswordPrompt() {
+        if (m_promptReported || m_secretNotified || !m_iface) return;
+        const int pid = m_iface->terminalProcessId();
+        if (pid <= 0) return;
+        const auto name = QStringLiteral("/proc/%1/fd/0").arg(pid).toLocal8Bit();
+        const int fd = ::open(name.constData(), O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) return;
+        termios state{};
+        const bool secret = ::tcgetattr(fd, &state) == 0 && (state.c_lflag & ICANON) && !(state.c_lflag & ECHO);
+        ::close(fd);
+        if (!secret) return;
+        m_secretNotified = true;
+        if (!m_native) { m_autoHuman = true; setNative(true); }
+        focusTerminal();
+        toast(QStringLiteral("Password prompt · you're in control"));
+        notifyIfAway(QStringLiteral("Password prompt"), QStringLiteral("A command in %1 is waiting for a password.").arg(m_cwd));
+    }
+
+    void notifyIfAway(const QString &title, const QString &body) {
+        if (window() && window()->isActiveWindow()) return;
+        QApplication::alert(window());
+        const QString notifier = QStandardPaths::findExecutable(QStringLiteral("notify-send"));
+        if (!notifier.isEmpty()) QProcess::startDetached(notifier, {QStringLiteral("-a"), QStringLiteral("Relay"), title, body});
     }
 
     static bool copyOnSelect() { return QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool(); }
@@ -1155,6 +1212,12 @@ private:
             m_shellPath = event.value(QStringLiteral("path")).toString();
             const int status = event.value(QStringLiteral("status")).toInt();
             if (!m_agentBusy) this->status(QStringLiteral("Shell ready · exit %1").arg(status));
+            if (m_runningSince.isValid()) {
+                const qint64 ms = m_runningSince.elapsed();
+                m_runningSince.invalidate();
+                if (ms > 30000) notifyIfAway(QStringLiteral("Command finished"), QStringLiteral("Exit %1 after %2 s in %3").arg(status).arg(ms / 1000).arg(m_cwd));
+            }
+            if (m_native && m_autoHuman) { m_autoHuman = false; setNative(false, false); }
             if (m_fixArmed) {
                 const QString command = m_fixCommand;
                 const int attempt = m_fixAttempt;
@@ -1174,6 +1237,15 @@ private:
             QTimer::singleShot(120, this, [this] { flushInline(); });
         } else if (stage == QStringLiteral("running")) {
             m_shellReady = false; m_promptReported = false;
+            m_runningSince.start(); m_secretNotified = false;
+            // Any program that keeps running hands control to the human, like Warp: the prompt
+            // hides and keys go to the program (passwords, REPLs, vim, long builds).
+            const QString sequence = m_shellSequence;
+            QTimer::singleShot(150, this, [this, sequence] {
+                if (m_shellSequence != sequence || m_promptReported || m_native) return;
+                m_autoHuman = true;
+                setNative(true);
+            });
         } else if (stage == QStringLiteral("loaded") && m_loading && m_iface &&
                    event.value(QStringLiteral("input_sha256")).toString() == m_pendingHash) {
             m_loading = false; m_shellReady = false; m_promptReported = false; m_refocus = true;
@@ -1188,17 +1260,19 @@ private:
         }
     }
 
-    void setNative(bool enabled) {
+    void setNative(bool enabled, bool cancelLine = true) {
         m_native = enabled;
         changed();
         m_editor->setReadOnly(enabled);
+        // Human control hides the prompt box entirely; the terminal gets the space and the keys.
+        if (m_composer) m_composer->setVisible(!enabled);
         if (enabled) {
-            m_routeLabel->setText(QStringLiteral("NATIVE · keystrokes go directly to Konsole. F12 returns to the composer."));
+            m_routeLabel->setText(QStringLiteral("NATIVE · keystrokes go directly to Konsole."));
             focusTerminal();
         } else {
             // Returning from native mode cancels Readline's partial line at a prompt.
             // Never inject a cancellation into a foreground TUI/process here.
-            if (m_shellReady && m_iface && (m_iface->foregroundProcessId() <= 0 || m_iface->foregroundProcessId() == m_iface->terminalProcessId())) {
+            if (cancelLine && m_shellReady && m_iface && (m_iface->foregroundProcessId() <= 0 || m_iface->foregroundProcessId() == m_iface->terminalProcessId())) {
                 m_iface->sendInput(QString(QChar(3))); m_shellReady = false; m_promptReported = false; m_refocus = true;
             }
             m_editor->setFocus(); requestRoute(false, QStringLiteral("auto"));
@@ -1321,6 +1395,10 @@ private:
     QList<QPair<QString, QString>> m_stored;
     QComboBox *m_modeBox = nullptr, *m_modelBox = nullptr;
     QLabel *m_toast = nullptr;
+    QFrame *m_composer = nullptr;
+    QTimer m_secretPoll;
+    QElapsedTimer m_runningSince;
+    bool m_autoHuman = false, m_secretNotified = false;
     QTimer m_toastTimer;
     QString m_currentPreset;
     bool m_cleanShell = false, m_closing = false;
@@ -1493,6 +1571,9 @@ protected:
         if (id.isEmpty()) return QMainWindow::eventFilter(object, event);
         // A program such as vim owns its keys, unless the program_keys rule lets this shortcut act.
         Pane *pane = paneOf(widget);
+        // Ctrl+H only takes control from the prompt box; in the terminal it stays Backspace.
+        if (id == QStringLiteral("control.human") && !(pane && pane->ownsComposerWidget(widget)))
+            return QMainWindow::eventFilter(object, event);
         if (pane && pane->ownsTerminalWidget(widget) && pane->processBusy() && !Keymap::instance().actsInsidePrograms(key))
             return QMainWindow::eventFilter(object, event);
         // Accept the override so neither the composer nor Konsole consumes the key,
@@ -1575,6 +1656,8 @@ private:
         }
         else if (!pane) return;
         else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
+        else if (id == QStringLiteral("control.human")) pane->takeControl();
+        else if (id == QStringLiteral("control.prompt")) pane->showPrompt();
         else if (id == QStringLiteral("terminal.interrupt")) pane->interruptShell();
         else if (id == QStringLiteral("agent.newChat")) pane->newChat();
         else if (id == QStringLiteral("agent.stop")) pane->stopAgent();
@@ -1699,7 +1782,8 @@ private:
         items << importKeys;
 
         items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Send Ctrl+C to the running program") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
-        items << actionItem(terminal, QStringLiteral("Native terminal input"), QStringLiteral("Type directly into Konsole"), QStringLiteral("terminal.native"), pane && pane->isNative());
+        items << actionItem(terminal, QStringLiteral("Take control"), QStringLiteral("Hide the prompt and type into the terminal"), QStringLiteral("control.human"), pane && pane->isNative());
+        items << actionItem(terminal, QStringLiteral("Show the Relay prompt"), QStringLiteral("The agent is in control of a running program"), QStringLiteral("control.prompt"), pane && !pane->isNative());
         {
             PaletteItem copy;
             const bool on = QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool();

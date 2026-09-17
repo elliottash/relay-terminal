@@ -12,6 +12,7 @@ Name=Relay
 Parent=FALLBACK/
 TerminalColumns=100
 TerminalRows=30
+ShowTerminalSizeHint=false
 
 [Scrolling]
 HistoryMode=2
