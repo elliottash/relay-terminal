@@ -78,7 +78,8 @@ class TurnSupervisor:
             self._clear_locked()
 
     # ----- requests -------------------------------------------------------
-    def submit(self, prompt, when: str = "now", request_id=None, context=None) -> str:
+    def submit(self, prompt, when: str = "now", request_id=None, context=None, origin: str = "user") -> str:
+        """origin "relay" marks prompts Relay queued itself (e.g. a background subagent finished)."""
         if when not in {"now", "queue", "interrupt"}:
             raise ValueError('"when" must be "now", "queue", or "interrupt".')
         with self._lock:
@@ -93,7 +94,8 @@ class TurnSupervisor:
             busy = self._running is not None or (self._queue and not self._paused)
             if when == "now" and busy:
                 raise ValueError("An agent turn is already active.")
-            item = {"id": uuid.uuid4().hex, "prompt": prompt, "force": when != "queue", "context": context}
+            item = {"id": uuid.uuid4().hex, "prompt": prompt, "force": when != "queue", "context": context,
+                    "origin": origin}
             if item["force"]:
                 # Interrupts are FIFO among themselves, ahead of ordinary queued prompts.
                 position = sum(1 for _ in self._leading_forced())
@@ -102,7 +104,7 @@ class TurnSupervisor:
                 self._queue.append(item)
                 position = len(self._queue) - 1
             self._emit({"event": "queued", "id": item["id"], "request_id": request_id,
-                        "when": when, "position": position})
+                        "when": when, "position": position, "origin": origin})
             if when == "interrupt" and self._running is not None:
                 self._emit({"event": "interrupting", "id": self._running, "by": item["id"]})
                 self._stop_locked()
@@ -170,7 +172,8 @@ class TurnSupervisor:
 
     def _changed_locked(self) -> None:
         self._emit({"event": "queue_changed", "running": self._running, "paused": self._paused,
-                    "items": [{"id": i["id"], "preview": i["prompt"][:PREVIEW], "forced": i["force"]}
+                    "items": [{"id": i["id"], "preview": i["prompt"][:PREVIEW], "forced": i["force"],
+                               "origin": i.get("origin", "user")}
                               for i in self._queue]})
 
     def _next_locked(self):

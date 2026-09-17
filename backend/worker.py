@@ -10,6 +10,8 @@ import threading
 
 from relay_core import __version__, keystore, skills
 from relay_core.agent import Agent
+from relay_core import agents_defs
+from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog, KeybindingError
 from relay_core.presets import PRESETS, match_preset
 from relay_core.queue import TurnSupervisor
@@ -49,7 +51,15 @@ def main():
             sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
             sys.stdout.flush()
 
-    turns = TurnSupervisor(emit)
+    # Subagents observe main-turn endings to wake the main agent for background results.
+    subagents = SubagentManager(emit)
+
+    def turn_emit(obj: dict):
+        emit(obj)
+        subagents.observe(obj)
+
+    turns = TurnSupervisor(turn_emit)
+    subagents.turns = turns
 
     emit({"event": "ready", "version": __version__})
     while True:
@@ -98,9 +108,21 @@ def main():
                 workspace = request.get("workspace", os.getcwd())
                 skill_index = skills.from_request(request.get("skills"), workspace)
                 agent = Agent(config, workspace, turns.agent_emit, keybindings=catalog, skills=skill_index)
+                # --- subagents ---
+                agents_request = request.get("agents") or {}
+                if not isinstance(agents_request, dict):
+                    raise ValueError("agents must be an object.")
+                agent_catalog = agents_defs.load_catalog(workspace, agents_request.get("dirs"))
+                subagent_factory = SubagentFactory(config, workspace, skills=skill_index,
+                                                   preset_id=request.get("preset"), key_lookup=keystore.lookup,
+                                                   aliases=agents_request.get("aliases"))
                 turns.set_agent(agent)
+                subagents.configure(agent_catalog, subagent_factory)
+                subagents.attach(agent)
+                # --- end subagents ---
                 event = {"event": "configured", "model": config.model,
                          "skills": len(agent.executor.skills.skills) if agent.executor.skills is not None else 0}
+                event["agents"] = len(agent_catalog.definitions)  # subagents
                 if skill_index is not None and skill_index.skipped:
                     event["skills_skipped"] = skill_index.skipped[:50]
                 emit(event)
@@ -124,6 +146,7 @@ def main():
                 emit({"event": "warp_imported", "id": request.get("id"),
                       "imported": [item.to_dict() for item in imported], "skipped": skipped})
             elif kind == "ask":
+                subagents.user_activity()
                 turns.submit(request.get("text", ""), request.get("when", "now"), request.get("id"),
                              request.get("context"))
             elif kind == "cancel":
@@ -136,7 +159,26 @@ def main():
                 turns.clear()
             elif kind == "reset":
                 turns.reset()
+                subagents.stop_all(reset=True)
                 emit({"event": "reset"})
+            # --- subagents (protocol sections 7 and 8) ---
+            elif kind == "agents_list":
+                catalog = subagents.catalog
+                if catalog is None:
+                    catalog = agents_defs.load_catalog(request.get("workspace") or os.getcwd(), None)
+                emit({"event": "agents", "id": request.get("id"), "items": catalog.items(),
+                      "duplicates": catalog.duplicates, "skipped": catalog.skipped})
+            elif kind == "agent_subscribe":
+                subagents.subscribe(request.get("id"), request.get("on", True) is not False)
+            elif kind == "agent_message":
+                result = subagents.send_message(request.get("id"), request.get("text"), origin="user")
+                emit({"event": "agent_message_delivered", **result})
+            elif kind == "agent_stop":
+                target = request.get("id")
+                emit({"event": "agent_stopped", "ids": subagents.stop("all" if target in (None, "all") else target)})
+            elif kind == "agents_status":
+                emit({"event": "agents_status", "items": subagents.list()})
+            # --- end subagents ---
             elif kind == "shutdown":
                 break
             else:
@@ -145,6 +187,7 @@ def main():
             emit({"event": "error", "id": request.get("id") if isinstance(locals().get("request"), dict) else None,
                   "agent_busy": turns.busy,
                   "text": str(exc)[:2000] if isinstance(exc, (ValueError, OSError, keystore.KeystoreError)) else f"Protocol error ({type(exc).__name__})."})
+    subagents.shutdown()
     turns.shutdown(timeout=1)
 
 if __name__ == "__main__":
