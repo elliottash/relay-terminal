@@ -64,6 +64,9 @@ terminal CPU is the terminal process over the same window + 1 s settle.
 | Konsole 23.08.5 | 3.66 / 3.57 / 3.71 | 3.43 / 3.40 / 3.49 | 142 MB |
 | xterm 390 | 2.91 / 2.94 / 2.91 | 2.73 / 2.75 / 2.72 | 13 MB |
 
+At 150x50 (one run each after the review fixes): ghostty core 1.24 s wall / 1.84 s CPU / 145 MB,
+Konsole 3.63 s / 3.43 s / 142 MB, so repaint cost does not grow noticeably with the grid.
+
 Target was "at most Konsole's time" (and within 1.2x of Konsole's 3.7 s for the core decision): the
 ghostty core takes **about a third of Konsole's time**. The libvterm core is 1.1x Konsole: better than
 the spike's 2x, and within the 1.2x fallback budget. Terminal CPU above wall time is the second

@@ -29,7 +29,13 @@ build-engine/engine/relay-vterm-spike --core ghostty   # manual harness
 ```
 
 Without `RELAY_ENGINE_WITH_GHOSTTY` only the libvterm core is built (no Zig needed); every test runs
-against whichever cores are available.
+against whichever cores are available. `RELAY_ENGINE_TEST=SessionTest relay-engine-tests` runs one
+test object.
+
+Sanitizers (2026-09-17): the suite is clean under ASan+UBSan (Debug; the libvterm flood test needs
+`ASAN_OPTIONS=detect_stack_use_after_return=0` to finish in time). Under TSan
+(`setarch -R`, needed on this aarch64 kernel) the only reports were inside uninstrumented Qt
+(posted-event queue) and one in test code that was fixed.
 
 | Target | What |
 |---|---|

@@ -29,7 +29,7 @@ struct Collector {
     QByteArray snapshot()
     {
         std::lock_guard<std::mutex> lock(mutex);
-        return data;
+        return QByteArray(data.constData(), data.size()); // deep copy: no implicit sharing across threads
     }
     bool waitFor(const QByteArray &needle, int ms = 5000)
     {
