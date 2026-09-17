@@ -89,8 +89,9 @@ Options: `--workspace/-w PATH` (initial terminal directory and agent workspace) 
 Pane anatomy, top to bottom: directory line (click opens the explorer), an optional
 banner (memory kill, restart), the terminal, the transcript panel (section 8), the composer
 frame (route label, input-mode picker, model picker, interrupt-shell button, Submit, editor,
-key hints). Two overlays float over the terminal without resizing it: the agent queue strip
-and toasts.
+key hints). Overlays float over the terminal without resizing it (a resize makes the idle shell
+redraw its prompt in the middle of inline output): the agent queue strip, the thinking panel,
+toasts and the pane button row.
 
 Layout rules:
 
@@ -105,9 +106,46 @@ Layout rules:
   directories (`RELAY_START_DIR`, applied by `shell/integration.bash` after `.bashrc`).
   Scrollback and running programs are not restored.
 - Closing a window asks for confirmation when it has more than one pane or anything is busy.
+- **Pane button row** (`PaneChrome`, a child of each leaf created in `syncChrome()`): shown for
+  the leaf under the mouse (application event filter, Enter/MouseMove). Buttons run the same
+  actions as the keys (`pane.splitRight`, `pane.splitDown`, `pane.moveToNewTab`, `pane.close`).
+  `PaneChrome` has no `Q_OBJECT`, so it is found with `dynamic_cast` (`chromeOf`), never
+  `findChild<PaneChrome*>` (that matches any `QFrame`, such as the transcript panel).
+- **Moving without destroying.** `takeLeaf()` detaches a leaf (collapsing a one-child splitter,
+  removing an emptied tab, closing an emptied window) and leaves it parentless;
+  `insertBeside()` / `adoptLeafAsTab()` / `adoptPage()` put it back. Shells, workers and
+  conversations keep running. Pane callbacks resolve their window at call time
+  (`windowOf(pane)`), so nothing has to be rebound when a pane or tab changes window.
+- **Keyboard moves** (`pane.moveLeft/Right/Up/Down`, default Ctrl+Alt+arrows, unbound in the
+  Warp preset where those keys focus panes): the neighbor is found like focus movement; adjacent
+  siblings in a splitter of that orientation swap, otherwise the pane docks on the neighbor's
+  near side, so repeating keeps moving it.
+- **Drag:** the grip tracks the mouse itself (no `QDrag`, because KonsolePart accepts text
+  drops). `dropTarget()` picks the nearest edge of the leaf under the cursor or a `QTabBar`; a
+  translucent `dropZone` frame shows the half that will be taken. Esc cancels.
+- **Tabs:** a "+" button placed after the last tab, a ⧉ left-side tab button shown on hover and a
+  context menu run `tab.new` / `tab.moveToNewWindow`; the tab page moves to
+  `WindowManager::newEmptyWindow()`.
 - Typing `exit` closes the pane. A shell stopped for memory keeps the pane open (section 13).
 
 ## 4. Keyboard: Keymap, presets, palette
+
+### Shortcut hints
+
+`src/Hints.*` (`relay::ShortcutHints`) decides whether a hint may show: on by default
+(`hints/enabled`, toggles in Agent options and the Shortcuts section), at most `limit` (3) times
+per id, a per-id cooldown (600 s) and a global gap of 20 s, counts in QSettings `hints/`.
+`Pane::hint()` and `RelayWindow::hint()` show a 5 s toast; `nextTime(shortcut, what)` builds the
+text from the live Keymap, so rebinding changes the hint and unbound actions get none. Current
+triggers: toolbar and palette activations of actions with shortcuts, pane buttons, the tab "+",
+tab close and ⧉ buttons, clicking into another pane, mouse model/effort/mode pickers, clicking
+the directory line (`@`), the queue ×, `/shell ` and `/agent ` (`!`, `*`), palette rewinds, pane
+drags, the first `relay://` link, and rotating idle tips 4 s after a finished agent turn with an
+empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
+in `WARP.md`); tests in `tests/hints_test.cpp`.
+
+Palette items also match hidden alias words (`paletteAliases()`, keyed by label/key/section
+substrings, half weight), e.g. "undo" → Rewind, "reasoning" → effort, "detach" → move actions.
 
 `Keymap` (`src/main.cpp`) is a process-wide registry of named actions. Each action has an id,
 a category, a description and default keys.
@@ -181,6 +219,20 @@ Pasting never submits.
 | PageUp / PageDown | scroll the terminal scrollback one page |
 
 Text changes trigger a debounced (150 ms) preview route; the route label shows the decision.
+
+**Prefixes.** `!` or `*` typed (not pasted) as the first character of an empty editor is consumed
+and switches the input mode to terminal or agent for one submission (`setPrefixMode`, chip
+`prefixChip`); Backspace on the empty editor restores the previous mode. `/shell ` and `/agent `
+still work and trigger a shortcut hint.
+
+**Routing assist (protocol 11).** When a preview `route` has `needs_assist` and the mode is auto,
+the label shows the local guess, then "AUTO · checking…" after 150 ms; 300 ms after typing stops
+the pane sends `route_assist {id: "assist-N", text, cwd, timeout_ms: 4000}` for the current text
+only. `route_assisted` updates the label ("AGENT · guessed: reason (82%)") and is cached per
+text. On submit, a cached answer replaces the route; otherwise the decision is held for at most
+400 ms (`m_assistHold`) and then dispatched with the local guess. A failed or timed-out assist
+leaves the local guess ("model check unavailable"). Prefixes, Ctrl+Enter and Ctrl+Shift+Enter
+send a non-auto mode and never ask.
 Submission sends `route` to the worker with the text, mode, live alias/function names, the
 shell's `PATH` and cwd. The worker's `router.classify` (`backend/relay_core/router.py`) never
 executes input:
@@ -287,6 +339,38 @@ screen. Output is buffered, and also shown live in the **transcript panel** abov
 (`Pane::appendTranscript`): header "Agent · model — output will also print in the terminal
 when <program> exits", at most about 40% of the pane height, × hides it until the program
 exits. On the next `ready` event the buffer prints into the terminal and the panel resets.
+
+**Thinking and turn summaries (protocol 11).** `thinking_delta` text streams into a floating
+`thinkingOverlay` over the bottom of the terminal (not the transcript panel: that is in the
+layout, and resizing the terminal makes Readline redraw its prompt mid-output) when
+`agent/show_thinking` is on (default). `thinking_done` hides it and prints one Note line,
+`✦ thought for N s` (skipped for `chars: 0`). `turn_summary` (sent just before `done`) is stored
+per pane (last 50) and, when the turn used tools, prints `✦ N tool calls · T s` wrapped in an
+OSC 8 hyperlink to `relay://turn/<pane token>/<turn id>`. The live `tool_output {text}` stream and
+the stored reply `tool_output {stored: true, …}` share a name; the GUI branches on `stored`.
+
+**`relay://` links.** Konsole 23.08 opens OSC 8 links only when the profile has
+`AllowEscapedLinks=true` and the scheme is in `EscapedLinksSchema` (`data/theme/konsole/Relay.profile`),
+and KonsolePart applies its profile before the view exists, which leaves the URL extractor off;
+`Pane` re-applies the profile (`TerminalInterfaceV2::setCurrentProfile`) after starting the shell.
+Clicks go through `KIO::OpenUrlJob`, so `registerUrlHandler()` (1.5 s after start, idempotent,
+`RELAY_NO_URL_HANDLER=1` skips it) writes
+`$XDG_DATA_HOME/applications/org.relayterminal.Relay.url-handler.desktop` (`Exec=python3
+relay-open %u`, template in `data/`), runs `xdg-mime default … x-scheme-handler/relay`,
+`update-desktop-database` and `kbuildsycoca5`, and says so once in the status bar. `relay-open`
+forwards `relay://` URLs as `{url}` over the open socket; a helper launched by the desktop has no
+`RELAY_OPEN_SOCKET`, so `WindowManager` also writes the address to
+`$XDG_RUNTIME_DIR/relay/open-socket` (0600). `handleOpen` finds the pane by token and
+`openTurnPane()` inserts a `ToolPane(TurnTranscriptView)` (`src/TurnTranscript.*`): tool rows
+from the summary, the transcript from `turn_transcript_get`; Enter on a row sends
+`tool_output_get` and the result is written to a 0600 temp file (`.diff` or `.log`) and opened in
+a preview pane.
+
+**Rewind.** `/rewind` and Esc Esc open *Rewind chat* (`rewind {restore: "conversation"}`, files
+never touched; "Fork from here"). `/rewind-code` (palette "Rewind code…") opens *Rewind code*
+with "Rewind code…" (`files`) and "Code and chat…" (`both`); both first list the files changed by
+that turn and later ones in a confirmation where Enter restores. Conflicts are only known after
+the restore (the backend skips files changed since and reports them in `rewound`).
 
 ## 9. Human and agent control
 
@@ -450,6 +534,15 @@ prompt as lower-priority guidance. `load_skill` returns up to 64 KiB of `SKILL.m
 folder's file list; `read_skill_file` reads a text file inside the folder. Symlinks, `..` and
 binary files are refused. Skipped folders are reported in `configured.skills_skipped`.
 
+GUI: `src/SkillsDialog.*` (non-modal, from `/skills`, the palette or Agent options) lists
+`skills_list` items with a checkbox per skill (unchecked names go to QSettings `skills/exclude`,
+sent in `configure.skills.exclude` for new sessions), "overridden" for `shadowed_by`. Refine sends
+`refine_skills` and opens the first refined `SKILL.md` in an editable pane. Import sends
+`import_skills_preview`, shows a modal review (checkbox per skill, files as children) and sends
+`import_skills_confirm` with the checked names. Check for updates reads the repository URL from
+the imported skill's `../.relay-import.json` and sends `skills_check_updates`. Dialog requests
+use ids `skills-N` so worker `error` events route to the dialog's status line.
+
 ### Queue and interrupt
 
 `backend/relay_core/queue.py` (`TurnSupervisor`) runs every turn on one dispatcher thread.
@@ -605,6 +698,10 @@ Other limits:
 | `src/RichEditor.*` | composer editor |
 | `src/FilePanes.*` | explorer and preview widgets |
 | `src/Theme.*` | palette, stylesheet, Konsole profile exposure |
+| `src/Hints.*` | shortcut hint limits and idle tips |
+| `src/TurnTranscript.*` | turn details pane (tool calls, transcript) |
+| `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |
+| `src/AgentUi.*` | pickers and instructions dialog |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
 | `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `keystore`, `keybindings`, `skills` |

@@ -87,13 +87,24 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
 
 - **Composer routing.** A local check (`bash -n`, then every command word resolved against
   builtins, `PATH`, your live aliases and functions) decides terminal or agent. Nothing is
-  executed to decide. Input that is not a runnable command goes to the agent. `/shell ` and
-  `/agent ` prefixes force a destination.
+  executed to decide. Input that is not a runnable command goes to the agent. Type `!` as the
+  first character of an empty prompt box for terminal mode or `*` for agent mode (a chip shows;
+  Backspace on the empty box goes back; pasting does not switch). `/shell ` and `/agent ` still
+  work. When a command is also an English word used in a sentence ("install ripgrep", "make the
+  tests pass"), the label shows the local guess and asks the agent's model in the background
+  ("AGENT · guessed: … (82%)"); Enter uses the model's answer if it arrives within 400 ms,
+  otherwise the local guess. Typing is never blocked.
 - **Fix loop.** In terminal mode, an invalid command or a non-zero exit asks the agent for a
   fix, which Relay runs in your terminal. Up to 3 attempts; Ctrl+C stops it.
 - **Inline agent output.** Prompts, answers, tool calls, command output and diffs print in the
   terminal in distinct colors. They are written to the display, never typed into the shell.
   While a program such as vim runs, output shows in a small panel and prints when it exits.
+- **Thinking and tool calls.** Model reasoning streams dimly in a panel over the bottom of the
+  terminal (Actions › Agent options › Show thinking); the terminal keeps one line,
+  `✦ thought for 7 s`. A turn that used tools ends with `✦ 3 tool calls · 12 s`: Ctrl+click it
+  (or Actions › Open last agent turn) for a pane listing each call; Enter on a call opens its
+  full output. The link is a `relay://` URL; Relay registers a user-level
+  `x-scheme-handler/relay` desktop entry for it on first run.
 - **One queue for commands and prompts.** Terminal commands entered while the shell is busy and
   agent prompts entered while the agent is busy wait in one queue per pane and run in the order
   entered: an agent prompt queued after a command waits for that command, and vice versa. The
@@ -119,7 +130,9 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
 - **Agent sessions.** Per pane: switch model without losing the conversation, reasoning effort
   (picker, Alt+. / Alt+,), and a context indicator (`ctx 142k · 14%`, amber near the auto-compact
   limit). Type `/` in the prompt box for commands: `/new`, `/model`, `/effort`, `/compact [focus]`,
-  `/context`, `/rewind` (also Esc Esc in an empty prompt), `/fork` (continues in a new pane),
+  `/context`, `/rewind` (rewind chat: the conversation only, files untouched; also Esc Esc in
+  an empty prompt), `/rewind-code` (restores the files the agent changed, after showing them and
+  asking; "Code and chat" does both), `/fork` (continues in a new pane),
   `/resume` (with a recap), `/plan`, `/recap`, `/agents`, `/skills`, `/instructions`, `/export`
   (Markdown under `.relay/exports`). Coming back to the window after 3 minutes, with a finished
   turn and an empty prompt, prints a short recap (Actions › Agent options turns it off).
@@ -134,14 +147,30 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
 - **AI suggestions (off by default).** Actions › Agent options: a suggested next command after a
   command finishes (→ or Tab accepts) and a suggested next prompt after an agent turn (Tab).
 - **Windows, tabs and panes.** Each pane has its own shell, prompt, agent and conversation.
-  Closed panes, tabs and windows restore in the same directories with new shells.
+  Closed panes, tabs and windows restore in the same directories with new shells. Hovering a
+  pane shows a button row: drag grip ⠿, split right, split down, move to a new tab, close. Drag
+  the grip onto another pane's edge (a drop zone shows) to move the pane there, or onto a tab bar
+  to make it a tab; Ctrl+Alt+Left/Right/Up/Down moves the focused pane (in the Warp preset these
+  keys focus panes, so moving is unbound there; GNOME and KDE may take Ctrl+Alt+arrows for
+  workspaces). "+" after the tabs opens a tab; hovering a tab shows ⧉ (also in its right-click
+  menu) to move it to a new window. Moved panes keep their shell, agent and conversation.
 - **File panes.** Folder explorer and file preview (code, Markdown, images, optional PDF).
   Open with `relay open PATH`, a click on the pane's directory line, or Ctrl+click on a text
   file in terminal output.
-- **Palette and shortcuts.** One searchable actions palette. Shortcuts live in
-  `~/.config/RelayTerminal/relay/keybindings.json`, reload live, and the agent can change them.
-- **Skills.** The agent sees your Warp-style skills in `~/.warp/skills` and loads one before
-  following it.
+- **Palette and shortcuts.** One searchable actions palette; it also matches related words
+  ("undo" finds Rewind, "reasoning" finds effort, "detach" finds the move actions). Shortcuts
+  live in `~/.config/RelayTerminal/relay/keybindings.json`, reload live, and the agent can change
+  them.
+- **Shortcut hints.** When you click something that has a faster key, a short toast says so
+  ("Next time: Ctrl+P · new pane to the right"), at most 3 times per hint and not more than once
+  every 20 s. After a finished agent turn, an idle empty prompt box shows a tip. Actions ›
+  Agent options › Shortcut hints turns them off; Reset shortcut hints shows them again.
+- **Skills.** The agent sees your Warp-style skills (`~/.warp/skills`, `~/.claude/skills`,
+  refined copies and imports) and loads one before following it. `/skills` (or Actions ›
+  Skills…) lists them: uncheck to exclude, **Refine selected** has the agent write an improved
+  copy to `~/.config/relay/skills` and opens it for editing, **Import from repository…** clones a
+  git URL, shows the skills and their files for review, and imports the checked ones pinned to
+  that commit, and **Check for updates** compares an imported skill with its repository.
 - **Pane isolation.** Each pane's shell and agent run in their own systemd user scope with
   memory limits, so a runaway command stops inside its pane. Limits are configurable.
 

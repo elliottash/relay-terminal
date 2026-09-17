@@ -13,7 +13,7 @@
 - **Model and effort.** Picking a model while the pane is configured sends `set_model` (stored key); the conversation is kept and a toast says so. A per-pane effort picker sits next to the model picker; Alt+. / Alt+, (`agent.effortUp` / `agent.effortDown`, prompt box only) step low → medium → high → max and send `set_effort`. The default for new panes is Actions › Agent options › Default reasoning effort.
 - **Context indicator.** `ctx 3.8k · 0.4%` in the prompt row from `context` events; the tooltip gives exact counts and the auto-compact limit; amber at 90% of the limit. "Compacting…" while `compaction_started` is pending; `compacted` prints an inline note with before/after tokens.
 - **Slash commands.** Typing `/` opens a menu over the prompt box filtered by command-name prefix; ↑/↓ select, Enter runs (commands that need an argument are completed instead), Tab completes, Esc closes; the route label shows `COMMAND · /name · description`. Commands: /new, /clear, /model [name], /effort [level], /compact [focus], /context, /rewind, /fork, /resume, /plan, /recap, /agents (the subagents panel when a handler is installed, otherwise `agents_list` printed inline), /skills, /instructions, /export. Paths such as `/usr/bin/ls` are not affected: only exact command names run.
-- **Rewind.** /rewind, Actions › Rewind…, or Esc Esc in an empty prompt box while the agent is idle (a single Esc still takes control of the terminal after 350 ms). A picker lists checkpoints newest first (turn, prompt, time, files) with Restore conversation and files (default), Conversation only, Files only, Fork from here. `rewound` prints what was restored and any conflicts, and puts the rewound prompt back in the prompt box when it is empty.
+- **Rewind** (superseded by the rewind split below). /rewind, Actions › Rewind…, or Esc Esc in an empty prompt box while the agent is idle (a single Esc still takes control of the terminal after 350 ms). A picker lists checkpoints newest first (turn, prompt, time, files) with Restore conversation and files (default), Conversation only, Files only, Fork from here. `rewound` prints what was restored and any conflicts, and puts the rewound prompt back in the prompt box when it is empty.
 - **Fork.** /fork sends `fork`; the `fork_state` opens a new pane to the right, which sends `load_state` once configured and prints "Forked from “title” · N turn(s)".
 - **Resume.** /resume lists saved sessions (title, updated, turns, model); Resume sends `resume`; the backend's recap prints inline in purple.
 - **Recaps.** /recap asks for a manual recap. Away recap: when the window is re-activated after at least 3 minutes (`RELAY_RECAP_AWAY_SECONDS` overrides for testing), a turn finished while it was inactive, the prompt box is empty, at least 3 turns exist and no recap already covers this turn count, Relay sends `recap_request {reason:"away"}`. Actions › Agent options › Recap when you come back turns it off.
@@ -52,3 +52,20 @@ Not verified live: switching to a different provider (only a Kimi key was availa
 7. Restart Relay; /resume; check the recap.
 8. Switch to another window for more than 3 minutes while a turn finishes; come back: one recap; switch away and back again with no new turn: no second recap.
 9. /export and open the file.
+
+## Update 2026-09-17: rewind chat and rewind code (owner decision)
+
+"For rewind, lets have separate rewind-chat and rewind-code options. rewind-chat (the default) doesnt change any code."
+
+- `/rewind`, Esc Esc and Actions › **Rewind chat…** open *Rewind chat*: Enter sends `rewind {restore: "conversation"}`; files are never touched; "Fork from here" stays. The prompt returns to the prompt box.
+- `/rewind-code` and Actions › **Rewind code…** (keymap `agent.rewindCode`, unbound) open *Rewind code* with **Rewind code…** (`files`, default) and **Code and chat…** (`both`). A confirmation lists the files the agent changed in that turn and later ones (Show Details open); Enter restores. Files changed since are skipped by the backend and printed as conflicts afterwards (they cannot be listed before the restore; there is no dry run in the protocol). Code-only rewinds do not put the prompt back.
+- Palette aliases: undo, checkpoint, restore, revert. Hints: palette rewind chat suggests Esc Esc; palette rewind code suggests `/rewind-code`; the idle tip mentions both.
+
+Implementer check (Xvfb, Kimi K3, `docs/qa_evidence/2026-09-17-agent-sessions-ui/`): the agent overwrote notes.txt ("hello" → "goodbye"); Esc Esc showed *Rewind chat* (`implementer-rewind-chat-picker-esc-esc.png`); Enter printed "Rewound chat to turn 1 · files unchanged" and notes.txt stayed "goodbye" (`implementer-rewind-chat-files-unchanged.png`). A second turn wrote "hello again"; `/rewind-code` (`implementer-rewind-code-picker.png`) → confirmation listing notes.txt (`implementer-rewind-code-confirm-files-enter.png`) → Enter printed "Rewound code to turn 2 · 1 file(s) restored" and notes.txt was "goodbye" again (`implementer-rewind-code-restored.png`). Not verified live: "Code and chat", a conflict.
+
+QA checklist (rewind split):
+1. Let the agent edit a file; Esc Esc; Enter: the conversation rewinds and the file is unchanged.
+2. Let the agent edit a file; `/rewind-code`; the confirmation lists it; Esc cancels with nothing restored; again with Enter restores it and the chat is kept.
+3. "Code and chat…" restores both.
+4. Edit the file by hand before `/rewind-code`: it is reported as a conflict and left alone.
+5. Palette: "undo" finds Rewind chat… and Rewind code….

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Relay link handler
+Comment=Opens relay:// links (agent turn details) in the running Relay
+# Relay writes a copy with absolute paths to ~/.local/share/applications on first run and makes
+# it the default for x-scheme-handler/relay; @HELPER@ is replaced there.
+Exec=@PYTHON@ @HELPER@ %u
+NoDisplay=true
+Terminal=false
+MimeType=x-scheme-handler/relay;

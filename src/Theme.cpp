@@ -169,7 +169,7 @@ QFrame#queueStrip QToolButton { color: @muted; border: 1px solid transparent; bo
 QFrame#queueStrip QToolButton:hover { color: @text; border-color: @border; }
 QFrame#paneBanner { background: @raised; border: 1px solid #b0603a; border-radius: 8px; }
 QFrame#paneBanner QLabel { color: @text; }
-QFrame#transcript { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
+QFrame#transcript, QFrame#thinkingOverlay { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
 QLabel#transcriptHeader { color: @muted; }
 QPlainTextEdit#transcriptView { background: transparent; border: none; }
 QLabel#toast { background: @raised; color: @text; border: 1px solid @accentBorder; border-radius: 8px; padding: 6px 12px; }
@@ -182,6 +182,28 @@ QToolButton#interruptButton { border: 1px solid @border; border-radius: 6px; pad
 QToolButton#interruptButton:hover { border-color: @accent; }
 QWidget#pane { background: @bg; border: 1px solid @border; border-radius: 6px; }
 QWidget#pane[relayActive="true"] { border: 1px solid @accent; }
+/* Pane button row, drop zones, tab bar controls */
+QFrame#paneChrome { background: @raised; border: 1px solid @border; border-radius: 6px; }
+QLabel#paneGrip { color: @muted; padding: 0 4px; font-size: 11pt; }
+QLabel#paneGrip:hover { color: @text; }
+QToolButton#paneChromeButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; min-width: 16px; }
+QToolButton#paneChromeButton:hover { color: @text; border-color: @border; background: @surface; }
+QFrame#dropZone { background: @accentSoft; border: 2px solid @accent; border-radius: 6px; }
+QToolButton#newTabButton { color: @muted; border: 1px solid transparent; border-radius: 6px; font-size: 12pt; padding: 0; }
+QToolButton#newTabButton:hover { color: @text; border-color: @border; background: @raised; }
+QToolButton#tabDetachButton { color: @muted; border: none; background: transparent; padding: 0; }
+QToolButton#tabDetachButton:hover { color: @accent; }
+/* Composer prefix chip (! terminal, * agent) */
+QLabel#prefixChip { border-radius: 4px; padding: 1px 6px; font-weight: 700; font-size: 8pt; letter-spacing: 1px; }
+QLabel#prefixChip[kind="shell"] { color: #221a08; background: #e5c07b; }
+QLabel#prefixChip[kind="agent"] { color: #06222b; background: #3ec5f0; }
+/* Turn details pane */
+QLabel#turnHeader { color: @text; font-weight: 600; padding: 4px 6px; }
+QTreeWidget#turnTools { background: @bg; color: @text; border: 1px solid @border; border-radius: 6px; outline: none; }
+QTreeWidget#turnTools::item { padding: 3px 2px; }
+QTreeWidget#turnTools::item:selected { background: @raised; color: @text; }
+QPlainTextEdit#turnLog { background: @surface; color: @text; border: 1px solid @border; border-radius: 6px; font-family: "@mono"; font-size: 9pt; }
+QLabel#skillsStatus { color: @muted; }
 QSplitter::handle:horizontal { width: 4px; }
 QSplitter::handle:vertical { height: 4px; }
 QSplitter::handle:hover { background: @border; }

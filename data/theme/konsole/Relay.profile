@@ -26,3 +26,5 @@ BlinkingCursorEnabled=true
 UnderlineFilesEnabled=true
 TextEditorCmd=6
 TextEditorCmdCustom=relay-open PATH:LINE:COLUMN
+AllowEscapedLinks=true
+EscapedLinksSchema=http://;https://;file://;relay://

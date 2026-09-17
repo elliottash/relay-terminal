@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Ask the running Relay to open a file or folder in a pane.
+"""Ask the running Relay to open a file or folder in a pane, or a relay:// link.
 
 Used by `relay open PATH` in Relay shells and by Konsole's file-link "text editor command"
 (PATH:LINE:COLUMN). Falls back to the desktop's default app when Relay is not reachable.
+relay://turn/<pane-token>/<turn-id> links (the "✦ N tool calls" lines) reach this script through
+the desktop's x-scheme-handler/relay entry and are forwarded to Relay as {"url": ...}.
 """
 import json
 import os
@@ -13,11 +15,44 @@ import subprocess
 import sys
 
 
+def socket_address() -> str:
+    address = os.environ.get("RELAY_OPEN_SOCKET", "")
+    if address:
+        return address
+    # Launched by the desktop (link click) without Relay's environment: use the last address
+    # Relay published for this user.
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    try:
+        with open(os.path.join(runtime, "relay", "open-socket"), encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def send(request: dict) -> bool:
+    address = socket_address()
+    if not address:
+        return False
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.settimeout(3)
+            conn.connect(address)
+            conn.sendall((json.dumps(request) + "\n").encode("utf-8"))
+            return conn.recv(256).decode("utf-8", "replace").strip() == "ok"
+    except OSError:
+        return False
+
+
 def main() -> int:
     if len(sys.argv) < 2:
-        print("usage: relay-open PATH[:LINE[:COLUMN]]", file=sys.stderr)
+        print("usage: relay-open PATH[:LINE[:COLUMN]] | relay://URL", file=sys.stderr)
         return 2
     raw = sys.argv[1]
+    if raw.startswith("relay://"):
+        if send({"url": raw}):
+            return 0
+        print(f"relay-open: Relay could not open {raw} (is the pane still open?)", file=sys.stderr)
+        return 1
     line = 0
     path = raw
     if not os.path.exists(path):
@@ -32,18 +67,8 @@ def main() -> int:
     # Only a shell inside Relay knows which pane asked; Konsole link clicks use the focused pane.
     if os.environ.get("RELAY_OPEN_FROM_SHELL") == "1" and os.environ.get("RELAY_SESSION_TOKEN"):
         request["token"] = os.environ["RELAY_SESSION_TOKEN"]
-    address = os.environ.get("RELAY_OPEN_SOCKET", "")
-    if address:
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-                conn.settimeout(3)
-                conn.connect(address)
-                conn.sendall((json.dumps(request) + "\n").encode("utf-8"))
-                reply = conn.recv(256).decode("utf-8", "replace").strip()
-                if reply == "ok":
-                    return 0
-        except OSError:
-            pass
+    if send(request):
+        return 0
     try:
         subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         return 0
