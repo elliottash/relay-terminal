@@ -78,12 +78,12 @@
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
-| `#ERES` | [Ctrl+Alt+arrow pane moves and pane dragging do not work](changes/2026-09-17-pane-move-keys-and-drag-broken.md) | ready |  |  |  |
 | `#G152` | [Ctrl+H shrinks a pane to almost nothing](changes/2026-09-17-ctrl-h-shrinks-pane.md) | ready |  |  |  |
 | `#0C7V` | [Single click opens folders in the explorer pane (Dolphin style)](changes/2026-09-17-single-click-folders.md) | ready |  |  |  |
-| `#SQAM` | [Provider stalls have no visible progress, no retry and no log](changes/2026-09-17-provider-stalls-and-no-logs.md) | ready |  |  |  |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
 | `#90JF` | [Check that a terminal command will run before it is sent](changes/needs_qa_llm/2026-09-17-pre-submit-run-check.md) | needs-qa-llm |  |  |  |
 | `#AHS5` | [The prompt box is the only input; clicking the terminal does not type into it](changes/needs_qa_llm/2026-09-17-terminal-not-directly-typable.md) | needs-qa-llm | implemented by Claude Opus 5 (1M context) (Claude Code session), 2026-09-17 |  |  |
 | `#Q7MK` | [Numpad Enter submits like Return instead of inserting a newline](changes/needs_qa_llm/2026-09-17-keypad-enter-submits.md) | needs-qa-llm | implemented by Claude (Relay agent session), 2026-09-17 |  |  |
 | `#H3QW` | [Tasks are the model's todos only; the request ledger becomes invisible](changes/needs_qa_llm/2026-09-17-tasks-are-todos-only.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code), 2026-09-17 |  |  |
+| `#ERES` | [Ctrl+Alt+arrow pane moves and pane dragging do not work](changes/needs_qa_llm/2026-09-17-pane-move-keys-and-drag-broken.md) | needs-qa-llm | agent |  |  |
+| `#SQAM` | [Provider stalls have no visible progress, no retry and no log](changes/needs_qa_llm/2026-09-17-provider-stalls-and-no-logs.md) | needs-qa-llm | implemented by Claude Opus 5 (1M context), Claude Code session, 2026-09-17 |  |  |
