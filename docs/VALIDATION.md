@@ -137,6 +137,8 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-human-agent-control-and-password-prompts.md`
 - `2026-09-17-keyboard-shortcuts-and-palettes.md`
 - `2026-09-17-load-global-warp-skills.md`
+- `2026-09-17-model-roles-and-fast-agent.md`
+- `2026-09-17-model-roles.md`
 - `2026-09-17-pane-process-isolation.md`
 - `2026-09-17-program-control-policy.md`
 - `2026-09-17-queue-or-interrupt-agent-prompts.md`

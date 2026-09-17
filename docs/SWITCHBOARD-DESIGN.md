@@ -338,7 +338,7 @@ Board UI), so autonomy is QA'd before the drag-and-drop pane lands.
 ### 12.5 Card agent (owner decision, 2026-09-17)
 
 - **Thread replies** come from a dedicated **Switchboard agent** (a worker per window, as in 4.3), whose model is a
-  role in Agent options defaulting to the main agent (see `issues/features/2026-09-17-model-roles-and-fast-agent.md`).
+  role in Agent options defaulting to the main agent (implemented: `docs/AGENT-SESSIONS-PROTOCOL.md` section 13, role `switchboard`).
 - **Pane hand-off (option C):** a card can be pulled into a terminal pane's own conversation (`#K7Q2`, "work on
   #K7Q2"), so the pane agent has the card body, open tasks and thread tail in context and posts progress back.
 - **Per-card conversation (option D):** each card keeps a saved conversation so long discussions retain full detail

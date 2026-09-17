@@ -146,6 +146,13 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
   `/resume` (with a recap), `/plan`, `/recap`, `/tasks`, `/continue`, `/agents`, `/skills`, `/instructions`, `/export`
   (Markdown under `.relay/exports`). Coming back to the window after 3 minutes, with a finished
   turn and an empty prompt, prints a short recap (Actions › Agent options turns it off).
+- **Model roles.** Actions › Agent options › Model roles picks a model per job: terminal use,
+  subagents, the Switchboard agent, the fast agent, chores, vision and route assist. Each role is
+  "same as the main agent" until you pick one, and a role whose key is missing quietly falls back to
+  the main agent. The fast agent has a default per provider (GLM-5.3 Flash, DeepSeek V4.1 Flash,
+  Kimi K2.7 Code HighSpeed). New panes start on the fast agent (the first pane keeps the main agent);
+  Alt+F, or Actions › Fast agent for this pane, switches a pane either way without losing the
+  conversation.
 - **Plan mode.** Shift+Tab in the prompt box (or `/plan`) shows a PLAN chip: the agent
   investigates read-only and writes a plan, which opens in an editable pane (Ctrl+S saves) with
   **Execute**, **Execute in fresh context** and **Keep planning**.
@@ -206,7 +213,7 @@ Relay is not a Konsole fork and does not change your Konsole settings or dotfile
 - **BYOK.** Presets for Kimi K3, Z.AI GLM-5.3 (standard and Coding Plan) and DeepSeek V4.1
   Flash via OpenRouter, or any OpenAI-compatible endpoint.
 - **Where keys live.** The desktop keyring (GNOME Keyring or KWallet) through `secret-tool`,
-  or environment variables such as `RELAY_KIMI_API_KEY`. Keys are passed on stdin, never on a
+  or environment variables such as `RELAY_KIMI_API_KEY` (`RELAY_KEYRING=off` skips the keyring). Keys are passed on stdin, never on a
   command line, in settings files or logs. **Import keys from Warp** copies Warp's
   custom-endpoint keys into the keyring.
 - **No telemetry.** No analytics, crash reports, account or Relay server. Relay connects only to

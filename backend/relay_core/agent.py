@@ -112,11 +112,14 @@ class Agent:
                  compact_threshold: float | None = None, effort: str | None = None,
                  session_dir: str | None = None, plans_dir: str | None = None, instructions=None,
                  max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS, track_requests: bool = True,
-                 todo_tool: bool = True, completion_check: bool = True, audit_requests: bool = False):
+                 todo_tool: bool = True, completion_check: bool = True, audit_requests: bool = False,
+                 roles=None):
         self.emit = emit
         self.cancel_event = threading.Event()
         self.config = config
         self.preset = resolve_preset(preset_id, config.base_url, config.model)
+        # Model roles (relay_core.roles.RoleResolver) or None: side calls then use the main model.
+        self.roles = roles
         self._injected_provider = provider is not None
         self.provider = provider or ChatProvider(config)
         self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings, skills)
@@ -273,21 +276,37 @@ class Agent:
         self.context.invalidate()
         self.messages = adapt_history(self.messages, self._effort_style())
 
-    def side_provider(self, *, cheap: bool = False, max_tokens: int | None = None):
+    def side_provider(self, *, cheap: bool = False, max_tokens: int | None = None, role: str | None = None):
         """A separate provider for no-tools calls, so cancelling one never closes the other's stream.
 
         max_tokens below the configurable minimum (256) is applied after validation, for tiny
-        classification calls such as route_assist."""
+        classification calls such as route_assist. ``role`` picks a model role (protocol 13); when
+        no roles are configured, or the role follows the main agent, the main model is used."""
         if self._injected_provider:
             return self.provider
-        if not cheap:
+        resolved = self.roles.resolve(role) if role is not None and self.roles is not None else None
+        if resolved is not None and not resolved.is_main:
+            # A role's model was picked for this job: its own params (and its effort, already applied
+            # by the resolver) stand, so "cheap" only caps the output budget.
+            config = resolved.config
+            extra = copy.deepcopy(config.extra)
+            limit = min(config.max_tokens, 4096) if cheap else config.max_tokens
+        elif not cheap:
             return ChatProvider(self.config)
-        extra, _ = apply_effort(self.config.extra, self._effort_style(), "low")
-        provider = ChatProvider(ProviderConfig(self.config.base_url, self.config.model, self.config.api_key,
-                                               extra, min(self.config.max_tokens, 4096)))
+        else:
+            config = self.config
+            extra, _ = apply_effort(config.extra, self._effort_style(), "low")
+            limit = min(config.max_tokens, 4096)
+        provider = ChatProvider(ProviderConfig(config.base_url, config.model, config.api_key, extra, limit))
         if max_tokens is not None:
             provider.config.max_tokens = max(1, min(int(max_tokens), provider.config.max_tokens))
         return provider
+
+    def role_model(self, role: str) -> str:
+        """The model id a role resolves to (the main model when roles are unset)."""
+        if self.roles is None:
+            return self.config.model
+        return self.roles.resolve(role).config.model
 
     # ----- context -------------------------------------------------------------
     def context_event(self) -> dict:
@@ -378,7 +397,7 @@ class Agent:
             self.emit({"event": "compaction_started", "reason": reason})
             limit, ratio = self.context.limit, self.context.ratio
             result = compaction.compact(
-                self.messages, self.side_provider(), manual=reason == "manual", focus=focus,
+                self.messages, self.side_provider(role="fast"), manual=reason == "manual", focus=focus,
                 cancel=self.cancel_event,
                 over=lambda m: compaction.estimate_tokens(m) * ratio + compaction.estimate_tokens(tools) * ratio >= limit,
                 window_chars=max(20_000, min(400_000, self.context.window * compaction.CHARS_PER_TOKEN // 2)),
@@ -715,14 +734,20 @@ class Agent:
             model = None
             try:
                 provider = None
-                try:
-                    provider = route_assist.router_provider()
-                except Exception:
-                    provider = None
-                if provider is not None:
-                    provider.config.max_tokens = AUDIT_MAX_TOKENS
-                    model = route_assist.ROUTER_MODEL
+                if self.roles is not None:
+                    # Chores role (protocol 13): Gemini 3.8 Flash on OpenRouter by default, else the
+                    # fast agent, else the main model.
+                    provider = self.side_provider(cheap=True, role="chores", max_tokens=AUDIT_MAX_TOKENS)
+                    model = self.role_model("chores")
                 else:
+                    try:
+                        provider = route_assist.router_provider()
+                    except Exception:
+                        provider = None
+                    if provider is not None:
+                        provider.config.max_tokens = AUDIT_MAX_TOKENS
+                        model = route_assist.ROUTER_MODEL
+                if provider is None:
                     provider, model = self.side_provider(cheap=True), self.config.model
                 flags = run_audit(provider, requests, answer, todos)
                 if ledger is self.requests:

@@ -396,3 +396,93 @@ without the JSON object gives `unaddressed: []` plus `error`.
 - On cancel/failure the interrupted tool group is completed with error results instead of being removed, so the
   model still sees which tools ran.
 - Requests have one extra status, `cancelled` (model-cancelled via todos), distinct from `cancelled_by_user`.
+
+## 13. Model roles (v1.3, 2026-09-17)
+
+One configurable model per job. Backend: `backend/relay_core/roles.py` (resolution and defaults), with
+call sites in `agent.py`, `subagents.py`, `session_protocol.py`, `observe_protocol.py` and `worker.py`;
+tests: `tests/test_roles.py`. Source: `issues/features/needs_qa_llm/2026-09-17-model-roles-and-fast-agent.md` (owner,
+2026-09-17). All additive: existing fields keep their meaning, and a worker that gets no `roles` behaves
+exactly as before.
+
+### 13.1 Roles
+
+| Role (protocol name) | Used for | Default |
+|---|---|---|
+| `main` | the pane's own agent | the configured preset (read-only here: set with `configure` / `set_model`) |
+| `terminal_use` | driving programs, fixing commands | main |
+| `subagent` | subagents that do not name a model | main |
+| `switchboard` | Switchboard card threads (stored now, used when the Switchboard lands) | main |
+| `fast` | panes that default to the fast agent, summaries, recaps, suggestions | per main provider (13.3) |
+| `chores` | duplicate checks, labels, titles, note scans, the request audit (12.6) | `google/gemini-3.8-flash` on OpenRouter when a key is stored, else the fast agent |
+| `vision` | image turns on presets without image support | GLM main → `glm-5.3-flash`, otherwise main |
+| `route_assist` | the routing assist call (section 11) | `google/gemini-3.5-flash-lite` on OpenRouter when a key is stored, else main |
+
+Side calls by role: compaction summaries, recaps and next-command/next-prompt suggestions use `fast`; the
+request audit uses `chores`; routing assist uses `route_assist`; instruction synthesis stays on `main`.
+
+### 13.2 Options
+
+`configure` and `set_agent_options` accept `roles`, an object keyed by role name (`main` is rejected: it is
+the pane's own model). Each value is `null`, `{}` or `{"inherit": true}` for "same as the main agent", or:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `preset` | string | a built-in preset id (`kimi`, `kimi-code`, `glm`, `glm-coding`, `openrouter`) |
+| `base_url` + `model` | string | a custom endpoint instead of a preset (both required together) |
+| `model` | string | with `preset`: a different model id on that provider |
+| `extra` | object | provider params; defaults to the preset's `extra` |
+| `effort` | `low`/`medium`/`high`/`max` | mapped as in section 3; omitted means the provider's own default |
+
+Keys never cross the pipe: a role resolves its key through the keystore (environment variable, then the
+desktop keyring) for the preset matching its endpoint, and reuses the main agent's in-memory key when it
+lands on the main preset. Invalid values → `error`, nothing changed.
+
+`configure` also accepts `agent_role` (default `"main"`): the role this pane's **own** agent runs, used by
+panes that default to the fast agent.
+
+### 13.3 Fast-agent defaults by main provider
+
+| Main preset | Fast agent |
+|---|---|
+| `glm`, `glm-coding` | `glm-5.3-flash` with `{"thinking": {"type": "disabled"}}` (measured fastest with thinking off) |
+| `openrouter` | `deepseek/deepseek-v4.1-flash` |
+| `kimi` | `kimi-k2.7-code-highspeed` |
+| `kimi-code` | `kimi-for-coding-highspeed` |
+| custom / unknown endpoint | the main agent |
+
+### 13.4 Events
+
+`configured` gains `agent_role` (string) and `roles`: every role, including `main`, as
+`{role, label, model, preset, base_url, effort, source, warning?}`. `source` is `main` (follows the main
+agent), `configured` (from the `roles` table), `default` (a built-in default above) or `fallback` (a
+configured role whose key is missing). No key material appears in any of it.
+
+`model_roles {roles, agent_role, warnings, id?}` is emitted when a role table changes (`set_agent_options`),
+after a `set_model` (per-provider defaults are recomputed for the new main model), and after `configure`
+**only when `warnings` is non-empty**, so a pane that configured cleanly keeps its old event order.
+`warnings` holds one line per role that fell back, e.g.
+`Subagent: no stored key for glm; using the main agent.`
+
+`set_agent_options {roles}` replies with `agent_options {…, roles}` (the same table) followed by
+`model_roles`. A missing key is never a hard failure: the role falls back to the main agent.
+
+### 13.5 `set_agent_role`
+
+`set_agent_role {role, id?}` switches this pane between the main agent and another role (the fast agent in
+the GUI) **keeping the conversation**, like `set_model`. Refused while a turn is running. Replies with
+`model_changed {model, preset, context_window, effort, agent_role, warning?}` and `context`. A role that
+falls back reports `agent_role: "main"`. `configure` with an unusable `agent_role` reports
+`agent_role: "main"` too, plus the warning in `model_roles`.
+
+### 13.6 Notes and deviations
+
+- Subagent model specs accept role names (`fast`, `chores`, …) in addition to preset ids; a user alias of the
+  same name still wins. A definition's own `model` still overrides the `subagent` role.
+- A pane running a non-main role resolves roles that "follow main" against that pane's model, not the
+  configured main preset; the `subagent` role and subagent inheritance keep using the configured main model.
+- `set_model` rebases the role defaults on the new model and puts the pane back on `agent_role: "main"`.
+- `RELAY_KEYRING=off` (environment) skips the desktop keyring entirely; environment keys still work. Tests
+  set it so no test run can reach a real keyring.
+- Not implemented on purpose (owner: "later"): routing between the main and fast agent by estimated task
+  difficulty.

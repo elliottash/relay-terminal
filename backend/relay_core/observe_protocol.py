@@ -57,6 +57,12 @@ class ObserveCommands:
     # ----- routing assist ---------------------------------------------------------------------
     def _route_assist(self, request):
         agent = self.turns.agent
+        if agent is not None and getattr(agent, "roles", None) is not None:
+            # Route-assist role (protocol 13): its own fast model by default, the pane's model when
+            # the role follows the main agent.
+            provider = agent.side_provider(cheap=True, role="route_assist", max_tokens=route_assist.MAX_TOKENS)
+            route_assist.run(provider, request, self.emit)
+            return
         fast = self._router_provider()
         if fast is not None:
             route_assist.run(fast, request, self.emit)
