@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -12,6 +13,30 @@ from typing import Callable
 
 MAX_EVENT = 2 * 1024 * 1024
 MAX_RESPONSE = 8 * 1024 * 1024
+
+def _reasoning_text(part: dict) -> str:
+    """Displayable reasoning in a streamed delta or a complete message.
+
+    Kimi and GLM use reasoning_content, OpenRouter reasoning, and OpenRouter also sends
+    reasoning_details (text or summary items), usually duplicating reasoning; details are only used
+    when no plain field is present.
+    """
+    if not isinstance(part, dict):
+        return ""
+    for key in ("reasoning_content", "reasoning"):
+        if isinstance(part.get(key), str) and part[key]:
+            return part[key]
+    details = part.get("reasoning_details")
+    if isinstance(details, list):
+        texts = []
+        for item in details:
+            if isinstance(item, dict):
+                value = item.get("text") if isinstance(item.get("text"), str) else item.get("summary")
+                if isinstance(value, str) and value:
+                    texts.append(value)
+        return "".join(texts)
+    return ""
+
 
 class ProviderError(RuntimeError):
     pass
@@ -74,6 +99,7 @@ class ChatProvider:
                  emit: Callable[[dict], None], cancel: threading.Event) -> dict:
         if cancel.is_set():
             raise Cancelled("Stopped.")
+        started = time.monotonic()
         payload = {"model": self.config.model, "messages": messages,
                    "stream": True, "max_tokens": self.config.max_tokens, **self.config.extra}
         if tools:
@@ -107,10 +133,14 @@ class ChatProvider:
                     if isinstance(obj.get("usage"), dict):
                         emit({"event": "usage", "usage": obj["usage"]})
                     message = choices[0].get("message", {})
+                    thinking = _reasoning_text(message)
+                    if thinking:
+                        emit({"event": "thinking_delta", "text": thinking})
+                        emit({"event": "thinking_done", "elapsed_ms": 0, "chars": len(thinking)})
                     if message.get("content"):
                         emit({"event": "delta", "text": message["content"]})
                     return self._normalize(message)
-                return self._stream(response, emit, cancel)
+                return self._stream(response, emit, cancel, started)
         except urllib.error.HTTPError as exc:
             # Providers can echo submitted secrets/prompts in error bodies. Do not log them.
             raise ProviderError(f"Provider HTTP {exc.code}. Check endpoint, model access, key, quota, and parameters.") from None
@@ -151,7 +181,9 @@ class ChatProvider:
             normalized["tool_calls"] = calls
         return normalized
 
-    def _stream(self, response, emit, cancel) -> dict:
+    def _stream(self, response, emit, cancel, started: float | None = None) -> dict:
+        """started: when the request was sent. thinking_done.elapsed_ms counts from then, because some
+        providers (GLM) buffer reasoning and deliver it in one burst just before the answer."""
         message = {"content": "", "reasoning_content": ""}
         calls: dict[int, dict] = {}
         total = 0
@@ -161,6 +193,15 @@ class ChatProvider:
         usage = None
         event_lines: list[str] = []
         event_size = 0
+        thinking_started = None
+        thinking_closed = False
+        thinking_chars = 0
+
+        def finish_thinking():
+            nonlocal thinking_closed
+            thinking_closed = True
+            emit({"event": "thinking_done", "elapsed_ms": int((time.monotonic() - thinking_started) * 1000),
+                  "chars": thinking_chars})
         while True:
             if cancel.is_set():
                 raise Cancelled("Stopped.")
@@ -198,19 +239,25 @@ class ChatProvider:
                 usage = choice["usage"]
             finish_reason = choice.get("finish_reason") or finish_reason
             delta = choice.get("delta", {})
+            if isinstance(delta.get("reasoning"), str) and delta["reasoning"]:
+                message["reasoning"] = message.get("reasoning", "") + delta["reasoning"]
+            if isinstance(delta.get("reasoning_content"), str):
+                message["reasoning_content"] += delta["reasoning_content"]
+            thinking = _reasoning_text(delta)
+            if thinking:
+                if not reasoning_announced:
+                    emit({"event": "status", "text": "Model is reasoning…"})
+                    reasoning_announced = True
+                if thinking_started is None:
+                    thinking_started = started if started is not None else time.monotonic()
+                thinking_chars += len(thinking)
+                emit({"event": "thinking_delta", "text": thinking})
+            if thinking_started is not None and not thinking_closed and (
+                    (isinstance(delta.get("content"), str) and delta["content"]) or delta.get("tool_calls")):
+                finish_thinking()
             if isinstance(delta.get("content"), str):
                 message["content"] += delta["content"]
                 emit({"event": "delta", "text": delta["content"]})
-            if isinstance(delta.get("reasoning"), str) and delta["reasoning"]:
-                message["reasoning"] = message.get("reasoning", "") + delta["reasoning"]
-                if not reasoning_announced:
-                    emit({"event": "status", "text": "Model is reasoning…"})
-                    reasoning_announced = True
-            if isinstance(delta.get("reasoning_content"), str):
-                message["reasoning_content"] += delta["reasoning_content"]
-                if not reasoning_announced:
-                    emit({"event": "status", "text": "Model is reasoning…"})
-                    reasoning_announced = True
             for chunk in delta.get("tool_calls", []):
                 index = chunk.get("index")
                 if not isinstance(index, int) or not 0 <= index < 16:
@@ -221,6 +268,8 @@ class ChatProvider:
                 func = chunk.get("function", {})
                 call["function"]["name"] += func.get("name") or ""
                 call["function"]["arguments"] += func.get("arguments") or ""
+        if thinking_started is not None and not thinking_closed:
+            finish_thinking()
         if cancel.is_set():
             raise Cancelled("Stopped.")
         if not got_done and finish_reason not in {"stop", "tool_calls"}:

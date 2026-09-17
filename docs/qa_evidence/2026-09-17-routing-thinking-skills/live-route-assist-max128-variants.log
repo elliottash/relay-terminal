@@ -1,0 +1,24 @@
+glm-coding {'thinking': {'type': 'disabled'}} 2.64 go build ./... shell 0.97
+glm-coding {'thinking': {'type': 'disabled'}} 2.42 go to the docs folder and summarize agent 0.97
+glm-coding {'thinking': {'type': 'disabled'}} 2.59 make the tests pass agent 0.95
+glm-coding {'thinking': {'type': 'disabled'}} 19.54 install ripgrep agent 0.75
+glm-coding {'thinking': {'type': 'disabled'}} 9.61 find where the config is loaded agent 0.9
+glm-coding {'thinking': {'type': 'disabled'}} 2.44 kill it agent 0.85
+glm-coding None 2.61 go build ./... shell 0.95
+glm-coding None 1.73 go to the docs folder and summarize agent 0.97
+glm-coding None 1.86 make the tests pass agent 0.95
+glm-coding None 2.44 install ripgrep agent 0.9
+glm-coding None 6.3 find where the config is loaded agent 0.85
+glm-coding None 2.37 kill it agent 0.65
+kimi None 3.42 go build ./... shell 0.99
+kimi None 6.6 go to the docs folder and summarize agent 0.95
+kimi None 5.18 make the tests pass agent 0.9
+kimi None 7.83 install ripgrep agent 0.9
+kimi None 4.3 find where the config is loaded agent 0.97
+kimi None 5.76 kill it agent 0.6
+openrouter None 1.43 go build ./... shell 0.99
+openrouter None 0.91 go to the docs folder and summarize ERR Response was truncated or filtered; partial tools were not executed. Increase output limit or narrow the task.
+openrouter None 2.35 make the tests pass agent 0.95
+openrouter None 3.27 install ripgrep ERR Response was truncated or filtered; partial tools were not executed. Increase output limit or narrow the task.
+openrouter None 3.19 find where the config is loaded ERR Response was truncated or filtered; partial tools were not executed. Increase output limit or narrow the task.
+openrouter None 1.47 kill it ERR Response was truncated or filtered; partial tools were not executed. Increase output limit or narrow the task.
