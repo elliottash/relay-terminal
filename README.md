@@ -1,432 +1,146 @@
-# Relay 0.1 — native terminal + rich input + BYOK agent
+# Relay
 
-**Status: source-code development preview.**
-The native app builds, passes its tests and runs on Ubuntu 24.04 (aarch64) against
-Qt5 / KDE Frameworks 5, with the real Konsole terminal embedded. The Qt6 / KF6
-build path is kept but only its editor tests have been built here, because Ubuntu
-24.04 ships no KF6. The Python backend and Bash/PTY integration pass 79 tests.
-Kimi K3, GLM-5.3 (Coding Plan) and DeepSeek V4.1 Flash via OpenRouter were tested
-with live requests. See [`docs/VALIDATION.md`](docs/VALIDATION.md).
+A Linux terminal with a rich prompt and bring-your-own-key agents.
 
-Relay is a native C++/Qt application (Qt6 + KF6, or Qt5 + KF5) that embeds **KonsolePart**, Konsole's actual
-terminal component. A separate first-class text editor handles commands and agent
-requests. There is no browser terminal, fake terminal canvas, account system,
-Relay cloud service, or telemetry.
+Relay embeds Konsole's real terminal (KonsolePart). Under it sits a normal text editor.
+Type a shell command and it runs in the terminal. Type a request in plain language and an
+agent, using your own API key, answers inline in the same terminal.
 
-## An architectural change from the original plan
+**Status: Linux beta in preparation.** The app runs on Ubuntu 24.04 (Qt5/KF5) and builds for
+Qt6/KF6. It has not had independent QA yet. See [docs/VALIDATION.md](docs/VALIDATION.md).
 
-This first version is **not a fork of the full Konsole application**. It is a
-separate executable using the installed KDE Frameworks 6 Konsole component.
-It preserves the native terminal engine without copying or patching its internals,
-and does not replace the user's existing Konsole installation. Full Konsole tabs,
-splits, settings integration, and a source-level fork remain subsequent work.
-The Relay-specific editor and agent modules are separate enough to move into a
-fork later. No Warp source code was copied.
+<!-- Screenshot placeholder: composer, an inline agent answer with a tool call, a split pane. -->
 
-## Implemented in this source preview
+## Install
 
-| Area | Implementation |
-|---|---|
-| Rich input | A real Qt `QPlainTextEdit`: mouse cursor placement, mouse drag selection, Shift+click, Shift+arrow, word selection/navigation, clipboard, multiline editing, undo/redo, basic shell syntax coloring, and an IME submission guard. Qt behavior is used instead of reimplementing a terminal grid editor. |
-| Auto-detection | Local executable/builtin/alias/function recognition, natural-language heuristics, explicit shell syntax and prefixes, a live destination indicator, and an ambiguity dialog. Classification never calls an LLM. |
-| Overrides | Auto / Terminal / Agent selector; force-submit shortcuts; `/shell ` and `/agent ` prefixes. |
-| Real terminal | KonsolePart, with an explicit native-input toggle. Foreground programs receive normal terminal keystrokes. |
-| Bash integration | A separate rcfile loads the user's `.bashrc`, preserves prompt commands, reports cwd/exit status/aliases, checks Readline's tty state, and uses an acknowledged command-loading binding. No user dotfiles are edited. |
-| Agent | Streaming chat-completions transport, streamed tool-call assembly, provider reasoning-field preservation, multi-step tool loop, cancellation, output/time/step limits. |
-| Tools | `run_command`, `read_file`, `list_directory`, `write_file`, run immediately without per-action confirmation. Each command, path, or write diff prints inline in the terminal as it runs. |
-| BYOK | Editable base URL/model/parameters; Kimi K3, GLM-5.3 standard API and Coding Plan presets; custom compatible endpoints. Keys are session-memory-only. |
+### From source
 
-“Rich input” means rich **editing interactions**, not HTML or bold formatting in
-shell commands. Commands remain plain text. Shell highlighting is basic, not a
-complete Bash parser/completion engine.
-
-## Build on a Linux/KDE Frameworks 6 system
-
-For **Ubuntu 24.04** (no KF6 packages; builds against Qt5 / KF5):
+Ubuntu 24.04 (Qt5 / KF5):
 
 ```bash
 sudo apt install build-essential cmake ninja-build python3 libsecret-tools \
-  qtbase5-dev libkf5parts-dev libkf5coreaddons-dev konsole-kpart
-./scripts/build.sh            # auto-selects Qt6+KF6 when present, else Qt5+KF5
-./build/relay --workspace "$HOME/path/to/project"
+  qtbase5-dev libkf5parts-dev libkf5coreaddons-dev libkf5syntaxhighlighting-dev \
+  qtpdf5-dev konsole-kpart
+./scripts/build.sh                 # configures, builds, runs all tests
+./build/relay --workspace ~/project
 ```
 
-Force a version with `./scripts/build.sh -DRELAY_QT_MAJOR=5` or `=6`.
-
-Reference dependency set for **Debian 13 / trixie**:
+Debian 13 or Ubuntu 26.04 (Qt6 / KF6):
 
 ```bash
-sudo apt update
-sudo apt install build-essential cmake ninja-build python3 unzip \
-  qt6-base-dev libkf6parts-dev libkf6coreaddons-dev konsole
-
-unzip relay-0.1.0-source.zip
-cd relay-0.1.0
+sudo apt install build-essential cmake ninja-build python3 libsecret-tools \
+  qt6-base-dev libkf6parts-dev libkf6coreaddons-dev libkf6syntaxhighlighting-dev konsole-kpart
 ./scripts/build.sh
-./build/relay --workspace "$HOME/path/to/project"
 ```
 
-The package commands are installation instructions, not something executed on
-your machine. This environment could not verify the dependency installation or
-native build. A Qt5/KF5 Konsole installation does not satisfy the app's Qt6/KF6
-requirements. Other distributions need the corresponding Qt6 Widgets/Test,
-KDE Frameworks 6 Parts/CoreAddons, and Konsole packages.
+`build.sh` picks Qt6+KF6 when both are installed, else Qt5+KF5. Force one with
+`./scripts/build.sh -DRELAY_QT_MAJOR=5` (or `6`). KSyntaxHighlighting and Qt PDF are optional.
+`cmake --install build` installs to `~/.local` by default.
 
-`build.sh` compiles and runs the tests; it does **not** install the app or edit
-shell startup files. It uses two parallel compiler jobs by default; change with
-`RELAY_JOBS=4 ./scripts/build.sh`. Existing CMake options can be supplied as arguments.
+Options: `--workspace PATH` sets the first terminal directory and the agent workspace.
+`--clean-shell` skips `~/.bashrc` for that session, for prompt plugins that conflict.
 
-For a conflicting prompt/preexec plugin:
+### Packages (coming)
 
-```bash
-./build/relay --clean-shell --workspace "$HOME/path/to/project"
-```
+Beta `.deb`s for Ubuntu 24.04, Debian 13 and Ubuntu 26.04 (amd64, arm64) and the AUR packages
+`relay-terminal` and `relay-terminal-git` are prepared but not published.
+See [docs/RELEASING.md](docs/RELEASING.md).
 
-An existing Bash `DEBUG` trap is not replaced: the app falls back to native input.
-`--clean-shell` skips `.bashrc` for that Relay session only. It does not remove your
-configuration. If you change the shell to Zsh/Fish, SSH, or tmux, use native mode;
-rich integration for those environments is not included in v0.1.
+## Quick start
 
-Optional user-local installation after a successful build:
+1. Start Relay. If you use Warp, open **Provider / BYOK…** and click **Import keys from Warp**.
+   Otherwise pick a preset, paste a key, and tick **Save entered key to the desktop keyring**.
+2. Type `git status` and press Enter. It runs in the terminal.
+3. Type `why is this build failing?` and press Enter. The agent answers inline.
 
-```bash
-cmake --install build
-# Default prefix from build.sh: ~/.local
-# Ensure ~/.local/bin is on PATH; desktop launchers may need a session refresh.
-```
-
-## Using the composer
-
-| Input | Destination in Auto mode |
+| Key | Action |
 |---|---|
-| `git status` | Terminal |
-| `find . -type f -size +100M` | Terminal |
-| `why is this build failing?` | Agent |
-| `find the largest files in this repo` | Agent |
-| Anything that is not a runnable command: a syntax error, or any command word in a pipeline or list that does not resolve | Agent, without running anything |
-
-Validity is checked locally and never executes the input: `bash -n`, then every command
-word is resolved against builtins, `PATH`, live aliases and functions, and executable paths
-relative to the terminal's directory.
-
-**Terminal mode** (Ctrl+Shift+Enter, or the Terminal selector) always targets the terminal:
-
-- If the command is not valid, the agent fixes it and Relay runs the fix in your terminal.
-- If a command exits non-zero, the agent investigates, fixes it, and Relay re-runs the fix.
-- Up to 3 fix attempts. Ctrl+C (exit 130) stops the loop. Auto-mode commands are never auto-fixed.
-
-The agent cannot read the terminal's scrollback, so it reproduces a failure with its own
-`run_command` when it needs the error text. That re-runs the command a second time.
-
-**Agent output is inline.** There is no agent pane. Your prompt, the agent's reply, each
-tool call, tool output, and write diffs print in the terminal in distinct colors. They are
-written to the terminal display, not typed into the shell: they never enter shell history
-and are never executed. Control characters are stripped from model and tool output. Output
-that arrives while a program is running waits until the next prompt.
-
-| Shortcut | Action |
-|---|---|
-| Enter | Submit using the selected/detected destination |
-| Shift+Enter | Insert a newline |
-| Ctrl+Enter | Always agent |
-| Ctrl+Alt+Enter | Interrupt the running agent turn with the prompt-box text |
-| Ctrl+I (in the prompt box) | Toggle input between terminal command and agent prompt; in the terminal Ctrl+I stays Tab |
-| PageUp / PageDown (in the prompt box) | Scroll the pane's terminal scrollback; Shift+PageUp/PageDown in the terminal keep Konsole's behavior |
-| Ctrl+Shift+Enter | Always terminal; the agent fixes invalid or failing commands |
+| Enter | Submit: commands to the terminal, everything else to the agent |
+| Ctrl+Enter | Always the agent |
+| Ctrl+Shift+Enter | Always the terminal; the agent fixes an invalid or failing command |
+| Ctrl+Alt+Enter | Interrupt the running agent turn with this prompt |
+| Shift+Enter | New line |
+| Ctrl+I | Toggle terminal / agent input (from the prompt box) |
+| Ctrl+H / Ctrl+Shift+H | Take control of the terminal / back to the prompt |
+| Ctrl+Shift+A | Actions palette |
+| Ctrl+T, Ctrl+N | New tab, new window |
+| Ctrl+P, Ctrl+Shift+P | Split right, split down |
+| Alt+Arrows | Move between panes |
+| Ctrl+W, Ctrl+Shift+W | Close pane (then tab, then window); restore |
 | F12 | Toggle native terminal input |
-| Escape in the composer | Focus native terminal input |
-| Up on the first line / Down on the last line | Composer history, preserving the current draft |
-| Ctrl+C / Ctrl+X / Ctrl+V; Ctrl+Shift+C / Ctrl+Shift+V | Copy / cut / paste in the composer |
-| Ctrl+C in the terminal | Copy when text is selected; otherwise interrupt |
-| Selecting terminal text | Copies it when **Actions › Copy on select** is on (off by default) |
-| Ctrl+V in the terminal | Paste at a shell prompt; passed to programs such as vim |
-| Ctrl+A, Shift+arrows, Ctrl+Shift+arrows | Normal text-editor selection |
+| Ctrl+Shift+R | Restart a pane's shell or agent after it was stopped |
+| Ctrl+Tab, Ctrl+Shift+Tab | Next, previous tab |
+| Up / Down (first / last line) | Prompt history |
+| PageUp / PageDown (prompt box) | Scroll the terminal |
+| Ctrl+C in the terminal | Copy the selection, or interrupt when nothing is selected |
 
-### Windows, tabs and panes
+Shortcut presets: **Relay** (Chrome-style, default), **Warp**, **VS Code**, **Konsole**
+(Actions › Shortcut preset). Every shortcut can be changed in
+`~/.config/RelayTerminal/relay/keybindings.json` (Actions › Edit keyboard shortcuts), which
+reloads live. Copy on select is off by default (Actions › Copy on select).
 
-| Shortcut | Action |
-|---|---|
-| Ctrl+N | New window, in the focused pane's directory |
-| Alt+Tab / Alt+Shift+Tab | Next / previous Relay window |
-| Ctrl+T | New tab, in the focused pane's directory |
-| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
-| Ctrl+P | New pane to the right |
-| Ctrl+Shift+P | New pane below |
-| Alt+Left / Right / Up / Down | Move focus to the neighboring pane |
-| Ctrl+W | Close the pane; the tab if it is the last pane; the window, after a warning, if it is the last tab |
-| Ctrl+Shift+W | Restore the last closed pane, tab or window |
-| Ctrl+Shift+A | Actions palette: agent, terminal, panes and tabs, shortcuts |
-| Ctrl+H (from the prompt box) | Take control: hide the prompt and type into the terminal |
-| Ctrl+Shift+H | Back to the Relay prompt; while a program runs, the agent is in control |
+## Feature tour
 
-Every pane has its own shell, composer, agent worker and conversation. The toolbar acts on
-the focused pane, which has an accent outline. Typing `exit` closes a pane. Restoring
-reopens panes in the same directories and layout with **new shells**: scrollback and
-programs that were running are not restored. These shortcuts take priority over the
-composer and the shell prompt. While a program such as vim, nano or less runs in the focused
-terminal, only Ctrl+Shift shortcuts and F-keys act; everything else reaches the program. Most
-desktop window managers reserve Alt+Tab for themselves, in which case Relay never receives it.
+- **Composer routing.** A local check (`bash -n`, then every command word resolved against
+  builtins, `PATH`, your live aliases and functions) decides terminal or agent. Nothing is
+  executed to decide. Input that is not a runnable command goes to the agent. `/shell ` and
+  `/agent ` prefixes force a destination.
+- **Fix loop.** In terminal mode, an invalid command or a non-zero exit asks the agent for a
+  fix, which Relay runs in your terminal. Up to 3 attempts; Ctrl+C stops it.
+- **Inline agent output.** Prompts, answers, tool calls, command output and diffs print in the
+  terminal in distinct colors. They are written to the display, never typed into the shell.
+  While a program such as vim runs, output shows in a small panel and prints when it exits.
+- **Agent queue.** Prompts sent while the agent works are queued and shown in a strip; remove,
+  clear, interrupt, or resume after a stop.
+- **Human and agent control.** A running program gets your keys; the prompt returns when it
+  exits. Password prompts are detected from the terminal mode and always hand control to you.
+  Per-program policy in the palette.
+- **Windows, tabs and panes.** Each pane has its own shell, prompt, agent and conversation.
+  Closed panes, tabs and windows restore in the same directories with new shells.
+- **File panes.** Folder explorer and file preview (code, Markdown, images, optional PDF).
+  Open with `relay open PATH`, a click on the pane's directory line, or Ctrl+click on a text
+  file in terminal output.
+- **Palette and shortcuts.** One searchable actions palette. Shortcuts live in
+  `~/.config/RelayTerminal/relay/keybindings.json`, reload live, and the agent can change them.
+- **Skills.** The agent sees your Warp-style skills in `~/.warp/skills` and loads one before
+  following it.
+- **Pane isolation.** Each pane's shell and agent run in their own systemd user scope with
+  memory limits, so a runaway command stops inside its pane. Limits are configurable.
 
-The actions palette floats over the right edge without resizing the terminal. With an empty
-filter it shows recently used actions, then sections ordered by where focus was. Typing
-searches everything, including submenu entries: "deep" finds Model › DeepSeek. Use the arrow
-keys or Ctrl+N / Ctrl+P to move, Right or Enter to open a submenu, Left to go back, Enter to
-run, and Esc to clear the filter, go back, then close. Focus returns to where it was. The input mode and model pickers and an interrupt button sit in each
-pane's input row.
+Relay is not a Konsole fork and does not change your Konsole settings or dotfiles.
 
-### Agent queue
+## Privacy and your keys
 
-Prompts sent while the agent is busy are queued and run in order; each is echoed when its turn
-starts. A strip above the prompt lists the running and queued prompts with × to remove one, and
-Clear. Ctrl+Alt+Enter interrupts the running turn with the prompt-box text instead; actions that
-already ran are not rolled back. Stopping the agent pauses the queue until you choose Resume (strip or
-Actions palette); a new prompt while paused runs immediately.
+- **BYOK.** Presets for Kimi K3, Z.AI GLM-5.3 (standard and Coding Plan) and DeepSeek V4.1
+  Flash via OpenRouter, or any OpenAI-compatible endpoint.
+- **Where keys live.** The desktop keyring (GNOME Keyring or KWallet) through `secret-tool`,
+  or environment variables such as `RELAY_KIMI_API_KEY`. Keys are passed on stdin, never on a
+  command line, in settings files or logs. **Import keys from Warp** copies Warp's
+  custom-endpoint keys into the keyring.
+- **No telemetry.** No analytics, crash reports, account or Relay server. Relay connects only to
+  the provider you configure, when you use the agent.
+- **What goes to your provider.** Your agent prompts, the conversation, and tool results
+  (command output, file contents the agent reads). Terminal output is not sent automatically.
+- **Tools run without asking.** The agent runs commands and writes files as your user as soon
+  as it decides to. Every action prints in the terminal first, and Stop agent cancels, but
+  nothing is rolled back. Shell commands are **not sandboxed**; file tools are limited to the
+  workspace. Start with a disposable project.
 
-### Human and agent control
+## Documentation
 
-When any command keeps running for more than a moment, Relay hides the prompt box and your
-keys go to the program: passwords, REPLs, vim, long builds. When the command ends, the prompt
-returns. **Ctrl+Shift+H** brings the prompt back while a program runs; anything you submit then
-goes to the agent. **Ctrl+H** from the prompt box gives control back to you; in the terminal,
-Ctrl+H stays Backspace.
+[docs/README.md](docs/README.md) lists every document: architecture, roadmap, validation,
+releasing, and research notes.
 
-Password prompts are detected from the terminal mode, not the text on screen: echo off with
-line input on, checked once a second while a command runs. Relay then puts you in control and
-shows "Password prompt · you're in control". Prompt-box text never goes to a running program.
-If Relay's window is in the background, it flashes the taskbar and sends a desktop notification
-(`notify-send`) for password prompts and for commands that finish after more than 30 seconds.
+## Contributing and QA
 
-**Agent output while a program runs.** Agent output normally prints into the terminal. While a
-program such as vim owns it, the reply appears live in a small panel above the prompt, and it
-still prints into the terminal when the program exits. The × hides the panel until then.
-When you ask the agent something while a program runs, Relay tells it which program is running
-and that it cannot see or type into it yet, so it answers accordingly.
+- Tests: `./scripts/test.sh` (Python backend and real Bash/PTY), `./scripts/build.sh` (all).
+- Issues are Markdown files in [`issues/`](issues/README.md). Implemented work waits in
+  `needs_qa_llm/` until a QA session by a non-Claude model runs its checklist and records
+  evidence in `docs/qa_evidence/`.
+- Backend diagnostic CLI: `python3 scripts/relay-agent.py --list`, `--import-warp`, or
+  `--provider openrouter --workspace PATH`.
 
-**Choosing who gets control.** **Actions › Control when a program starts** sets the default:
-you take control (default) or the agent stays in control, keeping the prompt. While a program
-runs, **Always give the agent control of <program>** or **Always take control of <program>**
-set a per-program override (`control/default` and `control/programs` in Relay's settings).
-Password prompts always hand control to you.
+## License
 
-The agent cannot type into running programs yet; see
-`issues/features/2026-09-17-agent-delegate-and-take-over.md`.
-
-### Pane isolation
-
-Each pane's shell and agent worker run in their own systemd user scopes
-(`relay-pane-<id>-shell-N.scope`, `relay-pane-<id>-agent-N.scope`) with memory limits, so a runaway
-command is stopped inside its pane instead of taking down Relay or other panes. Pane processes also
-raise their `oom_score_adj` (shell 300, worker 500) so the kernel picks them before the window.
-
-- A command that exceeds the pane limit is stopped; the shell keeps running and the pane shows
-  "A command in this pane was stopped because it ran out of memory".
-- If the shell or worker itself is stopped, the pane stays open with **Restart shell** or
-  **Restart agent** (Ctrl+Shift+R).
-- Defaults: shell `MemoryMax=8G`, `MemoryHigh=6G`, `MemorySwapMax=2G`; worker `MemoryMax=2G`,
-  `MemorySwapMax=512M`. Change them in `~/.config/RelayTerminal/relay.conf` under `[isolation]`
-  (`shell_memory_max`, `shell_memory_high`, `shell_swap_max`, `agent_memory_max`, `agent_swap_max`,
-  `shell_oom_policy=continue|stop`, `enabled=false`). Values are systemd sizes such as `512M` or `infinity`.
-- Without a systemd user session (containers, WSL, non-systemd distros) panes run unisolated.
-- Scrollback is capped at 20,000 lines per pane (it was unlimited) so huge output cannot grow the
-  window's memory or temp files without bound. Older output beyond that is dropped.
-
-### Files and folders
-
-- Click a pane's directory line, or run **Actions › Open folder in explorer**, to open a folder pane.
-- `relay open PATH` in a Relay shell opens a folder in the explorer or a file in the preview pane.
-- File names in terminal output are underlined on hover. Ctrl+click a text or source file to preview
-  it in Relay, jumping to `file:LINE` when present. Konsole opens folders, images and PDFs with the
-  system default app; routing those clicks into Relay needs a patched Konsole (see
-  `issues/features/2026-09-17-clickable-paths.md`).
-- The explorer filters as you type; Enter opens, Backspace goes up. Previews cover text and code
-  (syntax highlighted), Markdown (rendered or source), and images. PDF preview is optional at build time.
-- An existing explorer or preview in the tab is reused. Both kinds of pane split, close, restore and
-  navigate like terminal panes.
-
-### Changing shortcuts
-
-All window shortcuts are named actions stored in
-`~/.config/RelayTerminal/relay/keybindings.json`, which reloads automatically:
-
-```json
-{"version": 1, "preset": "relay", "program_keys": "shift-only", "bindings": {"agent.newChat": ["Ctrl+Shift+Y"]}}
-```
-
-`preset` is `relay` (Chrome-style defaults), `warp`, `vscode` or `konsole`; switch it from
-**Actions › Shortcut preset**. Presets follow each program's Linux defaults where Relay has an
-equivalent action; sources and adaptations are in `docs/KEYBINDING-PRESETS.md`. Entries in
-`bindings` override the preset and survive preset changes; **Clear custom overrides** removes
-them.
-
-**Actions › Edit keyboard shortcuts** opens the file in `$VISUAL`, `$EDITOR` or
-nano in the focused pane. `program_keys` is `shift-only` (default), `all` or `none`. Conflicts
-and unknown keys are reported in the status bar. The agent can also change shortcuts: ask it,
-for example, to bind `agent.newChat` to Ctrl+Shift+N. Its `set_keybinding` tool edits only
-this file.
-
-Pasting never submits. In native mode, normal terminal keybindings apply (including
-Ctrl+C as interrupt). The toolbar also has **Interrupt shell**. Returning from
-native mode at a prompt cancels any partial Readline line before using the composer;
-returning while a foreground program runs does not inject Ctrl+C into that program.
-F12 is reserved by this preview; customizable shortcuts are future work.
-
-The composer rejects control characters and incomplete Bash syntax before shell
-submission. It does not execute a “syntax check” command in your shell: parsing
-uses a separate non-executing `bash -n` process. Routing is a convenience, **not a
-security classifier**, and can misclassify language or unfamiliar commands.
-The visible route and force overrides are intentional safeguards.
-
-## Configure Kimi, GLM, or OpenRouter with your own key
-
-Open **Provider / BYOK…**, select a preset, choose an agent workspace, and confirm
-sharing submitted prompts and tool results with that provider. Either
-paste an API key or leave the key field empty to use the key stored in the
-desktop keyring for that preset. Saving settings makes no network call.
-
-| Preset | Base URL | Model ID |
-|---|---|---|
-| Kimi | `https://api.moonshot.ai/v1` | `kimi-k3` |
-| Z.AI standard API | `https://api.z.ai/api/paas/v4` | `glm-5.3` |
-| Z.AI Coding Plan | `https://api.z.ai/api/coding/paas/v4` | `glm-5.3` |
-| OpenRouter | `https://openrouter.ai/api/v1` | `deepseek/deepseek-v4.1-flash` |
-
-The preset table lives in `backend/relay_core/presets.py` and is mirrored in the
-dialog in `src/main.cpp`.
-
-### Stored keys and importing from Warp
-
-Relay looks up a preset's key in this order:
-
-1. An environment variable such as `RELAY_KIMI_API_KEY`, `RELAY_GLM_CODING_API_KEY`
-   or `RELAY_OPENROUTER_API_KEY`.
-2. The desktop Secret Service keyring (GNOME Keyring or KWallet), entry
-   `service=org.relayterminal.Relay provider=<preset>`, via `secret-tool`.
-
-**Import keys from Warp** in the dialog, or the CLI below, reads Warp's custom
-endpoints from `~/.config/warp-terminal/settings.toml`, reads their keys from
-Warp's keyring entry, and stores each one under the matching Relay preset.
-Keys go to `secret-tool` on stdin, never on a command line, into a file, or
-across the GUI pipe. The worker resolves a stored key itself.
-
-```bash
-python3 scripts/relay-agent.py --import-warp   # copy Warp keys into the keyring
-python3 scripts/relay-agent.py --list          # show presets and stored-key status
-python3 scripts/relay-agent.py --provider openrouter --workspace /path/to/project
-```
-
-Z.AI's current guide lists the coding endpoint in its protocol table and the
-standard endpoint in its example. Both presets are therefore exposed rather than
-silently assuming one billing/access path. Availability, quota, plan eligibility,
-and charges depend on the provider account. Neither endpoint has been live-tested
-here. If switching to a model with different capabilities, edit the request JSON;
-use `{}` for a custom provider that does not accept these extra parameters.
-
-Supported extras: `thinking`, `reasoning`, `reasoning_effort`, `temperature`, `top_p`.
-OpenRouter's `reasoning` stream field is kept for later tool turns and not displayed.
-The OpenRouter preset sends no extras by default; add `{"reasoning":{"effort":"high"}}` if wanted.
-HTTP is refused except for a loopback model server. HTTPS certificate checks are
-not disabled, and authorization-bearing redirects are refused.
-
-**Do not put API keys in the composer or in a checked-in file.** Provider keys are
-not written to QSettings, command arguments, or source files. A key is persisted
-only if you import it or tick **Save entered key to the desktop keyring**. This is normal
-process memory, not encrypted/locked memory. OS swap, crash dumps, or another
-process with your privileges are outside this protection.
-
-## Agent execution and privacy
-
-Agents run commands in a **separate non-interactive Bash process** under the chosen
-workspace. They do not inherit the interactive shell's aliases, functions, or
-unexported variables; `cd` inside an agent command does not change the terminal's
-cwd. The chosen agent workspace does not silently follow terminal directory
-changes. Both paths are visible in the app.
-
-**Tools run without asking.** When the model calls a tool, Relay runs it at once
-and sends the result to your provider. Each command, file path, or write diff prints
-inline in the terminal as it starts. Use **Stop agent** to cancel a turn; it does not undo
-actions that already ran. Agent tool commands run in a separate process, not in your
-interactive shell; only fixed commands from terminal mode run in your shell. Commands time out (default 30s, maximum 120s) and
-have a 32 KiB returned-output cap. A turn is limited to 12 model requests and
-24 tool calls. These are limits, not a dollar-denominated spending budget.
-
-**Agent shell commands are not sandboxed.** It runs with your account's normal
-permissions, can access files beyond the chosen workspace, and can access the
-network. The workspace restriction and basic secret-file guard apply to the file
-tools, not arbitrary shell commands. Use a disposable project for initial testing.
-Text the agent reads from files or command output can try to steer it into
-running other commands, and nothing stops a command before it runs.
-Package scripts, build systems, and “read-only-looking” commands may execute code.
-
-Terminal history/output is **not automatically uploaded or available to the
-agent** in this version. Copy relevant output into your prompt when needed. The
-agent does not automatically index your repository. There is no telemetry.
-
-Composer and agent history are kept in memory. Bash/Konsole keep their normal
-history behavior and may persist shell command history. The shell bridge uses a
-private temporary directory (0700) containing shell metadata and the most recently
-staged command (0600); it is removed on normal application exit. An OS crash may
-leave a temporary directory. No provider key is placed there.
-
-Stopping does not undo completed actions. A blocked network operation may take up
-to its 30-second I/O timeout to return. Agent output and file content are untrusted
-and rendered as plain text, not executable HTML.
-
-### Skills
-
-The agent can use your Warp-style skills: folders in `~/.warp/skills/<name>/SKILL.md` with
-`name` and `description` frontmatter. At configure time the worker indexes them and adds a
-compact list of names and descriptions (capped at 6 KiB) to the system prompt. The agent loads
-a skill's full text with `load_skill` before following it, and reads files the skill references
-with `read_skill_file`. Skill text is treated as lower-priority guidance than your request.
-
-Only configured directories are read, symlinks and `..` cannot leave a skill folder, and binary
-files are refused, because agent tools run without per-action approval. Folders without a
-`SKILL.md` or without a description are skipped and reported in the worker's `configured` event.
-Worker protocol: `configure` accepts `"skills": {"enabled": true, "dirs": ["/abs/path"], "project": false}`;
-omit it for the default (`~/.warp/skills`). `project: true` also indexes `.warp/skills` in the agent
-workspace.
-
-## Tests and backend-only diagnostic CLI
-
-```bash
-./scripts/test.sh                     # Python + real Bash/PTY tests, no pip install
-python3 scripts/relay-agent.py --provider kimi --workspace /path/to/project
-python3 scripts/relay-agent.py --provider glm --workspace /path/to/project
-```
-
-The diagnostic CLI uses the same actual agent backend. It is
-not the rich-input desktop app. It prompts privately for the API key. `/new`
-clears conversation context and `/quit` exits. Using a real key incurs whatever
-usage charges the configured provider applies.
-
-After Qt is available, `./scripts/build.sh` also runs the Qt interaction tests.
-To compile only the editor tests without KDE Parts:
-
-```bash
-cmake -S . -B build-editor -DRELAY_BUILD_APP=OFF
-cmake --build build-editor
-ctest --test-dir build-editor --output-on-failure
-```
-
-## Not implemented yet
-
-Full Konsole application fork; Zsh/Fish/remote/tmux rich integration; robust custom
-prompt-plugin support; tabs/splits; shell completion in the rich editor; automatic
-terminal-output capture; command blocks; automatic repository context; same-session
-agent command execution; resumable agent conversations;
-OS sandboxing; checkpoint/rollback; multiple agents; MCP; packaged desktop binary.
-
-## Source map
-
-- `src/`: native Qt/Konsole UI and rich editor.
-- `shell/`: Bash integration and atomic prompt-state events.
-- `backend/relay_core/`: router, provider transport, agent loop, tool execution.
-- `backend/worker.py`: private newline-delimited JSON over stdin/stdout.
-- `tests/`: backend, PTY, HTTP fixture, agent, queue, and Qt editor tests.
-- `data/theme/`: dark theme, Konsole profile and color scheme.
-- `scripts/`: build, tests, and a backend diagnostic CLI.
-- `docs/`: architecture, source research, validation, and next acceptance gates.
-
-New Relay source files are GPL-3.0-or-later; see `LICENSE`. KDE/Qt components are
-external dependencies under their own licenses. No third-party source or fonts are
-bundled.
+GPL-3.0-or-later. See `LICENSE`. Qt, KDE Frameworks and Konsole are external dependencies
+under their own licenses. No Warp source code is included.

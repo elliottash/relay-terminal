@@ -1,5 +1,15 @@
 # Interrupt vs. queue for new submissions
 
+> **Status (2026-09-17).** The GUI now uses this protocol; the sentence below saying it does
+> not is from before that change. Every agent prompt is sent with `when: "queue"` (or `"now"`
+> while the queue is paused); Ctrl+Alt+Enter (`agent.interrupt`, from the prompt box) sends
+> `"interrupt"`; a queue strip over the terminal shows running and queued prompts with remove,
+> Clear and Resume; terminal-mode fix turns are queued instead of refused. It waits for QA:
+> `issues/features/needs_qa_llm/2026-09-17-queue-or-interrupt-agent-prompts.md`. The bindings
+> suggested in "What the GUI must do" item 3 were not used as written: plain Enter queues and
+> Ctrl+Alt+Enter interrupts, with no choice dialog. "Shell commands while a foreground program
+> runs" is still a design only (`issues/features/2026-09-17-queue-shell-commands-while-busy.md`).
+
 Source: `issues/feature_intake.txt`. The backend for agent prompts is
 implemented in `backend/relay_core/queue.py` and wired into `backend/worker.py`.
 The GUI does not use it yet. The shell-command variant is a design only.

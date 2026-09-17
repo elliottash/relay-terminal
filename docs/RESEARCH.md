@@ -1,5 +1,12 @@
 # Primary-source checks used for this implementation
 
+> **Historical (status added 2026-09-17).** This page records sources checked for the first
+> build on 2026-09-16 and is kept unchanged below. It is not maintained. Current design is in
+> [ARCHITECTURE.md](ARCHITECTURE.md); all documents are listed in [README.md](README.md).
+> Since then: Relay embeds `kf6/parts/konsolepart` or the KF5 part; the Kimi, `glm-coding` and
+> OpenRouter presets were live-tested ([VALIDATION.md](VALIDATION.md)); the `glm` standard
+> endpoint was not.
+
 Sources were inspected during this build conversation (September 2026). This is a
 reference snapshot, not an automatic updater or a claim that endpoints will never
 change. No Warp implementation code was copied or bundled.

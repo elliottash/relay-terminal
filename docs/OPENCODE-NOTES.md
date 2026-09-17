@@ -1,5 +1,20 @@
 # opencode notes: what Relay's agent should adopt next
 
+> **Status (2026-09-17).** The notes below are unchanged from 2026-09-16. Since then:
+>
+> | Item | Status |
+> |---|---|
+> | "Relay today" paragraph | Outdated. Approvals are removed, output is inline in the terminal (no agent pane), and the tool list also has `set_keybinding`, `load_skill` and `read_skill_file`. |
+> | P1 `edit_file` | Not implemented |
+> | P2 permission rules | Superseded: the owner removed per-action approvals; tools run immediately with inline previews |
+> | P3 context accounting | Not implemented |
+> | P4 accept messages while busy | Implemented differently: queued prompts run as separate turns, and an explicit interrupt stops the running turn (`backend/relay_core/queue.py`, [QUEUE-INTERRUPT.md](QUEUE-INTERRUPT.md)). No steering at step boundaries. |
+> | P5 project instructions | Partly: Warp-style skills from `~/.warp/skills` are indexed and loadable (`backend/relay_core/skills.py`). No AGENTS.md or environment block. |
+> | P6 provider quirks | Presets `kimi`, `glm`, `glm-coding`, `openrouter` exist with reasoning-field handling; no separate quirk table |
+> | P7–P11 | Not implemented |
+>
+> Current agent design: [ARCHITECTURE.md](ARCHITECTURE.md) section 11. Candidates are tracked in [ROADMAP.md](ROADMAP.md).
+
 Research date: 2026-09-16. Source: `sst/opencode` branch `dev`, commit
 `88c6c7abc7f3` (shallow clone). Paths below are relative to
 `packages/opencode/src/` unless stated; links use

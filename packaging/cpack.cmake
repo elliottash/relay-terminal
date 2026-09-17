@@ -8,7 +8,7 @@
 #         -DBUILD_TESTING=OFF -DRELAY_VERSION_SUFFIX=~beta.1
 #   cmake --build build-deb && (cd build-deb && cpack -G DEB)
 #
-# packaging/build-deb.sh wraps this. Library dependencies (Qt, KF Parts, CoreAddons,
+# packaging/deb/build-deb.sh wraps this. Library dependencies (Qt, KF Parts, CoreAddons,
 # SyntaxHighlighting, QtPdf) are computed by dpkg-shlibdeps; the runtime-only ones
 # (the Konsole part plugin, Python, Bash) are listed here.
 

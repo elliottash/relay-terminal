@@ -75,8 +75,7 @@ so users upgrade cleanly from beta to final. Tags containing `-` become GitHub p
 1. **Bump versions** (for a new base version; a new beta of the same base skips this):
    - `CMakeLists.txt`: `project(Relay VERSION X.Y.Z …)`. The release workflow fails if the tag
      does not match.
-   - `src/main.cpp`: `QCoreApplication::setApplicationVersion(...)`.
-   - `backend/worker.py`: the `ready` event's `"version"`; `backend/relay_core/__init__.py`: `__version__`.
+   - `backend/relay_core/__init__.py`: `__version__` (the app and worker read their version from CMake and this; `tests/test_version.py` catches drift).
    - `packaging/org.relayterminal.Relay.metainfo.xml`: new `<release version="X.Y.Z~beta.N" date=…>`.
    - `site/index.html`: the `v=` lines and the note under Install.
    - `packaging/arch/relay-terminal/PKGBUILD`: `_tag`, `pkgver`, `pkgrel=1`.

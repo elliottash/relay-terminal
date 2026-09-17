@@ -1,238 +1,616 @@
-# Architecture and development notes
+# Relay architecture
 
-## Product requirements preserved
+Current as of 2026-09-17 (commit `10819d9`). Every
+statement points at code; paths are relative to the repository root. Planned work is in
+[ROADMAP.md](ROADMAP.md), test status in [VALIDATION.md](VALIDATION.md).
 
-A first-class rich editor with normal mouse/Shift selection is the central UI,
-not a future polish item. Users enter shell commands and agent requests in that
-same editor. Auto-routing must be visible and overridable. Normal terminal
-programs must retain raw/native interaction. The agent is BYOK and provider-agnostic.
+Contents:
 
-The implemented milestone is Linux, Bash, one embedded Konsole terminal, one
-composer, one conversation, tools that run without per-action approval, and editable model
-configuration. A source-level Konsole fork is not included in this milestone.
+1. [Overview](#1-overview)
+2. [Process model](#2-process-model)
+3. [Windows, tabs and panes](#3-windows-tabs-and-panes)
+4. [Keyboard: Keymap, presets, palette](#4-keyboard-keymap-presets-palette)
+5. [Composer and routing](#5-composer-and-routing)
+6. [Shell bridge: staging commands safely](#6-shell-bridge-staging-commands-safely)
+7. [Terminal-mode fix loop](#7-terminal-mode-fix-loop)
+8. [Inline agent output](#8-inline-agent-output)
+9. [Human and agent control](#9-human-and-agent-control)
+10. [File panes and `relay open`](#10-file-panes-and-relay-open)
+11. [Agent backend](#11-agent-backend)
+12. [Keys, keyring and Warp import](#12-keys-keyring-and-warp-import)
+13. [Per-pane isolation](#13-per-pane-isolation)
+14. [Theme](#14-theme)
+15. [Packaging layout](#15-packaging-layout)
+16. [Engine spike and `TerminalBackend`](#16-engine-spike-and-terminalbackend)
+17. [Fragile dependencies and limits](#17-fragile-dependencies-and-limits)
+18. [Source map](#18-source-map)
 
-## Separation of concerns
+## 1. Overview
+
+Relay is a native C++/Qt application for Linux. It embeds **KonsolePart**, Konsole's
+terminal component, loaded at runtime as a KPart. Under each terminal sits a real text
+editor (the composer). Text typed there goes to the shell or to a bring-your-own-key agent.
+The agent runs in a separate Python process per pane and talks to any OpenAI-compatible
+chat-completions endpoint.
+
+It builds against Qt6 + KF6 or Qt5 + KF5 (`CMakeLists.txt`, `RELAY_QT_MAJOR=AUTO|6|5`).
+It is not a Konsole fork and does not patch Konsole.
+
+## 2. Process model
 
 ```text
-Qt rich editor
-    |
-    +-- local Python router ----- visible decision / ambiguity choice
-    |                                |
-    |                                +-- shell destination
-    |                                |     syntax-check without execution
-    |                                |     private input file
-    |                                |     Readline binding + hash acknowledgement
-    |                                |     Enter -> real Bash -> KonsolePart
-    |                                |
-    |                                +-- agent destination
-    |                                      provider HTTP stream
-    |                                      validated tool call
-    |                                      preview printed inline in the terminal
-    |                                      separate tool process or file operation
-    |                                      result -> provider -> final answer
-    |
-    +-- explicit native toggle --- Konsole receives normal keys
+relay  (GUI process: Qt, all KonsolePart instances, all screens and scrollback)
+ |
+ |-- WindowManager: private QLocalServer  $TMPDIR/relay-open-XXXXXX/open.sock   <-- scripts/relay-open
+ |
+ +-- per terminal pane (Pane) -------------------------------------------------------------
+ |    runtime dir  $TMPDIR/relay-XXXXXX (0700): state.json, input.txt (0600)
+ |
+ |    systemd scope relay-pane-<id8>-shell-<n>          systemd scope relay-pane-<id8>-agent-<n>
+ |      bash --noprofile --rcfile shell/integration.bash -i    python3 -S -u backend/worker.py
+ |        |-- shell/event.py  (writes state.json)                |-- bash -n  (router syntax check)
+ |        +-- user commands, vim, builds ...                     +-- bash --norc -c  (run_command)
+ |               ^                                                      ^
+ |               | PTY (KonsolePart startProgram / sendInput)           | NDJSON over stdin/stdout
+ +---------------+------------------------------------------------------+
 ```
 
-The Python worker has no listening TCP port. Its frontend protocol is JSON lines
-on a private child-process stdin/stdout pipe. API keys travel over that pipe, not
-command-line arguments, URLs, files, or logs. Frontend output is plain text.
+| Process | Started by | Talks to the GUI through |
+|---|---|---|
+| `relay` | user or desktop file | n/a |
+| Pane shell (Bash) | KonsolePart `startProgram`, wrapped in `systemd-run --user --scope` when available | PTY bytes; atomic `state.json` events; `input.txt` for staged commands |
+| `shell/event.py` | Bash prompt and DEBUG hooks | writes `state.json` (token, sequence, event, status, cwd, shell PID, aliases/functions, PATH) |
+| Agent worker `backend/worker.py` | `QProcess`, wrapped in `systemd-run` when available | newline-delimited JSON on private stdin/stdout. No TCP port. |
+| Agent tool commands | worker, `/bin/bash --noprofile --norc -c` in a new session | results go back through the worker |
+| `scripts/relay-open` | `relay open` in a pane shell, or Konsole's file-link editor command | Unix socket `RELAY_OPEN_SOCKET`, one JSON line |
 
-## Shell state machine and the bug found during testing
+Startup (`main()` in `src/main.cpp`):
 
-`PROMPT_COMMAND` runs **before** Bash puts the terminal in Readline's input mode.
-A prompt event alone is therefore not sufficient to dispatch a control-key
-binding. An early test observed the kernel interpreting Ctrl+R as terminal reprint
-because the terminal was still canonical. Tests were corrected to require
-noncanonical tty mode; the frontend now also checks tty mode and foreground process
-group via the shell's `/proc/<pid>/fd/0` before dispatch.
+1. `relay::theme::exposeKonsoleProfile()` prepends `data/theme` to `XDG_CONFIG_DIRS` and
+   `XDG_DATA_DIRS`, before `QApplication` exists.
+2. The data root is the first of `$RELAY_DATA_DIR`, `<exe>/../share/relay`, the compiled
+   `RELAY_DATA_DIR`, or the source tree that contains `backend/worker.py`.
+3. `<data>/scripts` is prepended to `PATH`; `RELAY_OPEN_HELPER` points at `relay-open`.
+4. `WindowManager` opens the socket, then `newWindowAt(--workspace)` creates the first window.
 
-The intended sequence is:
+Options: `--workspace/-w PATH` (initial terminal directory and agent workspace) and
+`--clean-shell` (skip `~/.bashrc`).
 
-1. Bash prompt hooks publish authenticated private state: cwd, original exit status,
-   aliases/functions, PATH, and a new sequence value.
-2. Frontend also verifies Readline tty readiness and shell foreground ownership.
-3. User submits. Router validates the input and performs non-executing `bash -n`.
-4. Frontend writes the exact UTF-8 command to a private atomic file. The PTY only
-   receives the reserved Readline key sequence, not arbitrary input bytes.
-5. Readline loads the command; the shell bridge acknowledges its SHA-256 hash.
-6. Only after matching acknowledgement does the frontend send Enter. No ack means
-   no Enter. The editor draft remains recoverable.
-7. Terminal takes focus during execution. Bash DEBUG/prompt hooks report running
-   and ready states. A foreground TUI/REPL receives ordinary terminal input.
-8. On a new ready prompt, the composer can regain focus unless native mode was
-   explicitly selected.
+## 3. Windows, tabs and panes
 
-The event file is not a trust boundary against hostile same-user processes.
-Permissions and the token avoid accidental cross-session events and terminal
-output spoofing; they are not a substitute for an OS sandbox.
+| Class | Role |
+|---|---|
+| `WindowManager` | Window list, a stack of up to 25 closed items (pane, tab or window), the `relay open` socket |
+| `RelayWindow` | `QMainWindow`: toolbar (Actions, New chat, Stop agent, Provider / BYOK…), a `QTabWidget`, the actions palette overlay, an application event filter for shortcuts |
+| Tab page | One root widget: a leaf or a tree of `QSplitter`s |
+| `Pane` (leaf) | Terminal pane: KonsolePart, Bash bridge, composer, its own worker and conversation |
+| `ToolPane` (leaf) | Folder explorer or file preview (section 10) |
 
-The temporary rcfile sources the user's `.bashrc`, preserves scalar/array prompt
-commands, and refuses to replace a pre-existing DEBUG trap. The latter intentionally
-fails into native mode. It does not claim compatibility with all prompt frameworks.
+Pane anatomy, top to bottom: directory line (click opens the explorer), an optional
+banner (memory kill, restart), the terminal, the transcript panel (section 8), the composer
+frame (route label, input-mode picker, model picker, interrupt-shell button, Submit, editor,
+key hints). Two overlays float over the terminal without resizing it: the agent queue strip
+and toasts.
 
-## Routing
+Layout rules:
 
-No remote classifier is used. The router considers explicit prefixes/modes,
-known shell builtins, executable resolution, live aliases/functions, natural-language
-patterns, and explicit shell constructs. Since 2026-09-17, input that is not a runnable
-command (syntax error, or an unresolved command word anywhere in a pipeline or list) goes
-to the agent in Auto mode instead of producing `ambiguous`. Terminal mode reports validity
-so the GUI can ask the agent to fix an invalid command.
+- Splitting reuses the anchor's splitter if the orientation matches, otherwise wraps the
+  anchor in a new splitter. Closing a leaf collapses a splitter left with one child.
+- Focus movement is geometric: the nearest leaf on the requested side, then the best aligned.
+- The focused leaf gets the `relayActive` property (accent outline). Agent and terminal
+  actions use the last focused terminal `Pane` in that tab, even when a tool pane has focus.
+- Closed items are stored as JSON layout nodes:
+  `{"pane":{"cwd","workspace"}}`, `{"explorer":{"path"}}`, `{"preview":{"path"}}`,
+  `{"split":"h"|"v","sizes":[…],"children":[…]}`. Restoring starts **new shells** in the saved
+  directories (`RELAY_START_DIR`, applied by `shell/integration.bash` after `.bashrc`).
+  Scrollback and running programs are not restored.
+- Closing a window asks for confirmation when it has more than one pane or anything is busy.
+- Typing `exit` closes the pane. A shell stopped for memory keeps the pane open (section 13).
 
-## Inline agent output
+## 4. Keyboard: Keymap, presets, palette
 
-The agent pane was removed on 2026-09-17. KonsolePart exposes no API to write to the
-display, but each Konsole `Session` registers on D-Bus at `/Sessions/N`. In-process,
-`QDBusConnection::objectRegisteredAt()` returns that QObject; Relay matches it by shell
-PID and invokes its `onReceiveBlock(const char*, int)` slot, which feeds bytes to the
-emulator exactly like program output. Relay clears the idle prompt line, prints colored
-text with C0/C1 controls stripped, then sends Ctrl+X Ctrl+P, bound in the Bash integration
-to a no-op `bind -x` function, so Readline redraws the prompt. Output that arrives while a
-foreground program runs is buffered until the next ready prompt. This depends on Konsole
-internals (verified on Konsole 23.08 / KF5) and must be re-verified on KF6.
+`Keymap` (`src/main.cpp`) is a process-wide registry of named actions. Each action has an id,
+a category, a description and default keys.
 
-## Terminal-mode fix loop
+| Source, lowest to highest priority | Where |
+|---|---|
+| Relay defaults | `Keymap::Keymap()` `add(...)` calls |
+| Preset table (`relay`, `warp`, `vscode`, `konsole`) | `Keymap::presetJson()`, researched in [KEYBINDING-PRESETS.md](KEYBINDING-PRESETS.md). Actions missing from a table keep the Relay default. |
+| User overrides | `~/.config/RelayTerminal/relay/keybindings.json` `bindings` |
 
-In terminal mode an invalid command, or a run whose ready-prompt exit status is non-zero
-(except 130), starts an agent turn with the command, cwd and problem. The agent must end
-with a fenced `relay-run` block. Relay stages that command through the normal hash-
-acknowledged Readline path and watches its exit status, up to 3 attempts.
+The file also holds `preset` and `program_keys` (`shift-only` default, `all`, `none`).
+A `QFileSystemWatcher` watches the file and its directory, because atomic replacement
+drops a plain file watch. Unknown keys and conflicts are reported in the status bar.
+Symbol keys match with or without Shift, because shifted punctuation differs by layout.
 
-Syntax validity does not imply safety or even command intent. Natural-language
-strings can be valid Bash. Routing therefore does not use parsing alone.
-Examples and overrides are in README.md. This classifier is deliberately modest;
-measure real misroutes before adding a model classifier or a learned component.
+Dispatch: `RelayWindow::eventFilter` handles `ShortcutOverride` and `KeyPress` for widgets in
+its window and runs `runAction(id)`, which the toolbar and palette also use.
 
-## Provider transport
+- `control.human` (Ctrl+H), `input.toggle` (Ctrl+I) and `agent.interrupt` (Ctrl+Alt+Enter)
+  act only from the composer. In the terminal those keys stay Backspace, Tab and Enter.
+- While a foreground program owns the focused terminal, only keys allowed by
+  `program_keys` act. The default lets Ctrl+Shift combinations and F-keys through to Relay.
+- Terminal clipboard: Ctrl+C invokes the display's `copyToClipboard` slot and treats a
+  clipboard change as proof of a selection (KonsolePart has no selection query); otherwise
+  the key reaches the shell. Ctrl+V pastes at a prompt and passes through inside programs.
+  Optional copy-on-select (`terminal/copy_on_select`).
 
-Use standard-library HTTP/JSON, not one vendor's agent SDK. Providers can differ
-in reasoning parameters and tool-stream fields even when “OpenAI-compatible.”
-The parser assembles partial tool arguments by index, retains provider reasoning
-fields for later tool turns, enforces stream limits, handles JSON fallback, and
-refuses truncated/incomplete tool-call execution. The request adapter exposes a
-small allowlist of extra request parameters, editable in the UI.
+Default window shortcuts:
 
-BYOK does not imply account access. Configuration validates syntax and policy;
-only a real API request can validate a user's model entitlement. Live provider
-calls remain untested in this environment.
+| Action | Key | Action | Key |
+|---|---|---|---|
+| New window | Ctrl+N | Close pane → tab → window | Ctrl+W |
+| Next / previous window | Alt+Tab / Alt+Shift+Tab | Restore closed | Ctrl+Shift+W |
+| New tab | Ctrl+T | Actions palette | Ctrl+Shift+A |
+| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Take control (from composer) | Ctrl+H |
+| Split right / down | Ctrl+P / Ctrl+Shift+P | Back to the prompt | Ctrl+Shift+H |
+| Focus neighbor pane | Alt+Arrows | Native input toggle | F12 |
+| Toggle terminal/agent input | Ctrl+I | Restart stopped shell/agent | Ctrl+Shift+R |
+| Interrupt agent with prompt | Ctrl+Alt+Enter | | |
 
-## Agent tools
+Unbound by default: `files.explorer`, `files.open`, `terminal.interrupt`, `agent.newChat`,
+`agent.stop`, `agent.clearQueue`, `agent.resumeQueue`, `agent.provider`, `input.mode*`,
+`keybindings.edit`, `keybindings.reload`.
 
-Per-action approvals were removed on 2026-09-17. A tool call is validated and
-prepared, its preview (command, path, or write diff) is emitted with
-`tool_started`, and it executes immediately. Writes re-check the original file
-between preparation and replacement. File tools reject parent traversal, absolute
-paths, symlinks, common secret-file locations, nonregular files, and oversized
-content. These checks reduce mistakes, but are not a hardened filesystem sandbox
-against concurrent hostile processes.
+**Actions palette** (Ctrl+Shift+A). One overlay child of the central widget, so opening it
+never resizes a terminal. Sections: Recent (up to 4, from `palette/recent`), then Agent and
+Terminal (ordered by where focus was), Panes and tabs, Shortcuts. Items have a stable key and
+either a run function or a submenu (Model, Input mode, Control when a program starts,
+Shortcut preset, Shortcuts inside programs). Typing searches everything, including submenu
+entries. Toggles stay open and re-render. Closing returns focus to the widget that had it.
 
-Shell commands are separate Bash processes. They do not mutate the live terminal's
-shell state. API-key-like environment names, shell-init hooks, and authentication
-agent variables are removed from their inherited environment. This reduces
-accidental leakage but cannot revoke filesystem or network permissions.
+**Agent-editable shortcuts.** Each worker receives the action catalog at configure time and
+after every reload. The `set_keybinding` tool (`backend/relay_core/keybindings.py`) validates
+the action id and key strings, then rewrites only that binding atomically. The watcher reloads it.
 
-With no approval step, the remaining controls are the system prompt, workspace
-checks on file tools, the secret-file guard, environment scrubbing, timeouts,
-output caps, per-turn step and tool limits, and Stop. None of these prevent a
-shell command from running. If a confirmation step returns, do not base it on a
-first-word “safe command” allowlist: shell substitutions, redirects, build
-scripts, aliases, and interpreters make such a policy unreliable.
+## 5. Composer and routing
 
-## Next acceptance gates (not completed work)
+`RichEditor` (`src/RichEditor.cpp`) is a `QPlainTextEdit`: native mouse and keyboard selection,
+undo, multiline, basic shell coloring, draft-preserving history (Up on the first line, Down on
+the last), an IME guard (Enter during preedit never submits) and a 128 KiB paste cap.
+Pasting never submits.
 
-The first gate is a real Qt6/KF6 build followed by mouse-drag, Shift+click,
-Ctrl+Shift+arrow, undo, multiline, paste, IME, and accessibility checks on a KDE
-desktop. No backend test substitutes for these user-critical GUI checks.
+| Key in the composer | Destination sent to the router |
+|---|---|
+| Enter | selected input mode (`auto`, `shell`, `agent`) |
+| Ctrl+Enter | `agent` |
+| Ctrl+Shift+Enter | `shell` (terminal mode) |
+| Ctrl+Alt+Enter | agent, `when: "interrupt"` (section 11) |
+| Shift+Enter | newline |
+| Esc | native terminal input |
+| PageUp / PageDown | scroll the terminal scrollback one page |
 
-Next test native terminal compatibility with vim/neovim, less, fzf, interactive
-Python, Ctrl+C/Ctrl+D, resize, alternate screen, Unicode, SSH, and tmux. Remote and
-multiplexer sessions should remain native until their integrations are explicit.
+Text changes trigger a debounced (150 ms) preview route; the route label shows the decision.
+Submission sends `route` to the worker with the text, mode, live alias/function names, the
+shell's `PATH` and cwd. The worker's `router.classify` (`backend/relay_core/router.py`) never
+executes input:
 
-Then validate a real Kimi key and GLM-5.3 key with streaming and a harmless
-tool call. Follow that with user-requested workspace/file edits,
-network failures, token exhaustion, and cancellation during each tool state.
+1. Control characters (other than newline and tab) are rejected. Limit 128 KiB.
+2. A leading `/shell ` or `/agent ` forces a destination.
+3. Agent mode returns `agent`. Terminal mode returns `shell` plus a validity check.
+4. Auto mode: text matching the natural-language pattern (`why`, `how`, `please`,
+   `explain`, `find the`, …) goes to the agent, unless the first word is a live alias or
+   function and the text is runnable.
+5. Otherwise `check_runnable`: `bash --noprofile --norc -n` in a clean environment (2 s
+   timeout), then every command word in pipelines, lists, subshells and command substitutions
+   must resolve to a builtin, keyword, live alias/function, `PATH` executable, or executable
+   path relative to the terminal cwd. Heredocs, `case`, arithmetic and arrays fall back to
+   checking the first word only.
+6. Runnable text returns `shell`. Anything else returns `agent` with `invalid_reason`
+   (for example `command not found: foo`), which the GUI prints as the reason.
 
-Only after those gates should the milestone be called a usable desktop alpha.
-The next product work is completion, command/output capture, tabs/splits, explicit
-context attachment, KWallet storage, Zsh/Fish bridges, and OS sandboxing. A decision
-on moving these modules into a full Konsole fork remains open.
+The router no longer produces `ambiguous`. `Pane::dispatch` still treats a legacy
+`ambiguous` decision like `agent`.
 
-## Theme
+GUI dispatch (`Pane::dispatch`):
 
-Relay uses a Warp-inspired dark theme defined in `src/Theme.h`/`src/Theme.cpp`:
-Fusion style, a dark `QPalette`, and one stylesheet built from color tokens
-(background, surface, border, muted text, and a single cyan accent). Widgets that
-`buildUi()` creates without names are tagged by `relay::theme::polishWindow()`.
+| Decision and mode | Action |
+|---|---|
+| `shell`, a program owns the terminal, not terminal mode | send to the agent with a note |
+| `shell`, terminal mode, invalid | start the fix loop (section 7) without running |
+| `shell`, terminal mode, valid | run in the terminal and watch the exit status |
+| `shell`, auto, invalid | send to the agent with the reason |
+| `shell`, auto, valid | run in the terminal |
+| `agent` | `submitAgent` |
 
-The embedded terminal uses `data/theme/konsole/RelayDark.colorscheme` through the
-`Relay.profile` profile. KF5 KonsolePart has no API to select a profile, so before
-`QApplication` is created Relay prepends `data/theme` to `XDG_CONFIG_DIRS` and
-`XDG_DATA_DIRS`. KonsolePart's `ProfileManager` then reads `relayrc`
-(`DefaultProfile=Relay.profile`) and finds the profile and color scheme there.
-Relay restores both variables before starting Bash, so the user's shell and the
-programs it launches see their original XDG paths. No file in `~/.config` or
-`~/.local/share/konsole` is written. Theme data is installed to
-`share/relay/theme` and found from the source tree during development.
+Routing is a convenience, not a security classifier. Natural language can be valid Bash.
 
-## Windows, tabs and panes
+## 6. Shell bridge: staging commands safely
 
-`Pane` owns everything that used to belong to the single window: a KonsolePart shell, its
-private runtime directory and Bash bridge, a composer, and a Python worker with its own agent
-conversation. `RelayWindow` is a `QMainWindow` with the toolbar and a `QTabWidget`; each tab
-page holds one root widget, either a `Pane` or a tree of `QSplitter`s. `WindowManager` keeps
-the window list and a stack of up to 25 closed items.
+`shell/integration.bash` is passed as `--rcfile`; user dotfiles are never edited. It sources
+`~/.bashrc` (unless `--clean-shell`), raises its own `oom_score_adj` to 300, changes to
+`RELAY_START_DIR`, defines `relay open`, and installs hooks:
 
-Splitting reuses the anchor's splitter when its orientation matches, otherwise wraps the
-anchor in a new splitter. Closing a pane collapses a splitter left with one child. Pane
-navigation is geometric: the nearest pane on the requested side, then the best aligned.
+- `PROMPT_COMMAND` becomes `(__relay_prompt_begin, <user entries>, __relay_prompt_end)`,
+  keeping scalar or array forms and the original exit status. `prompt_end` emits `ready` with
+  alias and function names.
+- A DEBUG trap emits `running` for the first command after a prompt. If a DEBUG trap already
+  exists, the script emits `unsupported` and stops; Relay falls back to native input.
+- `bind -x` in emacs, vi-insert and vi-move keymaps: Ctrl+X Ctrl+R runs `__relay_load`,
+  Ctrl+X Ctrl+P runs the no-op `__relay_redraw`.
 
-Closed panes, tabs and windows are stored as JSON layout nodes with each pane's directory.
-Restoring rebuilds the layout with new shells started in those directories
-(`RELAY_START_DIR`, applied by the Bash integration after `.bashrc`). A pane is restored next
-to the pane that took focus when it closed, if that pane still exists.
+The GUI polls `state.json` every 80 ms and accepts only events with its session token and a
+new sequence value. If no event arrives within 5 s, the pane switches to native input.
 
-Window shortcuts are handled in an application event filter on `ShortcutOverride` and
-`KeyPress` for widgets in that window, so they win over the composer and Konsole.
+Sending a command (`Pane::runInTerminal`):
 
-## Keyboard shortcuts and palettes
+1. Readiness: a `ready` event was seen, nothing is loading, and `/proc/<shell>/fd/0` is in
+   noncanonical mode (Readline active; `PROMPT_COMMAND` runs before that), and the shell owns
+   the foreground group (`/proc/<shell>/stat` field `tpgid`; `tcgetpgrp()` fails with
+   `ENOTTY` because the PTY is not Relay's controlling terminal).
+2. The UTF-8 text is written atomically to `input.txt` (0600).
+3. Only Ctrl+X Ctrl+R is sent to the PTY. `__relay_load` reads the file into `READLINE_LINE`
+   and emits `loaded` with the file's SHA-256.
+4. Enter is sent only if the hash matches. No acknowledgement within 2.5 s means no Enter:
+   the pane switches to native input and says so.
 
-`Keymap` is a process-wide registry of named actions with defaults, loaded overrides from
-`keybindings.json`, conflict detection, and a `QFileSystemWatcher` on the file and its
-directory (atomic replacement drops a plain file watch). `RelayWindow`'s application event
-filter matches key events to action ids and runs them through `runAction`, which the toolbar
-and palettes also use. When a foreground program owns the focused terminal, `program_keys`
-decides whether a shortcut acts (default: only Ctrl+Shift combinations and F-keys).
+The event file protects against accidental cross-session events and output spoofing, not
+against hostile processes running as the same user.
 
-Each pane sends the action catalog to its worker at configure time and after reloads. The
-agent's `set_keybinding` tool (`backend/relay_core/keybindings.py`) validates the action id and
-key strings and rewrites only that binding atomically; the watcher reloads it everywhere.
+## 7. Terminal-mode fix loop
 
-Terminal Ctrl+C calls the display's `copyToClipboard` slot and treats a clipboard change as
-proof of a selection, because KonsolePart exposes no selection query; otherwise the key
-reaches the shell as an interrupt. The single actions palette is an overlay child of the central widget, so opening it never
-resizes the terminal or makes a TUI redraw. Items carry a stable key (recent list in QSettings),
-a section, and either a run function or a submenu builder; searching flattens submenus.
+Applies only to terminal mode (Ctrl+Shift+Enter, `/shell `, or the Terminal picker).
 
-Presets (`relay`, `warp`, `vscode`, `konsole`) are embedded tables; loading applies the Relay
-defaults, then the chosen preset, then user overrides. Symbol keys match with or without
-Shift, because shifted punctuation differs between keyboard layouts.
+- An invalid command is not run. The agent is asked to fix it (attempt 1).
+- A valid command runs. At the next `ready` event: exit 0 ends the loop, exit 130 (Ctrl+C)
+  ends it silently, any other status starts a fix turn.
+- The fix prompt carries the command, terminal cwd and problem, and tells the agent it cannot
+  see terminal output. The reply must end with a fenced `relay-run` block.
+- Fix prompts are submitted through the agent queue, so a busy agent queues them.
+- When the fix turn ends with `done`, Relay takes the last `relay-run` block and stages it
+  through section 6, 150 ms later. At most 3 attempts (`kMaxFixAttempts`).
+- Auto-mode commands are never auto-fixed.
 
-## File and preview panes
+## 8. Inline agent output
 
-`src/FilePanes.{h,cpp}` (static library `relay-filepanes`) holds two plain-Qt widgets with no KDE
-requirement, so they are the portable path for macOS and Windows:
+There is no agent pane. KonsolePart has no API to write to the display, but each Konsole
+`Session` registers on D-Bus at `/Sessions/N`. In-process,
+`QDBusConnection::objectRegisteredAt()` returns that `QObject`. Relay finds the session whose
+child reports the shell PID through `processId()`, then invokes its
+`onReceiveBlock(const char*, int)` slot. Bytes go to the emulator like program output. They
+never reach the shell, its history or its input.
 
-- `relay::FileExplorer` lists one folder through `QFileSystemModel` (folders first, hidden-file
-  toggle, type-to-filter via name filters). Enter or double-click opens: folders navigate, files
-  call `onOpenFile`. Backspace or Alt+Up goes up; `onDirectoryChanged` reports the new root.
+`Pane::printInline`:
+
+- Text is sanitized: C0 and C1 controls other than newline and tab are dropped.
+- On the first block, the idle prompt line is erased (`\r\x1b[2K`). Each kind of text has its
+  own 24-bit color (`Ink`: user prompt, agent text, tool line, tool output, diff add/remove,
+  error, note).
+- `closeInline` sends Ctrl+X Ctrl+P, so Readline redraws the prompt. While more queued turns
+  are pending, the prompt is not redrawn between turns.
+- `tool_started` previews are compacted: `⚙ $ command`, `⚙ read path`, `⚙ list path`,
+  `⚙ write path` plus a colored diff. `tool_result` prints `exit N`, `✓ tool` or `✗ error`.
+- If the D-Bus session is not found, output goes to stderr.
+
+**While a program owns the terminal** (vim, a build, a REPL), printing would corrupt its
+screen. Output is buffered, and also shown live in the **transcript panel** above the composer
+(`Pane::appendTranscript`): header "Agent · model — output will also print in the terminal
+when <program> exits", at most about 40% of the pane height, × hides it until the program
+exits. On the next `ready` event the buffer prints into the terminal and the panel resets.
+
+## 9. Human and agent control
+
+| Situation | Behavior (`Pane::pollShell`, `takeControl`, `showPrompt`) |
+|---|---|
+| A command is still running 150 ms after `running` | Read the foreground program's basename from `/proc/<tpgid>/cmdline`. Policy `human` (default): hide the composer, focus the terminal. Policy `agent`: keep the composer and show "Agent in control of <name>". |
+| Program exits (`ready`) | Automatic human control ends; the composer returns |
+| Ctrl+H from the composer | Human control: composer hidden, keys go to the terminal |
+| Ctrl+Shift+H | Composer back. While a program runs, submissions go to the agent |
+| Typing directly into the terminal at a prompt | Switches to native input, so a later composer submission cannot overwrite Readline's line |
+| F12 | Toggles native input |
+
+Policy lives in QSettings: `control/default` (`human` or `agent`) and `control/programs`
+(basename → `human` or `agent`), set from the palette.
+
+**Password prompts.** Once a second while a command runs, `checkPasswordPrompt` opens
+`/proc/<shell>/fd/0` and checks termios: `ICANON` on and `ECHO` off (full-screen programs
+and Readline turn `ICANON` off, so they do not match). A match forces human control, shows
+"Password prompt · you're in control", and, if the window is inactive, flashes the taskbar
+and runs `notify-send`. Commands that finish after more than 30 s notify the same way.
+Composer text never goes to a running program.
+
+**Program context for the agent.** A prompt submitted while a program runs carries
+`"context": {"foreground_program", "terminal_cwd"}`. The worker validates it
+(`agent.validate_context`) and prepends a labelled note saying the agent cannot see or type
+into that program and that `run_command` uses a separate shell.
+
+The agent cannot type into running programs. That is planned
+(`issues/features/2026-09-17-agent-delegate-and-take-over.md`).
+
+## 10. File panes and `relay open`
+
+`src/FilePanes.{h,cpp}` builds the static library `relay-filepanes`: plain Qt widgets with no
+KDE requirement.
+
+- `relay::FileExplorer`: one folder through `QFileSystemModel`; folders first, hidden-file
+  toggle, type-to-filter. Enter or double-click opens (folders navigate, files call
+  `onOpenFile`); Backspace or Alt+Up goes up.
 - `relay::FilePreview::open(path)` picks a viewer by MIME type: text and code in a read-only
-  `QPlainTextEdit`, highlighted by KSyntaxHighlighting ("Breeze Dark") when built in; Markdown in
-  a `QTextBrowser` with a Rendered/Source toggle; images via `QImageReader` with Fit/100%; PDF via
-  Qt PDF when built in; anything else, or a "text" file containing NUL bytes, as a file-info panel
-  with Open externally. Text is capped at 2 MiB with a notice; images over 64 MiB are refused.
+  `QPlainTextEdit` (KSyntaxHighlighting "Breeze Dark" when built in), Markdown rendered or
+  source, images (fit or 100%), PDF when Qt PDF is built in, otherwise a file-info panel with
+  Open externally. Text is capped at 2 MiB with a notice; images over 64 MiB are refused.
+  `goToLine` scrolls and highlights.
 
-Both optional dependencies are detected at configure time (`RELAY_HAVE_SYNTAX_HIGHLIGHTING`,
-`RELAY_HAVE_QTPDF`). Neither widget uses `Q_OBJECT`; callbacks are `std::function` members, like
-`Pane`. Styling uses object names targeted by the "File panes" block in `Theme.cpp`. Tests:
-`tests/filepanes_test.cpp` (`relay-filepanes-tests`).
+Optional dependencies are detected at configure time (`RELAY_HAVE_SYNTAX_HIGHLIGHTING`,
+`RELAY_HAVE_QTPDF`). The Qt6 `.deb` and AUR builds leave PDF off
+(`packaging/deb/build-deb.sh`, `packaging/arch/*/PKGBUILD`).
+
+`RelayWindow::openPath` reuses an existing explorer or preview in the tab. A new preview
+opens beside an explorer if there is one, otherwise beside the anchor. Tool panes split,
+close, restore and navigate like terminal panes.
+
+Ways to open a path:
+
+| Source | Path |
+|---|---|
+| Click the pane's directory line | `Pane::onOpenPath` → explorer |
+| Palette: Open folder in explorer / Open file… | `files.explorer`, `files.open` |
+| `relay open PATH` in a pane shell | shell function → `scripts/relay-open` → socket request `{path, line, token}`; the token selects the pane |
+| Ctrl+click a text file in terminal output | Relay's Konsole profile sets `UnderlineFilesEnabled=true` and `TextEditorCmdCustom=relay-open PATH:LINE:COLUMN` |
+
+KonsolePart sends folders, images and PDFs to KIO (the desktop default app), not to the
+editor command, so those clicks do not reach Relay
+(`issues/features/2026-09-17-clickable-paths.md`). `relay-open` falls back to `xdg-open` when
+Relay is not reachable.
+
+## 11. Agent backend
+
+### Worker protocol
+
+`backend/worker.py`: one JSON object per line, 2 MiB maximum per message. The GUI kills a
+worker whose unread output exceeds 8 MiB and ignores its stderr. The worker raises its own
+`oom_score_adj` to 500.
+
+| Request `type` | Purpose |
+|---|---|
+| `route` | classify composer text (section 5) |
+| `configure` | provider, key or `use_stored_key`, workspace, extras, `max_tokens`, `keybindings` catalog, optional `skills`. Refused while a turn runs. |
+| `keybindings` | replace the action catalog, keeping the conversation |
+| `presets` | list presets with `has_stored_key` and Warp's default preset |
+| `store_key`, `import_warp` | keyring operations (section 12) |
+| `ask` | `text`, `when` (`now`/`queue`/`interrupt`), optional `context` |
+| `cancel`, `resume_queue`, `queue_remove`, `queue_clear` | queue control |
+| `reset` | new conversation; refused while a turn runs |
+| `shutdown` | exit |
+
+Events: `ready`, `route`, `configured`, `presets`, `key_stored`, `warp_imported`,
+`keybindings_updated`, `queued`, `queue_changed`, `interrupting`, `agent_started`,
+`agent_finished`, `status`, `delta`, `usage`, `tool_started`, `tool_output`, `tool_result`,
+`done`, `cancelled`, `error`, `reset`. Errors carry `agent_busy`.
+
+### Provider transport
+
+`backend/relay_core/provider.py`, standard library only.
+
+- `POST <base_url>/chat/completions` with `stream: true`; JSON (non-stream) responses are also accepted.
+- HTTPS required, except plain HTTP to `localhost`, `127.0.0.1` or `::1`. No credentials,
+  query or fragment in the URL. Redirects are refused.
+- Extra request keys are limited to `thinking`, `reasoning`, `reasoning_effort`,
+  `temperature`, `top_p`. `max_tokens` 256–32768.
+- Limits: 8 MiB request and response, 2 MiB per SSE event, 16 tool calls per response,
+  30 s socket timeout. Cancel closes the response from another thread.
+- Tool-call fragments are assembled by index. `reasoning_content` and OpenRouter's
+  `reasoning` are kept in history for later tool turns, not displayed.
+- A stream without `[DONE]` or a `stop`/`tool_calls` finish, or with `length` or
+  `content_filter`, is an error; partial tool calls never run. HTTP error bodies are not echoed.
+
+Presets (`backend/relay_core/presets.py`, mirrored by hand in the dialog in `src/main.cpp`):
+
+| Id | Base URL | Model | Extras |
+|---|---|---|---|
+| `kimi` | `https://api.moonshot.ai/v1` | `kimi-k3` | `reasoning_effort: high` |
+| `glm` | `https://api.z.ai/api/paas/v4` | `glm-5.3` | thinking enabled, `reasoning_effort: high` |
+| `glm-coding` | `https://api.z.ai/api/coding/paas/v4` | `glm-5.3` | same |
+| `openrouter` | `https://openrouter.ai/api/v1` | `deepseek/deepseek-v4.1-flash` | none |
+
+The Provider / BYOK dialog also accepts custom base URL, model and extras, requires an
+existing workspace and a consent checkbox for sending prompts and tool results to the
+provider. Saving makes no network call. Switching model starts a new conversation.
+
+### Agent loop
+
+`backend/relay_core/agent.py`. One conversation per worker. The system prompt tells the model
+that tools run without confirmation, that tool output is untrusted, and that `run_command` is a
+separate non-interactive shell. Per turn: at most 12 model requests and 24 tool calls. On cancel
+or error, the partial turn is removed from history and a note asks the model to reinspect state,
+because actions may already have run. Context is not counted or compacted; a request over
+8 MiB fails and the user must start a new chat.
+
+### Tools
+
+`backend/relay_core/tools.py`. **There is no approval step.** Each call is validated and
+prepared, `tool_started` carries a preview, and it executes immediately.
+
+| Tool | Behavior |
+|---|---|
+| `run_command` | `/bin/bash --noprofile --norc -c` in the workspace (or a workspace-relative `cwd`), new session, stdin `/dev/null`. Timeout 1–120 s, default 30. Output streamed as `tool_output`, 32 KiB returned. The process group gets SIGTERM then SIGKILL. Environment scrubbed: names containing KEY/TOKEN/SECRET/PASSWORD/CREDENTIAL/COOKIE, `RELAY_*`, `BASH_ENV`, `ENV`, `PYTHONPATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `SSH_AUTH_SOCK`, `BASH_FUNC_*`. Sets `TERM=dumb`, `PAGER=cat`, `GIT_TERMINAL_PROMPT=0`. |
+| `read_file` | UTF-8 regular file, 128 KiB, no NUL bytes |
+| `list_directory` | at most 200 entries |
+| `write_file` | parent must exist; unified diff in the preview; the file's SHA-256 is rechecked before an atomic replace that keeps its mode |
+| `set_keybinding` | offered when the GUI sent a catalog (section 4) |
+| `load_skill`, `read_skill_file` | offered when at least one skill is indexed |
+
+File tools reject absolute paths, `..`, symlinks anywhere on the path, paths outside the
+workspace, and `.ssh`, `.gnupg`, `.git`, `.env*`, `id_rsa`, `id_ed25519`, `*.pem`, `*.key`.
+These checks reduce mistakes; they are not a sandbox. `run_command` has the user's full
+filesystem and network permissions.
+
+Remaining controls without approvals: the system prompt, file-tool guards, environment
+scrubbing, timeouts, output caps, step and tool limits, the Stop agent action, and the inline
+preview of every action. Stop does not undo completed actions.
+
+### Skills
+
+`backend/relay_core/skills.py`. At configure time the worker indexes
+`<dir>/<name>/SKILL.md` files with `name`/`description` frontmatter. Default directory:
+`~/.warp/skills`; `configure.skills` can set `enabled`, up to 8 absolute `dirs`, and
+`project: true` for `<workspace>/.warp/skills`. The GUI does not send `skills` today, so the
+default applies. A list of skill ids and descriptions (6 KiB cap) is appended to the system
+prompt as lower-priority guidance. `load_skill` returns up to 64 KiB of `SKILL.md` plus the
+folder's file list; `read_skill_file` reads a text file inside the folder. Symlinks, `..` and
+binary files are refused. Skipped folders are reported in `configured.skills_skipped`.
+
+### Queue and interrupt
+
+`backend/relay_core/queue.py` (`TurnSupervisor`) runs every turn on one dispatcher thread.
+
+- `queue` appends; `now` is refused while busy; `interrupt` goes ahead of ordinary queued
+  prompts (FIFO among interrupts) and stops the running turn.
+- `cancel` stops the turn, drops waiting interrupts and **pauses** the queue. A failed turn also
+  pauses it. `resume_queue` continues. `now` and `interrupt` still run while paused.
+- At most 32 queued prompts. `configure` and `reset` clear the queue when idle.
+
+GUI (`Pane::submitAgent`, `rebuildQueueStrip`): every agent prompt is sent with `when: "queue"`
+(or `now` while paused). The prompt is echoed when its turn starts (`agent_started`), not when
+queued. Busy state follows `agent_started`/`agent_finished`. The queue strip floats over the
+bottom of the terminal: running prompt, numbered queued prompts with ×, Clear, and
+"PAUSED · Resume". The palette offers Clear agent queue and Resume agent queue when relevant.
+Full protocol: [QUEUE-INTERRUPT.md](QUEUE-INTERRUPT.md).
+
+## 12. Keys, keyring and Warp import
+
+`backend/relay_core/keystore.py`.
+
+- Lookup order for a preset: environment variable `RELAY_<PRESET>_API_KEY` (for example
+  `RELAY_GLM_CODING_API_KEY`), then the Secret Service keyring through `secret-tool`
+  (`service=org.relayterminal.Relay provider=<preset>`), which works with GNOME Keyring and
+  KWallet's Secret Service provider.
+- Keys go to `secret-tool` on stdin, never in argv, files, QSettings or logs.
+- At startup each pane asks for `presets`. If any preset has a stored key, it configures one
+  without the key crossing the GUI pipe (`use_stored_key`): the saved preset, else Warp's
+  default agent model, else the first stored key. A "custom" configuration whose base URL
+  matches a preset also uses that preset's stored key.
+- A key typed into the dialog is sent over the private pipe and kept in worker memory. It is
+  saved to the keyring only if "Save entered key to the desktop keyring" is ticked.
+- **Warp import** reads `agents.custom_endpoints` from `~/.config/warp-terminal/settings.toml`
+  (TOML 1.1 inline tables are normalized for Python's TOML 1.0 parser), reads keys from Warp's
+  keyring entry (`service=dev.warp.Warp key=AiCustomEndpointKeys`), matches endpoints to presets
+  by base URL, and stores each key under the Relay preset. It never returns key material.
+- CLI: `scripts/relay-agent.py --import-warp`, `--list`, or an interactive session on the same
+  backend.
+
+Non-secret provider settings live in QSettings (`provider/preset`, `base`, `model`, `extra`,
+`max_tokens`) in `~/.config/RelayTerminal/relay.conf`.
+
+## 13. Per-pane isolation
+
+`namespace isolation` in `src/main.cpp`, probed once with `systemd-run --user --scope -- true`.
+
+| Unit | Properties (defaults) |
+|---|---|
+| `relay-pane-<token8>-shell-<n>.scope` | `MemoryMax=8G`, `MemoryHigh=6G`, `MemorySwapMax=2G`, `KillSignal=SIGHUP`, `TimeoutStopSec=5`, `OOMPolicy=continue` |
+| `relay-pane-<token8>-agent-<n>.scope` | `MemoryMax=2G`, `MemorySwapMax=512M`, `TimeoutStopSec=5`, `OOMPolicy=stop` |
+
+`--scope` execs in place, so the PIDs Relay tracks are Bash's and Python's own. Settings in
+`relay.conf` `[isolation]`: `enabled`, `shell_memory_max`, `shell_memory_high`, `shell_swap_max`,
+`shell_oom_policy` (`continue` or `stop`), `agent_memory_max`, `agent_swap_max`. Invalid sizes
+fall back to defaults. Without a systemd user manager, panes start unisolated and the status
+bar says so once.
+
+Detection, once a second: an increase in the shell scope's `memory.events` `oom_kill` shows
+"A command in this pane was stopped because it ran out of memory"; a dead shell PID or
+`Result=oom-kill` shows a banner with Restart shell (Ctrl+Shift+R), which replaces the
+KonsolePart in the same pane. A stopped worker shows Restart agent. Failed scopes are
+`reset-failed`. Scrollback is capped at 20,000 lines by the profile.
+
+## 14. Theme
+
+`src/Theme.{h,cpp}`: Fusion style, a dark `QPalette`, and one stylesheet built from color
+tokens. `polishWindow()` tags unnamed widgets.
+
+The terminal uses `data/theme/konsole/Relay.profile` and `RelayDark.colorscheme`. KonsolePart
+has no API to select a profile, so Relay prepends `data/theme` to `XDG_CONFIG_DIRS` and
+`XDG_DATA_DIRS` before `QApplication` starts; `relayrc` sets `DefaultProfile=Relay.profile`.
+Both variables are restored before each shell starts, so user programs see their original
+paths. Nothing is written to `~/.config` or `~/.local/share/konsole`.
+
+## 15. Packaging layout
+
+Installed tree (`CMakeLists.txt` `install()`):
+
+| Path | Content |
+|---|---|
+| `bin/relay` | the application |
+| `share/relay/backend/`, `share/relay/shell/` | worker, `relay_core`, Bash integration |
+| `share/relay/scripts/` | `relay-open`, `relay-agent.py` |
+| `share/relay/theme/` | `relayrc`, Konsole profile and color scheme, icons used by the stylesheet |
+| `share/applications/org.relayterminal.Relay.desktop` | desktop entry |
+| `share/metainfo/org.relayterminal.Relay.metainfo.xml` | AppStream metadata |
+| `share/icons/hicolor/…` | PNG and SVG icons |
+| `share/doc/relay/` | `README.md`, `copyright` |
+
+| Piece | File |
+|---|---|
+| `.deb` (CPack) | `packaging/cpack.cmake`; runtime deps `konsole-kpart` pinned below or above 4:24.02 to match KF5 or KF6, `python3 (>= 3.10)`, `bash`; recommends `libsecret-tools`, `xdg-utils` |
+| Per-distro build in a container | `packaging/deb/build-deb.sh` (Ubuntu 24.04 Qt5; Debian 13, Ubuntu 25.10/26.04 Qt6) |
+| Install + smoke test | `packaging/deb/smoke-test.sh`, `packaging/smoke-installed.sh` (installed files, `--version`, worker `ready`, KonsolePart plugin, GUI start under Xvfb offscreen and xcb) |
+| Local matrix | `packaging/deb/docker-build-all.sh` |
+| Arch | `packaging/arch/relay-terminal/PKGBUILD` (release tarball), `relay-terminal-git` |
+| CI | `.github/workflows/ci.yml`: Ubuntu 24.04 Qt5 build, ctest, install layout, desktop/AppStream validation; Debian 13 Qt6 build, tests and `.deb` |
+| Release | `.github/workflows/release.yml` on `v*` tags: source tarball, 6 `.deb` jobs (3 distros × amd64/arm64) with smoke tests, `SHA256SUMS`, GitHub pre-release; AUR job present but disabled |
+| Website | `site/` static page; `.github/workflows/pages.yml` runs only when `RELAY_PAGES_ENABLED=true` |
+
+Version: `project(Relay VERSION …)` in `CMakeLists.txt` is passed to the app as `RELAY_VERSION`;
+the worker reports `relay_core.__version__`, which `tests/test_version.py` checks against CMake.
+Procedure: [RELEASING.md](RELEASING.md).
+
+## 16. Engine spike and `TerminalBackend`
+
+`engine/` is built only with `-DRELAY_BUILD_ENGINE_SPIKE=ON` (default OFF) and is **not
+used by the app**.
+
+- `engine/Pty.h`, `PtyUnix.cpp`: `relay::Pty` over `forkpty`, non-blocking reads on the GUI
+  thread; the child resets signal dispositions and mask.
+- `engine/VTermWidget.{h,cpp}`: libvterm screen painted with `QPainter`, scrollback ring,
+  selection, bracketed paste, mouse reporting, OSC 8 links, Ctrl+click path detection.
+- `engine/TerminalBackend.h`: the engine-neutral interface. `VTermWidget` implements it.
+  Process (`startProgram`, `sendInput`, `sendText`, `shellPid`, `foregroundProcessId`),
+  introspection (`capabilities`, `screenText`, `scrollbackText`, `altScreen`, rows/columns),
+  geometry and focus, callbacks (`onLinkActivated`, `onPathActivated`, `onTitleChanged`,
+  `onFinished`). Capability flags: `ScreenText`, `Scrollback`, `AltScreenState`, `LinkClicks`,
+  `Osc8Links`.
+- `engine/main.cpp`: `relay-vterm-spike` test harness with a debug dump and `--bench`.
+
+No KonsolePart adapter exists yet; `src/main.cpp` still calls KonsolePart's `TerminalInterface`
+and the Session D-Bus object directly. Results and gaps: [ENGINE-SPIKE.md](ENGINE-SPIKE.md).
+Plan: [ROADMAP.md](ROADMAP.md).
+
+## 17. Fragile dependencies and limits
+
+Relay relies on KonsolePart internals that are not a public API. All were exercised on
+Konsole 23.08 / KF5 only:
+
+| Dependency | Used for |
+|---|---|
+| `QDBusConnection::objectRegisteredAt("/Sessions/N")`, a child with `processId()`, slot `onReceiveBlock(const char*, int)` | inline agent output |
+| Display slots `copyToClipboard()`, `pasteFromClipboard()` | terminal Ctrl+C / Ctrl+V |
+| The terminal's hidden vertical `QScrollBar` | PageUp/PageDown from the composer |
+| Profile keys `TextEditorCmdCustom`, `UnderlineFilesEnabled`, `HistoryMode` via `XDG_*` paths | Ctrl+click text files, scrollback cap, theme |
+
+Other limits:
+
+- Linux only: `/proc/<pid>/fd/0`, `/proc/<pid>/stat`, `/proc/<pid>/cmdline`, cgroup files,
+  `systemd-run`. CMake refuses to build the app on other systems.
+- Rich integration is Bash only. Zsh, Fish, SSH and tmux sessions work through native input.
+- KonsolePart exposes no screen text, alternate-screen state or click signal, so the agent
+  cannot read the terminal and folder/image clicks go to the desktop.
+- The GUI process holds every pane's screen and scrollback; a KonsolePart crash takes down
+  all panes.
+
+## 18. Source map
+
+| Path | Content |
+|---|---|
+| `src/main.cpp` | `Keymap`, `isolation`, `Pane`, `ToolPane`, `WindowManager`, `RelayWindow`, palette, `main()` |
+| `src/RichEditor.*` | composer editor |
+| `src/FilePanes.*` | explorer and preview widgets |
+| `src/Theme.*` | palette, stylesheet, Konsole profile exposure |
+| `shell/integration.bash`, `shell/event.py` | Bash bridge |
+| `backend/worker.py` | worker protocol loop |
+| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `keystore`, `keybindings`, `skills` |
+| `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
+| `engine/` | libvterm spike, `TerminalBackend.h` |
+| `data/` | theme, Konsole profile, icons |
+| `packaging/`, `.github/workflows/`, `site/` | packages, CI, release, website |
+| `tests/` | Python backend and PTY tests, Qt editor and file pane tests |
+| `issues/` | file-based tracker |

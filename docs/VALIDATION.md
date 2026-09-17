@@ -1,101 +1,154 @@
-# Relay 0.1 validation report
+# Relay validation status
 
-## Release status
+Last updated 2026-09-17. Status: **Linux beta in preparation.** Nothing here is a QA verdict
+from an independent model; see [The QA lane](#the-qa-lane).
 
-**Source development preview.** Checked on 2026-09-16/17 on Ubuntu 24.04.5 (aarch64),
-kernel 7.0, Python 3.12.3, Qt 5.15 / KDE Frameworks 5.115, Konsole part 23.08.
+Reference machine for local runs: Ubuntu 24.04.5, aarch64, kernel 7.0, Python 3.12.3,
+Qt 5.15.13, KDE Frameworks 5.115, `konsole-kpart` 23.08.5.
 
-## Executed checks
+## Test inventory
 
-| Check | Result | Notes |
-|---|---|---|
-| Python backend and Bash/PTY suite | **79 tests passed** | `./scripts/test.sh` |
-| Native build, Qt5 / KF5 | **Built and linked** | `./scripts/build.sh`, auto-selected Qt5 |
-| Native ctest | **2 of 2 passed** | Qt editor tests plus the backend suite |
-| Qt6 editor-only build | Built, editor tests passed | Full Qt6 app not built: no KF6 on Ubuntu 24.04 |
-| App launch under Xvfb | Konsole embedded, Bash prompt, worker ready | Screenshots taken, not committed |
-| GUI end to end under Xvfb | Auto-configured GLM-5.3 from keyring; agent answered; unknown command fell back to the agent and reached a tool approval | Driven with xdotool |
-| Live provider requests (2026-09-16) | **Passed** for Kimi K3, GLM-5.3 Coding Plan, OpenRouter DeepSeek V4.1 Flash: plain reply plus one approved `list_directory` tool round trip each | Keys imported from Warp via keyring; see "Live provider smoke test" below |
-| CI | None configured | |
+### Automated suites
 
-Two bugs were found only by running the real app:
-
-- Worker messages sent before `QProcess` reported `Running` were dropped, so the
-  preset list and configuration were sometimes lost at startup.
-- `tcgetpgrp()` on the shell's terminal returns `ENOTTY`, as Linux always has, because it is
-  not Relay's controlling terminal, so composer commands never reached the shell.
-  Readiness now reads the foreground group from `/proc/<pid>/stat`.
-
-## Coverage of the original 51 tests
-
-Approval tests in this table were replaced when approvals were removed: tools now
-run immediately, show a preview, and can be stopped mid-command.
-
-Later additions cover presets and keyring storage, Warp import, OpenRouter reasoning,
-the interrupt/queue dispatcher, and ambiguous-route syntax reporting.
-
-| Area | Tests | Verified behavior |
-|---|---:|---|
-| Local routing | 8 | Commands versus language, explicit routing, aliases/functions, ambiguous input, control-character rejection, multiline parsing, non-execution during syntax checking |
-| Real Bash / PTY integration | 8 | Loaded-command acknowledgement, exit status, cwd/environment persistence, aliases, Unicode/multiline commands, heredoc, interactive `read`, interrupt, existing prompt array, DEBUG-hook fallback |
-| Tool execution and approval preparation | 16 | No execution during preparation, output/exit capture, timeouts, cancellation, output limits, restricted file paths and secret guards, diffs, stale-write rejection, symlink/file-appearance races, FIFO rejection, environment scrubbing |
-| Provider transport | 11 | Local HTTP fixture, auth/request payload, SSE and JSON responses, fragmented/multiple tool calls, reasoning fields, Unicode, malformed/truncated streams, redirect refusal, cancellation, configuration guards, sanitized HTTP errors |
-| Agent loop and worker protocol | 8 | Explicit approval before execution, denial, cancellation during approval, unknown-tool refusal, configuration without a network call or key echo, route-only use, malformed input, missing provider configuration |
-| **Total** | **51** | All passed on the final source state |
-
-Provider tests use a local mock HTTP server and synthetic model responses.
-They do not validate real account access, model behavior, billing, quotas,
-provider-side compatibility, or end-to-end live coding performance.
-
-## Native/editor acceptance gates that remain
-
-1. Install Qt6/KF6/Konsole development/runtime packages and compile the app with
-   warnings enabled. Confirm `kf6/parts/konsolepart` loads on the target distro.
-2. Run the seven Qt tests for word selection/undo, multiline/submit shortcuts,
-   Shift+click, mouse drag, safe paste, IME submission, and draft-preserving history.
-3. Manually exercise mouse and keyboard selection on both Wayland and X11 where
-   relevant, including HiDPI, light/dark palettes, wrapped lines, and the user's IME.
-4. Verify editor submission through the actual embedded KonsolePart, return-to-
-   prompt behavior, failed-ack fallback, keyboard focus, direct Readline typing,
-   partially entered native lines, and shell exit/window cleanup.
-5. Test native-mode applications such as Vim, `less`, interactive Python, SSH,
-   tmux, and password prompts. Only Bash has rich integration in this preview.
-6. Test with the user's real prompt/plugins. An existing DEBUG trap intentionally
-   uses native fallback; `--clean-shell` is the diagnostic configuration.
-7. In a disposable workspace, configure a provider key and verify one simple
-   response, one read, one command, one write, and cancellation mid-command. Inspect provider account usage independently.
-
-These are outstanding acceptance checks, not completed test results.
-
-## Security boundaries and known functional gaps
-
-Agent tools run without per-action approval (removed 2026-09-17), and shell
-commands are **not sandboxed**. It has the user's normal filesystem and network permissions.
-File-tool workspace checks and secret-file guards are limited defenses, not an
-OS-level sandbox or a guarantee against hostile same-user filesystem races.
-Cancellation does not undo a completed write or command; blocked network I/O can
-last until its 30-second timeout.
-
-Agent commands use separate non-interactive processes, not the live terminal
-session. Terminal output/history is not automatically captured or sent to the
-model. Rich shell integration supports Bash only. Tabs/splits, shell completion,
-command blocks, KWallet persistence, checkpoints, and installable desktop packages
-are not implemented. The native application itself remains unverified.
-
-See `../README.md` for build/use instructions and `ARCHITECTURE.md` for design.
-
-## Live provider smoke test (2026-09-16)
-
-Run through the real `Agent` loop with keys imported from Warp into the keyring.
-Each provider got a plain prompt and a prompt requiring one `list_directory` call
-in a scratch workspace. Only that tool was auto-approved.
-
-| Preset | Plain reply | Tool round trip | Reasoning field retained |
+| ctest name | Command | Content | Local result (2026-09-17) |
 |---|---|---|---|
-| `kimi` | Passed, 5.8 s | Passed, 25.1 s | Yes |
-| `glm-coding` | Passed, 4.9 s | Passed, 12.0 s | Yes, on the tool turn |
-| `openrouter` | Passed, 3.0 s | Passed, 5.1 s | Yes |
+| `backend-and-bash` | `./scripts/test.sh` (`python3 -m unittest discover -s tests`) | Python backend, worker protocol, real Bash/PTY integration | **127 passed** |
+| `editor` | `relay-editor-tests` (Qt Test, offscreen) | `RichEditor` interactions | **8 passed** |
+| `filepanes` | `relay-filepanes-tests` (Qt Test, offscreen) | explorer and preview widgets | **9 passed** |
 
-The Z.AI standard endpoint (`glm`) was not tested because Warp only had a Coding
-Plan key. Warp's `settings.toml` uses TOML 1.1 multi-line inline tables; the
-importer normalizes them for Python 3.12's TOML 1.0 parser.
+The two Qt counts exclude Qt Test's `initTestCase`/`cleanupTestCase` entries. They were run
+from the existing `build/` binaries; `./scripts/build.sh` rebuilds and runs all three.
+
+Backend tests by module:
+
+| Module | Tests | What they check |
+|---|---:|---|
+| `tests/test_router.py` | 19 | Shell vs. language routing, explicit destinations and prefixes, live aliases/functions, every command word in pipelines, lists, subshells, groups and substitutions, assignments/wrappers/redirects, path words, syntax errors, control-character guard, validity fields, and that parsing and validity checks never execute input |
+| `tests/test_tools.py` | 16 | Preparation never executes, output and exit capture, secret env removal, timeouts (including after stdout closes), output cap, read and diff, stale-write refusal, new-file race, path escape and secret guard, symlink swap, FIFO, cancel before and during a command, unknown tools, create and list |
+| `tests/test_keybindings.py` | 16 | Key normalization and validation, tool spec and enum, atomic write that keeps other content and reports conflicts, unbind, invalid existing file left alone, configure with and without a catalog, `keybindings` update keeps the conversation |
+| `tests/test_agent.py` | 14 | Commands and writes run without approval and show previews, unknown tools refused, file tools confined, cancel during a command, route without a provider, configure makes no network call and never echoes the key, malformed requests, program context note (labelled, validated, control characters stripped, passed through the queue) |
+| `tests/test_queue.py` | 14 | Ordered turns without overlap, `now` refused while busy, remove and clear, interrupt while streaming, idle and during a tool, FIFO interrupts, cancel pauses until resume, `now` while paused, cancel drops pending interrupts, configure/reset rules, validation, protocol errors, failed turn pauses |
+| `tests/test_provider.py` | 12 | Local HTTP fixture: text and Unicode, fragmented tool arguments and reasoning, multiple tool calls, truncated and malformed streams, cancel, configuration guards, JSON fallback, redirect refusal, sanitized HTTP errors, OpenRouter `reasoning` kept but not displayed |
+| `tests/test_skills.py` | 12 | Frontmatter parsing, skipped folders reported, prompt section cap, tools offered only with skills, `load_skill` and `read_skill_file` with refusals, worker configure count, indexing the real `~/.warp/skills` without errors |
+| `tests/test_keystore.py` | 11 | Preset URL matching, secrets passed on stdin, env var overrides keyring, bad ids and keys, Warp TOML 1.1 tables, Warp default preset, custom preset matched by URL, import success, missing keys and no keys |
+| `tests/test_shell.py` | 8 | Real Bash in a PTY: acknowledged command loading and exit status, cwd/env persistence, multiline Unicode, heredoc, native `read` and interrupt, alias reporting, existing prompt arrays, existing DEBUG trap falls back to native |
+| `tests/test_isolation.py` | 4 | Worker raises its own `oom_score_adj`, never lowers it, starts with the raised score; integration script raises the shell's |
+| `tests/test_version.py` | 1 | `relay_core.__version__` matches `project(Relay VERSION …)` in `CMakeLists.txt` |
+| **Total** | **127** | |
+
+Qt tests:
+
+| File | Tests |
+|---|---|
+| `tests/editor_test.cpp` | native selection and undo, submission shortcuts and multiline, Shift+click, mouse drag, paste never submits, IME preedit does not submit, history keeps the draft, Up inside multiline text moves the cursor |
+| `tests/filepanes_test.cpp` | explorer navigates in and up, filter, hidden files, Enter opens a file, typing starts the filter, filter then Down+Enter opens the match, preview picks a viewer by type, large text truncated with a notice, missing path returns false |
+
+Provider tests use a local mock server and synthetic responses. They do not validate real
+accounts, quotas, billing or model behavior.
+
+### CI and packaging checks (configured)
+
+| Workflow | Checks |
+|---|---|
+| `.github/workflows/ci.yml` `ubuntu-qt5` | Ubuntu 24.04 Qt5/KF5 build, all ctest groups, staged install layout, `desktop-file-validate`, `appstreamcli validate` |
+| `.github/workflows/ci.yml` `debian-qt6` | Debian 13 Qt6/KF6 build, ctest and `.deb` in a container (`packaging/deb/build-deb.sh`) |
+| `.github/workflows/release.yml` | Per tag: `.deb` for Ubuntu 24.04, Debian 13, Ubuntu 26.04 on amd64 and arm64, each installed in a fresh container and smoke-tested (`packaging/smoke-installed.sh`: files, `--version`, worker `ready`, KonsolePart plugin, GUI start under Xvfb offscreen and xcb) |
+
+These workflows exist in the repository. Their results on GitHub were not checked when this
+page was written, and no release tag has been pushed.
+
+## Verified live (implementer checks)
+
+These are runs of the real app, mostly under Xvfb with `xdotool`, by the implementing
+Claude session. They show the feature worked once; they are not independent QA.
+
+| Feature | Evidence folder |
+|---|---|
+| Inline agent output, invalid command to agent, fix loop | [`qa_evidence/2026-09-17-inline-agent-output/`](qa_evidence/2026-09-17-inline-agent-output/) |
+| Transcript panel while a program runs | [`qa_evidence/2026-09-17-agent-output-while-program-runs/`](qa_evidence/2026-09-17-agent-output-while-program-runs/) |
+| Program context sent to the agent | [`qa_evidence/2026-09-17-agent-program-context/`](qa_evidence/2026-09-17-agent-program-context/) |
+| PageUp/PageDown from the composer | [`qa_evidence/2026-09-17-composer-page-scroll/`](qa_evidence/2026-09-17-composer-page-scroll/) |
+| Human/agent control, password prompt | [`qa_evidence/2026-09-17-control-and-passwords/`](qa_evidence/2026-09-17-control-and-passwords/) |
+| Ctrl+I input toggle | [`qa_evidence/2026-09-17-ctrl-i-input-toggle/`](qa_evidence/2026-09-17-ctrl-i-input-toggle/) |
+| Per-program control policy | [`qa_evidence/2026-09-17-program-control-policy/`](qa_evidence/2026-09-17-program-control-policy/) |
+| File explorer and preview panes | [`qa_evidence/2026-09-17-file-panes/`](qa_evidence/2026-09-17-file-panes/) |
+| Palette, presets, agent `set_keybinding`, copy on select | [`qa_evidence/2026-09-17-keyboard-and-palettes/`](qa_evidence/2026-09-17-keyboard-and-palettes/) |
+| Windows, tabs, panes, restore | [`qa_evidence/2026-09-17-windows-tabs-panes/`](qa_evidence/2026-09-17-windows-tabs-panes/) |
+| Per-pane systemd scopes, OOM banners, restart | [`qa_evidence/2026-09-17-pane-isolation/`](qa_evidence/2026-09-17-pane-isolation/) |
+| Agent queue strip, remove, interrupt, pause/resume | [`qa_evidence/2026-09-17-queue-interrupt-gui/`](qa_evidence/2026-09-17-queue-interrupt-gui/) |
+| libvterm engine spike (vim, less, htop, tmux, throughput) | [`qa_evidence/2026-09-17-engine-spike/`](qa_evidence/2026-09-17-engine-spike/), report in [ENGINE-SPIKE.md](ENGINE-SPIKE.md) |
+| Terminal-first fallback (superseded behavior) | [`qa_evidence/2026-09-17-terminal-first-fallback/`](qa_evidence/2026-09-17-terminal-first-fallback/) |
+
+Live provider smoke test, 2026-09-16, through the real `Agent` loop with keys imported from
+Warp: Kimi K3 (`kimi`), GLM-5.3 Coding Plan (`glm-coding`) and DeepSeek V4.1 Flash via
+OpenRouter (`openrouter`) each returned a plain reply and completed one `list_directory` tool
+round trip, with the reasoning field retained. Per-action approval still existed at the time;
+the tool was auto-approved for the test. The `glm` standard endpoint was not tested.
+Several GUI checks above also used Kimi K3 as the live provider.
+
+Bugs found only by running the real app:
+
+- Worker messages written before `QProcess` reported `Running` were dropped (fixed: buffered until `started`).
+- `tcgetpgrp()` on the pane PTY returns `ENOTTY`; readiness now reads `tpgid` from `/proc/<pid>/stat`.
+- Relay shortcuts stole keys from vim, for example Ctrl+W (addressed by `program_keys`).
+- Interactive Bash ignores SIGTERM, so a stopped scope hung (fixed: `KillSignal=SIGHUP`); swap
+  delayed memory kills (fixed: swap caps).
+- The prompt redraw landed inside the next queued turn's output (fixed: redraw only when idle).
+
+## Not verified
+
+| Area | Why it matters |
+|---|---|
+| **Qt6/KF6 app on a real KDE Plasma desktop** | All GUI checks ran on Qt5/KF5 under Xvfb. The inline-output D-Bus hook, clipboard slots, hidden scrollbar and profile loading depend on KonsolePart internals that may differ in Konsole 24.02+. |
+| **Wayland** | No Wayland session was tested: focus, Alt+Tab, notifications, clipboard, IME. |
+| **Real systemd-oomd kill** | Isolation was tested with scope `MemoryMax` limits and a manual `systemctl kill`, not with systemd-oomd acting under real memory pressure. |
+| **IME** | Only the editor's preedit guard is unit-tested. No fcitx or ibus session was used. |
+| **amd64 packages outside CI** | The development machine is arm64. amd64 `.deb`s are built only by the release workflow, which has not run. There is no recorded install of a `.deb` or AUR package on a real desktop. |
+| HiDPI, light desktop themes, accessibility | Not checked |
+| Zsh, Fish, SSH, tmux as the pane shell | Native input only; rich integration is Bash only |
+| User prompt frameworks | Only a pre-existing DEBUG trap (native fallback) is tested |
+| `glm` standard endpoint; other OpenAI-compatible providers | Not live-tested |
+| Relay's own launch path for inherited `SIG_IGN` | The spike found this bug class in its launcher (see [ENGINE-SPIKE.md](ENGINE-SPIKE.md)); Relay's KonsolePart path was not checked |
+
+## Security boundaries
+
+- Agent tools run **without per-action approval** (removed 2026-09-17). Every action is
+  previewed inline as it starts; Stop agent cancels but does not undo.
+- `run_command` is not sandboxed. It has the user's filesystem and network access.
+  Workspace and secret-file guards apply only to the file tools.
+- Text the agent reads (files, command output, skills) can try to steer it.
+- The shell bridge's token and file permissions protect against accidental cross-session
+  events, not hostile same-user processes.
+
+## The QA lane
+
+Implemented features wait in `needs_qa_llm/` until a QA session from a **non-Claude** model
+family runs the issue's checklist and records evidence under `docs/qa_evidence/`. See
+[`issues/README.md`](../issues/README.md). No issue has passed this lane yet.
+
+Waiting for QA (`issues/features/needs_qa_llm/`):
+
+- `2026-09-17-agent-output-while-program-runs.md`
+- `2026-09-17-agent-program-context.md`
+- `2026-09-17-agent-responses-in-terminal.md`
+- `2026-09-17-ctrl-i-input-toggle.md`
+- `2026-09-17-file-explorer-and-preview-panes.md`
+- `2026-09-17-fix-and-rerun-terminal-commands.md`
+- `2026-09-17-human-agent-control-and-password-prompts.md`
+- `2026-09-17-keyboard-shortcuts-and-palettes.md`
+- `2026-09-17-load-global-warp-skills.md`
+- `2026-09-17-pane-process-isolation.md`
+- `2026-09-17-program-control-policy.md`
+- `2026-09-17-queue-or-interrupt-agent-prompts.md`
+- `2026-09-17-windows-tabs-panes.md`
+
+Waiting for QA (`issues/changes/needs_qa_llm/`):
+
+- `2026-09-17-composer-page-scroll.md`
+- `2026-09-17-pre-submit-run-check.md`
+
+Closed (`issues/features/done/`): `2026-09-17-review-opencode-agent-design.md` (research) and
+`2026-09-17-terminal-first-agent-fallback.md` (superseded before QA).
+
+[RELEASING.md](RELEASING.md) requires every feature shipped in a beta to have passed QA or be
+listed as a known issue.
