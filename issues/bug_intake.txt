@@ -1,0 +1,1 @@
+/new doesnt clear the terminal . 

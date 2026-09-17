@@ -2,7 +2,7 @@
      edit the card files and regenerate. -->
 # Board
 
-85 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+86 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
 ## Features (72)
 
@@ -81,11 +81,12 @@
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | Claude Opus 5 research subagent, 2026-09-16 |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | implemented by Claude Opus 5 (Claude Code session), 2026-09-16 |  |  |
 
-## Bugs (13)
+## Bugs (14)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#308N` | [Next command and next prompt suggestions never appear](changes/2026-09-17-suggestions-not-working.md) | ready |  |  |  |
+| `#4PW5` | [A new pane is not active: typing and Ctrl+W do nothing](changes/2026-09-17-new-pane-not-active.md) | ready |  |  |  |
 | `#RDQ7` | [A small second window opens when Relay starts](changes/2026-09-17-second-window-on-start.md) | ready |  |  |  |
 | `#T9ZS` | [Ctrl+? does not open the shortcuts overlay](changes/2026-09-17-ctrl-question-shortcuts.md) | ready |  |  |  |
 | `#G152` | [Ctrl+H shrinks a pane to almost nothing](changes/2026-09-17-ctrl-h-shrinks-pane.md) | ready |  |  |  |

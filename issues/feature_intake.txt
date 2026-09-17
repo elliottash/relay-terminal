@@ -1,0 +1,1 @@
+in terminal mode, if there is an error and it was clearly an agent prompt, flash the mode selector and have a popup that says ctrl+I to change to agent mode. conversely for a shell command in agent mode. 
