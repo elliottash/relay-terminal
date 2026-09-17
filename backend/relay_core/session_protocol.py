@@ -12,19 +12,22 @@ import os
 import threading
 import uuid
 
-from . import attachments, instructions, keystore, planning, suggestions
+from . import attachments, conv_index, instructions, keystore, planning, suggestions
 from .agent import validate_turn_options
 from .requests import check_ledger_id
 from .context import validate_threshold, validate_window
 from .presets import PRESETS, match_preset, resolve_preset, validate_effort
 from .provider import ProviderConfig, ProviderError
-from .sessions import default_session_dir
+from .sessions import SessionStore, check_id, default_session_dir
 
 TYPES = {"set_model", "set_effort", "context", "compact", "checkpoints", "rewind", "fork", "load_state",
          "sessions", "resume", "recap_request", "set_mode", "plan_execute", "scan_instructions",
          "synthesize_instructions", "suggest",
          # request ledger and todos (protocol section 12)
-         "requests", "request_get", "request_set", "request_reask", "todos"}
+         "requests", "request_get", "request_set", "request_reask", "todos",
+         # conversation list and full-text search (protocol section 14)
+         "conversations", "conversation_get", "conversation_delete", "conversation_rename",
+         "conversation_pin", "terminal_history", "index_rebuild"}
 
 
 def provider_config(request: dict) -> ProviderConfig:
@@ -118,6 +121,8 @@ class SessionCommands:
         # Worker hooks (subagents): follow a model switch; drop background work of a replaced conversation.
         self.on_model_changed = on_model_changed or (lambda agent: None)
         self.on_conversation_replaced = on_conversation_replaced or (lambda: None)
+        # Conversation index (protocol 14), opened on the first conversation command.
+        self._index = None
 
     @staticmethod
     def handles(kind) -> bool:
@@ -291,6 +296,119 @@ class SessionCommands:
     def _todos(self, request):
         agent = self._tracking_agent()
         self.emit({**agent.todos.event(None), "id": request.get("id")})
+
+    # ----- conversation list and full-text search (protocol section 14) ----------------------
+    def index(self):
+        """The shared conversation index, opened on first use. Raises when it is off."""
+        if self._index is None:
+            if not conv_index.enabled():
+                raise ValueError("The conversation index is disabled (RELAY_INDEX=off).")
+            self._index = conv_index.ConversationIndex(rebuild_on_reset=True)
+        return self._index
+
+    def _workspace(self, request) -> str:
+        """The workspace a conversation query is scoped to: the request's, else this pane's."""
+        workspace = request.get("workspace")
+        if isinstance(workspace, str) and workspace:
+            return os.path.expanduser(workspace)
+        agent = self.turns.agent
+        return str(agent.executor.workspace.root) if agent is not None else ""
+
+    @staticmethod
+    def _conversation_id(value) -> str:
+        if isinstance(value, str) and conv_index.TERMINAL_ID.match(value):
+            return value
+        return check_id(value)
+
+    def _conversations(self, request):
+        for name in ("model",):
+            if request.get(name) is not None and not isinstance(request.get(name), str):
+                raise ValueError(f"{name} must be text.")
+        sources = request.get("sources")
+        if sources is not None and (not isinstance(sources, list) or not all(isinstance(s, str) for s in sources)):
+            raise ValueError("sources must be a list of \"agent\" and/or \"terminal\".")
+        result = self.index().search(
+            request.get("query", "") or "", scope=request.get("scope", "project") or "project",
+            workspace=self._workspace(request), model=request.get("model") or None,
+            has_open=bool(request.get("has_open_tasks")), since=request.get("since"),
+            until=request.get("until"), sources=sources, limit=request.get("limit", 50))
+        self.emit({"event": "conversations", "id": request.get("id"),
+                   "scope": request.get("scope", "project") or "project",
+                   "workspace": self._workspace(request), **result})
+
+    def _conversation_get(self, request):
+        session_id = self._conversation_id(request.get("session_id", request.get("id")))
+        turn = request.get("turn")
+        if turn is not None and type(turn) is not int:
+            raise ValueError("turn must be an integer.")
+        data = self.index().conversation(session_id, turn, request.get("query", "") or "",
+                                         request.get("limit", 400))
+        self.emit({"event": "conversation", "id": request.get("id"), **data})
+
+    def _conversation_delete(self, request):
+        session_id = self._conversation_id(request.get("session_id"))
+        index = self.index()
+        removed = {"session_id": session_id, "files": 0}
+        if session_id.startswith("term-"):
+            index.delete_session(session_id, remove_files=False)
+        else:
+            directory = ""
+            try:
+                directory = index.conversation(session_id).get("session_dir") or ""
+            except ValueError:
+                directory = ""
+            agent = self.turns.agent
+            if not directory and agent is not None and agent.store is not None:
+                directory = str(agent.store.directory)
+            if not directory:
+                raise ValueError("That conversation is not in the index; nothing to delete.")
+            store = SessionStore(directory, index=index)
+            try:
+                removed = store.delete(session_id)
+            except ValueError:
+                index.delete_session(session_id, remove_files=False)
+            # Deleting the conversation this pane is showing starts a fresh one.
+            if agent is not None and agent.session_id == session_id and not self.turns.busy:
+                self.turns.reset()
+                self.on_conversation_replaced()
+                self.emit({"event": "reset"})
+        self.emit({"event": "conversation_deleted", "id": request.get("id"),
+                   "session_id": session_id, **{k: v for k, v in removed.items() if k != "session_id"}})
+
+    def _conversation_rename(self, request):
+        session_id = self._conversation_id(request.get("session_id"))
+        title = request.get("title")
+        if title is not None and not isinstance(title, str):
+            raise ValueError("title must be text.")
+        self.index().rename(session_id, title or "")
+        self.emit({"event": "conversation_renamed", "id": request.get("id"), "session_id": session_id,
+                   "title": " ".join((title or "").split())[:200]})
+
+    def _conversation_pin(self, request):
+        session_id = self._conversation_id(request.get("session_id"))
+        pinned = request.get("pinned", True)
+        if type(pinned) is not bool:
+            raise ValueError("pinned must be a boolean.")
+        self.index().set_pinned(session_id, pinned)
+        self.emit({"event": "conversation_pinned", "id": request.get("id"), "session_id": session_id,
+                   "pinned": pinned})
+
+    def _terminal_history(self, request):
+        # Sent for every command the pane ran; with the index off it is simply dropped, so a
+        # disabled index never turns each command into an error.
+        if not conv_index.enabled():
+            return
+        workspace = self._workspace(request)
+        count = self.index().record_commands(workspace, request.get("items") or [])
+        if request.get("id") is not None:
+            self.emit({"event": "terminal_history_indexed", "id": request.get("id"),
+                       "workspace": workspace, "rows": count})
+
+    def _index_rebuild(self, request):
+        index = self.index()
+        request_id = request.get("id")
+        self._background("index_rebuild", request_id,
+                         lambda: {"event": "index_rebuilt", **index.rebuild(), **index.stats()})
 
     def _set_mode(self, request):
         agent = self._agent()

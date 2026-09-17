@@ -6,6 +6,10 @@ Layout under session_dir (0700):
     <id>.meta.json   {id, title, updated, turns, model}, 0600
     <id>.blobs/      checkpoint file pre-images (content-addressed)
 Sessions can contain tool output and file contents, so they never leave this machine.
+
+Every save also refreshes the full-text index (`relay_core.conv_index`), a cache beside the
+sessions that the conversation list searches. Indexing failures never fail a save: the index can
+always be rebuilt from these files.
 """
 from __future__ import annotations
 
@@ -13,9 +17,12 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import tempfile
 import uuid
 from pathlib import Path
+
+from . import conv_index
 
 SESSION_ID = re.compile(r"^[0-9a-f]{32}$")
 MAX_LISTED = 200
@@ -71,10 +78,30 @@ def _atomic_json(path: Path, data: dict) -> None:
 
 
 class SessionStore:
-    def __init__(self, directory: str | Path):
+    def __init__(self, directory: str | Path, index=None):
         self.directory = Path(directory).expanduser()
         if not self.directory.is_absolute():
             raise ValueError("session_dir must be an absolute path.")
+        # None: open the shared index lazily on the first save. False: never index (tests, RELAY_INDEX=off).
+        self._index = index
+
+    def index(self):
+        """The conversation index, or None when it is off, elsewhere, or could not be opened.
+
+        Only sessions in Relay's own data directory are indexed: the index lives beside them, and
+        a pane pointed at some other `session_dir` (tests, throwaway directories) stays out of it.
+        """
+        if self._index is None:
+            root = conv_index.sessions_root()
+            inside = self.directory == root or root in self.directory.parents
+            if not inside or not conv_index.enabled():
+                self._index = False
+            else:
+                try:
+                    self._index = conv_index.ConversationIndex()
+                except (OSError, sqlite3.Error):
+                    self._index = False
+        return self._index or None
 
     def path(self, session_id: str) -> Path:
         return self.directory / f"{check_id(session_id)}.json"
@@ -87,6 +114,45 @@ class SessionStore:
         _atomic_json(self.path(session_id), data)
         meta = {key: data.get(key) for key in ("id", "title", "created", "updated", "turns", "model", "preset", "open_requests")}
         _atomic_json(self.directory / f"{session_id}.meta.json", meta)
+        index = self.index()
+        if index is not None:
+            # The index is a cache: a failure here must never lose the conversation.
+            try:
+                index.update_session(data, self.directory)
+            except (OSError, ValueError, sqlite3.Error):
+                pass
+
+    def delete(self, session_id: str) -> dict:
+        """Remove a session, its metadata, its checkpoint blobs and its index rows."""
+        session_id = check_id(session_id)
+        removed = 0
+        for name in (f"{session_id}.json", f"{session_id}.meta.json"):
+            try:
+                (self.directory / name).unlink()
+                removed += 1
+            except OSError:
+                pass
+        blobs = self.blob_dir(session_id)
+        if blobs.is_dir():
+            for child in blobs.iterdir():
+                try:
+                    child.unlink()
+                except OSError:
+                    pass
+            try:
+                blobs.rmdir()
+                removed += 1
+            except OSError:
+                pass
+        index = self.index()
+        if index is not None:
+            try:
+                index.delete_session(session_id, remove_files=False)
+            except (OSError, ValueError, sqlite3.Error):
+                pass
+        if not removed:
+            raise ValueError("No saved session with that id.")
+        return {"session_id": session_id, "files": removed}
 
     def load(self, session_id: str) -> dict:
         path = self.path(session_id)

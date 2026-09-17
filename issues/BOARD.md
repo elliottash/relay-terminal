@@ -2,7 +2,7 @@
      edit the card files and regenerate. -->
 # Board
 
-64 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+65 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
 ## Features (61)
 
@@ -10,7 +10,6 @@
 |---|---|---|---|---|---|
 | `#C1HH` | [Agent drives interactive programs in the visible pane, with take-over](features/2026-09-17-agent-delegate-and-take-over.md) | ready |  |  |  |
 | `#G8DK` | [Aliased terminal commands and prompts (Warp workflows)](features/2026-09-17-aliases-and-workflows.md) | ready |  |  |  |
-| `#GAAR` | [Conversation list with full-text search](features/2026-09-17-conversation-list-and-search.md) | ready |  |  |  |
 | `#GDQN` | [Two-way sync between the Switchboard and GitHub Issues](features/2026-09-17-github-issues-sync.md) | ready |  |  |  |
 | `#EM1E` | [Image context in agent prompts](features/2026-09-17-image-context.md) | ready |  |  |  |
 | `#GWXM` | [Keyboard shortcut to step through files, folders and links in output](features/2026-09-17-keyboard-jump-to-output-links.md) | ready |  |  |  |
@@ -36,6 +35,7 @@
 | `#4C94` | [One combined queue for terminal commands and agent prompts](features/needs_qa_llm/2026-09-17-combined-terminal-agent-queue.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI D subagent), 2026-09-17 |  |  |
 | `#VSDH` | [Ctrl+I toggles terminal command vs agent prompt](features/needs_qa_llm/2026-09-17-ctrl-i-input-toggle.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
 | `#9VXF` | [Relay's own terminal engine, selectable per pane](features/needs_qa_llm/2026-09-17-engine-integration.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
+| `#CCKY` | [Conversation list with full-text search](features/needs_qa_llm/2026-09-17-conversation-list-and-search.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, conversation-search worktree), 2026-09-17 |  |  |
 | `#QQK4` | [Folder explorer and file preview panes (plain Qt)](features/needs_qa_llm/2026-09-17-file-explorer-and-preview-panes.md) | needs-qa-llm | widgets implemented by Claude Opus 5 (Claude Code subagent), 2026-09-17; integration into windows, tabs and panes is done by the main session |  |  |
 | `#VH4B` | [Fix and re-run invalid or failing commands in terminal mode](features/needs_qa_llm/2026-09-17-fix-and-rerun-terminal-commands.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
 | `#FR72` | [Ghost-text command suggestions from history](features/needs_qa_llm/2026-09-17-history-suggestions.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI D subagent), 2026-09-17 |  |  |
@@ -70,10 +70,11 @@
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | Claude Opus 5 research subagent, 2026-09-16 |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | implemented by Claude Opus 5 (Claude Code session), 2026-09-16 |  |  |
 
-## Bugs (3)
+## Bugs (4)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
+| `#ERES` | [Ctrl+Alt+arrow pane moves and pane dragging do not work](changes/2026-09-17-pane-move-keys-and-drag-broken.md) | ready |  |  |  |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
 | `#90JF` | [Check that a terminal command will run before it is sent](changes/needs_qa_llm/2026-09-17-pre-submit-run-check.md) | needs-qa-llm |  |  |  |
 | `#AHS5` | [The prompt box is the only input; clicking the terminal does not type into it](changes/needs_qa_llm/2026-09-17-terminal-not-directly-typable.md) | needs-qa-llm | implemented by Claude Opus 5 (1M context) (Claude Code session), 2026-09-17 |  |  |

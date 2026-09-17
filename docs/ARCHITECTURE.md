@@ -561,6 +561,37 @@ Events: `ready`, `route`, `configured`, `presets`, `key_stored`, `warp_imported`
 `agent_finished`, `status`, `delta`, `usage`, `tool_started`, `tool_output`, `tool_result`,
 `done`, `cancelled`, `error`, `reset`. Errors carry `agent_busy`.
 
+### Conversation index and search
+
+`backend/relay_core/conv_index.py`, protocol section 14. An SQLite FTS5 database at
+`$XDG_DATA_HOME/relay/index.db` (0600, in the 0700 directory that holds the sessions) with one
+`conversations` row per saved conversation and one `entries` row per user prompt, assistant reply,
+tool call, capped tool output, Relay-run terminal command and captured command output. `entries` is
+mirrored into an external-content FTS5 table by triggers.
+
+The index is a **cache**, never the source of truth: `SessionStore.save` refreshes a session's rows
+on every autosave, and `index_rebuild` recreates everything from the session JSON. A database that
+is corrupt or written by a different `SCHEMA_VERSION` is deleted and recreated, in the constructor
+and again if SQLite reports corruption mid-query. Only sessions under
+`$XDG_DATA_HOME/relay/sessions` are indexed, so a pane with a custom `session_dir` (and every test)
+stays out of it; `RELAY_INDEX=off` disables it.
+
+Terminal history is a synthetic conversation per workspace (`term-<16 hex>`, `source: "terminal"`).
+The pane sends `terminal_history` when the shell reports the prompt again after a command Relay
+staged: the command line, its exit status, the directory, and the output captured through
+`TerminalBackend::onOutput` between "command loaded" and "shell ready" (enabled only for that
+window, cut at the next `OSC 133;A` so the redrawn prompt is not part of the output, control
+sequences stripped by `relay::conversations::stripAnsi`). Commands typed straight into the terminal
+in native mode never pass through Relay and are not indexed.
+
+The GUI side is `src/Conversations.{h,cpp}`: the list dialog (Ctrl+Shift+O, `/conversations`,
+Actions › Conversations…), which asks the worker through callbacks and is fed `conversations` and
+`conversation` events, and the Ctrl+F find bar, which searches the terminal through
+`TerminalBackend::find()` and counts matches in the pane's conversation with
+`conversation_get {query}`. Enter resumes in the pane (`resume`, or `load_state` with a session
+reference when the conversation belongs to another workspace); Shift+Enter opens it in a new pane
+through the same path as a fork.
+
 ### Model roles
 
 `backend/relay_core/roles.py`, protocol section 13. One configurable model per job: `main`,
@@ -890,9 +921,10 @@ Other limits:
 | `src/TurnTranscript.*` | turn details pane (tool calls, transcript) |
 | `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |
 | `src/AgentUi.*` | pickers and instructions dialog |
+| `src/Conversations.*` | conversation list with search (Ctrl+Shift+O) and the Ctrl+F find bar |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
-| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles) |
+| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `src/KonsoleBackend.*`, `src/EngineBackend.*` | the two `TerminalBackend` implementations |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |

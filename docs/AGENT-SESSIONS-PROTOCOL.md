@@ -486,3 +486,122 @@ falls back reports `agent_role: "main"`. `configure` with an unusable `agent_rol
   set it so no test run can reach a real keyring.
 - Not implemented on purpose (owner: "later"): routing between the main and fast agent by estimated task
   difficulty.
+
+## 14. Conversation list and full-text search (v1.4, 2026-09-17)
+
+Backend: `backend/relay_core/conv_index.py` (the index) with command handlers in
+`session_protocol.py` and the autosave hook in `sessions.py`; GUI: `src/Conversations.{h,cpp}`
+and `src/main.cpp`; tests: `tests/test_conv_index.py`, `tests/conversations_test.cpp`. Source:
+`issues/features/needs_qa_llm/2026-09-17-conversation-list-and-search.md` (owner, 2026-09-17).
+All additive: a worker that never receives these messages behaves exactly as before.
+
+### 14.1 The index
+
+An SQLite FTS5 database at `$XDG_DATA_HOME/relay/index.db` (0600, in the 0700 `relay/`
+directory that already holds the sessions). It is a **cache**: every agent row can be rebuilt
+from the session JSON, so a database that is corrupt, unreadable or written by another
+`SCHEMA_VERSION` is deleted and recreated rather than migrated. `meta.schema_version` records
+the version; `journal_mode=WAL` and `busy_timeout=10000` let one worker per pane write to it.
+
+| Table | Holds |
+|---|---|
+| `conversations` | one row per conversation: `session_id`, `source` (`agent`/`terminal`), `workspace`, `project`, `title`, `custom_title` (rename), `model`, `preset`, `created`, `updated`, `turns`, `open_requests`, `session_dir`, `pinned` |
+| `entries` | one row per indexed piece of text: `session_id`, `turn`, `seq`, `kind`, `time`, `status`, `text` |
+| `entries_fts` | FTS5 (`unicode61 remove_diacritics 2`) over `entries.text`, external content, kept in step by triggers |
+
+`kind` is `prompt`, `reply`, `tool_call`, `tool_output` (agent threads) or `command`,
+`command_output` (terminal history). User prompts are indexed from the **checkpoints**, so they
+survive compaction, which rewrites the message list; replies, tool calls and capped tool output
+come from the messages. Context blocks Relay writes into a user message
+(`[Relay context: …]`) are not indexed: they are not something the user typed. Text is capped at
+8000 characters for prompts and 4000 for everything else, and a session contributes at most
+20000 entries.
+
+`SessionStore.save` refreshes the session's rows on **every autosave**, so the index follows the
+conversation without a separate crawl. Only sessions under `$XDG_DATA_HOME/relay/sessions` are
+indexed: a pane pointed at some other `session_dir` (tests, throwaway directories) stays out of
+it, and `RELAY_INDEX=off` disables indexing and the commands below entirely.
+
+### 14.2 Queries
+
+A query is words and `"quoted phrases"`. Every word is escaped and turned into an FTS5 prefix
+term (`"word"*`), a quoted run into a phrase; nothing the user types can reach FTS5 as an
+operator. Several words are an **AND inside one message or command**, the way grep matches a
+line, not an AND across a conversation.
+
+### 14.3 `conversations`
+
+`conversations {query?, scope: "project"|"all", workspace?, model?, has_open_tasks?, since?,
+until?, sources?: ["agent"|"terminal"], limit? (1–200, default 50), id?}`
+
+`scope` defaults to `project`, which uses `workspace` (the pane's own workspace when the field is
+absent). `since`/`until` are epoch seconds against `updated`. An empty `query` lists conversations
+instead of searching. No agent has to be configured.
+
+→ `conversations {id?, scope, workspace, query, total, elapsed_ms, items: [...]}`
+
+Each item:
+
+`{session_id, source, title, generated_title, workspace, project, model, preset, created, updated,
+turns, open_requests, session_dir, pinned, snippet, match_count, matches: [{turn, kind, line,
+ranges: [[start, length], …], time}]}`
+
+`title` is the user's rename when there is one, else the generated title. `matches` holds at most
+five turns per conversation, with the matching line and the character ranges to highlight;
+`match_count` is the true number of matching entries. Items are ordered pinned first, then newest
+`updated` first. `total` is how many conversations the filters (not the query) match.
+
+Terminal history appears as its own conversation per workspace, `session_id` `term-<16 hex>` and
+`source: "terminal"`; its `turn` is the command's ordinal. It cannot be resumed.
+
+### 14.4 `conversation_get`
+
+`conversation_get {session_id, turn?, query?, limit? (≤2000, default 400), id?}` →
+`conversation {id?, …the item fields…, items: [{turn, kind, time, text, exit_status?, line?,
+ranges?}], match_count}`
+
+Entries come back in conversation order (`turn`, then write order). With `query`, every entry that
+matches carries `line` and `ranges`, and `match_count` is how many entries matched — this is also
+how Ctrl+F counts matches in the pane's own conversation.
+
+### 14.5 `conversation_delete`, `conversation_rename`, `conversation_pin`
+
+- `conversation_delete {session_id, id?}` → `conversation_deleted {session_id, files, indexed}`.
+  For an agent conversation it removes `<id>.json`, `<id>.meta.json`, the `<id>.blobs/` checkpoint
+  pre-images **and** the index rows; deleting the conversation the pane is showing also starts a
+  fresh one (`reset`). For a `term-…` id only the index rows go: the shell's own history file is
+  never touched.
+- `conversation_rename {session_id, title}` → `conversation_renamed {session_id, title}`. An empty
+  title restores the generated one. The rename is index-only and survives re-indexing.
+- `conversation_pin {session_id, pinned: bool}` → `conversation_pinned {session_id, pinned}`.
+
+### 14.6 `terminal_history`
+
+`terminal_history {workspace?, items: [{command, exit_status?, cwd?, time?, output?}] (≤500), id?}`
+→ `terminal_history_indexed {workspace, rows}` (only when the request carried an `id`).
+
+The GUI sends one item per command **Relay itself ran** in the pane, when the shell reports the
+prompt again: the command line, its exit status, the directory, and the output the engine captured
+between "command loaded" and "shell ready" — cut at the next `OSC 133;A` (the prompt being redrawn)
+when the shell integration is on, control sequences stripped, 64 KiB captured, 4000 characters
+stored. Commands typed straight into the terminal in native mode never reach Relay, so they are not
+indexed.
+
+### 14.7 `index_rebuild`
+
+`index_rebuild {id?}` drops every agent conversation and rebuilds it from the session JSON files
+under `$XDG_DATA_HOME/relay/sessions`, on a background thread. Terminal history has no file to
+rebuild from and is kept. → `index_rebuilt {sessions, entries, ms, conversations, bytes,
+schema_version, path}`.
+
+### 14.8 Notes and deviations
+
+- The index holds message text. It lives in the same 0700 directory as the sessions, is never
+  synced, and holds nothing the session files do not already hold. There is no telemetry.
+- Search matches inside one message or command (14.2); a query whose words are spread over
+  several turns finds nothing. Phrase search covers that case.
+- `conversations` returns at most five matching turns per conversation; `conversation_get` has the
+  rest.
+- Measured on 300 conversations × 30 turns (36 000 entries, 36 MiB of session JSON): index 44.7
+  MiB, full rebuild 1.2 s, autosave update 3.4 ms, worst-case search (a word in every entry) 56–64
+  ms median. On a real 248-session set: index 388 KiB, rebuild 61 ms, search 0.03–1.2 ms.
