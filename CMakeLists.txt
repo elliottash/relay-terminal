@@ -76,6 +76,9 @@ if(RELAY_BUILD_APP)
         PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
     install(DIRECTORY data/theme DESTINATION ${CMAKE_INSTALL_DATADIR}/relay)
     install(FILES org.relayterminal.Relay.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(DIRECTORY data/icons/hicolor DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)
+    install(FILES data/icons/org.relayterminal.Relay.svg data/icons/org.relayterminal.Relay-symbolic.svg
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
 endif()
 
 if(BUILD_TESTING)
