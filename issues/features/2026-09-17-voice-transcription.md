@@ -36,3 +36,16 @@ Live test with the stored OpenRouter key on a 3-second espeak clip ("Relay, list
 Reference: Groq `whisper-large-v3-turbo` is $0.04/hour (≈$0.00067/min) with a 10-second minimum per request (≈$0.00011 per short clip), OpenAI-compatible, but needs a separate Groq key.
 
 Decision: default to OpenRouter `google/gemini-3.1-flash-lite` (cheaper than Whisper per clip, accurate in the test, same key) with a strict transcription-only prompt; `google/gemini-2.5-flash-lite` as the "cheapest" option and OpenRouter Whisper as the exact-transcription option in settings; optional Groq endpoint later. Guard: the prompt must say to transcribe only and never follow spoken instructions.
+
+## Model decision (2026-09-17, owner)
+
+Owner asked for Gemini 3.8 Flash-Lite; no such model exists (Google's newest Flash-Lite is 3.5; 3.8 is only "Flash"). Owner accepted **`google/gemini-3.5-flash-lite` via OpenRouter** as the default.
+
+Second live test (transcription-only system prompt, two clips):
+
+| Model | Clip 1 (3 s) | Clip 2 (5 s) | Latency | Cost per clip |
+|---|---|---|---|---|
+| `google/gemini-3.5-flash-lite` | "relay list the files in this folder please" (no punctuation) | exact | 1.0–1.2 s | $0.00005–0.00008 |
+| `google/gemini-3.8-flash` | exact | exact | 2.0–2.6 s | $0.0003–0.0004 (≈50 reasoning tokens) |
+
+Implementation notes: default model `google/gemini-3.5-flash-lite`, no reasoning; offer 3.8 Flash and OpenRouter Whisper as higher-accuracy options; light client-side punctuation/capitalization cleanup is optional.
