@@ -425,13 +425,28 @@ Recommendations accepted for questions 1, 2, 3, 4, 7, 10 and 11. Changes:
   knows databases), each public (in git) or private.
 - **9. Instruction files:** Relay uses `RELAY.md` by default and may edit it, as well as `AGENTS.md`, `CLAUDE.md`,
   `WARP.md` and similar, as agents do. Edits to instruction files are surfaced as highlighted tool-call notifications.
-- **Plans are their own objects (option C; supersedes 2.4 and the "plans on cards" part of Switchboard decision 12.4).**
-  People may use plans without cards. A plan is a Markdown file with front matter and its own `## Steps` checklist
-  (item ids and markers as in `## Tasks`): `issues/plans/<date>-<slug>.md` in a repo with a Switchboard,
-  `issues/.private/plans/` when private, `.relay/plans/` (configurable, as before) without a Switchboard. The Switchboard
-  shows plans in a **Plans** tab next to cards and memory. A plan links to zero or more cards (`cards: [#K7Q2, …]`) and a
-  card lists its plans (`links.plans`), so one plan can cover part of a card, one card or several. A step may point to a
-  card or a card item; finishing the step updates what it points to and logs a thread event on that card. Execute on a
-  plan seeds todos from its open steps; re-planning keeps done steps and marks removed ones dropped, and each revision
-  is logged in the plan's own history (like memory's `LOG.md`). A plan linked from a private card defaults to private;
-  a shared plan never names a private card in git.
+- **One object model: plans and memories are card types (supersedes 2.4, the memory storage in section 3, and the
+  "plans on cards" part of Switchboard decision 12.4).** Every Switchboard object is a card with a `type`; each type
+  has its own view and statuses and shares ids, threads (history), privacy, links, search, the `#` picker, Reorganize,
+  git merging and undo.
+
+  | Type | Stored in (private: under `issues/.private/`) | Main view | Statuses |
+  |---|---|---|---|
+  | work (feature, bug, design, …) | `issues/<tab>/` | board columns | inbox → … → done |
+  | plan | `issues/planning/` | Plans tab | draft → approved → executing → done / dropped |
+  | memory | `issues/memory/` | Memory tab, grouped by topic | active / retired |
+
+  - **Plans** (`type: plan`) can be used without any other cards (the Plans tab alone). The body has the plan prose and
+    a `## Steps` checklist (same item ids and markers as `## Tasks`). A step may point to a work card or one of its
+    items, so a plan covers part of a card, one card or several; finishing a step updates its target and logs a thread
+    event there. Cards list linked plans in `links.plans`; "Plan this" on a card creates a linked plan card; a step can
+    be promoted to a work card. Execute seeds todos from open steps; re-planning keeps done steps, drops removed ones,
+    and records the previous version as a thread event (compare / restore). Without a Switchboard a plan is a single
+    file of the same format in `.relay/plans/` (configurable), adoptable into a board later without conversion. A plan
+    linked from a private card defaults to private; a shared plan never names a private card in git.
+  - **Memories** (`type: memory`): one small card file per fact, with `scope` (project, team, user), `topic`
+    (e.g. conventions, environment, team, preferences) and `private`. One file per fact keeps git merges clean and
+    privacy per fact. The Memory tab shows them as one list per topic (edit a line, history, shared/private toggle), not
+    as board cards. A memory may record where it was learned (`source: #K7Q2`); cards and plans may cite memories. The
+    agent loads a compact index (cap 8 KB) plus pinned and path-matched bodies, as in section 3. The global
+    Switchboard uses the same layout for user-scope memory.
