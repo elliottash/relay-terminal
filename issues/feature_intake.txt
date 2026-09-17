@@ -1,0 +1,6 @@
+the interrupt vs queue feature for new commands. 
+
+can also look at opencode for features / logic on how the agent should work 
+
+try something as a terminal command first, if it fails, run it as the agent
+

@@ -1,0 +1,241 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "Theme.h"
+#include <QApplication>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QList>
+#include <QFileInfo>
+#include <QFontDatabase>
+#include <QFrame>
+#include <QLabel>
+#include <QLayout>
+#include <QPalette>
+#include <QPlainTextEdit>
+#include <QRegularExpression>
+#include <QSplitter>
+#include <QStyle>
+#include <QStyleFactory>
+
+#ifndef RELAY_DATA_DIR
+#define RELAY_DATA_DIR "/usr/local/share/relay"
+#endif
+#ifndef RELAY_SOURCE_DIR
+#define RELAY_SOURCE_DIR "."
+#endif
+
+namespace relay::theme {
+namespace {
+QString hex(const QColor &c) { return c.name(QColor::HexRgb); }
+
+QString monoFamily() {
+    const auto families = QFontDatabase().families();
+    for (const auto &name : {QStringLiteral("Hack"), QStringLiteral("JetBrains Mono"), QStringLiteral("DejaVu Sans Mono")})
+        if (families.contains(name)) return name;
+    return QFontDatabase::systemFont(QFontDatabase::FixedFont).family();
+}
+}
+
+QString themeDataDir() {
+    // QCoreApplication::applicationDirPath() needs an application object; /proc does not.
+    const QString appDir = QFileInfo(QFileInfo(QStringLiteral("/proc/self/exe")).symLinkTarget()).absolutePath();
+    const QStringList choices{qEnvironmentVariable("RELAY_THEME_DIR"),
+        appDir + QStringLiteral("/../share/relay/theme"),
+        QStringLiteral(RELAY_DATA_DIR "/theme"), QStringLiteral(RELAY_SOURCE_DIR "/data/theme")};
+    for (const auto &path : choices) {
+        if (!path.isEmpty() && QFileInfo::exists(path + QStringLiteral("/konsole/RelayDark.colorscheme")))
+            return QDir(path).absolutePath();
+    }
+    return {};
+}
+
+namespace {
+struct SavedVariable { QByteArray name, value; bool set; };
+QList<SavedVariable> &savedXdg() { static QList<SavedVariable> saved; return saved; }
+
+void prepend(const char *name, const QString &dir, const char *fallback) {
+    const bool set = qEnvironmentVariableIsSet(name);
+    const QByteArray value = qgetenv(name);
+    savedXdg().append({QByteArray(name), value, set});
+    const QByteArray base = value.isEmpty() ? QByteArray(fallback) : value;
+    qputenv(name, QFile::encodeName(dir) + ':' + base);
+}
+}
+
+bool exposeKonsoleProfile() {
+    const QString dir = themeDataDir();
+    if (dir.isEmpty() || !savedXdg().isEmpty()) return false;
+    prepend("XDG_CONFIG_DIRS", dir, "/etc/xdg");
+    prepend("XDG_DATA_DIRS", dir, "/usr/local/share:/usr/share");
+    return true;
+}
+
+void restoreXdgEnvironment() {
+    for (const auto &variable : savedXdg()) {
+        if (variable.set) qputenv(variable.name.constData(), variable.value);
+        else qunsetenv(variable.name.constData());
+    }
+    savedXdg().clear();
+}
+
+void applyDarkTheme(QApplication &app) {
+    app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    QPalette p;
+    p.setColor(QPalette::Window, Background);
+    p.setColor(QPalette::WindowText, Text);
+    p.setColor(QPalette::Base, Surface);
+    p.setColor(QPalette::AlternateBase, SurfaceRaised);
+    p.setColor(QPalette::Text, Text);
+    p.setColor(QPalette::PlaceholderText, TextMuted);
+    p.setColor(QPalette::Button, SurfaceRaised);
+    p.setColor(QPalette::ButtonText, Text);
+    p.setColor(QPalette::BrightText, Qt::white);
+    p.setColor(QPalette::ToolTipBase, SurfaceRaised);
+    p.setColor(QPalette::ToolTipText, Text);
+    p.setColor(QPalette::Highlight, Accent.darker(160));
+    p.setColor(QPalette::HighlightedText, Qt::white);
+    p.setColor(QPalette::Link, Accent);
+    p.setColor(QPalette::Light, Border.lighter(130));
+    p.setColor(QPalette::Midlight, Border);
+    p.setColor(QPalette::Mid, Border);
+    p.setColor(QPalette::Dark, Background.darker(130));
+    p.setColor(QPalette::Shadow, Qt::black);
+    for (auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText})
+        p.setColor(QPalette::Disabled, role, TextMuted.darker(140));
+    app.setPalette(p);
+
+    const QString mono = monoFamily();
+    QString css = QStringLiteral(R"(
+* { outline: none; }
+QMainWindow, QDialog, QMessageBox { background: @bg; color: @text; }
+QToolTip { background: @raised; color: @text; border: 1px solid @border; padding: 4px 6px; }
+
+QToolBar { background: @bg; border: none; border-bottom: 1px solid @border; padding: 6px 10px; spacing: 8px; }
+QToolBar::separator { background: @border; width: 1px; margin: 6px 4px; }
+QToolBar QToolButton { background: transparent; color: @muted; border: 1px solid transparent; border-radius: 6px; padding: 5px 10px; }
+QToolBar QToolButton:hover { background: @raised; color: @text; border-color: @border; }
+QToolBar QToolButton:checked { background: @accentSoft; color: @accent; border-color: @accentBorder; }
+QLabel#brand { color: @text; letter-spacing: 3px; }
+
+QLabel { color: @text; background: transparent; }
+QLabel#muted, QLabel#cwd, QLabel#help, QLabel#privacy { color: @muted; }
+QLabel#route { color: @accent; font-family: "@mono"; }
+
+QPushButton { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 5px 14px; }
+QPushButton:hover { border-color: @muted; }
+QPushButton:pressed { background: @surface; }
+QPushButton:default, QPushButton#primary { background: @accent; color: @accentText; border-color: @accent; font-weight: 600; }
+QPushButton:default:hover, QPushButton#primary:hover { background: @accentHover; }
+QPushButton:disabled { color: @disabled; border-color: @surface; }
+
+QComboBox { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 28px 4px 10px; min-height: 20px; }
+QComboBox:hover { border-color: @muted; }
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox::down-arrow { image: url(@icons/chevron-down.svg); width: 12px; height: 12px; margin-right: 8px; }
+QComboBox QAbstractItemView { background: @raised; color: @text; border: 1px solid @border; selection-background-color: @accentSoft; selection-color: @text; padding: 4px; outline: none; }
+
+QLineEdit, QSpinBox, QPlainTextEdit, QTextEdit { background: @surface; color: @text; border: 1px solid @border; border-radius: 6px; padding: 5px 8px; selection-background-color: @selection; selection-color: #ffffff; }
+QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus, QTextEdit:focus { border-color: @accentBorder; }
+QSpinBox::up-button, QSpinBox::down-button { background: transparent; border: none; width: 16px; }
+QSpinBox::up-arrow { image: url(@icons/chevron-up.svg); width: 10px; height: 10px; }
+QSpinBox::down-arrow { image: url(@icons/chevron-down.svg); width: 10px; height: 10px; }
+
+QDialog QPlainTextEdit { min-height: 64px; font-family: "@mono"; }
+QFrame#composer { background: @surface; border: 1px solid @border; border-radius: 10px; }
+QPlainTextEdit#composerEditor { background: transparent; border: none; padding: 2px 4px; font-family: "@mono"; font-size: 11pt; }
+QPlainTextEdit#agentLog { background: @bg; border: none; font-family: "@mono"; font-size: 10pt; padding: 8px 4px; }
+QWidget#agentPanel { background: @bg; border-left: 1px solid @border; }
+
+QCheckBox { color: @text; spacing: 8px; }
+QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid @border; border-radius: 4px; background: @surface; }
+QCheckBox::indicator:hover { border-color: @muted; }
+QCheckBox::indicator:checked { background: @accent; border-color: @accent; image: url(@icons/check.svg); }
+
+QSplitter::handle { background: @bg; }
+QSplitter::handle:horizontal { width: 6px; }
+QSplitter::handle:hover { background: @border; }
+
+QStatusBar { background: @bg; color: @muted; border-top: 1px solid @border; }
+QStatusBar::item { border: none; }
+QStatusBar QLabel { color: @muted; }
+
+QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px; }
+QScrollBar::handle { background: @border; border-radius: 3px; min-height: 24px; min-width: 24px; }
+QScrollBar::handle:hover { background: @muted; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
+QMenu { background: @raised; color: @text; border: 1px solid @border; padding: 4px; }
+QMenu::item { padding: 5px 18px; border-radius: 4px; }
+QMenu::item:selected { background: @accentSoft; }
+QMenu::separator { height: 1px; background: @border; margin: 4px 6px; }
+
+QTabWidget::pane { border: 1px solid @border; }
+QTabBar::tab { background: @bg; color: @muted; padding: 6px 12px; border: none; }
+QTabBar::tab:selected { color: @text; border-bottom: 2px solid @accent; }
+)");
+    QColor accentSoft = Accent; accentSoft.setAlpha(40);
+    QColor accentBorder = Accent; accentBorder.setAlpha(150);
+    const auto rgba = [](const QColor &c) {
+        return QStringLiteral("rgba(%1, %2, %3, %4)").arg(c.red()).arg(c.green()).arg(c.blue()).arg(c.alpha());
+    };
+    const QList<QPair<QString, QString>> tokens{
+        {QStringLiteral("@accentText"), hex(AccentText)}, {QStringLiteral("@accentSoft"), rgba(accentSoft)},
+        {QStringLiteral("@accentBorder"), rgba(accentBorder)}, {QStringLiteral("@accentHover"), hex(Accent.lighter(115))},
+        {QStringLiteral("@accent"), hex(Accent)}, {QStringLiteral("@selection"), hex(Accent.darker(200))},
+        {QStringLiteral("@surface"), hex(Surface)}, {QStringLiteral("@raised"), hex(SurfaceRaised)},
+        {QStringLiteral("@border"), hex(Border)}, {QStringLiteral("@muted"), hex(TextMuted)},
+        {QStringLiteral("@disabled"), hex(TextMuted.darker(150))}, {QStringLiteral("@text"), hex(Text)},
+        {QStringLiteral("@bg"), hex(Background)}, {QStringLiteral("@mono"), mono},
+        {QStringLiteral("@icons"), themeDataDir() + QStringLiteral("/icons")}};
+    if (themeDataDir().isEmpty()) {
+        // Without bundled icons, fall back to the style's own arrows and check marks.
+        css.remove(QRegularExpression(QStringLiteral(R"([^\n]*url\(@icons[^\n]*\n)")));
+    }
+    for (const auto &token : tokens) css.replace(token.first, token.second);
+    app.setStyleSheet(css);
+}
+
+void polishWindow(QWidget *window) {
+    // buildUi() creates these widgets without names; tag them for the stylesheet.
+    for (auto *editor : window->findChildren<QPlainTextEdit *>(QStringLiteral("composerEditor"))) {
+        if (auto *frame = qobject_cast<QFrame *>(editor->parentWidget())) {
+            frame->setObjectName(QStringLiteral("composer"));
+            frame->setAttribute(Qt::WA_StyledBackground);
+            if (auto *layout = frame->layout()) { layout->setContentsMargins(14, 10, 14, 8); layout->setSpacing(4); }
+        }
+        // Start compact; RichEditor grows the height as lines are added.
+        if (editor->height() > editor->minimumHeight() || editor->maximumHeight() > editor->minimumHeight()) {
+            editor->setFixedHeight(editor->minimumHeight());
+        }
+    }
+    for (auto *edit : window->findChildren<QPlainTextEdit *>()) {
+        if (edit->isReadOnly() && edit->accessibleName().startsWith(QStringLiteral("Agent conversation"))) {
+            edit->setObjectName(QStringLiteral("agentLog"));
+            if (auto *panel = edit->parentWidget()) { panel->setObjectName(QStringLiteral("agentPanel")); panel->setAttribute(Qt::WA_StyledBackground); }
+        }
+    }
+    for (auto *label : window->findChildren<QLabel *>()) {
+        const auto text = label->text();
+        if (text.trimmed() == QStringLiteral("RELAY")) label->setObjectName(QStringLiteral("brand"));
+        else if (text.startsWith(QStringLiteral("AUTO ·"))) label->setObjectName(QStringLiteral("route"));
+        else if (text.startsWith(QStringLiteral("Shift+Enter"))) label->setObjectName(QStringLiteral("help"));
+        else if (text.startsWith(QStringLiteral("Only submitted prompts"))) label->setObjectName(QStringLiteral("privacy"));
+        else if (label->textInteractionFlags() & Qt::TextSelectableByMouse) label->setObjectName(QStringLiteral("cwd"));
+    }
+    // Proportional splitter: terminal keeps ~60% and the agent pane never collapses to nothing.
+    for (auto *splitter : window->findChildren<QSplitter *>()) {
+        if (splitter->count() == 2) {
+            splitter->setStretchFactor(0, 3); splitter->setStretchFactor(1, 2);
+            splitter->setChildrenCollapsible(false);
+            splitter->widget(1)->setMinimumWidth(300);
+            splitter->widget(0)->setMinimumWidth(360);
+        }
+    }
+    // Re-polish so object-name selectors apply to already-created widgets.
+    for (auto *widget : window->findChildren<QWidget *>()) {
+        widget->style()->unpolish(widget); widget->style()->polish(widget);
+    }
+}
+}
