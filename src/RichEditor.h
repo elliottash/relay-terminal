@@ -17,12 +17,15 @@ public:
     // Ghost text: a dim suggestion drawn after the cursor when it sits at the end of the text.
     // Grow with the text instead of standing empty: one line when idle, up to maxLines, then scroll.
     void setAutoHeight(int minLines, int maxLines);
+    // The placeholder shrinks with the pane instead of wrapping onto a second line.
+    void updatePlaceholder();
     void setGhost(const QString &remainder);
     QString ghost() const { return m_ghost; }
     // Accept the whole suggestion, or only up to the end of the next word. False if none.
     bool acceptGhost(bool wholeSuggestion);
 protected:
     void paintEvent(QPaintEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void inputMethodEvent(QInputMethodEvent *event) override;
     void insertFromMimeData(const QMimeData *source) override;

@@ -1306,8 +1306,8 @@ private:
         m_opaqueHint->hide();
         routeRow->addWidget(m_opaqueHint, 1);
         routeRow->addStretch(1);
-        buildSessionControls(routeRow);        // context chip
         setupRequestsUi(routeRow);             // tasks chip, hidden unless something is unfinished
+        buildSessionControls(routeRow);        // plan chip and the context chip, next to the model
         m_modelBox = new QComboBox;
         m_modelBox->setObjectName(QStringLiteral("statusPicker"));
         m_modelBox->setAccessibleName(QStringLiteral("Agent model"));
@@ -1396,12 +1396,12 @@ private:
         m_planChip->setObjectName(QStringLiteral("planChip"));
         m_planChip->setToolTip(QStringLiteral("Plan mode: the agent investigates and writes a plan (Shift+Tab to leave)"));
         m_planChip->hide();
-        row->insertWidget(1, m_planChip);
+        row->addWidget(m_planChip);
         m_ctxLabel = new QLabel;
         m_ctxLabel->setObjectName(QStringLiteral("stripChipLabel"));
         m_ctxLabel->setTextFormat(Qt::PlainText);
         m_ctxLabel->hide();
-        row->insertWidget(2, m_ctxLabel);
+        row->addWidget(m_ctxLabel);
         m_effortBox = new QComboBox;
         for (const QString &level : efforts()) m_effortBox->addItem(level, level);
         m_effortBox->setAccessibleName(QStringLiteral("Reasoning effort"));
@@ -2782,7 +2782,7 @@ private:
         m_requestsChip->setIconSize(QSize(13, 13));
         m_requestsChip->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         m_requestsChip->hide();
-        row->insertWidget(3, m_requestsChip);   // after the PLAN chip and the context label
+        row->addWidget(m_requestsChip);
         connect(m_requestsChip, &QToolButton::clicked, this, [this] {
             toggleRequests();
             hint(QStringLiteral("tasks.chip"), requestsShortcutHint());

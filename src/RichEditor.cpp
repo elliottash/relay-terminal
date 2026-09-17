@@ -49,7 +49,7 @@ RichEditor::RichEditor(QWidget *parent) : QPlainTextEdit(parent) {
     setAccessibleName(QStringLiteral("Relay command and agent input"));
     setAccessibleDescription(QStringLiteral("Multiline editor. Enter submits; Shift Enter inserts a newline. Control Enter forces Agent; Control Shift Enter forces Terminal."));
     setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    setPlaceholderText(QStringLiteral("Type a shell command or agent prompt…      ?  for help"));
+    updatePlaceholder();
     setMinimumHeight(64);
     setMaximumHeight(260);
     setTabStopDistance(fontMetrics().horizontalAdvance(QLatin1Char(' ')) * 4);
@@ -68,6 +68,30 @@ void RichEditor::remember(const QString &text) {
     }
     m_historyIndex = m_history.size();
     m_draft.clear();
+}
+
+void RichEditor::resizeEvent(QResizeEvent *event) {
+    QPlainTextEdit::resizeEvent(event);
+    updatePlaceholder();
+}
+
+// Longest hint that fits on one line; a narrow pane loses the help note first, then words.
+void RichEditor::updatePlaceholder() {
+    static const QStringList candidates{
+        QStringLiteral("Shell commands or agent prompts…      ?  for help"),
+        QStringLiteral("Shell commands or agent prompts…"),
+        QStringLiteral("Commands or prompts…"),
+        QStringLiteral("Commands…"),
+        QStringLiteral("…"),
+    };
+    const QFontMetrics metrics(font());
+    const int available = viewport()->width() - int(document()->documentMargin()) * 2 - 8;
+    for (const QString &text : candidates) {
+        if (metrics.horizontalAdvance(text) <= available || text == candidates.last()) {
+            if (placeholderText() != text) setPlaceholderText(text);
+            return;
+        }
+    }
 }
 
 void RichEditor::setAutoHeight(int minLines, int maxLines) {
