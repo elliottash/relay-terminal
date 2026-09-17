@@ -296,10 +296,10 @@ private:
         auto add = [this](const char *id, const char *category, const char *description, QStringList keys) {
             m_actions.append({QString::fromLatin1(id), QString::fromUtf8(description), QString::fromLatin1(category), std::move(keys)});
         };
-        add("window.new", "window", "New window", {QStringLiteral("Ctrl+N")});
+        add("window.new", "window", "New window", {QStringLiteral("Ctrl+N"), QStringLiteral("Ctrl+Shift+N")});
         add("window.next", "window", "Next Relay window", {QStringLiteral("Alt+Tab")});
         add("window.previous", "window", "Previous Relay window", {QStringLiteral("Alt+Shift+Tab")});
-        add("tab.new", "tab", "New tab", {QStringLiteral("Ctrl+T")});
+        add("tab.new", "tab", "New tab", {QStringLiteral("Ctrl+T"), QStringLiteral("Ctrl+Shift+T")});
         add("tab.next", "tab", "Next tab", {QStringLiteral("Ctrl+Tab")});
         add("tab.previous", "tab", "Previous tab", {QStringLiteral("Ctrl+Shift+Tab")});
         add("pane.splitRight", "pane", "New pane to the right", {QStringLiteral("Ctrl+P")});
@@ -308,14 +308,14 @@ private:
         add("pane.focusRight", "pane", "Focus pane to the right", {QStringLiteral("Alt+Right")});
         add("pane.focusUp", "pane", "Focus pane above", {QStringLiteral("Alt+Up")});
         add("pane.focusDown", "pane", "Focus pane below", {QStringLiteral("Alt+Down")});
-        add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W")});
+        add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W"), QStringLiteral("Ctrl+Shift+W")});
         add("pane.moveLeft", "pane", "Move pane left (swap with or dock beside the neighbor)", {QStringLiteral("Ctrl+Alt+Left")});
         add("pane.moveRight", "pane", "Move pane right", {QStringLiteral("Ctrl+Alt+Right")});
         add("pane.moveUp", "pane", "Move pane up", {QStringLiteral("Ctrl+Alt+Up")});
         add("pane.moveDown", "pane", "Move pane down", {QStringLiteral("Ctrl+Alt+Down")});
         add("pane.moveToNewTab", "pane", "Move pane to a new tab (keeps the shell and agent)", {});
         add("tab.moveToNewWindow", "tab", "Move tab to a new window (keeps its panes)", {});
-        add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+W")});
+        add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+Z")});
         add("windows.fresh", "window", "Start a fresh window set (forget the saved window layout)", {});
         add("palette.open", "palette", "Open the Relay actions palette", {QStringLiteral("Ctrl+Shift+A")});
         add("files.explorer", "pane", "Open this pane's folder in an explorer pane", {});
@@ -344,7 +344,8 @@ private:
         add("input.modeAuto", "agent", "Input mode: auto detect", {});
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
         add("input.modeAgent", "agent", "Input mode: agent", {});
-        add("input.toggle", "agent", "Cycle input: auto detect → terminal → agent (from the prompt box)", {QStringLiteral("Ctrl+I")});
+        add("input.toggle", "agent", "Cycle input: auto detect → terminal → agent (from the prompt box)",
+            {QStringLiteral("Ctrl+I"), QStringLiteral("Ctrl+Shift+I")});
         add("agent.planToggle", "agent", "Toggle plan mode (from the prompt box)", {QStringLiteral("Shift+Tab")});
         add("agent.effortUp", "agent", "Raise reasoning effort (from the prompt box)", {QStringLiteral("Alt+.")});
         add("agent.effortDown", "agent", "Lower reasoning effort (from the prompt box)", {QStringLiteral("Alt+,")});
@@ -357,7 +358,7 @@ private:
         add("conversations.open", "agent", "Conversations: list and search every saved conversation and Relay's terminal history",
             {QStringLiteral("Ctrl+Shift+O")});
         add("find.inView", "agent", "Find in this pane: the conversation and the terminal scrollback (from the prompt box)",
-            {QStringLiteral("Ctrl+F")});
+            {QStringLiteral("Ctrl+F"), QStringLiteral("Ctrl+Shift+F")});
         add("agent.recap", "agent", "Recap this agent session", {});
         add("agent.requests", "agent", "Tasks: show or hide the agent's task list (/tasks)", {QStringLiteral("Ctrl+Shift+K")});
         add("agent.continue", "agent", "Continue the agent turn after a step limit (/continue)", {});
@@ -6946,8 +6947,8 @@ private:
         dialog.exec();
     }
 
-    void hint(const QString &id, const QString &text) {
-        if (text.isEmpty() || !relay::ShortcutHints::instance().shouldShow(id)) return;
+    void hint(const QString &id, const QString &text, int limit = 3) {
+        if (text.isEmpty() || !relay::ShortcutHints::instance().shouldShow(id, limit)) return;
         if (m_active) m_active->toast(text, 5000); else statusBar()->showMessage(text, 6000);
     }
 
@@ -9099,6 +9100,17 @@ public:
     void closePane(QWidget *pane, bool record) {
         QWidget *page = pageOf(pane);
         if (!page) return;
+        // Once per run, the first time something is closed: say how to get it back (owner, 2026-09-17).
+        if (record) {
+            static bool toldAboutRestore = false;
+            if (!toldAboutRestore) {
+                toldAboutRestore = true;
+                const QString keys = Keymap::instance().shortcutText(QStringLiteral("closed.restore"));
+                hint(QStringLiteral("closed.restore.first"),
+                     keys.isEmpty() ? QStringLiteral("Closed. \"Restore closed\" in the palette brings it back, with its conversation.")
+                                    : QStringLiteral("Closed. %1 brings it back, with its conversation.").arg(keys), 1);
+            }
+        }
         if (leavesIn(page).size() <= 1) {
             // Last pane of its tab: close the tab, or the window when it is the last tab.
             if (m_tabs->count() > 1) closeTab(m_tabs->indexOf(page), record);

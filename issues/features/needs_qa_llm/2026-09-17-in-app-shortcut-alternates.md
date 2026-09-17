@@ -1,7 +1,7 @@
 ---
 id: 5FY5
 type: work
-status: discussing
+status: needs-qa-llm
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal
@@ -51,3 +51,15 @@ so pane focus works while a program runs. The `program_keys` setting (`all` / `n
 
 Note for the alternates above: Ctrl+Shift+Left/Right also mean "select the previous/next word" in the prompt
 box, so binding them to pane focus needs the owner's call (open question 2).
+
+## Decisions and first implementation (owner, 2026-09-17)
+
+- Pane focus stays on **Alt+arrows** (they already reach Relay inside full-screen programs); Ctrl+Shift+arrows
+  keep their word-selection meaning in the prompt box.
+- Restore last closed moves to **Ctrl+Shift+Z**; close takes **Ctrl+Shift+W** as its twin.
+- The first time anything is closed in a run, a one-off hint names the restore key.
+
+Landed in the Relay preset: `window.new` Ctrl+N / Ctrl+Shift+N · `tab.new` Ctrl+T / Ctrl+Shift+T ·
+`pane.close` Ctrl+W / Ctrl+Shift+W · `closed.restore` Ctrl+Shift+Z · `input.toggle` Ctrl+I / Ctrl+Shift+I ·
+`find.inView` Ctrl+F / Ctrl+Shift+F. Still to do: the new-pane key pair, which waits on card #78BN
+(one key plus an arrow) so Ctrl+Shift+P is free.
