@@ -11,6 +11,7 @@
 #include "SubagentsPanel.h"
 #include "RequestLedger.h"         // request ledger UI
 #include "RequestsPanel.h"
+#include "Conversations.h"         // conversation list, search and the Ctrl+F find bar
 #include "TerminalBackends.h"
 #include "TerminalBackend.h"
 #include <iterator>
@@ -326,6 +327,11 @@ private:
         add("agent.rewindCode", "agent", "Rewind code: restore files the agent changed since an earlier turn (/rewind-code)", {});
         add("agent.fork", "agent", "Fork the conversation into a new pane", {});
         add("agent.resume", "agent", "Resume a saved agent session", {});
+        // Conversation list with full-text search, and find-in-view for this pane.
+        add("conversations.open", "agent", "Conversations: list and search every saved conversation and Relay's terminal history",
+            {QStringLiteral("Ctrl+Shift+O")});
+        add("find.inView", "agent", "Find in this pane: the conversation and the terminal scrollback (from the prompt box)",
+            {QStringLiteral("Ctrl+F")});
         add("agent.recap", "agent", "Recap this agent session", {});
         add("agent.requests", "agent", "Tasks: show or hide the task list (/tasks)", {QStringLiteral("Ctrl+Shift+K")});
         add("agent.continue", "agent", "Continue the agent turn after a step limit (/continue)", {});
@@ -838,12 +844,18 @@ public:
     std::function<void(const QString &path, Pane *owner)> onPlanWritten;   // open the plan in an editable pane
     std::function<void(const QString &path)> onOpenDocument;               // open e.g. relay.md in an editable pane
     std::function<void(const QJsonObject &state, const QString &title)> onForkState;
+    // Conversation list, Shift+Enter: open an existing saved conversation in a new pane.
+    std::function<void(const QJsonObject &state, const QString &title)> onOpenSessionInNewPane;
     std::function<void()> onShowAgents;                                    // subagents panel (GUI E2), if present
 
     static QStringList efforts() { return {QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"), QStringLiteral("max")}; }
     QString effort() const { return m_effort; }
     QString agentMode() const { return m_agentMode; }
-    void setInitialState(const QJsonObject &state, const QString &title) { m_initialState = state; m_forkTitle = title; }
+    // `fork` false: the state is an existing conversation opened in this pane (the conversation
+    // list's Shift+Enter), so the pane reports "Session loaded", not "Forked from".
+    void setInitialState(const QJsonObject &state, const QString &title, bool fork = true) {
+        m_initialState = state; m_forkTitle = title; m_initialIsFork = fork;
+    }
 
     void setEffort(const QString &value) {
         if (!efforts().contains(value)) return;
@@ -1312,7 +1324,7 @@ private:
         if (!m_initialState.isEmpty()) {
             const QJsonObject state = m_initialState;
             m_initialState = QJsonObject();
-            m_forkLoadPending = true;
+            m_forkLoadPending = m_initialIsFork;
             send({{"type", "load_state"}, {"state", state}});
         }
         // First launch: offer to choose instruction files (once per installation).
@@ -1788,6 +1800,33 @@ private:
             clearAgentQueue();
             return true;
         }
+        // ----- conversation list and search (protocol section 14) -----------------------------
+        if (type == QStringLiteral("conversations")) {
+            if (m_conversations) m_conversations->setResults(event);
+            return true;
+        }
+        if (type == QStringLiteral("conversation")) {
+            if (event.value(QStringLiteral("id")).toString() == QStringLiteral("find-count")) {
+                if (m_findBar) m_findBar->setConversationMatches(event.value(QStringLiteral("match_count")).toInt());
+                return true;
+            }
+            if (m_conversations) m_conversations->setPreview(event);
+            return true;
+        }
+        if (type == QStringLiteral("conversation_deleted") || type == QStringLiteral("conversation_renamed")
+            || type == QStringLiteral("conversation_pinned")) {
+            if (m_conversations) m_conversations->removed(event.value(QStringLiteral("session_id")).toString());
+            if (type == QStringLiteral("conversation_deleted")) status(QStringLiteral("Conversation deleted."));
+            return true;
+        }
+        if (type == QStringLiteral("terminal_history_indexed") || type == QStringLiteral("index_rebuilt")) {
+            if (type == QStringLiteral("index_rebuilt"))
+                status(QStringLiteral("Conversation index rebuilt: %1 conversation(s), %2 entries, %3 ms")
+                           .arg(event.value(QStringLiteral("sessions")).toInt())
+                           .arg(event.value(QStringLiteral("entries")).toInt())
+                           .arg(event.value(QStringLiteral("ms")).toInt()));
+            return true;
+        }
         if (type == QStringLiteral("sessions")) {
             if (!m_resumePending) return true;
             m_resumePending = false;
@@ -1945,6 +1984,146 @@ private:
         send({{"type", "resume"}, {"id", ids.at(result.row)}});
     }
 
+    // ===== conversation list and full-text search (protocol section 14) =====================
+public:
+    // Ctrl+Shift+O, /conversations, palette: every saved conversation and Relay's terminal
+    // history, searchable. The worker searches the index; this only shows what comes back.
+    void openConversations(const QString &initialQuery = QString()) {
+        if (!m_workerReady) { status(QStringLiteral("The agent worker is still starting.")); return; }
+        if (!m_conversations) {
+            m_conversations = new relay::conversations::Dialog(this);
+            m_conversations->setAttribute(Qt::WA_DeleteOnClose, false);
+            m_conversations->onQuery = [this](const QJsonObject &request) {
+                QJsonObject message = request;
+                message.insert(QStringLiteral("type"), QStringLiteral("conversations"));
+                message.insert(QStringLiteral("workspace"), m_workspace);
+                message.insert(QStringLiteral("id"), QStringLiteral("conv-list"));
+                send(message);
+            };
+            m_conversations->onPreview = [this](const QString &sessionId, const QString &query) {
+                send({{"type", "conversation_get"}, {"id", QStringLiteral("conv-preview")},
+                      {"session_id", sessionId}, {"query", query}});
+            };
+            m_conversations->onResume = [this](const QJsonObject &item, bool newPane) { openSavedSession(item, newPane); };
+            m_conversations->onRename = [this](const QString &sessionId, const QString &title) {
+                send({{"type", "conversation_rename"}, {"session_id", sessionId}, {"title", title}});
+            };
+            m_conversations->onPin = [this](const QString &sessionId, bool pinned) {
+                send({{"type", "conversation_pin"}, {"session_id", sessionId}, {"pinned", pinned}});
+            };
+            m_conversations->onDelete = [this](const QString &sessionId) {
+                send({{"type", "conversation_delete"}, {"session_id", sessionId}});
+            };
+        }
+        if (!initialQuery.isEmpty()) m_conversations->findChildren<QLineEdit *>().value(0)->setText(initialQuery);
+        m_conversations->show();
+        m_conversations->raise();
+        m_conversations->activateWindow();
+        m_conversations->focusSearch();
+    }
+
+    // Enter resumes in this pane, Shift+Enter opens the conversation in a new one. A conversation
+    // saved for another workspace comes back through load_state, which accepts a session reference.
+    void openSavedSession(const QJsonObject &item, bool newPane) {
+        const QString sessionId = item.value(QStringLiteral("session_id")).toString();
+        const QString directory = item.value(QStringLiteral("session_dir")).toString();
+        const QString title = item.value(QStringLiteral("title")).toString();
+        if (sessionId.isEmpty()) return;
+        const QJsonObject reference{{QStringLiteral("version"), 1},
+                                    {QStringLiteral("kind"), QStringLiteral("relay_agent_state_ref")},
+                                    {QStringLiteral("session_id"), sessionId},
+                                    {QStringLiteral("session_dir"), directory.isEmpty() ? m_sessionDir : directory}};
+        if (newPane) {
+            if (onOpenSessionInNewPane) onOpenSessionInNewPane(reference, title);
+            else if (onForkState) onForkState(reference, title);
+            return;
+        }
+        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+        if (m_agentBusy) { status(QStringLiteral("Stop the agent turn before opening another conversation.")); return; }
+        if (directory.isEmpty() || directory == m_sessionDir) send({{"type", "resume"}, {"id", sessionId}});
+        else send({{"type", "load_state"}, {"state", reference}});
+    }
+
+    // Ctrl+F: find in this pane. The terminal scrollback is searched by the engine; the saved
+    // conversation is counted by the worker, which can also open it in the list.
+    void openFindInView() {
+        if (!m_findBar) {
+            m_findBar = new relay::conversations::FindBar(this);
+            m_findBar->hide();
+            if (auto *box = qobject_cast<QVBoxLayout *>(layout()))
+                box->insertWidget(m_composer ? box->indexOf(m_composer) : box->count(), m_findBar);
+            m_findBar->onFind = [this](const QString &text, bool backwards) { return findInTerminal(text, backwards); };
+            m_findBar->onCountConversation = [this](const QString &text) {
+                // Nothing is indexed before the first turn is saved; asking then is an error.
+                if (!m_workerReady || m_sessionId.isEmpty() || text.isEmpty() || m_turnsCompleted == 0) {
+                    if (m_findBar) m_findBar->setConversationMatches(0);
+                    return;
+                }
+                send({{"type", "conversation_get"}, {"id", QStringLiteral("find-count")},
+                      {"session_id", m_sessionId}, {"query", text}});
+            };
+            m_findBar->onOpenConversation = [this](const QString &text) { openConversations(text); };
+            m_findBar->onClosed = [this] { focusInput(); };
+        }
+        m_findBar->setTerminalSearchable(terminalCan(relay::TerminalBackend::Search));
+        QString preset = m_backend ? m_backend->selectedText().trimmed() : QString();
+        if (preset.contains('\n') || preset.size() > 80) preset.clear();
+        m_findBar->start(preset);
+    }
+
+    void closeFindInView() { if (m_findBar) m_findBar->hide(); }
+
+    void rebuildConversationIndex() {
+        if (!m_workerReady) { status(QStringLiteral("The agent worker is still starting.")); return; }
+        status(QStringLiteral("Rebuilding the conversation index…"));
+        send({{"type", "index_rebuild"}, {"id", QStringLiteral("index-rebuild")}});
+    }
+
+private:
+    // Relay-run terminal commands: the command line, its exit status and, on engines that can
+    // stream it, its output. Nothing typed straight into the terminal in native mode is seen here.
+    static constexpr int kCommandCaptureCap = 64 * 1024;
+
+    static bool indexTerminalHistory() {
+        return QSettings().value(QStringLiteral("index/terminal_history"), true).toBool();
+    }
+    static bool indexTerminalOutput() {
+        return QSettings().value(QStringLiteral("index/terminal_output"), true).toBool();
+    }
+
+    void beginCommandCapture(const QString &command) {
+        if (!indexTerminalHistory() || command.trimmed().isEmpty()) { m_captureCommand.clear(); return; }
+        m_captureCommand = command;
+        m_captureCwd = m_cwd;
+        m_captureAt = QDateTime::currentSecsSinceEpoch();
+        m_capture.clear();
+        m_capturing = indexTerminalOutput() && m_backend;
+        if (m_capturing) m_backend->setOutputCallbackEnabled(true);
+    }
+
+    void finishCommandCapture(int exitStatus) {
+        if (m_captureCommand.isEmpty()) return;
+        if (m_capturing && m_backend) m_backend->setOutputCallbackEnabled(false);
+        m_capturing = false;
+        QJsonObject item{{QStringLiteral("command"), m_captureCommand},
+                         {QStringLiteral("exit_status"), exitStatus},
+                         {QStringLiteral("cwd"), m_captureCwd},
+                         {QStringLiteral("time"), double(m_captureAt)}};
+        // With the shell integration the next prompt starts with OSC 133;A; everything from there
+        // is the prompt being redrawn, not the command's output.
+        QByteArray captured = m_capture;
+        if (const int prompt = captured.indexOf("\x1b]133;A"); prompt >= 0) captured.truncate(prompt);
+        QString output = relay::conversations::stripAnsi(captured);
+        // The shell echoes the command it is about to run; that line is already the command row.
+        if (output.startsWith(m_captureCommand)) output = output.mid(m_captureCommand.size());
+        if (!output.trimmed().isEmpty()) item.insert(QStringLiteral("output"), output.trimmed());
+        m_captureCommand.clear();
+        m_capture.clear();
+        if (m_workerReady)
+            send({{"type", "terminal_history"}, {"workspace", m_workspace}, {"items", QJsonArray{item}}});
+    }
+
+
     void showInstructionsDialog(const QJsonArray &items) {
         QSettings settings;
         const QStringList selected = settings.value(QStringLiteral("instructions/files")).toStringList();
@@ -1997,6 +2176,8 @@ private:
             {QStringLiteral("rewind-code"), QString(), QStringLiteral("Restore files the agent changed since an earlier turn")},
             {QStringLiteral("fork"), QString(), QStringLiteral("Continue this conversation in a new pane")},
             {QStringLiteral("resume"), QString(), QStringLiteral("Resume a saved session")},
+            {QStringLiteral("conversations"), QStringLiteral("[words]"), QStringLiteral("List and search every conversation and Relay's terminal history")},
+            {QStringLiteral("find"), QStringLiteral("[words]"), QStringLiteral("Find in this pane: conversation and terminal scrollback")},
             {QStringLiteral("plan"), QString(), QStringLiteral("Toggle plan mode")},
             {QStringLiteral("recap"), QString(), QStringLiteral("Summarize this session")},
             {QStringLiteral("tasks"), QString(), QStringLiteral("Task list: progress, mark done, cancel, re-ask")},
@@ -2129,6 +2310,16 @@ private:
         else if (name == QStringLiteral("rewind-code")) openRewind(QStringLiteral("code"));
         else if (name == QStringLiteral("fork")) requestFork();
         else if (name == QStringLiteral("resume")) openResume();
+        else if (name == QStringLiteral("conversations")) {
+            openConversations(args);
+            if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("conversations.open")); !keys.isEmpty())
+                hint(QStringLiteral("conversations.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("conversations")));
+        } else if (name == QStringLiteral("find")) {
+            openFindInView();
+            if (!args.isEmpty() && m_findBar) m_findBar->start(args);
+            if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("find.inView")); !keys.isEmpty())
+                hint(QStringLiteral("find.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("find in this pane")));
+        }
         else if (name == QStringLiteral("plan")) togglePlanMode();
         else if (name == QStringLiteral("recap")) requestRecap();
         else if (name == QStringLiteral("tasks") || name == QStringLiteral("requests") || name == QStringLiteral("todos")) {
@@ -2522,6 +2713,13 @@ private:
         m_backend->onPromptMark = [this](char kind, int exitCode) {
             m_lastPromptMark = kind;
             if (kind == 'D') m_lastMarkExitCode = exitCode;
+        };
+        // Output of the commands Relay itself ran, for the conversation index (protocol 14).
+        // Only enabled between "command loaded" and "shell ready", so it costs nothing otherwise.
+        m_backend->setOutputCallbackEnabled(false);
+        m_backend->onOutput = [this](const QByteArray &bytes) {
+            if (!m_capturing || m_capture.size() >= kCommandCaptureCap) return;
+            m_capture.append(bytes.left(kCommandCaptureCap - m_capture.size()));
         };
         m_backend->onLinkActivated = [this](const QString &target, int line, int column) {
             if (target.startsWith(QStringLiteral("http")) || target.startsWith(QStringLiteral("relay://"))) {
@@ -4420,6 +4618,8 @@ private:
                     });
                 }
             }
+            // The command Relay ran has finished: index its line, exit status and captured output.
+            finishCommandCapture(status);
             QTimer::singleShot(120, this, [this] { flushInline(); });
         } else if (stage == QStringLiteral("running")) {
             m_shellReady = false; m_promptReported = false;
@@ -4437,6 +4637,7 @@ private:
             m_commandLoaded = true;
             m_commandLog.append({m_pendingCommand, m_cwd});
             if (m_commandLog.size() > 500) m_commandLog.removeFirst();
+            beginCommandCapture(m_pendingCommand);   // conversation index (protocol 14)
             const bool fromQueue = m_activeValid && !m_active.agent;
             if (fromQueue) m_activeLoaded = true;
             // Do not discard edits typed while waiting for the shell acknowledgement.
@@ -4648,6 +4849,13 @@ private:
     QElapsedTimer m_fileIndexAge;
     QDateTime m_shellHistoryStamp;
     QList<QPair<QString, QString>> m_commandLog;   // command, directory
+    // Conversation list and search (protocol 14) plus the terminal-history capture.
+    relay::conversations::Dialog *m_conversations = nullptr;
+    relay::conversations::FindBar *m_findBar = nullptr;
+    QByteArray m_capture;
+    QString m_captureCommand, m_captureCwd;
+    qint64 m_captureAt = 0;
+    bool m_capturing = false;
     char m_lastPromptMark = 0;      // OSC 133 A/B/C/D, engine panes with the shell integration
     int m_lastMarkExitCode = -1;
     QTimer m_programPoll;
@@ -4684,7 +4892,7 @@ private:
     QString m_rewindKind = QStringLiteral("chat");
     bool m_rewindPending = false, m_forkPending = false, m_resumePending = false, m_recapManual = false;
     bool m_instructionsDialogPending = false, m_onboarding = false, m_agentsListPending = false, m_reconfigureOnNewChat = false;
-    bool m_finishedWhileAway = false, m_forkLoadPending = false, m_commandLoaded = false;
+    bool m_finishedWhileAway = false, m_forkLoadPending = false, m_commandLoaded = false, m_initialIsFork = true;
     int m_turnsCompleted = 0, m_lastRecapTurns = -1, m_skillCount = 0;
     QList<SteerEntry> m_steering;
     quint64 m_lastQueuedEntryId = 0;
@@ -5144,13 +5352,14 @@ public:
         updateTitles();
     }
 
-    // Fork: a new agent pane on the right continues from the same conversation state.
-    void openFork(Pane *source, const QJsonObject &state, const QString &title) {
+    // Fork: a new agent pane on the right continues from the same conversation state. The
+    // conversation list uses the same path with `fork` false to open a saved conversation.
+    void openFork(Pane *source, const QJsonObject &state, const QString &title, bool fork = true) {
         if (!source || source->window() != this) return;
         Pane *pane = nullptr;
         try { pane = createPane({{"cwd", source->cwd()}, {"workspace", source->workspace()}}); }
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
-        pane->setInitialState(state, title);
+        pane->setInitialState(state, title, fork);
         insertBeside(source, pane, Qt::Horizontal, false);
         setActive(pane);
         QTimer::singleShot(0, pane, [pane] { pane->focusInput(); });
@@ -5192,8 +5401,11 @@ protected:
         // A program such as vim owns its keys, unless the program_keys rule lets this shortcut act.
         Pane *pane = paneOf(widget);
         // Ctrl+H only takes control from the prompt box; in the terminal it stays Backspace.
+        // Ctrl+F only opens the find bar from the prompt box; in the terminal it stays Readline's
+        // forward-char, the way Ctrl+H stays Backspace there.
         if ((id == QStringLiteral("control.human") || id == QStringLiteral("input.toggle") || id == QStringLiteral("agent.interrupt")
-             || id == QStringLiteral("agent.planToggle") || id == QStringLiteral("agent.effortUp") || id == QStringLiteral("agent.effortDown"))
+             || id == QStringLiteral("agent.planToggle") || id == QStringLiteral("agent.effortUp") || id == QStringLiteral("agent.effortDown")
+             || id == QStringLiteral("find.inView"))
             && !(pane && pane->ownsComposerWidget(widget)))
             return QMainWindow::eventFilter(object, event);
         if (pane && pane->ownsTerminalWidget(widget) && pane->processBusy() && !Keymap::instance().actsInsidePrograms(key))
@@ -5361,6 +5573,8 @@ private:
         }
         else if (id == QStringLiteral("agent.fork")) pane->requestFork();
         else if (id == QStringLiteral("agent.resume")) pane->openResume();
+        else if (id == QStringLiteral("conversations.open")) pane->openConversations();
+        else if (id == QStringLiteral("find.inView")) pane->openFindInView();
         else if (id == QStringLiteral("agent.recap")) pane->requestRecap();
         else if (id == QStringLiteral("agent.requests")) pane->toggleRequests();
         else if (id == QStringLiteral("agent.continue")) pane->continueTurn(Keymap::instance().shortcutText(id).isEmpty());
@@ -5761,6 +5975,20 @@ private:
         items << actionItem(agent, QStringLiteral("Rewind code…"), QStringLiteral("Restore files the agent changed since a turn · /rewind-code"), QStringLiteral("agent.rewindCode"));
         items << actionItem(agent, QStringLiteral("Fork conversation"), QStringLiteral("Continue this conversation in a new pane"), QStringLiteral("agent.fork"));
         items << actionItem(agent, QStringLiteral("Resume session…"), QStringLiteral("Open a saved agent session in this pane"), QStringLiteral("agent.resume"));
+        items << actionItem(agent, QStringLiteral("Conversations…"),
+                            QStringLiteral("Search every conversation and Relay's terminal history · /conversations"),
+                            QStringLiteral("conversations.open"));
+        items << actionItem(agent, QStringLiteral("Find in this pane…"),
+                            QStringLiteral("Search this conversation and the terminal scrollback"),
+                            QStringLiteral("find.inView"));
+        {
+            PaletteItem rebuild;
+            rebuild.key = QStringLiteral("conversations.rebuild"); rebuild.section = agent;
+            rebuild.label = QStringLiteral("Rebuild the conversation index");
+            rebuild.detail = QStringLiteral("The index is a cache of the saved conversations; this recreates it");
+            rebuild.run = [this] { if (m_active) m_active->rebuildConversationIndex(); };
+            items << rebuild;
+        }
         items << actionItem(agent, QStringLiteral("Recap"), QStringLiteral("Summarize what happened in this session"), QStringLiteral("agent.recap"));
         items << actionItem(agent, QStringLiteral("Tasks…"),
                             pane && !pane->tasksProgress().isEmpty() ? pane->tasksProgress() + QStringLiteral(" · mark done, cancel, re-ask · /tasks")
@@ -6028,6 +6256,9 @@ private:
             {QStringLiteral("rewind"), QStringLiteral("undo checkpoint restore revert history back chat code files")},
             {QStringLiteral("fork"), QStringLiteral("branch copy duplicate conversation")},
             {QStringLiteral("resume"), QStringLiteral("sessions history reopen continue")},
+            {QStringLiteral("conversations"), QStringLiteral("search find chats threads history full text index past old sessions grep")},
+            {QStringLiteral("find in this pane"), QStringLiteral("search scrollback conversation ctrl+f highlight matches")},
+            {QStringLiteral("rebuild the conversation index"), QStringLiteral("reindex search index sqlite fts repair cache")},
             {QStringLiteral("new chat"), QStringLiteral("clear reset conversation fresh")},
             {QStringLiteral("stop agent"), QStringLiteral("cancel abort halt interrupt")},
             {QStringLiteral("provider"), QStringLiteral("api key byok endpoint base url credentials")},
@@ -6436,6 +6667,7 @@ private:
         pane->onPlanWritten = [guard](const QString &path, Pane *) { if (auto *w = windowOf(guard)) w->openDocument(path, guard, true); };
         pane->onOpenDocument = [guard](const QString &path) { if (auto *w = windowOf(guard)) w->openDocument(path, guard, false); };
         pane->onForkState = [guard](const QJsonObject &state, const QString &title) { if (auto *w = windowOf(guard)) w->openFork(guard, state, title); };
+        pane->onOpenSessionInNewPane = [guard](const QJsonObject &state, const QString &title) { if (auto *w = windowOf(guard)) w->openFork(guard, state, title, false); };
         pane->onOpenSubagent = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openSubagentPane(guard, id); };   // subagents UI
         pane->onShowAgents = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openAgentsMenu(); } };   // /agents → subagents panel menu
         pane->onOpenTurn = [guard](const QString &turnId) { if (auto *w = windowOf(guard)) w->openTurnPane(guard, turnId); };

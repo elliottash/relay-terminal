@@ -143,9 +143,25 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
   `/context`, `/rewind` (rewind chat: the conversation only, files untouched; also Esc Esc in
   an empty prompt), `/rewind-code` (restores the files the agent changed, after showing them and
   asking; "Code and chat" does both), `/fork` (continues in a new pane),
-  `/resume` (with a recap), `/plan`, `/recap`, `/tasks`, `/continue`, `/agents`, `/skills`, `/instructions`, `/export`
+  `/resume` (with a recap), `/conversations`, `/find`, `/plan`, `/recap`, `/tasks`, `/continue`, `/agents`, `/skills`, `/instructions`, `/export`
   (Markdown under `.relay/exports`). Coming back to the window after 3 minutes, with a finished
   turn and an empty prompt, prints a short recap (Actions › Agent options turns it off).
+- **Conversations: list and full-text search.** Ctrl+Shift+O (also `/conversations` and Actions ›
+  Conversations…) opens every saved conversation, grouped by project and newest first, with a
+  search field that filters as you type. The search covers **both** agent threads (your prompts,
+  the agent's replies, its tool calls and their output) and **Relay's terminal history** (the
+  commands Relay ran, their exit status and, on the Relay engine, their output); every hit says
+  which kind it is and which turn it came from. Filters: this project or all projects, agent
+  threads or terminal history, model, open tasks, date. The right pane previews the conversation
+  with the match highlighted; Enter resumes it in this pane, Shift+Enter opens it in a new one,
+  and there are Rename, Pin and Delete. Words are matched inside one message or command; use
+  `"quotes"` for a phrase.
+  **Ctrl+F** searches the current pane instead: the terminal scrollback (Relay engine) and this
+  pane's conversation, with next/previous, wrap, a match count and Esc to close.
+  The index is an SQLite FTS5 file next to the sessions (`~/.local/share/relay/index.db`, 0600),
+  updated on every autosave and rebuildable from the session files at any time (Actions › Rebuild
+  the conversation index). It holds message text, so it stays on this machine and is deleted with
+  the conversation; `RELAY_INDEX=off` turns indexing off entirely.
 - **Model roles.** Actions › Agent options › Model roles picks a model per job: terminal use,
   subagents, the Switchboard agent, the fast agent, chores, vision and route assist. Each role is
   "same as the main agent" until you pick one, and a role whose key is missing quietly falls back to
