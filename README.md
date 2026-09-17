@@ -51,8 +51,11 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Quick start
 
-1. Start Relay. If you use Warp, open **Provider / BYOK…** and click **Import keys from Warp**.
-   Otherwise pick a preset, paste a key, and tick **Save entered key to the desktop keyring**.
+1. Start Relay and open **Settings › Models › API keys…** (Ctrl+, , the gear at the bottom of the
+   model box, or Actions › API keys…). Add a key for one provider — or click **Import from Warp** or
+   **Import from Claude Code / Codex**. **Test** checks the key reaches the provider.
+   Then open **Model roles…** and pick your default provider; GLM Coding Plan + OpenRouter and
+   Kimi Code + OpenRouter are the recommended pairs.
 2. Type `git status` and press Enter. It runs in the terminal.
 3. Type `why is this build failing?` and press Enter. The agent answers inline.
 
@@ -82,9 +85,13 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 | Ctrl+C in the prompt box (nothing selected, program running) | Interrupt the program |
 
 Shortcut presets: **Relay** (Chrome-style, default), **Warp**, **VS Code**, **Konsole**
-(Actions › Shortcut preset). Every shortcut can be changed in
-`~/.config/RelayTerminal/relay/keybindings.json` (Actions › Edit keyboard shortcuts), which
-reloads live. Copy on select is off by default (Actions › Copy on select).
+(Settings › Shortcuts). Every shortcut can be changed in
+`~/.config/RelayTerminal/relay/keybindings.json` (Settings › Shortcuts › Edit keyboard shortcuts),
+which reloads live. Copy on select is off by default (Settings › Terminal).
+
+**Settings** (Ctrl+, , or Actions › Settings) is one window with six sections — General, Models,
+Terminal, Agent, Privacy, Shortcuts. Every row is also in the actions palette under Settings, so
+nothing there needs the mouse.
 
 ## Feature tour
 
@@ -112,7 +119,7 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
   terminal in distinct colors. They are written to the display, never typed into the shell.
   While a program such as vim runs, output shows in a small panel and prints when it exits.
 - **Thinking and tool calls.** Model reasoning streams dimly in a panel over the bottom of the
-  terminal (Actions › Agent options › Show thinking); the terminal keeps one line,
+  terminal (Settings › General › Show thinking); the terminal keeps one line,
   `✦ thought for 7 s`. A turn that used tools ends with `✦ 3 tool calls · 12 s`: Ctrl+click it
   (or Actions › Open last agent turn) for a pane listing each call; Enter on a call opens its
   full output. The link is a `relay://` URL; Relay registers a user-level
@@ -181,6 +188,20 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
   "same as the main agent" until you pick one, and a role whose key is missing quietly falls back to
   the main agent. The fast agent has a default per provider (GLM-5.3 Flash, DeepSeek V4.1 Flash,
   Kimi K2.7 Code HighSpeed). New panes start on the fast agent (the first pane keeps the main agent);
+  turn and an empty prompt, prints a short recap (Settings › General turns it off).
+- **Model roles: Main, Flash, Lite.** Settings › Models › **Model roles…** (also the ⚙ at the bottom
+  of the model box, or Actions › Model roles…) asks for one thing: your default provider. Everything
+  else follows from it as three models — **Main** for agent turns and subagents, **Flash** for driving
+  programs and quick side calls, **Lite** for titles, labels and duplicate checks. Picking GLM gives
+  glm-5.3 / glm-5.3-flash / Gemini 3.8 Flash; Kimi gives kimi-k3 / kimi-k2.7-code-highspeed / Gemini
+  3.8 Flash; Anthropic gives Opus 5 / Sonnet 5 / Haiku 4.5. Each row is editable.
+  **Advanced options** opens one row per job — agent turns, subagents, terminal use, new panes,
+  suggestions, summaries, Switchboard threads, chores, the request audit, images — each showing the
+  model it resolves to ("Flash · glm-5.3-flash") and following its tier until you pin it.
+  Command routing is pinned to `google/gemini-3.5-flash-lite` on purpose: routing has a sub-second
+  budget and that model measures 0.5–0.6 s against 2.3–4.9 s for Gemini 3.8 Flash.
+  A tier whose provider has no key steps down to the next one and says so inline; nothing ever fails
+  because a key is missing. New panes start on the fast agent (the first pane keeps the main agent);
   Alt+F, or Actions › Fast agent for this pane, switches a pane either way without losing the
   conversation.
 - **Plan mode.** Shift+Tab in the prompt box (or `/plan`) shows a PLAN chip: the agent
@@ -198,10 +219,10 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
   open the task list: requests (your words, verbatim) with their tasks under them, marked
   ✓ ◐ ○ ✗ ⏸ ✕; keys: Enter folds, `d` marks done, `x` cancels, `o` reopens, `r` re-asks, Esc
   closes. When a turn stops at its step limit (default 50 model calls, 150 tool calls; Actions ›
-  Agent options), the terminal shows **▸ Continue** (Ctrl+click, `/continue` or the palette), and
+  Settings › Agent), the terminal shows **▸ Continue** (Ctrl+click, `/continue` or the palette), and
   turns with more than one task end with a line such as
   `✦ Tasks 3/5 (1 failed, 1 deferred) · T4 “…” failed, T5 “…” deferred`. Resume and recaps list
-  unfinished requests. Actions › Agent options › Audit requests after each turn (off by default)
+  unfinished requests. Settings › Agent › Audit requests after each turn (off by default)
   flags asks that may be unaddressed.
 - **When a model goes quiet.** A turn whose model sends nothing usable for 60 s (SSE keepalives do
   not count) ends instead of hanging: the connection is closed, the turn is retried once
@@ -216,8 +237,8 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
   level — its opt-in "Verbose" level does add your prompt text to the file.
 - **Instruction files.** On first launch Relay lists instruction files from other tools
   (CLAUDE.md, AGENTS.md, WARP.md, …) to include, and can combine them into a global
-  `~/.config/relay/relay.md`. Change it later in Actions › Agent options › Instructions….
-- **AI suggestions (off by default).** Actions › Agent options: a suggested next command after a
+  `~/.config/relay/relay.md`. Change it later in Settings › Agent › Instructions….
+- **AI suggestions (off by default).** Settings › Privacy: a suggested next command after a
   command finishes (→ or Tab accepts) and a suggested next prompt after an agent turn (Tab).
 - **Reopen where you left off.** Quit Relay and start it again: your windows come back with their
   tabs, splits, sizes and screens, each pane in the directory it was in, on the same model and
@@ -246,7 +267,7 @@ reloads live. Copy on select is off by default (Actions › Copy on select).
 - **Shortcut hints.** When you click something that has a faster key, a short toast says so
   ("Next time: Ctrl+P · new pane to the right"), at most 3 times per hint and not more than once
   every 20 s. After a finished agent turn, an idle empty prompt box shows a tip. Actions ›
-  Agent options › Shortcut hints turns them off; Reset shortcut hints shows them again.
+  Settings › General › Shortcut hints turns them off; Reset shortcut hints shows them again.
 - **Skills.** The agent sees your Warp-style skills (`~/.warp/skills`, `~/.claude/skills`,
   refined copies and imports) and loads one before following it. `/skills` (or Actions ›
   Skills…) lists them: uncheck to exclude, **Refine selected** has the agent write an improved
@@ -260,12 +281,18 @@ Relay is not a Konsole fork and does not change your Konsole settings or dotfile
 
 ## Privacy and your keys
 
-- **BYOK.** Presets for Kimi K3, Z.AI GLM-5.3 (standard and Coding Plan) and DeepSeek V4.1
-  Flash via OpenRouter, or any OpenAI-compatible endpoint.
+- **BYOK.** Subscriptions (GLM Coding Plan, Kimi Code, MiniMax Coding/Token Plan), the OpenRouter
+  aggregator, and pay-as-you-go OpenAI, Anthropic and Google Gemini — all through their
+  OpenAI-compatible endpoints — plus Kimi's and Z.AI's standard APIs and any other
+  OpenAI-compatible endpoint.
 - **Where keys live.** The desktop keyring (GNOME Keyring or KWallet) through `secret-tool`,
   or environment variables such as `RELAY_KIMI_API_KEY` (`RELAY_KEYRING=off` skips the keyring). Keys are passed on stdin, never on a
-  command line, in settings files or logs. **Import keys from Warp** copies Warp's
-  custom-endpoint keys into the keyring.
+  command line, in settings files or logs. Settings › Models › **API keys…** shows, per provider,
+  whether the key is in the keyring, comes from `RELAY_*_API_KEY` or is missing; **Test** makes one
+  two-word call and reports ok or the HTTP status without ever printing the key. **Import from Warp**
+  copies Warp's custom-endpoint keys; **Import from Claude Code / Codex** copies an API key out of
+  `~/.claude/settings.json` or `~/.codex/auth.json` — an OAuth login is not an API key and is never
+  imported.
 - **No telemetry.** No analytics, crash reports, account or Relay server. Relay connects only to
   the provider you configure, when you use the agent.
 - **What goes to your provider.** Your agent prompts, the conversation, and tool results

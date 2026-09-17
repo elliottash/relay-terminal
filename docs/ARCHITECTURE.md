@@ -82,6 +82,7 @@ Options: `--workspace/-w PATH` (initial terminal directory and agent workspace) 
 |---|---|
 | `WindowManager` | Window list, a stack of up to 25 closed items (pane, tab or window), the saved window layout, the `relay open` socket |
 | `RelayWindow` | `QMainWindow`: its own title bar (the tab row), a `QTabWidget`, the actions palette overlay, an application event filter for shortcuts |
+| `RelayWindow` | `QMainWindow`: toolbar (Actions, New chat, Stop agent, Provider / BYOK…), a `QTabWidget`, the actions palette overlay, the Settings window, an application event filter for shortcuts |
 | Tab page | One root widget: a leaf or a tree of `QSplitter`s |
 | `Pane` (leaf) | Terminal pane: KonsolePart, Bash bridge, composer, its own worker and conversation |
 | `ToolPane` (leaf) | Folder explorer or file preview (section 10) |
@@ -651,25 +652,43 @@ reference when the conversation belongs to another workspace); Shift+Enter opens
 through the same path as a fork.
 
 ### Model roles
+### Model roles and the Main / Flash / Lite tiers
 
-`backend/relay_core/roles.py`, protocol section 13. One configurable model per job: `main`,
-`terminal_use`, `subagent`, `switchboard`, `fast`, `chores`, `vision` and `route_assist`. Every role
-defaults to "same as the main agent"; the GUI stores the table under QSettings `roles/<role>/{preset,
-model,effort}` and sends it in `configure` / `set_agent_options`.
+`backend/relay_core/roles.py` and the tier table in `presets.py`, protocol sections 13 and 13.7.
+Eleven roles — `main`, `terminal_use`, `subagent`, `switchboard`, `fast`, `summaries`, `suggestions`,
+`chores`, `audit`, `vision`, `route_assist` — but only **three** knobs, because every role follows a
+tier:
+
+| Tier | Roles | Default |
+|---|---|---|
+| Main | `main`, `subagent`, `switchboard` | the pane's own model |
+| Flash | `terminal_use`, `fast`, `summaries`, `suggestions` | `TIER_DEFAULTS[<main preset>]["flash"]` |
+| Lite | `chores`, `audit` | `TIER_DEFAULTS[<main preset>]["lite"]` |
+
+`vision` and `route_assist` are outside the tiers: vision uses the provider's image model, and route
+assist is pinned to `google/gemini-3.5-flash-lite` because routing has a sub-second budget (0.5–0.6 s
+measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not move it.
 
 - `RoleResolver` turns a role into a `ProviderConfig`, resolving its key through the keystore (the main
-  agent's in-memory key is reused when a role lands on the main preset). A role whose key is missing
-  falls back to the main agent with a one-line warning in `model_roles` — never a hard failure.
-- Built-in defaults: the fast agent per main provider (GLM → `glm-5.3-flash` with thinking off,
-  OpenRouter → `deepseek/deepseek-v4.1-flash`, Kimi → `kimi-k2.7-code-highspeed`, Kimi Code →
-  `kimi-for-coding-highspeed`), chores → `google/gemini-3.8-flash` on OpenRouter else the fast agent,
-  vision → `glm-5.3-flash` on GLM, route assist → `google/gemini-3.5-flash-lite`.
-- Used by: subagents that inherit (`SubagentFactory.base()`), compaction summaries, recaps and
-  suggestions (`fast`), the request audit (`chores`), routing assist (`route_assist`), and panes that
-  run the fast agent themselves (`configure {agent_role}` / `set_agent_role`).
-- GUI: Actions › Agent options › Model roles, "New panes use the fast agent" (on by default; the first
-  pane keeps the main agent), the pane's model chip (role and effective model, all roles in its
-  tooltip) and the palette action "Fast agent for this pane" (`agent.fastAgent`, Alt+F).
+  agent's in-memory key is reused when a role lands on the main preset).
+- **Two kinds of "no key".** A tier whose provider has no key steps one tier towards Main
+  (Lite → Flash → Main) and reports an inline `note`; that is expected, so it never reaches
+  `model_roles.warnings`. A role the user pinned to a provider whose key is missing falls back to the
+  main agent and does produce a `warning`. Neither is ever a hard failure.
+- QSettings: `provider/preset` is the default provider, `tiers/<flash|lite>/{preset,model,effort}` are
+  the tier overrides, and `roles/<role>/tier` (or `roles/<role>/{preset,model,effort}` for a pinned
+  endpoint) is the per-job override. `Pane::rolesObject()` and `Pane::tiersObject()` turn them into the
+  protocol objects; both go out together in `configure` and `set_agent_options`.
+- Used by: subagents that inherit (`SubagentFactory.base()`), compaction and recaps (`summaries`),
+  next-command/next-prompt suggestions (`suggestions`), the request audit (`audit`), routing assist
+  (`route_assist`), and panes that run the fast agent themselves (`configure {agent_role}` /
+  `set_agent_role`).
+- GUI: `src/ModelSettings.*` — `RolesDialog` (default provider, the three tier rows, an Advanced
+  disclosure with one row per job showing the model it resolves to). Reached from Settings › Models,
+  the palette (`agent.modelRoles`) and the ⚙ entry at the bottom of the pane's model box. Plus
+  "New panes use the fast agent" (on by default; the first pane keeps the main agent), the pane's model
+  chip (role and effective model, all roles in its tooltip) and "Fast agent for this pane"
+  (`agent.fastAgent`, Alt+F).
 - Difficulty-based routing between the main and fast agent is deliberately not implemented yet.
 
 ### Provider transport
@@ -688,19 +707,35 @@ model,effort}` and sends it in `configure` / `set_agent_options`.
 - A stream without `[DONE]` or a `stop`/`tool_calls` finish, or with `length` or
   `content_filter`, is an error; partial tool calls never run. HTTP error bodies are not echoed.
 
-Presets (`backend/relay_core/presets.py`, mirrored by hand in the dialog in `src/main.cpp`):
+Presets (`backend/relay_core/presets.py`; the advanced dialog in `src/main.cpp` keeps a copy that
+`tests/test_presets.py` checks for drift). Every endpoint and model id was verified against the
+provider's own documentation on 2026-09-17, and the doc URL sits beside the entry it supports.
 
-| Id | Base URL | Model | Extras |
-|---|---|---|---|
-| `kimi` | `https://api.moonshot.ai/v1` | `kimi-k3` | `reasoning_effort: high` |
-| `kimi-code` | `https://api.kimi.ai/coding/v1` | `k3` (also `k3-256k`, `kimi-for-coding` = K2.8 Preview, `kimi-for-coding-highspeed`) | `reasoning_effort: high`; key from the Kimi Code Console |
-| `glm` | `https://api.z.ai/api/paas/v4` | `glm-5.3` | thinking enabled, `reasoning_effort: high` |
-| `glm-coding` | `https://api.z.ai/api/coding/paas/v4` | `glm-5.3` | same |
-| `openrouter` | `https://openrouter.ai/api/v1` | `deepseek/deepseek-v4.1-flash` | none |
+| Id | Group | Base URL | Model | Effort style |
+|---|---|---|---|---|
+| `glm-coding` | subscription | `https://api.z.ai/api/coding/paas/v4` | `glm-5.3` | `glm` |
+| `kimi-code` | subscription | `https://api.kimi.ai/coding/v1` | `k3` (also `k3-256k`, `kimi-for-coding`, `kimi-for-coding-highspeed`) | `kimi` |
+| `minimax` | subscription | `https://api.minimax.io/v1` | `MiniMax-M3` | `none` |
+| `openrouter` | aggregator | `https://openrouter.ai/api/v1` | `deepseek/deepseek-v4.1-flash` | `openrouter` |
+| `glm` | pay-as-you-go | `https://api.z.ai/api/paas/v4` | `glm-5.3` | `glm` |
+| `kimi` | pay-as-you-go | `https://api.moonshot.ai/v1` | `kimi-k3` | `kimi` |
+| `openai` | pay-as-you-go | `https://api.openai.com/v1` | `gpt-6-astra` | `openai` |
+| `anthropic` | pay-as-you-go | `https://api.anthropic.com/v1` | `claude-opus-5` | `none` |
+| `gemini` | pay-as-you-go | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3.1-pro-preview` | `gemini` |
 
-The Provider / BYOK dialog also accepts custom base URL, model and extras, requires an
-existing workspace and a consent checkbox for sending prompts and tool results to the
-provider. Saving makes no network call. Switching model starts a new conversation.
+Provider quirks the effort styles encode: Z.AI rejects `thinking.type: "disabled"` on GLM-5.3 and
+GLM-5.3-Flash, so the Flash tier asks for `reasoning_effort: low` with thinking still enabled;
+Kimi documents `reasoning_effort` for `kimi-k3` only, so the high-speed models carry none; Gemini
+rejects `reasoning_effort: "minimal"` on 3.8 Flash, so `max` maps to `high`; Anthropic's
+OpenAI-compatible layer ignores `reasoning_effort` and no longer accepts `thinking` on Claude 5, and
+MiniMax has no `reasoning_effort` at all — both use the `none` style, which sends no effort field and
+leaves the model's own default. MiniMax's Coding Plan was renamed the Token Plan and shares the
+pay-as-you-go base URL; only the key differs, and the two kinds are not interchangeable.
+
+The advanced Provider dialog (Settings › Models › Advanced provider settings) still accepts a custom
+base URL, model and extras, requires an existing workspace and a consent checkbox for sending prompts
+and tool results to the provider. Saving makes no network call. Switching model starts a new
+conversation.
 
 ### Agent loop
 
@@ -828,7 +863,7 @@ bottom of the terminal: running prompt, numbered queued prompts with ×, Clear, 
 "PAUSED · Resume". The palette offers Clear agent queue and Resume agent queue when relevant.
 Full protocol: [QUEUE-INTERRUPT.md](QUEUE-INTERRUPT.md).
 
-## 12. Keys, keyring and Warp import
+## 12. Keys, keyring and imports
 
 `backend/relay_core/keystore.py`.
 
@@ -841,17 +876,45 @@ Full protocol: [QUEUE-INTERRUPT.md](QUEUE-INTERRUPT.md).
   without the key crossing the GUI pipe (`use_stored_key`): the saved preset, else Warp's
   default agent model, else the first stored key. A "custom" configuration whose base URL
   matches a preset also uses that preset's stored key.
-- A key typed into the dialog is sent over the private pipe and kept in worker memory. It is
-  saved to the keyring only if "Save entered key to the desktop keyring" is ticked.
+- A key typed into the keys modal is sent over the private pipe (`store_key`) and written straight
+  to the keyring; it is never held in the GUI, echoed back or written to QSettings. The advanced
+  provider dialog still has the older path, where a typed key stays in worker memory and only reaches
+  the keyring if "Save entered key to the desktop keyring" is ticked.
+- **Keys modal** (`src/ModelSettings.h`, `KeysDialog`): one row per preset, grouped Subscriptions /
+  Aggregator / Pay-as-you-go, showing whether the key is in the keyring, comes from
+  `RELAY_<PRESET>_API_KEY` or is missing (`presets.key_source`), with Add/Replace, Remove
+  (`remove_key`, hidden for an environment key Relay cannot delete), a link to the provider's key page
+  and **Test**.
+- **Test** (`backend/relay_core/keytest.py`, `test_key` → `key_tested`) makes one two-word, no-tools
+  call with a 256-token budget on a background thread and reports ok or the HTTP status. The key is
+  read inside the worker; provider error bodies are never echoed, because they can quote the request.
 - **Warp import** reads `agents.custom_endpoints` from `~/.config/warp-terminal/settings.toml`
   (TOML 1.1 inline tables are normalized for Python's TOML 1.0 parser), reads keys from Warp's
   keyring entry (`service=dev.warp.Warp key=AiCustomEndpointKeys`), matches endpoints to presets
   by base URL, and stores each key under the Relay preset. It never returns key material.
+- **Claude Code / Codex import** (`import_agent_tools`) reads `~/.claude/settings.json`
+  (`env.ANTHROPIC_API_KEY`) and `~/.codex/auth.json` (`OPENAI_API_KEY`) and stores what it finds under
+  the `anthropic` and `openai` presets. Both tools sign in with OAuth by default, and an OAuth token is
+  not an API key — it does not work on the OpenAI-compatible endpoints Relay talks to — so only a plain
+  key is imported and anything else is reported as skipped.
 - CLI: `scripts/relay-agent.py --import-warp`, `--list`, or an interactive session on the same
   backend.
 
 Non-secret provider settings live in QSettings (`provider/preset`, `base`, `model`, `extra`,
-`max_tokens`) in `~/.config/RelayTerminal/relay.conf`.
+`max_tokens`) in `~/.config/RelayTerminal/relay.conf`, alongside the tier and role overrides
+(`tiers/<tier>/…`, `roles/<role>/…`).
+
+### Settings window
+
+`src/ModelSettings.h`, `SettingsWindow`. One dialog, a section list down the left (General, Models,
+Terminal, Agent, Privacy, Shortcuts) and rows on the right. `RelayWindow::settingsSections()` builds a
+catalog of `SettingRow`s — toggle, choice, text, number, button or info — each carrying its own reader
+and writer, so QSettings stays the single source of truth and nothing in the window knows how a
+setting is used. The actions palette renders the **same** catalog as submenus and entries
+(`settingsMenuItems()`), so every setting keeps a keyboard path and stays searchable. Changing a row
+rebuilds the window, which keeps rows that describe other rows (a tier's effective model) current.
+Ctrl+, opens it in the Relay preset; presets that already bind Ctrl+, to "edit keyboard shortcuts"
+leave it unbound rather than fight for the key.
 
 ## 13. Per-pane isolation
 
@@ -1016,12 +1079,14 @@ Other limits:
 | `src/Notifications.*` | notification centre behind the header bell |
 | `src/TurnTranscript.*` | turn details pane (tool calls, transcript) |
 | `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |
+| `src/ModelSettings.*` | the API-keys and model-roles modals and the compact Settings window |
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `src/Conversations.*` | conversation list with search (Ctrl+Shift+O) and the Ctrl+F find bar |
 | `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
 | `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search), `logs` (rotating `worker.log`) |
+| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `src/KonsoleBackend.*`, `src/EngineBackend.*` | the two `TerminalBackend` implementations |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |

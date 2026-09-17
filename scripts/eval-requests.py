@@ -153,7 +153,35 @@ def scenario6(run: Run, ws: Path, timeout: float) -> dict:
     return {"asks": 9, "completed": sum(checks.values()), "checks": checks, "compactions": compactions}
 
 
-SCENARIOS = {1: scenario1, 2: scenario2, 3: scenario3, 4: scenario4, 6: scenario6}
+def scenario8(run: Run, ws: Path, timeout: float) -> dict:
+    """A single simple ask. `todos.RULES` says to skip the list for one, and since card H3QW the GUI
+    no longer invents a task from the prompt, so `wrote_no_list` is what keeps the Tasks chip hidden."""
+    (ws / "README.md").write_text("# Demo\nthe answer is 42\n")
+    run.sup.submit("Create answer.txt containing just the number that README.md says is the answer.", "now")
+    run.idle(timeout)
+    ok = file_is(ws, "answer.txt", "42")
+    return {"asks": 1, "completed": int(ok), "checks": {"answer.txt": ok},
+            "wrote_no_list": not run.agent.todos.items}
+
+
+def scenario9(run: Run, ws: Path, timeout: float) -> dict:
+    """A message that refines an ask already covered by a todo. `todos.RULES` says to add its request
+    id to that todo rather than add one, so the refinement should not become a second task."""
+    run.sup.submit("Run `sleep 10` (timeout 60 seconds), then create note.txt containing hello.", "now")
+    run.wait(lambda e: e.get("event") == "tool_started", timeout)
+    time.sleep(1.0)
+    run.sup.submit("actually make note.txt say hello world, not hello", "steer")
+    run.idle(timeout)
+    todos = run.agent.todos.items
+    return {"asks": 2, "completed": int(file_is(ws, "note.txt", "hello world")),
+            "checks": {"note.txt": file_is(ws, "note.txt", "hello world")},
+            # The steer is R2: merged means one todo carries both it and the ask it refines.
+            "refinement_merged": any("R2" in t["request_ids"] and len(t["request_ids"]) > 1 for t in todos),
+            "todo_count": len(todos)}
+
+
+SCENARIOS = {1: scenario1, 2: scenario2, 3: scenario3, 4: scenario4, 6: scenario6,
+             8: scenario8, 9: scenario9}
 
 
 def main() -> int:

@@ -425,16 +425,24 @@ exactly as before.
 | Role (protocol name) | Used for | Default |
 |---|---|---|
 | `main` | the pane's own agent | the configured preset (read-only here: set with `configure` / `set_model`) |
-| `terminal_use` | driving programs, fixing commands | main |
-| `subagent` | subagents that do not name a model | main |
-| `switchboard` | Switchboard card threads (stored now, used when the Switchboard lands) | main |
-| `fast` | panes that default to the fast agent, summaries, recaps, suggestions | per main provider (13.3) |
-| `chores` | duplicate checks, labels, titles, note scans, the request audit (12.6) | `google/gemini-3.8-flash` on OpenRouter when a key is stored, else the fast agent |
+| `terminal_use` | driving programs, fixing commands | Flash tier |
+| `subagent` | subagents that do not name a model | Main tier (the pane's own model) |
+| `switchboard` | Switchboard card threads (stored now, used when the Switchboard lands) | Main tier |
+| `fast` | panes that default to the fast agent | Flash tier |
+| `summaries` | compaction summaries and recaps | Flash tier |
+| `suggestions` | next-command and next-prompt suggestions | Flash tier |
+| `chores` | duplicate checks, labels, titles, note scans | Lite tier |
+| `audit` | the request audit (12.6) | Lite tier |
 | `vision` | image turns on presets without image support | GLM main → `glm-5.3-flash`, otherwise main |
 | `route_assist` | the routing assist call (section 11) | `google/gemini-3.5-flash-lite` on OpenRouter when a key is stored, else main |
 
-Side calls by role: compaction summaries, recaps and next-command/next-prompt suggestions use `fast`; the
-request audit uses `chores`; routing assist uses `route_assist`; instruction synthesis stays on `main`.
+Side calls by role: compaction summaries and recaps use `summaries`; next-command/next-prompt suggestions
+use `suggestions`; the request audit uses `audit`; routing assist uses `route_assist`; instruction
+synthesis stays on `main`.
+
+`summaries`, `suggestions` and `audit` were split out of `fast` and `chores` on 2026-09-17 so the roles
+modal's Advanced list can name one job per row (owner). Their defaults resolve to the same models as
+before, so a worker that gets no `roles` still behaves exactly as it did.
 
 ### 13.2 Options
 
@@ -443,7 +451,8 @@ the pane's own model). Each value is `null`, `{}` or `{"inherit": true}` for "sa
 
 | Field | Type | Meaning |
 |---|---|---|
-| `preset` | string | a built-in preset id (`kimi`, `kimi-code`, `glm`, `glm-coding`, `openrouter`) |
+| `tier` | `main`/`flash`/`lite` | follow a tier (13.7); exclusive with the endpoint fields below |
+| `preset` | string | a built-in preset id (`kimi`, `kimi-code`, `glm`, `glm-coding`, `minimax`, `openrouter`, `openai`, `anthropic`, `gemini`) |
 | `base_url` + `model` | string | a custom endpoint instead of a preset (both required together) |
 | `model` | string | with `preset`: a different model id on that provider |
 | `extra` | object | provider params; defaults to the preset's `extra` |
@@ -458,18 +467,16 @@ panes that default to the fast agent.
 
 ### 13.3 Fast-agent defaults by main provider
 
-| Main preset | Fast agent |
-|---|---|
-| `glm`, `glm-coding` | `glm-5.3-flash` with `{"thinking": {"type": "disabled"}}` (measured fastest with thinking off) |
-| `openrouter` | `deepseek/deepseek-v4.1-flash` |
-| `kimi` | `kimi-k2.7-code-highspeed` |
-| `kimi-code` | `kimi-for-coding-highspeed` |
-| custom / unknown endpoint | the main agent |
+Superseded by the Flash tier (13.7). `fast` resolves to `TIER_DEFAULTS[<main preset>]["flash"]`, which is
+the same model it used to be for every provider that existed before, except GLM: Z.AI now rejects
+`thinking.type: "disabled"` on GLM-5.3 and GLM-5.3-Flash
+(<https://docs.z.ai/guides/capabilities/thinking>), so the Flash tier sends
+`{"thinking": {"type": "enabled"}, "reasoning_effort": "low"}` instead.
 
 ### 13.4 Events
 
-`configured` gains `agent_role` (string) and `roles`: every role, including `main`, as
-`{role, label, model, preset, base_url, effort, source, warning?}`. `source` is `main` (follows the main
+`configured` gains `agent_role` (string), `roles` — every role, including `main`, as
+`{role, label, model, preset, base_url, effort, source, tier, warning?, note?}` — and `tiers` (13.7). `source` is `main` (follows the main
 agent), `configured` (from the `roles` table), `default` (a built-in default above) or `fallback` (a
 configured role whose key is missing). No key material appears in any of it.
 
@@ -707,3 +714,76 @@ Diagnostics › Log detail) and passed to workers as `RELAY_LOG_LEVEL`; workers 
 **`verbose` additionally writes prompt text** (`turn_prompt`) and is the only level that does; it is
 off by default and labelled "Verbose (includes prompt text)" in the palette. Actions › Diagnostics ›
 Open log folder opens the directory, and "Stop a silent model after…" edits `stall_timeout_s`.
+### 13.7 Main / Flash / Lite tiers (v1.4, 2026-09-17)
+
+Eight roles were too many knobs for one screen, so the roles modal shows **three** models — Main, Flash and
+Lite — and every role follows one of them. Source: owner, 2026-09-17 ("lets have main, flash, and lite
+presets … then advanced options, which would then reveal the specific actions"). Backend:
+`presets.TIER_DEFAULTS` (the per-provider table) and `roles.RoleResolver._tier` (resolution); tests:
+`tests/test_presets.py` and `tests/test_roles.py`. Additive: a worker that receives no `tiers` and no
+`"tier"` in `roles` resolves exactly as v1.3 did.
+
+| Tier | Used for | Where it comes from |
+|---|---|---|
+| `main` | agent turns, subagents, Switchboard threads | the pane's own model (`configure` / `set_model`) |
+| `flash` | terminal use, fast panes, summaries, suggestions | `TIER_DEFAULTS[<main preset>]["flash"]` |
+| `lite` | chores and the request audit | `TIER_DEFAULTS[<main preset>]["lite"]` |
+
+**Options.** `configure` and `set_agent_options` accept `tiers`, an object keyed by tier name. `main` is
+rejected — it is the pane's own model. Each value is `null` (restore the provider's default) or
+`{preset?, base_url?, model?, extra?, effort?}` with the same meaning as a `roles` entry. `roles.<name>`
+additionally accepts `{"tier": "main"|"flash"|"lite", "effort"?}`, which is exclusive with
+`preset`/`base_url`/`model`/`extra`; giving both is an error.
+
+**Fallback.** A tier whose provider has no stored key steps one tier towards Main — Lite → Flash → Main —
+and the Main tier is the pane's own model, so resolution never hard-fails. The step-down is expected, not a
+misconfiguration, so it appears as `note` on the tier and the role (`"No stored key for the Lite model;
+using Flash."`) and **not** in `model_roles.warnings`; `warnings` stays reserved for a role the user pinned
+explicitly whose key is missing.
+
+**Events.** `configured` and `model_roles` gain `tiers`:
+`{tier: {tier, label, model, preset, base_url, effort, source, using?, note?}}`, where `source` is
+`default` or `configured` and `using` is the tier actually serving it after any step-down. Each role in
+`roles` gains `tier` (the tier it came from, or `null` for `vision` / `route_assist`) and an optional
+`note`. No key material appears in any of it.
+
+**Defaults per provider** (verified against each provider's own documentation on 2026-09-17; the doc URL
+sits next to the entry in `backend/relay_core/presets.py`):
+
+| Default provider | Main | Flash | Lite |
+|---|---|---|---|
+| `glm`, `glm-coding` | `glm-5.3` | `glm-5.3-flash` (`reasoning_effort: low`) | `google/gemini-3.8-flash` on OpenRouter |
+| `kimi` | `kimi-k3` | `kimi-k2.7-code-highspeed` | `google/gemini-3.8-flash` on OpenRouter |
+| `kimi-code` | `k3` | `kimi-for-coding-highspeed` | `google/gemini-3.8-flash` on OpenRouter |
+| `openrouter` | `deepseek/deepseek-v4.1-flash` | `deepseek/deepseek-v4.1-flash` | `google/gemini-3.5-flash-lite` |
+| `minimax` | `MiniMax-M3` | `MiniMax-M2.7-highspeed` | `google/gemini-3.8-flash` on OpenRouter |
+| `anthropic` | `claude-opus-5` | `claude-sonnet-5` | `claude-haiku-4-5` |
+| `openai` | `gpt-6-astra` | `gpt-5.6-terra` | `gpt-5.6-luna` |
+| `gemini` | `gemini-3.1-pro-preview` | `gemini-3.8-flash` | `gemini-3.5-flash-lite` |
+| custom / unknown endpoint | the pane's model | the pane's model | the pane's model |
+
+`route_assist` is deliberately **not** tiered: it keeps `google/gemini-3.5-flash-lite` on OpenRouter, because
+the routing budget is under a second and that model measured 0.5–0.6 s against 2.3–4.9 s for Gemini 3.8
+Flash. Changing the Lite tier must not move it, so the GUI shows it as its own pinned row with that reason.
+
+### 13.8 Key management commands (v1.4, 2026-09-17)
+
+The keys modal needs three things the protocol did not have. All are additive.
+
+| Message | Reply | Meaning |
+|---|---|---|
+| `remove_key {preset, id?}` | `key_removed {preset, removed: bool}` | delete the keyring entry; `removed: false` when there was none (or `RELAY_KEYRING=off`) |
+| `test_key {preset, id?}` | `key_tested {preset, ok, model, elapsed_ms, error?, reply_chars?}` | one minimal call (two-word prompt, no tools, 256 output tokens) that answers "does this key reach this endpoint" |
+| `import_agent_tools {id?}` | `agent_tools_imported {imported: [{preset, name, model}], skipped: [string]}` | copy an API key out of `~/.claude/settings.json` (`env.ANTHROPIC_API_KEY`) or `~/.codex/auth.json` (`OPENAI_API_KEY`) |
+
+`test_key` runs on a background thread and emits exactly one event. The key is read from the keystore
+inside the worker and never crosses the pipe in either direction; `error` carries the HTTP status only,
+because provider error bodies can quote the submitted request (`provider.ProviderError` already strips
+them). An OAuth login is not an API key and is never imported: Claude Code and Codex both sign in with
+OAuth by default, and those tokens do not work on the OpenAI-compatible endpoints Relay talks to.
+
+The `presets` event gains, per preset, `group` (`subscription` / `aggregator` / `payg`), `key_url` (where
+the user gets a key), `note`, and `key_source` (`env` / `keyring` / `""`), so the modal can show
+"From RELAY_OPENROUTER_API_KEY" and refuse to offer Remove for something it cannot remove. The event also
+gains `tier_defaults` (13.7) and `role_actions` — the Advanced list, one row per job — so the GUI never
+keeps a second copy of the backend's tables.

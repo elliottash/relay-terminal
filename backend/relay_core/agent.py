@@ -438,7 +438,7 @@ class Agent:
             self.emit({"event": "compaction_started", "reason": reason})
             limit, ratio = self.context.limit, self.context.ratio
             result = compaction.compact(
-                self.messages, self.side_provider(role="fast"), manual=reason == "manual", focus=focus,
+                self.messages, self.side_provider(role="summaries"), manual=reason == "manual", focus=focus,
                 cancel=self.cancel_event,
                 over=lambda m: compaction.estimate_tokens(m) * ratio + compaction.estimate_tokens(tools) * ratio >= limit,
                 window_chars=max(20_000, min(400_000, self.context.window * compaction.CHARS_PER_TOKEN // 2)),
@@ -844,10 +844,10 @@ class Agent:
             try:
                 provider = None
                 if self.roles is not None:
-                    # Chores role (protocol 13): Gemini 3.8 Flash on OpenRouter by default, else the
-                    # fast agent, else the main model.
-                    provider = self.side_provider(cheap=True, role="chores", max_tokens=AUDIT_MAX_TOKENS)
-                    model = self.role_model("chores")
+                    # Request-audit role (protocol 13): the Lite tier by default, which falls back
+                    # towards Flash and then the main model when a key is missing.
+                    provider = self.side_provider(cheap=True, role="audit", max_tokens=AUDIT_MAX_TOKENS)
+                    model = self.role_model("audit")
                 else:
                     try:
                         provider = route_assist.router_provider()

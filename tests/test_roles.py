@@ -78,9 +78,12 @@ class DefaultTests(unittest.TestCase):
             self.assertEqual(fast.source, "default")
             self.assertFalse(fast.is_main)
 
-    def test_glm_fast_default_turns_thinking_off(self):
+    def test_glm_fast_default_uses_the_lowest_legal_thinking(self):
+        # Z.AI rejects thinking.type=disabled on GLM-5.3 and GLM-5.3-Flash
+        # (https://docs.z.ai/guides/capabilities/thinking), so the Flash tier asks for the least
+        # thinking it can instead of turning it off.
         fast = resolver("glm-coding", keys=("glm-coding",)).resolve("fast")
-        self.assertEqual(fast.config.extra, {"thinking": {"type": "disabled"}})
+        self.assertEqual(fast.config.extra, {"thinking": {"type": "enabled"}, "reasoning_effort": "low"})
 
     def test_fast_reuses_the_main_key_without_a_keyring_lookup(self):
         made = resolver("kimi", keys=())        # nothing stored: only the in-memory main key exists
@@ -113,11 +116,19 @@ class DefaultTests(unittest.TestCase):
         self.assertEqual(with_or.config.base_url, route_assist.ROUTER_BASE_URL)
         self.assertTrue(resolver("kimi").resolve("route_assist").is_main)
 
-    def test_terminal_use_subagent_and_switchboard_default_to_main(self):
+    def test_subagent_and_switchboard_follow_the_main_tier(self):
         made = resolver("kimi")
-        for role in ("terminal_use", "subagent", "switchboard"):
+        for role in ("subagent", "switchboard"):
             self.assertTrue(made.resolve(role).is_main, role)
             self.assertEqual(made.resolve(role).source, "main")
+            self.assertEqual(made.resolve(role).tier, "main")
+
+    def test_terminal_use_takes_the_flash_tier(self):
+        # Owner, 2026-09-17: driving programs is a Flash job, not a main-agent job.
+        made = resolver("kimi", keys=("kimi",))
+        terminal_use = made.resolve("terminal_use")
+        self.assertEqual(terminal_use.model, "kimi-k2.7-code-highspeed")
+        self.assertEqual(terminal_use.tier, "flash")
 
 
 # ----- configured roles and fallbacks ----------------------------------------------------------
@@ -287,6 +298,143 @@ class WorkerTests(unittest.TestCase):
         events, _ = run_worker([{"type": "configure", "preset": "kimi", "use_stored_key": True,
                                  "base_url": CONFIGS["kimi"][0], "model": CONFIGS["kimi"][1],
                                  "workspace": str(ROOT), "roles": {"fast": {"preset": "nope"}}},
+                                {"type": "shutdown"}], {"RELAY_KIMI_API_KEY": "k"})
+        self.assertEqual(events[1]["event"], "error")
+        self.assertIn("preset", events[1]["text"])
+
+
+# ----- Main / Flash / Lite tiers (protocol 13.7) ----------------------------------------------
+class TierTests(unittest.TestCase):
+    def tiered(self, preset, keys, roles=None, tiers=None):
+        store = {name: f"{name}-key" for name in keys}
+        return RoleResolver(main_config(preset), preset, validate_roles(roles),
+                            key_lookup=lambda pid: store.get(pid, ""), main_effort="high",
+                            tiers=model_roles.validate_tiers(tiers))
+
+    def test_tier_defaults_per_provider(self):
+        expected = {
+            "glm": ("glm-5.3-flash", "google/gemini-3.8-flash"),
+            "glm-coding": ("glm-5.3-flash", "google/gemini-3.8-flash"),
+            "kimi": ("kimi-k2.7-code-highspeed", "google/gemini-3.8-flash"),
+            "kimi-code": ("kimi-for-coding-highspeed", "google/gemini-3.8-flash"),
+            "openrouter": ("deepseek/deepseek-v4.1-flash", "google/gemini-3.5-flash-lite"),
+        }
+        for preset, (flash, lite) in expected.items():
+            made = self.tiered(preset, (preset, "openrouter"))
+            self.assertEqual(made.resolve("fast").model, flash, preset)
+            self.assertEqual(made.resolve("chores").model, lite, preset)
+            self.assertEqual(made.resolve("fast").tier, "flash", preset)
+            self.assertEqual(made.resolve("chores").tier, "lite", preset)
+
+    def test_main_tier_roles_follow_the_panes_own_model(self):
+        made = self.tiered("kimi", ("kimi",))
+        for role in ("subagent", "switchboard"):
+            resolved = made.resolve(role)
+            self.assertTrue(resolved.is_main, role)
+            self.assertEqual(resolved.tier, "main", role)
+            self.assertEqual(resolved.config.model, "kimi-k3")
+
+    def test_the_new_roles_default_exactly_like_the_ones_they_came_from(self):
+        made = self.tiered("glm-coding", ("glm-coding", "openrouter"))
+        self.assertEqual(made.resolve("summaries").model, made.resolve("fast").model)
+        self.assertEqual(made.resolve("suggestions").model, made.resolve("fast").model)
+        self.assertEqual(made.resolve("audit").model, made.resolve("chores").model)
+
+    def test_lite_without_its_key_steps_down_to_flash_with_an_inline_note(self):
+        made = self.tiered("kimi", ("kimi",))          # no OpenRouter key
+        chores = made.resolve("chores")
+        self.assertEqual(chores.model, "kimi-k2.7-code-highspeed")
+        self.assertEqual(chores.tier, "flash")
+        self.assertIn("using Flash", chores.note)
+        # A step-down is expected, not a failure: it never reaches the protocol warnings list.
+        self.assertIsNone(chores.warning)
+        self.assertEqual(made.warnings, [])
+
+    def test_a_tier_falls_back_to_main_when_nothing_else_has_a_key(self):
+        # Custom endpoint: no tier table at all, so every tiered role is the main agent.
+        config = ProviderConfig("https://example.invalid/v1", "house-model", "k", {}, 8192)
+        made = RoleResolver(config, None, {}, key_lookup=lambda pid: "")
+        for role in model_roles.ROLES:
+            self.assertTrue(made.resolve(role).is_main, role)
+        self.assertEqual(made.warnings, [])
+
+    def test_minimax_flash_is_its_own_highspeed_model(self):
+        made = self.tiered("kimi", ("minimax",))
+        made.rebase(ProviderConfig("https://api.minimax.io/v1", "MiniMax-M3", "minimax-key", {}, 8192),
+                    "minimax", "high")
+        self.assertEqual(made.resolve("fast").model, "MiniMax-M2.7-highspeed")
+        # No OpenRouter key here, so Lite steps down to Flash.
+        self.assertEqual(made.resolve("chores").model, "MiniMax-M2.7-highspeed")
+
+    def test_a_role_can_name_a_tier(self):
+        made = self.tiered("glm-coding", ("glm-coding",), roles={"subagent": {"tier": "flash"}})
+        subagent = made.resolve("subagent")
+        self.assertEqual(subagent.model, "glm-5.3-flash")
+        self.assertEqual(subagent.source, "configured")
+        self.assertEqual(subagent.tier, "flash")
+
+    def test_a_tier_override_moves_every_role_that_follows_it(self):
+        made = self.tiered("glm-coding", ("glm-coding", "openrouter"),
+                           tiers={"flash": {"preset": "openrouter", "model": "google/gemini-3.8-flash"}})
+        for role in ("fast", "terminal_use", "summaries", "suggestions"):
+            self.assertEqual(made.resolve(role).model, "google/gemini-3.8-flash", role)
+        # Main-tier roles are untouched.
+        self.assertEqual(made.resolve("subagent").model, "glm-5.3")
+
+    def test_tier_summary_reports_models_notes_and_no_keys(self):
+        made = self.tiered("kimi", ("kimi",))
+        summary = made.tier_summary()
+        self.assertEqual(sorted(summary), ["flash", "lite", "main"])
+        self.assertEqual(summary["main"]["model"], "kimi-k3")
+        self.assertEqual(summary["flash"]["model"], "kimi-k2.7-code-highspeed")
+        self.assertEqual(summary["lite"]["using"], "flash")
+        self.assertIn("using Flash", summary["lite"]["note"])
+        self.assertNotIn("kimi-key", json.dumps(summary))
+
+    def test_probing_the_tiers_does_not_poison_the_role_cache(self):
+        made = self.tiered("kimi", ("kimi",))
+        made.tier_summary()
+        self.assertTrue(made.resolve("subagent").is_main)
+        self.assertEqual(made.resolve("fast").role, "fast")
+
+    def test_validate_tiers(self):
+        self.assertEqual(model_roles.validate_tiers(None), {})
+        self.assertEqual(model_roles.validate_tiers({"flash": None}), {})
+        self.assertEqual(model_roles.validate_tiers({"lite": {"preset": "openrouter", "effort": "low"}}),
+                         {"lite": {"preset": "openrouter", "effort": "low"}})
+        for bad in ({"main": {"preset": "glm"}}, {"turbo": {"preset": "glm"}}, {"flash": {"preset": "nope"}},
+                    {"flash": {"model": "m"}}, {"flash": {"zzz": 1}}, {"flash": 3}, [1]):
+            with self.assertRaises(ValueError):
+                model_roles.validate_tiers(bad)
+
+    def test_a_role_cannot_be_both_tiered_and_pinned(self):
+        with self.assertRaises(ValueError):
+            validate_roles({"fast": {"tier": "flash", "preset": "glm"}})
+        with self.assertRaises(ValueError):
+            validate_roles({"fast": {"tier": "turbo"}})
+
+    def test_worker_accepts_tiers_and_reports_them(self):
+        events, _ = run_worker([{"type": "configure", "preset": "kimi", "use_stored_key": True,
+                                 "base_url": CONFIGS["kimi"][0], "model": CONFIGS["kimi"][1],
+                                 "workspace": str(ROOT),
+                                 "tiers": {"flash": {"preset": "kimi", "model": "kimi-k2.6"}}},
+                                {"type": "set_agent_options", "id": "o1",
+                                 "roles": {"subagent": {"tier": "flash"}},
+                                 "tiers": {"flash": {"preset": "kimi", "model": "kimi-k2.6"}}},
+                                {"type": "shutdown"}], {"RELAY_KIMI_API_KEY": "k"})
+        configured = next(e for e in events if e["event"] == "configured")
+        self.assertEqual(configured["tiers"]["flash"]["model"], "kimi-k2.6")
+        self.assertEqual(configured["roles"]["fast"]["model"], "kimi-k2.6")
+        options = next(e for e in events if e["event"] == "agent_options")
+        self.assertEqual(options["roles"]["subagent"]["model"], "kimi-k2.6")
+        roles_event = next(e for e in events if e["event"] == "model_roles")
+        self.assertIn("tiers", roles_event)
+        self.assertNotIn("error", [e["event"] for e in events])
+
+    def test_a_bad_tier_table_is_an_error_and_changes_nothing(self):
+        events, _ = run_worker([{"type": "configure", "preset": "kimi", "use_stored_key": True,
+                                 "base_url": CONFIGS["kimi"][0], "model": CONFIGS["kimi"][1],
+                                 "workspace": str(ROOT), "tiers": {"flash": {"preset": "nope"}}},
                                 {"type": "shutdown"}], {"RELAY_KIMI_API_KEY": "k"})
         self.assertEqual(events[1]["event"], "error")
         self.assertIn("preset", events[1]["text"])

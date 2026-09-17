@@ -9,6 +9,7 @@
 #include "InputPolicy.h"           // prompt-box-only input: where a submitted line goes
 #include "PaneLayout.h"            // pane focus, pane moves and grip drops
 #include "TurnTranscript.h"
+#include "ModelSettings.h"
 #include "SkillsDialog.h"
 #include "SubagentTranscript.h"   // subagents UI
 #include "SubagentsPanel.h"
@@ -330,7 +331,10 @@ private:
         add("agent.agentsMenu", "agent", "Agents: definitions and running subagents", {});
         add("agent.interrupt", "agent", "Send to the agent; while it is busy, interrupt it and send now (prompt box)",
             {QStringLiteral("Ctrl+Return"), QStringLiteral("Ctrl+Enter"), QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
-        add("agent.provider", "agent", "Provider and API keys", {});
+        add("agent.provider", "agent", "Provider and API keys (advanced endpoint settings)", {});
+        add("agent.modelKeys", "agent", "API keys for model providers", {});
+        add("agent.modelRoles", "agent", "Model roles: default provider and the Main / Flash / Lite models", {});
+        add("app.settings", "window", "Settings: models, terminal, agent, privacy, shortcuts", {QStringLiteral("Ctrl+,")});
         add("agent.fastAgent", "agent", "Switch this pane between the main agent and the fast agent", {QStringLiteral("Alt+F")});   // model roles
         add("input.modeAuto", "agent", "Input mode: auto detect", {});
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
@@ -418,7 +422,7 @@ private:
 
     // Filled from docs/KEYBINDING-PRESETS.md research. Missing actions fall back to Relay defaults.
     static QByteArray presetJson() {
-        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":["Ctrl+Shift+E"],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.moveLeft":[],"pane.moveRight":[],"pane.moveUp":[],"pane.moveDown":[],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+Shift+Y"],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":["Ctrl+Shift+I"],"input.modeAgent":[],"input.toggle":["Ctrl+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"vscode":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":["Ctrl+Shift+|"],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+N"],"agent.stop":["Ctrl+Esc"],"agent.provider":["Ctrl+Alt+."],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"konsole":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":["Ctrl+Shift+)","Ctrl+)"],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[],"agent.requests":[]}})PRESETS");
+        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"app.settings":[],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":["Ctrl+Shift+E"],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.moveLeft":[],"pane.moveRight":[],"pane.moveUp":[],"pane.moveDown":[],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+Shift+Y"],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":["Ctrl+Shift+I"],"input.modeAgent":[],"input.toggle":["Ctrl+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"vscode":{"app.settings":[],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":["Ctrl+Shift+|"],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+N"],"agent.stop":["Ctrl+Esc"],"agent.provider":["Ctrl+Alt+."],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"konsole":{"app.settings":[],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":["Ctrl+Shift+)","Ctrl+)"],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[],"agent.requests":[]}})PRESETS");
     }
     QFileSystemWatcher m_watcher;
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_listeners;
@@ -701,7 +705,8 @@ public:
         status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
     }
     void selectModel(const QString &id) {
-        if (id.startsWith(QStringLiteral("role:"))) return;   // the pane's own role chip entry
+        // "role:" is the pane's own role chip entry, "gear:" the model options modal.
+        if (id.startsWith(QStringLiteral("role:")) || id.startsWith(QStringLiteral("gear:"))) return;
         // Picking a model from the chip puts the pane back on the main agent (protocol 13).
         if (m_agentRole != QStringLiteral("main")) { setAgentRole(QStringLiteral("main")); if (id == m_currentPreset) return; }
         if (id.isEmpty() || id == m_currentPreset) return;
@@ -722,9 +727,11 @@ public:
     // ----- model roles (protocol 13) -------------------------------------------------------
     // Every role defaults to "same as the main agent". Settings live under roles/<id>/{preset,model,effort};
     // a role is unset when it has no preset. The worker resolves keys and per-provider defaults.
+    // Mirrors relay_core.roles.ROLES minus "main" (the pane's own model).
     static QStringList roleIds() {
         return {QStringLiteral("terminal_use"), QStringLiteral("subagent"), QStringLiteral("switchboard"),
-                QStringLiteral("fast"), QStringLiteral("chores"), QStringLiteral("vision"),
+                QStringLiteral("fast"), QStringLiteral("summaries"), QStringLiteral("suggestions"),
+                QStringLiteral("chores"), QStringLiteral("audit"), QStringLiteral("vision"),
                 QStringLiteral("route_assist")};
     }
     static QString roleLabel(const QString &role) {
@@ -734,29 +741,59 @@ public:
             {QStringLiteral("subagent"), QStringLiteral("Subagent")},
             {QStringLiteral("switchboard"), QStringLiteral("Switchboard agent")},
             {QStringLiteral("fast"), QStringLiteral("Fast agent")},
+            {QStringLiteral("summaries"), QStringLiteral("Summaries")},
+            {QStringLiteral("suggestions"), QStringLiteral("Suggestions")},
             {QStringLiteral("chores"), QStringLiteral("Chores")},
+            {QStringLiteral("audit"), QStringLiteral("Request audit")},
             {QStringLiteral("vision"), QStringLiteral("Vision")},
             {QStringLiteral("route_assist"), QStringLiteral("Route assist")}};
         return labels.value(role, role);
     }
     static QString roleSetting(const QString &role, const QString &field) {
-        return QStringLiteral("roles/") + role + '/' + field;
+        return relay::RolesDialog::roleSetting(role, field);
     }
-    // The `roles` object of configure / set_agent_options; empty when every role follows the main agent.
+    // The `roles` object of configure / set_agent_options; empty when every role follows its default.
+    // A role is either tiered (`roles/<id>/tier` = main|flash|lite) or pinned to an endpoint
+    // (`roles/<id>/preset` plus an optional model), never both — protocol 13.7 rejects the pair.
     static QJsonObject rolesObject() {
         QSettings settings;
         QJsonObject roles;
         for (const QString &role : roleIds()) {
+            const QString effort = settings.value(roleSetting(role, QStringLiteral("effort"))).toString();
+            const QString tier = settings.value(roleSetting(role, QStringLiteral("tier"))).toString();
+            if (relay::RolesDialog::tierIds().contains(tier)) {
+                QJsonObject entry{{"tier", tier}};
+                if (efforts().contains(effort)) entry.insert(QStringLiteral("effort"), effort);
+                roles.insert(role, entry);
+                continue;
+            }
             const QString preset = settings.value(roleSetting(role, QStringLiteral("preset"))).toString();
-            if (preset.isEmpty()) continue;   // same as the main agent
+            if (preset.isEmpty()) continue;   // follows its built-in tier
             QJsonObject entry{{"preset", preset}};
             const QString model = settings.value(roleSetting(role, QStringLiteral("model"))).toString().trimmed();
             if (!model.isEmpty()) entry.insert(QStringLiteral("model"), model);
-            const QString effort = settings.value(roleSetting(role, QStringLiteral("effort"))).toString();
             if (efforts().contains(effort)) entry.insert(QStringLiteral("effort"), effort);
             roles.insert(role, entry);
         }
         return roles;
+    }
+    // The `tiers` object: Flash/Lite overrides only. Main is the pane's own model.
+    static QJsonObject tiersObject() {
+        QSettings settings;
+        QJsonObject tiers;
+        for (const QString &tier : relay::RolesDialog::tierIds()) {
+            if (tier == QStringLiteral("main")) continue;
+            const QString preset = settings.value(relay::RolesDialog::tierSetting(tier, QStringLiteral("preset"))).toString();
+            const QString model = settings.value(relay::RolesDialog::tierSetting(tier, QStringLiteral("model"))).toString().trimmed();
+            if (preset.isEmpty() && model.isEmpty()) continue;
+            QJsonObject entry;
+            if (!preset.isEmpty()) entry.insert(QStringLiteral("preset"), preset);
+            if (!model.isEmpty()) entry.insert(QStringLiteral("model"), model);
+            const QString effort = settings.value(relay::RolesDialog::tierSetting(tier, QStringLiteral("effort"))).toString();
+            if (efforts().contains(effort)) entry.insert(QStringLiteral("effort"), effort);
+            if (!entry.isEmpty()) tiers.insert(tier, entry);
+        }
+        return tiers;
     }
     static bool newPanesUseFastAgent() {
         return QSettings().value(QStringLiteral("agent/panes_fast"), true).toBool();
@@ -783,9 +820,11 @@ public:
     void toggleFastAgent() {
         setAgentRole(m_agentRole == QStringLiteral("fast") ? QStringLiteral("main") : QStringLiteral("fast"));
     }
-    // Live update after the Roles section changed (applies to side calls and new subagents at once).
+    // Live update after the roles modal changed something (applies to side calls and new subagents
+    // at once). Both tables go together so the worker never resolves half a change.
     void rolesChanged() {
-        if (m_configured) send({{"type", "set_agent_options"}, {"roles", rolesObject()}});
+        if (m_configured)
+            send({{"type", "set_agent_options"}, {"roles", rolesObject()}, {"tiers", tiersObject()}});
     }
     void toggleInputMode() {
         // Ctrl+I at a password prompt leaves masked input and talks to the agent instead
@@ -999,8 +1038,11 @@ public:
             if (m_configured) send({{"type", "set_agent_options"}, {"max_auto_turns", QSettings().value(QStringLiteral("agent/max_auto_turns"), 50).toInt()}});
             return;
         }
-        // Model roles apply to side calls and new subagents at once (protocol 13).
-        if (key.startsWith(QStringLiteral("roles/"))) { rolesChanged(); return; }
+        // Model roles and tiers apply to side calls and new subagents at once (protocol 13).
+        if (key.startsWith(QStringLiteral("roles/")) || key.startsWith(QStringLiteral("tiers/"))) {
+            rolesChanged();
+            return;
+        }
         if (key == QStringLiteral("agent/panes_fast")) return;   // only affects panes opened later
         // Turn limits and the request audit apply to the running agent at once (protocol 12.1).
         if (key == QStringLiteral("agent/max_steps") || key == QStringLiteral("agent/max_tool_calls")
@@ -1258,7 +1300,16 @@ private:
         m_modelBox->setMinimumContentsLength(8);
         m_modelBox->setFocusPolicy(Qt::TabFocus);
         connect(m_modelBox, qOverload<int>(&QComboBox::activated), this, [this](int index) {
-            selectModel(m_modelBox->itemData(index).toString()); focusInput();
+            const QString data = m_modelBox->itemData(index).toString();
+            // Gear entry at the bottom of the list: the model options modal, not a model.
+            if (data == QStringLiteral("gear:modelOptions")) {
+                refreshPickers();
+                openRolesDialog();
+                hint(QStringLiteral("model.options.mouse"),
+                     QStringLiteral("Tip: Actions › Settings › Models opens the same modals"));
+                return;
+            }
+            selectModel(data); focusInput();
             hint(QStringLiteral("model.mouse"), QStringLiteral("Tip: /model switches models from the prompt box"));
         });
         routeRow->addWidget(m_modelBox);
@@ -1432,9 +1483,11 @@ private:
         for (auto it = limits.begin(); it != limits.end(); ++it) request.insert(it.key(), it.value());
         const QStringList exclude = settings.value(QStringLiteral("skills/exclude")).toStringList();
         if (!exclude.isEmpty()) request.insert(QStringLiteral("skills"), QJsonObject{{"exclude", QJsonArray::fromStringList(exclude)}});
-        // Model roles (protocol 13): the table, and the role this pane's own agent runs.
+        // Model roles (protocol 13): the tables, and the role this pane's own agent runs.
         const QJsonObject roles = rolesObject();
         if (!roles.isEmpty()) request.insert(QStringLiteral("roles"), roles);
+        const QJsonObject tiers = tiersObject();
+        if (!tiers.isEmpty()) request.insert(QStringLiteral("tiers"), tiers);
         if (m_agentRole != QStringLiteral("main")) request.insert(QStringLiteral("agent_role"), m_agentRole);
         return request;
     }
@@ -1623,6 +1676,15 @@ private:
             onRouteAssisted(event);
             return true;
         }
+        if (type == QStringLiteral("key_tested") || type == QStringLiteral("key_removed")
+            || type == QStringLiteral("agent_tools_imported")) {
+            if (m_keysDialog) m_keysDialog->handleEvent(event);
+            else if (type == QStringLiteral("key_tested"))
+                status(event.value(QStringLiteral("ok")).toBool()
+                           ? QStringLiteral("Key works for ") + event.value(QStringLiteral("preset")).toString()
+                           : QStringLiteral("Key test failed: ") + event.value(QStringLiteral("error")).toString());
+            return true;
+        }
         if (type == QStringLiteral("skills") || type == QStringLiteral("skills_refined") || type == QStringLiteral("skills_import_preview")
             || type == QStringLiteral("skills_imported") || type == QStringLiteral("skills_updates")) {
             if (m_skillsDialog) m_skillsDialog->handleEvent(event);
@@ -1742,6 +1804,38 @@ public:
         if (!m_workerReady) { m_skillsDialog->handleEvent({{"event", "skills"}, {"items", QJsonArray()}}); return; }
         m_skillsDialog->refresh();
     }
+
+    // ----- provider and model modals -------------------------------------------------------
+    // Both are non-modal windows fed by the worker's `presets` / `model_roles` events. No key
+    // material passes through either of them in the read direction: keys only go out, to the
+    // worker's keyring commands.
+    void openKeysDialog() {
+        if (!m_keysDialog) {
+            m_keysDialog = new relay::KeysDialog(window());
+            m_keysDialog->setAttribute(Qt::WA_DeleteOnClose);
+            m_keysDialog->send = [this](QJsonObject request) { send(request); };
+            m_keysDialog->onKeysChanged = [this] { send({{"type", "presets"}}); };
+        }
+        m_keysDialog->setPresets(m_presets);
+        m_keysDialog->show(); m_keysDialog->raise(); m_keysDialog->activateWindow();
+        if (m_workerReady) send({{"type", "presets"}});
+    }
+
+    void openRolesDialog() {
+        if (!m_rolesDialog) {
+            m_rolesDialog = new relay::RolesDialog(window());
+            m_rolesDialog->setAttribute(Qt::WA_DeleteOnClose);
+            m_rolesDialog->send = [this](QJsonObject request) { send(request); };
+            m_rolesDialog->openKeys = [this] { openKeysDialog(); };
+            m_rolesDialog->onProviderChosen = [this](const QString &id) { selectModel(id); };
+            m_rolesDialog->onRolesChanged = [this] { rolesChanged(); };
+        }
+        m_rolesDialog->setPresets(m_presets, m_tierCatalog, m_roleActions);
+        m_rolesDialog->setProvider(m_currentPreset);
+        m_rolesDialog->setResolved(m_tierSummary, m_roleSummary);
+        m_rolesDialog->show(); m_rolesDialog->raise(); m_rolesDialog->activateWindow();
+        if (m_workerReady) send({{"type", "presets"}});
+    }
     QString lastTurnId() const { return m_lastTurnId; }
     void requestTurn(const QString &turnId, relay::TurnTranscriptView *view) {
         m_turnViews.insert(turnId, view);
@@ -1841,6 +1935,8 @@ private:
         }
         if (type == QStringLiteral("model_roles")) {   // protocol 13
             m_roleSummary = event.value(QStringLiteral("roles")).toObject();
+            m_tierSummary = event.value(QStringLiteral("tiers")).toObject();
+            if (m_rolesDialog) m_rolesDialog->setResolved(m_tierSummary, m_roleSummary);
             const QString role = event.value(QStringLiteral("agent_role")).toString();
             if (!role.isEmpty()) m_agentRole = role;
             const QJsonArray warnings = event.value(QStringLiteral("warnings")).toArray();
@@ -3181,6 +3277,8 @@ private:
             // Model roles (protocol 13): the worker reports the effective model of every role and
             // which role this pane runs (a role that could not be used falls back to "main").
             m_roleSummary = event.value(QStringLiteral("roles")).toObject();
+            m_tierSummary = event.value(QStringLiteral("tiers")).toObject();
+            if (m_rolesDialog) m_rolesDialog->setResolved(m_tierSummary, m_roleSummary);
             m_agentRole = event.value(QStringLiteral("agent_role")).toString(QStringLiteral("main"));
             onSessionConfigured(event);
             status(QStringLiteral("Agent ready · ") + (m_agentRole == QStringLiteral("main") ? QString() : roleLabel(m_agentRole) + QStringLiteral(" · "))
@@ -3188,15 +3286,21 @@ private:
             changed();
         } else if (type == QStringLiteral("presets")) {
             m_presets = event.value(QStringLiteral("presets")).toArray();
+            // Tier defaults and the Advanced action list come from the worker so the GUI never has
+            // to keep a second copy of backend/relay_core/presets.py in step (protocol 13.7).
+            m_tierCatalog = event.value(QStringLiteral("tier_defaults")).toObject();
+            m_roleActions = event.value(QStringLiteral("role_actions")).toArray();
             m_stored.clear();
             for (const auto &item : m_presets) {
                 const auto preset = item.toObject();
                 if (preset.value(QStringLiteral("has_stored_key")).toBool())
                     m_stored.append({preset.value(QStringLiteral("id")).toString(), preset.value(QStringLiteral("label")).toString()});
             }
+            if (m_keysDialog) m_keysDialog->setPresets(m_presets);
+            if (m_rolesDialog) m_rolesDialog->setPresets(m_presets, m_tierCatalog, m_roleActions);
             changed();
             if (m_stored.isEmpty()) {
-                status(QStringLiteral("No stored provider keys. Open Provider / BYOK… to import them from Warp or enter one."));
+                status(QStringLiteral("No stored provider keys. Open Settings › Models › API keys… to add one or import from Warp."));
                 return;
             }
             if (!m_configured && !m_configuring) {
@@ -3853,9 +3957,14 @@ private:
         m_modelBox->clear();
         for (const auto &model : std::as_const(m_stored)) m_modelBox->addItem(model.second, model.first);
         if (m_stored.isEmpty()) m_modelBox->addItem(QStringLiteral("No stored keys"));
-        m_modelBox->setEnabled(!m_stored.isEmpty());
         const int index = m_modelBox->findData(m_currentPreset);
         if (index >= 0) m_modelBox->setCurrentIndex(index);
+        // Last entry: the model options modal (default provider, Main/Flash/Lite, per-job overrides).
+        // It stays reachable with no stored key, which is exactly when it is needed most.
+        m_modelBox->insertSeparator(m_modelBox->count());
+        m_modelBox->addItem(QString(QChar(0x2699)) + QStringLiteral("  Model options…"),
+                            QStringLiteral("gear:modelOptions"));
+        m_modelBox->setEnabled(true);
         // Model roles (protocol 13): a pane on another role shows that role and its model, and
         // picking a preset from the chip puts the pane back on the main agent.
         if (m_agentRole != QStringLiteral("main")) {
@@ -5284,7 +5393,7 @@ private:
         auto *form = new QFormLayout;
         struct PresetRow { const char *id, *label, *base, *model, *extra; };
         static const PresetRow presets[] = {
-            // Mirrors backend/relay_core/presets.py.
+            // Mirrors backend/relay_core/presets.py; tests/test_presets.py fails if the two drift.
             {"custom", "Custom / current settings", "", "", ""},
             {"kimi", "Kimi · K3", "https://api.moonshot.ai/v1", "kimi-k3", "{\"reasoning_effort\":\"high\"}"},
             {"kimi-code", "Kimi Code · K3", "https://api.kimi.ai/coding/v1", "k3", "{\"reasoning_effort\":\"high\"}"},
@@ -5292,7 +5401,12 @@ private:
              "{\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":\"high\"}"},
             {"glm-coding", "Z.AI · GLM-5.3 · Coding Plan", "https://api.z.ai/api/coding/paas/v4", "glm-5.3",
              "{\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":\"high\"}"},
+            {"minimax", "MiniMax · M3 · Coding/Token Plan", "https://api.minimax.io/v1", "MiniMax-M3", "{}"},
             {"openrouter", "OpenRouter · DeepSeek V4.1 Flash", "https://openrouter.ai/api/v1", "deepseek/deepseek-v4.1-flash", "{}"},
+            {"openai", "OpenAI · GPT-6 Astra", "https://api.openai.com/v1", "gpt-6-astra", "{\"reasoning_effort\":\"high\"}"},
+            {"anthropic", "Anthropic · Claude Opus 5", "https://api.anthropic.com/v1", "claude-opus-5", "{}"},
+            {"gemini", "Google · Gemini 3.1 Pro", "https://generativelanguage.googleapis.com/v1beta/openai",
+             "gemini-3.1-pro-preview", "{\"reasoning_effort\":\"high\"}"},
         };
         auto *preset = new QComboBox;
         for (const auto &row : presets) preset->addItem(QString::fromUtf8(row.label), QString::fromLatin1(row.id));
@@ -5388,6 +5502,8 @@ private:
     QLabel *m_toast = nullptr;
     QLabel *m_prefixChip = nullptr;
     QPointer<relay::SkillsDialog> m_skillsDialog;
+    QPointer<relay::KeysDialog> m_keysDialog;
+    QPointer<relay::RolesDialog> m_rolesDialog;
     QTimer m_assistDebounce, m_assistHold;
     QString m_assistLocalGuess, m_assistFailedText;
     QString m_assistId, m_assistText, m_assistInflightText, m_assistQueuedText, m_assistRoute, m_assistReason, m_heldMode;
@@ -5471,7 +5587,8 @@ private:
     QString m_currentPreset;
     // model roles (protocol 13): this pane's role and the worker's last role table
     QString m_agentRole = QStringLiteral("main");
-    QJsonObject m_roleSummary;
+    QJsonObject m_roleSummary, m_tierSummary, m_tierCatalog;
+    QJsonArray m_roleActions;
     bool m_cleanShell = false, m_closing = false;
     QJsonArray m_presets;
     bool m_configuring = false;
@@ -6548,6 +6665,7 @@ private:
         else if (id == QStringLiteral("palette.open")) togglePalette();
         else if (id == QStringLiteral("keybindings.reload")) Keymap::instance().reload();
         else if (id == QStringLiteral("help.shortcuts")) showShortcutsOverlay();
+        else if (id == QStringLiteral("app.settings")) openSettings();
         else if (id == QStringLiteral("keybindings.edit")) {
             Keymap::instance().ensureFile();
             const QString editor = qEnvironmentVariable("VISUAL", qEnvironmentVariable("EDITOR", QStringLiteral("nano")));
@@ -6591,6 +6709,17 @@ private:
         else if (id == QStringLiteral("agent.stopAllSubagents")) pane->stopAllSubagents();   // subagents UI
         else if (id == QStringLiteral("agent.agentsMenu")) openAgentsMenu();
         else if (id == QStringLiteral("agent.provider")) pane->openProviderDialog();
+        else if (id == QStringLiteral("agent.modelKeys")) {
+            pane->openKeysDialog();
+            hint(QStringLiteral("model.keys.slow"),
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("app.settings")),
+                                                QStringLiteral("settings, including keys and model roles")));
+        }
+        else if (id == QStringLiteral("agent.modelRoles")) {
+            pane->openRolesDialog();
+            hint(QStringLiteral("model.roles.slow"),
+                 QStringLiteral("Tip: the gear at the bottom of the model box opens this too"));
+        }
         else if (id == QStringLiteral("input.modeAuto")) pane->setMode(QStringLiteral("auto"));
         else if (id == QStringLiteral("input.modeTerminal")) pane->setMode(QStringLiteral("shell"));
         else if (id == QStringLiteral("input.modeAgent")) pane->setMode(QStringLiteral("agent"));
@@ -6674,236 +6803,419 @@ private:
         return item;
     }
 
-    // Agent options (Actions › Agent options). Settings live in QSettings; most apply to the next
-    // conversation (New chat), except max automatic turns, which applies at once.
-    QList<PaletteItem> agentOptionItems() {
-        QList<PaletteItem> children;
-        const QString section = QStringLiteral("Agent options");
-        auto toggle = [&](const QString &key, const QString &label, const QString &detail, bool fallback) {
-            PaletteItem item;
-            const bool on = QSettings().value(key, fallback).toBool();
-            item.key = QStringLiteral("option:") + key; item.section = section; item.label = label;
-            item.detail = (on ? QStringLiteral("On · ") : QStringLiteral("Off · ")) + detail;
-            item.checked = on; item.stayOpen = true;
-            item.run = [key, on] { QSettings().setValue(key, !on); };
-            children << item;
+    // ----- settings ---------------------------------------------------------------------------
+    //
+    // One catalog, two front ends. The compact Settings window (src/ModelSettings.h) renders these
+    // sections with real controls; the actions palette renders the same rows as menu entries, so
+    // every setting keeps its keyboard path. Values live in QSettings under exactly the keys they
+    // used before, because several of them are read straight from QSettings elsewhere.
+    //
+    // Sections: General, Models, Terminal, Agent, Privacy, Shortcuts.
+    static QStringList settingsSectionIds() {
+        return {QStringLiteral("general"), QStringLiteral("models"), QStringLiteral("terminal"),
+                QStringLiteral("agent"), QStringLiteral("privacy"), QStringLiteral("shortcuts")};
+    }
+
+    relay::SettingRow toggleRow(const QString &key, const QString &label, const QString &detail,
+                                bool fallback, std::function<void(bool)> extra = {}) {
+        relay::SettingRow row;
+        row.kind = relay::SettingRow::Toggle;
+        row.id = QStringLiteral("option:") + key;
+        row.label = label;
+        row.detail = detail;
+        row.checked = QSettings().value(key, fallback).toBool();
+        row.onToggle = [this, key, extra](bool on) {
+            QSettings().setValue(key, on);
+            if (extra) extra(on);
+            if (m_active) m_active->agentOptionsChanged(key);
         };
-        PaletteItem instructions = actionItem(section, QStringLiteral("Instructions…"), QStringLiteral("CLAUDE.md, AGENTS.md, WARP.md and other instruction files"), QStringLiteral("agent.instructions"));
-        children << instructions;
-        auto askText = [this](const QString &key, const QString &title, const QString &label, const QString &fallback, std::function<void(const QString &)> apply) {
-            bool ok = false;
-            const QString value = QInputDialog::getText(this, title, label, QLineEdit::Normal, QSettings().value(key, fallback).toString(), &ok);
-            if (ok) { apply(value.trimmed()); if (m_active) m_active->agentOptionsChanged(key); }
+        return row;
+    }
+
+    relay::SettingRow numberRow(const QString &key, const QString &label, const QString &detail,
+                                int fallback, int minimum, int maximum) {
+        relay::SettingRow row;
+        row.kind = relay::SettingRow::Number;
+        row.id = QStringLiteral("option:") + key;
+        row.label = label;
+        row.detail = detail;
+        row.number = QSettings().value(key, fallback).toInt();
+        row.minimum = minimum;
+        row.maximum = maximum;
+        row.onNumber = [this, key](int value) {
+            QSettings().setValue(key, value);
+            if (m_active) m_active->agentOptionsChanged(key);
         };
-        {
-            PaletteItem item; item.key = QStringLiteral("option:plans_dir"); item.section = section;
-            const QString dir = QSettings().value(QStringLiteral("agent/plans_dir")).toString();
-            item.label = QStringLiteral("Plans folder…");
-            item.detail = dir.isEmpty() ? QStringLiteral("<project>/.relay/plans") : dir;
-            item.run = [askText] { askText(QStringLiteral("agent/plans_dir"), QStringLiteral("Plans folder"),
-                QStringLiteral("Absolute folder for plans (empty: <project>/.relay/plans)"), QString(),
-                [](const QString &value) { QSettings().setValue(QStringLiteral("agent/plans_dir"), value); }); };
-            children << item;
-        }
-        {
-            PaletteItem item; item.key = QStringLiteral("option:compact_threshold"); item.section = section;
-            const QString value = QSettings().value(QStringLiteral("agent/compact_threshold")).toString();
-            item.label = QStringLiteral("Compaction threshold…");
-            item.detail = value.isEmpty() ? QStringLiteral("Default: 80% of the model window, minus output room") : value + QStringLiteral(" of the window");
-            item.run = [askText] { askText(QStringLiteral("agent/compact_threshold"), QStringLiteral("Compaction threshold"),
-                QStringLiteral("Fraction of the model's context window, 0.50–0.98 (empty: default)"), QString(),
-                [](const QString &value) {
-                    bool ok = false; const double number = value.toDouble(&ok);
-                    if (value.isEmpty()) QSettings().remove(QStringLiteral("agent/compact_threshold"));
-                    else if (ok && number >= 0.5 && number <= 0.98) QSettings().setValue(QStringLiteral("agent/compact_threshold"), number);
-                }); };
-            children << item;
-        }
-        {
-            PaletteItem item; item.key = QStringLiteral("option:max_auto_turns"); item.section = section;
-            item.label = QStringLiteral("Automatic turns from background agents…");
-            item.detail = QStringLiteral("Up to %1 in a row without your input (0 = unlimited)").arg(QSettings().value(QStringLiteral("agent/max_auto_turns"), 50).toInt());
-            item.run = [this] {
-                bool ok = false;
-                const int value = QInputDialog::getInt(this, QStringLiteral("Automatic turns"), QStringLiteral("Consecutive automatic turns (0 = unlimited)"),
-                                                       QSettings().value(QStringLiteral("agent/max_auto_turns"), 50).toInt(), 0, 10000, 1, &ok);
-                if (!ok) return;
-                QSettings().setValue(QStringLiteral("agent/max_auto_turns"), value);
-                if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/max_auto_turns"));
-            };
-            children << item;
-        }
-        {
-            // Turn limits (protocol 12.1): apply to the running agent at once.
-            auto askInt = [this, section](const QString &key, const QString &label, const QString &detail, const QString &prompt, int fallback, int min, int max) {
-                PaletteItem item; item.key = QStringLiteral("option:") + key; item.section = section; item.label = label;
-                item.detail = detail.arg(QSettings().value(key, fallback).toInt());
-                item.run = [this, key, label, prompt, fallback, min, max] {
-                    bool ok = false;
-                    const int value = QInputDialog::getInt(this, label.chopped(1), prompt, QSettings().value(key, fallback).toInt(), min, max, 1, &ok);
-                    if (!ok) return;
-                    QSettings().setValue(key, value);
-                    if (m_active) m_active->agentOptionsChanged(key);
-                };
-                return item;
-            };
-            children << askInt(QStringLiteral("agent/max_steps"), QStringLiteral("Step limit per turn…"),
-                               QStringLiteral("%1 model calls, then the turn stops with Continue (default 50)"), QStringLiteral("Model calls per turn (1–500)"), 50, 1, 500);
-            children << askInt(QStringLiteral("agent/max_tool_calls"), QStringLiteral("Tool-call limit per turn…"),
-                               QStringLiteral("%1 tool calls (default 150)"), QStringLiteral("Tool calls per turn (1–2000)"), 150, 1, 2000);
-            PaletteItem audit; audit.key = QStringLiteral("option:agent/audit_requests"); audit.section = section;
-            const bool on = QSettings().value(QStringLiteral("agent/audit_requests"), false).toBool();
-            audit.label = QStringLiteral("Audit requests after each turn");
-            audit.detail = (on ? QStringLiteral("On · ") : QStringLiteral("Off · ")) + QStringLiteral("a small side call flags asks that may be unaddressed");
-            audit.checked = on; audit.stayOpen = true;
-            audit.run = [this, on] { QSettings().setValue(QStringLiteral("agent/audit_requests"), !on); if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/audit_requests")); };
-            children << audit;
-        }
-        {
-            PaletteItem manage; manage.key = QStringLiteral("option:skills"); manage.section = section;
-            manage.label = QStringLiteral("Skills…"); manage.detail = QStringLiteral("list, exclude, refine, import from a repository · /skills");
-            manage.run = [pane = m_active] { if (pane) pane->openSkills(); };
-            children << manage;
-            PaletteItem item; item.key = QStringLiteral("option:skills_exclude"); item.section = section;
-            const QStringList list = QSettings().value(QStringLiteral("skills/exclude")).toStringList();
-            item.label = QStringLiteral("Excluded skills…");
-            item.detail = list.isEmpty() ? QStringLiteral("Default: Warp-app skills") : list.join(QStringLiteral(", "));
-            item.run = [askText] { askText(QStringLiteral("skills/exclude_text"), QStringLiteral("Excluded skills"),
-                QStringLiteral("Comma-separated skill names to skip (replaces the default list; empty: default)"), QString(),
-                [](const QString &value) {
-                    QStringList names;
-                    for (const QString &name : value.split(',', Qt::SkipEmptyParts)) if (!name.trimmed().isEmpty()) names << name.trimmed();
-                    QSettings().setValue(QStringLiteral("skills/exclude_text"), value);
-                    if (names.isEmpty()) QSettings().remove(QStringLiteral("skills/exclude")); else QSettings().setValue(QStringLiteral("skills/exclude"), names);
-                }); };
-            children << item;
-        }
-        {
-            const QString effort = QSettings().value(QStringLiteral("agent/effort"), QStringLiteral("high")).toString();
-            PaletteItem item; item.key = QStringLiteral("option:effort_default"); item.section = section;
-            item.label = QStringLiteral("Default reasoning effort"); item.detail = effort + QStringLiteral(" · new panes and new chats");
-            item.children = [effort] {
-                QList<PaletteItem> levels;
-                for (const QString &level : Pane::efforts()) {
-                    PaletteItem child; child.key = QStringLiteral("option:effort_default:") + level; child.section = QStringLiteral("Default reasoning effort");
-                    child.label = level; child.checked = effort == level; child.stayOpen = true;
-                    child.run = [level] { QSettings().setValue(QStringLiteral("agent/effort"), level); };
-                    levels << child;
-                }
-                return levels;
-            };
-            children << item;
-        }
-        children << rolesMenu(section);
-        {
-            // "Panes default to the fast agent" (owner decision 2026-09-17): applies to panes opened
-            // from now on; the first pane of a window stays on the main agent.
-            PaletteItem item; item.key = QStringLiteral("option:agent/panes_fast"); item.section = section;
-            const bool on = Pane::newPanesUseFastAgent();
-            item.label = QStringLiteral("New panes use the fast agent");
-            item.detail = (on ? QStringLiteral("On · ") : QStringLiteral("Off · ")) + QStringLiteral("the first pane keeps the main agent");
-            item.checked = on; item.stayOpen = true;
-            item.run = [on] { QSettings().setValue(QStringLiteral("agent/panes_fast"), !on); };
-            children << item;
-        }
-        toggle(QStringLiteral("agent/show_thinking"), QStringLiteral("Show thinking"), QStringLiteral("stream reasoning above the prompt; a one-line summary always prints"), true);
-        toggle(QStringLiteral("agent/show_tool_output"), QStringLiteral("Show tool output"), QStringLiteral("pour every tool's output into the pane; off, it collapses to its size and opens from the turn summary"), false);
-        toggle(QStringLiteral("hints/enabled"), QStringLiteral("Shortcut hints"), QStringLiteral("tips when a faster key exists"), true);
-        toggle(QStringLiteral("suggestions/next_command"), QStringLiteral("AI next-command suggestions"), QStringLiteral("after a command finishes; uses your API key"), false);
-        toggle(QStringLiteral("suggestions/next_prompt"), QStringLiteral("Suggested next prompts"), QStringLiteral("after an agent turn; uses your API key"), false);
-        toggle(QStringLiteral("recap/away"), QStringLiteral("Recap when you come back"), QStringLiteral("after 3+ minutes away while the agent worked"), true);
-        return children;
+        return row;
     }
 
-    // Agent options › Model roles (protocol 13). Each role is "same as main agent" until a preset is
-    // picked here; the worker resolves keys and falls back to the main agent when one is missing.
-    PaletteItem rolesMenu(const QString &section) {
-        return submenu(QStringLiteral("menu:roles"), section, QStringLiteral("Model roles"),
-                       QStringLiteral("one model per job · unset roles follow the main agent"), [this] {
-            QList<PaletteItem> roles;
-            for (const QString &role : Pane::roleIds()) {
-                const QString preset = QSettings().value(Pane::roleSetting(role, QStringLiteral("preset"))).toString();
-                const QString model = QSettings().value(Pane::roleSetting(role, QStringLiteral("model"))).toString();
-                const QString effort = QSettings().value(Pane::roleSetting(role, QStringLiteral("effort"))).toString();
-                QString detail = preset.isEmpty() ? QStringLiteral("Same as main agent") : presetLabel(preset);
-                if (!preset.isEmpty() && !model.isEmpty()) detail += QStringLiteral(" · ") + model;
-                if (!preset.isEmpty() && !effort.isEmpty()) detail += QStringLiteral(" · ") + effort;
-                const QString effective = m_active ? m_active->roleModel(role) : QString();
-                if (preset.isEmpty() && !effective.isEmpty()) detail += QStringLiteral(" (") + effective + ')';
-                roles << submenu(QStringLiteral("role:") + role, QStringLiteral("Model roles"),
-                                 Pane::roleLabel(role), detail, [this, role] { return roleItems(role); });
-            }
-            return roles;
-        });
+    relay::SettingRow textRow(const QString &key, const QString &label, const QString &detail,
+                              const QString &placeholder, std::function<void(const QString &)> write = {}) {
+        relay::SettingRow row;
+        row.kind = relay::SettingRow::Text;
+        row.id = QStringLiteral("option:") + key;
+        row.label = label;
+        row.detail = detail;
+        row.placeholder = placeholder;
+        row.text = QSettings().value(key).toString();
+        row.onText = [this, key, write](const QString &value) {
+            if (write) write(value);
+            else if (value.isEmpty()) QSettings().remove(key);
+            else QSettings().setValue(key, value);
+            if (m_active) m_active->agentOptionsChanged(key);
+        };
+        return row;
     }
 
-    QString presetLabel(const QString &id) const {
-        if (m_active) for (const auto &model : m_active->storedModels()) if (model.first == id) return model.second;
-        return id;
+    relay::SettingRow buttonRow(const QString &id, const QString &label, const QString &detail,
+                                const QString &buttonText, std::function<void()> run) {
+        relay::SettingRow row;
+        row.kind = relay::SettingRow::Button;
+        row.id = id;
+        row.label = label;
+        row.detail = detail;
+        row.buttonText = buttonText;
+        row.run = std::move(run);
+        return row;
     }
 
-    QList<PaletteItem> roleItems(const QString &role) {
-        QList<PaletteItem> items;
-        const QString section = Pane::roleLabel(role);
+    relay::SettingRow choiceRow(const QString &id, const QString &label, const QString &detail,
+                                const QStringList &values, const QStringList &labels,
+                                const QString &current, std::function<void(const QString &)> choose) {
+        relay::SettingRow row;
+        row.kind = relay::SettingRow::Choice;
+        row.id = id;
+        row.label = label;
+        row.detail = detail;
+        row.options = values;
+        row.optionLabels = labels;
+        row.current = current;
+        row.onChoose = std::move(choose);
+        return row;
+    }
+
+    QList<relay::SettingsSection> settingsSections() {
+        QList<relay::SettingsSection> sections;
         QSettings settings;
-        const QString preset = settings.value(Pane::roleSetting(role, QStringLiteral("preset"))).toString();
-        auto apply = [this, role](const QString &field, const QVariant &value) {
-            if (value.toString().isEmpty()) QSettings().remove(Pane::roleSetting(role, field));
-            else QSettings().setValue(Pane::roleSetting(role, field), value);
-            if (m_active) m_active->agentOptionsChanged(Pane::roleSetting(role, field));
-        };
-        PaletteItem same; same.key = QStringLiteral("role:") + role + QStringLiteral(":same"); same.section = section;
-        same.label = QStringLiteral("Same as main agent"); same.detail = QStringLiteral("the default for every role");
-        same.checked = preset.isEmpty(); same.stayOpen = true;
-        same.run = [apply] { apply(QStringLiteral("preset"), QString()); apply(QStringLiteral("model"), QString()); };
-        items << same;
-        if (m_active) for (const auto &model : m_active->storedModels()) {
-            const QString id = model.first;
-            PaletteItem item; item.key = QStringLiteral("role:") + role + ':' + id; item.section = section;
-            item.label = model.second; item.detail = QStringLiteral("use this provider for this role");
-            item.checked = preset == id; item.stayOpen = true;
-            item.run = [apply, id] { apply(QStringLiteral("preset"), id); };
-            items << item;
+
+        relay::SettingsSection general;
+        general.id = QStringLiteral("general");
+        general.title = QStringLiteral("General");
+        general.blurb = QStringLiteral("What Relay shows while it works.");
+        general.rows << toggleRow(QStringLiteral("agent/show_thinking"), QStringLiteral("Show thinking"),
+                                  QStringLiteral("Stream reasoning above the prompt; a one-line summary always prints"), true);
+        {
+            relay::SettingRow hints;
+            hints.kind = relay::SettingRow::Toggle;
+            hints.id = QStringLiteral("option:shortcut_hints");
+            hints.label = QStringLiteral("Shortcut hints");
+            hints.detail = QStringLiteral("A brief tip when you do something the slow way and a key exists");
+            hints.checked = relay::ShortcutHints::instance().enabled();
+            hints.onToggle = [](bool on) { relay::ShortcutHints::instance().setEnabled(on); };
+            general.rows << hints;
+        }
+        general.rows << buttonRow(QStringLiteral("option:shortcut_hints_reset"), QStringLiteral("Reset shortcut hints"),
+                                  QStringLiteral("Show every tip again"), QStringLiteral("Reset"), [this] {
+            relay::ShortcutHints::instance().resetAll();
+            statusBar()->showMessage(QStringLiteral("Shortcut hints reset."), 4000);
+        });
+        general.rows << toggleRow(QStringLiteral("recap/away"), QStringLiteral("Recap when you come back"),
+                                  QStringLiteral("After 3+ minutes away while the agent worked"), true);
+        {
+            // Saved window layout. The toggle only decides whether the layout is kept; restoring the
+            // last closed pane works either way.
+            relay::SettingRow reopen;
+            reopen.kind = relay::SettingRow::Toggle;
+            reopen.id = QStringLiteral("option:windows/restore");
+            reopen.label = QStringLiteral("Reopen windows on start");
+            reopen.detail = QStringLiteral("Windows, tabs, panes, directories and conversations come back");
+            reopen.aliases = QStringLiteral("session persist startup warp layout remember where you left off");
+            reopen.checked = WindowManager::restoreEnabled();
+            reopen.onToggle = [this](bool on) {
+                QSettings().setValue(QStringLiteral("windows/restore"), on);
+                if (on) m_manager->scheduleSave(); else m_manager->forgetSavedLayout(false);
+                statusBar()->showMessage(on ? QStringLiteral("Relay will reopen this window set on start.")
+                                           : QStringLiteral("Relay will open one new window on start."), 6000);
+            };
+            general.rows << reopen;
+        }
+        general.rows << buttonRow(QStringLiteral("windows.fresh"), QStringLiteral("Start a fresh window set"),
+                                  QStringLiteral("Forget the saved layout; the next start opens one new window"),
+                                  QStringLiteral("Forget"), [this] { startFreshWindowSet(); });
+        sections << general;
+
+        relay::SettingsSection models;
+        models.id = QStringLiteral("models");
+        models.title = QStringLiteral("Models");
+        models.blurb = QStringLiteral("Relay is bring-your-own-key. Keys live in the desktop keyring and are sent "
+                                      "only to the provider they belong to.");
+        models.rows << buttonRow(QStringLiteral("agent.modelKeys"), QStringLiteral("API keys"),
+                                 QStringLiteral("One row per provider: status, add or replace, remove, test"),
+                                 QStringLiteral("API keys…"), [this] { runAction(QStringLiteral("agent.modelKeys")); });
+        models.rows << buttonRow(QStringLiteral("agent.modelRoles"), QStringLiteral("Model roles"),
+                                 QStringLiteral("Default provider, the Main / Flash / Lite models, and what each job uses"),
+                                 QStringLiteral("Model roles…"), [this] { runAction(QStringLiteral("agent.modelRoles")); });
+        {
+            const QString effort = settings.value(QStringLiteral("agent/effort"), QStringLiteral("high")).toString();
+            models.rows << choiceRow(QStringLiteral("option:effort_default"), QStringLiteral("Default reasoning effort"),
+                                     QStringLiteral("New panes and new chats; Alt+. and Alt+, change it per pane"),
+                                     Pane::efforts(), Pane::efforts(), effort, [this](const QString &value) {
+                QSettings().setValue(QStringLiteral("agent/effort"), value);
+                if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/effort"));
+            });
+        }
+        models.rows << toggleRow(QStringLiteral("agent/panes_fast"), QStringLiteral("New panes use the fast agent"),
+                                 QStringLiteral("The first pane of a window keeps the main agent"), true);
+        models.rows << numberRow(QStringLiteral("provider/max_tokens"), QStringLiteral("Output token limit"),
+                                 QStringLiteral("Per model call; applies to the next conversation"), 8192, 256, 32768);
+        models.rows << buttonRow(QStringLiteral("agent.provider"), QStringLiteral("Advanced provider settings"),
+                                 QStringLiteral("Base URL, model id, extra request JSON and the agent workspace"),
+                                 QStringLiteral("Open…"), [this] { runAction(QStringLiteral("agent.provider")); });
+        sections << models;
+
+        relay::SettingsSection terminal;
+        terminal.id = QStringLiteral("terminal");
+        terminal.title = QStringLiteral("Terminal");
+        terminal.blurb = QStringLiteral("The shell side of a pane.");
+        terminal.rows << toggleRow(QStringLiteral("composer/history_suggestions"),
+                                   QStringLiteral("Command suggestions from history"),
+                                   QStringLiteral("→ or Ctrl+F accepts, Alt+→ accepts a word"), true);
+        {
+            const QString current = Pane::defaultControl();
+            terminal.rows << choiceRow(QStringLiteral("option:control_default"),
+                                       QStringLiteral("Control when a full-screen program starts"),
+                                       QStringLiteral("Who gets the keyboard when vim, less or top opens"),
+                                       {QStringLiteral("agent"), QStringLiteral("human")},
+                                       {QStringLiteral("The prompt box keeps the keyboard"),
+                                        QStringLiteral("Relay takes control for you")},
+                                       current, [](const QString &value) {
+                QSettings().setValue(QStringLiteral("control/default"), value);
+            });
+        }
+        terminal.rows << toggleRow(QStringLiteral("terminal/copy_on_select"), QStringLiteral("Copy on select"),
+                                   QStringLiteral("Selecting terminal text copies it"), false);
+        terminal.rows << toggleRow(QStringLiteral("terminal/shell_integration"),
+                                   QStringLiteral("Shell integration (OSC 7/133)"),
+                                   QStringLiteral("Directory and prompt marks; applies to new panes"), false);
+        sections << terminal;
+
+        relay::SettingsSection agent;
+        agent.id = QStringLiteral("agent");
+        agent.title = QStringLiteral("Agent");
+        agent.blurb = QStringLiteral("Instructions, skills and the limits of one turn. Most of these apply to the "
+                                     "next conversation; the turn limits apply at once.");
+        agent.rows << buttonRow(QStringLiteral("agent.instructions"), QStringLiteral("Instructions"),
+                                QStringLiteral("CLAUDE.md, AGENTS.md, WARP.md and other instruction files"),
+                                QStringLiteral("Choose…"), [this] { runAction(QStringLiteral("agent.instructions")); });
+        agent.rows << buttonRow(QStringLiteral("option:skills"), QStringLiteral("Skills"),
+                                QStringLiteral("List, exclude, refine, import from a repository · /skills"),
+                                QStringLiteral("Open…"), [this] { if (m_active) m_active->openSkills(); });
+        agent.rows << textRow(QStringLiteral("skills/exclude_text"), QStringLiteral("Excluded skills"),
+                              QStringLiteral("Comma-separated names to skip (empty: the default Warp-app list)"),
+                              QStringLiteral("name, other-name"), [](const QString &value) {
+            QStringList names;
+            for (const QString &name : value.split(',', Qt::SkipEmptyParts))
+                if (!name.trimmed().isEmpty()) names << name.trimmed();
+            QSettings settings;
+            settings.setValue(QStringLiteral("skills/exclude_text"), value);
+            if (names.isEmpty()) settings.remove(QStringLiteral("skills/exclude"));
+            else settings.setValue(QStringLiteral("skills/exclude"), names);
+        });
+        agent.rows << textRow(QStringLiteral("agent/plans_dir"), QStringLiteral("Plans folder"),
+                              QStringLiteral("Absolute folder for plans (empty: <project>/.relay/plans)"),
+                              QStringLiteral("<project>/.relay/plans"));
+        agent.rows << textRow(QStringLiteral("agent/compact_threshold"), QStringLiteral("Compaction threshold"),
+                              QStringLiteral("Fraction of the model window, 0.50–0.98 (empty: 80% minus output room)"),
+                              QStringLiteral("0.80"), [](const QString &value) {
+            bool ok = false;
+            const double number = value.toDouble(&ok);
+            if (value.isEmpty()) QSettings().remove(QStringLiteral("agent/compact_threshold"));
+            else if (ok && number >= 0.5 && number <= 0.98)
+                QSettings().setValue(QStringLiteral("agent/compact_threshold"), number);
+        });
+        agent.rows << numberRow(QStringLiteral("agent/max_auto_turns"),
+                                QStringLiteral("Automatic turns from background agents"),
+                                QStringLiteral("In a row without your input (0 = unlimited)"), 50, 0, 10000);
+        agent.rows << numberRow(QStringLiteral("agent/max_steps"), QStringLiteral("Step limit per turn"),
+                                QStringLiteral("Model calls, then the turn stops with Continue"), 50, 1, 500);
+        agent.rows << numberRow(QStringLiteral("agent/max_tool_calls"), QStringLiteral("Tool-call limit per turn"),
+                                QStringLiteral("Tool calls in one turn"), 150, 1, 2000);
+        agent.rows << toggleRow(QStringLiteral("agent/audit_requests"), QStringLiteral("Audit requests after each turn"),
+                                QStringLiteral("A small side call flags asks that may be unaddressed"), false);
+        sections << agent;
+
+        relay::SettingsSection privacy;
+        privacy.id = QStringLiteral("privacy");
+        privacy.title = QStringLiteral("Privacy");
+        privacy.blurb = QStringLiteral("Relay has no telemetry. Everything below decides what leaves this machine, "
+                                       "and it only ever goes to the provider whose key you configured.");
+        {
+            relay::SettingRow info;
+            info.kind = relay::SettingRow::Info;
+            info.id = QStringLiteral("info:privacy");
+            info.label = QStringLiteral(
+                "Keys are stored in the desktop keyring (secret-tool, service org.relayterminal.Relay) or read "
+                "from RELAY_<PROVIDER>_API_KEY. They are never written to Relay's settings files and never logged. "
+                "Terminal history is not sent automatically. Shell commands the agent runs are NOT sandboxed: they "
+                "have your user permissions. File tools are restricted to the agent workspace.");
+            privacy.rows << info;
+        }
+        privacy.rows << toggleRow(QStringLiteral("suggestions/next_command"),
+                                  QStringLiteral("AI next-command suggestions"),
+                                  QStringLiteral("After a command finishes. Sends the command and its recent output "
+                                                 "to the Suggestions model, which stays on your own provider."), false);
+        privacy.rows << toggleRow(QStringLiteral("suggestions/next_prompt"),
+                                  QStringLiteral("Suggested next prompts"),
+                                  QStringLiteral("After an agent turn. Sends a summary of the conversation."), false);
+        privacy.rows << toggleRow(QStringLiteral("instructions/project_auto"),
+                                  QStringLiteral("Load project instruction files automatically"),
+                                  QStringLiteral("CLAUDE.md, AGENTS.md and WARP.md found in the workspace"), true);
+        sections << privacy;
+
+        relay::SettingsSection shortcuts;
+        shortcuts.id = QStringLiteral("shortcuts");
+        shortcuts.title = QStringLiteral("Shortcuts");
+        shortcuts.blurb = QStringLiteral("Keys are read from keybindings.json; your own overrides sit on top of the preset.");
+        shortcuts.rows << buttonRow(QStringLiteral("help.shortcuts"), QStringLiteral("Keyboard shortcuts"),
+                                    QStringLiteral("Every action and the keys it answers to"),
+                                    QStringLiteral("Show…"), [this] { runAction(QStringLiteral("help.shortcuts")); });
+        {
+            const QString presetId = Keymap::instance().preset();
+            QStringList values, labels;
+            for (const auto &preset : Keymap::presets()) { values << preset.first; labels << preset.second; }
+            shortcuts.rows << choiceRow(QStringLiteral("option:keymap_preset"), QStringLiteral("Shortcut preset"),
+                                        Keymap::instance().hasOverrides()
+                                            ? QStringLiteral("Your custom overrides stay on top")
+                                            : QStringLiteral("Starting point for every shortcut"),
+                                        values, labels, presetId,
+                                        [](const QString &id) { Keymap::instance().setPreset(id); });
         }
         {
-            PaletteItem item; item.key = QStringLiteral("role:") + role + QStringLiteral(":model"); item.section = section;
-            item.label = QStringLiteral("Model id…");
-            item.detail = settings.value(Pane::roleSetting(role, QStringLiteral("model"))).toString().isEmpty()
-                ? QStringLiteral("the preset's own model (empty)")
-                : settings.value(Pane::roleSetting(role, QStringLiteral("model"))).toString();
-            item.run = [this, role, apply] {
-                bool ok = false;
-                const QString value = QInputDialog::getText(this, Pane::roleLabel(role) + QStringLiteral(" · model"),
-                    QStringLiteral("Model id on the chosen provider (empty: the preset's model)"), QLineEdit::Normal,
-                    QSettings().value(Pane::roleSetting(role, QStringLiteral("model"))).toString(), &ok);
-                if (ok) apply(QStringLiteral("model"), value.trimmed());
-            };
-            items << item;
+            const QString programKeys = Keymap::instance().programKeys();
+            shortcuts.rows << choiceRow(QStringLiteral("option:program_keys"), QStringLiteral("Shortcuts inside programs"),
+                                        QStringLiteral("Which Relay keys still act while vim, nano or less runs"),
+                                        {QStringLiteral("shift-only"), QStringLiteral("all"), QStringLiteral("none")},
+                                        {QStringLiteral("Ctrl+Shift and F-keys only"),
+                                         QStringLiteral("All shortcuts act"),
+                                         QStringLiteral("Programs get every key")},
+                                        programKeys,
+                                        [](const QString &value) { Keymap::instance().setProgramKeys(value); });
         }
-        {
-            const QString effort = settings.value(Pane::roleSetting(role, QStringLiteral("effort"))).toString();
-            PaletteItem item; item.key = QStringLiteral("role:") + role + QStringLiteral(":effort"); item.section = section;
-            item.label = QStringLiteral("Reasoning effort");
-            item.detail = effort.isEmpty() ? QStringLiteral("the provider's default for this model") : effort;
-            item.children = [role, effort, apply] {
-                QList<PaletteItem> levels;
-                const QString section = Pane::roleLabel(role) + QStringLiteral(" · effort");
-                PaletteItem none; none.key = QStringLiteral("role:") + role + QStringLiteral(":effort:default");
-                none.section = section; none.label = QStringLiteral("Provider default"); none.checked = effort.isEmpty();
-                none.stayOpen = true; none.run = [apply] { apply(QStringLiteral("effort"), QString()); };
-                levels << none;
-                for (const QString &level : Pane::efforts()) {
-                    PaletteItem child; child.key = QStringLiteral("role:") + role + QStringLiteral(":effort:") + level;
-                    child.section = section; child.label = level; child.checked = effort == level; child.stayOpen = true;
-                    child.run = [apply, level] { apply(QStringLiteral("effort"), level); };
-                    levels << child;
-                }
-                return levels;
-            };
+        shortcuts.rows << buttonRow(QStringLiteral("keybindings.edit"), QStringLiteral("Edit keyboard shortcuts"),
+                                    QStringLiteral("Opens keybindings.json in your editor"),
+                                    QStringLiteral("Edit…"), [this] { runAction(QStringLiteral("keybindings.edit")); });
+        shortcuts.rows << buttonRow(QStringLiteral("keybindings.reload"), QStringLiteral("Reload keyboard shortcuts"),
+                                    QStringLiteral("Re-read keybindings.json now"),
+                                    QStringLiteral("Reload"), [this] { runAction(QStringLiteral("keybindings.reload")); });
+        sections << shortcuts;
+        return sections;
+    }
+
+    void openSettings(const QString &section = QString()) {
+        if (!m_settings) {
+            m_settings = new relay::SettingsWindow([this] { return settingsSections(); }, this);
+            m_settings->setAttribute(Qt::WA_DeleteOnClose);
+        } else {
+            m_settings->rebuild();
+        }
+        if (!section.isEmpty()) m_settings->showSection(section);
+        m_settings->show();
+        m_settings->raise();
+        m_settings->activateWindow();
+    }
+
+    // The palette renders the same catalog: one submenu per section, one entry per row, so every
+    // setting is still reachable and searchable from the keyboard.
+    QList<PaletteItem> settingsRowItems(const relay::SettingsSection &section) {
+        QList<PaletteItem> items;
+        for (const relay::SettingRow &row : section.rows) {
+            if (row.kind == relay::SettingRow::Info) continue;
+            PaletteItem item;
+            item.key = QStringLiteral("set:") + section.id + ':' + row.id;
+            item.section = section.title;
+            item.label = row.label;
+            item.aliases = row.aliases;
+            switch (row.kind) {
+            case relay::SettingRow::Toggle:
+                item.detail = (row.checked ? QStringLiteral("On · ") : QStringLiteral("Off · ")) + row.detail;
+                item.checked = row.checked;
+                item.stayOpen = true;
+                item.run = [fn = row.onToggle, on = row.checked] { if (fn) fn(!on); };
+                break;
+            case relay::SettingRow::Choice: {
+                QString current = row.current;
+                for (int i = 0; i < row.options.size(); ++i)
+                    if (row.options.at(i) == row.current && i < row.optionLabels.size()) current = row.optionLabels.at(i);
+                item.detail = current + QStringLiteral(" · ") + row.detail;
+                const QString title = row.label;
+                item.children = [row, title] {
+                    QList<PaletteItem> children;
+                    for (int i = 0; i < row.options.size(); ++i) {
+                        PaletteItem child;
+                        const QString value = row.options.at(i);
+                        child.key = QStringLiteral("set:") + row.id + ':' + value;
+                        child.section = title;
+                        child.label = i < row.optionLabels.size() ? row.optionLabels.at(i) : value;
+                        child.checked = value == row.current;
+                        child.stayOpen = true;
+                        child.run = [fn = row.onChoose, value] { if (fn) fn(value); };
+                        children << child;
+                    }
+                    return children;
+                };
+                break;
+            }
+            case relay::SettingRow::Text:
+                item.label = row.label + QStringLiteral("…");
+                item.detail = row.text.isEmpty() ? row.detail : row.text;
+                item.run = [this, row] {
+                    bool ok = false;
+                    const QString value = QInputDialog::getText(this, row.label, row.detail, QLineEdit::Normal,
+                                                                row.text, &ok);
+                    if (ok && row.onText) row.onText(value.trimmed());
+                };
+                break;
+            case relay::SettingRow::Number:
+                item.label = row.label + QStringLiteral("…");
+                item.detail = QStringLiteral("%1 · %2").arg(row.number).arg(row.detail);
+                item.run = [this, row] {
+                    bool ok = false;
+                    const int value = QInputDialog::getInt(this, row.label, row.detail, row.number,
+                                                           row.minimum, row.maximum, 1, &ok);
+                    if (ok && row.onNumber) row.onNumber(value);
+                };
+                break;
+            case relay::SettingRow::Button:
+                item.label = row.label + QStringLiteral("…");
+                item.detail = row.detail;
+                item.run = row.run;
+                break;
+            case relay::SettingRow::Info:
+                break;
+            }
             items << item;
         }
         return items;
     }
+
+    QList<PaletteItem> settingsMenuItems() {
+        QList<PaletteItem> items;
+        const QString section = QStringLiteral("Settings");
+        items << actionItem(section, QStringLiteral("Open the Settings window"),
+                            QStringLiteral("General, Models, Terminal, Agent, Privacy, Shortcuts"),
+                            QStringLiteral("app.settings"));
+        for (const relay::SettingsSection &group : settingsSections()) {
+            const QString id = group.id;
+            items << submenu(QStringLiteral("menu:settings:") + id, section, group.title, group.blurb,
+                             [this, id] {
+                for (const relay::SettingsSection &group : settingsSections())
+                    if (group.id == id) return settingsRowItems(group);
+                return QList<PaletteItem>();
+            });
+        }
+        return items;
+    }
+
 
     QList<PaletteItem> rootItems() {
         QList<PaletteItem> items;
@@ -7000,9 +7312,15 @@ private:
                             pane && pane->limitReached() ? QStringLiteral("The last turn stopped at its step limit · /continue")
                                                          : QStringLiteral("Send “Continue” to the agent · /continue"), QStringLiteral("agent.continue"));
         items << actionItem(agent, QStringLiteral("Export conversation"), QStringLiteral("Save the conversation as Markdown"), QStringLiteral("agent.export"));
-        items << submenu(QStringLiteral("menu:agentOptions"), agent, QStringLiteral("Agent options"), QStringLiteral("Instructions, plans, compaction, suggestions"), [this] {
-            return agentOptionItems();
-        });
+        items << submenu(QStringLiteral("menu:settings"), agent, QStringLiteral("Settings"),
+                         QStringLiteral("Models, keys, terminal, agent, privacy, shortcuts"),
+                         [this] { return settingsMenuItems(); });
+        items << actionItem(agent, QStringLiteral("API keys…"),
+                            QStringLiteral("Add, replace, remove or test a provider key"),
+                            QStringLiteral("agent.modelKeys"));
+        items << actionItem(agent, QStringLiteral("Model roles…"),
+                            QStringLiteral("Default provider and the Main / Flash / Lite models"),
+                            QStringLiteral("agent.modelRoles"));
         items << actionItem(agent, QStringLiteral("New chat"), QStringLiteral("Start a new conversation in this pane"), QStringLiteral("agent.newChat"));
         items << actionItem(agent, QStringLiteral("Stop agent"), pane && pane->agentBusy() ? QStringLiteral("Cancel the running turn") : QStringLiteral("Agent is idle"), QStringLiteral("agent.stop"));
         // --- subagents UI ---
@@ -7019,45 +7337,13 @@ private:
             items << actionItem(agent, QStringLiteral("Clear queue"), QStringLiteral("%1 queued item(s)").arg(pane->queuedPrompts()), QStringLiteral("agent.clearQueue"));
         if (pane && pane->queuePaused())
             items << actionItem(agent, QStringLiteral("Resume queue"), QStringLiteral("Paused after a stop, failure or edit"), QStringLiteral("agent.resumeQueue"));
-        items << actionItem(agent, QStringLiteral("Provider and API keys…"), QStringLiteral("Base URL, model ID, key, request options"), QStringLiteral("agent.provider"));
-        PaletteItem importKeys; importKeys.key = QStringLiteral("agent.importWarp"); importKeys.section = agent;
-        importKeys.label = QStringLiteral("Import keys from Warp"); importKeys.detail = QStringLiteral("Copy Warp's custom-endpoint keys into the keyring");
-        importKeys.run = [this] { if (m_active) m_active->importWarpKeys(); };
-        items << importKeys;
-
         items << actionItem(QStringLiteral("palette"), QStringLiteral("Keyboard shortcuts…"), QStringLiteral("Every action and its keys"), QStringLiteral("help.shortcuts"));
         items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Stop the running program · Esc in the prompt box") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
         items << actionItem(terminal, QStringLiteral("Take control"),
                             QStringLiteral("Hide the prompt box and type into the terminal · the only way keys reach it"),
                             QStringLiteral("control.human"), pane && pane->isNative());
-        {
-            PaletteItem suggestions;
-            const bool on = QSettings().value(QStringLiteral("composer/history_suggestions"), true).toBool();
-            suggestions.key = QStringLiteral("composer.historySuggestions"); suggestions.section = terminal;
-            suggestions.label = QStringLiteral("Command suggestions from history");
-            suggestions.detail = on ? QStringLiteral("On: → or Ctrl+F accepts, Alt+→ accepts a word") : QStringLiteral("Off");
-            suggestions.checked = on; suggestions.stayOpen = true;
-            suggestions.run = [on] { QSettings().setValue(QStringLiteral("composer/history_suggestions"), !on); };
-            items << suggestions;
-        }
         items << actionItem(terminal, QStringLiteral("Show the Relay prompt"), QStringLiteral("Back to the prompt box; it becomes the input again"), QStringLiteral("control.prompt"), pane && !pane->isNative());
         {
-            const QString current = Pane::defaultControl();
-            items << submenu(QStringLiteral("menu:control"), terminal, QStringLiteral("Control when a full-screen program starts"),
-                             current == QStringLiteral("agent") ? QStringLiteral("The prompt box keeps the keyboard") : QStringLiteral("Relay takes control for you"), [current] {
-                QList<PaletteItem> children;
-                const QList<QStringList> options{{QStringLiteral("agent"), QStringLiteral("The prompt box keeps the keyboard"), QStringLiteral("A \"Take control\" button appears; Ctrl+H does the same")},
-                                                 {QStringLiteral("human"), QStringLiteral("Relay takes control for you"), QStringLiteral("The old behaviour: the prompt box hides and keys go to the program")}};
-                for (const auto &option : options) {
-                    PaletteItem item;
-                    const QString value = option[0];
-                    item.key = QStringLiteral("control.default:") + value; item.section = QStringLiteral("Control when a full-screen program starts");
-                    item.label = option[1]; item.detail = option[2]; item.checked = current == value; item.stayOpen = true;
-                    item.run = [value] { QSettings().setValue(QStringLiteral("control/default"), value); };
-                    children << item;
-                }
-                return children;
-            });
             const QString program = pane ? pane->foregroundProgramName() : QString();
             if (!program.isEmpty()) {
                 const QString override = Pane::programControl(program);
@@ -7076,28 +7362,6 @@ private:
                 humanItem.run = [program, override] { Pane::setProgramControl(program, override == QStringLiteral("human") ? QString() : QStringLiteral("human")); };
                 items << humanItem;
             }
-        }
-        {
-            PaletteItem copy;
-            const bool on = QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool();
-            copy.key = QStringLiteral("terminal.copyOnSelect"); copy.section = terminal;
-            copy.label = QStringLiteral("Copy on select"); copy.detail = on ? QStringLiteral("On: selecting terminal text copies it") : QStringLiteral("Off");
-            copy.checked = on; copy.stayOpen = true;
-            copy.run = [on] { QSettings().setValue(QStringLiteral("terminal/copy_on_select"), !on); };
-            items << copy;
-        }
-        {
-            // shell/relay-integration.bash: OSC 7 and OSC 133 marks, used by Relay's engine.
-            PaletteItem shellIntegration;
-            const bool on = QSettings().value(QStringLiteral("terminal/shell_integration"), false).toBool();
-            shellIntegration.key = QStringLiteral("terminal.shellIntegration"); shellIntegration.section = terminal;
-            shellIntegration.label = QStringLiteral("Shell integration (OSC 7/133)");
-            shellIntegration.detail = on ? QStringLiteral("On for new panes: directory and prompt marks")
-                                         : QStringLiteral("Off · new panes only");
-            shellIntegration.aliases = QStringLiteral("osc7 osc133 prompt marks");
-            shellIntegration.checked = on; shellIntegration.stayOpen = true;
-            shellIntegration.run = [on] { QSettings().setValue(QStringLiteral("terminal/shell_integration"), !on); };
-            items << shellIntegration;
         }
         if (m_active) {
             PaletteItem clear;
@@ -7173,113 +7437,14 @@ private:
         items << actionItem(panes, QStringLiteral("Move pane up"), QString(), QStringLiteral("pane.moveUp"));
         items << actionItem(panes, QStringLiteral("Move pane down"), QString(), QStringLiteral("pane.moveDown"));
         items << actionItem(panes, QStringLiteral("Restore closed"), QStringLiteral("Last closed pane, tab or window"), QStringLiteral("closed.restore"));
-        {
-            // Saved window layout ("reopen where I left off"). The toggle only decides whether the
-            // layout is kept; Ctrl+Shift+W (restore last closed) works either way.
-            PaletteItem reopen; reopen.key = QStringLiteral("option:windows/restore"); reopen.section = panes;
-            const bool on = WindowManager::restoreEnabled();
-            reopen.label = QStringLiteral("Reopen windows on start");
-            reopen.detail = (on ? QStringLiteral("On · ") : QStringLiteral("Off · "))
-                + QStringLiteral("windows, tabs, panes, directories and conversations come back");
-            reopen.aliases = QStringLiteral("session persist startup warp layout remember where you left off");
-            reopen.checked = on; reopen.stayOpen = true;
-            reopen.run = [this, on] {
-                QSettings().setValue(QStringLiteral("windows/restore"), !on);
-                if (on) m_manager->forgetSavedLayout(false);   // turned off: drop what was saved
-                else m_manager->scheduleSave();
-                statusBar()->showMessage(on ? QStringLiteral("Relay will open one new window on start.")
-                                            : QStringLiteral("Relay will reopen this window set on start."), 6000);
-            };
-            items << reopen;
-            items << actionItem(panes, QStringLiteral("Start a fresh window set"),
-                                QStringLiteral("Forget the saved layout; the next start opens one new window"),
-                                QStringLiteral("windows.fresh"));
-        }
-        {
-            // Window header: Relay's own title bar, or the desktop's. Existing windows keep theirs.
-            PaletteItem frame; frame.key = QStringLiteral("option:window/native_frame"); frame.section = panes;
-            const bool native = nativeFrame();
-            frame.label = QStringLiteral("System title bar");
-            frame.detail = (native ? QStringLiteral("On · ") : QStringLiteral("Off · "))
-                + QStringLiteral("off: the tab row is the title bar, with the window buttons on it · new windows");
-            frame.aliases = QStringLiteral("frameless decorations titlebar header chrome window buttons");
-            frame.checked = native; frame.stayOpen = true;
-            frame.run = [this, native] {
-                QSettings().setValue(QStringLiteral("window/native_frame"), !native);
-                statusBar()->showMessage(native ? QStringLiteral("New windows will draw Relay's own title bar.")
-                                                : QStringLiteral("New windows will use the system title bar."), 6000);
-            };
-            items << frame;
-            PaletteItem bell; bell.key = QStringLiteral("notifications.open"); bell.section = panes;
-            const int unseen = relay::NotificationCenter::instance().unseen();
-            bell.label = QStringLiteral("Notifications…");
-            bell.detail = unseen > 0 ? QStringLiteral("%1 new · the bell in the window header").arg(unseen)
-                                     : QStringLiteral("%1 in this session · the bell in the window header")
-                                           .arg(relay::NotificationCenter::instance().count());
-            bell.aliases = QStringLiteral("bell alerts notice history");
-            bell.run = [this] { QTimer::singleShot(0, this, [this] { toggleNotifications(); }); };
-            items << bell;
-            PaletteItem desktop; desktop.key = QStringLiteral("option:notifications/desktop"); desktop.section = panes;
-            const bool on = relay::NotificationCenter::desktopEnabled();
-            desktop.label = QStringLiteral("Desktop notifications");
-            desktop.detail = (on ? QStringLiteral("On · ") : QStringLiteral("Off · "))
-                + QStringLiteral("notify-send while another window has the focus; the bell keeps them either way");
-            desktop.aliases = QStringLiteral("notify-send popup alert away");
-            desktop.checked = on; desktop.stayOpen = true;
-            desktop.run = [on] { relay::NotificationCenter::setDesktopEnabled(!on); };
-            items << desktop;
-        }
+        // "Reopen windows on start" is a row in Settings > General.
+        items << actionItem(panes, QStringLiteral("Start a fresh window set"),
+                            QStringLiteral("Forget the saved layout; the next start opens one new window"),
+                            QStringLiteral("windows.fresh"));
         items << actionItem(panes, QStringLiteral("Next tab"), QString(), QStringLiteral("tab.next"));
         items << actionItem(panes, QStringLiteral("Previous tab"), QString(), QStringLiteral("tab.previous"));
 
-        {
-            PaletteItem hints;
-            const bool on = relay::ShortcutHints::instance().enabled();
-            hints.key = QStringLiteral("option:shortcut_hints"); hints.section = keys;
-            hints.label = QStringLiteral("Shortcut hints"); hints.detail = on ? QStringLiteral("On · tips when a faster key exists") : QStringLiteral("Off");
-            hints.checked = on; hints.stayOpen = true;
-            hints.run = [on] { relay::ShortcutHints::instance().setEnabled(!on); };
-            items << hints;
-            PaletteItem reset;
-            reset.key = QStringLiteral("option:shortcut_hints_reset"); reset.section = keys;
-            reset.label = QStringLiteral("Reset shortcut hints"); reset.detail = QStringLiteral("Show every tip again");
-            reset.run = [this] { relay::ShortcutHints::instance().resetAll(); statusBar()->showMessage(QStringLiteral("Shortcut hints reset."), 4000); };
-            items << reset;
-        }
-        const QString presetId = Keymap::instance().preset();
-        QString presetName;
-        for (const auto &preset : Keymap::presets()) if (preset.first == presetId) presetName = preset.second;
-        items << submenu(QStringLiteral("menu:preset"), keys, QStringLiteral("Shortcut preset"), presetName, [this, presetId] {
-            QList<PaletteItem> children;
-            for (const auto &preset : Keymap::presets()) {
-                PaletteItem item;
-                const QString id = preset.first;
-                item.key = QStringLiteral("preset:") + id; item.section = QStringLiteral("Shortcut preset"); item.label = preset.second;
-                item.detail = Keymap::instance().hasOverrides() ? QStringLiteral("Your custom overrides stay on top") : QString();
-                item.checked = id == presetId; item.stayOpen = true;
-                item.run = [id] { Keymap::instance().setPreset(id); };
-                children << item;
-            }
-            return children;
-        });
-        const QString programKeys = Keymap::instance().programKeys();
-        items << submenu(QStringLiteral("menu:programKeys"), keys, QStringLiteral("Shortcuts inside programs"),
-                         programKeys == QStringLiteral("all") ? QStringLiteral("All shortcuts act") : programKeys == QStringLiteral("none") ? QStringLiteral("Programs get every key") : QStringLiteral("Ctrl+Shift and F-keys only"),
-                         [programKeys] {
-            QList<PaletteItem> children;
-            const QList<QStringList> options{{QStringLiteral("shift-only"), QStringLiteral("Ctrl+Shift and F-keys only"), QStringLiteral("Other keys reach vim, nano, less")},
-                                             {QStringLiteral("all"), QStringLiteral("All shortcuts act"), QStringLiteral("Relay wins inside programs")},
-                                             {QStringLiteral("none"), QStringLiteral("Programs get every key"), QStringLiteral("No shortcuts while a program runs")}};
-            for (const auto &option : options) {
-                PaletteItem item;
-                const QString value = option[0];
-                item.key = QStringLiteral("programKeys:") + value; item.section = QStringLiteral("Shortcuts inside programs");
-                item.label = option[1]; item.detail = option[2]; item.checked = programKeys == value; item.stayOpen = true;
-                item.run = [value] { Keymap::instance().setProgramKeys(value); };
-                children << item;
-            }
-            return children;
-        });
+        // "Shortcut hints", "Shortcut preset" and "Shortcuts inside programs" are rows in Settings.
         items << actionItem(keys, QStringLiteral("Edit keyboard shortcuts…"), Keymap::instance().path(), QStringLiteral("keybindings.edit"));
         items << actionItem(keys, QStringLiteral("Reload keyboard shortcuts"), QString(), QStringLiteral("keybindings.reload"));
         if (Keymap::instance().hasOverrides()) {
@@ -8615,6 +8780,7 @@ private:
     WindowManager *m_manager;
     QTabWidget *m_tabs = nullptr;
     QList<QPair<QAction *, QString>> m_toolbarActions;
+    QPointer<relay::SettingsWindow> m_settings;
     QWidget *m_sidebar = nullptr;
     QLabel *m_paletteTitle = nullptr;
     QLineEdit *m_filter = nullptr;

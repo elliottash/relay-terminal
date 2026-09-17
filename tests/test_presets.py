@@ -1,0 +1,170 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Provider presets, the Main/Flash/Lite tier table, and the GUI mirror in src/main.cpp.
+
+Nothing here touches the network or the keyring: the tables are plain data and the mirror check
+reads the C++ source as text.
+"""
+import json
+import re
+import unittest
+from pathlib import Path
+
+from relay_core import presets as P
+from relay_core import roles as model_roles
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class PresetTableTests(unittest.TestCase):
+    def test_every_preset_is_a_usable_openai_compatible_endpoint(self):
+        for preset in P.PRESETS.values():
+            with self.subTest(preset.id):
+                self.assertTrue(preset.base_url.startswith("https://"), preset.base_url)
+                self.assertFalse(preset.base_url.endswith("/"), "the transport appends /chat/completions")
+                self.assertTrue(preset.model.strip())
+                self.assertIn(preset.group, P.GROUPS)
+                self.assertIn(preset.effort_style, P.EFFORT_MAP)
+                self.assertGreaterEqual(preset.context_window, 128_000)
+                self.assertTrue(preset.key_url.startswith("https://"), preset.id)
+                self.assertTrue(preset.note)
+                # ProviderConfig only accepts these request fields.
+                self.assertFalse(set(preset.extra) - {"thinking", "reasoning", "reasoning_effort",
+                                                      "temperature", "top_p"})
+
+    def test_new_providers_are_present_with_their_documented_endpoints(self):
+        expected = {
+            # Verified 2026-09-17; the doc URL for each sits next to the entry in presets.py.
+            "minimax": ("https://api.minimax.io/v1", "MiniMax-M3"),
+            "openai": ("https://api.openai.com/v1", "gpt-6-astra"),
+            "anthropic": ("https://api.anthropic.com/v1", "claude-opus-5"),
+            "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.1-pro-preview"),
+        }
+        for preset_id, (base_url, model) in expected.items():
+            preset = P.PRESETS[preset_id]
+            self.assertEqual((preset.base_url, preset.model), (base_url, model), preset_id)
+
+    def test_subscriptions_aggregator_and_payg_are_all_represented(self):
+        by_group = {}
+        for preset in P.PRESETS.values():
+            by_group.setdefault(preset.group, []).append(preset.id)
+        self.assertEqual(sorted(by_group["subscription"]), ["glm-coding", "kimi-code", "minimax"])
+        self.assertEqual(by_group["aggregator"], ["openrouter"])
+        self.assertEqual(sorted(by_group["payg"]), ["anthropic", "gemini", "glm", "kimi", "openai"])
+
+    def test_providers_without_an_effort_knob_send_no_effort_fields(self):
+        # Anthropic's compat layer ignores reasoning_effort and MiniMax has no such field.
+        for preset_id in ("anthropic", "minimax"):
+            self.assertEqual(P.PRESETS[preset_id].effort_style, "none", preset_id)
+        self.assertEqual(P.distinct_efforts("none"), [])
+        for level in P.EFFORTS:
+            extra, applied = P.apply_effort({"temperature": 0.2}, "none", level)
+            self.assertEqual(applied, {})
+            self.assertEqual(extra, {"temperature": 0.2})
+        self.assertIsNone(P.infer_effort("none", {"reasoning_effort": "high"}))
+
+    def test_openai_and_gemini_effort_maps_stay_inside_the_documented_values(self):
+        self.assertEqual(set(P.EFFORT_MAP["openai"].values()), {"low", "medium", "high", "xhigh"})
+        # "minimal" is rejected by gemini-3.8-flash and "none" only works on 2.5 models.
+        self.assertEqual(set(P.EFFORT_MAP["gemini"].values()), {"low", "medium", "high"})
+
+    def test_glm_flash_never_asks_to_disable_thinking(self):
+        # Z.AI errors when thinking.type is "disabled" on GLM-5.3 and GLM-5.3-Flash.
+        self.assertEqual(P.GLM_FAST_EXTRA["thinking"], {"type": "enabled"})
+        for table in P.TIER_DEFAULTS.values():
+            for _, _, extra in table.values():
+                self.assertNotEqual((extra.get("thinking") or {}).get("type"), "disabled")
+
+
+class TierTableTests(unittest.TestCase):
+    def test_every_preset_has_all_three_tiers_pointing_at_real_presets(self):
+        self.assertEqual(sorted(P.TIER_DEFAULTS), sorted(P.PRESETS))
+        for provider, table in P.TIER_DEFAULTS.items():
+            self.assertEqual(sorted(table), sorted(P.TIERS), provider)
+            for tier, (preset_id, model, extra) in table.items():
+                self.assertIn(preset_id, P.PRESETS, f"{provider}.{tier}")
+                self.assertTrue(model.strip(), f"{provider}.{tier}")
+                self.assertIsInstance(extra, dict)
+
+    def test_owner_requested_defaults(self):
+        expected = {
+            "glm": ("glm-5.3", "glm-5.3-flash", "google/gemini-3.8-flash"),
+            "glm-coding": ("glm-5.3", "glm-5.3-flash", "google/gemini-3.8-flash"),
+            "kimi": ("kimi-k3", "kimi-k2.7-code-highspeed", "google/gemini-3.8-flash"),
+            "kimi-code": ("k3", "kimi-for-coding-highspeed", "google/gemini-3.8-flash"),
+            # No non-flash DeepSeek V4.1 exists on OpenRouter, so Main falls back to the flash model.
+            "openrouter": ("deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash",
+                           "google/gemini-3.5-flash-lite"),
+            "minimax": ("MiniMax-M3", "MiniMax-M2.7-highspeed", "google/gemini-3.8-flash"),
+            "anthropic": ("claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"),
+            "gemini": ("gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-3.5-flash-lite"),
+        }
+        for provider, (main, flash, lite) in expected.items():
+            table = P.TIER_DEFAULTS[provider]
+            self.assertEqual((table["main"][1], table["flash"][1], table["lite"][1]),
+                             (main, flash, lite), provider)
+
+    def test_the_cross_provider_lite_tier_is_openrouter(self):
+        for provider in ("glm", "glm-coding", "kimi", "kimi-code", "minimax"):
+            self.assertEqual(P.TIER_DEFAULTS[provider]["lite"][0], "openrouter", provider)
+
+    def test_recommended_pairs_name_real_presets(self):
+        self.assertEqual(P.RECOMMENDED, (("glm-coding", "openrouter"), ("kimi-code", "openrouter")))
+        for first, second in P.RECOMMENDED:
+            self.assertIn(first, P.PRESETS)
+            self.assertIn(second, P.PRESETS)
+
+    def test_tier_fallbacks_always_end_at_main(self):
+        self.assertEqual(P.tier_fallbacks("lite"), ("lite", "flash", "main"))
+        self.assertEqual(P.tier_fallbacks("flash"), ("flash", "main"))
+        self.assertEqual(P.tier_fallbacks("main"), ("main",))
+        with self.assertRaises(ValueError):
+            P.tier_fallbacks("turbo")
+
+    def test_role_tiers_cover_every_role(self):
+        self.assertEqual(sorted(model_roles.ROLE_TIERS), sorted(model_roles.ROLES))
+        self.assertEqual([role for role, tier in model_roles.ROLE_TIERS.items() if tier == "main"],
+                         ["main", "subagent", "switchboard"])
+        self.assertEqual(sorted(r for r, t in model_roles.ROLE_TIERS.items() if t == "flash"),
+                         ["fast", "suggestions", "summaries", "terminal_use"])
+        self.assertEqual(sorted(r for r, t in model_roles.ROLE_TIERS.items() if t == "lite"),
+                         ["audit", "chores"])
+        # Command routing is its own override, never moved by the Lite row.
+        self.assertIsNone(model_roles.ROLE_TIERS["route_assist"])
+        self.assertEqual(model_roles.ROUTE_ASSIST_DEFAULT[1], "google/gemini-3.5-flash-lite")
+
+    def test_action_catalog_names_every_role_once(self):
+        actions = model_roles.action_catalog()
+        self.assertEqual(sorted(a["role"] for a in actions), sorted(model_roles.ROLES))
+        for action in actions:
+            self.assertTrue(action["label"] and action["hint"])
+            # Named after the job, not the protocol id.
+            self.assertNotEqual(action["label"], action["role"])
+        self.assertFalse(next(a for a in actions if a["role"] == "main")["settable"])
+
+    def test_tier_catalog_is_json_safe_and_complete(self):
+        catalog = model_roles.tier_catalog()
+        json.dumps(catalog)
+        self.assertEqual([t["id"] for t in catalog["tiers"]], list(P.TIERS))
+        self.assertEqual(sorted(catalog["providers"]), sorted(P.PRESETS))
+
+
+class GuiMirrorTests(unittest.TestCase):
+    """The advanced provider dialog in src/main.cpp keeps its own copy of the preset table."""
+
+    def test_the_cpp_preset_table_matches_presets_py(self):
+        source = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
+        block = source.split("// Mirrors backend/relay_core/presets.py", 1)[1].split("};", 1)[0]
+        rows = re.findall(r'\{"([a-z0-9-]+)",\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",', block)
+        mirrored = {row[0]: (row[1], row[2], row[3]) for row in rows if row[0] != "custom"}
+        expected = {p.id: (p.label, p.base_url, p.model) for p in P.PRESETS.values()}
+        self.assertEqual(mirrored, expected)
+
+    def test_the_cpp_role_list_matches_roles_py(self):
+        source = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
+        block = source.split("static QStringList roleIds() {", 1)[1].split("}", 1)[0]
+        mirrored = re.findall(r'QStringLiteral\("([a-z_]+)"\)', block)
+        self.assertEqual(sorted(mirrored), sorted(model_roles.SETTABLE))
+
+
+if __name__ == "__main__":
+    unittest.main()
