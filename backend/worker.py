@@ -8,14 +8,13 @@ import os
 import sys
 import threading
 
-from relay_core import __version__, keystore, skills
+from relay_core import __version__, keystore, session_protocol, skills
 from relay_core.agent import Agent
 from relay_core import agents_defs
 from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog, KeybindingError
-from relay_core.presets import PRESETS, match_preset
+from relay_core.presets import PRESETS
 from relay_core.queue import TurnSupervisor
-from relay_core.provider import ProviderConfig
 from relay_core.router import classify
 
 MAX_MESSAGE = 2 * 1024 * 1024
@@ -61,6 +60,17 @@ def main():
     turns = TurnSupervisor(turn_emit)
     subagents.turns = turns
 
+    def model_changed(agent):
+        # Subagents that inherit the main model follow a set_model switch.
+        factory = subagents.factory
+        if factory is not None:
+            factory.config = agent.config
+            factory.preset_id = agent.preset.id if agent.preset else None
+
+    sessions = session_protocol.SessionCommands(
+        turns, emit, on_model_changed=model_changed,
+        on_conversation_replaced=lambda: subagents.stop_all(reset=True))
+
     emit({"event": "ready", "version": __version__})
     while True:
         line = sys.stdin.buffer.readline(MAX_MESSAGE + 1)
@@ -87,27 +97,12 @@ def main():
             elif kind == "configure":
                 if turns.busy:
                     raise ValueError("Stop the active agent turn before changing provider or workspace.")
-                api_key = request.get("api_key", "")
-                if not isinstance(api_key, str):
-                    raise ValueError("API key must be text.")
-                if not api_key and request.get("use_stored_key"):
-                    # The key never crosses the frontend pipe in this path.
-                    preset_id = request.get("preset", "")
-                    if preset_id not in PRESETS:
-                        # "Custom" settings that point at a known endpoint still use its stored key.
-                        match = match_preset(str(request.get("base_url", "")), str(request.get("model", "")))
-                        preset_id = match.id if match else ""
-                    api_key = keystore.lookup(preset_id) if preset_id else ""
-                    if not api_key:
-                        raise ValueError("No stored key for this provider. Import from Warp or enter a key.")
-                config = ProviderConfig(request.get("base_url", ""), request.get("model", ""),
-                                        api_key, request.get("extra", {}),
-                                        request.get("max_tokens", 8192))
-                config.validate()
+                config = session_protocol.provider_config(request)
                 catalog = KeybindingCatalog.from_request(request.get("keybindings"))
                 workspace = request.get("workspace", os.getcwd())
                 skill_index = skills.from_request(request.get("skills"), workspace)
-                agent = Agent(config, workspace, turns.agent_emit, keybindings=catalog, skills=skill_index)
+                agent = Agent(config, workspace, turns.agent_emit, keybindings=catalog, skills=skill_index,
+                              **session_protocol.agent_options(request, workspace))
                 # --- subagents ---
                 agents_request = request.get("agents") or {}
                 if not isinstance(agents_request, dict):
@@ -123,7 +118,8 @@ def main():
                 subagents.attach(agent)
                 # --- end subagents ---
                 event = {"event": "configured", "model": config.model,
-                         "skills": len(agent.executor.skills.skills) if agent.executor.skills is not None else 0}
+                         "skills": len(agent.executor.skills.skills) if agent.executor.skills is not None else 0,
+                         **session_protocol.configured_fields(agent)}
                 event["agents"] = len(agent_catalog.definitions)  # subagents
                 if skill_index is not None and skill_index.skipped:
                     event["skills_skipped"] = skill_index.skipped[:50]
@@ -150,7 +146,7 @@ def main():
             elif kind == "ask":
                 subagents.user_activity()
                 turns.submit(request.get("text", ""), request.get("when", "now"), request.get("id"),
-                             request.get("context"))
+                             request.get("context"), session_protocol.load_attachments(request, turns))
             elif kind == "cancel":
                 turns.cancel()
             elif kind == "resume_queue":
@@ -184,6 +180,8 @@ def main():
             elif kind == "agents_status":
                 emit({"event": "agents_status", "items": subagents.list()})
             # --- end subagents ---
+            elif sessions.handles(kind):
+                sessions.handle(kind, request)
             elif kind == "shutdown":
                 break
             else:

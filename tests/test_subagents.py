@@ -556,7 +556,7 @@ class FactoryTests(unittest.TestCase):
             agent, label, warns = factory(catalog.get('explore'), None, 'low', lambda e: None, 'a1')
             self.assertEqual(agent.provider.extra['reasoning_effort'], 'low')
             self.assertEqual(label, 'kimi-k3')
-            self.assertEqual(effort_extra('openrouter', {}, 'max'), {'reasoning': {'effort': 'high'}})
+            self.assertEqual(effort_extra('openrouter', {}, 'max'), {'reasoning': {'effort': 'xhigh'}})
             self.assertEqual(effort_extra('glm', {}, 'medium')['thinking'], {'type': 'enabled'})
             self.assertIsNone(effort_extra(None, {}, 'low'))
 

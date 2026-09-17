@@ -32,7 +32,7 @@ from typing import Callable
 
 from .agent import CONTEXT_CLOSE, CONTEXT_OPEN, Agent
 from .agents_defs import EFFORTS, MAX_STEPS, AgentCatalog, AgentDefinition
-from .presets import PRESETS, match_preset
+from .presets import PRESETS, apply_effort, match_preset
 from .provider import Cancelled, ProviderConfig
 from .tools import ToolExecutor, spec
 
@@ -52,24 +52,12 @@ AGENT_TOOLS = ("agent", "agent_message", "agent_wait")
 FORWARDED = {"delta", "tool_started", "tool_output", "tool_result", "status"}
 PROGRESS_INTERVAL = 1.0
 
-# Effort -> provider parameters (protocol section 3). Kept here until presets.py carries the table.
-_KIMI_GLM = {"low": "low", "medium": "high", "high": "high", "max": "max"}
-_OPENROUTER = {"low": "low", "medium": "medium", "high": "high", "max": "high"}
-
-
 def effort_extra(preset_id: str | None, extra: dict, effort: str) -> dict | None:
-    """Provider extra params for an effort, or None when this provider has no known mapping."""
-    extra = dict(extra)
-    if preset_id == "kimi":
-        extra["reasoning_effort"] = _KIMI_GLM[effort]
-    elif preset_id in ("glm", "glm-coding"):
-        extra["thinking"] = {"type": "enabled"}
-        extra["reasoning_effort"] = _KIMI_GLM[effort]
-    elif preset_id == "openrouter":
-        extra["reasoning"] = {"effort": _OPENROUTER[effort]}
-    else:
+    """Provider extra params for an effort (table in presets.EFFORT_MAP), or None for unknown providers."""
+    preset = PRESETS.get(preset_id) if preset_id else None
+    if preset is None:
         return None
-    return extra
+    return apply_effort(extra, preset.effort_style, effort)[0]
 
 
 class RestrictedExecutor(ToolExecutor):
