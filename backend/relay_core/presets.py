@@ -47,6 +47,10 @@ GLM_EXTRA = {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
 PRESETS: dict[str, Preset] = {p.id: p for p in [
     Preset("kimi", "Kimi · K3", "https://api.moonshot.ai/v1", "kimi-k3", {"reasoning_effort": "high"},
            1_048_576, "kimi"),
+    # Kimi Code subscription (https://www.kimi.com/code/docs/en/kimi-code/models.html): API key from the Kimi Code
+    # Console. Model ids: k3, k3-256k, kimi-for-coding (K2.8 Preview), kimi-for-coding-highspeed (K2.7 Code HighSpeed).
+    Preset("kimi-code", "Kimi Code · K3", "https://api.kimi.ai/coding/v1", "k3", {"reasoning_effort": "high"},
+           1_048_576, "kimi"),
     Preset("glm", "Z.AI · GLM-5.3 · standard API", "https://api.z.ai/api/paas/v4", "glm-5.3", GLM_EXTRA,
            1_000_000, "glm"),
     Preset("glm-coding", "Z.AI · GLM-5.3 · Coding Plan", "https://api.z.ai/api/coding/paas/v4", "glm-5.3", GLM_EXTRA,

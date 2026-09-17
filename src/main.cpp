@@ -4250,6 +4250,7 @@ private:
             // Mirrors backend/relay_core/presets.py.
             {"custom", "Custom / current settings", "", "", ""},
             {"kimi", "Kimi · K3", "https://api.moonshot.ai/v1", "kimi-k3", "{\"reasoning_effort\":\"high\"}"},
+            {"kimi-code", "Kimi Code · K3", "https://api.kimi.ai/coding/v1", "k3", "{\"reasoning_effort\":\"high\"}"},
             {"glm", "Z.AI · GLM-5.3 · standard API", "https://api.z.ai/api/paas/v4", "glm-5.3",
              "{\"thinking\":{\"type\":\"enabled\"},\"reasoning_effort\":\"high\"}"},
             {"glm-coding", "Z.AI · GLM-5.3 · Coding Plan", "https://api.z.ai/api/coding/paas/v4", "glm-5.3",

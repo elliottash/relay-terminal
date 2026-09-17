@@ -484,6 +484,7 @@ Presets (`backend/relay_core/presets.py`, mirrored by hand in the dialog in `src
 | Id | Base URL | Model | Extras |
 |---|---|---|---|
 | `kimi` | `https://api.moonshot.ai/v1` | `kimi-k3` | `reasoning_effort: high` |
+| `kimi-code` | `https://api.kimi.ai/coding/v1` | `k3` (also `k3-256k`, `kimi-for-coding` = K2.8 Preview, `kimi-for-coding-highspeed`) | `reasoning_effort: high`; key from the Kimi Code Console |
 | `glm` | `https://api.z.ai/api/paas/v4` | `glm-5.3` | thinking enabled, `reasoning_effort: high` |
 | `glm-coding` | `https://api.z.ai/api/coding/paas/v4` | `glm-5.3` | same |
 | `openrouter` | `https://openrouter.ai/api/v1` | `deepseek/deepseek-v4.1-flash` | none |

@@ -106,6 +106,8 @@ class KeystoreTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"RELAY_OPENROUTER_API_KEY": "from-env"}):
             self.assertEqual(keystore.lookup("openrouter"), "from-env")
         self.assertEqual(keystore.env_name("glm-coding"), "RELAY_GLM_CODING_API_KEY")
+        self.assertEqual(keystore.env_name("kimi-code"), "RELAY_KIMI_CODE_API_KEY")
+        self.assertEqual(match_preset("https://api.kimi.ai/coding/v1", "kimi-for-coding").id, "kimi-code")
 
     def test_rejects_bad_ids_and_keys(self):
         for bad in ["", "../x", "Kimi", "a b"]:
