@@ -96,7 +96,8 @@ def main():
                 emit({"event": "warp_imported", "id": request.get("id"),
                       "imported": [item.to_dict() for item in imported], "skipped": skipped})
             elif kind == "ask":
-                turns.submit(request.get("text", ""), request.get("when", "now"), request.get("id"))
+                turns.submit(request.get("text", ""), request.get("when", "now"), request.get("id"),
+                             request.get("context"))
             elif kind == "cancel":
                 turns.cancel()
             elif kind == "resume_queue":

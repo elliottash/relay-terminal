@@ -55,6 +55,9 @@
 #include <QTabWidget>
 #include <QFileSystemWatcher>
 #include <QKeySequence>
+#include <QIcon>
+#include <QScrollBar>
+#include <QTextCharFormat>
 #include <QTreeView>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -274,6 +277,7 @@ private:
         add("input.modeAuto", "agent", "Input mode: auto detect", {});
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
         add("input.modeAgent", "agent", "Input mode: agent", {});
+        add("input.toggle", "agent", "Toggle input between terminal command and agent prompt (from the prompt box)", {QStringLiteral("Ctrl+I")});
         add("keybindings.edit", "terminal", "Edit keyboard shortcuts", {});
         add("keybindings.reload", "terminal", "Reload keyboard shortcuts", {});
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
@@ -337,7 +341,7 @@ private:
 
     // Filled from docs/KEYBINDING-PRESETS.md research. Missing actions fall back to Relay defaults.
     static QByteArray presetJson() {
-        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":["Ctrl+Shift+E"],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+Shift+Y"],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":["Ctrl+Shift+I"],"input.modeAgent":["Ctrl+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[]},"vscode":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":["Ctrl+Shift+|"],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+N"],"agent.stop":["Ctrl+Esc"],"agent.provider":["Ctrl+Alt+."],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[]},"konsole":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":["Ctrl+Shift+)","Ctrl+)"],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[]}})PRESETS");
+        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":["Ctrl+Shift+E"],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+Shift+Y"],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":["Ctrl+Shift+I"],"input.modeAgent":[],"input.toggle":["Ctrl+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[]},"vscode":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":["Ctrl+Shift+|"],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+N"],"agent.stop":["Ctrl+Esc"],"agent.provider":["Ctrl+Alt+."],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[]},"konsole":{"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":["Ctrl+Shift+)","Ctrl+)"],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[]}})PRESETS");
     }
     QFileSystemWatcher m_watcher;
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_listeners;
@@ -434,6 +438,55 @@ public:
         configurePreset(id, true);
     }
     void openProviderDialog() { configure(); }
+    void toggleInputMode() {
+        const QString next = m_modeValue == QStringLiteral("agent") ? QStringLiteral("shell") : QStringLiteral("agent");
+        setMode(next);
+        toast(next == QStringLiteral("agent") ? QStringLiteral("Input: Agent") : QStringLiteral("Input: Terminal"));
+    }
+
+    // ----- control policy for programs --------------------------------------------------
+    static QString defaultControl() {
+        return QSettings().value(QStringLiteral("control/default"), QStringLiteral("human")).toString() == QStringLiteral("agent")
+            ? QStringLiteral("agent") : QStringLiteral("human");
+    }
+    static QString programControl(const QString &program) {
+        const QString value = QSettings().value(QStringLiteral("control/programs")).toMap().value(program).toString();
+        return value == QStringLiteral("agent") || value == QStringLiteral("human") ? value : QString();
+    }
+    static void setProgramControl(const QString &program, const QString &value) {
+        QSettings settings;
+        QVariantMap map = settings.value(QStringLiteral("control/programs")).toMap();
+        if (value.isEmpty()) map.remove(program); else map.insert(program, value);
+        settings.setValue(QStringLiteral("control/programs"), map);
+    }
+    static QString controlFor(const QString &program) {
+        const QString override = program.isEmpty() ? QString() : programControl(program);
+        return override.isEmpty() ? defaultControl() : override;
+    }
+
+    // Command line of the program in the terminal's foreground, or empty at the shell prompt.
+    QString foregroundCommandLine() const {
+        if (!m_iface) return {};
+        const int shell = m_iface->terminalProcessId();
+        long group = shell > 0 ? foregroundGroup(shell) : -1;
+        if (group <= 0 || group == shell) {
+            const int fallback = m_iface->foregroundProcessId();
+            if (fallback <= 0 || fallback == shell) return {};
+            group = fallback;
+        }
+        QFile file(QStringLiteral("/proc/%1/cmdline").arg(group));
+        if (!file.open(QIODevice::ReadOnly)) return {};
+        QByteArray raw = file.read(4096);
+        while (raw.endsWith('\0')) raw.chop(1);
+        QString line = QString::fromLocal8Bit(raw.replace('\0', ' ')).simplified();
+        if (line.size() > 200) line = line.left(200) + QStringLiteral("…");
+        return line;
+    }
+    QString foregroundProgramName() const {
+        const QString line = foregroundCommandLine();
+        return line.isEmpty() ? QString() : QFileInfo(line.section(' ', 0, 0)).fileName();
+    }
+
     bool ownsComposerWidget(QWidget *widget) const { return m_composer && widget && (widget == m_composer || m_composer->isAncestorOf(widget)); }
 
     // Human control: the prompt box hides and keys go to the terminal.
@@ -463,6 +516,7 @@ protected:
         QWidget::resizeEvent(event);
         // Split panes get narrow: drop the key hints and the agent workspace path first.
         if (m_help) m_help->setVisible(width() >= 900);
+        if (m_transcript) m_transcript->setMaximumHeight(std::max(120, height() * 2 / 5));
         updatePaths();
     }
 
@@ -477,6 +531,14 @@ protected:
         if (event->type() == QEvent::MouseButtonRelease && copyOnSelect()
             && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && ownsTerminalWidget(qobject_cast<QWidget *>(object))) {
             QTimer::singleShot(0, this, [this] { copySelection(); });
+        }
+        if (event->type() == QEvent::KeyPress && object == m_editor) {
+            auto *key = static_cast<QKeyEvent *>(event);
+            const auto mods = key->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
+            // The composer is a few lines tall; PageUp/PageDown scroll the pane's terminal instead.
+            if (mods == Qt::NoModifier && (key->key() == Qt::Key_PageUp || key->key() == Qt::Key_PageDown)) {
+                if (scrollTerminalPage(key->key() == Qt::Key_PageUp ? -1 : 1)) return true;
+            }
         }
         if (event->type() == QEvent::KeyPress || event->type() == QEvent::ShortcutOverride) {
             auto *key = static_cast<QKeyEvent *>(event);
@@ -566,6 +628,8 @@ private:
         auto *help = new QLabel(QStringLiteral("Shift+Enter  newline     Ctrl+Enter  agent     Ctrl+Shift+Enter  terminal     ↑/↓  history"));
         help->setWordWrap(true); composerLayout->addWidget(help);
         m_help = help;
+        buildTranscript();
+        layout->addWidget(m_transcript);
         layout->addWidget(composer);
         updatePaths();
     }
@@ -934,6 +998,17 @@ private:
         m_toastTimer.start(1600);
     }
 
+    // Scroll the terminal's scrollback by one page through Konsole's (possibly hidden) scrollbar.
+    bool scrollTerminalPage(int direction) {
+        if (!m_terminal) return false;
+        QScrollBar *bar = nullptr;
+        for (QScrollBar *candidate : m_terminal->findChildren<QScrollBar *>())
+            if (candidate->orientation() == Qt::Vertical) { bar = candidate; break; }
+        if (!bar) return false;
+        bar->setValue(bar->value() + direction * std::max(1, bar->pageStep() - 1));
+        return true;
+    }
+
     QObject *terminalDisplay() const {
         if (!m_terminal) return nullptr;
         if (m_terminal->metaObject()->indexOfMethod("copyToClipboard()") >= 0) return m_terminal;
@@ -1080,17 +1155,91 @@ private:
                                   Q_ARG(const char *, bytes.constData()), Q_ARG(int, bytes.size()));
     }
 
-    void printInline(const QString &text, Ink ink) {
-        if (text.isEmpty()) return;
-        if (!shellIdleAtPrompt()) { m_inlinePending.append({text, ink}); return; }
+    // Model and tool output is untrusted: drop C0/C1 controls so it cannot emit escape
+    // sequences (clipboard writes, title changes, cursor games).
+    static QString sanitize(const QString &text) {
         QString clean;
         clean.reserve(text.size());
         for (const QChar c : text) {
             const ushort u = c.unicode();
-            // Model and tool output is untrusted: drop C0/C1 controls so it cannot emit
-            // escape sequences (clipboard writes, title changes, cursor games).
             if (u == '\n' || u == '\t' || (u >= 0x20 && u != 0x7f && !(u >= 0x80 && u < 0xa0))) clean += c;
         }
+        return clean;
+    }
+
+    static QColor inkColor(Ink ink) {
+        switch (ink) {
+        case Ink::Agent: return QColor(226, 229, 235);
+        case Ink::User: return QColor(62, 197, 240);
+        case Ink::Tool: return QColor(229, 192, 123);
+        case Ink::ToolOutput: case Ink::Note: return QColor(128, 135, 150);
+        case Ink::DiffAdd: return QColor(126, 200, 140);
+        case Ink::DiffRemove: case Ink::Error: return QColor(240, 113, 120);
+        }
+        return QColor(226, 229, 235);
+    }
+
+    void buildTranscript() {
+        m_transcript = new QFrame;
+        m_transcript->setObjectName(QStringLiteral("transcript"));
+        m_transcript->setAttribute(Qt::WA_StyledBackground);
+        auto *box = new QVBoxLayout(m_transcript); box->setContentsMargins(10, 6, 6, 8); box->setSpacing(4);
+        auto *header = new QHBoxLayout;
+        m_transcriptHeader = new QLabel; m_transcriptHeader->setObjectName(QStringLiteral("transcriptHeader"));
+        m_transcriptHeader->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        header->addWidget(m_transcriptHeader, 1);
+        auto *close = new QToolButton; close->setText(QStringLiteral("×")); close->setAutoRaise(true);
+        close->setToolTip(QStringLiteral("Hide until this program exits; the output still prints in the terminal then"));
+        close->setFocusPolicy(Qt::NoFocus);
+        connect(close, &QToolButton::clicked, this, [this] { m_transcriptDismissed = true; m_transcript->hide(); });
+        header->addWidget(close);
+        box->addLayout(header);
+        m_transcriptView = new QPlainTextEdit;
+        m_transcriptView->setObjectName(QStringLiteral("transcriptView"));
+        m_transcriptView->setReadOnly(true);
+        m_transcriptView->setFocusPolicy(Qt::ClickFocus);
+        m_transcriptView->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+        m_transcriptView->setMaximumBlockCount(4000);
+        box->addWidget(m_transcriptView, 1);
+        m_transcript->hide();
+    }
+
+    // While a program owns the terminal, buffered agent output is shown live here and printed
+    // into the terminal when the program exits.
+    void appendTranscript(const QString &text, Ink ink) {
+        if (!m_transcript) return;
+        const QString clean = sanitize(text);
+        if (clean.isEmpty()) return;
+        const QString program = !m_transcriptProgram.isEmpty() ? m_transcriptProgram
+                                : (foregroundProgramName().isEmpty() ? QStringLiteral("the program") : foregroundProgramName());
+        m_transcriptHeader->setText(QStringLiteral("Agent · %1  —  output will also print in the terminal when %2 exits")
+                                        .arg(m_model.isEmpty() ? QStringLiteral("agent") : m_model, program));
+        QTextCursor cursor(m_transcriptView->document());
+        cursor.movePosition(QTextCursor::End);
+        QTextCharFormat format;
+        format.setForeground(inkColor(ink));
+        if (ink == Ink::User) format.setFontWeight(QFont::Bold);
+        if (ink == Ink::Note) format.setFontItalic(true);
+        cursor.insertText(clean, format);
+        m_transcriptView->verticalScrollBar()->setValue(m_transcriptView->verticalScrollBar()->maximum());
+        if (!m_transcriptDismissed && !m_transcript->isVisible()) {
+            m_transcript->setMaximumHeight(std::max(120, height() * 2 / 5));
+            m_transcript->show();
+        }
+    }
+
+    void resetTranscript() {
+        if (!m_transcript) return;
+        m_transcript->hide();
+        m_transcriptView->clear();
+        m_transcriptDismissed = false;
+        m_transcriptProgram.clear();
+    }
+
+    void printInline(const QString &text, Ink ink) {
+        if (text.isEmpty()) return;
+        if (!shellIdleAtPrompt()) { m_inlinePending.append({text, ink}); appendTranscript(text, ink); return; }
+        const QString clean = sanitize(text);
         if (clean.isEmpty()) return;
         QByteArray out;
         if (!m_inlineOpen) {
@@ -1122,6 +1271,7 @@ private:
         m_inlinePending.clear();
         for (const auto &item : pending) printInline(item.first, item.second);
         if (!m_agentBusy) { ensureLineStart(); closeInline(); }
+        resetTranscript();
     }
 
     void turnHeader() {
@@ -1174,7 +1324,14 @@ private:
         printInline(QStringLiteral("› ") + text + '\n', Ink::User);
         if (!why.isEmpty()) printInline(why + '\n', Ink::Note);
         m_turnText.clear(); m_turnHeader = false; m_agentBusy = true;
-        send({{"type", "ask"}, {"text", text}});
+        QJsonObject request{{"type", "ask"}, {"text", text}};
+        const QString program = processBusy() ? foregroundCommandLine() : QString();
+        if (!program.isEmpty()) {
+            // Tell the agent what owns the terminal and that it cannot see or type into it yet.
+            request.insert(QStringLiteral("context"), QJsonObject{{"foreground_program", program}, {"terminal_cwd", m_cwd}});
+            m_transcriptProgram = QFileInfo(program.section(' ', 0, 0)).fileName();
+        }
+        send(request);
     }
 
     bool readlineReady() const {
@@ -1265,6 +1422,15 @@ private:
             const QString sequence = m_shellSequence;
             QTimer::singleShot(150, this, [this, sequence] {
                 if (m_shellSequence != sequence || m_promptReported || m_native) return;
+                const QString program = foregroundProgramName();
+                if (controlFor(program) == QStringLiteral("agent")) {
+                    // "Agent stays in control": keep the prompt; password prompts still hand over.
+                    m_editor->setFocus(Qt::OtherFocusReason);
+                    toast(QStringLiteral("Agent in control of %1 · %2 to take control")
+                          .arg(program.isEmpty() ? QStringLiteral("this program") : program,
+                               Keymap::instance().shortcutText(QStringLiteral("control.human"))));
+                    return;
+                }
                 m_autoHuman = true;
                 setNative(true);
             });
@@ -1417,7 +1583,11 @@ private:
     QList<QPair<QString, QString>> m_stored;
     QComboBox *m_modeBox = nullptr, *m_modelBox = nullptr;
     QLabel *m_toast = nullptr;
-    QFrame *m_composer = nullptr;
+    QFrame *m_composer = nullptr, *m_transcript = nullptr;
+    QLabel *m_transcriptHeader = nullptr;
+    QPlainTextEdit *m_transcriptView = nullptr;
+    QString m_transcriptProgram;
+    bool m_transcriptDismissed = false;
     QTimer m_secretPoll;
     QElapsedTimer m_runningSince;
     bool m_autoHuman = false, m_secretNotified = false;
@@ -1700,7 +1870,7 @@ protected:
         // A program such as vim owns its keys, unless the program_keys rule lets this shortcut act.
         Pane *pane = paneOf(widget);
         // Ctrl+H only takes control from the prompt box; in the terminal it stays Backspace.
-        if (id == QStringLiteral("control.human") && !(pane && pane->ownsComposerWidget(widget)))
+        if ((id == QStringLiteral("control.human") || id == QStringLiteral("input.toggle")) && !(pane && pane->ownsComposerWidget(widget)))
             return QMainWindow::eventFilter(object, event);
         if (pane && pane->ownsTerminalWidget(widget) && pane->processBusy() && !Keymap::instance().actsInsidePrograms(key))
             return QMainWindow::eventFilter(object, event);
@@ -1791,6 +1961,7 @@ private:
         else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
         else if (id == QStringLiteral("control.human")) pane->takeControl();
         else if (id == QStringLiteral("control.prompt")) pane->showPrompt();
+        else if (id == QStringLiteral("input.toggle")) pane->toggleInputMode();
         else if (id == QStringLiteral("terminal.interrupt")) pane->interruptShell();
         else if (id == QStringLiteral("agent.newChat")) pane->newChat();
         else if (id == QStringLiteral("agent.stop")) pane->stopAgent();
@@ -1906,6 +2077,7 @@ private:
                 actionItem(QStringLiteral("Input mode"), QStringLiteral("Terminal"), QStringLiteral("Always the terminal; the agent fixes failures"), QStringLiteral("input.modeTerminal"), mode == QStringLiteral("shell")),
                 actionItem(QStringLiteral("Input mode"), QStringLiteral("Agent"), QStringLiteral("Always the agent"), QStringLiteral("input.modeAgent"), mode == QStringLiteral("agent"))};
         });
+        items << actionItem(agent, QStringLiteral("Toggle terminal / agent input"), QStringLiteral("From the prompt box"), QStringLiteral("input.toggle"));
         items << actionItem(agent, QStringLiteral("New chat"), QStringLiteral("Start a new conversation in this pane"), QStringLiteral("agent.newChat"));
         items << actionItem(agent, QStringLiteral("Stop agent"), pane && pane->agentBusy() ? QStringLiteral("Cancel the running turn") : QStringLiteral("Agent is idle"), QStringLiteral("agent.stop"));
         items << actionItem(agent, QStringLiteral("Provider and API keys…"), QStringLiteral("Base URL, model ID, key, request options"), QStringLiteral("agent.provider"));
@@ -1917,6 +2089,42 @@ private:
         items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Send Ctrl+C to the running program") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
         items << actionItem(terminal, QStringLiteral("Take control"), QStringLiteral("Hide the prompt and type into the terminal"), QStringLiteral("control.human"), pane && pane->isNative());
         items << actionItem(terminal, QStringLiteral("Show the Relay prompt"), QStringLiteral("The agent is in control of a running program"), QStringLiteral("control.prompt"), pane && !pane->isNative());
+        {
+            const QString current = Pane::defaultControl();
+            items << submenu(QStringLiteral("menu:control"), terminal, QStringLiteral("Control when a program starts"),
+                             current == QStringLiteral("agent") ? QStringLiteral("Agent stays in control") : QStringLiteral("You take control"), [current] {
+                QList<PaletteItem> children;
+                const QList<QStringList> options{{QStringLiteral("human"), QStringLiteral("You take control"), QStringLiteral("The prompt hides and keys go to the program")},
+                                                 {QStringLiteral("agent"), QStringLiteral("Agent stays in control"), QStringLiteral("The prompt stays; Ctrl+H takes control")}};
+                for (const auto &option : options) {
+                    PaletteItem item;
+                    const QString value = option[0];
+                    item.key = QStringLiteral("control.default:") + value; item.section = QStringLiteral("Control when a program starts");
+                    item.label = option[1]; item.detail = option[2]; item.checked = current == value; item.stayOpen = true;
+                    item.run = [value] { QSettings().setValue(QStringLiteral("control/default"), value); };
+                    children << item;
+                }
+                return children;
+            });
+            const QString program = pane ? pane->foregroundProgramName() : QString();
+            if (!program.isEmpty()) {
+                const QString override = Pane::programControl(program);
+                PaletteItem agentItem;
+                agentItem.key = QStringLiteral("control.program.agent"); agentItem.section = terminal;
+                agentItem.label = QStringLiteral("Always give the agent control of %1").arg(program);
+                agentItem.detail = QStringLiteral("The prompt stays when %1 starts").arg(program);
+                agentItem.checked = override == QStringLiteral("agent"); agentItem.stayOpen = true;
+                agentItem.run = [program, override] { Pane::setProgramControl(program, override == QStringLiteral("agent") ? QString() : QStringLiteral("agent")); };
+                items << agentItem;
+                PaletteItem humanItem;
+                humanItem.key = QStringLiteral("control.program.human"); humanItem.section = terminal;
+                humanItem.label = QStringLiteral("Always take control of %1").arg(program);
+                humanItem.detail = QStringLiteral("The prompt hides when %1 starts").arg(program);
+                humanItem.checked = override == QStringLiteral("human"); humanItem.stayOpen = true;
+                humanItem.run = [program, override] { Pane::setProgramControl(program, override == QStringLiteral("human") ? QString() : QStringLiteral("human")); };
+                items << humanItem;
+            }
+        }
         {
             PaletteItem copy;
             const bool on = QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool();
@@ -2619,6 +2827,14 @@ int main(int argc, char **argv) {
     QCoreApplication::setApplicationName(QStringLiteral("relay"));
     QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
     QGuiApplication::setDesktopFileName(QStringLiteral("org.relayterminal.Relay"));
+    try {
+        // Theme icon when installed; the bundled PNG from the source tree or install otherwise.
+        const QString root = dataRoot();
+        QString png = root + QStringLiteral("/data/icons/hicolor/256x256/apps/org.relayterminal.Relay.png");
+        if (!QFileInfo::exists(png)) png = root + QStringLiteral("/../icons/hicolor/256x256/apps/org.relayterminal.Relay.png");
+        QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("org.relayterminal.Relay"), QIcon(png)));
+    } catch (const std::exception &) {
+    }
     QCommandLineParser parser; parser.setApplicationDescription(QStringLiteral("Konsole-based terminal with rich input and BYOK agents."));
     parser.addHelpOption(); parser.addVersionOption();
     QCommandLineOption workspace(QStringList{QStringLiteral("w"), QStringLiteral("workspace")}, QStringLiteral("Initial terminal directory and agent workspace."), QStringLiteral("path"), QDir::currentPath());

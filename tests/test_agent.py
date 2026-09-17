@@ -109,3 +109,50 @@ class WorkerTests(unittest.TestCase):
     def test_agent_requires_config(self):
         results=self.run_worker([{'type':'ask','text':'hello'},{'type':'shutdown'}])
         self.assertIn('Configure',results[1]['text'])
+
+
+class ContextTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_context_note_is_labelled_and_prepended(self):
+        fake = FakeProvider({'role': 'assistant', 'content': 'I cannot type into vim.'})
+        agent = Agent(CONFIG, self.temp.name, lambda e: None, provider=fake)
+        agent.ask('type something interesting', context={'foreground_program': 'vim scratch.txt', 'terminal_cwd': '/tmp/x'})
+        content = fake.messages[-1]['content']
+        self.assertTrue(content.startswith('[Relay context: added by Relay, not typed by the user]'))
+        self.assertIn('`vim scratch.txt`', content)
+        self.assertIn('/tmp/x', content)
+        self.assertIn('cannot see', content)
+        self.assertTrue(content.endswith('type something interesting'))
+
+    def test_no_context_leaves_prompt_unchanged(self):
+        fake = FakeProvider({'role': 'assistant', 'content': 'ok'})
+        agent = Agent(CONFIG, self.temp.name, lambda e: None, provider=fake)
+        agent.ask('hello', context={'foreground_program': '', 'terminal_cwd': '/tmp'})
+        self.assertEqual(fake.messages[-1]['content'], 'hello')
+
+    def test_invalid_context_rejected(self):
+        from relay_core.agent import validate_context
+        with self.assertRaises(ValueError): validate_context({'foreground_program': 'vim', 'extra': 1})
+        with self.assertRaises(ValueError): validate_context({'foreground_program': 5})
+        with self.assertRaises(ValueError): validate_context({'foreground_program': 'x' * 1001})
+
+    def test_control_characters_stripped_from_program(self):
+        from relay_core.agent import format_context
+        note = format_context({'foreground_program': 'vim \x1b[31mevil\x07'})
+        self.assertNotIn('\x1b', note)
+        self.assertNotIn('\x07', note)
+
+    def test_worker_passes_context_to_queue(self):
+        payload = ''.join(json.dumps(m) + '\n' for m in [
+            {'type': 'configure', 'base_url': 'http://127.0.0.1:1/v1', 'model': 'test', 'api_key': '', 'workspace': str(ROOT)},
+            {'type': 'ask', 'text': 'hi', 'context': {'foreground_program': 'vim', 'bogus': 1}},
+            {'type': 'shutdown'}])
+        proc = subprocess.run([sys.executable, '-S', str(ROOT / 'backend/worker.py')], input=payload,
+                              text=True, capture_output=True, timeout=10, cwd=ROOT)
+        events = [json.loads(line) for line in proc.stdout.splitlines()]
+        self.assertTrue(any(e['event'] == 'error' and 'Context' in e.get('text', '') for e in events))

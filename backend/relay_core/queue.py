@@ -18,6 +18,8 @@ import uuid
 from collections import deque
 from typing import Callable
 
+from .agent import validate_context
+
 MAX_QUEUE = 32
 MAX_PROMPT = 131072
 PREVIEW = 120
@@ -76,13 +78,14 @@ class TurnSupervisor:
             self._clear_locked()
 
     # ----- requests -------------------------------------------------------
-    def submit(self, prompt, when: str = "now", request_id=None) -> str:
+    def submit(self, prompt, when: str = "now", request_id=None, context=None) -> str:
         if when not in {"now", "queue", "interrupt"}:
             raise ValueError('"when" must be "now", "queue", or "interrupt".')
         with self._lock:
             if self._agent is None:
                 raise ValueError("Configure a provider and workspace first.")
             validate_prompt(prompt)
+            validate_context(context)
             if self._closed:
                 raise ValueError("Worker is shutting down.")
             if len(self._queue) >= MAX_QUEUE:
@@ -90,7 +93,7 @@ class TurnSupervisor:
             busy = self._running is not None or (self._queue and not self._paused)
             if when == "now" and busy:
                 raise ValueError("An agent turn is already active.")
-            item = {"id": uuid.uuid4().hex, "prompt": prompt, "force": when != "queue"}
+            item = {"id": uuid.uuid4().hex, "prompt": prompt, "force": when != "queue", "context": context}
             if item["force"]:
                 # Interrupts are FIFO among themselves, ahead of ordinary queued prompts.
                 position = sum(1 for _ in self._leading_forced())
@@ -195,7 +198,7 @@ class TurnSupervisor:
                 self._emit({"event": "agent_started", "id": item["id"]})
                 self._changed_locked()
             try:
-                agent.ask(item["prompt"], reset_cancellation=False)
+                agent.ask(item["prompt"], reset_cancellation=False, context=item.get("context"))
             except Exception as exc:  # ask() handles its own errors; this is defensive.
                 self._emit({"event": "error", "text": f"Agent error ({type(exc).__name__})."})
                 self._outcome = "error"

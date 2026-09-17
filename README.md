@@ -129,6 +129,8 @@ that arrives while a program is running waits until the next prompt.
 | Enter | Submit using the selected/detected destination |
 | Shift+Enter | Insert a newline |
 | Ctrl+Enter | Always agent |
+| Ctrl+I (in the prompt box) | Toggle input between terminal command and agent prompt; in the terminal Ctrl+I stays Tab |
+| PageUp / PageDown (in the prompt box) | Scroll the pane's terminal scrollback; Shift+PageUp/PageDown in the terminal keep Konsole's behavior |
 | Ctrl+Shift+Enter | Always terminal; the agent fixes invalid or failing commands |
 | F12 | Toggle native terminal input |
 | Escape in the composer | Focus native terminal input |
@@ -184,6 +186,18 @@ line input on, checked once a second while a command runs. Relay then puts you i
 shows "Password prompt · you're in control". Prompt-box text never goes to a running program.
 If Relay's window is in the background, it flashes the taskbar and sends a desktop notification
 (`notify-send`) for password prompts and for commands that finish after more than 30 seconds.
+
+**Agent output while a program runs.** Agent output normally prints into the terminal. While a
+program such as vim owns it, the reply appears live in a small panel above the prompt, and it
+still prints into the terminal when the program exits. The × hides the panel until then.
+When you ask the agent something while a program runs, Relay tells it which program is running
+and that it cannot see or type into it yet, so it answers accordingly.
+
+**Choosing who gets control.** **Actions › Control when a program starts** sets the default:
+you take control (default) or the agent stays in control, keeping the prompt. While a program
+runs, **Always give the agent control of <program>** or **Always take control of <program>**
+set a per-program override (`control/default` and `control/programs` in Relay's settings).
+Password prompts always hand control to you.
 
 The agent cannot type into running programs yet; see
 `issues/features/2026-09-17-agent-delegate-and-take-over.md`.

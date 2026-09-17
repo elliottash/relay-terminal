@@ -40,7 +40,8 @@ Sources:
 | agent.stop | — | Warp: Ctrl+C while the agent responds (W4). Left unbound (same reason as interrupt) |
 | agent.provider | — | none (a Settings page in Warp) |
 | input.modeAuto | — | none (auto-detection is a setting, W4) |
-| input.modeAgent | Ctrl+I | W4: Ctrl+I toggles shell ↔ agent. Relay has no toggle, so it sets Agent |
+| input.modeAgent | — | Superseded 2026-09-17: Relay added `input.toggle`, which now takes Ctrl+I |
+| input.toggle | Ctrl+I | W4: Ctrl+I toggles shell ↔ agent (acts from the prompt box only) |
 | input.modeTerminal | Ctrl+Shift+I | **adapt:** Shift = the other direction. In Warp this key toggles auto-approve (Relay has no such action). Esc (Warp's "back to terminal") is taken by Relay |
 | keybindings.edit | Ctrl+, | **adapt.** W1's Linux column says `Ctrl+⌘+K`, which is a macOS key; the keybindings page has a macOS-only binding. Ctrl+, opens Warp Settings, where the shortcuts live |
 | keybindings.reload | — | none |
@@ -127,7 +128,7 @@ Sources:
     "pane.close": ["Ctrl+Shift+W"], "closed.restore": ["Ctrl+Alt+T"], "palette.open": ["Ctrl+Shift+P"],
     "terminal.native": ["F12"], "terminal.interrupt": [],
     "agent.newChat": ["Ctrl+Shift+Y"], "agent.stop": [], "agent.provider": [],
-    "input.modeAuto": [], "input.modeTerminal": ["Ctrl+Shift+I"], "input.modeAgent": ["Ctrl+I"],
+    "input.modeAuto": [], "input.modeTerminal": ["Ctrl+Shift+I"], "input.modeAgent": [], "input.toggle": ["Ctrl+I"],
     "keybindings.edit": ["Ctrl+,"], "keybindings.reload": []
   },
   "vscode": {
