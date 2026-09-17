@@ -21,12 +21,9 @@
 | Route assist | `google/gemini-3.5-flash-lite` (unchanged, latency budget under 1 s) |
 
 Fast agent defaults by main provider: GLM → `glm-5.3-flash`; OpenRouter → `deepseek/deepseek-v4.1-flash` (alternative
-`google/gemini-3.8-flash`); Kimi → owner decision (2026-09-17): **K2.8**. K2.8 Preview is only on the Kimi Code subscription
-(`https://api.kimi.ai/coding/v1`, model id `kimi-for-coding`, needs Plus or above, API key from the Kimi Code Console;
-https://www.kimi.com/code/docs/en/kimi-code/models.html), not on the Moonshot platform API behind the `kimi` preset.
-A `kimi-code` preset now exists. For the platform `kimi` preset the fast default is `kimi-k2.7-code-highspeed`. K2.8
-always thinks, so measure it at `reasoning_effort: low` before making it the default; fallback
-`kimi-for-coding-highspeed` (K2.7 Code HighSpeed, 262K context, "~5–6× faster output" per the docs).
+`google/gemini-3.8-flash`); Kimi → owner decision (2026-09-17): **K2.7 Code HighSpeed for now** (`kimi-k2.7-code-highspeed` on the `kimi`
+platform preset, `kimi-for-coding-highspeed` on the `kimi-code` preset). Upgrade to K2.8 (`kimi-for-coding`) when it is
+available through the Coding Plan API key; measure it at `reasoning_effort: low` first.
 
 Later: route between main and fast agent in the main terminal by estimated task difficulty.
 
