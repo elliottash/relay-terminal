@@ -406,3 +406,28 @@ Order: T0 → T1 → M1 → T2 → T3 → M2. T3 must land before subagent workt
 10. **Memory identity**: slug names (recommended, readable in `@memory:name`) or 4-character card-style ids?
 11. **Imports**: offer to import Claude Code auto memory and `CLAUDE.local.md` into private memory (recommended, with
     preview)?
+
+## 9. Owner decisions (2026-09-17)
+
+Recommendations accepted for questions 1, 2, 3, 4, 7, 10 and 11. Changes:
+
+- **5. Item vs card:** no rigid rule ("anything landable is a card" is too strict). The agent follows the user's
+  observed preferences for granularity; it may nudge and propose reorganizations in that direction, never force them.
+  The Switchboard gets a **Reorganize** action (button, palette, `/switchboard-review`): the agent reviews the whole
+  board (duplicates, cards that should be items or vice versa, stale statuses, missing links, unconverted notes) and
+  presents proposals, applied per the board's autonomy setting and logged in the affected threads.
+- **6. Global Switchboard:** global memory lives in a **global Switchboard** (per user, e.g. `~/.config/relay/switchboard/`)
+  holding everything cross-project: guidance (global `RELAY.md`), global skills, aliases/prebaked commands and prompts
+  (intake: Warp-workflow-style), memory, and possibly MCP server config. The **local (repo) Switchboard** holds local
+  skills, cards, plans and project memory. Same UI for both, switchable.
+- **8. Learned preferences** are global-Switchboard memory, inspectable and editable there. A local Switchboard may
+  also hold **team characteristics** memories (e.g. one collaborator is an economist, another a computer scientist, who
+  knows databases), each public (in git) or private.
+- **9. Instruction files:** Relay uses `RELAY.md` by default and may edit it, as well as `AGENTS.md`, `CLAUDE.md`,
+  `WARP.md` and similar, as agents do. Edits to instruction files are surfaced as highlighted tool-call notifications.
+- **Plans spanning cards** (follow-up to 2.4): every plan belongs to exactly one card. A plan for part of a card is a
+  scoped `### Plan: <part>` under the card's `## Plan` with its steps as sub-items of that item, or the part is promoted
+  to a child card, following the user's preferences (decision 5). A plan over several cards lives on a parent card
+  whose items point to the child cards or their items; children get `parent:` and a "Part of plan" banner; Execute on
+  the parent seeds todos across children. A shared parent never names a private child in git; a card has at most one
+  parent and cycles are refused.
