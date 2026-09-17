@@ -185,3 +185,8 @@ tests in `tests/test_routing_thinking_skills.py`; live evidence in
   `skill-imports/<repo>@<full commit>/<name>/` with a `.relay-import.json` manifest; `skills_imported` adds `url`,
   `commit`, `dir`, `reloaded`. `skills_check_updates {url, ref?}` → `skills_updates {url, ref, current, latest,
   update_available}`, where `current` is the newest imported commit for that URL.
+
+**Routing assist model (2026-09-17):** when an OpenRouter key is stored, `route_assist` uses
+`google/gemini-3.5-flash-lite` on OpenRouter (0.6–0.9 s measured) regardless of the pane's model,
+and works before the pane's agent is configured. Without that key it falls back to the pane's model
+(reasoning models took 2–12 s; send a longer `timeout_ms`).

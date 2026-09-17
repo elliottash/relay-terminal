@@ -15,6 +15,11 @@ from . import sidecall
 
 MAX_TEXT = 2000
 DEFAULT_TIMEOUT_MS = 2000
+# Fast dedicated router model (owner-approved use of OpenRouter, 2026-09-17). Measured live: 0.6-0.9 s
+# per call and correct on the owner's examples, versus 2-12 s for the reasoning models Kimi K3 and
+# GLM-5.3. Used whenever an OpenRouter key is stored; otherwise the pane's own model is used.
+ROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+ROUTER_MODEL = "google/gemini-3.5-flash-lite"
 MAX_TIMEOUT_MS = 15000
 # Thinking models spend output tokens on reasoning before the JSON (Kimi K3 cannot turn thinking off).
 # Live 2026-09-17: 20 tokens truncated Kimi and GLM, 64 truncated Kimi once, 128 truncated OpenRouter
@@ -103,3 +108,13 @@ def run(provider, request: dict, emit, clock=time.monotonic) -> None:
                 pass
 
     threading.Thread(target=watchdog, name="relay-route-assist-watch", daemon=True).start()
+
+
+def router_provider(lookup=None):
+    """Return a provider for the fast router model when an OpenRouter key is available, else None."""
+    from . import keystore
+    from .provider import ChatProvider, ProviderConfig
+    key = (lookup or keystore.lookup)("openrouter")
+    if not key:
+        return None
+    return ChatProvider(ProviderConfig(ROUTER_BASE_URL, ROUTER_MODEL, key, {}, max_tokens=MAX_TOKENS))

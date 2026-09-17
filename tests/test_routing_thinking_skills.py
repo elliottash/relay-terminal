@@ -200,6 +200,9 @@ class RouteAssistTests(unittest.TestCase):
         turns = TurnSupervisor(rec)
         self.addCleanup(turns.shutdown)
         commands = ObserveCommands(turns, rec)
+        # Never reach the real keyring or network from tests: no fast router key here.
+        patcher = mock.patch.object(route_assist, 'router_provider', return_value=None)
+        patcher.start(); self.addCleanup(patcher.stop)
         commands.handle('route_assist', {'id': 'x', 'text': 'go to the docs'})
         self.assertEqual(rec.wait(lambda e: e['event'] == 'route_assisted')['error'], 'not_configured')
         with tempfile.TemporaryDirectory() as ws:
@@ -575,3 +578,15 @@ class ImportTests(SkillsHome):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RouterProviderTests(unittest.TestCase):
+    def test_fast_router_model_used_when_openrouter_key_exists(self):
+        provider = route_assist.router_provider(lookup=lambda preset: "sk-or-test" if preset == "openrouter" else "")
+        self.assertIsNotNone(provider)
+        self.assertEqual(provider.config.model, route_assist.ROUTER_MODEL)
+        self.assertEqual(provider.config.base_url, route_assist.ROUTER_BASE_URL)
+        self.assertEqual(provider.config.max_tokens, route_assist.MAX_TOKENS)
+
+    def test_no_fast_router_without_key(self):
+        self.assertIsNone(route_assist.router_provider(lookup=lambda preset: ""))

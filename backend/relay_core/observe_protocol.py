@@ -57,6 +57,10 @@ class ObserveCommands:
     # ----- routing assist ---------------------------------------------------------------------
     def _route_assist(self, request):
         agent = self.turns.agent
+        fast = self._router_provider()
+        if fast is not None:
+            route_assist.run(fast, request, self.emit)
+            return
         if agent is None:
             route_assist.validate(request)
             self.emit({"event": "route_assisted", "id": request.get("id"), "route": None,
@@ -64,6 +68,17 @@ class ObserveCommands:
             return
         provider = agent.side_provider(cheap=True, max_tokens=route_assist.MAX_TOKENS)
         route_assist.run(provider, request, self.emit)
+
+    def _router_provider(self):
+        # Cached per worker; a missing key is re-checked on each request so a newly stored key applies.
+        cached = getattr(self, "_fast_router", None)
+        if cached is not None:
+            return cached
+        try:
+            self._fast_router = route_assist.router_provider()
+        except (OSError, ValueError):
+            self._fast_router = None
+        return self._fast_router
 
     # ----- turns -------------------------------------------------------------------------------
     def _tool_output_get(self, request):
