@@ -354,7 +354,11 @@ BARE_WORD_ODD = frozenset("install open less more head tail file sort cut join s
 # Their arguments are literal text, so a sentence after them is still most likely a shell command.
 LITERAL_TEXT = frozenset("echo printf print say logger wall write notify send".split())
 ASSIST_THRESHOLD = 2
-SHELLISH = re.compile(r"[|&;<>()`$\\{}\[\]*=]")
+# Operators and expansions that only appear in shell input. Globs (`*`, `[...]`) and `~` are left out
+# on purpose: "look at my letters in ~/admin/Advisees.*.docx for my style" is an English request that
+# happens to name a path, and `look` is also a command (2026-09-17 owner report).
+SHELLISH = re.compile(r"[|&;<>()`$\\{}=]")
+GLOBBISH = re.compile(r"[*\[\]]")
 
 
 def assist_signals(text: str, cwd: str | None = None) -> tuple[int, list[str], str | None]:
@@ -386,6 +390,10 @@ def assist_signals(text: str, cwd: str | None = None) -> tuple[int, list[str], s
         if weight and bare not in reasons:
             score += weight
             reasons.append(bare)
+    # A glob or a path alone does not make it a command, but it is weak evidence for the shell.
+    if GLOBBISH.search(trimmed):
+        score -= 1
+        reasons.append("glob")
     if args and args[-1].endswith("?") and args[-1][:-1].isalpha():
         score += 2
         reasons.append("trailing ?")

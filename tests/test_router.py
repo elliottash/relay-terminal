@@ -150,6 +150,16 @@ class ValidityTests(unittest.TestCase):
             self.assertTrue(result.valid)
             self.assertEqual(result.invalid_reason, "")
 
+    def test_sentence_naming_a_path_or_glob_is_not_a_command(self):
+        # Owner report 2026-09-17: "look" is an installed command, and the glob used to suppress
+        # the ambiguity check entirely, so this ran in the shell.
+        result = self.check("look at some of my other letters in ~/admin/Advisees.*.docx for my writing style")
+        self.assertEqual(result.route, "agent")
+        self.assertTrue(result.needs_assist)
+        # Real commands with globs and paths stay in the shell.
+        for text in ["ls *.py", "grep -r foo src/*.cpp", "cat ~/.bashrc"]:
+            self.assertEqual(self.check(text).route, "shell", text)
+
     def test_shell_mode_always_shell_but_reports_validity(self):
         result = classify("nope123 --now", "shell", path=PATH)
         self.assertEqual(result.route, "shell")
