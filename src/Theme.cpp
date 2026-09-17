@@ -174,9 +174,13 @@ QFrame#queueStrip QToolButton { color: @muted; border: 1px solid transparent; bo
 QFrame#queueStrip QToolButton:hover { color: @text; border-color: @border; }
 QFrame#paneBanner { background: @raised; border: 1px solid #b0603a; border-radius: 8px; }
 QFrame#paneBanner QLabel { color: @text; }
-QFrame#transcript, QFrame#thinkingOverlay { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
+QFrame#transcript { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
+/* Thinking floats over the terminal, so it stays quiet: dark gray chrome, not the accent, and a
+   background below @surface so it reads as behind the output rather than on top of it. */
+QFrame#thinkingOverlay { background: @bg; border: 1px solid @border; border-radius: 8px; }
 QLabel#transcriptHeader { color: @muted; }
 QPlainTextEdit#transcriptView { background: transparent; border: none; }
+QPlainTextEdit#thinkingView { background: transparent; border: none; color: @muted; font-family: "@mono"; font-size: 10pt; }
 QLabel#toast { background: @raised; color: @text; border: 1px solid @accentBorder; border-radius: 8px; padding: 6px 12px; }
 QWidget#sidebar { background: @surface; border: 1px solid @border; border-radius: 10px; }
 QLabel#paletteTitle { color: @muted; font-weight: 600; letter-spacing: 1px; padding: 2px 4px; }
@@ -188,6 +192,11 @@ QToolButton#interruptButton:hover { border-color: @accent; }
 QWidget#pane { background: @bg; border: 1px solid @border; border-radius: 6px; }
 QWidget#pane[relayActive="true"] { border: 1px solid @accent; }
 /* Pane button row, drop zones, tab bar controls */
+/* The composer's status strip: dim, flat, no dropdown chrome (Warp keeps its chips quiet). */
+QComboBox#statusPicker { border: none; background: transparent; color: @muted; padding: 1px 16px 1px 4px; font-size: 11px; }
+QComboBox#statusPicker:hover { color: @text; background: @raised; border-radius: 4px; }
+QComboBox#statusPicker::drop-down { border: none; width: 12px; }
+QComboBox#statusPicker QAbstractItemView { background: @raised; color: @text; selection-background-color: @accent; }
 QFrame#paneChrome { background: @raised; border: 1px solid @border; border-radius: 6px; }
 QLabel#paneGrip { color: @muted; padding: 0 4px; font-size: 11pt; }
 QLabel#paneGrip:hover { color: @text; }

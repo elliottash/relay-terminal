@@ -1226,13 +1226,17 @@ private:
         routeRow->addWidget(m_opaqueHint, 1);
         // Per-pane controls live under the terminal, next to the input they affect.
         m_modeBox = new QComboBox;
-        m_modeBox->addItem(QStringLiteral("Auto detect"), QStringLiteral("auto"));
-        m_modeBox->addItem(QStringLiteral("Terminal"), QStringLiteral("shell"));
-        m_modeBox->addItem(QStringLiteral("Agent"), QStringLiteral("agent"));
+        // Icons, not words: ✶ auto-detect, ›_ terminal, ✦ agent. The tooltip names the current one.
+        m_modeBox->addItem(stripIcon(QStringLiteral("auto")), QString(), QStringLiteral("auto"));
+        m_modeBox->addItem(stripIcon(QStringLiteral("terminal")), QString(), QStringLiteral("shell"));
+        m_modeBox->addItem(stripIcon(QStringLiteral("agent")), QString(), QStringLiteral("agent"));
+        m_modeBox->setIconSize(QSize(14, 14));
+        m_modeBox->setFixedWidth(40);   // icon plus its chevron; the label is the tooltip
+        m_modeBox->setObjectName(QStringLiteral("statusPicker"));
         m_modeBox->setAccessibleName(QStringLiteral("Input destination"));
         m_modeBox->setFocusPolicy(Qt::TabFocus);
         m_modeBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        m_modeBox->setMinimumContentsLength(6);
+        m_modeBox->setMinimumContentsLength(0);
         connect(m_modeBox, qOverload<int>(&QComboBox::activated), this, [this](int) {
             setMode(m_modeBox->currentData().toString()); focusInput();
             hint(QStringLiteral("mode.mouse"), QStringLiteral("Next time: type ! for the terminal or * for the agent · %1 toggles")
@@ -1240,6 +1244,7 @@ private:
         });
         routeRow->addWidget(m_modeBox);
         m_modelBox = new QComboBox;
+        m_modelBox->setObjectName(QStringLiteral("statusPicker"));
         m_modelBox->setAccessibleName(QStringLiteral("Agent model"));
         m_modelBox->setToolTip(QStringLiteral("Agent model for this pane. Switching keeps the conversation."));
         m_modelBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
@@ -1260,11 +1265,14 @@ private:
         cancel->setAccessibleName(QStringLiteral("Interrupt shell"));
         cancel->setFocusPolicy(Qt::NoFocus);
         connect(cancel, &QToolButton::clicked, this, [this] { interruptShell(); });
+        cancel->hide();   // only while something is running
+        m_interruptButton = cancel;
         routeRow->addWidget(cancel);
         refreshPickers();
-        auto *submit = new QPushButton(QStringLiteral("Submit ↵"));
-        connect(submit, &QPushButton::clicked, this, [this] { requestRoute(true, QStringLiteral("auto")); });
-        routeRow->addWidget(submit); composerLayout->addLayout(routeRow);
+        // Warp/Claude-style: the box holds only the text, and one dim strip under it carries the
+        // destination, model, effort, context and tasks. Enter submits, so there is no button.
+        routeRow->setContentsMargins(2, 0, 2, 0);
+        routeRow->setSpacing(8);
         m_editor = new RichEditor;
         m_editor->setAutoHeight(1, 8);   // one line when idle, growing with the text
         composerLayout->addWidget(m_editor);
@@ -1279,6 +1287,7 @@ private:
         m_secretEdit->hide();
         connect(m_secretEdit, &QLineEdit::returnPressed, this, [this] { submitSecret(); });
         composerLayout->addWidget(m_secretEdit);
+        composerLayout->addLayout(routeRow);
         auto *help = new QLabel(QStringLiteral("Shift+Enter  newline     Ctrl+Enter  agent (interrupts when busy)     Ctrl+Shift+Enter  terminal     Ctrl+H  type into the terminal     Esc  stop agent     @  files     ↑  queue / history"));
         help->setWordWrap(true); composerLayout->addWidget(help);
         m_help = help;
@@ -1309,6 +1318,11 @@ private:
     }
 
     // ----- agent sessions UI: helpers ----------------------------------------------------------
+    static QIcon stripIcon(const QString &name) {
+        const QString path = relay::theme::themeDataDir() + QStringLiteral("/icons/") + name + QStringLiteral(".svg");
+        return QFileInfo::exists(path) ? QIcon(path) : QIcon();
+    }
+
     void buildSessionControls(QHBoxLayout *row) {
         m_planChip = new QLabel(QStringLiteral("PLAN"));
         m_planChip->setObjectName(QStringLiteral("planChip"));
@@ -1317,6 +1331,7 @@ private:
         row->insertWidget(1, m_planChip);
         m_ctxLabel = new QLabel;
         m_ctxLabel->setObjectName(QStringLiteral("contextLabel"));
+        m_ctxLabel->setTextFormat(Qt::RichText);
         m_ctxLabel->hide();
         row->insertWidget(2, m_ctxLabel);
         m_effortBox = new QComboBox;
@@ -1333,10 +1348,12 @@ private:
             hint(QStringLiteral("effort.mouse"), relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.effortUp"))
                  + QStringLiteral(" / ") + Keymap::instance().shortcutText(QStringLiteral("agent.effortDown")), QStringLiteral("raise / lower effort")));
         });
+        m_effortBox->hide();   // owner, 2026-09-17: effort shows on the model chip's tooltip, not as a third picker
         row->addWidget(m_effortBox);
     }
 
     void refreshSessionControls() {
+        if (m_modelBox) m_modelBox->setToolTip(modelTooltip());
         if (!m_effortBox) return;
         const QSignalBlocker block(m_effortBox);
         m_effortBox->setCurrentIndex(std::max(0, m_effortBox->findData(m_effort)));
@@ -1350,13 +1367,21 @@ private:
         return QString::number(tokens);
     }
 
+    // A 12 px icon in front of a short label, so the strip reads as symbols with numbers.
+    static QString iconText(const QString &icon, const QString &text) {
+        const QString path = relay::theme::themeDataDir() + QStringLiteral("/icons/") + icon + QStringLiteral(".svg");
+        if (!QFileInfo::exists(path)) return text;
+        return QStringLiteral("<img src=\"%1\" width=\"12\" height=\"12\"> %2").arg(path, text.toHtmlEscaped());
+    }
+
     void updateContextLabel() {
         if (!m_ctxLabel) return;
         if (m_ctxWindow <= 0) { m_ctxLabel->hide(); return; }
         if (m_compacting) {
-            m_ctxLabel->setText(QStringLiteral("Compacting…"));
+            m_ctxLabel->setText(iconText(QStringLiteral("context"), QStringLiteral("compacting…")));
         } else {
-            m_ctxLabel->setText(QStringLiteral("ctx %1 · %2%").arg(compactTokens(m_ctxUsed)).arg(QString::number(m_ctxPercent, 'f', m_ctxPercent > 0 && m_ctxPercent < 10 ? 1 : 0)));
+            m_ctxLabel->setText(iconText(QStringLiteral("context"), QStringLiteral("%1%")
+                .arg(QString::number(m_ctxPercent, 'f', m_ctxPercent > 0 && m_ctxPercent < 10 ? 1 : 0))));
         }
         const bool near = m_ctxLimit > 0 && m_ctxUsed >= m_ctxLimit * 9 / 10;
         m_ctxLabel->setProperty("warn", near);
@@ -1478,7 +1503,7 @@ private:
         if (route != QStringLiteral("shell") && route != QStringLiteral("agent")) {
             m_assistText = text; m_assistRoute.clear(); m_assistFailedText = text;
             const QString guess = m_assistLocalGuess == QStringLiteral("shell") ? QStringLiteral("TERMINAL") : QStringLiteral("AGENT");
-            if (m_editor->toPlainText() == text) m_routeLabel->setText(QStringLiteral("%1 · local guess (model check unavailable%2) · ! or * to choose")
+            if (m_editor->toPlainText() == text) setRouteText(QStringLiteral("%1 · local guess (model check unavailable%2) · ! or * to choose")
                 .arg(guess, event.value(QStringLiteral("error")).toString().isEmpty() ? QString() : QStringLiteral(": ") + event.value(QStringLiteral("error")).toString().left(60)));
         } else {
             m_assistText = text; m_assistRoute = route;
@@ -1506,7 +1531,7 @@ private:
     }
 
     void showAssistLabel() {
-        m_routeLabel->setText(QStringLiteral("%1 · guessed: %2 (%3%)").arg(m_assistRoute == QStringLiteral("shell") ? QStringLiteral("TERMINAL") : QStringLiteral("AGENT"),
+        setRouteText(QStringLiteral("%1 · guessed: %2 (%3%)").arg(m_assistRoute == QStringLiteral("shell") ? QStringLiteral("TERMINAL") : QStringLiteral("AGENT"),
                                   m_assistReason.isEmpty() ? QStringLiteral("model") : m_assistReason)
                                   .arg(qRound(m_assistConfidence * 100)));
         m_routeLabel->setToolTip(QStringLiteral("Local rules could not decide, so the agent model guessed.\nPrefix ! for the terminal or * for the agent to be explicit."));
@@ -1628,7 +1653,8 @@ private:
             header->addWidget(close);
             box->addLayout(header);
             m_thinkingView = new QPlainTextEdit;
-            m_thinkingView->setObjectName(QStringLiteral("transcriptView"));
+            // Its own name, not transcriptView's: the overlay is styled quieter than the transcript.
+            m_thinkingView->setObjectName(QStringLiteral("thinkingView"));
             m_thinkingView->setReadOnly(true);
             m_thinkingView->setFocusPolicy(Qt::NoFocus);
             m_thinkingView->setMaximumBlockCount(400);
@@ -2635,6 +2661,9 @@ private:
         m_requestsChip->setObjectName(QStringLiteral("requestsChip"));
         m_requestsChip->setFocusPolicy(Qt::NoFocus);
         m_requestsChip->setAccessibleName(QStringLiteral("Tasks"));
+        m_requestsChip->setIcon(stripIcon(QStringLiteral("tasks")));
+        m_requestsChip->setIconSize(QSize(13, 13));
+        m_requestsChip->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         m_requestsChip->hide();
         row->insertWidget(3, m_requestsChip);   // after the PLAN chip and the context label
         connect(m_requestsChip, &QToolButton::clicked, this, [this] {
@@ -2971,7 +3000,7 @@ private:
             if (tryRunSlashCommand(m_editor->toPlainText())) return;
             clearAiGhost();
         } else if (const SlashCommand *command = slashCommandFor(m_editor->toPlainText())) {
-            m_routeLabel->setText(QStringLiteral("COMMAND · /%1 · %2").arg(command->name, command->description));
+            setRouteText(QStringLiteral("COMMAND · /%1 · %2").arg(command->name, command->description));
             return;
         }
         if (!m_workerReady) {
@@ -3050,11 +3079,11 @@ private:
                     // Show the local guess now; "checking…" only if the model has not answered within ~150 ms.
                     const QString why = event.value(QStringLiteral("assist_reason")).toString(event.value(QStringLiteral("reason")).toString());
                     const QString guess = route == QStringLiteral("shell") ? QStringLiteral("TERMINAL") : QStringLiteral("AGENT");
-                    m_routeLabel->setText(QStringLiteral("%1 · local guess · %2").arg(guess, why));
+                    setRouteText(QStringLiteral("%1 · local guess · %2").arg(guess, why));
                     m_routeLabel->setToolTip(why);
                     QTimer::singleShot(150, this, [this, text = routedText, guess, why] {
                         if (m_editor->toPlainText() == text && !(m_assistText == text && !m_assistRoute.isEmpty()) && m_assistFailedText != text)
-                            m_routeLabel->setText(QStringLiteral("AUTO · checking… · local guess: %1 · %2").arg(guess.toLower(), why));
+                            setRouteText(QStringLiteral("AUTO · checking… · local guess: %1 · %2").arg(guess.toLower(), why));
                     });
                     m_assistQueuedText = routedText;
                     m_assistLocalGuess = route;
@@ -3064,10 +3093,10 @@ private:
                 showAssistLabel();
             } else if (id == m_previewId || id == m_pendingSubmit) {
                 if (route == QStringLiteral("shell") && !event.value(QStringLiteral("valid")).toBool(true))
-                    m_routeLabel->setText(QStringLiteral("TERMINAL · ") + event.value(QStringLiteral("invalid_reason")).toString()
+                    setRouteText(QStringLiteral("TERMINAL · ") + event.value(QStringLiteral("invalid_reason")).toString()
                                           + QStringLiteral(" · the agent will fix it"));
                 else
-                    m_routeLabel->setText(route.toUpper() + QStringLiteral(" · ") + event.value(QStringLiteral("reason")).toString());
+                    setRouteText(route.toUpper() + QStringLiteral(" · ") + event.value(QStringLiteral("reason")).toString());
                 m_routeLabel->setToolTip(event.value(QStringLiteral("syntax_error")).toString());
             }
             if (id == m_pendingSubmit) {
@@ -3479,7 +3508,7 @@ private:
         hideAtPopup(); hideSlashPopup(); hideTabPopup(); clearAiGhost();
         m_secretChip->setText(relay::input::passwordChip(m_secretProgram));
         m_secretChip->show();
-        m_routeLabel->setText(QStringLiteral("PASSWORD · the line goes to the program, not to Relay"));
+        setRouteText(QStringLiteral("PASSWORD · the line goes to the program, not to Relay"));
         scrubSecretEditor();
         m_editor->hide();
         m_secretEdit->show();
@@ -3625,6 +3654,14 @@ private:
     void status(const QString &text) { if (onStatus) onStatus(text); }
     void changed() { refreshPickers(); refreshSessionControls(); if (onStateChanged) onStateChanged(); }
 
+    // The strip stays quiet: one word ("TERMINAL", "AGENT", "COMMAND"), the full sentence on hover.
+    void setRouteText(const QString &full) {
+        if (!m_routeLabel) return;
+        const QString head = full.section(QStringLiteral(" · "), 0, 0).trimmed();
+        m_routeLabel->setText(head.isEmpty() ? full : head);
+        m_routeLabel->setToolTip(full);
+    }
+
     void refreshPickers() {
         if (!m_modeBox || !m_modelBox) return;
         const QSignalBlocker modeBlock(m_modeBox), modelBlock(m_modelBox);
@@ -3648,7 +3685,10 @@ private:
 
     // Chip tooltip: the pane's model plus every role's effective model (protocol 13).
     QString modelTooltip(const QString &extra = QString()) const {
-        QStringList lines{QStringLiteral("Agent model for this pane. Switching keeps the conversation.")};
+        QStringList lines{QStringLiteral("Agent model for this pane. Switching keeps the conversation."),
+                          QStringLiteral("Reasoning effort: %1  (%2 / %3 to change)")
+                              .arg(m_effort, Keymap::instance().shortcutText(QStringLiteral("agent.effortUp")),
+                                   Keymap::instance().shortcutText(QStringLiteral("agent.effortDown")))};
         if (!extra.isEmpty()) lines << extra;
         if (!m_roleSummary.isEmpty()) {
             lines << QString();
@@ -4880,7 +4920,12 @@ private:
         return ok ? tpgid : -1;
     }
 
+    void refreshStatusStrip() {
+        if (m_interruptButton) m_interruptButton->setVisible(processBusy());
+    }
+
     void refreshShellReady() {
+        refreshStatusStrip();
         m_shellReady = m_promptReported && !m_loading && readlineReady();
         if (m_refocus && m_shellReady && !m_native) {
             m_editor->setFocus(); m_refocus = false;
@@ -5001,7 +5046,7 @@ private:
         if (enabled) hideAtPopup();
         applyTerminalFocusPolicy();
         if (enabled) {
-            m_routeLabel->setText(QStringLiteral("NATIVE · keystrokes go directly to the terminal."));
+            setRouteText(QStringLiteral("NATIVE · keystrokes go directly to the terminal."));
             focusTerminal();
         } else {
             // Returning from native mode cancels Readline's partial line at a prompt.
@@ -5239,6 +5284,7 @@ private:
     bool m_seenShell = false, m_refocus = true, m_configured = false, m_agentBusy = false;
     // agent sessions UI
     QLabel *m_planChip = nullptr, *m_ctxLabel = nullptr;
+    QToolButton *m_interruptButton = nullptr;
     QComboBox *m_effortBox = nullptr;
     QListWidget *m_slashList = nullptr;
     QListWidget *m_tabList = nullptr;   // Tab completion candidates
