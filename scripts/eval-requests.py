@@ -184,6 +184,12 @@ def main() -> int:
                            "ledger": [{"id": i["id"], "source": i["source"], "status": i["status"],
                                        "reason": i["reason"], "text": i["text"][:120]} for i in ledger],
                            "todos": run.agent.todos.items,
+                           # Todo-tool uptake: does this model write a list at all for a multi-ask prompt?
+                           # The GUI no longer invents a task from the prompt when it does not (card H3QW),
+                           # so an empty list here means an empty Tasks panel.
+                           "todo_calls": sum(1 for e in run.events if e.get("event") == "todos"),
+                           "todo_items": max([len(e.get("items") or []) for e in run.events
+                                              if e.get("event") == "todos"] or [0]),
                            "completion_checks": sum(1 for e in run.events if e.get("event") == "completion_check"),
                            "limits": sum(1 for e in run.events if e.get("stop_reason") == "limit" and e.get("event") == "done"),
                            "silent_drops": sum(1 for i in ledger if i["status"] == "open" and i["requires_completion"])})

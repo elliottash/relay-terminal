@@ -193,6 +193,8 @@ TerminalView::TerminalView(TerminalSession *session, QWidget *parent)
 
     m_frameTimer.setSingleShot(true);
     connect(&m_frameTimer, &QTimer::timeout, this, &TerminalView::pullFrame);
+    m_geometryTimer.setSingleShot(true);
+    connect(&m_geometryTimer, &QTimer::timeout, this, &TerminalView::applyGeometry);
     m_blinkTimer.setInterval(600);
     connect(&m_blinkTimer, &QTimer::timeout, this, [this] {
         m_blinkOn = !m_blinkOn;
@@ -384,13 +386,34 @@ TerminalView::CellPos TerminalView::cellAt(const QPoint &p, bool clamp) const
 
 void TerminalView::resizeEvent(QResizeEvent *)
 {
-    applyGeometry();
+    scheduleGeometry();
     if (m_searchBar)
         m_searchBar->move(width() - m_searchBar->width() - 8, 4);
 }
 
+void TerminalView::showEvent(QShowEvent *e)
+{
+    QWidget::showEvent(e);
+    // The view may have been resized while it was hidden, so ask for the grid again.
+    scheduleGeometry();
+}
+
+// Moving a pane to another split, tab or window hides it, reparents it and shows it again within
+// one turn of the event loop, and Qt hands the view several sizes on the way (0 wide, then the
+// parentless 100x30, then the real one). Following those would resize the emulator down to one
+// row and a couple of columns, which reflows the screen and loses everything that was on it, so
+// the grid follows the size the view still has once the layout has settled.
+void TerminalView::scheduleGeometry()
+{
+    if (!m_geometryTimer.isActive())
+        m_geometryTimer.start(0);
+}
+
 void TerminalView::applyGeometry()
 {
+    // A hidden or parentless view has no size worth following; showEvent() asks again.
+    if (!isVisible())
+        return;
     const int cols = std::max(2, (width() - 2 * m_padding) / m_cw);
     const int rows = std::max(1, (height() - 2 * m_padding) / m_ch);
     if (cols == m_cols && rows == m_rows && m_session->rows() == rows && m_session->columns() == cols)

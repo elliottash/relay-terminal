@@ -300,7 +300,9 @@ successful update, and after `reset`, `load_state`, `resume` and a conversation 
 **Command** `todos {id?}` → `todos {id, turn_id: null, …}`.
 
 The system prompt gains the todo rules (one todo per ask when a message has several asks or a message arrives
-mid-turn; keep going until each is completed or cancelled/deferred/blocked with a reason).
+mid-turn; a message that changes, narrows or corrects an ask already covered by a todo adds its request id to that
+todo instead of adding one; keep going until each is completed or cancelled/deferred/blocked with a reason; no list
+for a single simple ask).
 
 **Stale reminder (item 7):** when open todos exist and `update_todos` has not been called for 8 model steps in the
 turn, the worker adds a short user note before the next model call ("update_todos has not been used for 8 steps

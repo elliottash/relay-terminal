@@ -7,6 +7,7 @@
 #include "Hints.h"
 #include "Notifications.h"        // window header: the bell and its list
 #include "InputPolicy.h"           // prompt-box-only input: where a submitted line goes
+#include "PaneLayout.h"            // pane focus, pane moves and grip drops
 #include "TurnTranscript.h"
 #include "SkillsDialog.h"
 #include "SubagentTranscript.h"   // subagents UI
@@ -6433,15 +6434,15 @@ private:
         else if (id == QStringLiteral("tab.previous")) cycleTab(-1);
         else if (id == QStringLiteral("pane.splitRight")) split(Qt::Horizontal);
         else if (id == QStringLiteral("pane.splitDown")) split(Qt::Vertical);
-        else if (id == QStringLiteral("pane.focusLeft")) navigate(Qt::Key_Left);
-        else if (id == QStringLiteral("pane.focusRight")) navigate(Qt::Key_Right);
-        else if (id == QStringLiteral("pane.focusUp")) navigate(Qt::Key_Up);
-        else if (id == QStringLiteral("pane.focusDown")) navigate(Qt::Key_Down);
+        else if (id == QStringLiteral("pane.focusLeft")) navigate(relay::panes::Direction::Left);
+        else if (id == QStringLiteral("pane.focusRight")) navigate(relay::panes::Direction::Right);
+        else if (id == QStringLiteral("pane.focusUp")) navigate(relay::panes::Direction::Up);
+        else if (id == QStringLiteral("pane.focusDown")) navigate(relay::panes::Direction::Down);
         else if (id == QStringLiteral("pane.close")) closeActive();
-        else if (id == QStringLiteral("pane.moveLeft")) moveActive(Qt::Key_Left);
-        else if (id == QStringLiteral("pane.moveRight")) moveActive(Qt::Key_Right);
-        else if (id == QStringLiteral("pane.moveUp")) moveActive(Qt::Key_Up);
-        else if (id == QStringLiteral("pane.moveDown")) moveActive(Qt::Key_Down);
+        else if (id == QStringLiteral("pane.moveLeft")) moveActive(relay::panes::Direction::Left);
+        else if (id == QStringLiteral("pane.moveRight")) moveActive(relay::panes::Direction::Right);
+        else if (id == QStringLiteral("pane.moveUp")) moveActive(relay::panes::Direction::Up);
+        else if (id == QStringLiteral("pane.moveDown")) moveActive(relay::panes::Direction::Down);
         else if (id == QStringLiteral("pane.moveToNewTab")) { if (m_activeLeaf) moveLeafToNewTab(m_activeLeaf); }
         else if (id == QStringLiteral("tab.moveToNewWindow")) moveTabToNewWindow(m_tabs->currentIndex());
         else if (id == QStringLiteral("closed.restore")) m_manager->restore(this);
@@ -7822,11 +7823,11 @@ private:
         QTimer::singleShot(0, pane, [pane] { pane->focusInput(); });
     }
 
-    void navigate(int key) {
+    void navigate(relay::panes::Direction direction) {
         QWidget *current = m_activeLeaf;
         if (!current || !pageOf(current)) return;
         // A candidate must lie on the requested side; prefer the nearest, then the most aligned.
-        if (QWidget *best = neighborOf(current, key)) { setActiveLeaf(best); focusLeaf(best); }
+        if (QWidget *best = neighborOf(current, direction)) { setActiveLeaf(best); focusLeaf(best); }
     }
 
     // ----- pane chrome, tab bar controls and moving panes ------------------------------------------
@@ -8129,11 +8130,25 @@ private:
         return nullptr;
     }
 
+    // Show the button row of the pane under the mouse, and only that one.
+    //
+    // hide() and show() make Qt deliver synthetic enter/leave and mouse-move events for whatever
+    // the change put under the cursor, and those come straight back here through the window's
+    // application event filter. So this only records what is wanted while an update is running,
+    // and the loop applies it once the widgets have settled; hiding a chrome from inside its own
+    // hide() used to recurse until the stack ran out (clicking ⇱ "Move to new tab" crashed).
     void showChromeFor(QWidget *leaf) {
-        if (m_hoverLeaf == leaf) return;
-        if (m_hoverLeaf) if (auto *old = chromeOf(m_hoverLeaf)) old->hide();
-        m_hoverLeaf = leaf;
-        if (leaf) if (auto *chrome = chromeOf(leaf)) { chrome->place(); chrome->show(); }
+        m_wantedHoverLeaf = leaf;
+        if (m_updatingChrome) return;
+        m_updatingChrome = true;
+        // Bounded, so two panes that keep handing the cursor back and forth cannot spin here.
+        for (int pass = 0; pass < 8 && m_hoverLeaf != m_wantedHoverLeaf; ++pass) {
+            QWidget *old = m_hoverLeaf;
+            m_hoverLeaf = m_wantedHoverLeaf;
+            if (old) if (auto *chrome = chromeOf(old)) chrome->hide();
+            if (m_hoverLeaf) if (auto *chrome = chromeOf(m_hoverLeaf)) { chrome->place(); chrome->show(); }
+        }
+        m_updatingChrome = false;
     }
 
     enum class Edge { None, Left, Right, Top, Bottom, TabBar };
@@ -8145,13 +8160,12 @@ private:
             if (auto *bar = dynamic_cast<QTabBar *>(w); bar && windowOf(bar)) return {bar, Edge::TabBar};
         QWidget *leaf = leafOf(under);
         if (!leaf || leaf == dragged || !windowOf(leaf)) return {nullptr, Edge::None};
-        const QPoint local = leaf->mapFromGlobal(global);
-        const double fx = double(local.x()) / std::max(1, leaf->width()), fy = double(local.y()) / std::max(1, leaf->height());
-        const double left = fx, right = 1 - fx, top = fy, bottom = 1 - fy;
-        const double nearest = std::min({left, right, top, bottom});
-        if (nearest == left) return {leaf, Edge::Left};
-        if (nearest == right) return {leaf, Edge::Right};
-        if (nearest == top) return {leaf, Edge::Top};
+        switch (relay::panes::dropEdge(leaf->mapFromGlobal(global), leaf->size())) {
+        case relay::panes::Direction::Left: return {leaf, Edge::Left};
+        case relay::panes::Direction::Right: return {leaf, Edge::Right};
+        case relay::panes::Direction::Up: return {leaf, Edge::Top};
+        case relay::panes::Direction::Down: break;
+        }
         return {leaf, Edge::Bottom};
     }
 
@@ -8212,6 +8226,7 @@ private:
         QWidget *page = pageOf(leaf);
         if (!page) return false;
         if (m_hoverLeaf == leaf) m_hoverLeaf = nullptr;
+        if (m_wantedHoverLeaf == leaf) m_wantedHoverLeaf = nullptr;
         if (auto *chrome = chromeOf(leaf)) chrome->hide();
         const bool last = leavesIn(page).size() <= 1;
         auto *splitter = dynamic_cast<QSplitter *>(leaf->parentWidget());
@@ -8285,6 +8300,7 @@ private:
         if (m_tabs->count() <= 1) { statusBar()->showMessage(QStringLiteral("This is the only tab in the window."), 4000); return; }
         QWidget *lastActive = m_lastActive.value(page);
         if (m_hoverLeaf && pageOf(m_hoverLeaf) == page) m_hoverLeaf = nullptr;
+        if (m_wantedHoverLeaf && pageOf(m_wantedHoverLeaf) == page) m_wantedHoverLeaf = nullptr;
         if (m_active && pageOf(m_active) == page) m_active = nullptr;
         if (m_activeLeaf && pageOf(m_activeLeaf) == page) m_activeLeaf = nullptr;
         m_lastActive.remove(page);
@@ -8303,22 +8319,19 @@ private:
 
     // Keyboard move: swap with the neighbor in that direction when they share a splitter,
     // otherwise dock on the neighbor's near side. Repeating keeps moving the pane that way.
-    void moveActive(int key) {
+    void moveActive(relay::panes::Direction direction) {
         QWidget *current = m_activeLeaf;
         QWidget *page = current ? pageOf(current) : nullptr;
         if (!page) return;
-        QWidget *neighbor = neighborOf(current, key);
+        QWidget *neighbor = neighborOf(current, direction);
         if (!neighbor) { statusBar()->showMessage(QStringLiteral("No pane in that direction."), 2500); return; }
-        const Qt::Orientation orientation = key == Qt::Key_Left || key == Qt::Key_Right ? Qt::Horizontal : Qt::Vertical;
-        const bool towardStart = key == Qt::Key_Left || key == Qt::Key_Up;
+        const Qt::Orientation orientation = relay::panes::orientationFor(direction);
+        const bool towardStart = relay::panes::towardStart(direction);
         auto *splitter = dynamic_cast<QSplitter *>(current->parentWidget());
         const bool siblings = splitter && splitter == neighbor->parentWidget() && splitter->orientation() == orientation
                               && std::abs(splitter->indexOf(current) - splitter->indexOf(neighbor)) == 1;
         if (siblings) {
-            const QList<int> sizes = splitter->sizes();
-            splitter->insertWidget(splitter->indexOf(neighbor), current);   // moves `current` before or after
-            if (!towardStart) splitter->insertWidget(splitter->indexOf(current), neighbor);
-            splitter->setSizes(sizes);
+            relay::panes::swapInSplitter(splitter, current, neighbor);
         } else {
             QPointer<QWidget> anchor(neighbor);
             if (!takeLeaf(current) || !anchor) return;
@@ -8329,26 +8342,18 @@ private:
         updateTitles();
     }
 
-    QWidget *neighborOf(QWidget *current, int key) const {
+    QWidget *neighborOf(QWidget *current, relay::panes::Direction direction) const {
         QWidget *page = pageOf(current);
         const QRect from(current->mapTo(page, QPoint(0, 0)), current->size());
-        QWidget *best = nullptr;
-        double bestScore = 1e18;
+        QList<QWidget *> panes;
+        QList<QRect> rects;
         for (QWidget *pane : leavesIn(page)) {
             if (pane == current) continue;
-            const QRect to(pane->mapTo(page, QPoint(0, 0)), pane->size());
-            double gap = 0, offset = 0;
-            switch (key) {
-            case Qt::Key_Right: if (to.left() < from.right() - 4) continue; gap = to.left() - from.right(); offset = std::abs(to.center().y() - from.center().y()); break;
-            case Qt::Key_Left: if (to.right() > from.left() + 4) continue; gap = from.left() - to.right(); offset = std::abs(to.center().y() - from.center().y()); break;
-            case Qt::Key_Down: if (to.top() < from.bottom() - 4) continue; gap = to.top() - from.bottom(); offset = std::abs(to.center().x() - from.center().x()); break;
-            case Qt::Key_Up: if (to.bottom() > from.top() + 4) continue; gap = from.top() - to.bottom(); offset = std::abs(to.center().x() - from.center().x()); break;
-            default: continue;
-            }
-            const double score = std::max(0.0, gap) * 4 + offset;
-            if (score < bestScore) { bestScore = score; best = pane; }
+            panes.append(pane);
+            rects.append(QRect(pane->mapTo(page, QPoint(0, 0)), pane->size()));
         }
-        return best;
+        const int best = relay::panes::neighborIndex(from, rects, direction);
+        return best < 0 ? nullptr : panes.at(best);
     }
 
     void closeActive() {
@@ -8469,7 +8474,8 @@ private:
     QPointer<Pane> m_active;
     QHash<QWidget *, QPointer<QWidget>> m_lastActive;
     QPointer<QWidget> m_activeLeaf;
-    QPointer<QWidget> m_hoverLeaf;
+    QPointer<QWidget> m_hoverLeaf, m_wantedHoverLeaf;   // shown now, and what showChromeFor was last asked for
+    bool m_updatingChrome = false;
     QPointer<QToolButton> m_newTabButton;
     // Window header (see buildWindowChrome). m_nativeFrame: this window kept the system title bar.
     static constexpr int kFrameMargin = 5;

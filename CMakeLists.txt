@@ -109,6 +109,13 @@ target_include_directories(relay-notifications PUBLIC src)
 target_link_libraries(relay-notifications PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-notifications PRIVATE -Wall -Wextra -Wpedantic)
 
+# Pane movement: which pane is the neighbour in a direction, how two panes swap inside their
+# splitter, and which edge a dropped pane lands on. Plain Qt widgets, no terminal.
+add_library(relay-panes STATIC src/PaneLayout.cpp src/PaneLayout.h)
+target_include_directories(relay-panes PUBLIC src)
+target_link_libraries(relay-panes PUBLIC ${RELAY_QT}::Widgets)
+target_compile_options(relay-panes PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
 target_include_directories(relay-requests PUBLIC src)
 target_link_libraries(relay-requests PUBLIC ${RELAY_QT}::Widgets)
@@ -130,7 +137,7 @@ if(RELAY_BUILD_APP)
     add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/Hints.cpp src/Hints.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
         src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -183,6 +190,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-conversations-tests PRIVATE relay-conversations ${RELAY_QT}::Test)
     add_test(NAME conversations COMMAND relay-conversations-tests)
     set_tests_properties(conversations PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-panes-tests tests/panelayout_test.cpp)
+    target_link_libraries(relay-panes-tests PRIVATE relay-panes ${RELAY_QT}::Test)
+    add_test(NAME panes COMMAND relay-panes-tests)
+    set_tests_properties(panes PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-backends-tests tests/backends_test.cpp)
     target_link_libraries(relay-backends-tests PRIVATE relay-backends ${RELAY_QT}::Test)
     add_test(NAME backends COMMAND relay-backends-tests)

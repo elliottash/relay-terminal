@@ -108,6 +108,7 @@ protected:
     bool event(QEvent *e) override;
     void paintEvent(QPaintEvent *e) override;
     void resizeEvent(QResizeEvent *e) override;
+    void showEvent(QShowEvent *e) override;
     void keyPressEvent(QKeyEvent *e) override;
     void keyReleaseEvent(QKeyEvent *e) override;
     void inputMethodEvent(QInputMethodEvent *e) override;
@@ -130,6 +131,7 @@ private:
 
     void updateMetrics();
     void applyGeometry();
+    void scheduleGeometry();
     void scheduleFrame();
     void pullFrame();
     QRect cellRect(int row, int col, int width = 1) const;
@@ -170,6 +172,7 @@ private:
     int m_cols = 80;
 
     QTimer m_frameTimer;
+    QTimer m_geometryTimer;   // the grid follows the size the view still has once the layout settles
     QElapsedTimer m_sinceFrame;
     quint64 m_bytesAtFrame = 0;
     quint64 m_paints = 0;
