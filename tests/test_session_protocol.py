@@ -144,6 +144,20 @@ class InstructionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             instructions.load({'files': ['relative.md']}, self.ws)
 
+    def test_warp_files_preferred_and_cap_configurable(self):
+        self.write(self.ws / 'AGENTS.md', 'agents file')
+        self.write(self.ws / 'WARP.md', 'warp file ' + 'w' * 5000)
+        warp_global = self.write(self.home / '.warp/WARP.md', 'global warp rules')
+        items = {i['path']: i for i in instructions.scan(self.ws)}
+        self.assertEqual((items[str(warp_global)]['tool'], items[str(warp_global)]['scope']), ('Warp', 'global'))
+        loaded = instructions.load({'files': [str(warp_global)], 'project_auto': True, 'max_bytes': 2048}, self.ws)
+        self.assertEqual(loaded.loaded, [str(warp_global), str(self.ws / 'WARP.md')])
+        self.assertEqual(loaded.truncated, [str(self.ws / 'WARP.md')])
+        self.assertLessEqual(len(loaded.section.encode()), 2048)
+        self.assertEqual(loaded.cap, 2048)
+        with self.assertRaises(ValueError):
+            instructions.load({'max_bytes': 10}, self.ws)
+
     def test_instructions_in_system_prompt(self):
         self.write(self.ws / 'AGENTS.md', 'ALWAYS RUN MAKE CHECK')
         loaded = instructions.load(None, self.ws)

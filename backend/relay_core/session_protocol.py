@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import threading
 import uuid
-from pathlib import Path
 
 from . import attachments, instructions, keystore, planning, suggestions
 from .context import validate_threshold, validate_window
@@ -74,8 +73,13 @@ def configured_fields(agent) -> dict:
               "instructions": list(agent.instructions.loaded) if agent.instructions else [],
               "session_id": agent.session_id, "plans_dir": str(agent.plans_dir),
               "session_dir": str(agent.store.directory) if agent.store else None}
-    if agent.instructions and agent.instructions.skipped:
-        fields["instructions_skipped"] = agent.instructions.skipped[:50]
+    if agent.instructions:
+        fields["instructions_max_bytes"] = agent.instructions.cap
+        fields["instructions_bytes"] = len(agent.instructions.section.encode("utf-8"))
+        if agent.instructions.truncated:
+            fields["instructions_truncated"] = agent.instructions.truncated
+        if agent.instructions.skipped:
+            fields["instructions_skipped"] = agent.instructions.skipped[:50]
     return fields
 
 

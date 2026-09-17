@@ -147,6 +147,32 @@ class RequestTests(SkillFixture):
         self.assertEqual(results[2]['skills'], 0)
 
 
+class DiscoveryTests(unittest.TestCase):
+    def test_default_search_covers_warp_tree_claude_dirs_and_excludes(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as temp:
+            home, ws = Path(temp) / 'home', Path(temp) / 'ws'
+            skill = '---\ndescription: {}\n---\nbody\n'
+            write(home / '.warp/skills/shared/SKILL.md', skill.format('user copy'))
+            bundled = home / '.warp/remote-server/bundled_resources/bundled/skills'
+            write(bundled / 'shared/SKILL.md', skill.format('bundled copy'))
+            write(bundled / 'bundled-only/SKILL.md', skill.format('bundled'))
+            write(bundled / 'bundled-only/nested/SKILL.md', skill.format('not a separate skill'))
+            write(bundled / 'warpctrl/SKILL.md', skill.format('warp app only'))
+            write(home / '.warp/a/b/c/d/e/f/too-deep/SKILL.md', skill.format('too deep'))
+            write(home / '.claude/skills/claude-user/SKILL.md', skill.format('claude user'))
+            write(ws / '.claude/skills/claude-project/SKILL.md', skill.format('claude project'))
+            with mock.patch.dict(os.environ, {'HOME': str(home)}):
+                index = skills.from_request(None, str(ws))
+                self.assertEqual(sorted(index.skills), ['bundled-only', 'claude-project', 'claude-user', 'shared'])
+                self.assertEqual(index.skills['shared'].description, 'user copy')
+                self.assertTrue(any(r.startswith('shared: duplicate') for r in index.skipped))
+                self.assertTrue(any(r.startswith('warpctrl: excluded') for r in index.skipped))
+                self.assertIn('warpctrl', skills.from_request({'exclude': []}, str(ws)).skills)
+                with self.assertRaises(ValueError):
+                    skills.from_request({'exclude': 'warpctrl'}, str(ws))
+
+
 class RealSkillsTest(unittest.TestCase):
     def test_home_skills_index_without_errors(self):
         home = Path.home() / '.warp' / 'skills'

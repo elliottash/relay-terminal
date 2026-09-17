@@ -4,7 +4,7 @@
 Conventions follow docs/INTAKE-CLARIFICATION-RESEARCH.md section 6. Project files are looked for in
 every directory from the git root down to the workspace. `project_auto` loads the first project
 file per directory in PROJECT_ORDER (plus CLAUDE.local.md and unconditional .claude/rules next to a
-CLAUDE.md pick), resolves CLAUDE-style `@path` imports, and caps the total at 32 KiB.
+CLAUDE.md pick), resolves CLAUDE-style `@path` imports, and caps the total (32 KiB by default).
 """
 from __future__ import annotations
 
@@ -17,7 +17,8 @@ from pathlib import Path
 from . import sidecall
 from .skills import SkillError, parse_frontmatter
 
-TOTAL_CAP = 32 * 1024
+TOTAL_CAP = 32 * 1024          # default; configure instructions.max_bytes changes it
+MIN_CAP, MAX_CAP = 1024, 1024 * 1024
 FILE_READ_CAP = 256 * 1024
 SYNTH_INPUT_CAP = 128 * 1024
 MAX_IMPORT_DEPTH = 4
@@ -51,6 +52,7 @@ PROJECT_CONVENTIONS = [
 
 GLOBAL_CONVENTIONS = [
     ("Relay", "~/.config/relay/relay.md"),
+    ("Warp", "~/.warp/WARP.md"),
     ("Relay", "~/.config/relay/AGENTS.md"),
     ("Claude Code", "~/.claude/CLAUDE.md"),
     ("Claude Code", "~/.claude/rules/*.md"),
@@ -68,8 +70,9 @@ GLOBAL_CONVENTIONS = [
     ("Continue", "~/.continue/rules/*.md"),
 ]
 
-# project_auto: first hit per directory. aider's CONVENTIONS.md is explicit-only in aider, so not auto.
-PROJECT_ORDER = ["AGENTS.override.md", "AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md", "WARP.md", "GEMINI.md",
+# project_auto: first hit per directory. Warp prefers WARP.md over AGENTS.md in the same directory.
+# aider's CONVENTIONS.md is explicit-only in aider, so not auto.
+PROJECT_ORDER = ["WARP.md", "AGENTS.override.md", "AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md", "GEMINI.md",
                  ".github/copilot-instructions.md", ".cursor/rules/*.mdc", ".cursorrules", ".windsurfrules",
                  ".windsurf/rules/*.md", ".clinerules", ".rules", ".junie/AGENTS.md", ".junie/guidelines.md",
                  ".kiro/steering/*.md", ".continue/rules/*.md"]
@@ -173,7 +176,7 @@ def _frontmatter_ok(path: Path, text: str) -> bool:
         return True
     if path.suffix == ".mdc":
         return fields.get("alwaysApply", "").lower() == "true"
-    if "paths" in fields and fields["paths"].strip():
+    if "paths" in fields:
         return False
     if fields.get("inclusion") and fields["inclusion"] not in ("always",):
         return False
@@ -246,24 +249,30 @@ class LoadedInstructions:
     section: str = ""
     loaded: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    truncated: list[str] = field(default_factory=list)   # loaded, but cut by the size cap
+    cap: int = TOTAL_CAP
 
 
 def validate_settings(settings) -> dict:
     if settings is None:
-        return {"files": [], "project_auto": True}
-    if not isinstance(settings, dict) or set(settings) - {"files", "project_auto"}:
-        raise ValueError("instructions must be an object with files and project_auto.")
+        return {"files": [], "project_auto": True, "max_bytes": TOTAL_CAP}
+    if not isinstance(settings, dict) or set(settings) - {"files", "project_auto", "max_bytes"}:
+        raise ValueError("instructions must be an object with files, project_auto and max_bytes.")
+    cap = settings.get("max_bytes", TOTAL_CAP)
+    if type(cap) is not int or not MIN_CAP <= cap <= MAX_CAP:
+        raise ValueError("instructions.max_bytes must be an integer from 1024 to 1048576.")
     files = settings.get("files", [])
     if not isinstance(files, list) or len(files) > MAX_FILES or not all(isinstance(f, str) and os.path.isabs(os.path.expanduser(f)) for f in files):
         raise ValueError("instructions.files must be a list of absolute paths.")
     auto = settings.get("project_auto", True)
     if type(auto) is not bool:
         raise ValueError("instructions.project_auto must be a boolean.")
-    return {"files": [os.path.expanduser(f) for f in files], "project_auto": auto}
+    return {"files": [os.path.expanduser(f) for f in files], "project_auto": auto, "max_bytes": cap}
 
 
-def load(settings, workspace: str | Path, cap: int = TOTAL_CAP) -> LoadedInstructions:
+def load(settings, workspace: str | Path, cap: int | None = None) -> LoadedInstructions:
     settings = validate_settings(settings)
+    cap = cap or settings["max_bytes"]
     workspace = Path(workspace).expanduser().resolve()
     project_root = git_root(workspace)
     home = Path.home().resolve()
@@ -274,7 +283,7 @@ def load(settings, workspace: str | Path, cap: int = TOTAL_CAP) -> LoadedInstruc
         queue.append((path, limit, None, 0))
     if settings["project_auto"]:
         queue.extend((p, project_root, None, 0) for p in auto_project_files(workspace))
-    result = LoadedInstructions()
+    result = LoadedInstructions(cap=cap)
     blocks, size, seen_paths, seen_hashes = [], len(SECTION_HEADER.encode("utf-8")), set(), set()
     while queue:
         path, limit, parent, depth = queue.pop(0)
@@ -295,11 +304,12 @@ def load(settings, workspace: str | Path, cap: int = TOTAL_CAP) -> LoadedInstruc
         closing = "\n</instructions>\n"
         room = cap - size - len(label.encode("utf-8")) - len(closing.encode("utf-8"))
         if room < 200:
-            result.skipped.append(f"{path}: over the {cap // 1024} KiB instruction cap")
+            result.skipped.append(f"{path}: over the {cap} byte instruction cap")
             continue
         body = text
         if len(body.encode("utf-8")) > room:
             body = body.encode("utf-8")[: room - 60].decode("utf-8", "ignore") + "\n[…truncated by Relay's size cap…]"
+            result.truncated.append(key)
         block = label + body + closing
         blocks.append(block)
         size += len(block.encode("utf-8"))
