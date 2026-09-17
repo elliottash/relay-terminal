@@ -22,6 +22,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) | Konsole fork vs. owned engine, per-pane process isolation, terminal-only Relay |
 | [DISTRIBUTION-RESEARCH.md](DISTRIBUTION-RESEARCH.md) | Linux packaging options, macOS and Windows blockers and signing costs, website, phased plan |
 | [CONTROL-AND-FILE-PANES-RESEARCH.md](CONTROL-AND-FILE-PANES-RESEARCH.md) | How Warp and others hand control between human and agent, password detection, file pane options |
+| [AGENT-FEATURES-RESEARCH.md](AGENT-FEATURES-RESEARCH.md) | Session, planning, model/effort, command and subagent UX in Warp, opencode, Claude Code and Codex; recommendations and a subagent design for Relay |
 | [PALETTE-RESEARCH.md](PALETTE-RESEARCH.md) | Palette designs in other tools; recommended two palettes, later merged into one actions palette |
 | [OPENCODE-NOTES.md](OPENCODE-NOTES.md) | What Relay's agent could adopt from opencode, ranked |
 | [RESEARCH.md](RESEARCH.md) | Historical: primary sources checked for the first build (KonsolePart, Qt editor, Warp licensing, Kimi and Z.AI endpoints) |
