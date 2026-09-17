@@ -274,7 +274,10 @@ private:
         add("pane.restartShell", "terminal", "Restart this pane's shell or agent after it stopped", {QStringLiteral("Ctrl+Shift+R")});
         add("terminal.interrupt", "terminal", "Interrupt the running command (Ctrl+C)", {});
         add("agent.newChat", "agent", "Start a new agent conversation", {});
+        add("agent.clearQueue", "agent", "Clear queued agent prompts", {});
+        add("agent.resumeQueue", "agent", "Resume the paused agent queue", {});
         add("agent.stop", "agent", "Stop the agent turn", {});
+        add("agent.interrupt", "agent", "Interrupt the agent turn with the prompt in the prompt box", {QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
         add("agent.provider", "agent", "Provider and API keys", {});
         add("input.modeAuto", "agent", "Input mode: auto detect", {});
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
@@ -501,6 +504,16 @@ public:
         send({{"type", "reset"}}); clearFix();
         printInline(QStringLiteral("New agent conversation\n"), Ink::Note); closeInline();
     }
+    int queuedPrompts() const { return m_queueItems.size(); }
+    bool queuePaused() const { return m_queuePaused; }
+    void clearAgentQueue() { send({{"type", "queue_clear"}}); }
+    void resumeAgentQueue() { send({{"type", "resume_queue"}}); }
+    // Ctrl+Alt+Enter: run the prompt-box text now, stopping the current turn first.
+    void interruptAgentWithPrompt() {
+        const QString text = m_editor->toPlainText().trimmed();
+        if (text.isEmpty()) { status(QStringLiteral("Type a prompt first; Ctrl+Alt+Enter interrupts the agent with it.")); return; }
+        submitAgent(text, true, QString(), QStringLiteral("interrupt"));
+    }
     void stopAgent() {
         send({{"type", "cancel"}}); clearFix();
         status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
@@ -589,6 +602,7 @@ protected:
         QWidget::resizeEvent(event);
         // Split panes get narrow: drop the key hints and the agent workspace path first.
         if (m_help) m_help->setVisible(width() >= 900);
+        placeQueueStrip();
         if (m_transcript) m_transcript->setMaximumHeight(std::max(120, height() * 2 / 5));
         updatePaths();
     }
@@ -698,11 +712,18 @@ private:
         connect(submit, &QPushButton::clicked, this, [this] { requestRoute(true, QStringLiteral("auto")); });
         routeRow->addWidget(submit); composerLayout->addLayout(routeRow);
         m_editor = new RichEditor; composerLayout->addWidget(m_editor);
-        auto *help = new QLabel(QStringLiteral("Shift+Enter  newline     Ctrl+Enter  agent     Ctrl+Shift+Enter  terminal     ↑/↓  history"));
+        auto *help = new QLabel(QStringLiteral("Shift+Enter  newline     Ctrl+Enter  agent     Ctrl+Alt+Enter  interrupt agent     Ctrl+Shift+Enter  terminal     ↑/↓  history"));
         help->setWordWrap(true); composerLayout->addWidget(help);
         m_help = help;
         buildTranscript();
         layout->addWidget(m_transcript);
+        // The queue strip floats over the bottom of the terminal instead of taking layout space:
+        // resizing the terminal would make the shell redraw its prompt mid-output.
+        m_queueStrip = new QFrame(this);
+        m_queueStrip->setObjectName(QStringLiteral("queueStrip"));
+        m_queueStrip->setAttribute(Qt::WA_StyledBackground);
+        auto *queueLayout = new QVBoxLayout(m_queueStrip); queueLayout->setContentsMargins(10, 6, 6, 6); queueLayout->setSpacing(2);
+        m_queueStrip->hide();
         layout->addWidget(composer);
         updatePaths();
     }
@@ -924,8 +945,45 @@ private:
         } else if (type == QStringLiteral("keybindings_updated")) {
         } else if (type == QStringLiteral("key_stored")) {
             status(QStringLiteral("API key saved to the keyring for ") + event.value(QStringLiteral("preset")).toString());
+        } else if (type == QStringLiteral("queued")) {
+            const QString requestId = event.value(QStringLiteral("request_id")).toString();
+            if (m_pendingPrompts.contains(requestId)) m_itemPrompts.insert(event.value(QStringLiteral("id")).toString(), m_pendingPrompts.take(requestId));
+        } else if (type == QStringLiteral("queue_changed")) {
+            m_runningItem = event.value(QStringLiteral("running")).toString();
+            m_queuePaused = event.value(QStringLiteral("paused")).toBool();
+            m_queueItems.clear();
+            for (const auto &value : event.value(QStringLiteral("items")).toArray()) {
+                const auto item = value.toObject();
+                m_queueItems.append({item.value(QStringLiteral("id")).toString(),
+                                     {item.value(QStringLiteral("preview")).toString(), item.value(QStringLiteral("forced")).toBool()}});
+            }
+            // Forget prompts that are neither running nor queued any more (removed or cleared).
+            for (auto it = m_itemPrompts.begin(); it != m_itemPrompts.end();) {
+                const bool queued = std::any_of(m_queueItems.cbegin(), m_queueItems.cend(), [&](const auto &q) { return q.first == it.key(); });
+                if (!queued && it.key() != m_runningItem && it.key() != m_currentItem) it = m_itemPrompts.erase(it); else ++it;
+            }
+            rebuildQueueStrip();
+            changed();
+        } else if (type == QStringLiteral("interrupting")) {
+            status(QStringLiteral("Interrupting the current agent turn…"));
         } else if (type == QStringLiteral("agent_started")) {
-            m_agentBusy = true; m_turnHeader = false;
+            // Busy follows agent_started/agent_finished: the next queued turn may start right after done.
+            m_agentBusy = true; m_turnHeader = false; m_turnText.clear();
+            m_currentItem = event.value(QStringLiteral("id")).toString();
+            const PendingPrompt prompt = m_itemPrompts.value(m_currentItem);
+            m_fixAwaitingAgent = prompt.fix;
+            if (!prompt.program.isEmpty()) m_transcriptProgram = prompt.program;
+            if (!prompt.fix && !prompt.text.isEmpty()) {
+                ensureLineStart();
+                printInline(QStringLiteral("› ") + prompt.text + '\n', Ink::User);
+                if (!prompt.why.isEmpty()) printInline(prompt.why + '\n', Ink::Note);
+            }
+        } else if (type == QStringLiteral("agent_finished")) {
+            m_itemPrompts.remove(event.value(QStringLiteral("id")).toString());
+            if (m_currentItem == event.value(QStringLiteral("id")).toString()) m_currentItem.clear();
+            m_agentBusy = !m_runningItem.isEmpty() && m_runningItem != event.value(QStringLiteral("id")).toString();
+            if (!m_agentBusy && !moreTurnsPending()) { ensureLineStart(); closeInline(); }
+            changed();
         } else if (type == QStringLiteral("delta")) {
             const QString text = event.value(QStringLiteral("text")).toString();
             m_turnText += text;
@@ -978,23 +1036,28 @@ private:
         } else if (type == QStringLiteral("status")) {
             status(event.value(QStringLiteral("text")).toString());
         } else if (type == QStringLiteral("done") || type == QStringLiteral("cancelled")) {
-            m_agentBusy = false;
             if (type == QStringLiteral("cancelled")) {
                 ensureLineStart(); printInline(QStringLiteral("Stopped. Actions that already ran are not rolled back.\n"), Ink::Error);
             }
-            ensureLineStart(); closeInline();
-            status(QStringLiteral("Ready"));
+            ensureLineStart();
+            // Readline redraws its prompt asynchronously; closing between queued turns would drop the
+            // redrawn prompt into the middle of the next turn's output. Close once the queue is idle.
+            if (!moreTurnsPending()) closeInline();
+            status(moreTurnsPending() ? QStringLiteral("Next queued prompt…") : QStringLiteral("Ready"));
             finishFixTurn(type == QStringLiteral("done"));
         } else if (type == QStringLiteral("error")) {
             const auto text = event.value(QStringLiteral("text")).toString();
             if (event.value(QStringLiteral("id")).toString() == m_pendingSubmit) m_pendingSubmit.clear();
             const bool wasBusy = m_agentBusy;
+            // A rejected ask (queue full, invalid prompt) never started; forget it.
+            m_pendingPrompts.remove(event.value(QStringLiteral("id")).toString());
             // Route errors do not cancel a concurrent agent turn.
             m_agentBusy = event.value(QStringLiteral("agent_busy")).toBool(false);
             m_configuring = false;
             status(text);
             if (wasBusy && !m_agentBusy) {
-                ensureLineStart(); printInline(QStringLiteral("✗ ") + text + '\n', Ink::Error); closeInline();
+                ensureLineStart(); printInline(QStringLiteral("✗ ") + text + '\n', Ink::Error);
+                if (!moreTurnsPending()) closeInline();
                 finishFixTurn(false);
             }
         }
@@ -1268,11 +1331,8 @@ private:
             printInline(QStringLiteral("✗ %1. No agent provider is configured to fix it.\n").arg(problem), Ink::Error);
             closeInline(); clearFix(); return;
         }
-        if (m_agentBusy) {
-            printInline(QStringLiteral("✗ %1. The agent is busy, so no fix was started.\n").arg(problem), Ink::Error);
-            closeInline(); clearFix(); return;
-        }
-        m_fixCommand = command; m_fixAttempt = attempt; m_fixAwaitingAgent = true; m_fixWatch = false; m_fixArmed = false;
+        // A busy agent does not refuse the fix: it is queued and runs after the current turn.
+        m_fixCommand = command; m_fixAttempt = attempt; m_fixAwaitingAgent = false; m_fixWatch = false; m_fixArmed = false;
         ensureLineStart();
         printInline(QStringLiteral("⟳ %1 · asking the agent to fix it (attempt %2 of %3)\n").arg(problem).arg(attempt).arg(kMaxFixAttempts), Ink::Note);
         const QString prompt = QStringLiteral(
@@ -1286,8 +1346,8 @@ private:
             "```relay-run\nls -la\n```\n"
             "Relay runs that block in the user's terminal. If it cannot be fixed, end with an empty relay-run block and a one-line reason before it.")
             .arg(attempt).arg(kMaxFixAttempts).arg(shellQuote(m_cwd), command, problem);
-        m_turnText.clear(); m_turnHeader = false; m_agentBusy = true;
-        send({{"type", "ask"}, {"text", prompt}});
+        PendingPrompt pending; pending.fix = true;
+        sendPrompt(QJsonObject{{"type", "ask"}, {"text", prompt}, {"when", m_queuePaused ? QStringLiteral("now") : QStringLiteral("queue")}}, pending);
     }
 
     void finishFixTurn(bool completed) {
@@ -1530,29 +1590,111 @@ private:
         updatePaths();
     }
 
-    void submitAgent(const QString &text, bool fromEditor, const QString &why = QString()) {
+    // Agent prompts always go through the worker's queue: they start at once when the agent is
+    // idle and wait their turn when it is busy. The prompt is echoed when its turn starts.
+    void submitAgent(const QString &text, bool fromEditor, const QString &why = QString(), QString when = QString()) {
         if (!m_configured) {
             if (fromEditor) { configure(); return; }
             status(QStringLiteral("No agent provider is configured."));
             return;
         }
-        if (m_agentBusy) {
-            status(QStringLiteral("An agent turn is active. Stop it or wait for completion before submitting another request."));
-            return;
-        }
+        if (when.isEmpty()) when = m_queuePaused ? QStringLiteral("now") : QStringLiteral("queue");
+        if (when == QStringLiteral("interrupt") && !m_agentBusy) when = m_queuePaused ? QStringLiteral("now") : QStringLiteral("queue");
         if (fromEditor) { m_editor->remember(text); m_editor->clear(); }
-        ensureLineStart();
-        printInline(QStringLiteral("› ") + text + '\n', Ink::User);
-        if (!why.isEmpty()) printInline(why + '\n', Ink::Note);
-        m_turnText.clear(); m_turnHeader = false; m_agentBusy = true;
-        QJsonObject request{{"type", "ask"}, {"text", text}};
+        PendingPrompt prompt;
+        prompt.text = text; prompt.why = why;
+        QJsonObject request{{"type", "ask"}, {"text", text}, {"when", when}};
         const QString program = processBusy() ? foregroundCommandLine() : QString();
         if (!program.isEmpty()) {
             // Tell the agent what owns the terminal and that it cannot see or type into it yet.
             request.insert(QStringLiteral("context"), QJsonObject{{"foreground_program", program}, {"terminal_cwd", m_cwd}});
-            m_transcriptProgram = QFileInfo(program.section(' ', 0, 0)).fileName();
+            prompt.program = QFileInfo(program.section(' ', 0, 0)).fileName();
         }
+        sendPrompt(request, prompt);
+        if (when == QStringLiteral("interrupt")) {
+            ensureLineStart();
+            printInline(QStringLiteral("Interrupting the current turn; completed actions are not rolled back.\n"), Ink::Note);
+        } else if (m_agentBusy || !m_queueItems.isEmpty()) {
+            status(QStringLiteral("Queued · runs after the current agent turn"));
+        }
+    }
+
+    struct PendingPrompt { QString text, why, program; bool fix = false; };
+
+    // Another turn will start without user action: something is queued and the queue is not paused.
+    bool moreTurnsPending() const { return !m_queueItems.isEmpty() && !m_queuePaused; }
+
+    void sendPrompt(QJsonObject request, const PendingPrompt &prompt) {
+        const QString requestId = QStringLiteral("ask-%1").arg(++m_askSerial);
+        request.insert(QStringLiteral("id"), requestId);
+        m_pendingPrompts.insert(requestId, prompt);
         send(request);
+    }
+
+    // The queue strip above the prompt: the running prompt, queued prompts with remove buttons,
+    // and a paused state with Resume. queue_changed from the worker is authoritative.
+    void rebuildQueueStrip() {
+        if (!m_queueStrip) return;
+        const bool visible = !m_queueItems.isEmpty() || m_queuePaused;
+        auto *layout = static_cast<QVBoxLayout *>(m_queueStrip->layout());
+        while (QLayoutItem *item = layout->takeAt(0)) {
+            if (QWidget *w = item->widget()) w->deleteLater();
+            else if (QLayout *l = item->layout()) { while (QLayoutItem *inner = l->takeAt(0)) { if (inner->widget()) inner->widget()->deleteLater(); delete inner; } }
+            delete item;
+        }
+        m_queueStrip->setVisible(visible);
+        if (!visible) return;
+        placeQueueStrip();
+        auto elide = [this](const QString &text) {
+            QString single = text.simplified();
+            return fontMetrics().elidedText(single, Qt::ElideRight, std::max(160, width() - 160));
+        };
+        auto *header = new QHBoxLayout;
+        auto *title = new QLabel(m_queuePaused ? QStringLiteral("AGENT QUEUE · PAUSED") : QStringLiteral("AGENT QUEUE"));
+        title->setObjectName(QStringLiteral("queueTitle"));
+        header->addWidget(title, 1);
+        if (m_queuePaused) {
+            auto *resume = new QToolButton; resume->setText(QStringLiteral("Resume")); resume->setFocusPolicy(Qt::NoFocus);
+            connect(resume, &QToolButton::clicked, this, [this] { resumeAgentQueue(); });
+            header->addWidget(resume);
+        }
+        if (m_queueItems.size() > 1) {
+            auto *clear = new QToolButton; clear->setText(QStringLiteral("Clear")); clear->setFocusPolicy(Qt::NoFocus);
+            connect(clear, &QToolButton::clicked, this, [this] { clearAgentQueue(); });
+            header->addWidget(clear);
+        }
+        layout->addLayout(header);
+        if (!m_runningItem.isEmpty()) {
+            auto *running = new QLabel(QStringLiteral("▸ ") + elide(m_itemPrompts.value(m_runningItem).text.isEmpty()
+                                                                        ? QStringLiteral("running") : m_itemPrompts.value(m_runningItem).text));
+            running->setObjectName(QStringLiteral("queueRunning"));
+            layout->addWidget(running);
+        }
+        int index = 0;
+        for (const auto &entry : std::as_const(m_queueItems)) {
+            const QString id = entry.first;
+            auto *row = new QHBoxLayout;
+            const QString prefix = entry.second.second ? QStringLiteral("⚡ ") : QStringLiteral("%1. ").arg(++index);
+            auto *label = new QLabel(prefix + elide(m_itemPrompts.contains(id) ? m_itemPrompts.value(id).text : entry.second.first));
+            label->setObjectName(QStringLiteral("queueItem"));
+            label->setToolTip(m_itemPrompts.value(id).text);
+            row->addWidget(label, 1);
+            auto *remove = new QToolButton; remove->setText(QStringLiteral("×")); remove->setAutoRaise(true);
+            remove->setToolTip(QStringLiteral("Remove from the queue")); remove->setFocusPolicy(Qt::NoFocus);
+            connect(remove, &QToolButton::clicked, this, [this, id] { send({{"type", "queue_remove"}, {"item", id}}); });
+            row->addWidget(remove);
+            layout->addLayout(row);
+        }
+        placeQueueStrip();
+        QTimer::singleShot(0, this, [this] { placeQueueStrip(); });
+    }
+
+    void placeQueueStrip() {
+        if (!m_queueStrip || !m_queueStrip->isVisible() || !m_terminalHost) return;
+        const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
+        const int height = std::min(m_queueStrip->sizeHint().height(), host.height() / 2);
+        m_queueStrip->setGeometry(host.left() + 8, host.bottom() - height - 6, host.width() - 16, height);
+        m_queueStrip->raise();
     }
 
     bool readlineReady() const {
@@ -1819,6 +1961,12 @@ private:
     QLabel *m_transcriptHeader = nullptr;
     QPlainTextEdit *m_transcriptView = nullptr;
     QString m_transcriptProgram;
+    QHash<QString, PendingPrompt> m_pendingPrompts, m_itemPrompts;   // request id / queue item id -> prompt
+    QList<QPair<QString, QPair<QString, bool>>> m_queueItems;        // item id -> (preview, forced)
+    QString m_runningItem, m_currentItem;
+    bool m_queuePaused = false;
+    quint64 m_askSerial = 0;
+    QFrame *m_queueStrip = nullptr;
     bool m_transcriptDismissed = false;
     QTimer m_secretPoll;
     QElapsedTimer m_runningSince;
@@ -2102,7 +2250,8 @@ protected:
         // A program such as vim owns its keys, unless the program_keys rule lets this shortcut act.
         Pane *pane = paneOf(widget);
         // Ctrl+H only takes control from the prompt box; in the terminal it stays Backspace.
-        if ((id == QStringLiteral("control.human") || id == QStringLiteral("input.toggle")) && !(pane && pane->ownsComposerWidget(widget)))
+        if ((id == QStringLiteral("control.human") || id == QStringLiteral("input.toggle") || id == QStringLiteral("agent.interrupt"))
+            && !(pane && pane->ownsComposerWidget(widget)))
             return QMainWindow::eventFilter(object, event);
         if (pane && pane->ownsTerminalWidget(widget) && pane->processBusy() && !Keymap::instance().actsInsidePrograms(key))
             return QMainWindow::eventFilter(object, event);
@@ -2195,6 +2344,9 @@ private:
         else if (id == QStringLiteral("control.human")) pane->takeControl();
         else if (id == QStringLiteral("control.prompt")) pane->showPrompt();
         else if (id == QStringLiteral("input.toggle")) pane->toggleInputMode();
+        else if (id == QStringLiteral("agent.interrupt")) pane->interruptAgentWithPrompt();
+        else if (id == QStringLiteral("agent.clearQueue")) pane->clearAgentQueue();
+        else if (id == QStringLiteral("agent.resumeQueue")) pane->resumeAgentQueue();
         else if (id == QStringLiteral("terminal.interrupt")) pane->interruptShell();
         else if (id == QStringLiteral("agent.newChat")) pane->newChat();
         else if (id == QStringLiteral("agent.stop")) pane->stopAgent();
@@ -2313,6 +2465,10 @@ private:
         items << actionItem(agent, QStringLiteral("Toggle terminal / agent input"), QStringLiteral("From the prompt box"), QStringLiteral("input.toggle"));
         items << actionItem(agent, QStringLiteral("New chat"), QStringLiteral("Start a new conversation in this pane"), QStringLiteral("agent.newChat"));
         items << actionItem(agent, QStringLiteral("Stop agent"), pane && pane->agentBusy() ? QStringLiteral("Cancel the running turn") : QStringLiteral("Agent is idle"), QStringLiteral("agent.stop"));
+        if (pane && pane->queuedPrompts() > 0)
+            items << actionItem(agent, QStringLiteral("Clear agent queue"), QStringLiteral("%1 queued prompt(s)").arg(pane->queuedPrompts()), QStringLiteral("agent.clearQueue"));
+        if (pane && pane->queuePaused())
+            items << actionItem(agent, QStringLiteral("Resume agent queue"), QStringLiteral("Paused after a stop or failure"), QStringLiteral("agent.resumeQueue"));
         items << actionItem(agent, QStringLiteral("Provider and API keys…"), QStringLiteral("Base URL, model ID, key, request options"), QStringLiteral("agent.provider"));
         PaletteItem importKeys; importKeys.key = QStringLiteral("agent.importWarp"); importKeys.section = agent;
         importKeys.label = QStringLiteral("Import keys from Warp"); importKeys.detail = QStringLiteral("Copy Warp's custom-endpoint keys into the keyring");

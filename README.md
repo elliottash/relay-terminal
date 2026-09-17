@@ -129,6 +129,7 @@ that arrives while a program is running waits until the next prompt.
 | Enter | Submit using the selected/detected destination |
 | Shift+Enter | Insert a newline |
 | Ctrl+Enter | Always agent |
+| Ctrl+Alt+Enter | Interrupt the running agent turn with the prompt-box text |
 | Ctrl+I (in the prompt box) | Toggle input between terminal command and agent prompt; in the terminal Ctrl+I stays Tab |
 | PageUp / PageDown (in the prompt box) | Scroll the pane's terminal scrollback; Shift+PageUp/PageDown in the terminal keep Konsole's behavior |
 | Ctrl+Shift+Enter | Always terminal; the agent fixes invalid or failing commands |
@@ -172,6 +173,14 @@ searches everything, including submenu entries: "deep" finds Model › DeepSeek.
 keys or Ctrl+N / Ctrl+P to move, Right or Enter to open a submenu, Left to go back, Enter to
 run, and Esc to clear the filter, go back, then close. Focus returns to where it was. The input mode and model pickers and an interrupt button sit in each
 pane's input row.
+
+### Agent queue
+
+Prompts sent while the agent is busy are queued and run in order; each is echoed when its turn
+starts. A strip above the prompt lists the running and queued prompts with × to remove one, and
+Clear. Ctrl+Alt+Enter interrupts the running turn with the prompt-box text instead; actions that
+already ran are not rolled back. Stopping the agent pauses the queue until you choose Resume (strip or
+Actions palette); a new prompt while paused runs immediately.
 
 ### Human and agent control
 

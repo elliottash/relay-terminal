@@ -152,6 +152,13 @@ QCheckBox::indicator:hover { border-color: @muted; }
 QCheckBox::indicator:checked { background: @accent; border-color: @accent; image: url(@icons/check.svg); }
 
 QSplitter::handle { background: @bg; }
+/* Agent queue strip */
+QFrame#queueStrip { background: @surface; border: 1px solid @border; border-radius: 8px; }
+QLabel#queueTitle { color: @muted; font-weight: 600; letter-spacing: 1px; }
+QLabel#queueRunning { color: @accent; }
+QLabel#queueItem { color: @text; }
+QFrame#queueStrip QToolButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 1px 6px; }
+QFrame#queueStrip QToolButton:hover { color: @text; border-color: @border; }
 QFrame#paneBanner { background: @raised; border: 1px solid #b0603a; border-radius: 8px; }
 QFrame#paneBanner QLabel { color: @text; }
 QFrame#transcript { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
