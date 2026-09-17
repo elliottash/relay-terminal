@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import socket
 import threading
 import time
 import urllib.error
@@ -13,6 +15,97 @@ from typing import Callable
 
 MAX_EVENT = 2 * 1024 * 1024
 MAX_RESPONSE = 8 * 1024 * 1024
+
+# The idle deadline: how long the model may send nothing usable before the turn is ended. It covers
+# the response headers *and* every streamed chunk after them.
+#
+# Why a raw socket timeout is not enough (measured 2026-09-17): `urlopen(timeout=N)` does apply to
+# each read of the response, but *any* byte resets it, and an SSE stream of keepalive comments or
+# empty deltas is all bytes and no answer. A stream that pinged every 0.2 s read for 8 s against a
+# 2 s timeout without ever raising. That is how a worker held an ESTABLISHED connection to the
+# provider for 12 minutes while the pane showed only "thinking". The deadline therefore runs from
+# the last *usable* chunk and is enforced by a watchdog that closes the response.
+CONNECT_TIMEOUT = 30.0           # floor for DNS/TLS/headers; the deadline below raises it when larger
+DEFAULT_STALL_TIMEOUT = 60.0     # reasoning models go quiet for a long time between chunks
+MIN_STALL_TIMEOUT = 1.0
+MAX_STALL_TIMEOUT = 1800.0
+WATCHDOG_TICK = 0.5
+# Environment override for the deadline, kept from the 2026-09-17 stopgap that widened the raw
+# socket timeout. It wins over the agent option, so a pane that needs more room needs no settings
+# change; unset, the option (default 60 s) decides. One code path, one deadline.
+ENV_TIMEOUT = "RELAY_PROVIDER_TIMEOUT"
+ENV_MIN, ENV_MAX = 5.0, 900.0
+
+
+def env_stall_timeout() -> float | None:
+    """The RELAY_PROVIDER_TIMEOUT override in seconds, clamped to 5-900, or None when unset/invalid."""
+    raw = os.environ.get(ENV_TIMEOUT, "").strip()
+    if not raw:
+        return None
+    try:
+        return min(max(float(raw), ENV_MIN), ENV_MAX)
+    except ValueError:
+        return None
+
+
+def validate_stall_timeout(value) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"stall_timeout_s must be a number from {MIN_STALL_TIMEOUT:g} to {MAX_STALL_TIMEOUT:g}.")
+    value = float(value)
+    if not MIN_STALL_TIMEOUT <= value <= MAX_STALL_TIMEOUT:
+        raise ValueError(f"stall_timeout_s must be a number from {MIN_STALL_TIMEOUT:g} to {MAX_STALL_TIMEOUT:g}.")
+    return value
+
+
+def _socket_of(response):
+    """The raw socket behind an HTTPResponse, or None (a BytesIO in tests has none)."""
+    raw = getattr(getattr(response, "fp", None), "raw", None)
+    return getattr(raw, "_sock", None)
+
+
+def hard_close(response) -> None:
+    """Close a response so its socket cannot outlive the turn.
+
+    `close()` alone does not unblock a read another thread is already waiting in, and it leaves the
+    peer with an ESTABLISHED connection until it notices; `shutdown()` ends both directions at once.
+    On 2026-09-17 a worker still held an ESTABLISHED connection 12 minutes after its turn, which is
+    what this exists to prevent.
+    """
+    def close_quietly():
+        try:
+            response.close()
+        except (OSError, ValueError, AttributeError):
+            pass
+
+    sock = _socket_of(response)
+    if sock is None:
+        # Nothing to shut down, and close() waits for the buffer lock a blocked reader holds, so it
+        # must not run on the caller's thread: cancel() is called from the protocol loop.
+        threading.Thread(target=close_quietly, name="relay-provider-close", daemon=True).start()
+        return
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except (OSError, ValueError, AttributeError):
+        pass
+    # The shutdown just made any blocked read return, so this cannot wait on the network.
+    close_quietly()
+
+
+def response_closed(response) -> bool:
+    """Whether a response holds no socket any more. Used by the per-turn socket-hygiene check."""
+    if response is None or getattr(response, "fp", None) is None:
+        return True
+    sock = _socket_of(response)
+    if sock is not None:
+        try:
+            if sock.fileno() != -1:
+                return False
+        except (OSError, ValueError):
+            return True
+    try:
+        return bool(response.isclosed())
+    except (OSError, ValueError, AttributeError):
+        return True
 
 def _reasoning_text(part: dict) -> str:
     """Displayable reasoning in a streamed delta or a complete message.
@@ -47,6 +140,24 @@ def wire_messages(messages: list[dict]) -> list[dict]:
 
 class ProviderError(RuntimeError):
     pass
+
+class ProviderStalled(ProviderError):
+    """Nothing usable arrived from the provider for ``seconds``; the socket was closed.
+
+    ``produced`` says whether the stalled response had already started an answer (content or a
+    tool-call fragment). The agent retries a turn once only when it has not: that text is already on
+    the user's screen, and no tool call can be in flight (a stall can only happen while waiting for
+    the model, when every earlier tool call already has its result).
+
+    ``stage`` is "stream" (headers arrived, then nothing usable) or "connect" (no response at all).
+    """
+    def __init__(self, seconds: float, produced: bool = False, stage: str = "stream"):
+        what = ("the model sent nothing for" if stage == "stream"
+                else "the provider did not answer within")
+        super().__init__(f"Provider stalled: {what} {seconds:g} s.")
+        self.seconds = seconds
+        self.produced = produced
+        self.stage = stage
 
 class Cancelled(RuntimeError):
     pass
@@ -83,30 +194,102 @@ class ProviderConfig:
             raise ValueError("Output token limit must be between 256 and 32768.")
 
 class ChatProvider:
-    def __init__(self, config: ProviderConfig):
+    def __init__(self, config: ProviderConfig, stall_timeout: float = DEFAULT_STALL_TIMEOUT):
         config.validate()
         self.config = config
+        self._stall_timeout = validate_stall_timeout(stall_timeout)
         self._response = None
+        # The last response this provider opened, kept (closed) so the socket-hygiene check after a
+        # turn can prove it was closed. It holds no file descriptor once closed.
+        self._last_response = None
+        self._stalled = False
+        self._produced = False
+        self._progress = 0.0
         self._lock = threading.Lock()
 
+    @property
+    def stall_timeout(self) -> float:
+        """The idle deadline in force: the environment override when set, else the agent option."""
+        override = env_stall_timeout()
+        return override if override is not None else self._stall_timeout
+
+    @property
+    def open_timeout(self) -> float:
+        """Budget for DNS, TLS and the response headers.
+
+        Some providers withhold the 200 until the first token is ready, so this must not be shorter
+        than the idle deadline: "Provider connection failed (TimeoutError)" before any output was
+        exactly that case (owner reports, 2026-09-17).
+        """
+        return max(CONNECT_TIMEOUT, self.stall_timeout)
+
+    def set_stall_timeout(self, seconds) -> float:
+        self._stall_timeout = validate_stall_timeout(seconds)
+        return self.stall_timeout
+
     def cancel(self) -> None:
-        # Best effort. An in-flight DNS/TLS/read may last until the 30s I/O timeout.
+        """Close the in-flight response now. Deterministic, not best effort.
+
+        ``shutdown()`` cannot block, so this runs on the caller's thread: the protocol loop is never
+        held up and, unlike the old detached closer, the socket is gone by the time cancel returns.
+        """
         with self._lock:
+            # Capture this response now: a late cancel must never close a newer turn.
             response = self._response
         if response is not None:
-            # Capture this response now: a delayed closer must never close a newer turn.
-            def close_captured_response():
-                try:
-                    response.close()
-                except (OSError, ValueError):
-                    pass
-            threading.Thread(target=close_captured_response, daemon=True).start()
+            hard_close(response)
+
+    def response_open(self) -> bool:
+        """Whether this provider still holds an open HTTP response.
+
+        False after every end state of a turn (done, cancelled, failed, stalled). ``Agent`` checks
+        it when a turn ends and logs a warning if it is ever True (issue SQAM, socket hygiene).
+        """
+        with self._lock:
+            response, last = self._response, self._last_response
+        if response is not None and not response_closed(response):
+            return True
+        return last is not None and not response_closed(last)
+
+    # ----- idle deadline -------------------------------------------------------------
+    def _note_progress(self) -> None:
+        self._progress = time.monotonic()
+
+    def _watch_for_stall(self, response, cancel: threading.Event) -> threading.Event:
+        """Close ``response`` when nothing usable has arrived for ``stall_timeout`` seconds.
+
+        The socket timeout is not enough on its own: a provider that drips SSE keepalive comments or
+        empty deltas resets it forever, so a dead turn stays "thinking". The deadline therefore runs
+        from the last *usable* chunk (content, reasoning, a tool-call fragment, usage or [DONE]),
+        not from the last byte.
+        """
+        finished = threading.Event()
+        tick = max(0.05, min(WATCHDOG_TICK, self.stall_timeout / 4))
+
+        def watch():
+            while not finished.wait(tick):
+                if cancel.is_set():
+                    return
+                if time.monotonic() - self._progress >= self.stall_timeout:
+                    self._stalled = True
+                    hard_close(response)
+                    return
+
+        threading.Thread(target=watch, name="relay-provider-stall", daemon=True).start()
+        return finished
+
+    def _maybe_stalled(self, cancel: threading.Event) -> None:
+        if self._stalled and not cancel.is_set():
+            raise ProviderStalled(self.stall_timeout, self._produced) from None
 
     def complete(self, messages: list[dict], tools: list[dict],
                  emit: Callable[[dict], None], cancel: threading.Event) -> dict:
         if cancel.is_set():
             raise Cancelled("Stopped.")
         started = time.monotonic()
+        self._stalled = False
+        self._produced = False
+        self._note_progress()
         payload = {"model": self.config.model, "messages": wire_messages(messages),
                    "stream": True, "max_tokens": self.config.max_tokens, **self.config.extra}
         if tools:
@@ -121,10 +304,23 @@ class ChatProvider:
         request = urllib.request.Request(self.config.base_url.rstrip("/") + "/chat/completions",
                                          data=data, headers=headers, method="POST")
         opener = urllib.request.build_opener(NoRedirect())
+        watchdog = None
         try:
-            response = opener.open(request, timeout=30)
+            # DNS, TLS and the headers; every streamed chunk after them is covered by the watchdog.
+            response = opener.open(request, timeout=self.open_timeout)
             with self._lock:
                 self._response = response
+                self._last_response = response
+            self._note_progress()
+            # Socket timeout as a backstop under the watchdog, so a byte-silent stream and a
+            # keepalive-only stream end the same way, with the watchdog deciding first.
+            sock = _socket_of(response)
+            if sock is not None:
+                try:
+                    sock.settimeout(self.stall_timeout * 2 + WATCHDOG_TICK)
+                except (OSError, ValueError):
+                    pass
+            watchdog = self._watch_for_stall(response, cancel)
             with response:
                 content_type = response.headers.get("Content-Type", "")
                 if "application/json" in content_type:
@@ -149,24 +345,43 @@ class ChatProvider:
                     return self._normalize(message)
                 return self._stream(response, emit, cancel, started)
         except urllib.error.HTTPError as exc:
+            # The error carries the response, so it also carries the socket: close it here rather
+            # than leaving it to the garbage collector.
+            if getattr(exc, "fp", None) is not None:
+                hard_close(exc.fp)
             # Providers can echo submitted secrets/prompts in error bodies. Do not log them.
             raise ProviderError(f"Provider HTTP {exc.code}. Check endpoint, model access, key, quota, and parameters.") from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            # The watchdog's hard close surfaces here; report the stall, not a generic failure.
+            self._maybe_stalled(cancel)
             if cancel.is_set():
                 raise Cancelled("Stopped.") from None
+            if isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError):
+                # Either the socket-timeout backstop fired before the watchdog tick, or no response
+                # arrived at all. Both are a stall the agent may retry, not a broken base URL.
+                streaming = watchdog is not None
+                raise ProviderStalled(self.stall_timeout if streaming else self.open_timeout,
+                                      self._produced, "stream" if streaming else "connect") from None
             raise ProviderError(f"Provider connection failed ({type(exc).__name__}). Check connectivity and the base URL.") from None
         except AttributeError:
             # cancel() closes the response from another thread; http.client then reads from fp=None.
+            self._maybe_stalled(cancel)
             if cancel.is_set():
                 raise Cancelled("Stopped.") from None
             raise
         except (json.JSONDecodeError, UnicodeError, KeyError, TypeError, ValueError) as exc:
+            self._maybe_stalled(cancel)
             if cancel.is_set():
                 raise Cancelled("Stopped.") from None
             raise ProviderError(f"Malformed provider response ({type(exc).__name__}).") from None
         finally:
+            if watchdog is not None:
+                watchdog.set()
             with self._lock:
-                self._response = None
+                response, self._response = self._response, None
+            # A turn must never leave a connection behind, whatever ended it (issue SQAM).
+            if response is not None and not response_closed(response):
+                hard_close(response)
 
     @staticmethod
     def _normalize(message: dict) -> dict:
@@ -219,6 +434,8 @@ class ChatProvider:
                 raise Cancelled("Stopped.")
             raw = response.readline(MAX_EVENT + 1)
             if not raw:
+                # The watchdog closes the socket from another thread; that reads as a clean EOF here.
+                self._maybe_stalled(cancel)
                 break
             total += len(raw)
             event_size += len(raw)
@@ -235,6 +452,7 @@ class ChatProvider:
             event = "\n".join(event_lines)
             event_lines.clear()
             if event == "[DONE]":
+                self._note_progress()
                 got_done = True
                 break
             obj = json.loads(event)
@@ -242,13 +460,18 @@ class ChatProvider:
                 raise ProviderError("Provider reported a streaming error. No partial tool call was executed.")
             if isinstance(obj.get("usage"), dict):
                 usage = obj["usage"]
+                self._note_progress()
             choices = obj.get("choices", [])
             if not choices:
+                # An empty-choices event is a keepalive: it does not reset the idle deadline.
                 continue
             choice = choices[0]
             # Kimi reports usage inside the final choice unless stream_options is sent.
             if isinstance(choice.get("usage"), dict) and usage is None:
                 usage = choice["usage"]
+                self._note_progress()
+            if choice.get("finish_reason"):
+                self._note_progress()
             finish_reason = choice.get("finish_reason") or finish_reason
             delta = choice.get("delta", {})
             if isinstance(delta.get("reasoning"), str) and delta["reasoning"]:
@@ -257,6 +480,7 @@ class ChatProvider:
                 message["reasoning_content"] += delta["reasoning_content"]
             thinking = _reasoning_text(delta)
             if thinking:
+                self._note_progress()   # reasoning is progress, but it is not an answer yet
                 if not reasoning_announced:
                     emit({"event": "status", "text": "Model is reasoning…"})
                     reasoning_announced = True
@@ -268,9 +492,15 @@ class ChatProvider:
                     (isinstance(delta.get("content"), str) and delta["content"]) or delta.get("tool_calls")):
                 finish_thinking()
             if isinstance(delta.get("content"), str):
+                if delta["content"]:
+                    # An answer has begun: a retry would repeat text the user can already see.
+                    self._produced = True
+                    self._note_progress()
                 message["content"] += delta["content"]
                 emit({"event": "delta", "text": delta["content"]})
             for chunk in delta.get("tool_calls", []):
+                self._produced = True
+                self._note_progress()
                 index = chunk.get("index")
                 if not isinstance(index, int) or not 0 <= index < 16:
                     raise ProviderError("Invalid tool-call index.")

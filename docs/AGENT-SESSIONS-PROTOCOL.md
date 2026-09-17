@@ -605,3 +605,90 @@ schema_version, path}`.
 - Measured on 300 conversations × 30 turns (36 000 entries, 36 MiB of session JSON): index 44.7
   MiB, full rebuild 1.2 s, autosave update 3.4 ms, worst-case search (a word in every entry) 56–64
   ms median. On a real 248-session set: index 388 KiB, rebuild 61 ms, search 0.03–1.2 ms.
+
+## 15. Provider stalls, retry and logs (v1.5, 2026-09-17)
+
+Implements issue `#SQAM`. Backend: `backend/relay_core/{provider,agent,logs}.py` and
+`backend/worker.py`; tests: `tests/test_provider.py` (`StallTests`), `tests/test_agent.py`
+(`StallRetryTests`), `tests/test_logs.py`, `tests/logging_test.cpp`.
+
+### 15.1 The idle deadline
+
+`configure` and `set_agent_options` accept one more option, and `configured` / `agent_options`
+return it:
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `stall_timeout_s` | number 1–1800 | 60 | seconds the model may send **nothing usable** before the turn ends |
+
+"Nothing usable" means no answer text, reasoning, tool-call fragment, `usage` or `[DONE]`. SSE
+comments (`: ping`), empty deltas and choice-less events are keepalives and do **not** reset it.
+That distinction is the fix: `urlopen(timeout=N)` does apply to each read of the response, but any
+byte resets it, so a keepalive-only stream never times out (measured 2026-09-17: a stream pinging
+every 0.2 s read for 8 s against a 2 s timeout without raising). The deadline is therefore enforced
+by a watchdog that closes the response; the socket timeout stays as a backstop.
+
+The same deadline is the budget for the response headers (`max(30 s, stall_timeout_s)`), because a
+provider may withhold its `200` until the first token is ready. `RELAY_PROVIDER_TIMEOUT` (seconds,
+clamped 5–900) overrides the option in the worker's environment; the GUI passes the pane's setting
+through `stall_timeout_s`.
+
+When the deadline expires the response is closed with `shutdown()` plus `close()`, so no connection
+outlives its turn, and the turn fails with
+`error {text: "Provider stalled: the model sent nothing for 60 s."}` (or `… the provider did not
+answer within 60 s.` when no headers ever arrived). The request stays **open** in the ledger and the
+model gets the usual "not finished" note, exactly like the other drop paths in 12.5.
+
+### 15.2 Automatic retry (once)
+
+Before failing, a stalled turn is retried **once**, and only when the stalled response had produced
+no answer text and no tool-call fragment. A stall can only happen while waiting for the model, at a
+step boundary where every earlier tool call already has its result in the conversation, so nothing
+is in flight and the retry repeats no side effect and re-sends a byte-identical conversation.
+Reasoning-only output still allows the retry (the thinking overlay is closed and reopened); a
+started answer does not, because that text is already on the user's screen.
+
+New event, emitted before the retried model call:
+
+`provider_retry {turn_id, reason: "stall", attempt, max_attempts, seconds, step, text}`
+
+`turn_summary` is unchanged; the retry is not a new turn and the ledger entry stays `in_progress`.
+The GUI prints `text` as a note line.
+
+### 15.3 Socket hygiene
+
+`ChatProvider.response_open()` reports whether the provider still holds an HTTP response. The agent
+calls it when every turn ends (done, cancelled, error, limit) and before each retry; if one is ever
+still open it closes it and logs `provider_response_left_open`, which is a bug, not a normal path.
+`cancel()` is synchronous now (`shutdown()` cannot block), so the socket is gone by the time it
+returns rather than "best effort" on a detached thread.
+
+### 15.4 Logs
+
+Both sides write a rotating log under `$XDG_DATA_HOME/relay/logs` (default
+`~/.local/share/relay/logs`), 5 MiB × 3 backups, files `0600` in a `0700` directory:
+
+* `relay.log` — the GUI (`src/Logging.cpp`): start/stop, worker start and exit, protocol event
+  types and their ids, and Qt warnings.
+* `worker.log` — every worker (`backend/relay_core/logs.py`), tagged `pane=<id>` from
+  `RELAY_PANE_ID`. Several workers share the file; each record is written under an advisory lock on
+  a hidden `.worker.log.lock`, and a handler that finds the file rotated under it reopens.
+
+Line format: `<ISO-8601 UTC> <LEVEL> <logger> pane=<id> <event> key=value …`, e.g.
+
+```text
+2026-09-17T19:37:02.123Z INFO relay.worker pane=874cc3bb turn_start session=s-4f2a turn=t9 model=glm-5.3 host=api.z.ai mode=build effort=high prompt_chars=42 stall_s=60
+2026-09-17T19:38:02.140Z ERROR relay.worker pane=874cc3bb provider_stall session=s-4f2a turn=t9 step=3 model=glm-5.3 host=api.z.ai stall_s=60 waited_ms=60031 produced=False retry=True
+2026-09-17T19:38:20.881Z INFO relay.worker pane=874cc3bb turn_end session=s-4f2a turn=t9 outcome=done ms=78402 thinking_ms=41000 tools=4 retries=1 open_items=0
+```
+
+**Never logged, at any level:** prompts, model answers, reasoning, tool arguments, tool output,
+file contents, terminal output, API keys, password-mode input. What is logged is identifiers,
+model and host, event types, counts, durations and error types. `logs.scrub()` masks
+credential-shaped text in every record as a second line of defence.
+
+Levels are `off | error | info | debug | verbose`, from the GUI setting `logging/level` (Actions ›
+Diagnostics › Log detail) and passed to workers as `RELAY_LOG_LEVEL`; workers read it at startup.
+**`verbose` additionally writes prompt text** (`turn_prompt`) and is the only level that does; it is
+off by default and labelled "Verbose (includes prompt text)" in the palette. Actions › Diagnostics ›
+Open log folder opens the directory, and "Stop a silent model after…" edits `stall_timeout_s`.

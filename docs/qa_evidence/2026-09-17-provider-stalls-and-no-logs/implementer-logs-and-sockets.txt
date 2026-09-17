@@ -1,0 +1,91 @@
+Implementer evidence for #SQAM (not a QA verdict), 2026-09-17.
+All runs are on loopback only; no real provider, network or keyring was touched.
+
+================================================================================
+1. Does urlopen(timeout=N) cover each readline() on a streamed response?
+================================================================================
+Probe: two loopback servers, both sending SSE headers and then no answer; client timeout 2 s.
+
+  /silent:    TimeoutError after 2.0s
+  /keepalive: still reading after 8.0s, 79 keepalive lines, NO timeout
+              — the socket timeout never fires
+
+Answer: the timeout does apply to each read, but *any* byte resets it. A stream of SSE comments
+or empty deltas is all bytes and no answer, so it never times out. That is how the observed
+worker held an ESTABLISHED connection for 12+ minutes with an empty receive queue while the pane
+showed only "thinking". Widening the timeout alone cannot fix that case; the deadline has to run
+from the last *usable* chunk and be enforced by a watchdog that closes the response.
+
+================================================================================
+2. End to end through a real worker.py (stall_timeout_s = 3 for speed)
+================================================================================
+Provider: loopback, headers then ": keepalive" every 0.2 s, forever.
+
+  configured
+  requests: open=1
+  agent_started
+  status: Requesting model · step 1/50
+  provider_retry: Provider stalled: the model sent nothing for 3 s. Retrying this turn once;
+                  the request stays open.
+  status: No response for 3 s · retrying once
+  requests: open=1
+  turn_summary: outcome=error ms=6053
+  error: Provider stalled: the model sent nothing for 3 s.
+  agent_finished: error
+
+  elapsed: 6.2 s  (3 s stall + 3 s retry, bounded)
+  provider-side connections opened: 2   (one per attempt)
+  worker sockets still open after the turn: none   (read from /proc/<worker pid>/fd, the same
+                                                   way the original leak was found)
+  prompt leaked into the log?  no
+
+================================================================================
+3. Live GUI under Xvfb, isolated XDG_CONFIG_HOME/XDG_DATA_HOME, default 60 s deadline
+================================================================================
+Status line while the turn was in flight (implementer-thinking-elapsed-status.png):
+
+  thinking · 23 s · step 1/50 · Esc stops
+
+Transcript after the deadline expired twice (implementer-stall-retry-then-failure.png):
+
+  › what does this project do
+  ⚠ Provider stalled: the model sent nothing for 60 s. Retrying this turn once; the request stays open.
+  ✗ Provider stalled: the model sent nothing for 60 s.
+  ✦ Tasks 0/1 (1 unfinished) · R1 "what does this project do" unfinished  · /tasks
+
+~/.local/share/relay/logs/relay.log (GUI):
+
+  2026-09-17T20:15:06.457Z INFO relay.gui gui_start version=0.1.0 pid=1178630 level=info
+  2026-09-17T20:15:06.484Z INFO relay.gui worker_start pane=f20e8daf workspace_set=1
+  2026-09-17T20:15:06.563Z INFO relay.gui event type=ready pane=f20e8daf
+  2026-09-17T20:16:34.029Z INFO relay.gui event type=configured pane=f20e8daf model=stall-test
+  2026-09-17T20:17:19.134Z INFO relay.gui event type=agent_started pane=f20e8daf turn_id=5b9048dc…
+  2026-09-17T20:18:19.167Z INFO relay.gui event type=provider_retry pane=f20e8daf turn_id=5b9048dc… reason=stall attempt=1
+  2026-09-17T20:19:19.199Z INFO relay.gui event type=turn_summary pane=f20e8daf turn_id=5b9048dc… outcome=error ms=120067
+  2026-09-17T20:19:19.199Z ERROR relay.gui event type=error pane=f20e8daf turn_id=5b9048dc… msg="Provider stalled: the model sent nothing for 60 s."
+  2026-09-17T20:19:19.221Z INFO relay.gui event type=agent_finished pane=f20e8daf outcome=error
+
+~/.local/share/relay/logs/worker.log (same pane id):
+
+  2026-09-17T20:15:06.562Z INFO relay.worker pane=f20e8daf worker_start version=0.1.0 pid=1178695 level=info
+  2026-09-17T20:16:34.029Z INFO relay.worker pane=f20e8daf configured model=stall-test host=127.0.0.1 role=main skills=45 agents=2 stall_s=60 session=22082fc1…
+  2026-09-17T20:17:19.130Z INFO relay.agent pane=f20e8daf turn_start session=22082fc1… turn=5b9048dc… model=stall-test host=127.0.0.1 mode=build effort=high prompt_chars=25 messages=1 stall_s=60 max_steps=50
+  2026-09-17T20:18:19.166Z ERROR relay.agent pane=f20e8daf provider_stall session=22082fc1… turn=5b9048dc… step=1 model=stall-test host=127.0.0.1 stall_s=60 waited_ms=60034 produced=False retry=True
+  2026-09-17T20:19:19.197Z ERROR relay.agent pane=f20e8daf provider_stall session=22082fc1… turn=5b9048dc… step=1 model=stall-test host=127.0.0.1 stall_s=60 waited_ms=60030 produced=False retry=False
+  2026-09-17T20:19:19.197Z ERROR relay.agent pane=f20e8daf turn_end session=22082fc1… turn=5b9048dc… outcome=error ms=120067 thinking_ms=0 tools=0 retries=1 open_items=1 error="Provider stalled: the model sent nothing for 60 s."
+
+Timing: turn ended at 120.067 s = 60 s + one 60 s retry. The prompt ("what does this project do")
+appears in neither file; only prompt_chars=25.
+
+File modes, from a fresh isolated profile:
+  drwx------  ~/.local/share/relay/logs
+  -rw-------  relay.log
+  -rw-------  worker.log
+  -rw-------  .worker.log.lock   (hidden, so "Open log folder" shows only log files)
+
+================================================================================
+4. Test runs
+================================================================================
+  ./scripts/test.sh          439 tests, OK   (420 before; +19)
+  ctest --test-dir build      13/13 passed   (12 before; + the new `logging` target)
+  cmake --build build         no warnings

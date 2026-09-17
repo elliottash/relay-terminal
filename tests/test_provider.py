@@ -1,9 +1,14 @@
 import io
 import json
+import os
+import socket
 import threading
+import time
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from relay_core.provider import ChatProvider, ProviderConfig, ProviderError, Cancelled
+from relay_core.provider import (CONNECT_TIMEOUT, ChatProvider, ProviderConfig, ProviderError,
+                                 ProviderStalled, Cancelled, validate_stall_timeout)
 
 
 def event(delta=None, finish=None):
@@ -130,6 +135,166 @@ class HTTPTests(unittest.TestCase):
         with self.assertRaises(ProviderError) as ctx: self.complete('/error')
         self.assertNotIn('SECRET_ECHO', str(ctx.exception))
         self.assertIn('401', str(ctx.exception))
+
+
+class StallTests(unittest.TestCase):
+    """Issue SQAM: the idle deadline must cover every streamed chunk, and no socket may outlive a turn.
+
+    The server only ever answers on loopback; no test here reaches the network or the keyring.
+    """
+    STALL = 1.0            # the smallest allowed deadline, so the suite stays quick
+
+    @classmethod
+    def setUpClass(cls):
+        cls.release = threading.Event()
+        outer = cls
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args): pass
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get('Content-Length') or 0))
+                self.send_response(200); self.send_header('Content-Type', 'text/event-stream'); self.end_headers()
+                self.wfile.flush()
+                try:
+                    if self.path.startswith('/keepalive'):
+                        # Headers, then only SSE comments: bytes keep arriving but no answer does.
+                        while not outer.release.wait(0.05):
+                            self.wfile.write(b': ping\n\n'); self.wfile.flush()
+                        return
+                    if self.path.startswith('/partial'):
+                        self.wfile.write(event({'content': 'half an ans'})); self.wfile.flush()
+                    elif self.path.startswith('/truncated'):
+                        self.wfile.write(event({'content': 'no finish reason'})); self.wfile.flush()
+                        return                              # closes: an ordinary ProviderError
+                    elif self.path.startswith('/ok'):
+                        self.wfile.write(event({'content': 'HTTP_OK'}) + event(finish='stop') + b'data: [DONE]\n\n')
+                        self.wfile.flush(); return
+                    outer.release.wait(30)                  # headers sent, then nothing at all
+                except OSError:
+                    return
+        cls.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True); cls.thread.start()
+        cls.base = f'http://127.0.0.1:{cls.server.server_port}'
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.release.set()
+        cls.server.shutdown(); cls.server.server_close(); cls.thread.join()
+
+    def provider(self, path):
+        return ChatProvider(ProviderConfig(self.base + path, 'test-model', ''), stall_timeout=self.STALL)
+
+    def complete(self, provider, cancel=None):
+        return provider.complete([{'role': 'user', 'content': 'hello'}], [], lambda x: None,
+                                 cancel or threading.Event())
+
+    def test_headers_then_nothing_ends_the_turn(self):
+        provider = self.provider('/silent')
+        started = time.monotonic()
+        with self.assertRaises(ProviderStalled) as ctx:
+            self.complete(provider)
+        self.assertLess(time.monotonic() - started, self.STALL + 5)
+        self.assertIn('sent nothing for 1 s', str(ctx.exception))
+        self.assertFalse(ctx.exception.produced)      # nothing arrived, so the turn may be retried
+        self.assertFalse(provider.response_open())
+
+    def test_keepalives_do_not_hold_a_dead_turn_open(self):
+        # The observed 12-minute "thinking" pane: the socket timeout never fires while comments drip in.
+        provider = self.provider('/keepalive')
+        with self.assertRaises(ProviderStalled):
+            self.complete(provider)
+        self.assertFalse(provider.response_open())
+
+    def test_a_started_answer_is_not_retryable(self):
+        provider = self.provider('/partial')
+        with self.assertRaises(ProviderStalled) as ctx:
+            self.complete(provider)
+        self.assertTrue(ctx.exception.produced)
+        self.assertFalse(provider.response_open())
+
+    def test_no_response_is_left_open_after_any_end_state(self):
+        # done
+        provider = self.provider('/ok')
+        self.assertEqual(self.complete(provider)['content'], 'HTTP_OK')
+        self.assertFalse(provider.response_open())
+        # failed (the stream ends without a finish reason)
+        provider = self.provider('/truncated')
+        with self.assertRaises(ProviderError):
+            self.complete(provider)
+        self.assertFalse(provider.response_open())
+        # cancelled, while a read is blocked in the stalled stream
+        provider = self.provider('/silent')
+        cancel = threading.Event()
+        outcome = {}
+
+        def run():
+            try:
+                self.complete(provider, cancel)
+            except BaseException as exc:                     # noqa: BLE001 - recorded, then asserted
+                outcome['error'] = exc
+        worker = threading.Thread(target=run); worker.start()
+        for _ in range(200):
+            if provider.response_open():
+                break
+            time.sleep(0.01)
+        cancel.set(); provider.cancel()
+        worker.join(timeout=10)
+        self.assertFalse(worker.is_alive())
+        self.assertIsInstance(outcome.get('error'), Cancelled)
+        self.assertFalse(provider.response_open())
+        # stalled
+        provider = self.provider('/silent')
+        with self.assertRaises(ProviderStalled):
+            self.complete(provider)
+        self.assertFalse(provider.response_open())
+
+    def test_stall_timeout_bounds(self):
+        self.assertEqual(validate_stall_timeout(90), 90.0)
+        for bad in (0.5, 3600, 'soon', True, None):
+            with self.assertRaises(ValueError):
+                validate_stall_timeout(bad)
+
+    def test_environment_override_wins_over_the_agent_option(self):
+        # RELAY_PROVIDER_TIMEOUT (the 2026-09-17 stopgap) now feeds the one idle deadline.
+        provider = self.provider('/silent')
+        self.assertEqual(provider.stall_timeout, self.STALL)
+        with mock.patch.dict(os.environ, {'RELAY_PROVIDER_TIMEOUT': '300'}):
+            self.assertEqual(provider.stall_timeout, 300.0)
+            self.assertEqual(provider.open_timeout, 300.0)   # headers get the same room
+        for bad in ('', 'soon', '0'):                        # unset/invalid falls back, tiny is clamped
+            with mock.patch.dict(os.environ, {'RELAY_PROVIDER_TIMEOUT': bad}):
+                self.assertIn(provider.stall_timeout, (self.STALL, 5.0))
+        # The header budget never drops below the connect floor.
+        self.assertEqual(provider.open_timeout, CONNECT_TIMEOUT)
+
+    def test_no_response_headers_at_all_is_a_retryable_stall(self):
+        # A provider that withholds the 200 until its first token is ready: the owner's
+        # "Provider connection failed (TimeoutError)". It must read as a stall, not a bad base URL,
+        # so the turn is retried instead of failing outright.
+        listener = socket.socket()
+        listener.bind(('127.0.0.1', 0)); listener.listen(1)
+        held = []
+
+        def accept():
+            try:
+                held.append(listener.accept()[0])     # accepted, then never answered
+            except OSError:
+                pass
+        thread = threading.Thread(target=accept, daemon=True); thread.start()
+        provider = ChatProvider(ProviderConfig(f'http://127.0.0.1:{listener.getsockname()[1]}/v1',
+                                               'test-model', ''), stall_timeout=1.0)
+        try:
+            with mock.patch('relay_core.provider.CONNECT_TIMEOUT', 1.0), \
+                 self.assertRaises(ProviderStalled) as ctx:
+                self.complete(provider)
+            self.assertEqual(ctx.exception.stage, 'connect')
+            self.assertIn('did not answer within', str(ctx.exception))
+            self.assertFalse(ctx.exception.produced)   # retryable: nothing was sent or done
+            self.assertFalse(provider.response_open())
+        finally:
+            listener.close()
+            for connection in held:
+                connection.close()
+            thread.join(timeout=5)
 
 
 class OpenRouterReasoningTests(unittest.TestCase):

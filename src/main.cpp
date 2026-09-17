@@ -13,6 +13,7 @@
 #include "RequestLedger.h"         // request ledger UI
 #include "RequestsPanel.h"
 #include "Conversations.h"         // conversation list, search and the Ctrl+F find bar
+#include "Logging.h"               // rotating diagnostics log (~/.local/share/relay/logs)
 #include "TerminalBackends.h"
 #include "TerminalBackend.h"
 #include "WindowState.h"   // saved window layout ("reopen where I left off")
@@ -990,7 +991,8 @@ public:
         if (key.startsWith(QStringLiteral("roles/"))) { rolesChanged(); return; }
         if (key == QStringLiteral("agent/panes_fast")) return;   // only affects panes opened later
         // Turn limits and the request audit apply to the running agent at once (protocol 12.1).
-        if (key == QStringLiteral("agent/max_steps") || key == QStringLiteral("agent/max_tool_calls") || key == QStringLiteral("agent/audit_requests")) {
+        if (key == QStringLiteral("agent/max_steps") || key == QStringLiteral("agent/max_tool_calls")
+            || key == QStringLiteral("agent/stall_timeout_s") || key == QStringLiteral("agent/audit_requests")) {
             if (m_configured) {
                 QJsonObject request{{"type", "set_agent_options"}};
                 const QJsonObject options = requestOptions();
@@ -1368,6 +1370,8 @@ private:
         QSettings settings;
         return {{"max_steps", std::clamp(settings.value(QStringLiteral("agent/max_steps"), 50).toInt(), 1, 500)},
                 {"max_tool_calls", std::clamp(settings.value(QStringLiteral("agent/max_tool_calls"), 150).toInt(), 1, 2000)},
+                // Idle deadline for a streamed model call (protocol 15).
+                {"stall_timeout_s", std::clamp(settings.value(QStringLiteral("agent/stall_timeout_s"), 60).toInt(), 1, 1800)},
                 {"audit_requests", settings.value(QStringLiteral("agent/audit_requests"), false).toBool()}};
     }
 
@@ -2741,6 +2745,14 @@ private:
         if (!m_workerConnected) connectWorker();
         m_workerBuffer.clear(); m_workerPending.clear();
         const QStringList command{m_python, QStringLiteral("-S"), QStringLiteral("-u"), m_data + QStringLiteral("/backend/worker.py")};
+        // The worker writes worker.log itself; it needs this pane's id and the chosen detail level.
+        // Passed per process rather than with qputenv, which would leak between panes.
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("RELAY_PANE_ID"), paneLogId());
+        environment.insert(QStringLiteral("RELAY_LOG_LEVEL"), relay::log::levelName(relay::log::level()));
+        m_worker.setProcessEnvironment(environment);
+        relay::log::info(QStringLiteral("worker_start pane=%1 workspace_set=%2")
+                             .arg(paneLogId()).arg(m_workspace.isEmpty() ? 0 : 1));
         m_agentUnit.clear();
         if (isolation::enabled() && isolation::available()) {
             m_agentUnit = QStringLiteral("relay-pane-%1-agent-%2").arg(m_token.left(8)).arg(++m_agentGeneration);
@@ -2780,6 +2792,9 @@ private:
         });
         connect(&m_worker, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus exit) {
             m_workerReady = false; m_configured = false; m_agentBusy = false;
+            stopTurnClock();
+            relay::log::error(QStringLiteral("worker_exit pane=%1 code=%2 crashed=%3")
+                                  .arg(paneLogId()).arg(code).arg(exit == QProcess::CrashExit ? 1 : 0));
             if (m_closing) return;
             const bool oom = isolation::takeResult(m_agentUnit) == QStringLiteral("oom-kill");
             const bool killed = exit == QProcess::CrashExit || code == 137 || code == 143;
@@ -2981,6 +2996,7 @@ private:
 
     void handle(const QJsonObject &event) {
         const QString type = event.value(QStringLiteral("event")).toString();
+        logEvent(type, event);
         // --- subagents UI: subagent_* events are consumed; main-agent state is observed first ---
         if (type == QStringLiteral("configured")) QTimer::singleShot(0, this, [this] { refreshAgentDefinitions(); });
         if (m_subagents.handle(event)) return;
@@ -3125,6 +3141,7 @@ private:
         } else if (type == QStringLiteral("agent_started")) {
             // Busy follows agent_started/agent_finished: the next queued turn may start right after done.
             m_agentBusy = true; m_turnHeader = false; m_turnText.clear();
+            startTurnClock();
             m_currentItem = event.value(QStringLiteral("id")).toString();
             QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
             const PendingPrompt prompt = m_itemPrompts.value(m_currentItem);
@@ -3148,7 +3165,7 @@ private:
             m_itemPrompts.remove(event.value(QStringLiteral("id")).toString());
             if (m_currentItem == event.value(QStringLiteral("id")).toString()) m_currentItem.clear();
             m_agentBusy = !m_runningItem.isEmpty() && m_runningItem != event.value(QStringLiteral("id")).toString();
-            if (!m_agentBusy) m_idleTip.start();
+            if (!m_agentBusy) { stopTurnClock(); m_idleTip.start(); }
             if (outcome == QStringLiteral("done")) {
                 ++m_turnsCompleted;
                 if (window() && !window()->isActiveWindow()) m_finishedWhileAway = true;
@@ -3207,9 +3224,22 @@ private:
                     .arg(result.value(QStringLiteral("truncated")).toBool() ? QStringLiteral(" · output truncated") : QString()),
                     code == 0 ? Ink::Note : Ink::Error);
             } else printInline(QStringLiteral("✓ ") + event.value(QStringLiteral("tool")).toString() + '\n', Ink::Note);
+        } else if (type == QStringLiteral("provider_retry")) {
+            // The model went silent; the worker is retrying this turn once. Say so in the transcript.
+            ensureLineStart();
+            printInline(QStringLiteral("⚠ ") + event.value(QStringLiteral("text")).toString() + '\n', Ink::Note);
         } else if (type == QStringLiteral("status")) {
-            status(event.value(QStringLiteral("text")).toString());
+            const QString text = event.value(QStringLiteral("text")).toString();
+            // While a turn runs the clock owns the status line; a step note rides along with it
+            // instead of replacing the elapsed time.
+            if (m_agentBusy && text.startsWith(QStringLiteral("Requesting model · "))) {
+                m_turnStep = text.mid(QStringLiteral("Requesting model · ").size());
+                tickTurnClock();
+            } else {
+                status(text);
+            }
         } else if (type == QStringLiteral("done") || type == QStringLiteral("cancelled")) {
+            stopTurnClock();
             if (type == QStringLiteral("cancelled")) {
                 ensureLineStart(); printInline(QStringLiteral("Stopped. Actions that already ran are not rolled back.\n"), Ink::Error);
             }
@@ -3233,6 +3263,7 @@ private:
             }
             // Route errors do not cancel a concurrent agent turn.
             m_agentBusy = event.value(QStringLiteral("agent_busy")).toBool(false);
+            if (!m_agentBusy) stopTurnClock();
             m_configuring = false;
             status(text);
             if (wasBusy && !m_agentBusy) {
@@ -3578,6 +3609,65 @@ private:
 
     void status(const QString &text) { if (onStatus) onStatus(text); }
     void changed() { refreshPickers(); refreshSessionControls(); if (onStateChanged) onStateChanged(); }
+
+    // ----- diagnostics log and the in-flight turn clock (issue SQAM) --------------------------
+    // Short, stable id for this pane in relay.log and the worker's worker.log.
+    QString paneLogId() const { return m_token.left(8); }
+
+    // One line per protocol event. Types, ids and counts only: `delta`, `tool_output` and
+    // `thinking_delta` carry the model's text and the shell's output, so they are never logged.
+    void logEvent(const QString &type, const QJsonObject &event) {
+        if (type == QStringLiteral("delta") || type == QStringLiteral("thinking_delta")
+            || type == QStringLiteral("tool_output") || type == QStringLiteral("queue_changed"))
+            return;
+        const bool notable = type == QStringLiteral("agent_started") || type == QStringLiteral("agent_finished")
+                          || type == QStringLiteral("error") || type == QStringLiteral("provider_retry")
+                          || type == QStringLiteral("configured") || type == QStringLiteral("turn_summary")
+                          || type == QStringLiteral("ready");
+        QString line = QStringLiteral("event type=%1 pane=%2").arg(type, paneLogId());
+        for (const char *field : {"turn_id", "outcome", "stop_reason", "tool", "model", "reason", "attempt"}) {
+            const QJsonValue value = event.value(QLatin1String(field));
+            if (!value.isUndefined() && !value.isNull())
+                line += QStringLiteral(" %1=%2").arg(QString::fromLatin1(field), value.toVariant().toString());
+        }
+        if (type == QStringLiteral("error")) line += QStringLiteral(" msg=\"%1\"").arg(event.value(QStringLiteral("text")).toString().left(200));
+        if (type == QStringLiteral("turn_summary")) line += QStringLiteral(" ms=%1").arg(event.value(QStringLiteral("elapsed_ms")).toVariant().toLongLong());
+        relay::log::write(type == QStringLiteral("error") ? relay::log::Level::Error
+                          : notable ? relay::log::Level::Info : relay::log::Level::Debug, line);
+    }
+
+    // "thinking · 48 s · Esc stops" in the status line, and in the thinking overlay's header when
+    // it is open, so a silent turn is never indistinguishable from a hung one.
+    void startTurnClock() {
+        m_turnElapsed.start();
+        m_turnStep.clear();
+        if (!m_turnClock) {
+            m_turnClock = new QTimer(this);
+            m_turnClock->setInterval(1000);
+            connect(m_turnClock, &QTimer::timeout, this, [this] { tickTurnClock(); });
+        }
+        m_turnClock->start();
+        tickTurnClock();
+    }
+
+    void stopTurnClock() {
+        if (m_turnClock) m_turnClock->stop();
+        m_turnStep.clear();
+    }
+
+    void tickTurnClock() {
+        if (!m_agentBusy) { stopTurnClock(); return; }
+        const qint64 seconds = m_turnElapsed.elapsed() / 1000;
+        const QString stop = Keymap::instance().shortcutText(QStringLiteral("agent.stop"));
+        const QString label = QStringLiteral("thinking · %1 s%2 · %3 stops")
+                                  .arg(seconds)
+                                  .arg(m_turnStep.isEmpty() ? QString() : QStringLiteral(" · ") + m_turnStep)
+                                  .arg(stop.isEmpty() ? QStringLiteral("Esc") : stop);
+        status(label);
+        if (m_thinkingShown && m_thinkingHeader)
+            m_thinkingHeader->setText(QStringLiteral("Thinking… · %1 · %2 s")
+                                          .arg(m_model.isEmpty() ? QStringLiteral("agent") : m_model).arg(seconds));
+    }
 
     void refreshPickers() {
         if (!m_modeBox || !m_modelBox) return;
@@ -5193,6 +5283,10 @@ private:
     QList<SteerEntry> m_steering;
     quint64 m_lastQueuedEntryId = 0;
     QElapsedTimer m_lastQueuedAt, m_awaySince;
+    // In-flight turn clock: "thinking · 48 s · Esc stops" while the agent is busy (issue SQAM).
+    QTimer *m_turnClock = nullptr;
+    QElapsedTimer m_turnElapsed;
+    QString m_turnStep;
     QTimer m_escTimer;
     // sudo & co. in the foreground
     QLabel *m_opaqueHint = nullptr;
@@ -6627,6 +6721,65 @@ private:
             clear.run = [] { Keymap::instance().clearOverrides(); };
             items << clear;
         }
+        items << logItems();
+        return items;
+    }
+
+    // ----- diagnostics log (issue SQAM) --------------------------------------------------------
+    QList<PaletteItem> logItems() {
+        const QString section = QStringLiteral("Diagnostics");
+        QList<PaletteItem> items;
+        {
+            PaletteItem open;
+            open.key = QStringLiteral("logs.open"); open.section = section;
+            open.label = QStringLiteral("Open log folder");
+            open.detail = relay::log::directory().isEmpty() ? QStringLiteral("No writable data directory")
+                                                            : relay::log::directory();
+            open.aliases = QStringLiteral("log logs diagnostics debug troubleshoot relay.log worker.log");
+            open.run = [this] {
+                const QString dir = relay::log::directory();
+                if (dir.isEmpty()) { statusBar()->showMessage(QStringLiteral("No writable data directory for logs."), 6000); return; }
+                QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+                statusBar()->showMessage(dir, 8000);
+            };
+            items << open;
+        }
+        {
+            // Idle deadline for a model call (protocol 15). Applies to the running agent at once.
+            const int seconds = std::clamp(QSettings().value(QStringLiteral("agent/stall_timeout_s"), 60).toInt(), 1, 1800);
+            PaletteItem item;
+            item.key = QStringLiteral("option:stall_timeout"); item.section = section;
+            item.label = QStringLiteral("Stop a silent model after…");
+            item.detail = QStringLiteral("%1 s · the turn is retried once, then it ends with a message").arg(seconds);
+            item.aliases = QStringLiteral("stall timeout hang stuck thinking silent retry");
+            item.run = [this, seconds] {
+                bool ok = false;
+                const int value = QInputDialog::getInt(window(), QStringLiteral("Provider stall timeout"),
+                    QStringLiteral("End a turn when the model sends nothing for this many seconds\n"
+                                   "(reasoning models can be quiet for a while; 60 s is the default):"),
+                    seconds, 1, 1800, 5, &ok);
+                if (!ok) return;
+                QSettings().setValue(QStringLiteral("agent/stall_timeout_s"), value);
+                if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/stall_timeout_s"));
+            };
+            items << item;
+        }
+        const QString current = relay::log::levelName(relay::log::level());
+        QString detail = current + QStringLiteral(" · agent workers pick it up when they restart");
+        if (current == QStringLiteral("verbose")) detail = current + QStringLiteral(" · prompts are written to the log file");
+        items << submenu(QStringLiteral("menu:logLevel"), section, QStringLiteral("Log detail"), detail, [current] {
+            QList<PaletteItem> children;
+            for (const QStringList &choice : relay::log::levelChoices()) {
+                PaletteItem item;
+                const QString id = choice.at(0);
+                item.key = QStringLiteral("logs.level:") + id; item.section = QStringLiteral("Log detail");
+                item.label = choice.at(1); item.detail = choice.at(2);
+                item.checked = id == current; item.stayOpen = true;
+                item.run = [id] { relay::log::setLevel(id); };
+                children << item;
+            }
+            return children;
+        });
         return items;
     }
 
@@ -7993,6 +8146,11 @@ int main(int argc, char **argv) {
     QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminal"));
     QCoreApplication::setApplicationName(QStringLiteral("relay"));
     QCoreApplication::setApplicationVersion(QStringLiteral(RELAY_VERSION));
+    // From here on, stderr is no longer the only record: a launcher-started Relay keeps one too.
+    relay::log::installMessageHandler();
+    relay::log::info(QStringLiteral("gui_start version=%1 pid=%2 level=%3")
+                         .arg(QStringLiteral(RELAY_VERSION)).arg(QCoreApplication::applicationPid())
+                         .arg(relay::log::levelName(relay::log::level())));
     QGuiApplication::setDesktopFileName(QStringLiteral("org.relayterminal.Relay"));
     try {
         // Theme icon when installed; the bundled PNG from the source tree or install otherwise.

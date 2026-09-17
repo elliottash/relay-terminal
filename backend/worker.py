@@ -7,8 +7,10 @@ import json
 import os
 import sys
 import threading
+import urllib.parse
 
-from relay_core import __version__, keystore, observe_protocol, roles as model_roles, session_protocol, skills
+from relay_core import (__version__, keystore, logs, observe_protocol, roles as model_roles, session_protocol,
+                        skills)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import agents_defs
 from relay_core.subagents import SubagentFactory, SubagentManager
@@ -43,6 +45,11 @@ def prefer_as_oom_victim(value: int = OOM_SCORE_ADJ) -> bool:
 
 def main():
     prefer_as_oom_victim()
+    # Rotating diagnostics under $XDG_DATA_HOME/relay/logs (docs/ARCHITECTURE.md, "Logs"). Pane id
+    # and level come from the GUI through the environment. Never logs prompts or tool output.
+    logs.configure("worker")
+    log = logs.get("worker")
+    logs.event(log, "worker_start", version=__version__, pid=os.getpid(), level=logs.level())
     output_lock = threading.Lock()
 
     def emit(obj: dict):
@@ -148,6 +155,11 @@ def main():
                 if skill_index is not None and skill_index.skipped:
                     event["skills_skipped"] = skill_index.skipped[:50]
                 emit(event)
+                logs.event(log, "configured", model=config.model,
+                           host=urllib.parse.urlsplit(config.base_url).hostname, role=agent_role,
+                           skills=event.get("skills"), agents=event.get("agents"),
+                           stall_s=getattr(agent.provider, "stall_timeout", agent.stall_timeout_s),
+                           session=agent.session_id)
                 # Protocol 13: `configured` already carries the table; a separate model_roles event
                 # follows only when a role fell back, so its warnings reach the pane.
                 if resolver.warnings:
@@ -246,9 +258,13 @@ def main():
             else:
                 raise ValueError("Unknown protocol message.")
         except Exception as exc:
+            # The message, not the request: a request carries prompt text and must not be logged.
+            logs.event(log, "protocol_error", level_name="error", kind=locals().get("kind"),
+                       error=type(exc).__name__, msg=str(exc)[:300])
             emit({"event": "error", "id": request.get("id") if isinstance(locals().get("request"), dict) else None,
                   "agent_busy": turns.busy,
                   "text": str(exc)[:2000] if isinstance(exc, (ValueError, OSError, keystore.KeystoreError)) else f"Protocol error ({type(exc).__name__})."})
+    logs.event(log, "worker_stop", pid=os.getpid())
     subagents.shutdown()
     observe.shutdown()
     turns.shutdown(timeout=1)
