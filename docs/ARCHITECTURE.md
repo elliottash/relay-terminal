@@ -474,7 +474,9 @@ Applies only to terminal mode (Ctrl+Shift+Enter, `/shell `, or the Terminal pick
 
 - An invalid command is not run. The agent is asked to fix it (attempt 1) — unless it carries
   `agent_signal` (it reads like a request, not a command): then the wrong-mode hint fires instead,
-  nothing runs and the composer keeps the text (section 5, "Wrong-mode hints").
+  nothing runs and the composer keeps the text (section 5, "Wrong-mode hints"). Owner decision,
+  2026-09-18: this replaces the earlier rule that Ctrl+Shift+Enter sends every invalid line to the
+  fix loop — a request is not a broken command, and "fixing" it into one is worse than asking.
 - A valid command runs. At the next `ready` event: exit 0 ends the loop, exit 130 (Ctrl+C)
   ends it silently, any other status starts a fix turn. A failing run that carried `agent_signal`
   also shows the wrong-mode hint.

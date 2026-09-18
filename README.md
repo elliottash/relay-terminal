@@ -63,7 +63,7 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 |---|---|
 | Enter | Submit: commands to the terminal, everything else to the agent |
 | Ctrl+Enter | Always the agent; while the agent is busy, interrupt it and send now (Ctrl+Alt+Enter also works) |
-| Ctrl+Shift+Enter | Always the terminal; the agent fixes an invalid or failing command |
+| Ctrl+Shift+Enter | Always the terminal; the agent fixes an invalid or failing command. A line that reads like a request runs nothing and suggests Ctrl+I instead |
 | Esc (prompt box) | Stop the agent while it is busy |
 | @ | Pick a file: `@name` alone opens it in a preview pane; inside an agent prompt it attaches the file |
 | → or Ctrl+F / Alt+→ | Accept the dim history suggestion / one word of it |

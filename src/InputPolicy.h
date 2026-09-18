@@ -111,4 +111,9 @@ private:
     QString m_text;
 };
 
+// Wrong-mode hints: whether a run_command the agent issued is the line the user submitted in
+// agent mode. The agent tends to wrap a user's command — `cd <dir> && `, `cd "<dir>"; `, or a
+// trailing `2>&1` — so those are stripped before comparing, with whitespace collapsed.
+bool commandMatchesPrompt(const QString &command, const QString &prompt);
+
 }  // namespace relay::input

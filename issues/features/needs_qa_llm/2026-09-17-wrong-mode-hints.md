@@ -36,7 +36,7 @@ Xvfb drive (`docs/qa_evidence/2026-09-17-wrong-mode-hints/drive.sh`) with isolat
 - **B1** ✓ shot `implementer-07-…` crop: toast "That read like a request… Ctrl+I switches to agent mode" while the fix attempt runs (placeToast re-anchor).
 - **B2** ✓ log + shot `implementer-09-…`: ✗ line prints, `mode.requestInTerminal: gated` (cooldown from B1).
 
-`relay-a-stderr.log` / `relay-b-stderr.log` still carry temporary `[wmh]` diagnostic lines from the instrumented diagnosis run; the product binary no longer emits them.
+The temporary `[wmh]` diagnostic lines from the instrumented diagnosis run have been removed from the stderr logs.
 
 Evidence: `docs/qa_evidence/2026-09-17-wrong-mode-hints/` (`drive.sh`, `stub-provider.py`, `verify.sh`, `implementer-*.png`, stderr logs).
 
@@ -47,3 +47,14 @@ Evidence: `docs/qa_evidence/2026-09-17-wrong-mode-hints/` (`drive.sh`, `stub-pro
 3. Fresh session, terminal mode, type a natural-language command that still runs ("find the largest files"), Enter: command fails, toast + flash appear beside the fix attempt.
 4. Immediately submit another clear request: ✗ line still prints, but no toast and no flash (per-hint cooldown).
 5. With Shortcut hints disabled (or `input.toggle` unbound): neither toast nor flash on any of the above; the ✗ line / fix loop still behave.
+
+## Owner decision and review (2026-09-18)
+
+- **Rule change, owner:** an invalid line that reads like a request, submitted in Terminal mode,
+  runs nothing and is not handed to the fix loop; the ✗ line and the Ctrl+I hint replace it. This
+  supersedes the earlier "Ctrl+Shift+Enter always sends an invalid command to the fix loop".
+- **Reviewed** (Claude, 2026-09-18). The product code arrived through two WIP snapshot commits
+  (`c9c88aa`, `598f3ea`) rather than its own commit; it is now reviewed. No correctness bugs found.
+  Follow-ups applied: the agent-mode match moved to `relay::input::commandMatchesPrompt`, which also
+  strips a quoted `cd "<dir>"`, a `cd <dir>;` form and a trailing `2>&1`, with unit tests.
+- QA note: run A2 and B2 independently — B2 only passes after B1 because it relies on B1's cooldown.

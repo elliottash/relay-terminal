@@ -253,6 +253,21 @@ private Q_SLOTS:
         QCOMPARE(long_.size(), QStringLiteral("✦ typed: ").size() + 120);
         QVERIFY(long_.endsWith(QChar(u'…')));
     }
+    void wrongModeCommandMatching() {
+        using relay::input::commandMatchesPrompt;
+        const QString typed = QStringLiteral("git stauts");
+        QVERIFY(commandMatchesPrompt(QStringLiteral("git stauts"), typed));
+        QVERIFY(commandMatchesPrompt(QStringLiteral("cd /home/me/project && git stauts"), typed));
+        QVERIFY(commandMatchesPrompt(QStringLiteral("cd \"/home/me/my project\" && git stauts"), typed));
+        QVERIFY(commandMatchesPrompt(QStringLiteral("cd '/tmp/x y'; git stauts"), typed));
+        QVERIFY(commandMatchesPrompt(QStringLiteral("cd /tmp && git  stauts 2>&1"), typed));
+        QVERIFY(commandMatchesPrompt(QStringLiteral("git stauts 2>&1"), QStringLiteral("git stauts 2>&1")));
+        // A different command, or an empty side, is never a match.
+        QVERIFY(!commandMatchesPrompt(QStringLiteral("git status"), typed));
+        QVERIFY(!commandMatchesPrompt(QStringLiteral("cd /tmp && rm -rf build"), typed));
+        QVERIFY(!commandMatchesPrompt(QString(), typed));
+        QVERIFY(!commandMatchesPrompt(typed, QString()));
+    }
 };
 
 QTEST_APPLESS_MAIN(InputPolicyTests)

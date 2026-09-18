@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "InputPolicy.h"
 
+#include <QRegularExpression>
+
 #include <algorithm>
 
 namespace relay::input {
@@ -108,5 +110,20 @@ QString Secret::take() {
 }
 
 void Secret::wipe() { relay::input::wipe(m_text); }
+
+bool commandMatchesPrompt(const QString &command, const QString &prompt) {
+    if (command.trimmed().isEmpty() || prompt.trimmed().isEmpty()) return false;
+    // A leading `cd <dir>` joined by && or ;, where <dir> may be quoted with spaces.
+    static const QRegularExpression cdPrefix(
+        QStringLiteral(R"(^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*)"));
+    // A trailing redirect of stderr into stdout, which agents add to see errors.
+    static const QRegularExpression stderrSuffix(QStringLiteral(R"(\s+2>&1\s*$)"));
+    QString run = command.simplified();
+    run.remove(cdPrefix);
+    run.remove(stderrSuffix);
+    QString typed = prompt.simplified();
+    typed.remove(stderrSuffix);
+    return run == typed;
+}
 
 }  // namespace relay::input

@@ -30,6 +30,7 @@
 #include "Voice.h"          // voice transcription: capture, the hold key, the transcript
 #include "Images.h"         // image context: paste, drop, `@path` and "Screenshot this pane"
 #include "Aliases.h"        // aliases: saved commands and prompts, their fields and invocations
+#include "MarkdownAnsi.h"   // agent replies in the terminal: Markdown rendered as it streams
 #include <iterator>
 #include <QAbstractItemView>
 #include <QAction>
@@ -4916,7 +4917,7 @@ private:
             if (event.value(QStringLiteral("tool")).toString() == QStringLiteral("run_command")) {
                 const QString runText = m_runCommands.take(event.value(QStringLiteral("call_id")).toString());
                 if (!m_modeHintShown && !runText.isEmpty() && result.value(QStringLiteral("exit_code")).toInt() != 0
-                    && m_modeValue == QStringLiteral("agent") && commandMatchesPrompt(runText, m_turnShellPrompt)) {
+                    && m_modeValue == QStringLiteral("agent") && relay::input::commandMatchesPrompt(runText, m_turnShellPrompt)) {
                     m_modeHintShown = true;
                     wrongModeHint(false);
                 }
@@ -5361,15 +5362,6 @@ private:
         m_modeChip->setProperty("flash", m_chipFlashOn ? m_chipFlashDest : QVariant());
         m_modeChip->style()->unpolish(m_modeChip);
         m_modeChip->style()->polish(m_modeChip);
-    }
-
-    // Whether a failing run_command is the prompt the user submitted in agent mode. The agent is
-    // told to reproduce terminal commands as `cd <dir> && <command>`, so that prefix is stripped
-    // before comparing with whitespace collapsed.
-    static bool commandMatchesPrompt(const QString &command, const QString &prompt) {
-        if (command.isEmpty() || prompt.isEmpty()) return false;
-        static const QRegularExpression cd(QStringLiteral("^cd\\s+\\S+\\s*&&\\s*"));
-        return command.simplified().remove(cd) == prompt.simplified();
     }
 
     void showIdleTip() {
@@ -5837,6 +5829,15 @@ private:
             out += "\r\x1b[2K";
             m_inlineOpen = true; m_atLineStart = true;
         }
+        // Agent prose is Markdown, rendered as it streams (MarkdownAnsi holds back only what it
+        // cannot decide yet). Any other ink ends the Markdown run first, so held text lands before it.
+        if (ink == Ink::Agent) {
+            out += terminalLines(m_markdown.feed(clean));
+            m_atLineStart = clean.endsWith('\n');
+            writeTerminal(out);
+            return;
+        }
+        out += terminalLines(m_markdown.finish());
         const QByteArray body = clean.toUtf8();
         out += inkCode(ink);
         for (const char ch : body) { if (ch == '\n') out += "\x1b[0m\r\n" + inkCode(ink); else out += ch; }
@@ -5845,10 +5846,17 @@ private:
         writeTerminal(out);
     }
 
+    static QByteArray terminalLines(const QString &rendered) {
+        QByteArray bytes = rendered.toUtf8();
+        bytes.replace('\n', "\r\n");
+        return bytes;
+    }
+
     void ensureLineStart() { if (m_inlineOpen && !m_atLineStart) printInline(QStringLiteral("\n"), Ink::Note); }
 
     void closeInline() {
         if (!m_inlineOpen) return;
+        if (m_markdown.holding()) writeTerminal(terminalLines(m_markdown.finish()));
         if (!m_atLineStart) writeTerminal("\r\n");
         m_inlineOpen = false; m_atLineStart = true;
         // Ctrl+X Ctrl+P is bound to a no-op shell function; Readline redraws the prompt after it.
@@ -7577,6 +7585,7 @@ private:
     bool m_chipFlashOn = false;
     bool m_inlineOpen = false, m_atLineStart = true;
     QList<QPair<QString, Ink>> m_inlinePending;
+    relay::MarkdownAnsi m_markdown{QStringLiteral("38;2;226;229;235")};   // Ink::Agent's colour
     QList<QPair<QString, QString>> m_stored;
     QComboBox *m_modelBox = nullptr;
     QToolButton *m_cwdChip = nullptr, *m_modeChip = nullptr;

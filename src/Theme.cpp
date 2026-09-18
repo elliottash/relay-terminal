@@ -590,7 +590,7 @@ void restoreXdgEnvironment() {
 }
 
 void applyTheme(QApplication &app) {
-    const ThemeSpec &spec = resolveTheme(settingsThemeId());
+    const ThemeSpec spec = resolveTheme(settingsThemeId());   // a copy: GCC cannot see the reference outlives the call
     adoptTokens(spec);
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
     applyPalette(app, spec);
