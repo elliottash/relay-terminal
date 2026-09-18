@@ -250,7 +250,7 @@ owner can.
 
 | Threat | Mitigation |
 |---|---|
-| Stolen or unlocked phone | Per-device capability (View / Agent / Full). Take over and password entry need a fresh WebAuthn user-verification (Face ID or fingerprint) if idle > 10 min. Devices idle 30 days expire. **Revoke** in desktop Settings deletes the pinned key locally, so it works even if the rendezvous is down |
+| Stolen or unlocked phone | Per-device capability (View / Agent / Full). Password entry is a second per-device switch, off by default, and every write needs a desktop-minted single-use permit bound to the live prompt (`REMOTE-PROTOCOL.md` §6.7). Devices idle 30 days expire. **Revoke** in desktop Settings deletes the pinned key locally, so it works even if the rendezvous is down. **Not** WebAuthn: a user-verification check inside the web app enforces nothing, because hostile JavaScript skips its own `if` and the desktop sees no proof, so it was dropped from this table on 2026-09-18 rather than counted as a mitigation |
 | Leaked pairing QR or invite link | One-time, short expiry, desktop-side confirmation with the device name, knock-to-admit for invites |
 | Compromised or malicious rendezvous | Sees metadata only. Pinned static keys stop MITM, including of WebRTC DTLS. It can deny service. Self-hostable binary, and tailnet private mode (b) |
 | Compromised static web origin (malicious JS) | Separate origin and credentials, CSP + SRI, reproducible builds with published hashes, private mode, native apps later [43] |
@@ -267,7 +267,7 @@ owner can.
 | **P0 Spec** | RRP/1 message spec (`docs/REMOTE-PROTOCOL.md`), Noise suite choice, security review of this doc, rendezvous API, pairing written so settings sync (`#05J2`) reuses it | Owner answers below | S (≈1 wk) |
 | **P1 Agent companion** | `relay-rendezvous` (registry, signaling, WebSocket relay, Web Push); `RemoteHub` in the GUI; PWA with QR pairing, inbox, thread, composer, queue, Stop, plan review, voice via desktop, notifications; device list and revoke; desktop indicator; remote privacy page on the site and the `ROADMAP.md` non-goal edits (section 3.2). **Works with KonsolePart** (no Screen stream); generic "waiting for input" is best-effort until `#YR21` (section 12) | Hosting actions (app origin, cloudflared ingress rule) | M (≈5–7 wks) |
 | **P2 Terminal view** | Screen snapshot/diff from the view's frame, **`VtCore::historyLines` in both cores**, scrollback pages, resync, WebRTC P2P upgrade (desktop: libdatachannel, MPL-2.0, GPL-compatible under MPL §3.3), latency display | Engine panes (`--engine=relay`) | M (≈4–5 wks) |
-| **P3 Take over** | `keys`/`paste`/line input, extra-keys row, control token with the delegate/take-over work, secure password field, WebAuthn re-check | P2; delegate/take-over control model | S–M (≈2–3 wks) |
+| **P3 Take over** | `keys`/`paste`/line input, extra-keys row, control token with the delegate/take-over work, secure password field with a desktop-minted permit (the WebAuthn re-check was dropped, §6.7) | P2; delegate/take-over control model | S–M (≈2–3 wks) |
 | **P4 Multiplayer** | Accounts (passkeys + GitHub), invites, knock, roles, presence and follow, guest prompt moderation, audit log, pause and end; guests use the same web app | P3 | L (≈6–10 wks) |
 | **P5 Native apps** | Android (Kotlin or React Native) then iOS; APNs/FCM through the rendezvous with encrypted payloads; notification actions (Stop, Reply) | P1–P3 protocol stable | L (≈8–12 wks per platform, less with a shared RN codebase) |
 | Optional | Private tailnet mode (desktop serves the PWA); self-host guide for `relay-rendezvous`; predictive echo; Board on phone | | S each |
@@ -401,7 +401,41 @@ desktop-minted prompt nonce and a fresh termios read at write time (P3), WebAuth
 must be bound to the desktop or dropped from the threat table, and the `transport_switch` handshake
 is unwritten (P2).
 
-### 12.5 What shipped, and what the phases mean now (2026-09-18)
+### 12.5 Security review of the four things P0's review did not cover (2026-09-18)
+
+Web Push, password entry from a phone, voice from a phone and multiplayer all landed after
+section 12.4, so each of their **(security)** paragraphs was a claim nobody had attacked. A second
+review did, with a test per claim in `tests/test_remote_security.py`. Eight findings, all fixed in
+`remote/` and `rendezvous/`; the ones that change a rule rather than a line:
+
+- **The push route was a request-forgery proxy.** A `view` phone chooses the endpoint URL and the
+  rendezvous — the one process on the hosted side with a network — makes an authenticated POST to
+  it. Nothing said which hosts, and registering a desktop proves possession of a key rather than
+  any right to be there, so anyone who could reach the server could aim it at a private address.
+  `/v1/push/send` now posts only to a browser's push service, matched by name so there is no DNS
+  rebind to race; `RELAY_PUSH_HOSTS` is how a self-hoster adds their own.
+- **A password permit outlived its prompt.** The nonce is bound to a prompt generation, but the
+  generation only moved when a *new* permit was minted, so for its 45 seconds the permit survived
+  the prompt ending. A process that asks twice — `ssh` wanting a key passphrase and then a
+  password — keeps its pid, so the phone would have answered the second prompt with the decision
+  the person made about the first. The permit is burned and the generation advanced the moment the
+  pane stops being at a prompt.
+- **"A key is a device or a participant and never both" held in one direction.** `admit` refuses a
+  key the device store knows; nothing stopped `pair_prove` pairing a key the *guest* store knows,
+  and the handshake reads devices first, so that guest's next connection would have carried a
+  capability instead of a role. A guest watching a shared pane can read the pairing QR the moment
+  the owner opens it there, so the secret is not the obstacle it sounds like.
+- **One address could take every channel slot** on a desktop and keep the owner's phone out, which
+  section 8 of the protocol forbids by saying sockets are counted per device. Per-device connect
+  tokens do not exist; the budget is capped per peer address meanwhile, and the protocol now says
+  plainly that the rule is unmet and why finishing it is the owner's call.
+
+The rest: a `queued` event could carry another person's words to a guest through a field the
+filter did not strip, an unaddressed transcript with two clips in flight went to whichever phone
+came first, the audit log was umask-mode between creation and its first chmod, and the phone's
+queue Remove button sent a field the desktop did not read.
+
+### 12.6 What shipped, and what the phases mean now (2026-09-18)
 
 P0, P1's companion, P2's screen stream and P3's take-over are in and used from a real iPhone and
 iPad. The phase table in section 9 still reads as a plan; against it:
@@ -423,7 +457,7 @@ Two things the design did not anticipate, both confirmed by use:
 - **Sharing is no longer engine-gated.** KonsolePart's retirement removed the constraint this
   document treats as central to P1 versus P2.
 
-### 12.6 Still open
+### 12.7 Still open
 
 - **Hosting actions are owner-only and on the critical path**: the `app.relay-terminal.ai` vhost and
   the `rv.` cloudflared ingress rule are server-side changes on a box running a dozen sites, exactly
