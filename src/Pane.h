@@ -11,6 +11,7 @@
 #include "Isolation.h"
 
 #include "RichEditor.h"
+#include "PromptHistory.h"
 #include "Theme.h"
 #include "BoardPane.h"
 #include "AgentUi.h"
@@ -2009,6 +2010,9 @@ private:
         routeRow->setContentsMargins(2, 0, 2, 0);
         routeRow->setSpacing(6);
         m_editor = new RichEditor;
+        // Up and Down walk through one history per user, kept in a file, not one per pane that
+        // dies with the pane (owner report, 2026-09-18). src/PromptHistory.h has the rules.
+        m_editor->useHistoryFile(relay::prompthistory::defaultPath());
         m_highlighter = new relay::InputHighlighter(m_editor->document());
         QTimer::singleShot(0, this, [this] { refreshDestinationColor(); });
         m_editor->setAutoHeight(1, 8);   // one line when idle, growing with the text

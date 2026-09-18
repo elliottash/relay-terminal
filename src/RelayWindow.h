@@ -10,6 +10,8 @@
 // WindowManagerImpl.h.
 
 #include "PaneChrome.h"
+#include "PromptHistory.h"
+#include "RichEditor.h"
 #include "WindowChrome.h"
 
 #include "Theme.h"
@@ -2188,6 +2190,25 @@ private:
                 notice(QStringLiteral("Shortcut hints reset."), 4000);
             };
             items << hints;
+            // The prompt box's Up/Down history outlives a restart (src/PromptHistory.h), so there
+            // has to be a way to forget it. The file goes, and so does the copy every open prompt
+            // box holds — including one part-way through a browse.
+            PaletteItem history; history.key = QStringLiteral("history.clear"); history.section = app;
+            history.label = QStringLiteral("Clear prompt history");
+            history.detail = QStringLiteral("Forget every line Up recalls, in every pane");
+            history.aliases = QStringLiteral("prompt history up arrow forget clear erase commands prompts");
+            history.run = [this] {
+                const QString path = relay::prompthistory::defaultPath();
+                if (QMessageBox::question(this, QStringLiteral("Clear prompt history"),
+                                          QStringLiteral("Forget every line the prompt box recalls with Up?"),
+                                          QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+                    return;
+                QString error;
+                if (!relay::prompthistory::clear(path, &error)) { notice(error, 8000); return; }
+                RichEditor::forgetHistory(path);
+                notice(QStringLiteral("Prompt history cleared."), 4000);
+            };
+            items << history;
         }
 
         // "Shortcut hints", "Shortcut preset" and "Shortcuts inside programs" are rows in Options.

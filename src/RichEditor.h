@@ -9,6 +9,7 @@
 class RichEditor : public QPlainTextEdit {
 public:
     explicit RichEditor(QWidget *parent = nullptr);
+    ~RichEditor() override;
     // Destination: "auto", "shell", or "agent". Submission never executes here.
     std::function<void(const QString &)> onSubmit;
     // Image context (issue EM1E): a paste or a drop carrying a picture becomes `@path` tokens
@@ -19,6 +20,19 @@ public:
     const QStringList &history() const { return m_history; }
     // True unless Up/Down is browsing history (Down on the last line then has nothing to do).
     bool atDraft() const { return m_historyIndex == m_history.size(); }
+
+    // Keep this box's history in a file instead of only in this session (src/PromptHistory.h):
+    // what is in the file now is loaded, and every later remember() is appended to it. One file
+    // serves every prompt box, so a browse that starts here first takes in whatever the panes
+    // beside it have added. A box that never calls this — the Switchboard's reply box — keeps the
+    // session-only history it always had.
+    void useHistoryFile(const QString &path);
+    // Re-read the file when it has changed since the last read. Called when a browse begins.
+    void refreshHistory();
+    // "Clear prompt history": the file is gone, so every box open on it drops its copy at once.
+    // A box part-way through a browse would otherwise keep offering what was just forgotten until
+    // it came back to its draft. What is in a box is left alone: it is the person's text now.
+    static void forgetHistory(const QString &path);
 
     // Ghost text: a dim suggestion drawn after the cursor when it sits at the end of the text.
     // Grow with the text instead of standing empty: one line when idle, up to maxLines, then scroll.
@@ -51,6 +65,12 @@ private:
     QStringList m_placeholders;
     QString m_draft;
     int m_historyIndex = 0;
+    QString m_historyPath;
+    // Size and mtime of the file at the last read; "?" until one has happened, which no real
+    // stamp spells, and empty for "there is no file".
+    QString m_historyStamp = QStringLiteral("?");
+    bool m_historySeen = false;      // the file existed at the last look: an empty read now means cleared
+    int m_historyMax = 200;          // raised to prompthistory::kMaxEntries once a file is attached
     bool m_preedit = false;
     QString m_ghost;
     int m_minLines = 0, m_maxLines = 0;

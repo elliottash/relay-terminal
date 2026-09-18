@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "RichEditor.h"
 
+#include "PromptHistory.h"
+
 #include <algorithm>
 #include <cmath>
 #include <QApplication>
+#include <QDateTime>
 #include <QDropEvent>
+#include <QFileInfo>
 #include <QFontDatabase>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
+#include <QList>
 #include <QMimeData>
 #include <QPainter>
 #include <QPaintEvent>
@@ -18,6 +23,7 @@
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <algorithm>
+#include <utility>
 
 namespace {
 class ShellHighlighter final : public QSyntaxHighlighter {
@@ -65,10 +71,60 @@ RichEditor::RichEditor(QWidget *parent) : QPlainTextEdit(parent) {
 void RichEditor::remember(const QString &text) {
     if (!text.isEmpty() && (m_history.isEmpty() || m_history.last() != text)) {
         m_history.append(text);
-        if (m_history.size() > 200) m_history.removeFirst();
+        while (m_history.size() > m_historyMax) m_history.removeFirst();
+        // Written now, not at exit: a Relay that is killed rather than quit still remembers this
+        // line, and the pane beside this one sees it on its next browse.
+        if (!m_historyPath.isEmpty()) relay::prompthistory::append(m_historyPath, text);
     }
     m_historyIndex = m_history.size();
     m_draft.clear();
+}
+
+namespace {
+// Every box that keeps its history in a file. Small (one per pane), and only walked when the
+// history is cleared.
+QList<RichEditor *> &boxesWithHistoryFiles() {
+    static QList<RichEditor *> boxes;
+    return boxes;
+}
+}
+
+RichEditor::~RichEditor() { boxesWithHistoryFiles().removeAll(this); }
+
+void RichEditor::forgetHistory(const QString &path) {
+    for (RichEditor *box : std::as_const(boxesWithHistoryFiles())) {
+        if (box->m_historyPath != path) continue;
+        box->m_history.clear();
+        box->m_historyIndex = 0;
+        box->m_historyStamp = QString();   // no file: a later one is read when it appears
+        box->m_historySeen = false;
+    }
+}
+
+void RichEditor::useHistoryFile(const QString &path) {
+    if (!boxesWithHistoryFiles().contains(this)) boxesWithHistoryFiles().append(this);
+    m_historyPath = path;
+    m_historyMax = relay::prompthistory::kMaxEntries;
+    m_historyStamp = QStringLiteral("?");
+    m_historySeen = false;
+    refreshHistory();
+}
+
+void RichEditor::refreshHistory() {
+    if (m_historyPath.isEmpty()) return;
+    const QFileInfo info(m_historyPath);
+    const QString stamp = info.exists()
+        ? QStringLiteral("%1:%2").arg(info.size()).arg(info.lastModified().toMSecsSinceEpoch())
+        : QString();
+    if (stamp == m_historyStamp) return;
+    // No file at all (nothing submitted yet anywhere, or nowhere to write one): leave whatever
+    // this box has remembered in the meantime alone. An empty read only wins once the file has
+    // been seen, which is how "Clear prompt history" empties a box that is already open.
+    if (stamp.isEmpty() && !m_historySeen) return;
+    m_historyStamp = stamp;
+    m_historySeen = !stamp.isEmpty();
+    m_history = relay::prompthistory::read(m_historyPath, m_historyMax);
+    m_historyIndex = m_history.size();
 }
 
 void RichEditor::resizeEvent(QResizeEvent *event) {
@@ -203,14 +259,18 @@ void RichEditor::keyPressEvent(QKeyEvent *event) {
     // History: Up on the first line and Down on the last line, like a shell prompt.
     // Alt+arrows are reserved for moving between panes.
     const bool up = event->key() == Qt::Key_Up, down = event->key() == Qt::Key_Down;
-    if (mods == Qt::NoModifier && (up || down) && !textCursor().hasSelection() && !m_history.isEmpty()
-        && ((up && textCursor().blockNumber() == 0) || (down && textCursor().blockNumber() == document()->blockCount() - 1))
-        && !(down && m_historyIndex == m_history.size())) {
-        if (m_historyIndex == m_history.size()) m_draft = toPlainText();
-        m_historyIndex = std::clamp(m_historyIndex + (event->key() == Qt::Key_Up ? -1 : 1), 0, int(m_history.size()));
-        setPlainText(m_historyIndex == m_history.size() ? m_draft : m_history[m_historyIndex]);
-        moveCursor(QTextCursor::End);
-        return;
+    if (mods == Qt::NoModifier && (up || down) && !textCursor().hasSelection()
+        && ((up && textCursor().blockNumber() == 0) || (down && textCursor().blockNumber() == document()->blockCount() - 1))) {
+        // A browse begins here: re-read the file first, so this box walks back through what was
+        // typed before Relay was last closed and what the other panes have added since.
+        if (up && atDraft()) refreshHistory();
+        if (!m_history.isEmpty() && !(down && m_historyIndex == m_history.size())) {
+            if (m_historyIndex == m_history.size()) m_draft = toPlainText();
+            m_historyIndex = std::clamp(m_historyIndex + (event->key() == Qt::Key_Up ? -1 : 1), 0, int(m_history.size()));
+            setPlainText(m_historyIndex == m_history.size() ? m_draft : m_history[m_historyIndex]);
+            moveCursor(QTextCursor::End);
+            return;
+        }
     }
     QPlainTextEdit::keyPressEvent(event);
 }

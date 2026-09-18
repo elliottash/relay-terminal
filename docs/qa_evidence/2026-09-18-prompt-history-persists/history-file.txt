@@ -1,0 +1,5 @@
+echo hello from the first run
+printf "second\\n"
+echo one\necho two
+echo typed in run two
+echo written before the kill

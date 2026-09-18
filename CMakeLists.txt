@@ -37,9 +37,16 @@ set(RELAY_KF KF${RELAY_QT_MAJOR})
 message(STATUS "Relay: building against ${RELAY_QT}")
 find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
 
+# The prompt box's history file: `$XDG_DATA_HOME/relay/state/prompt-history.txt`, shared by every
+# pane and kept across restarts. QtCore only, so it is tested headless.
+add_library(relay-prompthistory STATIC src/PromptHistory.cpp src/PromptHistory.h)
+target_include_directories(relay-prompthistory PUBLIC src)
+target_link_libraries(relay-prompthistory PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-prompthistory PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-editor STATIC src/RichEditor.cpp src/RichEditor.h)
 target_include_directories(relay-editor PUBLIC src)
-target_link_libraries(relay-editor PUBLIC ${RELAY_QT}::Widgets)
+target_link_libraries(relay-editor PUBLIC relay-prompthistory ${RELAY_QT}::Widgets)
 target_compile_options(relay-editor PRIVATE -Wall -Wextra -Wpedantic)
 
 # Switchboard pane: the card board, its detail view and the per-window Switchboard worker.
@@ -374,7 +381,7 @@ if(RELAY_BUILD_APP)
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels)
-    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -403,6 +410,9 @@ if(BUILD_TESTING)
     target_link_libraries(relay-editor-tests PRIVATE relay-editor ${RELAY_QT}::Test)
     add_test(NAME editor COMMAND relay-editor-tests)
     set_tests_properties(editor PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-prompthistory-tests tests/prompthistory_test.cpp)
+    target_link_libraries(relay-prompthistory-tests PRIVATE relay-prompthistory ${RELAY_QT}::Test)
+    add_test(NAME prompthistory COMMAND relay-prompthistory-tests)
     add_executable(relay-modelsettings-tests tests/modelsettings_test.cpp)
     target_link_libraries(relay-modelsettings-tests PRIVATE relay-modelsettings ${RELAY_QT}::Test)
     add_test(NAME modelsettings COMMAND relay-modelsettings-tests)

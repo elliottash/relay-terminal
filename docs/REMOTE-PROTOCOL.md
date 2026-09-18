@@ -427,14 +427,6 @@ A password from a client is deliberately **not** an ordinary input message, beca
   single use, bound to (pane, foreground pid, prompt generation), and expires in seconds. The
   desktop discards any `secret_input` whose nonce is unknown, spent or stale. A client-chosen nonce
   would bind nothing; **this is implemented**: `Host._items` mints, `Host._on_secret_input` burns,
-- **(security) a permit dies with the prompt it was minted for.** When a pane stops being at a
-  prompt the desktop burns its nonce and advances the pane's prompt generation, so the next prompt
-  gets a permit of its own. Letting it live out its 45 seconds made "bound to the prompt
-  generation" untrue in the one case that matters: a process that asks twice — `ssh` wanting a key
-  passphrase and then a password — kept the same pid and the same generation, so the phone still
-  holding the first prompt's permit would have answered the second one on the strength of a
-  decision the person made about the first. The security review of 2026-09-18 found this;
-  `tests/test_remote_security.py` attacks it,
 - **(security) the prompt is re-checked from a fresh termios read immediately before the write**,
   with the foreground pid unchanged. `checkPasswordPrompt` polls at 1 s (250 ms while a command
   runs) and `submitSecret` trusts the cached flag, so remotely the window is that poll plus the
@@ -527,18 +519,6 @@ subscription travels to the **desktop** inside the Noise session, and `/v1/push/
 opaque endpoint URL plus ciphertext. The rendezvous holds the VAPID signing key, which authenticates
 it to the push service and opens nothing.
 
-**(security) Opaque is not unchecked: `/v1/push/send` posts only to a Web Push service.** The
-endpoint is a URL a *phone* chooses and this server then makes an authenticated POST to, and
-registering a desktop here proves possession of a key rather than any right to be here — so
-without a rule about which hosts, the route is a request-forgery proxy inside whatever network
-the rendezvous is hosted on, reachable by anyone who can reach the server. The host must be one of
-the browsers' push services (`PUSH_SERVICE_HOSTS`, matched as a name rather than resolved, so
-there is no DNS rebind between the check and the request), or one a self-hoster named in
-`RELAY_PUSH_HOSTS`. A URL carrying credentials (`https://fcm.googleapis.com@10.0.0.1/…`) is
-refused outright. The desktop refuses a literal private, loopback or link-local address when the
-phone first offers it (`remote/notify.py`), which is the earlier and friendlier half; this is the
-one that binds.
-
 **(security)** The desktop seals the notification body to the device's **pinned Noise static key**
 *inside* the RFC 8291 payload, and the service worker **must** discard any push it cannot open with
 that key. Otherwise a forged push still renders.
@@ -548,15 +528,6 @@ per device rather than per desktop, and the concurrent-socket limit is counted p
 it per desktop lets anyone who learns a `desktop_id` open every slot and keep the owner's own phone
 out. The desktop applies its own handshake rate limit and timeout as well, because it cannot rely on
 the rendezvous to do it.
-
-**Not built (2026-09-18).** There are no per-device connect tokens: a client attaches with
-`?desktop=<id>` and nothing else, and the budget is `MAX_CHANNELS_PER_DESKTOP`. A `desktop_id` is
-`SHA-256` of the static key, which is in the fragment of every pairing and invite link, so anyone
-who has ever held a link can compute it and fill the budget — exactly the denial the paragraph
-above exists to forbid. Minting a token here and delivering it inside the pairing session is a
-change to §5 and to the web client's storage, so it is the owner's call rather than a review's.
-Until then the budget is also capped per peer address (`MAX_CHANNELS_PER_PEER`), which does not
-make the rule true: it means one address is not the whole of the denial.
 
 Implementation: Python (asyncio, `websockets`, SQLite) in `rendezvous/`, per the design's section 12
 decision — the same toolchain `backend/` already requires, so `ci.yml` tests it with the existing
@@ -590,7 +561,7 @@ Any paired device may subscribe: the capability floor is `view`.
 
 | Field | What | Checked |
 |---|---|---|
-| `endpoint` | The URL the push service gave the browser | `https://`, ≤ 2048 characters, no whitespace, no credentials in the URL, and not a literal private, loopback or link-local address. The rendezvous checks it again and harder (§8) |
+| `endpoint` | The URL the push service gave the browser | `https://`, ≤ 2048 characters, no whitespace |
 | `p256dh` | The subscription's public key, base64url | 65 bytes, uncompressed P-256 (`0x04` first) |
 | `auth` | The subscription's auth secret, base64url | 16 bytes |
 | `key` | The per-device **seal key**, base64url | 32 bytes, AES-256 |
@@ -617,9 +588,7 @@ Two layers, and the outer one is the standard:
 2. the sealed bytes are the plaintext of an ordinary RFC 8291 `aes128gcm` payload, encrypted to
    `p256dh` and `auth`, padded per RFC 8188 (`0x02` delimiter on the last record);
 3. the payload goes to `/v1/push/send` with the endpoint. The rendezvous signs it with VAPID and
-   posts bytes it cannot read, as `Content-Encoding: aes128gcm` — RFC 8291 §4 requires the header,
-   and a push service that is not told what it is holding answers 400. A self-test never sees
-   that, which is why it went missing until the security review of 2026-09-18.
+   posts bytes it cannot read.
 
 The body:
 
@@ -737,13 +706,6 @@ puts on an approved prompt — and sees everyone else's as a row with no text an
 (`"you"`, a guest's name, or `"the owner"`). A share with two editors is otherwise a way to read
 what the other one is asking for, and what the owner is.
 
-**(security)** The words are stripped by one list of field names — `text`, `prompt`, `preview`,
-`label` — applied to both events. Each had its own shorter list until the review of 2026-09-18,
-which made the rule depend on which field the *producer* happened to use: `backend/relay_core/queue.py`
-puts the words in `preview` on a queue row, the demo source puts them in `text` on a `queued`, and
-a producer that put a `preview` on a `queued` would have handed every guest the owner's prompt on
-the day it was written.
-
 ### 10.2 Invites and knocking
 
 The invite link is `<app>/join#v=1&d=<desktop public key>&i=<invite secret>&r=<room>`. The secret is
@@ -776,16 +738,9 @@ Knocks are rate-limited per invite (5 a minute) and at most 3 wait at once.
 That last rule is **structural** in `remote/guests.py`, not a convention: the two lists are
 different classes in different files (`guests.json` beside `devices.json`) whose **field names
 differ**, so a row of one kind loaded as the other raises and is dropped rather than half-read;
-admitting refuses a key the device store already knows; **and pairing refuses a key the guest store
-already knows**; and the handshake looks a static key up in the device store first, so a key is a
-device *or* a participant and never both. There is no function anywhere from a role to a capability.
-
-**(security)** Both directions of that refusal are needed, and until the review of 2026-09-18 only
-one existed. `pair_prove` went straight to `DeviceStore.pair`, which cannot see the guest list, so a
-guest's pinned key could also become a device record — and because the handshake reads the device
-store first, their next connection would have been that guest holding a *capability* instead of a
-role, with the pane scope gone. It needs the pairing secret, which is not the obstacle it sounds
-like: a guest watching a shared pane can read the QR the moment the owner opens it on that pane.
+admitting refuses a key the device store already knows; and the handshake looks a static key up in
+the device store first, so a key is a device *or* a participant and never both. There is no function
+anywhere from a role to a capability.
 
 **The reconnect.** A participant's `welcome` carries `{participant, role, panes, expires}` and
 deliberately **no `capability` and no `password_entry`** — those belong to a device record and a
@@ -937,12 +892,10 @@ The one exception to *before* is `admitted`: admission is also where a key that 
 device is refused, so a line written first would record an admission that did not happen. It is
 written the moment the record exists and before the guest is told anything.
 
-**(security)** Never uploaded, written 0600 **from the moment the file exists** — opened with the
-mode rather than chmod-ed once the first line is in it, because between the two it is whatever the
-umask says, and the first line of an audit log is a pairing or a knock — inside a 0700 directory as
-`logs.py` requires of every Relay log, and size-capped, but not rotated the way `logs.py` rotates,
-because nothing in it is ever deleted: a month past 5 MiB goes on in numbered parts
-(`audit-YYYY-MM.2.jsonl`, `.3`, …), each capped, so files grow with volume, not time.
+**(security)** Never uploaded, written
+0600 inside a 0700 directory as `logs.py` requires of every Relay log, and size-capped — but not
+rotated the way `logs.py` rotates, because nothing in it is ever deleted: a month past 5 MiB goes on
+in numbered parts (`audit-YYYY-MM.2.jsonl`, `.3`, …), each capped, so files grow with volume, not time.
 
 ## 11. Versioning
 
@@ -995,8 +948,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | Take-over (P3) | `remote/host.py`, `app/app.js` | `keys`, `paste`, `line`, `control_request`/`control_release`, an extra-keys row and a line box, refused at a password prompt |
 | Password entry (§6.7) | `remote/host.py`, `src/Pane.h` (`submitRemoteSecret`), `app/app.js` | A desktop-minted single-use nonce bound to the prompt, a per-device switch that is off by default, a fresh termios check in the hub and again at the write, a password field in the client. Tested; not yet tried on a real phone |
 | Notifications (§9) | `remote/push.py`, `remote/notify.py`, `remote/host.py`, `app/app.js`, `app/sw.js`, `src/RemoteShare.cpp` | Connected end to end. `push_subscribe`/`push_unsubscribe` inside the Noise session, five triggers with a checkbox each on the phone, the presence rule over `window_active`, a per-pane cooldown, constructed bodies, a 410 or a revoke dropping the subscription, and a "Notify me" row that asks permission from a tap. RFC 8291 is checked against the RFC's own Appendix A vector, `app/sw.js` opens a Python seal under Node, and a local push service takes a real delivery (`tests/test_remote_push.py`). **Not yet tried on a real phone**: that needs the hosted rendezvous reachable from the push service |
-| Audit log | `remote/audit.py` | Local, 0600 from creation, split by month and size. Records pairing, revoke, prompt detection and password use so far |
-| Security review of P1–P4 | `tests/test_remote_security.py` | Push, password entry, voice and multiplayer reviewed adversarially (2026-09-18). Eight findings, all fixed; the attacks stay in the suite. What is **not** fixed is the per-device connect token of §8, which needs a change to §5 |
+| Audit log | `remote/audit.py` | Local, 0600, split by month and size. Records pairing, revoke, prompt detection and password use so far |
 | `transport_switch` (§2) | `remote/host.py`, `remote/client.py` | The handshake, tested. There is no second transport yet |
 | Local attach | `remote/attach.py` | The desktop's own terminal joins the same shell, so both ends drive it |
 | In the app | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` | The share chip beside the microphone, the QR and approval dialog, and a sidecar that carries one of Relay's own panes (`ARCHITECTURE.md` section 19) |

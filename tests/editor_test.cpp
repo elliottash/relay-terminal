@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "RichEditor.h"
+#include "PromptHistory.h"
 #include <QApplication>
+#include <QFile>
+#include <QTemporaryDir>
 #include <QClipboard>
 #include <QInputMethodEvent>
 #include <QMimeData>
@@ -152,6 +155,71 @@ private Q_SLOTS:
         QApplication::clipboard()->setMimeData(text);
         editor.paste();
         QCOMPARE(editor.toPlainText(), QStringLiteral("@/tmp/a.png @\"/tmp/b c.png\" "));
+    }
+    // The prompt box's history outlives the box (owner report, 2026-09-18: "i cant do up arrows
+    // to see what i did before"). A new editor on the same file starts where the last one left off.
+    void historyOutlivesTheEditor() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("prompt-history.txt"));
+        {
+            RichEditor first; first.useHistoryFile(path);
+            first.remember(QStringLiteral("git status"));
+            first.remember(QStringLiteral("summarise this file\nand the one beside it"));
+        }
+        RichEditor second; second.useHistoryFile(path);
+        QCOMPARE(second.history().size(), 2);
+        QTest::keyClick(&second, Qt::Key_Up);
+        QCOMPARE(second.toPlainText(), QStringLiteral("summarise this file\nand the one beside it"));
+        // Up from the first line of a recalled multi-line entry keeps walking back.
+        second.moveCursor(QTextCursor::Start);
+        QTest::keyClick(&second, Qt::Key_Up);
+        QCOMPARE(second.toPlainText(), QStringLiteral("git status"));
+    }
+    // One history for every pane: a box that is already open picks up what another added when its
+    // next browse begins, and it empties when the history is cleared.
+    void aBrowseTakesInWhatOtherPanesAdded() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("prompt-history.txt"));
+        RichEditor pane; pane.useHistoryFile(path);
+        QVERIFY(pane.history().isEmpty());
+        RichEditor other; other.useHistoryFile(path);
+        other.remember(QStringLiteral("ls -la"));
+        QTest::keyClick(&pane, Qt::Key_Up);
+        QCOMPARE(pane.toPlainText(), QStringLiteral("ls -la"));
+        QVERIFY(relay::prompthistory::clear(path));
+        QTest::keyClick(&pane, Qt::Key_Down);          // back to the draft, which was empty
+        QCOMPARE(pane.toPlainText(), QString());
+        QTest::keyClick(&pane, Qt::Key_Up);            // the next browse re-reads: there is nothing left
+        QCOMPARE(pane.toPlainText(), QString());
+        QVERIFY(pane.history().isEmpty());
+    }
+    // Clearing empties a box that is part-way through a browse too, rather than leaving it walking
+    // a copy of what was just forgotten.
+    void clearingEmptiesABoxMidBrowse() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("prompt-history.txt"));
+        RichEditor pane; pane.useHistoryFile(path);
+        pane.remember(QStringLiteral("first"));
+        pane.remember(QStringLiteral("second"));
+        QTest::keyClick(&pane, Qt::Key_Up);
+        QCOMPARE(pane.toPlainText(), QStringLiteral("second"));   // mid-browse, not at the draft
+        QVERIFY(!pane.atDraft());
+        QVERIFY(relay::prompthistory::clear(path));
+        RichEditor::forgetHistory(path);
+        QVERIFY(pane.history().isEmpty());
+        QCOMPARE(pane.toPlainText(), QStringLiteral("second"));   // what is in the box is the person's now
+        QTest::keyClick(&pane, Qt::Key_Up);
+        QCOMPARE(pane.toPlainText(), QStringLiteral("second"));   // nothing older to walk back to
+    }
+    // Without a file nothing is written anywhere: the Switchboard's reply box keeps its own
+    // session-only history, exactly as before.
+    void anEditorWithoutAFileWritesNothing() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("prompt-history.txt"));
+        RichEditor editor;
+        editor.remember(QStringLiteral("a reply"));
+        QCOMPARE(editor.history(), QStringList{QStringLiteral("a reply")});
+        QVERIFY(!QFile::exists(path));
     }
     void upInsideMultilineTextMovesCursor() {
         RichEditor editor; editor.remember(QStringLiteral("git status"));

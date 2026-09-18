@@ -389,6 +389,34 @@ nothing is re-run.
   while restoring is off, and "Start a fresh window set" deletes the file with the scrollback it
   names, though what was closed in this run can still be reopened from memory.
 
+### Prompt history across a restart
+
+The prompt box's Up/Down history used to live in the `RichEditor` and die with the pane (owner
+report, 2026-09-18: "conversation history isnt persisting on exit and re-open. i cant do up arrows
+to see what i did before"). It is now a file: `$XDG_DATA_HOME/relay/state/prompt-history.txt`
+(0600, in the 0700 directory `windows.json` is in), `relay::prompthistory` in
+`src/PromptHistory.h`.
+
+- **One history per person**, not one per pane, like a shell's. Every prompt box reads the same
+  file, so a new pane opens with what was typed in the pane beside it, and a browse that starts in
+  an open box first re-reads the file (`RichEditor::refreshHistory()`, on the Up that leaves the
+  draft) to take in what the other panes have added since. The file is only re-read when its size
+  or mtime has changed, so an idle box does no work.
+- **Appended as it is submitted**, never on the way out: one O_APPEND write per line, so a Relay
+  that is killed rather than quit loses nothing and two Relays running at once interleave their
+  lines instead of overwriting each other. The whole file is rewritten only to trim it, once it
+  passes 512 KiB, back to the newest 1,000 entries.
+- **One line per entry.** A prompt may be several lines, so a newline is stored as `\n` and a
+  backslash as `\\`; a hand-written file of plain lines reads back as it looks. An entry longer
+  than 10,000 characters stays in the pane's live history but is not written.
+- **What never reaches it.** A line written to a running program's stdin and a password are
+  refused upstream by `relay::input::retainable` (`src/InputPolicy.h`), and a password never
+  enters the composer's document at all — it is typed in the separate masked field.
+- **Forgetting it.** The palette action `history.clear` ("Clear prompt history") confirms, deletes
+  the file and calls `RichEditor::forgetHistory()`, which drops the copy every open prompt box
+  holds — including one part-way through a browse, which would otherwise keep offering what was
+  just forgotten. Text already in a box is left alone: it is the person's now.
+
 ## 4. Keyboard: Keymap, presets, palette
 
 ### Shortcut hints
