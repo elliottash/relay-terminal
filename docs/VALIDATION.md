@@ -83,6 +83,7 @@ Claude session. They show the feature worked once; they are not independent QA.
 | Terminal-first fallback (superseded behavior) | [`qa_evidence/2026-09-17-terminal-first-fallback/`](qa_evidence/2026-09-17-terminal-first-fallback/) |
 | Image context: paste, pane screenshot, the GLM-5.3-Flash swap and back, the vision-model row | [`qa_evidence/2026-09-17-image-context/`](qa_evidence/2026-09-17-image-context/) |
 | Model-written pane titles, tab labels, `/rename`, `/rename-tab` (loopback stub and, separately, a real model) | [`qa_evidence/2026-09-17-pane-title-summary/`](qa_evidence/2026-09-17-pane-title-summary/) |
+| Colour themes: four built-ins switched in one running process, every light surface, the Relay engine and a user theme | [`qa_evidence/2026-09-17-color-themes/`](qa_evidence/2026-09-17-color-themes/) |
 
 Live provider smoke test, 2026-09-16, through the real `Agent` loop with keys imported from
 Warp: Kimi K3 (`kimi`), GLM-5.3 Coding Plan (`glm-coding`) and DeepSeek V4.1 Flash via
@@ -146,6 +147,7 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-agent-output-while-program-runs.md`
 - `2026-09-17-agent-program-context.md`
 - `2026-09-17-agent-responses-in-terminal.md`
+- `2026-09-17-color-themes.md`
 - `2026-09-17-ctrl-i-input-toggle.md`
 - `2026-09-17-file-explorer-and-preview-panes.md`
 - `2026-09-17-fix-and-rerun-terminal-commands.md`

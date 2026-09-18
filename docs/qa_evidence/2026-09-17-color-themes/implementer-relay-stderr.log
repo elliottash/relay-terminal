@@ -1,0 +1,2 @@
+[wmh] dispatch route=shell mode=shell valid=1 signal=0 text='ls --color=always -la /usr/share/zoneinfo | head -10'
+[wmh] runInTerminal watch=1 natural=0 text='ls --color=always -la /usr/share/zoneinfo | head -10'
