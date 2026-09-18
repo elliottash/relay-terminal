@@ -13,7 +13,9 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"unpane","id":"p1"}                                 pane closed or stopped sharing
     {"t":"pair"}                                             open a pairing room, get a QR
     {"t":"answer","id":N,"allow":true,"capability":"full"}   the user answered the dialog
-    {"t":"address","value":"192.168.1.9"}                    serve the QR on another address
+    {"t":"address","value":"192.168.1.9"}                    serve the QR on another address;
+                                          the value may also be the tailnet name from the
+                                          `addresses` list, which publishes with `tailscale serve`
     {"t":"revoke","device":"..."}   {"t":"devices"}   {"t":"stop"}
     {"t":"password_entry","device":"...","allow":true}   per-device switch (section 6.7)
     {"t":"window_active","active":true}   Relay's own window is (or is not) the focused one:
@@ -41,7 +43,16 @@ the GUI never links a crypto library and this process never touches a widget.
 
   here → GUI
     {"t":"started","base":"...","fingerprint":"...","note":"...",
-     "addresses":[{"value":"192.168.1.9","where":"this network","current":true}, ...]}
+     "addresses":[{"value":"spark.tail0.ts.net","kind":"tailscale","available":true,
+                   "where":"no certificate warning, works from anywhere on your tailnet",
+                   "label":"https://spark.tail0.ts.net — no certificate warning, ...",
+                   "reason":"","current":true},
+                  {"value":"192.168.1.9","kind":"ip","available":true,"where":"this network",
+                   "label":"192.168.1.9 — reachable from this network","reason":"",
+                   "current":false}, ...]}
+                                          Best first. The `tailscale` entry is always there: with
+                                          `available:false` and a one-sentence `reason` when this
+                                          machine cannot serve a real certificate
     {"t":"pairing","url":"...","qr":[[0,1,...],...],"expires":N}
     {"t":"ask","id":N,"name":"...","platform":"...","fingerprint":"...","code":"12345","peer":"..."}
     {"t":"paired","device":"...","name":"...","capability":"..."}
@@ -91,7 +102,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from remote import devtls, guests as guests_mod, host as host_mod, identity as identity_mod, \
-    panes as panes_mod, terminal as terminal_mod, wire
+    panes as panes_mod, tailnet as tailnet_mod, terminal as terminal_mod, wire
 from rendezvous.server import Store, build
 
 log = logging.getLogger("relay.gui_host")
@@ -427,6 +438,11 @@ class Sidecar:
         self.tls_port = 0
         self.base = ""
         self.note = """"""
+        # The warning-free address (remote/tailnet.py). `found` is what detection said — the name
+        # when there is one, the one-sentence reason when there is not — and `served_by_tailscale`
+        # says whether `tailscale serve` is up right now, because it has to come down again.
+        self.found = tailnet_mod.Tailnet()
+        self.served_by_tailscale = False
         self.server = None
         self.store = None
         self.serving: asyncio.Task | None = None
@@ -490,7 +506,7 @@ class Sidecar:
         elif kind == "pair":
             await self.pair()
         elif kind == "address":
-            self.set_address(str(message.get("value", "")))
+            await self.set_address(str(message.get("value", "")))
             await self.pair()
         elif kind == "answer":
             future = self.asks.pop(int(message.get("id", -1)), None)
@@ -591,6 +607,10 @@ class Sidecar:
         self.base = local
         self.address = ""
         self.tls_port = 0
+        self.served_by_tailscale = False
+        # Detection is two `tailscale` calls, so it happens off the loop: a wedged CLI must not
+        # hold the share button down.
+        self.found = await asyncio.to_thread(tailnet_mod.probe)
         if message.get("tls", True):
             # One listener on every interface; which address goes in the QR is a separate choice,
             # because only the person knows whether the phone is on the Wi-Fi or on the tailnet.
@@ -599,10 +619,11 @@ class Sidecar:
             self.tls_port = self.server.port_of(listener)
             self.address = message.get("address") or devtls.preferred_address()
             self.base = f"https://{self.address}:{self.tls_port}"
-            self.note = ("The certificate is self-signed, so your phone warns once. Its SHA-256 "
-                         f"begins {devtls.fingerprint(identity_mod.state_dir())}. After you "
-                         "accept the warning, scan the code again: some browsers drop the "
-                         "pairing code when they reload past it.")
+            self.note = self.self_signed_note()
+        # A real certificate beats a warning, so it is what the QR gets whenever there is one. An
+        # address the GUI remembered is honoured instead: the person chose it last time.
+        if self.found.ready and not message.get("address"):
+            await self.use_tailnet()
 
         self.host = host_mod.Host(self.identity, self.devices, self.source, app_base=self.base,
                                   approver=self.ask, name=message.get("name", "this desktop"),
@@ -625,23 +646,94 @@ class Sidecar:
                    "note": self.note, "addresses": self.address_list()})
         self.report_devices()
 
-    def address_list(self) -> list[dict]:
-        if not self.tls_port:
-            return []
-        return [{"value": address, "where": devtls.describe(address),
-                 "current": address == self.address}
-                for address in devtls.local_addresses()]
+    def self_signed_note(self) -> str:
+        return ("The certificate is self-signed, so your phone warns once. Its SHA-256 "
+                f"begins {devtls.fingerprint(identity_mod.state_dir())}. After you "
+                "accept the warning, scan the code again: some browsers drop the "
+                "pairing code when they reload past it.")
 
-    def set_address(self, address: str) -> None:
-        """Point the pairing link at another of this machine's addresses."""
-        if not self.tls_port or address not in devtls.local_addresses():
-            return
-        self.address = address
-        self.base = f"https://{address}:{self.tls_port}"
+    TAILNET_WHERE = "no certificate warning, works from anywhere on your tailnet"
+
+    def address_list(self) -> list[dict]:
+        """What the share dialog offers, best first.
+
+        The tailnet **name** is always the first entry — as something to choose when tailscale can
+        serve it, and as one sentence saying why not when it cannot, because "there is no such
+        option" and "you have not run one command yet" look identical otherwise. Then this
+        machine's own addresses behind the self-signed certificate: the LAN one, which is what a
+        phone on the same Wi-Fi wants, and the tailnet IP last.
+        """
+        if self.found.ready:
+            entries = [{"value": self.found.name, "kind": "tailscale", "available": True,
+                        "where": self.TAILNET_WHERE, "reason": "",
+                        "label": f"{self.found.url} — {self.TAILNET_WHERE}",
+                        "current": self.served_by_tailscale}]
+        else:
+            entries = [{"value": "", "kind": "tailscale", "available": False,
+                        "where": self.TAILNET_WHERE, "reason": self.found.reason,
+                        "label": "", "current": False}]
+        if not self.tls_port:
+            return entries
+        entries.extend(
+            {"value": address, "kind": "ip", "available": True,
+             "where": devtls.describe(address), "reason": "",
+             "label": f"{address} — reachable from {devtls.describe(address)}",
+             "current": not self.served_by_tailscale and address == self.address}
+            for address in devtls.local_addresses())
+        return entries
+
+    def announce(self) -> None:
         if self.host is not None:
             self.host.app_base = self.base
         self.emit({"t": "started", "base": self.base, "fingerprint": self.identity.fingerprint,
                    "note": self.note, "addresses": self.address_list()})
+
+    async def use_tailnet(self) -> bool:
+        """Put the app behind `tailscale serve`, and point the pairing link at that origin.
+
+        Serve terminates TLS itself and proxies to a plain http port, so what goes behind it is the
+        loopback listener, never the self-signed one. Same routes, same CSP, same `/pair` and
+        `/join`; the Noise session is end-to-end above all of it and does not notice.
+        """
+        if self.server is None:
+            return False
+        url, said = await asyncio.to_thread(tailnet_mod.publish, self.server.port)
+        if url is None:
+            # Detection said yes and serve said no — the admin console is the usual reason. Keep
+            # the name, carry tailscale's own words as the reason the picker shows.
+            self.found = tailnet_mod.Tailnet(name=self.found.name, reason=said)
+            self.served_by_tailscale = False
+            return False
+        self.served_by_tailscale = True
+        self.address = self.found.name
+        self.base = url
+        self.note = ("Tailscale serves this with a real certificate, so your phone shows no "
+                     "warning — and notifications can be turned on, which a browser refuses "
+                     "behind a certificate it did not like.")
+        return True
+
+    async def drop_tailnet(self) -> None:
+        if not self.served_by_tailscale:
+            return
+        await asyncio.to_thread(tailnet_mod.unpublish)
+        self.served_by_tailscale = False
+
+    async def set_address(self, address: str) -> None:
+        """Point the pairing link at another of this machine's addresses."""
+        if self.server is None:
+            return
+        if address and address == self.found.name:
+            if not self.served_by_tailscale:
+                await self.use_tailnet()
+            self.announce()
+            return
+        if not self.tls_port or address not in devtls.local_addresses():
+            return
+        await self.drop_tailnet()
+        self.address = address
+        self.base = f"https://{address}:{self.tls_port}"
+        self.note = self.self_signed_note()
+        self.announce()
 
     async def pair(self) -> None:
         if self.host is None:
@@ -770,6 +862,9 @@ class Sidecar:
             for device in self.devices.live()]})
 
     async def stop(self) -> None:
+        # Before anything else: a `tailscale serve` route left behind would go on answering for a
+        # port nothing is listening on.
+        await self.drop_tailnet()
         if self.host is not None:
             await self.host.stop()
         if self.serving:
