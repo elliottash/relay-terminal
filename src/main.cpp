@@ -2,6 +2,8 @@
 #include "RichEditor.h"
 #include "Theme.h"
 #include "FilePanes.h"
+#include "BoardPane.h"          // Switchboard: cards, threads, card detail
+#include "BoardWorker.h"        // the per-window Switchboard worker (protocol 17)
 #include "AgentUi.h"
 #include "Completion.h"
 #include "ShellHighlighter.h"
@@ -602,7 +604,7 @@ class Pane final : public QWidget {
 public:
     struct QueueEntry {
         quint64 id = 0; bool agent = false, fix = false, watch = false;
-        QString text, why; QJsonArray attachments;
+        QString text, why; QJsonArray attachments, cards;   // cards: `#K7Q2` referenced in the prompt
         // Wrong-mode hints (2026-09-17): natural marks a terminal submission that reads like an
         // agent request; shellText carries an agent submission that is a runnable shell command.
         bool natural = false; QString shellText;
@@ -690,6 +692,7 @@ public:
     // Open a folder (explorer pane) or a file (preview pane); `line` > 0 scrolls the preview there.
     std::function<void(const QString &path, int line)> onOpenPath;
     std::function<void(const QString &)> onToggleExplorer;   // open the explorer, or close it again
+    std::function<void()> onOpenBoard;                 // Switchboard: /switchboard from this pane
     std::function<void(const QString &turnId)> onOpenTurn;   // "✦ N tool calls" link or palette
     // Right-click menu entries the window owns: new pane, close pane, tasks (issue #X2F1).
     std::function<void(const QString &action)> onWindowAction;
@@ -739,6 +742,14 @@ public:
         if (m_native) { focusTerminal(); return; }
         if (m_secretMode) { m_secretEdit->setFocus(Qt::OtherFocusReason); return; }
         m_editor->setFocus(Qt::OtherFocusReason);
+    }
+    // Switchboard: put `#K7Q2 ` (or any text) at the composer's cursor and focus it. Used by the
+    // pane's `t` key and by "work on #K7Q2" from a card.
+    void insertInComposer(const QString &text) {
+        if (text.isEmpty()) return;
+        if (m_secretMode || m_native) { focusInput(); return; }
+        m_editor->insertPlainText(text);
+        focusInput();
     }
     // The prompt box is masked and answers a password prompt (see checkPasswordPrompt()).
     bool secretMode() const { return m_secretMode; }
@@ -3427,6 +3438,8 @@ private:
             {QStringLiteral("conversations"), QStringLiteral("[words]"), QStringLiteral("List and search every conversation and Relay's terminal history")},
             {QStringLiteral("find"), QStringLiteral("[words]"), QStringLiteral("Find in this pane: conversation and terminal scrollback")},
             {QStringLiteral("plan"), QString(), QStringLiteral("Toggle plan mode")},
+        {QStringLiteral("switchboard"), QString(), QStringLiteral("Open the Switchboard: cards, threads and plans")},
+        {QStringLiteral("card"), QStringLiteral("<text>"), QStringLiteral("Add a card to the Switchboard inbox, verbatim")},
             {QStringLiteral("recap"), QString(), QStringLiteral("Summarize this session")},
             {QStringLiteral("tasks"), QString(), QStringLiteral("Task list: what the agent is working on")},
             {QStringLiteral("requests"), QString(), QStringLiteral("Task list (same as /tasks)")},
@@ -3579,6 +3592,20 @@ private:
         else if (name == QStringLiteral("rename-tab")) {
             if (onRenameTab) onRenameTab(args, args.isEmpty());
         }
+        else if (name == QStringLiteral("switchboard")) {
+            if (onOpenBoard) onOpenBoard();
+            boardShortcutHint(QStringLiteral("board.slash"));
+        }
+        else if (name == QStringLiteral("card")) {
+            if (args.trimmed().isEmpty()) { status(QStringLiteral("Usage: /card <what to remember>")); return; }
+            // Quick add to the Inbox without opening the pane; the text is kept verbatim.
+            send({{QStringLiteral("type"), QStringLiteral("board_create")},
+                  {QStringLiteral("tab"), QStringLiteral("features")},
+                  {QStringLiteral("status"), QStringLiteral("inbox")},
+                  {QStringLiteral("text"), args.trimmed()}});
+            m_cardIndexAsked = false;
+            boardShortcutHint(QStringLiteral("card.slash"));
+        }
         else if (name == QStringLiteral("recap")) requestRecap();
         else if (name == QStringLiteral("tasks") || name == QStringLiteral("requests") || name == QStringLiteral("todos")) {
             openRequests();
@@ -3613,6 +3640,7 @@ private:
         m_steering.append(steer);
         QJsonObject request{{"type", "ask"}, {"id", steer.requestId}, {"text", entry.text}, {"when", "steer"}, {"requeue", false}};
         if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
+        if (!entry.cards.isEmpty()) request.insert(QStringLiteral("cards"), entry.cards);
         send(request);
         m_lastSteerRequest = steer.requestId; m_lastSteeredAt.start();
         rebuildQueueStrip(); changed();
@@ -3806,8 +3834,10 @@ public:
             row(QStringLiteral("*"), QStringLiteral("send this line to the agent"));
             row(QStringLiteral("/"), QStringLiteral("slash commands"));
             row(QStringLiteral("@"), QStringLiteral("attach files and folders"));
+            row(QStringLiteral("#"), QStringLiteral("reference a Switchboard card"));
             row(keys.shortcutText(QStringLiteral("input.toggle")), QStringLiteral("switch terminal / agent"));
             row(keys.shortcutText(QStringLiteral("palette.open")), QStringLiteral("actions palette"));
+            row(keys.shortcutText(QStringLiteral("board.open")), QStringLiteral("Switchboard: cards and threads"));
             row(keys.shortcutText(QStringLiteral("agent.requests")).isEmpty() ? QStringLiteral("/tasks")
                                                                              : keys.shortcutText(QStringLiteral("agent.requests")),
                 QStringLiteral("tasks in this session"));
@@ -4200,6 +4230,7 @@ private:
                 m_lastProgramState = QJsonObject();   // a fresh worker knows nothing about the pane
                 sendProgramState();
             });
+        if (handleBoardEvent(type, event)) return;   // Switchboard (protocol 17)
         if (m_subagents.handle(event)) return;
         // --- end subagents UI ---
         if (handleProgramEvent(type, event)) return;    // the agent typing into this pane's program
@@ -4763,7 +4794,7 @@ private:
         endDelegation(QStringLiteral("password"));
         m_secretMode = true;
         m_secretProgram = program;
-        hideAtPopup(); hideSlashPopup(); hideTabPopup(); clearAiGhost();
+        hideAtPopup(); hideCardPopup(); hideSlashPopup(); hideTabPopup(); clearAiGhost();
         m_secretChip->setText(relay::input::passwordChip(m_secretProgram));
         m_secretChip->show();
         setRouteText(QStringLiteral("PASSWORD · the line goes to the program, not to Relay"));
@@ -4931,6 +4962,7 @@ private:
             {QStringLiteral("idle.agents"), QStringLiteral("Tip: ↓ from the prompt box selects running subagents")},
             {QStringLiteral("idle.palette"), QStringLiteral("Tip: %1 opens every action").arg(key("palette.open"))},
             {QStringLiteral("idle.prefix"), QStringLiteral("Tip: start with ! for the terminal or * for the agent")},
+            {QStringLiteral("idle.board"), QStringLiteral("Tip: %1 opens the Switchboard; # references a card").arg(key("board.open"))},
         };
         const auto tip = relay::ShortcutHints::instance().nextIdleTip(tips);
         if (!tip.text.isEmpty()) toast(tip.text, 6000);
@@ -5457,6 +5489,7 @@ private:
         QueueEntry entry;
         entry.agent = true; entry.text = text; entry.why = why; entry.attachments = attachmentsFor(text);
         entry.shellText = shellText;
+        entry.cards = cardsFor(text);   // Switchboard: `#K7Q2` in the prompt (protocol 17.6)
         if (when == QStringLiteral("interrupt") && m_agentBusy) {
             // Bypasses the queue: stop the running turn and run this now. Queued items keep their order.
             m_interruptPending = true;
@@ -5509,6 +5542,7 @@ private:
         if (!entry.fix) m_subagents.clearFinished();   // subagents UI: finished rows linger until a new user turn
         QJsonObject request{{"type", "ask"}, {"text", entry.text}, {"when", when}};
         if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
+        if (!entry.cards.isEmpty()) request.insert(QStringLiteral("cards"), entry.cards);
         const QString program = processBusy() ? foregroundCommandLine() : QString();
         // The terminal's directory always goes along: `cd` in the terminal must move the agent too.
         QJsonObject context{{"terminal_cwd", m_cwd}};
@@ -5656,6 +5690,15 @@ private:
             m_escTimer.start();
             return true;
         }
+        if (m_cardList && m_cardList->isVisible()) {
+            if (k == Qt::Key_Down || k == Qt::Key_Up) {
+                const int row = std::clamp(m_cardList->currentRow() + (k == Qt::Key_Down ? 1 : -1), 0, m_cardList->count() - 1);
+                m_cardList->setCurrentRow(row);
+                return true;
+            }
+            if (k == Qt::Key_Return || k == Qt::Key_Enter || k == Qt::Key_Tab) { acceptCardSelection(); return true; }
+            if (k == Qt::Key_Escape) { m_cardDismissedAt = m_editor->textCursor().position(); hideCardPopup(); return true; }
+        }
         if (m_atList && m_atList->isVisible()) {
             if (mods == Qt::NoModifier && (k == Qt::Key_Up || k == Qt::Key_Down)) {
                 const int row = std::clamp(m_atList->currentRow() + (k == Qt::Key_Down ? 1 : -1), 0, m_atList->count() - 1);
@@ -5736,6 +5779,7 @@ private:
         updateSlashPopup();
         if (m_selected >= 0 && !m_editor->toPlainText().isEmpty()) { m_selected = -1; rebuildQueueStrip(); }
         updateAtPopup();
+        updateCardPopup();
         updateGhost();
     }
 
@@ -5904,6 +5948,129 @@ private:
         m_atList->show();
         m_atList->raise();
         if (m_editor->ghost().size()) m_editor->setGhost(QString());
+    }
+
+    // "Next time: Ctrl+Shift+S" after the slow path (WARP.md's standing rule).
+    void boardShortcutHint(const QString &id) {
+        const QString keys = Keymap::instance().shortcutText(QStringLiteral("board.open"));
+        if (!keys.isEmpty())
+            hint(id, relay::ShortcutHints::nextTime(keys, QStringLiteral("the Switchboard")));
+    }
+
+    // Switchboard events a *terminal* pane cares about: the card index behind the `#` picker,
+    // and one inline line per agent write (protocol 17.2 and 17.5).
+    bool handleBoardEvent(const QString &type, const QJsonObject &event) {
+        if (type == QStringLiteral("board")) {
+            m_cardIndex.setConfig(event.value(QStringLiteral("config")).toObject());
+            m_cardIndex.reset(event.value(QStringLiteral("cards")).toArray());
+            return true;
+        }
+        if (type == QStringLiteral("board_changed")) {
+            m_cardIndex.upsert(event.value(QStringLiteral("upserts")).toArray());
+            QStringList removed;
+            for (const QJsonValue &value : event.value(QStringLiteral("removed")).toArray())
+                removed << value.toString();
+            m_cardIndex.remove(removed);
+            return true;
+        }
+        if (type == QStringLiteral("board_activity")) {
+            noteBoardActivity(event);
+            return true;
+        }
+        return false;
+    }
+
+    // ----- Switchboard: `#K7Q2` references (design section 5) ---------------------------------
+    // `#` after a space, in agent or auto mode, opens a card picker like the `@` file picker.
+    // In terminal mode `#` stays a Bash comment.
+    void updateCardPopup() {
+        if (!m_editor || m_native || m_modeValue == QStringLiteral("shell")) { hideCardPopup(); return; }
+        const QTextCursor cursor = m_editor->textCursor();
+        const QString before = cursor.block().text().left(cursor.positionInBlock());
+        static const QRegularExpression token(QStringLiteral("(?:^|\\s)#([0-9A-Za-z]*)$"));
+        const auto match = token.match(before);
+        if (!match.hasMatch() || cursor.position() == m_cardDismissedAt) { hideCardPopup(); return; }
+        requestCardIndex();
+        const QList<relay::board::Card> ranked = m_cardIndex.search(match.captured(1), 20);
+        if (ranked.isEmpty()) { hideCardPopup(); return; }
+        if (!m_cardList) {
+            m_cardList = new QListWidget(this);
+            m_cardList->setObjectName(QStringLiteral("atPicker"));
+            m_cardList->setFocusPolicy(Qt::NoFocus);
+            m_cardList->setUniformItemSizes(true);
+            connect(m_cardList, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
+                m_cardList->setCurrentItem(item); acceptCardSelection(); });
+        }
+        m_cardList->clear();
+        for (const relay::board::Card &card : ranked) {
+            auto *item = new QListWidgetItem(
+                QStringLiteral("#%1  %2  ·  %3").arg(card.id, card.title,
+                                                     relay::board::statusTitle(card.status)), m_cardList);
+            item->setData(Qt::UserRole, card.id);
+        }
+        m_cardList->setCurrentRow(0);
+        placeCardPopup();
+        m_cardList->show();
+        m_cardList->raise();
+        if (m_editor->ghost().size()) m_editor->setGhost(QString());
+    }
+
+    void placeCardPopup() {
+        if (!m_cardList || !m_composer) return;
+        const QRect composer(m_composer->mapTo(this, QPoint(0, 0)), m_composer->size());
+        const int rowHeight = std::max(18, m_cardList->sizeHintForRow(0));
+        const int height = std::min(8, m_cardList->count()) * rowHeight + 8;
+        const int width = std::min(640, composer.width() - 24);
+        m_cardList->setGeometry(composer.left() + 12, std::max(0, composer.top() - height - 4), width, height);
+    }
+
+    void hideCardPopup() { if (m_cardList && m_cardList->isVisible()) m_cardList->hide(); }
+
+    void acceptCardSelection() {
+        if (!m_cardList || !m_cardList->currentItem()) return;
+        const QString id = m_cardList->currentItem()->data(Qt::UserRole).toString();
+        QTextCursor cursor = m_editor->textCursor();
+        const QString before = cursor.block().text().left(cursor.positionInBlock());
+        const int at = before.lastIndexOf('#');
+        if (at < 0) { hideCardPopup(); return; }
+        cursor.movePosition(QTextCursor::Left, QTextCursor::KeepAnchor, before.size() - at);
+        cursor.insertText(QStringLiteral("#") + id + ' ');
+        m_editor->setTextCursor(cursor);
+        hideCardPopup();
+    }
+
+    // The board rows this pane knows, for the picker and for `ask {cards: […]}`. Asked for once
+    // per conversation and kept up to date by board_changed.
+    void requestCardIndex() {
+        if (m_cardIndexAsked || !m_configured) return;
+        m_cardIndexAsked = true;
+        send({{QStringLiteral("type"), QStringLiteral("board_open")}});
+    }
+
+    // `#K7Q2` tokens that name a card travel with an agent prompt (protocol 17.6).
+    QJsonArray cardsFor(const QString &text) const {
+        static const QRegularExpression token(QStringLiteral("(?:^|\\s)#([0-9A-Za-z]{4})\\b"));
+        QJsonArray out;
+        QStringList seen;
+        auto it = token.globalMatch(text);
+        while (it.hasNext()) {
+            const QString id = it.next().captured(1).toUpper();
+            if (seen.contains(id) || !m_cardIndex.card(id) || out.size() >= 10) continue;
+            seen << id;
+            out.append(QJsonObject{{QStringLiteral("id"), id}});
+        }
+        return out;
+    }
+
+    // One inline line per agent board write, in the pane that caused it (protocol 17.5).
+    void noteBoardActivity(const QJsonObject &event) {
+        const QString id = event.value(QStringLiteral("id")).toString();
+        const QString summary = event.value(QStringLiteral("summary")).toString();
+        if (id.isEmpty()) return;
+        m_cardIndexAsked = false;   // the rows changed; refresh the picker on its next use
+        const QString line = QStringLiteral("◆ #%1 · %2").arg(id, summary);
+        status(line);
+        toast(line, 4000);
     }
 
     void placeAtPopup() {
@@ -7032,6 +7199,11 @@ private:
     quint64 m_entrySerial = 0;
     int m_selected = -1;
     QListWidget *m_queueList = nullptr, *m_atList = nullptr;
+    // Switchboard: the `#K7Q2` picker and the card rows behind it (protocol 17.2, 17.6).
+    QListWidget *m_cardList = nullptr;
+    relay::board::Model m_cardIndex;
+    bool m_cardIndexAsked = false;
+    int m_cardDismissedAt = -1;
     int m_atDismissedAt = -1;
     QString m_editKind;
     QStringList m_fileIndex, m_recentFiles, m_shellHistory;
@@ -7149,7 +7321,7 @@ private:
 // as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
 class ToolPane final : public QWidget {
 public:
-    enum class Kind { Explorer, Preview, Plan, Subagent, Turn };
+    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board };
 
     ToolPane(Kind kind, const QString &path, bool planActions = true) : m_kind(kind) {
         setObjectName(QStringLiteral("pane"));
@@ -7179,6 +7351,16 @@ public:
         layout->addWidget(view);
     }
 
+    // The Switchboard: cards, threads and the card detail view (protocol 17). Saved and restored
+    // by workspace and tab, not by path.
+    ToolPane(relay::BoardView *view, const QString &cwd) : m_kind(Kind::Board), m_board(view), m_subagentCwd(cwd) {
+        setObjectName(QStringLiteral("pane"));
+        setAttribute(Qt::WA_StyledBackground);
+        auto *layout = new QVBoxLayout(this); layout->setContentsMargins(1, 1, 1, 1);
+        layout->addWidget(view);
+    }
+    relay::BoardView *board() const { return m_board; }
+
     // A finished agent turn: tool calls and transcript, opened from the inline summary line.
     ToolPane(relay::TurnTranscriptView *view, const QString &cwd) : m_kind(Kind::Turn), m_turn(view), m_subagentCwd(cwd) {
         setObjectName(QStringLiteral("pane"));
@@ -7193,9 +7375,10 @@ public:
     relay::FilePreview *preview() const { return m_preview; }
     relay::PlanEditor *plan() const { return m_plan; }
     relay::SubagentTranscriptView *subagent() const { return m_subagent; }
-    QString path() const { return (m_subagent || m_turn) ? QString() : m_explorer ? m_explorer->root() : m_plan ? m_plan->path() : m_preview->path(); }
-    QString cwd() const { return (m_subagent || m_turn) ? m_subagentCwd : m_explorer ? m_explorer->root() : QFileInfo(path()).absolutePath(); }
+    QString path() const { return (m_subagent || m_turn || m_board) ? QString() : m_explorer ? m_explorer->root() : m_plan ? m_plan->path() : m_preview->path(); }
+    QString cwd() const { return (m_subagent || m_turn || m_board) ? m_subagentCwd : m_explorer ? m_explorer->root() : QFileInfo(path()).absolutePath(); }
     QString title() const {
+        if (m_board) return m_board->title();
         if (m_subagent) return m_subagent->title();
         if (m_turn) return m_turn->title();
         if (m_plan) return (m_plan->isDirty() ? QStringLiteral("● ") : QString()) + m_plan->title();
@@ -7203,12 +7386,14 @@ public:
         return name.isEmpty() ? path() : name;
     }
     QJsonObject node() const {
+        if (m_board) return {{"board", QJsonObject{{"workspace", m_board->workspace()}, {"tab", m_board->currentTab()}}}};
         if (m_subagent || m_turn) return {};
         if (m_plan) return {{"plan", QJsonObject{{"path", path()}}}};
         return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};
     }
     void focusInput() {
-        if (m_subagent) m_subagent->focusInput();
+        if (m_board) m_board->focusInput();
+        else if (m_subagent) m_subagent->focusInput();
         else if (m_turn) m_turn->focusInput();
         else if (m_plan) m_plan->editor()->setFocus(Qt::OtherFocusReason);
         else if (m_explorer) m_explorer->view()->setFocus(Qt::OtherFocusReason);
@@ -7222,6 +7407,7 @@ private:
     relay::PlanEditor *m_plan = nullptr;
     relay::SubagentTranscriptView *m_subagent = nullptr;
     relay::TurnTranscriptView *m_turn = nullptr;
+    relay::BoardView *m_board = nullptr;
     QString m_subagentCwd;
 };
 
@@ -9295,6 +9481,15 @@ private:
         }
 
         items << actionItem(panes, QStringLiteral("File explorer"), QStringLiteral("Open this pane's directory, or close the explorer again"), QStringLiteral("files.explorer"));
+        items << actionItem(panes, QStringLiteral("Open folder in explorer"), QStringLiteral("This pane's directory"), QStringLiteral("files.explorer"));
+        {
+            // Switchboard: the board of cards, threads, plans and memory (design 4.1).
+            PaletteItem board = actionItem(panes, QStringLiteral("Switchboard"),
+                                           QStringLiteral("Cards, threads, plans and project memory"),
+                                           QStringLiteral("board.open"));
+            board.aliases = QStringLiteral("board issues cards todo trello kanban scratchpad tickets tracker");
+            items << board;
+        }
         items << actionItem(panes, QStringLiteral("Open file…"), QStringLiteral("Preview a file in a pane"), QStringLiteral("files.open"));
         {
             // Per-pane terminal engine (docs/ENGINE.md). Both can run side by side in one window.
@@ -9450,6 +9645,7 @@ private:
             {QStringLiteral("window"), QStringLiteral("windows frame")},
             {QStringLiteral("move"), QStringLiteral("drag rearrange relocate detach")},
             {QStringLiteral("explorer"), QStringLiteral("files folder browse tree dolphin")},
+        {QStringLiteral("switchboard"), QStringLiteral("board issues cards todo trello kanban scratchpad tracker")},
             {QStringLiteral("open file"), QStringLiteral("preview view read")},
             {QStringLiteral("native"), QStringLiteral("raw direct typing keyboard terminal control")},
             {QStringLiteral("interrupt"), QStringLiteral("ctrl+c kill stop signal")},
@@ -9741,6 +9937,129 @@ public:
         focusLeaf(tool);
         updateTitles();
     }
+    // ----- Switchboard (docs/SWITCHBOARD-DESIGN.md 4, protocol 17) -----------------------------
+    // Ctrl+Shift+S: open the Switchboard beside the anchor, focus the one this tab already has,
+    // or, pressed on it, go back to the last terminal pane.
+    void toggleBoardPane() {
+        const QString workspace = boardWorkspace();
+        if (workspace.isEmpty()) {
+            statusBar()->showMessage(QStringLiteral("This workspace has no Switchboard yet "
+                                                    "(issues/board.yaml is missing)."), 9000);
+            return;
+        }
+        QWidget *page = m_tabs->currentWidget();
+        if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data()); tool && tool->board()) {
+            if (m_active) { setActiveLeaf(m_active); focusLeaf(m_active); }
+            return;
+        }
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) {
+                setActiveLeaf(tool); focusLeaf(tool); return;
+            }
+        QWidget *anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
+        auto *tool = createBoardPane(workspace, QString());
+        if (!tool) return;
+        if (anchor) insertBeside(anchor, tool, Qt::Horizontal, false);
+        else if (page && page->layout()) page->layout()->addWidget(tool);
+        setActiveLeaf(tool);
+        focusLeaf(tool);
+        updateTitles();
+    }
+
+    // The nearest ancestor of the anchor pane's directory that has a Switchboard.
+    QString boardWorkspace() const {
+        QStringList candidates;
+        if (m_active) candidates << m_active->workspace() << m_active->cwd();
+        candidates << m_manager->workspace() << QDir::currentPath();
+        for (const QString &candidate : candidates) {
+            if (candidate.isEmpty()) continue;
+            for (QDir dir(candidate); ; ) {
+                if (QFileInfo::exists(dir.absoluteFilePath(QStringLiteral("issues/board.yaml"))))
+                    return dir.absolutePath();
+                if (!dir.cdUp()) break;
+            }
+        }
+        return QString();
+    }
+
+    relay::BoardWorker *boardWorker() {
+        if (!m_boardWorker) {
+            m_boardWorker = new relay::BoardWorker(
+                QStandardPaths::findExecutable(QStringLiteral("python3")), dataRoot(), this);
+            QPointer<RelayWindow> guard(this);
+            m_boardWorker->onEvent = [guard](const QJsonObject &event) {
+                if (!guard) return;
+                for (int i = 0; i < guard->m_tabs->count(); ++i)
+                    for (QWidget *leaf : leavesIn(guard->m_tabs->widget(i)))
+                        if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
+                            tool->board()->handleEvent(event);
+                if (event.value(QStringLiteral("event")).toString() == QStringLiteral("configured"))
+                    guard->m_boardWorker->send({{QStringLiteral("type"), QStringLiteral("board_open")}});
+            };
+            m_boardWorker->onStatus = [guard](const QString &text) {
+                if (guard) guard->statusBar()->showMessage(text, 9000);
+            };
+        }
+        return m_boardWorker;
+    }
+
+    // The Switchboard worker runs an ordinary agent on the `switchboard` role (protocol 13), so
+    // card threads never enter a pane's conversation.
+    void startBoardWorker(const QString &workspace) {
+        QSettings settings;
+        const QString preset = settings.value(QStringLiteral("provider/preset")).toString();
+        QJsonObject configure{{QStringLiteral("type"), QStringLiteral("configure")},
+                              {QStringLiteral("workspace"), workspace},
+                              {QStringLiteral("agent_role"), QStringLiteral("switchboard")},
+                              {QStringLiteral("use_stored_key"), true},
+                              {QStringLiteral("api_key"), QString()},
+                              {QStringLiteral("base_url"), settings.value(QStringLiteral("provider/base")).toString()},
+                              {QStringLiteral("model"), settings.value(QStringLiteral("provider/model")).toString()},
+                              {QStringLiteral("max_tokens"), settings.value(QStringLiteral("provider/max_tokens"), 8192).toInt()}};
+        if (!preset.isEmpty()) configure.insert(QStringLiteral("preset"), preset);
+        const QJsonObject extra = QJsonDocument::fromJson(
+            settings.value(QStringLiteral("provider/extra")).toString().toUtf8()).object();
+        if (!extra.isEmpty()) configure.insert(QStringLiteral("extra"), extra);
+        const QJsonObject roles = Pane::rolesObject();
+        if (!roles.isEmpty()) configure.insert(QStringLiteral("roles"), roles);
+        const QJsonObject tiers = Pane::tiersObject();
+        if (!tiers.isEmpty()) configure.insert(QStringLiteral("tiers"), tiers);
+        boardWorker()->start(configure);
+    }
+
+    ToolPane *createBoardPane(const QString &workspace, const QString &tab) {
+        auto *view = new relay::BoardView(workspace);
+        if (!tab.isEmpty()) view->setCurrentTab(tab);
+        auto *tool = new ToolPane(view, workspace);
+        relay::theme::polishWindow(tool);
+        tool->setObjectName(QStringLiteral("pane"));
+        QPointer<ToolPane> guard(tool);
+        view->onSend = [this](const QJsonObject &message) { boardWorker()->send(message); };
+        view->onStatus = [guard](const QString &text) {
+            if (auto *w = windowOf(guard); w && !text.isEmpty()) w->statusBar()->showMessage(text, 9000);
+        };
+        view->onTitleChanged = [guard](const QString &) { if (auto *w = windowOf(guard)) w->updateTitles(); };
+        view->onOpenFile = [guard](const QString &path) {
+            if (auto *w = windowOf(guard)) w->openPath(path, 0, guard);
+        };
+        view->onSendToTerminal = [guard](const QString &reference) {
+            auto *w = windowOf(guard);
+            if (!w || !w->m_active) return;
+            w->m_active->insertInComposer(reference);
+            w->setActiveLeaf(w->m_active);
+            w->m_active->focusInput();
+        };
+        view->onHint = [guard](const QString &id, const QString &keys) {
+            auto *w = windowOf(guard);
+            if (!w || keys.isEmpty()) return;
+            w->hint(QStringLiteral("board.") + id, relay::ShortcutHints::nextTime(keys));
+        };
+        startBoardWorker(workspace);
+        if (boardWorker()->configured())
+            boardWorker()->send({{QStringLiteral("type"), QStringLiteral("board_open")}});
+        return tool;
+    }
+
 private:
 
     // ----- panes ------------------------------------------------------------------------------
@@ -9863,6 +10182,7 @@ private:
         pane->onShellExited = [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, false); };
         pane->onOpenPath = [guard](const QString &path, int line) { if (auto *w = windowOf(guard)) w->openPath(path, line, guard); };
         pane->onToggleExplorer = [guard](const QString &path) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleExplorer(path, guard); } };
+        pane->onOpenBoard = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleBoardPane(); } };
         // Right-click menu entries the window owns (issue #X2F1).
         pane->onWindowAction = [guard](const QString &action) {
             auto *w = windowOf(guard);
@@ -9901,6 +10221,13 @@ private:
             for (const auto &size : node.value(QStringLiteral("sizes")).toArray()) sizes.append(size.toInt());
             if (sizes.size() == splitter->count()) splitter->setSizes(sizes);
             return splitter;
+        }
+        if (node.contains(QStringLiteral("board"))) {
+            const QJsonObject board = node.value(QStringLiteral("board")).toObject();
+            const QString workspace = board.value(QStringLiteral("workspace")).toString();
+            if (QFileInfo::exists(workspace + QStringLiteral("/issues/board.yaml")))
+                return createBoardPane(workspace, board.value(QStringLiteral("tab")).toString());
+            return createPane({{"cwd", m_manager->workspace()}, {"workspace", m_manager->workspace()}});
         }
         if (node.contains(QStringLiteral("plan"))) {
             const QString path = node.value(QStringLiteral("plan")).toObject().value(QStringLiteral("path")).toString();
@@ -10959,7 +11286,11 @@ private:
         m_manager->remember(item);
     }
 
+    void stopBoardWorker() { if (m_boardWorker) m_boardWorker->stop(); }
+
     WindowManager *m_manager;
+    // Switchboard: one worker per window, started on the first Ctrl+Shift+S (protocol 17).
+    QPointer<relay::BoardWorker> m_boardWorker;
     QTabWidget *m_tabs = nullptr;
     QList<QPair<QAction *, QString>> m_toolbarActions;
     QPointer<relay::SettingsWindow> m_settings;

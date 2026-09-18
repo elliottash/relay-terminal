@@ -149,6 +149,11 @@ private slots:
         QVERIFY(isUsableNode(split(QStringLiteral("h"), QJsonArray{pane(QStringLiteral("/tmp")), pane(QStringLiteral("/usr"))})));
         QVERIFY(isUsableNode(QJsonObject{{"explorer", QJsonObject{{"path", "/tmp"}}}}));
         QVERIFY(isUsableNode(QJsonObject{{"plan", QJsonObject{{"path", "/tmp/plan.md"}}}}));
+        // The Switchboard is keyed on its workspace and tab, not on a file path.
+        QVERIFY(isUsableNode(QJsonObject{{"board", QJsonObject{{"workspace", "/repo"}, {"tab", "bugs"}}}}));
+        QVERIFY(isUsableNode(QJsonObject{{"board", QJsonObject{{"workspace", "/repo"}}}}));
+        QVERIFY(!isUsableNode(QJsonObject{{"board", QJsonObject{}}}));               // no workspace
+        QVERIFY(!isUsableNode(QJsonObject{{"board", QJsonObject{{"tab", "bugs"}}}}));
         QVERIFY(!isUsableNode(QJsonObject{}));
         QVERIFY(!isUsableNode(QJsonObject{{"subagent", QJsonObject{}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"explorer", QJsonObject{}}}));   // no path

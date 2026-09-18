@@ -98,6 +98,11 @@ FORWARDED_EVENTS = frozenset({
     "vision_route", "vision_route_ended", "vision_unavailable",
     # Pane titles and tab labels: what a phone needs to label the panes it is showing.
     "session_title", "tab_label",
+    # Switchboard (protocol 19): cards, their threads and what the agent did to them. A phone
+    # watching a pane should see the board move for the same reason the desktop does; the card
+    # bodies are the user's own notes, already in git, not desktop-local configuration.
+    "board", "board_activity", "board_card", "board_changed", "board_problems",
+    "board_thread_appended", "board_undone", "board_written",
     # The agent typing into the visible program: a phone watching a pane must see every keystroke
     # the agent sends and every refusal, for the same reason the desktop prints them inline.
     "program_input", "program_input_refused",

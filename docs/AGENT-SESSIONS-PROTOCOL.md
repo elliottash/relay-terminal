@@ -1205,3 +1205,170 @@ knows the terminal at the instant of the write.
   screen in the result is the screen the keystroke produced.
 - **No separate "read the screen" tool.** The screen arrives with the grant and again with every
   result; a tool that only looks would be one more round trip for the same bytes.
+## 19. Switchboard: cards, threads and the Switchboard agent (v1.7, 2026-09-17)
+
+Phase 1 of `docs/SWITCHBOARD-DESIGN.md` (sections 4–6, 9.1 and the owner decisions in 12). The
+Switchboard **is** the repository's `issues/` tree: `backend/relay_core/board.py` owns the bytes
+(format: `docs/SWITCHBOARD-FORMAT.md`), `backend/relay_core/board_tools.py` owns the six agent
+tools and their guardrails, `backend/relay_core/board_protocol.py` owns the messages below, and
+`backend/relay_core/board_policy.md` is the versioned system-prompt block. The GUI never parses a
+card: it asks for rows and detail and sends back intents. Tests: `tests/test_board_tools.py`,
+`tests/test_board_protocol.py`, `tests/test_board.py`.
+
+Everything here is inert unless the workspace has an `issues/board.yaml`. The file's presence is
+the switch.
+
+### 17.1 `configure` additions
+
+`configure` gains an optional `board {dir?, autonomy?, limits?}`: `dir` overrides `<workspace>/issues`,
+`autonomy` overrides `board.yaml`'s `agent.autonomy` (`off` | `suggest` | `auto`; a per-user local
+override), and `limits` lowers `max_creates_per_turn`, `max_writes_per_turn` or
+`max_creates_per_hour`. When a board is found, `configured` gains
+
+```json
+"board": {"dir": "/repo/issues", "autonomy": "auto", "limits": {}, "cards": 86}
+```
+
+and is absent otherwise, so the GUI knows whether to offer the pane. Two instances of the tools are
+built per worker: the **agent's**, with the guardrails of 17.7, and the **owner's**, used by the
+messages below with the rate limit and the duplicate check off — the guardrails exist to keep an
+agent honest, not the person typing.
+
+### 17.2 Reading the board
+
+| Message | Reply |
+|---|---|
+| `board_open {id?}` | `board {id, rev, root, workspace, config, cards: [row], problems}` |
+| `board_refresh {id?}` | `board_changed {id?, rev, upserts: [row], removed: [card_id], problems}` |
+| `board_card_get {id?, card, thread_entries?≤50}` | `board_card {id, card_id, hash, path, front, title, body, sections, tasks, thread, thread_total}` |
+| `board_check {id?}` | `board_problems {id, items: [{code, path, message, severity}]}` |
+
+`config` is `{tabs, columns, autonomy, statuses, column_statuses, labels}`: `tabs` as `board.yaml`
+lists them (each names a `folder` or a `filter`), `columns` as the board configures them, and
+`column_statuses` mapping each column to the statuses it collects, so the pane's column model needs
+no table of its own.
+
+A **row** is `{id, title, type, status, tab, labels, assignee, waiting_on, rank, private, path,
+thread_entries, tasks_done, tasks_total, created, milestone, component, implemented_by}` — enough to
+draw a card without reading the file.
+
+`board_refresh` is what the GUI sends when its `QFileSystemWatcher` fires (and after a `git pull`).
+The worker diffs the tree against the rows it last sent, so a change to one card is one upsert, not
+a reload. `rev` increases on every `board_changed`; a GUI that has missed revisions re-opens.
+
+**On every event, `id` is the request id and `card_id` is the card.** A card id never travels as
+`id` on an event.
+
+### 17.3 Writing from the pane
+
+| Message | Reply |
+|---|---|
+| `board_create {id?, tab, status, text, title?, card_type?, labels?, source?, author?}` | `board_written` + `board_changed` |
+| `board_update {id?, card, base_hash, patch, author?}` | `board_written` + `board_changed` |
+| `board_move {id?, card, status?, tab?, before?, after?, reason?, evidence?, author?}` | `board_written` + `board_changed` |
+| `board_comment {id?, card, text, kind?, author?}` | `board_written` + `board_changed` |
+| `board_undo {id?, write_id}` | `board_undone` + `board_changed` |
+
+`board_create` is quick add: `text` is stored **verbatim** as the card's `## Request`, and the title
+is its first line (shortened) unless one is given. `patch` holds the `board_update_card` arguments
+(`fields`, `title`, `append_section`, `replace_section`, `tasks`). `before`/`after` are the card ids
+a drag dropped this card between; the worker computes the fractional rank. `author` names the
+person, and defaults to `owner`.
+
+`board_written` carries `{id, kind, card_id, write_id, …}` plus whatever the tool returned (the new
+`hash`, `path`, `status`). A refusal is the ordinary `error` event with a `code` — notably
+`board_conflict` (with `current_hash`, after which the GUI re-reads and reapplies) and
+`board_not_found`.
+
+`board_undo` is the 30-second toast. It restores the file bytes recorded before the write and
+truncates the thread back to its length at that moment, then records the undo itself as a thread
+event. Undoing a *creation* deletes the file only when git has never seen it; a committed card is
+closed with `done`/`dropped` instead, and the undo is refused.
+
+### 17.4 `board_ask`: the Switchboard agent
+
+| Message | Events |
+|---|---|
+| `board_ask {id?, card, text, author?}` | `board_thread_appended` (the question), then an ordinary turn tagged with `card_id`, then `board_thread_appended` (the answer) |
+
+The Switchboard agent is **a worker per window**, started by the GUI exactly like a pane's worker
+but configured with `agent_role: "switchboard"`, so its model is the `switchboard` role of section
+13 — which defaults to the main agent. Card chats therefore never enter a pane's conversation.
+
+The question is appended to the card's thread **before** the model is called, so a crash or a
+provider failure never loses what the user typed. The agent is stateless per card: the first
+question about a card resets the conversation and seeds it with the card's front matter, its body
+(capped at 16 KiB) and the last 10 thread entries; later questions about the same card reuse that
+conversation (owner decision 12.5, option D). Any change to the card file invalidates it and the
+next question reseeds — the file is the memory, so a collaborator's Relay, or this machine after
+its local state is gone, continues the same thread.
+
+Turn events (`delta`, `thinking`, `tool_started`, `tool_result`, `turn_summary`, `status`, `done`,
+`error`, `cancelled`) carry `card_id` while a `board_ask` turn runs, so the pane routes them to the
+right card detail view. On `done` the assembled answer is appended to the thread as an `agent`
+comment carrying the model and `session/turn`; on `error` or `cancelled` nothing is written.
+
+### 17.5 `board_activity`: what the agent did, in the pane that caused it
+
+Every agent write (and every write from the pane) emits, before its `board_changed`:
+
+```json
+{"event": "board_activity", "write_id": "w-1a0b", "id": "K7Q2", "action": "move",
+ "actor": "agent", "model": "anthropic/claude-opus-5", "pane": "2", "turn_id": "t-14",
+ "summary": "In progress to Needs QA (LLM)", "path": "issues/features/x.md", "undo_seconds": 30}
+```
+
+The pane draws one inline line (`◆ #K7Q2 … · moved to Needs QA (LLM)`) plus a toast with **Open**
+and **Undo**. This is the only board event a terminal pane needs to handle.
+
+### 17.6 `ask {cards: [...]}`
+
+`ask` gains `cards: [{id} | "K7Q2"]` (at most 10): the `#K7Q2` references resolved in the composer.
+Each becomes an attachment-shaped block labelled `Switchboard card #K7Q2` — front matter, body
+(16 KiB cap), open tasks and the last 10 thread entries — so the pane agent has the card in context
+and can post progress back with `board_comment`. The block is labelled as a card rather than as a
+file the user picked with `@`, and it is still data, not instructions.
+
+### 17.7 The agent tools and their guardrails
+
+`board_list`, `board_read`, `board_create_card`, `board_update_card`, `board_move_card` and
+`board_comment` are added to the pane agent's tool list whenever the workspace has a board and
+autonomy is not `off`, together with `board_policy.md` in the system prompt. Plan mode keeps the two
+read tools and drops the four writes.
+
+- **No delete tool.** Closing a card is `board_move_card` to `done` or `dropped` with a reason.
+- **Immutable through `board_update_card`:** `id`, `type`, `created`, `source`, `rank`, `status`,
+  `private`. `status` and `rank` are `board_move_card`'s job; the rest are the record.
+- **Owner text may be rewritten** (decision 12.3, superseding the refusal in design 6.3): a replaced
+  `## Request`, or a new title, writes a `rewrite` thread entry holding the old *and* the new text,
+  so the discussion history shows the change and it can be put back. The card hash now detects an
+  *unlogged* edit rather than preventing an edit.
+- **Every write appends a thread entry** with `author`, `model`, `pane` and `turn`.
+- **Writes are atomic and hash-checked**, exactly like `write_file`: a stale `base_hash` returns
+  `{"code": "board_conflict", "current_hash"}` and nothing is overwritten.
+- **Limits:** 5 creates and 20 other writes per turn, 30 creates per hour per workspace (the hourly
+  count lives in `<workspace>/.relay/board-rate.json` under `flock`, so panes share it). Over the
+  limit the tool returns `{"code": "board_rate_limited", "scope": "turn"|"hour"}` and the policy
+  tells the agent to summarize the rest in its reply.
+- **A fuzzy duplicate check** on create returns `{"code": "board_possible_duplicate",
+  "possible_duplicates": [{id, title, score}]}`; the agent repeats the call with `not_duplicate_of`
+  once it has read them.
+- **QA rules:** into `needs-qa-*` requires `evidence` and `implemented_by`; out of a QA lane to
+  `done`/`dropped` requires a verdict section in the body and a **different model family** from the
+  one that implemented it.
+- **A `decision` comment must quote the user verbatim** (text in quotation marks), or it is refused.
+
+### 17.8 Notes and deviations
+
+- The design's "new section 12" is this section 17: 12 is the request ledger.
+- Design 6.1 named the update argument `replace_agent_section`. It is `replace_section` here, since
+  decision 12.3 lets it touch owner sections too (with a logged rewrite); the old name is still
+  accepted.
+- Phase 1 does **not** implement `board_scan`, `board_convert`, `board_cleanup_sources` or the
+  `suggest` proposal flow (design 7 and phase 2). `autonomy: suggest` is accepted and stated in the
+  prompt, but writes still apply directly.
+- `board.yaml`'s `agent.autonomy: off` reads back as the YAML boolean `false`; the backend maps it,
+  so no board file has to quote the word.
+- Thread entry ids are second-resolution, so `board.append_thread` now picks the next free suffix
+  after the last id **on disk, under the lock**. Two writes in the same second stay ordered and
+  `relay-board.py check` stays clean.

@@ -36,6 +36,14 @@ target_include_directories(relay-editor PUBLIC src)
 target_link_libraries(relay-editor PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-editor PRIVATE -Wall -Wextra -Wpedantic)
 
+# Switchboard pane: the card board, its detail view and the per-window Switchboard worker.
+# BoardModel holds the logic (tabs, columns, filters, search) so it can be tested headless.
+add_library(relay-board STATIC src/BoardModel.cpp src/BoardModel.h src/BoardPane.cpp src/BoardPane.h
+    src/BoardWorker.cpp src/BoardWorker.h)
+target_include_directories(relay-board PUBLIC src)
+target_link_libraries(relay-board PUBLIC relay-editor ${RELAY_QT}::Widgets)
+target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
+
 # Folder explorer and file preview panes: plain Qt, with optional syntax highlighting and PDF.
 add_library(relay-filepanes STATIC src/FilePanes.cpp src/FilePanes.h)
 target_include_directories(relay-filepanes PUBLIC src)
@@ -192,7 +200,7 @@ if(RELAY_BUILD_APP)
         src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-outputlinks relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-outputlinks relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-board ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -285,6 +293,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-hints-tests PRIVATE ${RELAY_QT}::Test)
     add_test(NAME hints COMMAND relay-hints-tests)
     set_tests_properties(hints PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-board-tests tests/boardmodel_test.cpp)
+    target_link_libraries(relay-board-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    add_test(NAME board COMMAND relay-board-tests)
+    set_tests_properties(board PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME backend-and-bash COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -v)
     # XDG_DATA_HOME keeps session autosaves and the conversation index out of the real profile.
     set_tests_properties(backend-and-bash PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"

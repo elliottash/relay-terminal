@@ -33,8 +33,11 @@ def find_chrome() -> str | None:
 class Browser:
     """One headless Chrome with one page."""
 
-    def __init__(self, binary: str | None = None):
+    def __init__(self, binary: str | None = None, *, insecure: bool = False):
         self.binary = binary or find_chrome()
+        # `insecure` is for the development certificate only: the GUI shares over https with a
+        # self-signed certificate, and a phone gets a warning it can accept. Chrome cannot.
+        self.insecure = insecure
         self.process: subprocess.Popen | None = None
         self.socket: ws.WebSocket | None = None
         self.profile: tempfile.TemporaryDirectory | None = None
@@ -49,12 +52,15 @@ class Browser:
             raise RuntimeError("no Chrome or Chromium on this machine.")
         self.profile = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.port = _free_port()
-        self.process = subprocess.Popen(
-            [self.binary, "--headless=new", "--disable-gpu", "--no-first-run",
-             "--no-default-browser-check", "--disable-extensions", "--disable-dev-shm-usage",
-             f"--remote-debugging-port={self.port}", f"--user-data-dir={self.profile.name}",
-             "about:blank"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        arguments = [self.binary, "--headless=new", "--disable-gpu", "--no-first-run",
+                     "--no-default-browser-check", "--disable-extensions",
+                     "--disable-dev-shm-usage", f"--remote-debugging-port={self.port}",
+                     f"--user-data-dir={self.profile.name}"]
+        if self.insecure:
+            arguments.append("--ignore-certificate-errors")
+        arguments.append("about:blank")
+        self.process = subprocess.Popen(arguments, stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL)
 
         target = None
         for _ in range(200):

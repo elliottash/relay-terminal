@@ -38,6 +38,8 @@ shot() { import -window "$win" "$out/implementer-$1.png"; }
 t() { xdotool type --delay 12 "$1"; }
 k() { xdotool key --delay 40 "$@"; }
 
+# The pairing URL holds a one-time secret, so Relay writes it out only when asked to.
+export RELAY_REMOTE_PAIR_FILE="$work/pair-url.txt"
 "$build/relay" --engine=relay --workspace "$work" >"$out/relay-stderr.log" 2>&1 &
 relay_pid=$!
 sleep 7
@@ -55,65 +57,44 @@ t 'printf "shared from the desktop\\n"'; k Return
 sleep 2
 shot 01-pane-before-sharing
 
-# The share button is the chip right after the microphone in the composer's strip.
-share=$(xdotool search --onlyvisible --name "^Relay" >/dev/null; echo)
-python3 - "$win" <<'PY'
-# Find the share button by its accessible name is not available through xdotool, so click by
-# geometry: the strip sits at the bottom right of the composer. The button order is
-# ... model picker, mic, share ... and both chips are 14px icons in a 6px-spaced row.
-import subprocess, sys
-win = sys.argv[1]
-geometry = subprocess.run(["xdotool", "getwindowgeometry", "--shell", win],
-                          capture_output=True, text=True).stdout
-values = dict(line.split("=", 1) for line in geometry.strip().splitlines())
-width, height = int(values["WIDTH"]), int(values["HEIGHT"])
-print(f"window {width}x{height}")
-PY
-echo "clicking the share chip"
-# The strip's right edge holds the interrupt button (hidden), then share, then mic.
-xdotool mousemove --window "$win" 1416 872 click 1
-sleep 6
-shot 02-share-dialog
+# Share this pane by clicking the share chip, the last button in the composer's strip, right
+# after the microphone. (The palette action "Share this pane with a phone" does the same thing.)
+shot 02-strip-with-share-button
+xdotool mousemove --window "$win" 1452 914 click 1
+sleep 10
+shot 03-after-clicking-share
 
-# The dialog prints the URL; read it from the sidecar's own view of things instead of OCR.
-url=$(grep -ao 'https\?://[^ "]*#v=1[^ "]*' "$out/relay-stderr.log" | tail -1)
-echo "pairing url from the log: ${url:-<none>}"
+# The dialog is its own window; capture it so the shot shows the QR, not the pane behind it.
+dlg=$(xdotool search --onlyvisible --name "Share this pane" | head -1)
+[[ -n $dlg ]] && import -window "$dlg" "$out/implementer-04-qr-dialog.png"
 
-# Pair a headless browser with it and type into the real pane.
-if [[ -n $url ]]; then
-  ( cd "$root" && python3 - "$url" <<'PY' >"$out/pair.log" 2>&1
-import asyncio, sys
-sys.path.insert(0, ".")
-from tests.browser import Browser
+url=$(cat "$work/pair-url.txt" 2>/dev/null)
+echo "pairing url: ${url:0:60}${url:+...}"
+[[ -z $url ]] && { echo "no pairing url; the sidecar did not start"; tail -20 "$out/relay-stderr.log"; exit 1; }
 
-async def main():
-    url = sys.argv[1]
-    browser = Browser()
-    await browser.start()
-    try:
-        await browser.navigate(url)
-        await browser.wait_for("!document.getElementById('screen-inbox').hidden", timeout=60)
-        print("paired")
-        await browser.evaluate("document.querySelectorAll('.pane-row')[0].click()")
-        await browser.wait_for("!document.getElementById('terminal-pane').hidden", timeout=30)
-        await browser.wait_for("document.querySelectorAll('.screen-row').length > 1", timeout=30)
-        print("screen:", (await browser.evaluate(
-            "document.querySelector('.screen-grid').textContent"))[:200])
-        await browser.evaluate("document.getElementById('term-take').click()")
-        await browser.wait_for("!document.getElementById('term-composer').hidden", timeout=20)
-        await browser.evaluate(
-            "(() => { const b = document.getElementById('term-line');"
-            " b.value = 'printf \"typed from the phone\\\\n\"';"
-            " document.getElementById('term-send').click(); return true; })()")
-        await asyncio.sleep(3)
-        print("done")
-    finally:
-        await browser.stop()
+# Pair a headless browser and type into the real pane. Pairing needs the person at the desktop to
+# allow the device, so the browser runs in the background while the script answers the dialog.
+( cd "$root" && python3 browser_pair.py "$url" >"$out/pair.log" 2>&1 ) &
+pair_pid=$!
 
-asyncio.run(asyncio.wait_for(main(), 180))
-PY
-  )
+for i in $(seq 1 40); do
+  grep -q "phone shows code" "$out/pair.log" 2>/dev/null && break
+  sleep 1
+done
+sleep 3
+dlg=$(xdotool search --onlyvisible --name "Share this pane" | head -1)
+if [[ -n $dlg ]]; then
+  import -window "$dlg" "$out/implementer-05-confirm-code.png"
+  xdotool windowfocus "$dlg"; sleep 1
+  # Allowing takes a deliberate click: Refuse is the default, so Return would turn the phone away.
+  xdotool mousemove --window "$dlg" 257 467 click 1
 fi
 sleep 2
-shot 03-after-phone-typed
+[[ -n $dlg ]] && import -window "$dlg" "$out/implementer-06-paired.png"
+
+wait $pair_pid
+sleep 2
+shot 07-pane-after-phone-typed
+echo "--- what the browser saw ---"
+cat "$out/pair.log"
 echo "screenshots in $out"

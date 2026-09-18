@@ -1,0 +1,5 @@
+phone shows code 66532
+paired
+phone sees: elliott@spark-dcc9:/tmp/tmp.OzZ1FbE8iU$ printf "shared from the desktop\\n" shared from the desktop elliott@spark-dcc9:/tmp/tmp.OzZ1FbE8iU$
+phone sees after typing: elliott@spark-dcc9:/tmp/tmp.OzZ1FbE8iU$ printf "shared from the desktop\\n" shared from the desktop elliott@spark-dcc9:/tmp/tmp.OzZ1FbE8iU$ printf "typed from the phone\n" typed from the phone elliott@spark-dcc9:/tmp/tmp.OzZ1FbE8iU$
+console problems: []

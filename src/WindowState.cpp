@@ -140,6 +140,12 @@ bool isUsableNode(const QJsonObject &node, int depth) {
         return true;
     }
     if (node.contains(QStringLiteral("pane"))) return node.value(QStringLiteral("pane")).isObject();
+    // The Switchboard is keyed on its workspace and tab, not on a file path.
+    if (node.contains(QStringLiteral("board"))) {
+        const QJsonObject board = node.value(QStringLiteral("board")).toObject();
+        return node.value(QStringLiteral("board")).isObject()
+               && !board.value(QStringLiteral("workspace")).toString().isEmpty();
+    }
     for (const char *kind : {"explorer", "preview", "plan"}) {
         const QString key = QString::fromLatin1(kind);
         if (!node.contains(key)) continue;

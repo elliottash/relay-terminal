@@ -333,7 +333,12 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     auto *askRow = new QHBoxLayout;
     auto *refuse = new QPushButton(QStringLiteral("Refuse"));
     auto *allow = new QPushButton(QStringLiteral("Allow typing"));
-    allow->setDefault(true);
+    // Refuse is the default and holds the focus. Allowing a device is handing it the keyboard of
+    // a live shell, so it takes a deliberate click — never a stray Return in a window that just
+    // appeared while the person was typing somewhere else.
+    refuse->setDefault(true);
+    refuse->setFocus();
+    allow->setAutoDefault(false);
     askRow->addWidget(refuse);
     askRow->addWidget(allow);
     askColumn->addLayout(askRow);
