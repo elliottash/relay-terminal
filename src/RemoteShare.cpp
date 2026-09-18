@@ -226,10 +226,67 @@ void RemoteShare::handle(const QJsonObject &message)
         const QString paneId = message.value(QStringLiteral("pane")).toString();
         auto it = m_panes.find(paneId);
         if (it != m_panes.end() && it->hooks.compose) {
+            const QString when = message.value(QStringLiteral("when")).toString();
             it->hooks.compose(message.value(QStringLiteral("text")).toString(),
                               message.value(QStringLiteral("route")).toBool(),
-                              message.value(QStringLiteral("origin")).toString());
+                              message.value(QStringLiteral("origin")).toString(),
+                              when.isEmpty() ? QStringLiteral("now") : when,
+                              message.value(QStringLiteral("origin_name")).toString());
         }
+    // ----- pane_state (relay-terminal-71): section 16 ------------------------------------------
+    // Every one of these names a row, a choice or nothing at all — never a path, a preset or a
+    // worker type. The hub has already checked the device's capability and refused guests; the
+    // pane checks that the row still offers the action, against the pane as it is now.
+    } else if (kind == QLatin1String("pane_state_get")) {
+        auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
+        if (it != m_panes.end() && it->hooks.publishPaneState) it->hooks.publishPaneState();
+    } else if (kind == QLatin1String("queue_remove")) {
+        // `item` is what the phone's queue rows have been called since before pane_state; a
+        // `row` from the newer client means the same thing. Answered by the state that follows.
+        auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
+        const QString row = message.value(QStringLiteral("row")).toString().isEmpty()
+                                ? message.value(QStringLiteral("item")).toString()
+                                : message.value(QStringLiteral("row")).toString();
+        if (it != m_panes.end() && it->hooks.queueRemove && !row.isEmpty()) it->hooks.queueRemove(row);
+    } else if (kind == QLatin1String("queue_move")) {
+        auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
+        if (it != m_panes.end() && it->hooks.queueMove)
+            it->hooks.queueMove(message.value(QStringLiteral("row")).toString(),
+                                message.value(QStringLiteral("to")).toString());
+    } else if (kind == QLatin1String("queue_send_now")) {
+        auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
+        if (it != m_panes.end() && it->hooks.queueSendNow)
+            it->hooks.queueSendNow(message.value(QStringLiteral("row")).toString());
+    } else if (kind == QLatin1String("queue_edit")) {
+        // The hub is holding a device's request open for this answer, keyed by `id`, so every
+        // path answers: the text on success, `ok: false` when the row cannot be taken back.
+        const QString paneId = message.value(QStringLiteral("pane")).toString();
+        const QString row = message.value(QStringLiteral("row")).toString();
+        QJsonObject reply{{"t", QStringLiteral("queue_edit_text")}, {"pane", paneId}, {"row", row},
+                          {"id", message.value(QStringLiteral("id"))}};
+        QString text;
+        auto it = m_panes.find(paneId);
+        if (it != m_panes.end() && it->hooks.queueEdit && it->hooks.queueEdit(row, &text)) {
+            reply.insert(QStringLiteral("text"), text);
+        } else {
+            reply.insert(QStringLiteral("ok"), false);
+            reply.insert(QStringLiteral("error"), QStringLiteral("that row is no longer waiting."));
+        }
+        send(reply);
+    } else if (kind == QLatin1String("model_pick")) {
+        auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
+        if (it != m_panes.end() && it->hooks.modelPick)
+            it->hooks.modelPick(message.value(QStringLiteral("choice")).toString(),
+                                message.value(QStringLiteral("device_name")).toString());
+    } else if (kind == QLatin1String("conversation_new")) {
+        auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
+        if (it != m_panes.end() && it->hooks.conversationNew)
+            it->hooks.conversationNew(message.value(QStringLiteral("device_name")).toString());
+    } else if (kind == QLatin1String("recap_request")) {
+        // Forwarded by the sidecar since the phone first had a recap button, and dropped here
+        // until now (relay-terminal-71, 2026-09-18).
+        auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
+        if (it != m_panes.end() && it->hooks.recap) it->hooks.recap();
     } else if (kind == QLatin1String("secret_input")) {
         const QString paneId = message.value(QStringLiteral("pane")).toString();
         auto it = m_panes.find(paneId);
@@ -337,6 +394,15 @@ void RemoteShare::voiceResult(const QString &paneId, const QString &requestId, b
     if (ok) reply.insert(QStringLiteral("text"), text);
     else reply.insert(QStringLiteral("error"), error);
     send(reply);
+}
+
+void RemoteShare::paneState(const QString &paneId, const QJsonObject &state)
+{
+    if (!m_panes.contains(paneId)) return;   // stopped sharing between the publish and here
+    QJsonObject message = state;
+    message.insert(QStringLiteral("t"), QStringLiteral("pane_state"));
+    message.insert(QStringLiteral("pane"), paneId);
+    send(message);
 }
 
 bool RemoteShare::sharePane(const QString &paneId, const PaneHooks &hooks, QString *error)

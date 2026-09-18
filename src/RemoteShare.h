@@ -66,13 +66,30 @@ public:
         std::function<bool(const QByteArray &)> secret;
         // A prompt from a client. `route` means decide shell or agent the way the composer does;
         // without it the text may only reach the agent (the hub enforces which devices get it).
-        std::function<void(const QString &text, bool route, const QString &origin)> compose;
+        // `when` is "now", "queue" or "steer" — the phone's three-way send, the same choice the
+        // composer's Enter makes. `originName` is a guest's display name for the queue row; the
+        // id stays in `origin` and is never shown.
+        std::function<void(const QString &text, bool route, const QString &origin,
+                           const QString &when, const QString &originName)> compose;
         std::function<void()> stopAgent;
         // A voice clip from a phone (docs/REMOTE-PROTOCOL.md section 6.4). The pane hands it to
         // the same worker request its own microphone uses and answers with `voiceResult`; the
         // text belongs to the device that spoke, never to the desktop's prompt box.
         std::function<void(const QString &requestId, const QByteArray &audio,
                            const QString &format)> transcribe;
+        // pane_state (docs/REMOTE-PROTOCOL.md section 16): a client acting on the rows, the model
+        // choices and the sessions this pane published. Each takes ids the pane minted and answers
+        // false when the row is gone or no longer offers the action — the client was looking at an
+        // older state, and the pane publishes a fresh one rather than arguing with it.
+        std::function<bool(const QString &row)> queueRemove;
+        std::function<bool(const QString &row, const QString &to)> queueMove;
+        // Takes the row back for the client's own prompt box: `text` is what it held.
+        std::function<bool(const QString &row, QString *text)> queueEdit;
+        std::function<bool(const QString &row)> queueSendNow;
+        std::function<bool(const QString &choice, const QString &deviceName)> modelPick;
+        std::function<bool(const QString &deviceName)> conversationNew;
+        std::function<void()> publishPaneState;   // pane_state_get: publish this pane now
+        std::function<void()> recap;              // recap_request, which used to be dropped here
     };
 
     // Start the sidecar if needed and share this pane. Returns false with `error` set when the
@@ -127,6 +144,11 @@ public:
     // false; no audio and no key ever leaves this machine.
     void voiceResult(const QString &paneId, const QString &requestId, bool ok,
                      const QString &text, const QString &error);
+
+    // One pane's `pane_state` (section 16), on its way to every device watching that pane. The
+    // hub decides who sees what; this only carries it across. Called from Pane::onPaneState,
+    // which the publisher coalesces, so this is at most one message per pane per 100 ms.
+    void paneState(const QString &paneId, const QJsonObject &state);
 
 signals:
     void startedChanged();

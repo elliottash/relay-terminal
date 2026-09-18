@@ -193,9 +193,14 @@ public:
         // agent entry: it *is* that report, a prompt Relay wrote, shown and queued like a fix.
         bool handoff = false;
         bool noHandoff = false;   // a prompt from a paired device never gets the tool
+        // Who asked for it, when that is not the person at this desk: a guest's display name, or
+        // empty. Never the guest id — the row is read by people (card #W5N2's owner, 2026-09-18).
+        QString author;
         bool written() const { return fix || (agent && handoff); }   // by Relay, not by the user
         QString label() const {
-            return fix ? QStringLiteral("fix request") : written() ? QStringLiteral("terminal result") : text;
+            const QString what = fix ? QStringLiteral("fix request")
+                                 : written() ? QStringLiteral("terminal result") : text;
+            return author.isEmpty() ? what : author + QStringLiteral(" · ") + what;
         }
     };
     // Why the prompt box is hidden, so it can come back by itself when the reason ends.
@@ -3465,19 +3470,35 @@ public:
                 if (m_backend) m_backend->sendText(QString::fromUtf8(bytes), false);
             };
             hooks.secret = [this](const QByteArray &bytes) { return submitRemoteSecret(bytes); };
-            hooks.compose = [this](const QString &text, bool route, const QString &origin) {
-                submitRemote(text, route, origin);
+            hooks.compose = [this](const QString &text, bool route, const QString &origin,
+                                   const QString &when, const QString &originName) {
+                submitRemote(text, route, origin, when, originName);
             };
+            // pane_state (section 16): the pane publishes, and the phone's actions come back here.
+            hooks.queueRemove = [this](const QString &row) { return remoteQueueRemove(row); };
+            hooks.queueMove = [this](const QString &row, const QString &to) { return remoteQueueMove(row, to); };
+            hooks.queueEdit = [this](const QString &row, QString *text) { return remoteQueueEdit(row, text); };
+            hooks.queueSendNow = [this](const QString &row) { return remoteQueueSendNow(row); };
+            hooks.modelPick = [this](const QString &choice, const QString &name) { return remoteModelPick(choice, name); };
+            hooks.conversationNew = [this](const QString &name) { return remoteConversationNew(name); };
+            hooks.publishPaneState = [this] { m_paneState.publishNow(); };
+            hooks.recap = [this] { send({{"type", "recap_request"}, {"reason", "remote"}}); };
             hooks.stopAgent = [this] { stopAgent(); };
             hooks.transcribe = [this](const QString &requestId, const QByteArray &audio,
                                       const QString &format) {
                 transcribeForRemote(requestId, audio, format);
             };
+            onPaneState = [this](const QJsonObject &state) {
+                relay::RemoteShare::instance().paneState(m_token, state);
+            };
             QString error;
             if (!share.sharePane(m_token, hooks, &error)) {
+                onPaneState = nullptr;   // nothing is listening after all
                 status(error);
                 return;
             }
+            requestRemoteSessions();   // the session list a phone shows, before it asks
+            m_paneState.publishNow();
             updateShareChip();
         }
         auto *dialog = new relay::RemoteShareDialog(m_token, window());
@@ -8040,6 +8061,7 @@ private:
         entry.agent = true; entry.text = text; entry.why = why; entry.attachments = attachmentsFor(text);
         entry.shellText = shellText;
         entry.noHandoff = m_remoteSubmit;
+        if (m_remoteSubmit) entry.author = m_remoteAuthor;   // a guest's name on their row
         entry.cards = cardsFor(text);   // Switchboard: `#K7Q2` in the prompt (protocol 17.6)
         for (const QJsonValue &card : entry.cards) noteWorkCard(card.toObject().value(QStringLiteral("id")).toString());
         if (when == QStringLiteral("interrupt") && m_agentBusy) {
@@ -8061,17 +8083,35 @@ private:
     // be typing, and their draft is theirs. `route` asks the worker's router to decide, exactly as
     // the composer does; without it the text can only reach the agent, which is what keeps a
     // view-or-agent device away from the shell.
-    void submitRemote(const QString &text, bool route, const QString &origin) {
+    void submitRemote(const QString &text, bool route, const QString &origin,
+                      const QString &when = QStringLiteral("now"), const QString &originName = QString()) {
         const QString trimmed = text.trimmed();
         if (trimmed.isEmpty()) return;
-        status(QStringLiteral("Prompt from %1").arg(origin.isEmpty() ? QStringLiteral("a phone")
-                                                                     : origin));
+        const QString who = originName.trimmed().isEmpty()
+                                ? (origin.isEmpty() ? QStringLiteral("a phone") : origin)
+                                : originName.trimmed();
+        status(QStringLiteral("Prompt from %1").arg(who));
+        // "steer" is the phone's third choice: deliver it inside the running turn at the agent's
+        // next tool call, which is what Enter on an empty prompt box does here (#C4M8). With no
+        // turn to steer, the worker queues it, exactly as the desktop's own steer does.
+        m_remoteAuthor = originName.trimmed();
+        if (when == QLatin1String("steer") && m_agentBusy) {
+            m_remoteSubmit = true; submitAgent(trimmed, false, origin); m_remoteSubmit = false;
+            if (!m_entries.isEmpty() && m_entries.last().agent) {
+                m_lastQueuedEntryId = m_entries.last().id;
+                m_lastQueuedAt.start();
+                upgradeLastQueuedToSteer();
+            }
+            m_remoteAuthor.clear();
+            return;
+        }
         if (!route || !m_workerReady) {
             m_remoteSubmit = true; submitAgent(trimmed, false, origin); m_remoteSubmit = false;
+            m_remoteAuthor.clear();
             return;
         }
         const QString id = QStringLiteral("remote-") + QString::number(++m_requestId);
-        m_remotePrompts.insert(id, {trimmed, origin});
+        m_remotePrompts.insert(id, {trimmed, origin, originName.trimmed()});
         send({{"type", "route"}, {"id", id}, {"text", trimmed}, {"mode", QStringLiteral("auto")},
               {"known_commands", m_knownCommands}, {"path", m_shellPath}, {"cwd", m_cwd}});
     }
@@ -10606,7 +10646,10 @@ private:
     QToolButton *m_mic = nullptr;
     QToolButton *m_share = nullptr;
     // Prompts from paired devices waiting on the router, by request id.
-    struct RemotePrompt { QString text; QString origin; };
+    // `author` is a display name ("alice"), never the guest id in `origin`: the row shows who
+    // asked, and the id stays out of anything a person reads (card #W5N2's owner, 2026-09-18).
+    struct RemotePrompt { QString text; QString origin; QString author; };
+    QString m_remoteAuthor;   // the author of the prompt being submitted, for its queue entry
     QHash<QString, RemotePrompt> m_remotePrompts;
     relay::voice::Capture *m_voiceCapture = nullptr;
     QString m_voiceRequest, m_voiceClip;

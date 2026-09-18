@@ -90,6 +90,8 @@ output open the desktop app; agent tools run without approval and are not sandbo
 - Per-action approval prompts for agent tools.
 - A Relay account, hosted models or a Relay server.
 - Telemetry, analytics or crash reporting.
-- A browser-based terminal.
+- A browser-based terminal of its own. The browser shows a *desktop pane* as a remote
+  control that acts and feels like the terminal (`REMOTE-PROTOCOL.md` section 16); it never
+  runs a shell, and keys and provider settings never leave the desktop (owner, 2026-09-18).
 - croft-level IDE features (LSP, debugging) in the terminal-only variant
   ([NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section C).

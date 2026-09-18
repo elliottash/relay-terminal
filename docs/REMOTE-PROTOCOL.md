@@ -1046,3 +1046,61 @@ soon as two calls overlap. The counter is incremented synchronously, before any 
 frames are processed in arrival order for the same reason.
 
 Neither is visible at one message per second. A 20 fps screen stream finds them immediately.
+
+
+## 16. One pane model, two views: `pane_state`
+
+The desktop pane is the model. It publishes what it already shows, and every client — the phone,
+a tablet, the laptop browser, and in time another Relay — draws that. The client formats nothing:
+every label, hint and model name in the message was written by the desktop, so a pane feature
+reaches every screen without being built twice. Owner, 2026-09-18: the client is "a remote
+control, it doesn't have to be identical to the computer app", but "it acts and feels like the
+terminal".
+
+**The message** (desktop → client, at most one per pane per 100 ms; `remote/pane_state.py` is the
+only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` builds it):
+
+```json
+{"t":"pane_state","v":1,"pane":"p1","seq":42,
+ "turn":{"phase":"idle|thinking|tool|waiting","clock":"thinking · 12 s · step 1/256 · Esc stops","busy":true},
+ "thinking":{"visible":true,"header":"Thinking… · fake · 12 s","tail":"…the last 2000 characters"},
+ "queue":{"paused":false,"pause_reason":"","running":{"label":"✦ please plan this out"},
+          "rows":[{"id":"steer:steer-3","kind":"steer|agent|command","label":"↪ next tool call  ✦ …",
+                   "state":"waiting|withdrawing|queued|editing|paused",
+                   "actions":["remove","edit","to_queue","send_now","steer","up","down"]}],
+          "hint":"↑ select a row · Ctrl+↑↓ move · Shift+Del remove"},
+ "model":{"label":"fake · local","choices":[{"id":"m1","label":"Kimi K2 · Main","current":false}]},
+ "composer":{"mode":"auto|shell|agent","placeholder":"…","modes":["auto","shell","agent"]},
+ "context":{"label":"96% left","percent_left":96},
+ "sessions":{"rows":[{"id":"s1","title":"…","when":"14:02","current":true,"running":false}],"can_new":true}}
+```
+
+- `seq` rises; a client ignores anything older than what it has drawn. `running` is null when
+  nothing runs. Any field may be missing, and a client renders what it was given.
+- **A row's `actions` are the whole truth about it.** The client offers those and nothing else; the
+  pane checks the row still offers the action when the answer arrives, because the client was
+  necessarily looking at an older state.
+- **Every id is minted by the desktop**: row ids are the pane's own (`steer:<request id>`,
+  `entry:<n>`), and choice and session ids are per-publish tokens resolved against the pane's own
+  table. No preset id, no path, no session file name, no provider address ever appears.
+- **Capability** is read live, per message: a `view` device is sent no `actions`, no
+  `model.choices` and no `sessions.can_new`. **A guest is sent none of it at all** — `pane_state`
+  and `queue_edit_text` are absent from `GUEST_SERVER_TYPES`, which section 10.1 makes an
+  allow-list, so the owner's queue text, models and other sessions cannot reach a share.
+
+**Client → desktop.** All of these are `agent` except `pane_state_get` (`view`), and all are in
+`GUEST_NEVER`:
+
+| Type | Body | What it does |
+|---|---|---|
+| `pane_state_get` | `{pane}` | the pane publishes now, and the asking device is answered |
+| `queue_move` | `{pane,row,to}` | `to_queue`, `steer`, `up` or `down` |
+| `queue_edit` | `{pane,row}` | withdraws the row and answers `queue_edit_text {pane,row,text}` so the client can edit it in its own prompt box; nothing lands in the desktop's |
+| `queue_send_now` | `{pane,row}` | a waiting steer, now, interrupting the turn |
+| `queue_remove` | `{pane,row}` | withdraws or removes it (`item` is the older spelling of `row`) |
+| `model_pick` | `{pane,choice}` | only a model the menu offered, which is only one with a stored key; the pane says "Model changed from <device>" |
+| `conversation_new` | `{pane}` | the same as `/new`, refused while a turn runs. **Opening a past conversation remotely is not offered** (owner, 2026-09-18): the session list is there to be read |
+| `compose` | `{pane,text,when,origin_name?}` | `when` is `now`, `queue` or `steer`; `origin_name` is a guest's display name, which rides onto the queue row while the id stays in `origin` |
+
+Keys, provider and endpoint settings, the keyring and conversation deletion are desktop-only and
+have no type here at all (section 6.6, `NEVER_FROM_CLIENT`).
