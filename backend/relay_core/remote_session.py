@@ -89,16 +89,24 @@ def context_note(session: dict, *, delegated: bool = False) -> str:
         lines.append(f"The shell on {host} is at its prompt.")
     elif session.get("at_prompt") is False:
         lines.append(f"A program may be running in the session on {host}.")
-    lines.append(f"Plain run_command runs on this local machine, not on {host}; read_file, list_directory, "
-                 f"edit_file and write_file also only see this machine.")
+    lines.append(f"Without host, run_command and the file tools (read_file, list_directory, write_file, "
+                 f"edit_file) work on this local machine, not on {host}.")
     if usable(session):
         lines.append(
             f"To run a command on {host}, pass host: \"{host}\" to run_command. It runs over the user's own "
             f"ssh connection (no new login), non-interactively: no tty and no stdin, so nothing that asks "
             f"for a password (sudo) works there. It starts in "
             + (f"`{cwd}`" if cwd else f"the remote home directory")
-            + f" unless you pass cwd, which is then a path on {host}. Read files on {host} with run_command "
-            f"host (cat, sed -n, grep, ls), not read_file. Do not start your own ssh to {host}.")
+            + f" unless you pass cwd, which is then a path on {host}. Do not start your own ssh to {host}.")
+        lines.append(
+            f"read_file, list_directory, write_file and edit_file take the same host: \"{host}\", and then work "
+            f"on {host} over that connection — read, write and edit files there as you would here, and prefer "
+            f"them to cat and heredocs over run_command. path is then a path on {host}: absolute, ~/…, or "
+            f"relative to " + (f"`{cwd}`" if cwd else "the remote home directory") + ". It must be inside the "
+            f"user's home on {host}" + (f" or under `{cwd}`" if cwd else "") + " — there is no workspace there "
+            "to confine you — and the usual secret-file guard (.ssh, .env, keys, .git) applies. Nothing is "
+            f"installed on {host}, and there is no undo for a write there. Search with run_command host "
+            "(grep, find, ls).")
     else:
         lines.append(
             f"Relay cannot share this {program} connection (no connection-sharing socket answers), so "
@@ -137,6 +145,15 @@ def socket_alive(session: dict) -> bool:
         return stat.S_ISSOCK(os.stat(session["control_path"]).st_mode)
     except (OSError, KeyError, TypeError):
         return False
+
+
+def require_socket(session: dict) -> dict:
+    """The socket, or a refusal that says nothing ran. Every tool that reaches the host calls this
+    just before it does: the user may have logged out since the call was prepared."""
+    if not socket_alive(session):
+        raise ValueError(f"the ssh connection to {session['host']} has closed (its connection-sharing "
+                         "socket is gone), so nothing ran. Ask the user whether they are still logged in.")
+    return session
 
 
 def remote_script(command: str, cwd: str | None) -> str:

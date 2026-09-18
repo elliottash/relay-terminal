@@ -49,6 +49,7 @@ Owner, 2026-09-18, asked in the session:
 - [x] Connect to host (palette, from `~/.ssh/config`), split on the same host
 - [x] Options › Terminal › SSH sessions: auto / ask / off
 - [x] Clickable paths in a remote pane do not open local files (a toast names the host; URLs still open)
+- [x] The file tools take `host` too: read, list, write and edit files on the host over the same connection, content on ssh's stdin, temp+`mv`, mode preserved, inside the remote home or the shell's directory (`backend/relay_core/remote_files.py`, `tools.py`; protocol section 24.4; `tests/test_ssh_remote.py`)
 
 Design: [`docs/SSH-AND-MOSH.md`](../../docs/SSH-AND-MOSH.md).
 
@@ -81,3 +82,8 @@ main, Options › Terminal › SSH sessions on "Enhance automatically" unless a 
 10. Actions › Connect to host…: hosts from `~/.ssh/config` and recent ones; choosing one opens a tab
     that logs in. In a logged-in pane, Split on the same host opens a split that logs in without a
     password.
+11. At the remote prompt, ask the agent to read and then change a file in the remote home (e.g. add a
+    line to `~/notes.md`): the lines read "read notes.md on \<host\>" and "edited notes.md on
+    \<host\>", the fold shows a real diff of the remote file, the file on the host changes and keeps
+    its mode, and no `.relay-new.*` file is left beside it. Ask it for `/etc/hosts` and for
+    `~/.ssh/config`: both are refused in words the model can act on, and nothing is read.

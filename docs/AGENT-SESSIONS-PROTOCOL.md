@@ -2425,7 +2425,9 @@ A failed call always opens the fold, whatever it would have opened.
 
 A renderer may fold a **run of consecutive calls with the same `key`** into one line: "read 6 files
 · 4,100 lines" (sum the `lines`), "listed 3 folders · 92 entries" (sum the `entries`). Only two
-keys exist — `read` (`read_file`, `read_skill_file`) and `list` (`list_directory`). Commands,
+keys exist — `read` (`read_file`, `read_skill_file`) and `list` (`list_directory`) — plus, for a
+call made on an ssh host (24.4), `read on <host>` and `list on <host>`, whose `singular`/`plural`
+end in "on \<host\>" too, so a run on the host never merges with a local one. Commands,
 writes, edits, subagents, board writes and everything else never carry `merge` and are never
 merged. A **failed call carries no `merge`**, so it stands on its own line with its error, and it
 also breaks the run either side of it.
@@ -2549,6 +2551,49 @@ The property is in the tool schema only for a turn whose context has `remote_ses
   client; a remote process that ignores its closed output may outlive it.
 - `jobs` entries for such a job carry `host`. Labels (section 23) say "ran ls -la on filly",
   "running … on filly", "started job: … on filly"; the fold's `detail` gains a `host` section.
+
+### 24.4 The file tools take `host` too (v2.8, 2026-09-18)
+
+`read_file`, `list_directory`, `write_file` and `edit_file` take an optional `host` on exactly the
+turns `run_command` does (the context has `remote_session`), validate it exactly as `run_command`
+does — equal to `remote_session.host`, `reachable`, a `control_path`, and the socket still there —
+and refuse with the same actionable messages. `path` is then a path on the host, not a
+workspace-relative one. Design and the scripts: `docs/SSH-AND-MOSH.md` section 7,
+`backend/relay_core/remote_files.py`.
+
+Nothing is installed on the host: each call is one `ssh -S …` with a small POSIX script wrapped in
+`sh -c`, using `cat`, `head`, `printf`, `dirname`, `chmod`, `cp`, `mv` and `rm` only (a host missing
+one says which). The content of a write travels on ssh's **stdin**, into a temp file beside the
+target that takes the target's mode, and is `mv`d into place; `edit_file` matches in Python with the
+same code the local edit uses, so its errors and its uniqueness rule are identical. A write re-reads
+the file and compares its SHA-256 first, so "File changed while the write was prepared" means the
+same thing on the host. Remote writes are not checkpointed (checkpoints are workspace files), and
+there is no undo for them.
+
+**The path rule on a host**, which replaces the workspace check and is part of the contract:
+
+- the workspace secret-file guard applies unchanged (`.ssh`, `.gnupg`, `.git`, `.env`/`.env.*`,
+  `id_rsa`, `id_ed25519`, `*.pem`, `*.key`), and `..` is refused; both are checked in the backend
+  before any ssh runs;
+- the path must resolve inside the remote account's home directory, or under `remote_session.cwd`
+  when the GUI sent one (the directory the user's own shell is in). `$HOME` is known only on the
+  host, so the script checks it there and exits 78, which the backend turns into a refusal naming
+  both allowed roots. `~/…` is expanded against that same `$HOME`;
+- symlinks are not followed, here as locally. The containment check is textual: a directory symlink
+  inside the home that points elsewhere is not caught. This is the same class of guard as the
+  workspace check — against accidents, not an OS sandbox — and the user's own permissions still
+  bound every call.
+
+Results carry `host` (`read_file`: `path`, `content`, `sha256`, `host`; `list_directory`:
+`entries`, `truncated`, `host`, with the same 200-entry cap and `file`/`directory`/`symlink` types;
+a write: the usual `written_bytes`, `sha256`, `added`, `removed`, plus `host`). Labels (section 23)
+read "read nginx.conf on filly", "listed /srv/ on filly", "wrote app.conf on filly", and the fold's
+`detail` gains the same `host` section `run_command` has. A remote call's `open` is never
+`{"type": "file"}` — the path is on the host, and opening it here would open a local file of the
+same name — so it folds, or opens the diff view for a long diff; its `merge` key ends in
+"on \<host\>" (23.7). There is no `glob`/`grep` tool to extend,
+so search on the host stays `run_command` with `host`; the context note tells the model that, and
+that the file tools now take `host`. The GUI sends nothing new: `remote_session` as it already is.
 
 ## 25. Session info (ⓘ) and subagent threads (v2.7, 2026-09-18)
 

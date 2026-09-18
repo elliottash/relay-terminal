@@ -1,8 +1,11 @@
 """Card #S5SH, docs/SSH-AND-MOSH.md sections 4 and 7: the router at a remote prompt, the agent's
-`remote_session` context, and run_command's `host` over the user's ssh connection.
+`remote_session` context, and `host` on run_command and on the file tools — all over the user's
+own ssh connection.
 
-No network: run_command's ssh is a fake `ssh` on PATH that prints its argv, and the control
-socket is a real unix socket bound in a temporary directory."""
+No network: `ssh` is a fake on PATH (one that prints its argv and stdin, one that runs the script
+it was handed, as the remote login shell would), and the control socket is a real unix socket bound
+in a temporary directory. A directory in that temporary tree stands in for the remote home."""
+import hashlib
 import os
 import socket
 import tempfile
@@ -11,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from relay_core import remote_session, tool_labels
+from relay_core import remote_files, remote_session, tool_labels
 from relay_core.agent import format_context, validate_context
 from relay_core.router import classify
 from relay_core.tools import ToolExecutor
@@ -125,9 +128,10 @@ class RemoteContextTests(unittest.TestCase):
                                "remote_session": SESSION})
         self.assertIn("logged into elliott@filly (65.109.126.152) via ssh", note)
         self.assertIn("`/srv/archive/tracelaw`", note)
-        self.assertIn("Plain run_command runs on this local machine", note)
+        self.assertIn("run_command and the file tools", note)
+        self.assertIn("work on this local machine, not on filly", note)
         self.assertIn('pass host: "filly" to run_command', note)
-        self.assertIn("not read_file", note)
+        self.assertIn('take the same host: "filly"', note)
         # The old line told the model its run_command "cannot interact with the program" — true of
         # the session's screen, but not of the host any more.
         self.assertNotIn("cannot interact with the program", note)
@@ -249,6 +253,348 @@ class RemoteRunCommandTests(unittest.TestCase):
         self.assertTrue(result["still_running"])
         self.assertEqual(result["host"], "filly")
         self.assertEqual(self.tools.jobs.snapshot()[0]["host"], "filly")
+
+
+class RemoteFileToolTests(unittest.TestCase):
+    """The file tools on the host (card #S5SH, docs/SSH-AND-MOSH.md section 7).
+
+    Two fake `ssh` scripts, both on PATH and neither touching the network: `echo` prints its argv
+    and its stdin, so a test can read the exact command line and see that content travels on stdin;
+    `exec` runs the last argument with `sh -c`, so a test can watch a real temp-file-and-mv write
+    happen in a directory that stands in for the remote home."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        # The remote side: a home directory, and a "project" the user's shell is in outside it.
+        self.home = self.root / "remote-home"
+        (self.home / "sub").mkdir(parents=True)
+        self.elsewhere = self.root / "srv"
+        self.elsewhere.mkdir()
+        self.socket_path = str(self.root / "ctl")
+        self.sock = socket.socket(socket.AF_UNIX)
+        self.sock.bind(self.socket_path)
+        self.fake_ssh("exec")
+        self.env = patch.dict(os.environ, {"PATH": f"{self.bin}:{os.environ.get('PATH', '')}",
+                                           "HOME": str(self.home)})
+        self.env.start()
+        self.events = []
+        self.tools = ToolExecutor(self.tmp.name, self.events.append, threading.Event())
+        self.session = {**SESSION, "control_path": self.socket_path, "cwd": str(self.home)}
+        self.use(self.session)
+
+    def tearDown(self):
+        self.env.stop()
+        self.sock.close()
+        self.tools.shutdown()
+        self.tmp.cleanup()
+
+    def use(self, session):
+        self.tools.set_remote_session(remote_session.validate(session))
+
+    def fake_ssh(self, kind):
+        """`echo`: print argv then stdin. `exec`: run the script, as the remote login shell would."""
+        script = ('#!/bin/sh\nfor a in "$@"; do printf "[%s]\\n" "$a"; done\n'
+                  'printf -- "--stdin--\\n"\ncat\n' if kind == "echo" else
+                  '#!/bin/sh\nfor a in "$@"; do s=$a; done\nexec sh -c "$s"\n')
+        (self.bin / "ssh").write_text(script)
+        (self.bin / "ssh").chmod(0o755)
+
+    def call(self, name, **args):
+        return self.tools.execute(self.tools.prepare(name, {"host": "filly", **args}))
+
+    # ----- the command line, and how content gets there ---------------------------------
+
+    def test_argv_is_run_commands_own(self):
+        self.fake_ssh("echo")
+        result = self.call("read_file", path="notes.md")
+        printed = result["content"]
+        self.assertEqual(printed.splitlines()[:11],
+                         ["[-S]", f"[{self.socket_path}]", "[-o]", "[ControlMaster=no]", "[-o]",
+                          "[BatchMode=yes]", "[-o]", "[ConnectTimeout=10]", "[-T]", "[filly]", "[--]"])
+        # A relative path: the script is run in the remote shell's directory, inside `sh -c`.
+        self.assertIn(f"[cd {self.home} || exit 1\nsh -c '", printed)
+        self.assertIn('cat -- "$p" | head -c 131073', printed)
+        self.assertIn("exit 78", printed)
+
+    def test_an_absolute_path_needs_no_cd(self):
+        self.fake_ssh("echo")
+        result = self.call("read_file", path="/etc/hosts")
+        self.assertNotIn("cd ", result["content"].split("--stdin--")[0].splitlines()[-1])
+
+    def test_the_write_script_never_carries_the_content(self):
+        awkward = "port = 8080 # $(rm -rf /) 'quoted'\n"
+        script = remote_files.write_script("sub/app.conf", str(self.home))
+        self.assertNotIn("8080", script)
+        self.assertIn('cat > "$t"', script)          # the content is read from ssh's stdin
+        self.assertIn('mv -- "$t" "$p"', script)     # and only then does the file change
+        self.assertIn('chmod --reference="$p"', script)
+        self.assertNotIn(awkward, " ".join(remote_files.argv(
+            {**self.session, "host": "filly"}, script, str(self.home))))
+
+    def test_stdin_carries_the_bytes(self):
+        seen = {}
+        real_run = remote_files.run
+
+        def watch(session, script, **kwargs):
+            seen.setdefault("stdin", []).append(kwargs.get("stdin", b""))
+            seen.setdefault("script", []).append(script)
+            return real_run(session, script, **kwargs)
+
+        with patch.object(remote_files, "run", watch):
+            self.call("write_file", path="sub/app.conf", content="alpha\n")
+        self.assertEqual(seen["stdin"][-1], b"alpha\n")
+        self.assertNotIn("alpha", seen["script"][-1])
+        self.assertEqual((self.home / "sub/app.conf").read_text(), "alpha\n")
+
+    # ----- reading ----------------------------------------------------------------------
+
+    def test_read_returns_the_file_and_names_the_host(self):
+        (self.home / "notes.md").write_text("# Notes\nbody\n")
+        result = self.call("read_file", path="notes.md")
+        self.assertEqual(result["content"], "# Notes\nbody\n")
+        self.assertEqual(result["host"], "filly")
+        self.assertEqual(result["path"], "notes.md")
+        self.assertEqual(result["sha256"], hashlib.sha256(b"# Notes\nbody\n").hexdigest())
+
+    def test_read_refuses_what_the_local_read_refuses(self):
+        (self.home / "big.bin").write_bytes(b"x" * 200000)
+        with self.assertRaisesRegex(ValueError, "128 KiB"):
+            self.call("read_file", path="big.bin")
+        (self.home / "binary").write_bytes(b"abc\x00def")
+        with self.assertRaisesRegex(ValueError, "too large or binary"):
+            self.call("read_file", path="binary")
+        (self.home / "latin").write_bytes(b"caf\xe9\n")
+        with self.assertRaisesRegex(ValueError, "UTF-8"):
+            self.call("read_file", path="latin")
+        with self.assertRaisesRegex(ValueError, "No such file or directory on filly"):
+            self.call("read_file", path="gone.md")
+        os.symlink(self.home / "notes.md", self.home / "link.md")
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            self.call("read_file", path="link.md")
+        with self.assertRaisesRegex(ValueError, "Only regular files"):
+            self.call("read_file", path="sub")
+
+    def test_list_directory_has_the_local_shape(self):
+        (self.home / "a.txt").write_text("a")
+        os.symlink(self.home / "a.txt", self.home / "b-link")
+        result = self.call("list_directory", path="~")
+        self.assertEqual(result["host"], "filly")
+        self.assertFalse(result["truncated"])
+        self.assertEqual([e["name"] for e in result["entries"]], ["a.txt", "b-link", "sub"])
+        self.assertEqual([e["type"] for e in result["entries"]], ["file", "symlink", "directory"])
+        for i in range(210):
+            (self.home / "sub" / f"f{i:03d}").write_text("")
+        full = self.call("list_directory", path="sub")
+        self.assertTrue(full["truncated"])
+        self.assertEqual(len(full["entries"]), 200)
+        with self.assertRaisesRegex(ValueError, "not a directory"):
+            self.call("list_directory", path="a.txt")
+
+    # ----- writing ----------------------------------------------------------------------
+
+    def test_write_replaces_in_place_and_keeps_the_mode(self):
+        target = self.home / "sub" / "run.sh"
+        target.write_text("old\n")
+        target.chmod(0o750)
+        result = self.call("write_file", path="sub/run.sh", content="new\n")
+        self.assertEqual(target.read_text(), "new\n")
+        self.assertEqual(oct(target.stat().st_mode & 0o777), oct(0o750))
+        self.assertEqual((result["host"], result["created"], result["written_bytes"]), ("filly", False, 4))
+        # Nothing left beside it: the temp file is moved, never abandoned.
+        self.assertEqual(sorted(p.name for p in (self.home / "sub").iterdir()), ["run.sh"])
+
+    def test_a_new_file_is_private_and_needs_its_parent(self):
+        result = self.call("write_file", path="sub/fresh.txt", content="hi\n")
+        self.assertTrue(result["created"])
+        self.assertEqual(oct((self.home / "sub/fresh.txt").stat().st_mode & 0o777), oct(0o600))
+        with self.assertRaisesRegex(ValueError, "Parent directory must already exist"):
+            self.call("write_file", path="sub/deeper/tree.txt", content="hi\n")
+
+    def test_edit_matches_the_local_tool(self):
+        text = "alpha\nbeta\nalpha\n"
+        (self.home / "f.txt").write_text(text)
+        local = self.root / "f.txt"
+        local.write_text(text)
+
+        def both(**args):
+            """The same edit, remote and local, so the errors can be compared byte for byte."""
+            remote = self.assertRaises(ValueError)
+            with remote:
+                self.call("edit_file", path="f.txt", **args)
+            here = self.assertRaises(ValueError)
+            with here:
+                self.tools.execute(self.tools.prepare("edit_file", {"path": "f.txt", **args}))
+            return str(remote.exception), str(here.exception)
+
+        missing = both(old_string="gamma", new_string="x")
+        self.assertEqual(*missing)
+        self.assertIn("was not found in the file", missing[0])
+        twice = both(old_string="alpha", new_string="x")
+        self.assertEqual(*twice)
+        self.assertIn("occurs 2 times", twice[0])
+        self.assertEqual(*both(old_string="", new_string="x"))
+        self.assertEqual(*both(old_string="beta", new_string="beta"))
+        result = self.call("edit_file", path="f.txt", old_string="alpha", new_string="gamma",
+                           replace_all=True)
+        self.assertEqual((self.home / "f.txt").read_text(), "gamma\nbeta\ngamma\n")
+        self.assertEqual((result["replacements"], result["added"], result["removed"], result["host"]),
+                         (2, 2, 2, "filly"))
+        with self.assertRaisesRegex(ValueError, "needs a file that already exists"):
+            self.call("edit_file", path="nothing.txt", old_string="a", new_string="b")
+
+    def test_a_file_that_changes_under_the_diff_is_not_overwritten(self):
+        (self.home / "f.txt").write_text("one\n")
+        prepared = self.tools.prepare("write_file", {"host": "filly", "path": "f.txt", "content": "two\n"})
+        (self.home / "f.txt").write_text("someone else\n")
+        with self.assertRaisesRegex(ValueError, "changed while the write was prepared"):
+            self.tools.execute(prepared)
+        self.assertEqual((self.home / "f.txt").read_text(), "someone else\n")
+        prepared = self.tools.prepare("write_file", {"host": "filly", "path": "f.txt", "content": "two\n"})
+        (self.home / "f.txt").unlink()
+        with self.assertRaisesRegex(ValueError, "appeared or disappeared"):
+            self.tools.execute(prepared)
+
+    # ----- the rule that replaces the workspace -----------------------------------------
+
+    def test_secret_looking_paths_are_refused_on_the_host_too(self):
+        for path in [".ssh/config", "~/.ssh/id_ed25519", "sub/.env", "sub/.env.production",
+                     "deploy.key", "certs/server.pem", ".gnupg/secring", "repo/.git/config"]:
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(ValueError, "secret-file guard"):
+                    self.call("read_file", path=path)
+                with self.assertRaisesRegex(ValueError, "secret-file guard"):
+                    self.call("write_file", path=path, content="x")
+
+    def test_traversal_and_shapeless_paths_are_refused(self):
+        for path in ["../etc/passwd", "sub/../../x", ".."]:
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(ValueError, r"Parent traversal"):
+                    self.call("read_file", path=path)
+        with self.assertRaisesRegex(ValueError, "one line"):
+            self.call("read_file", path="a\nb")
+        with self.assertRaisesRegex(ValueError, "path on the host is required"):
+            self.call("read_file", path="   ")
+
+    def test_outside_the_home_is_refused_unless_the_shell_is_there(self):
+        (self.elsewhere / "app.conf").write_text("listen 80\n")
+        with self.assertRaisesRegex(ValueError, "outside the home directory"):
+            self.call("read_file", path=str(self.elsewhere / "app.conf"))
+        # The user's shell is in /srv: their own working directory is theirs to work in.
+        self.use({**self.session, "cwd": str(self.elsewhere)})
+        self.assertEqual(self.call("read_file", path="app.conf")["content"], "listen 80\n")
+        self.assertEqual(self.call("read_file", path=str(self.elsewhere / "app.conf"))["content"],
+                         "listen 80\n")
+        # The home is still allowed while the shell is elsewhere; /etc is still not.
+        (self.home / "notes.md").write_text("n\n")
+        self.assertEqual(self.call("read_file", path=str(self.home / "notes.md"))["content"], "n\n")
+        with self.assertRaisesRegex(ValueError, "outside the home directory"):
+            self.call("write_file", path="/etc/hosts", content="x")
+        self.assertEqual((self.elsewhere / "app.conf").read_text(), "listen 80\n")
+
+    def test_the_rule_is_checked_on_the_host_where_home_is_known(self):
+        # The refusal is the script's, not this machine's idea of a home directory.
+        script = remote_files.read_script("/etc/hosts", None, cap=10)
+        self.assertIn('case $p in "$HOME"/*|"$HOME") ;; *) exit 78 ;; esac', script)
+
+    # ----- refusals, the schema and the labels -------------------------------------------
+
+    def test_refusals_match_run_commands(self):
+        for name, args in [("read_file", {"path": "f"}), ("list_directory", {"path": "."}),
+                           ("write_file", {"path": "f", "content": "x"}),
+                           ("edit_file", {"path": "f", "old_string": "a", "new_string": "b"})]:
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, r'host "other" is not the host'):
+                    self.tools.prepare(name, {**args, "host": "other"})
+                self.use({**self.session, "reachable": False})
+                with self.assertRaisesRegex(ValueError, "can't be shared"):
+                    self.tools.prepare(name, {**args, "host": "filly"})
+                self.tools.set_remote_session(None)
+                with self.assertRaisesRegex(ValueError, "not logged into any host"):
+                    self.tools.prepare(name, {**args, "host": "filly"})
+                self.use(self.session)
+                with self.assertRaisesRegex(ValueError, "host must be text"):
+                    self.tools.prepare(name, {**args, "host": 5})
+
+    def test_a_closed_socket_reads_and_writes_nothing(self):
+        (self.home / "f.txt").write_text("one\n")
+        prepared = self.tools.prepare("write_file", {"host": "filly", "path": "f.txt", "content": "two\n"})
+        os.unlink(self.socket_path)
+        with self.assertRaisesRegex(ValueError, "has closed"):
+            self.tools.execute(prepared)
+        with self.assertRaisesRegex(ValueError, "has closed"):
+            self.call("read_file", path="f.txt")
+        self.assertEqual((self.home / "f.txt").read_text(), "one\n")
+
+    def test_a_broken_connection_says_so(self):
+        (self.bin / "ssh").write_text("#!/bin/sh\necho 'ssh: connect to host filly: Broken pipe' >&2\nexit 255\n")
+        with self.assertRaisesRegex(ValueError, "connection to filly failed or closed"):
+            self.call("read_file", path="f.txt")
+
+    def test_a_host_without_the_commands_says_which(self):
+        (self.bin / "ssh").write_text("#!/bin/sh\necho 'sh: cat: not found' >&2\nexit 127\n")
+        with self.assertRaisesRegex(ValueError, "missing a command"):
+            self.call("read_file", path="f.txt")
+
+    def test_empty_host_is_a_local_call(self):
+        (self.root / "local.txt").write_text("local\n")
+        result = self.tools.execute(self.tools.prepare("read_file", {"path": "local.txt", "host": ""}))
+        self.assertEqual(result["content"], "local\n")
+        self.assertNotIn("host", result)
+
+    def test_host_only_in_the_schema_while_logged_in(self):
+        specs = {t["function"]["name"]: t for t in self.tools.tools()}
+        for name in ("run_command", "read_file", "list_directory", "write_file", "edit_file"):
+            with self.subTest(name=name):
+                self.assertIn("host", specs[name]["function"]["parameters"]["properties"])
+                self.assertNotIn("host", specs[name]["function"]["parameters"]["required"])
+        self.tools.set_remote_session(None)
+        local = {t["function"]["name"]: t for t in self.tools.tools()}
+        for name in ("run_command", "read_file", "list_directory", "write_file", "edit_file"):
+            with self.subTest(name=name):
+                self.assertNotIn("host", local[name]["function"]["parameters"]["properties"])
+
+    def test_labels_and_detail_name_the_host(self):
+        read = {"path": "/etc/nginx/sites-enabled/relay-terminal/nginx.conf", "host": "filly"}
+        self.assertEqual(tool_labels.started_label("read_file", read)["title"], "read nginx.conf on filly")
+        self.assertEqual(tool_labels.started_label("read_file", read)["running"], "reading nginx.conf on filly")
+        self.assertEqual(tool_labels.started_label("read_file", {"path": "/etc/hosts", "host": "filly"})["title"],
+                         "read /etc/hosts on filly")
+        self.assertEqual(tool_labels.started_label("read_file", read)["merge"]["plural"], "files on filly")
+        self.assertEqual(tool_labels.started_label("list_directory", {"path": "/srv", "host": "filly"})["title"],
+                         "listed /srv/ on filly")
+        self.assertEqual(tool_labels.result_label("write_file", {"path": "app.conf", "host": "filly"},
+                                                  {"created": True, "host": "filly"})["title"],
+                         "wrote app.conf on filly")
+        self.assertEqual(tool_labels.started_label("edit_file", {"path": "app.conf", "host": "filly"})["title"],
+                         "edited app.conf on filly")
+        # A click never opens a local file of the same name: the path is on the host.
+        done = tool_labels.result_label("read_file", read, {"content": "x\n", "host": "filly"})
+        self.assertEqual(done["open"], {"type": "fold"})
+        self.assertEqual(done["merge"]["lines"], 1)
+        created = tool_labels.result_label("write_file", {"path": "new.txt", "host": "filly"},
+                                           {"created": True, "added": 1, "removed": 0, "host": "filly"})
+        self.assertEqual(created["open"], {"type": "fold"})
+        big = tool_labels.result_label("edit_file", {"path": "app.conf", "host": "filly"},
+                                       {"added": 40, "removed": 3, "host": "filly"})
+        self.assertEqual(big["open"], {"type": "diff"})
+        # Locally it still opens the file.
+        self.assertEqual(tool_labels.result_label("read_file", {"path": "a.py"}, {"content": "x"})["open"],
+                         {"type": "file", "path": "a.py"})
+        sections = tool_labels.detail("read_file", read, {"content": "x"})
+        self.assertEqual(sections[0], {"heading": "host", "style": "text",
+                                       "text": "filly (over your ssh connection)"})
+        # Without a host nothing changes: the local line is exactly what it was.
+        self.assertEqual(tool_labels.started_label("read_file", {"path": "a/b.py"})["title"], "read a/b.py")
+        self.assertNotIn("host", [s["heading"] for s in tool_labels.detail("read_file", {"path": "a"}, {})])
+
+    def test_the_note_offers_the_file_tools(self):
+        note = format_context({"foreground_program": "ssh filly", "remote_session": SESSION})
+        self.assertIn("read_file, list_directory, write_file and edit_file take the same host", note)
+        self.assertIn("inside the user's home", note)
+        self.assertNotIn("Read files on filly with run_command", note)
 
 
 if __name__ == "__main__":

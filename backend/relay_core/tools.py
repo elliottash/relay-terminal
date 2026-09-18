@@ -3,12 +3,18 @@
 
 Workspace checks protect the file tools from accidental path escape. They are NOT
 an OS sandbox: a shell command has the invoking user's permissions.
+
+With `host` (card #S5SH) run_command and the file tools work on the ssh host the user's terminal is
+logged into instead, over the user's own connection. There is no workspace there: what takes its
+place is remote_path() here and the scripts in relay_core/remote_files.py — the same secret-file
+guard, no `..`, no symlinks, and the remote home (or the directory the user's shell is in).
 """
 from __future__ import annotations
 
 import difflib
 import hashlib
 import os
+import posixpath
 import re
 import selectors
 import signal
@@ -27,7 +33,7 @@ from .skills import TOOL_SPECS as SKILL_TOOLS, SkillIndex
 from .terminal_handoff import TerminalHandoff
 from .provider import Cancelled
 from .jobs import JobTable
-from . import remote_session
+from . import remote_files, remote_session
 
 MAX_FILE = 131072
 MAX_OUTPUT = 32768
@@ -37,6 +43,38 @@ MAX_OUTPUT = 32768
 DEFAULT_WAIT = 30
 MAX_WAIT = 1800
 SECRET_NAME = re.compile(r"(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|COOKIE)", re.I)
+
+
+def looks_secret(part: str) -> bool:
+    """Relay's basic secret-file guard, one path component at a time. The same rule applies to a
+    workspace path and to a path on an ssh host (card #S5SH): there is no workspace to confine the
+    agent to on the host, so this guard is the part of the protection that travels."""
+    return (part in {".ssh", ".gnupg", ".git", "id_rsa", "id_ed25519"}
+            or part == ".env" or part.startswith(".env.") or part.endswith((".pem", ".key")))
+
+
+def remote_path(name: str) -> str:
+    """A path on the ssh host, checked with the rules that replace the workspace there (card #S5SH).
+
+    It is absolute, `~/…`, or relative to the remote shell's directory. What is checked here is what
+    can be checked here: `..` is refused outright, as it is locally, so the path the host sees reads
+    as what it is, and the secret-file guard is the same one the workspace uses. The other half of
+    the rule — inside the user's home on the host, or the directory their shell is in — is checked on
+    the host, where `$HOME` is known (relay_core/remote_files.py)."""
+    if not name.strip():
+        raise ValueError("A path on the host is required.")
+    if any(character in name for character in "\n\r"):
+        raise ValueError("A path on the host must be one line.")
+    parts = [part for part in name.split("/") if part not in ("", ".")]
+    if ".." in parts:
+        raise ValueError("Parent traversal (..) is not allowed in file tools, on the host any more than "
+                         "locally. Give the path in full.")
+    if any(looks_secret(part) for part in parts):
+        raise ValueError("This path is blocked by Relay's basic secret-file guard, which applies on the host "
+                         "too: .ssh, .gnupg, .git, .env files, and .pem/.key files stay unread. If the user "
+                         "needs something from one, ask them.")
+    # The host's separator is "/" whatever this machine's is: normalise as POSIX.
+    return posixpath.normpath(name)
 
 
 def spec(name: str, description: str, properties: dict, required: list[str]) -> dict:
@@ -68,23 +106,35 @@ TOOLS = [
          ["path", "old_string", "new_string"]),
 ]
 
-# run_command's `host` (card #S5SH): offered only while the user's terminal is logged into a host
-# over ssh (the turn's context has remote_session), so a local-only turn never sees it.
+# `host` (card #S5SH): offered only while the user's terminal is logged into a host over ssh (the
+# turn's context has remote_session), so a local-only turn never sees it.
 HOST_PROPERTY = {"type": "string", "description":
                  "Run on the ssh host the user's terminal is logged into (the Relay context names it), over "
                  "the user's own connection, instead of on this machine. cwd is then a path on that host "
                  "(default: the remote shell's directory). Omit to run locally."}
+HOST_FILE_PROPERTY = {"type": "string", "description":
+                      "Work on the file on the ssh host the user's terminal is logged into (the Relay context "
+                      "names it), over the user's own connection, instead of on this machine. path is then a "
+                      "path on that host: absolute, or relative to the remote shell's directory, and inside "
+                      "the user's home there (or that directory). Omit for this machine."}
+#: The tools that take `host`, and the property each one is offered with.
+HOST_TOOLS = {"run_command": HOST_PROPERTY, "read_file": HOST_FILE_PROPERTY,
+              "list_directory": HOST_FILE_PROPERTY, "write_file": HOST_FILE_PROPERTY,
+              "edit_file": HOST_FILE_PROPERTY}
 
 
-def run_command_spec(with_host: bool) -> dict:
-    tool = TOOLS[0]
-    if not with_host:
-        return tool
+def with_host(tool: dict) -> dict:
+    """The same tool, with its `host` property added. The original is left untouched: the tool list
+    is rebuilt for every model call, and a turn with no ssh session must see no `host` at all."""
     function = dict(tool["function"])
     parameters = dict(function["parameters"])
-    parameters["properties"] = {**parameters["properties"], "host": HOST_PROPERTY}
+    parameters["properties"] = {**parameters["properties"], "host": HOST_TOOLS[function["name"]]}
     function["parameters"] = parameters
     return {**tool, "function": function}
+
+
+def run_command_spec(with_host_property: bool) -> dict:
+    return with_host(TOOLS[0]) if with_host_property else TOOLS[0]
 
 
 @dataclass(frozen=True)
@@ -105,6 +155,11 @@ class Prepared:
     # The unified diff on its own, so the tool events can carry it without anything parsing
     # `preview` back apart (protocol 23, the concise tool-call line).
     diff: str = ""
+    # Card #S5SH: the ssh host this call works on, and the path on it (absolute or relative to the
+    # remote shell's directory, guarded by remote_path()). Both None for a call on this machine,
+    # which is what `path` above being a real local Path still means.
+    host: str | None = None
+    remote_path: str | None = None
 
 
 class Workspace:
@@ -129,9 +184,7 @@ class Workspace:
         resolved = candidate.resolve(strict=not allow_missing)
         if not resolved.is_relative_to(self.root):
             raise ValueError("Path escapes the workspace.")
-        if any(part in {".ssh", ".gnupg", ".git"} or part == ".env" or part.startswith(".env.")
-               or part in {"id_rsa", "id_ed25519"} or part.endswith((".pem", ".key"))
-               for part in relative.parts):
+        if any(looks_secret(part) for part in relative.parts):
             raise ValueError("This path is blocked by Relay's basic secret-file guard.")
         return resolved
 
@@ -229,7 +282,9 @@ class ToolExecutor:
         catalog = self.keybindings
         tools = TOOLS + [catalog.tool_spec()] if catalog is not None else list(TOOLS)
         if self.remote_session is not None:
-            tools[0] = run_command_spec(True)
+            # run_command and the file tools all reach the host the user is logged into.
+            tools = [with_host(tool) if tool["function"]["name"] in HOST_TOOLS else tool
+                     for tool in tools]
         tools += JOB_TOOLS
         if self.skills is not None:
             tools += SKILL_TOOLS
@@ -275,19 +330,16 @@ class ToolExecutor:
             return Prepared(name, {"job_id": job.id, "wait_seconds": wait},
                             f"COMMAND OUTPUT\n\n{job.id}: {job.command}\nWait: up to {wait}s")
         allowed = {"run_command": {"command", "cwd", "timeout_seconds", "background", "host"},
-                   "read_file": {"path"}, "list_directory": {"path"}, "write_file": {"path", "content"},
-                   "edit_file": {"path", "old_string", "new_string", "replace_all"}}
+                   "read_file": {"path", "host"}, "list_directory": {"path", "host"},
+                   "write_file": {"path", "content", "host"},
+                   "edit_file": {"path", "old_string", "new_string", "replace_all", "host"}}
         if name not in allowed or set(args) - allowed[name]:
             raise ValueError("Unknown tool or unexpected argument.")
+        host = self._host(args)
         if name == "run_command":
             command = self._text(args, "command", maximum=16384)
             if not command.strip():
                 raise ValueError("Command must not be empty.")
-            host = args.get("host")
-            if host is not None and not isinstance(host, str):
-                raise ValueError("host must be text: the host the user's terminal is logged into.")
-            if not host:
-                args.pop("host", None)
             background = args.get("background", False)
             if not isinstance(background, bool):
                 raise ValueError("background must be true or false.")
@@ -302,6 +354,8 @@ class ToolExecutor:
             if not cwd.is_dir():
                 raise ValueError("Command working directory must be a directory.")
             return Prepared(name, args, f"RUN COMMAND\n\nWorking directory: {cwd}\n{wait}\n\n{command}", cwd)
+        if host:
+            return self._prepare_remote_file(name, args, host)
         path = self.workspace.resolve(self._text(args, "path", maximum=4096),
                                       allow_missing=name in ("write_file", "edit_file"))
         if name == "read_file":
@@ -319,6 +373,13 @@ class ToolExecutor:
             if not path.parent.is_dir():
                 raise ValueError("Parent directory must already exist. Relay does not create directory trees automatically.")
             old = self.workspace.read_bytes(path) if existed else b""
+        return self._write_prepared(name, args, str(path), old, content, existed, replacements, path=path)
+
+    def _write_prepared(self, name: str, args: dict, shown: str, old: bytes, content: str, existed: bool,
+                        replacements: int, *, path: Path | None = None, host: str | None = None,
+                        header: str = "") -> Prepared:
+        """The diff the user sees and the bytes the write will put in place — the same computation
+        for a file on this machine and one on the ssh host (card #S5SH)."""
         old_sha = hashlib.sha256(old).hexdigest()
         diff = "".join(difflib.unified_diff(old.decode("utf-8").splitlines(keepends=True),
                      content.splitlines(keepends=True), fromfile=f"a/{args['path']}" if existed else "/dev/null",
@@ -327,9 +388,46 @@ class ToolExecutor:
         removed = sum(1 for line in diff.splitlines() if line.startswith("-") and not line.startswith("---"))
         # Preserve reviewability for files whose only change is a trailing newline.
         title = "EDIT FILE" if name == "edit_file" else "WRITE FILE"
-        preview = f"{title}\n\n{path}\n\n{diff or '(No text changes)'}\n\nOld bytes: {len(old)}; new bytes: {len(content.encode('utf-8'))}."
+        preview = (f"{title}{f' ON {host}' if host else ''}\n\n{header}{shown}\n\n{diff or '(No text changes)'}"
+                   f"\n\nOld bytes: {len(old)}; new bytes: {len(content.encode('utf-8'))}.")
         return Prepared(name, args, preview, path, old_sha, existed, content, replacements, added, removed,
-                        diff=diff)
+                        diff=diff, host=host, remote_path=shown if host else None)
+
+    def _host(self, args: dict) -> str:
+        """The `host` argument, checked as text. Empty or absent is a call on this machine, and the
+        key is dropped so nothing downstream (labels, the fold) shows a host that was not used."""
+        host = args.get("host")
+        if host is not None and not isinstance(host, str):
+            raise ValueError("host must be text: the host the user's terminal is logged into.")
+        if not host:
+            args.pop("host", None)
+            return ""
+        return host
+
+    def _prepare_remote_file(self, name: str, args: dict, host: str) -> Prepared:
+        """read_file, list_directory, write_file and edit_file on the ssh host (card #S5SH).
+
+        The path is a path on the host, so it is not resolved against the workspace; the rules that
+        replace the workspace are in remote_path() and in the scripts (relay_core/remote_files.py).
+        A write reads the file first, over the same connection, so the user sees the real diff."""
+        session = self._remote_ready(host)
+        path = remote_path(self._text(args, "path", maximum=4096))
+        user = session.get("user")
+        header = f"Host: {f'{user}@{host}' if user else host} (over the user's ssh connection)\n"
+        if name == "read_file":
+            return Prepared(name, args, f"READ FILE ON {host}\n\n{header}{path}", host=host, remote_path=path)
+        if name == "list_directory":
+            return Prepared(name, args, f"LIST DIRECTORY ON {host}\n\n{header}{path}", host=host,
+                            remote_path=path)
+        old, existed = self._remote_before(session, path)
+        if name == "edit_file":
+            if not existed:
+                raise ValueError("edit_file needs a file that already exists; use write_file to create one.")
+            content, replacements = self._edited(args, old)
+        else:
+            content, replacements = self._text(args, "content"), 0
+        return self._write_prepared(name, args, path, old, content, existed, replacements, host=host,
+                                    header=header + "\n")
 
     def _prepare_remote(self, args: dict, command: str, host: str, wait: str) -> Prepared:
         """run_command with `host`: the same call, run over the user's ssh connection (card #S5SH).
@@ -349,6 +447,75 @@ class ToolExecutor:
         preview = (f"RUN COMMAND ON {host}\n\nHost: {who} (over the user's ssh connection)\n"
                    f"Working directory: {cwd or 'the remote home directory'}\n{wait}\n\n{command}")
         return Prepared("run_command", args, preview)
+
+    # ----- the file tools on the ssh host (card #S5SH) -----------------------------------
+
+    def _remote_ready(self, host: str) -> dict:
+        """The session a `host` argument may use, with its connection-sharing socket still there.
+
+        run_command checks the socket only when it runs; a file tool reads the host while it is
+        prepared (the diff the user approves is the real one), so it checks here too."""
+        session = remote_session.check_host(self.remote_session, host)
+        remote_session.require_socket(session)
+        return session
+
+    def _remote_run(self, session: dict, script: str, path: str, *, stdin: bytes = b"",
+                    wrong_type: str = "Only regular files are supported.") -> bytes:
+        """One script on the host, through run_command's argv builder and environment."""
+        if self.cancel.is_set():
+            raise Cancelled("Stopped.")
+        cwd = session.get("cwd") or None
+        proc = remote_files.run(session, script, cwd=None if path.startswith("/") else cwd,
+                                stdin=stdin, env=command_env())
+        return remote_files.output(proc, session, path, wrong_type=wrong_type)
+
+    def _remote_read(self, session: dict, path: str) -> bytes:
+        """A remote file's text, refused for the same reasons the local read refuses it."""
+        data = self._remote_run(session, remote_files.read_script(
+            path, session.get("cwd") or None, cap=MAX_FILE + 1), path)
+        return _as_text(data)
+
+    def _remote_before(self, session: dict, path: str) -> tuple[bytes, bool]:
+        """What a write or an edit is about to replace, and whether the file is there at all."""
+        script = remote_files.read_script(path, session.get("cwd") or None, cap=MAX_FILE + 1, optional=True)
+        cwd = session.get("cwd") or None
+        if self.cancel.is_set():
+            raise Cancelled("Stopped.")
+        proc = remote_files.run(session, script, cwd=None if path.startswith("/") else cwd,
+                                env=command_env())
+        if proc.returncode == remote_files.MISSING:
+            return b"", False
+        return _as_text(remote_files.output(proc, session, path)), True
+
+    def _execute_remote_file(self, prepared: Prepared) -> dict:
+        """The prepared call, done on the host. The session is checked again first: the user may
+        have logged out between the diff and this."""
+        name, args, path = prepared.name, prepared.arguments, prepared.remote_path
+        session = self._remote_ready(prepared.host)
+        if name == "read_file":
+            data = self._remote_read(session, path)
+            return {"path": args["path"], "content": data.decode("utf-8"),
+                    "sha256": hashlib.sha256(data).hexdigest(), "host": session["host"]}
+        if name == "list_directory":
+            data = self._remote_run(session, remote_files.list_script(path, session.get("cwd") or None),
+                                    path, wrong_type="Path is not a directory.")
+            found, truncated = remote_files.entries(data)
+            return {"entries": found, "truncated": truncated, "host": session["host"]}
+        old, existed = self._remote_before(session, path)
+        if existed != prepared.existed:
+            raise ValueError("File appeared or disappeared while the write was prepared. Request a new diff.")
+        if hashlib.sha256(old).hexdigest() != prepared.old_sha:
+            raise ValueError("File changed while the write was prepared. Nothing was overwritten; request a fresh diff.")
+        data = (prepared.content if prepared.content is not None else args["content"]).encode("utf-8")
+        self._remote_run(session, remote_files.write_script(path, session.get("cwd") or None), path,
+                         stdin=data)
+        result = {"path": args["path"], "written_bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                  "added": prepared.added, "removed": prepared.removed, "host": session["host"]}
+        if name == "edit_file":
+            result["replacements"] = prepared.replacements
+        else:
+            result["created"] = not prepared.existed
+        return result
 
     def _edited(self, args: dict, old: bytes) -> tuple[str, int]:
         """The whole new text of an edit_file, and how many occurrences it replaces.
@@ -395,10 +562,7 @@ class ToolExecutor:
             return catalog.apply(args)
         if name == "run_command" and args.get("host"):
             # Recheck the session at execution time: the user may have logged out since.
-            session = remote_session.check_host(self.remote_session, args["host"])
-            if not remote_session.socket_alive(session):
-                raise ValueError(f"the ssh connection to {session['host']} has closed (its connection-sharing "
-                                 "socket is gone), so nothing ran. Ask the user whether they are still logged in.")
+            session = self._remote_ready(args["host"])
             argv = remote_session.ssh_argv(session, args["command"], args.get("cwd"))
             return self._run(args["command"], self.workspace.root, args["timeout_seconds"],
                              args.get("background", False), argv=argv, host=session["host"])
@@ -413,6 +577,8 @@ class ToolExecutor:
             job = self.jobs.get(args["job_id"])
             self.jobs.stop(job)
             return self._job_result(job)
+        if prepared.host:
+            return self._execute_remote_file(prepared)
         path = self.workspace.resolve(args["path"], allow_missing=name in ("write_file", "edit_file"))
         if name == "read_file":
             data = self.workspace.read_bytes(path)
@@ -460,12 +626,7 @@ class ToolExecutor:
              argv: list[str] | None = None, host: str | None = None) -> dict:
         """Start `command` as a job and wait for it. `argv`/`host`: the same job, run as ssh over
         the user's connection (card #S5SH); everything else — env, waiting, output — is shared."""
-        env = {key: value for key, value in os.environ.items()
-               if not SECRET_NAME.search(key) and not key.startswith("RELAY_")
-               and key not in {"BASH_ENV", "ENV", "PYTHONPATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "SSH_AUTH_SOCK"}
-               and not key.startswith("BASH_FUNC_")}
-        env.update({"TERM": "dumb", "PAGER": "cat", "GIT_TERMINAL_PROMPT": "0"})
-        job = self.jobs.start(command, cwd, env, argv=argv, host=host)
+        job = self.jobs.start(command, cwd, command_env(), argv=argv, host=host)
         # A background job still gets a moment: a server that fails at once says so in this result.
         return self._await(job, BACKGROUND_GLANCE if background else timeout)
 
@@ -511,6 +672,32 @@ class ToolExecutor:
                 result["note"] = (f"ssh exited 255: the connection to {job.host} failed or closed, so the "
                                   "command may not have run. The user's ssh session may have ended; ask them.")
         return result
+
+
+def command_env() -> dict:
+    """The environment every command Relay starts gets: this process's, without the names that
+    carry secrets or would change how a shell starts. ssh inherits it too (card #S5SH) — without
+    SSH_AUTH_SOCK, because the user's master connection needs no agent."""
+    env = {key: value for key, value in os.environ.items()
+           if not SECRET_NAME.search(key) and not key.startswith("RELAY_")
+           and key not in {"BASH_ENV", "ENV", "PYTHONPATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "SSH_AUTH_SOCK"}
+           and not key.startswith("BASH_FUNC_")}
+    env.update({"TERM": "dumb", "PAGER": "cat", "GIT_TERMINAL_PROMPT": "0"})
+    return env
+
+
+def _as_text(data: bytes) -> bytes:
+    """A file read from an ssh host, refused for the same reasons Workspace.read_bytes refuses a
+    local one: too big, binary, or not UTF-8."""
+    if len(data) > MAX_FILE:
+        raise ValueError("File exceeds the 128 KiB preview/read limit.")
+    if b"\x00" in data:
+        raise ValueError("File is too large or binary.")
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("File is not UTF-8 text; Relay's file tools read text files.") from None
+    return data
 
 
 def clamp_seconds(value, default: int, low: int, high: int) -> int:

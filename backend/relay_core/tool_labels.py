@@ -28,6 +28,9 @@ ERROR_CAP = 120
 #: Per-string cap for the arguments kept for the fold view. Mirrors nothing in tools.py: it only
 #: has to be big enough for a command line (16 KiB there) and small enough to keep 50 turns cheap.
 ARG_TEXT_CAP = 16384
+#: The tools that take `host` and work on the ssh host the user's terminal is logged into
+#: (card #S5SH). Kept here as names, so nothing in this file has to import the tool surface.
+HOST_TOOLS = {"run_command", "read_file", "list_directory", "write_file", "edit_file"}
 #: Caps for `detail` sections, matching what tools.py already stored (MAX_OUTPUT, MAX_FILE).
 DETAIL_OUTPUT_CAP = 32768
 DETAIL_TEXT_CAP = 131072
@@ -357,14 +360,17 @@ def _error_message(result) -> str:
     return ""
 
 
+def _on_host(args: dict) -> str:
+    """The " on filly" a line ends with when the call ran on the user's ssh host; else empty."""
+    host = _short(args.get("host"), 40)
+    return f" on {host}" if host else ""
+
+
 def _base(name, args: dict, existed) -> dict:
     """kind, present tense, past tense, the failed form, and the fixed half of merge/path."""
     if name == "run_command":
-        command = command_label(args.get("command"))
-        host = _short(args.get("host"), 40)
-        if host:
-            # Card #S5SH: run on the ssh host over the user's connection — "ran ls on filly".
-            command = f"{command} on {host}"
+        # Card #S5SH: run on the ssh host over the user's connection — "ran ls on filly".
+        command = command_label(args.get("command")) + _on_host(args)
         if args.get("background"):
             return _row("job", f"starting {command}", f"started job: {command}",
                         f"start job: {command}")
@@ -375,19 +381,22 @@ def _base(name, args: dict, existed) -> dict:
     if name == "stop_command":
         job = _short(args.get("job_id"), 24) or "job"
         return _row("job", f"stopping {job}", f"stopped {job}", f"stop {job}")
+    # Card #S5SH: the file tools take the ssh host too — "read nginx.conf on filly". A remote read
+    # merges with remote reads of the same host, never with local ones.
+    on = _on_host(args)
     if name == "read_file":
         path = _path(args)
-        return _row("read", f"reading {_file_name(path)}", f"read {_file_name(path)}",
-                    f"read {_file_name(path)}", path=path,
-                    merge={"key": "read", "singular": "file", "plural": "files"})
+        shown = _file_name(path) + on
+        return _row("read", f"reading {shown}", f"read {shown}", f"read {shown}", path=path,
+                    merge={"key": f"read{on}", "singular": f"file{on}", "plural": f"files{on}"})
     if name == "list_directory":
         path = _path(args)
-        shown = _dir_name(path)
+        shown = _dir_name(path) + on
         return _row("list", f"listing {shown}", f"listed {shown}", f"list {shown}", path=path,
-                    merge={"key": "list", "singular": "folder", "plural": "folders"})
+                    merge={"key": f"list{on}", "singular": f"folder{on}", "plural": f"folders{on}"})
     if name in ("write_file", "edit_file"):
         path = _path(args)
-        shown = _file_name(path)
+        shown = _file_name(path) + on
         edit = name == "edit_file" or existed is True
         return _row("edit", f"{'editing' if edit else 'writing'} {shown}",
                     f"{'edited' if edit else 'wrote'} {shown}",
@@ -568,6 +577,13 @@ def _open(name, args: dict, result: dict, base: dict, ok: bool, changed) -> dict
     fold = {"type": "fold"}
     if not ok:
         return fold
+    if name in HOST_TOOLS and isinstance(args.get("host"), str) and args["host"].strip():
+        # Card #S5SH: the file is on that host, so "open the file" would open a local file of the
+        # same name — the mistake remote path clicks already avoid. The fold has the contents; a
+        # long diff still opens the diff view, which carries the diff itself and no path.
+        if base["kind"] == "edit" and changed is not None and changed > INLINE_DIFF_LINES:
+            return {"type": "diff"}
+        return fold
     if base["kind"] == "edit":
         if result.get("created") and base.get("path"):
             return {"type": "file", "path": base["path"]}
@@ -592,7 +608,8 @@ def _open(name, args: dict, result: dict, base: dict, ok: bool, changed) -> dict
 
 
 def _merge_counts(name, merge: dict, result: dict) -> dict:
-    if merge["key"] == "read":
+    # "read" and "read on filly" are different runs (card #S5SH) but count the same way.
+    if merge["key"].startswith("read"):
         merge["lines"] = _count_lines(result.get("content"))
     else:
         entries = result.get("entries")
@@ -626,13 +643,16 @@ def detail(name, args, result, *, preview: str = "", diff=None) -> list[dict]:
     args, result = _dict(args), _dict(result)
     base = _base(name, args, None)
     kind, sections = base["kind"], []
+    # Card #S5SH: run_command and the file tools all say which host they worked on.
+    host = args.get("host")
+    remote = (f"{host} (over your ssh connection)"
+              if name in HOST_TOOLS and isinstance(host, str) and host.strip() else "")
     if kind in ("run", "job"):
         command = args.get("command")
         if isinstance(command, str) and command.strip():
             sections.append(_section("command", "code", command))
-        host = args.get("host")
-        if name == "run_command" and isinstance(host, str) and host.strip():
-            sections.append(_section("host", "text", f"{host} (over your ssh connection)"))
+        if remote:
+            sections.append(_section("host", "text", remote))
         cwd = args.get("cwd")
         if isinstance(cwd, str) and cwd not in ("", "."):
             sections.append(_section("working directory", "text", cwd))
@@ -687,6 +707,8 @@ def detail(name, args, result, *, preview: str = "", diff=None) -> list[dict]:
         changes = result.get("changes")
         if isinstance(changes, list) and changes:
             sections.append(_section("changes", "args", "\n".join(str(c) for c in changes)))
+    if remote and kind in ("read", "list", "edit"):
+        sections.insert(0, _section("host", "text", remote))
     if not call_ok(result):
         message = result.get("error")
         sections.append(_section("error", "error",
