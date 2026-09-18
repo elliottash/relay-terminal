@@ -16,6 +16,7 @@
 #include <QPoint>
 #include <QString>
 #include <QStringList>
+#include <QtGlobal>
 #include <functional>
 
 class QWidget;
@@ -36,6 +37,17 @@ public:
         Search = 1 << 8,           // find()
         ScrollControl = 1 << 9,    // scrollLines/Pages/ToBottom
         FontZoom = 1 << 10,        // zoom()
+        LinkWalk = 1 << 11,        // stepLink(): keyboard walk over the links in the output
+    };
+
+    // A file, folder or URL found in the output (src/OutputLinks.*).
+    struct Link {
+        QString target;         // an absolute path, or the URL as written
+        QString text;           // the output text it was found as
+        bool url = false;       // open in a browser rather than a Relay pane
+        bool directory = false; // a folder: the explorer pane, not the preview
+        int line = -1;
+        int column = -1;
     };
 
     virtual ~TerminalBackend() = default;
@@ -109,6 +121,19 @@ public:
         Q_UNUSED(step);
         return false;
     }
+    // ---- links in the output (issues YZTK and GWXM); needs the LinkWalk capability
+    // Highlight the previous (-1) / next (+1) link in the screen and the scrollback, or
+    // re-read the current one (0), scrolling it into view. False when there is none.
+    virtual bool stepLink(int delta, Link *link, int *index, int *count)
+    {
+        Q_UNUSED(delta); Q_UNUSED(link); Q_UNUSED(index); Q_UNUSED(count);
+        return false;
+    }
+    virtual void endLinkWalk() {}
+    virtual bool linkWalkActive() const { return false; }
+    // A plain left click on a link opens it. Hosts that use the first click of an inactive
+    // pane to move the focus disarm it until the pane is active; Ctrl+click always opens.
+    virtual void setPlainClickOpensLinks(bool on) { Q_UNUSED(on); }
 
     // ---- host callbacks (GUI thread)
     // OSC 8 URI, URL text or an existing absolute path; line/column are -1 when absent.

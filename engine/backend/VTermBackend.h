@@ -66,6 +66,10 @@ public:
 
     QString linkAt(const QPoint &pos, int *line = nullptr, int *column = nullptr) override;
     bool zoom(int step) override;
+    bool stepLink(int delta, Link *link, int *index, int *count) override;
+    void endLinkWalk() override;
+    bool linkWalkActive() const override;
+    void setPlainClickOpensLinks(bool on) override;
 
     void setOutputCallbackEnabled(bool enabled) override;
 

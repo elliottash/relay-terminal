@@ -15,7 +15,9 @@ links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-17-remote-p
 
 ## Status
 
-**P0 done; a working slice of P1 runs against a demo pane source (2026-09-17).**
+**P0 done. P1 runs against a demo agent; the P2 screen stream and P3 take-over run against real
+shells (2026-09-17).** Relay's own GUI panes are not wired in yet — shared shells come from
+`relay-screen-bridge`.
 
 - Design and owner decisions: `docs/REMOTE-AND-MULTIPLAYER-DESIGN.md` (section 12 records the review
   against the code and three further decisions).
@@ -25,11 +27,15 @@ links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-17-remote-p
 - Evidence: `docs/qa_evidence/2026-09-17-remote-p1/` — 55 tests, including the web client in
   headless Chrome and the browser's Noise implementation checked against the desktop's.
 
-You can pair a phone today:
+Share a terminal with a phone today:
 
 ```sh
-python3 -m remote.cli dev --tls     # prints a QR; scan it, confirm the five-digit code
+cmake --build build-engine --target relay-screen-bridge     # once
+python3 -m remote.cli share --tls    # prints a QR; scan it, confirm the five-digit code
 ```
+
+The phone watches the shell live and can take over and type. `remote.cli dev --tls` runs the
+agent-companion demo instead.
 
 ## What is built
 
@@ -39,22 +45,28 @@ python3 -m remote.cli dev --tls     # prints a QR; scan it, confirm the five-dig
 | WebSocket, framing, relay envelope | `remote/ws.py`, `remote/envelope.py`, `remote/httpd.py` |
 | Rendezvous (registry, rooms, ciphertext relay) | `rendezvous/server.py` |
 | Desktop hub: pairing, capabilities, streams, allow-lists | `remote/host.py`, `remote/identity.py` |
-| Web app: pair, inbox, thread, composer, plans | `app/` |
+| Web app: pair, inbox, thread, composer, plans, terminal grid | `app/` |
+| Screen stream: a real PTY through Relay's own emulator | `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `app/screen.js` |
+| Take-over: keys, paste, line, extra-keys row | `remote/host.py`, `app/app.js` |
+| Local attach, so the desktop shares the same shell | `remote/attach.py` |
 | Dev harness with the QR and self-signed TLS | `remote/cli.py`, `remote/devtls.py` |
 
 ## What is left
 
-1. **The GUI pane source.** `remote.panes.PaneSource` is the seam; today `DemoPaneSource` stands in.
-   Wiring it to real panes, worker events and the composer is the rest of P1.
+1. **Relay's GUI as the pane source.** `remote.panes.PaneSource` is the seam; today it is fed by
+   `relay-screen-bridge` (real shells) or `DemoPaneSource` (a scripted agent). Wiring it to the
+   app's own panes, worker events and composer is the rest of P1.
 2. **Web Push delivery.** `/v1/push/send` accepts and does not deliver; VAPID signing is not written.
    The subscription keys deliberately never reach the rendezvous.
 3. **Hosting actions (owner).** `app.relay-terminal.ai` and the `rv.` cloudflared ingress rule.
    Until then the harness serves the app itself over the tailnet.
 4. **Security findings not yet fixed**, all in parts that are refused rather than half-built:
-   the `secret_input` path (P3) needs a desktop-minted prompt nonce and a fresh termios read at
-   write time; WebAuthn user verification must be bound to the desktop or dropped; transport
-   switching (P2) needs the explicit `transport_switch` handshake. `keys`/`paste`/`line` and
-   `secret_input` currently return `not_permitted`.
+   `secret_input` needs a desktop-minted prompt nonce, so answering a password prompt from the
+   phone returns `not_permitted`; WebAuthn user verification must be bound to the desktop or
+   dropped from the threat table; transport switching needs the explicit `transport_switch`
+   handshake before WebRTC arrives. Ordinary input *is* refused while a pane is at a password
+   prompt, checked from a fresh termios read at write time.
+5. **Scrollback paging** (`history_get`) needs the const `VtCore::historyLines` in both cores.
 
 Related work: take-over shares the control token with `#C1HH`; `#YR21` improves remote
 "waiting for input" notifications; `#05J2` reuses this feature's pairing machinery.

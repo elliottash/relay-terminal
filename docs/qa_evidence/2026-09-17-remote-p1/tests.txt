@@ -1,10 +1,4 @@
 test_browser_client_talks_to_the_desktop (tests.test_remote_noise.BrowserInteropTests.test_browser_client_talks_to_the_desktop) ... ok
-/usr/lib/python3.12/unittest/suite.py:84: ResourceWarning: unclosed file <_io.TextIOWrapper name=5 encoding='UTF-8'>
-  return self.run(*args, **kwds)
-ResourceWarning: Enable tracemalloc to get the object allocation traceback
-/usr/lib/python3.12/unittest/suite.py:84: ResourceWarning: unclosed file <_io.TextIOWrapper name=7 encoding='UTF-8'>
-  return self.run(*args, **kwds)
-ResourceWarning: Enable tracemalloc to get the object allocation traceback
 test_handshake_round_trip (tests.test_remote_noise.NoiseTests.test_handshake_round_trip) ... ok
 test_hkdf_three_outputs_differ (tests.test_remote_noise.NoiseTests.test_hkdf_three_outputs_differ) ... ok
 test_low_order_public_key_is_rejected (tests.test_remote_noise.NoiseTests.test_low_order_public_key_is_rejected) ... ok
@@ -67,8 +61,18 @@ test_resume_replays_what_was_missed (tests.test_remote_host.StreamTests.test_res
 test_withheld_events_never_reach_a_client (tests.test_remote_host.StreamTests.test_withheld_events_never_reach_a_client) ... ok
 test_a_refused_device_shows_the_reason_and_stores_nothing (tests.test_remote_browser.BrowserClientTests.test_a_refused_device_shows_the_reason_and_stores_nothing) ... ok
 test_pair_and_drive_a_pane_from_the_browser (tests.test_remote_browser.BrowserClientTests.test_pair_and_drive_a_pane_from_the_browser) ... ok
+test_colours_and_styles_survive_the_trip (tests.test_remote_terminal.BridgeTests.test_colours_and_styles_survive_the_trip) ... ok
+test_the_bridge_reports_a_password_prompt (tests.test_remote_terminal.BridgeTests.test_the_bridge_reports_a_password_prompt) ... ok
+test_watch_and_type_from_the_browser (tests.test_remote_terminal.BrowserTerminalTests.test_watch_and_type_from_the_browser) ... ok
+test_a_command_reaches_the_screen_stream (tests.test_remote_terminal.ScreenStreamTests.test_a_command_reaches_the_screen_stream) ... ok
+test_a_view_device_cannot_type (tests.test_remote_terminal.ScreenStreamTests.test_a_view_device_cannot_type) ... ok
+test_input_is_refused_at_a_password_prompt (tests.test_remote_terminal.ScreenStreamTests.test_input_is_refused_at_a_password_prompt)
+The rule that makes §6.7 worth having: `line` must not become a shell command. ... ok
+test_revoking_drops_the_keyboard (tests.test_remote_terminal.ScreenStreamTests.test_revoking_drops_the_keyboard) ... ok
+test_the_phone_cannot_resize_the_host (tests.test_remote_terminal.ScreenStreamTests.test_the_phone_cannot_resize_the_host)
+There is no resize message in RRP/1; the host stays authoritative. ... ok
 
 ----------------------------------------------------------------------
-Ran 55 tests in 11.087s
+Ran 63 tests in 20.762s
 
 OK

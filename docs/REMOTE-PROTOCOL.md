@@ -277,12 +277,22 @@ On demand, mirroring the worker's own requests: `turn_transcript_get {pane, turn
 
 ### 6.5 Screen and history (P2)
 
-| Type | Direction | Body (CBOR) |
+| Type | Direction | Body |
 |---|---|---|
-| `screen_snapshot` | desktop → client | `{pane, seq, rows, cols, cells, cursor, alt, title, cwd, history_rows, viewport_top}` |
-| `screen_diff` | desktop → client | `{pane, seq, rows: [{row, cells}], cursor, viewport_top}` |
+| `screen_snapshot` | desktop → client | `{pane, seq, rows, cols, alt, cursor, lines: [<row>]}` — every row |
+| `screen_diff` | desktop → client | `{pane, seq, cursor, lines: [<row>]}` — only rows that changed |
+| `screen_get` | client → desktop | `{pane}` — ask for a fresh snapshot after a reconnect |
 | `history_get` | client → desktop | `{pane, id, before_row, count}` (`count` ≤ 200) |
 | `history` | desktop → client | `{pane, id, from_row, lines: [...], more}` |
+
+A `<row>` is `{row, segs: [[text, fg, bg, attrs], ...]}`: runs of identical style. The client needs
+no index arithmetic — a run carries its own text — and no second emulator. `fg` and `bg` are packed
+`relay::CellColor` (high byte the kind, low 24 bits the palette index or RGB) and `attrs` is the
+`relay::CellAttr` bitfield. A double-width glyph is sent once and its tail cell is dropped, because
+it already occupies two columns in a monospace grid.
+
+RRP/1 sends these as JSON. The CBOR encoding (§3) is reserved for when a measurement says the
+volume needs it; a run-length row of text is already far smaller than a cell-per-column array.
 
 `cells` is the flattened `relay::Cell` grid: for each cell, the first codepoint (or a cluster
 reference), `fg`, `bg`, `attrs`, `width` and the OSC 8 link id, plus the line's `marks`,
@@ -298,17 +308,18 @@ any other scheme independently — a confirm sheet is not an answer to `javascri
 
 Two rules come from the engine and are not negotiable:
 
-- **The hub reads the `ViewportFrame` `TerminalView` has already produced**; it **must not** call
-  `VtCore::updateFrame` itself. That call consumes the dirty state (`engine/core/VtCore.h`) and has
-  exactly one consumer (`engine/view/TerminalView.cpp`), so a second caller would stop the desktop
-  repainting.
+- **There is exactly one consumer of `VtCore::updateFrame` per session.** It consumes the dirty
+  state (`engine/core/VtCore.h`), so a second caller stops the first one seeing changes. In the GUI
+  that consumer is `TerminalView` and the hub reads the frame it already produced. In
+  `relay-screen-bridge` — the headless PTY used by remote access today — the bridge is the only
+  consumer and calls it directly.
 - **`history_get` is served by a const `VtCore::historyLines(from, count, out)`**, to be added in
   both cores in P2. It **must not** move the viewport: `scrollViewportToRow` is shared state and
   would drag the desktop user's own screen.
 
-**Sizing.** The host is authoritative. The client scales to fit and **must not** send its own size;
-there is no resize message in RRP/1, which is what makes the Warp mobile-viewer resize bug
-structurally impossible.
+**Sizing.** The host is authoritative. The client scales its font so the host's column count fits,
+and **must not** send its own size. There is no resize message in RRP/1 at all, which is what makes
+the Warp mobile-viewer resize bug structurally impossible rather than merely discouraged.
 
 **Rate.** At most 20 frames/s while the client reports itself foreground, at most 4 frames/s
 otherwise (`client_state {visible}`), and agent deltas coalesced at 50 ms.
@@ -558,7 +569,9 @@ and P3 clients interoperate at P1's level.
 
 ## 14. What exists today (2026-09-17)
 
-P0 is written and a working slice of P1 runs, against a demo pane source rather than the GUI.
+P0 is written; P1 runs against a demo agent source, and the P2 screen stream and P3 take-over run
+against **real shells**. What is not yet wired is Relay's GUI: the panes come from
+`relay-screen-bridge`, not from the app's own tabs.
 
 | Part | Where | State |
 |---|---|---|
@@ -568,12 +581,33 @@ P0 is written and a working slice of P1 runs, against a demo pane source rather 
 | Desktop hub | `remote/host.py`, `remote/identity.py`, `remote/panes.py` | Pairing, capabilities, live revoke and downgrade, streams and resume, the event allow-list, rate limits. `PaneSource` is the seam the GUI will implement; `DemoPaneSource` stands in |
 | Web client | `app/` | Pairing with the confirmation code, inbox, thread, composer, plan cards, reconnect. Installable; the service worker does not cache |
 | Python client | `remote/client.py` | For tests and scripts; also where the client-side pinning rule is tested |
-| Dev harness | `remote/cli.py` | `python3 -m remote.cli dev` runs all of it and prints the pairing QR code |
+| Dev harness | `remote/cli.py` | `python3 -m remote.cli share` shares a real shell; `dev` runs the demo agent. Both print the pairing QR |
+| Screen stream (P2) | `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `app/screen.js` | A real PTY parsed by Relay's own emulator, streamed as styled rows, painted as a cell grid on the phone |
+| Take-over (P3) | `remote/host.py`, `app/app.js` | `keys`, `paste`, `line`, `control_request`/`control_release`, an extra-keys row and a line box, refused at a password prompt |
+| Local attach | `remote/attach.py` | The desktop's own terminal joins the same shell, so both ends drive it |
 
-Not implemented, and refused explicitly rather than silently: `history_get`, `keys`, `paste`,
-`line`, `control_request`, `control_release` (P2 and P3), and `secret_input`, which stays refused
-until the desktop can re-read termios at write time and mint the prompt-bound nonce §6.7 requires.
+Not implemented, and refused explicitly rather than silently: `history_get` — scrollback paging
+needs the const `VtCore::historyLines` in both cores — and `secret_input`, which stays refused until
+the desktop can mint the prompt-bound nonce §6.7 requires. A phone therefore cannot answer a
+password prompt; it can see that one is waiting, and ordinary input is refused while it is.
 
 The desktop endpoint runs as Python today. `RemoteHub` in the GUI (§1) is still the target for P2,
 where screen frames come from `TerminalView` in process; for P1, where everything the hub needs
 already crosses the GUI↔worker line, the Python host is what the phone talks to.
+
+## 15. Two ordering bugs worth remembering
+
+Both were found by running the thing, not by reading it, and both produce the same symptom: a
+session that dies the moment traffic gets busy.
+
+**Encrypt and write are one step.** A Noise cipherstate is a counter. Fan-out spawns a send per
+channel, so two sends can encrypt in one order and reach the socket in another; the peer then sees
+a nonce gap and, correctly, drops the session. The desktop holds a per-channel lock across encrypt
+and write; the client chains its sends on a promise.
+
+**A nonce is reserved before the first await.** WebCrypto is asynchronous, so a client that reads
+`this.nonce`, awaits `subtle.encrypt`, and then increments will hand two frames the same nonce as
+soon as two calls overlap. The counter is incremented synchronously, before any await, and incoming
+frames are processed in arrival order for the same reason.
+
+Neither is visible at one message per second. A 20 fps screen stream finds them immediately.

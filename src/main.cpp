@@ -353,6 +353,11 @@ private:
         add("pane.restartShell", "terminal", "Restart this pane's shell or agent after it stopped", {QStringLiteral("Ctrl+Shift+R")});
         add("terminal.interrupt", "terminal", "Interrupt the running command (Esc)", {});
         add("agent.newChat", "agent", "Start a new agent conversation and clear the terminal", {});
+        // Keyboard walk over the files, folders and links in the output (issue GWXM). Free in
+        // every preset (docs/KEYBINDING-PRESETS.md), so all four keep the Relay default.
+        add("links.step", "terminal", "Step through files, folders and links in the output (Enter opens, Esc leaves)",
+            {QStringLiteral("Ctrl+Shift+L")});
+        add("agent.newChat", "agent", "Start a new agent conversation", {});
         add("agent.clearQueue", "agent", "Clear queued agent prompts", {});
         add("agent.resumeQueue", "agent", "Resume the paused agent queue", {});
         add("agent.stop", "agent", "Stop the agent turn", {});
@@ -674,7 +679,8 @@ public:
     std::function<void(const QString &)> onStatus;
     std::function<void()> onStateChanged;   // cwd, model list, native mode or busy state changed
     std::function<void()> onShellExited;
-    std::function<void(const QString &)> onOpenPath;   // open a folder or file in a Relay pane
+    // Open a folder (explorer pane) or a file (preview pane); `line` > 0 scrolls the preview there.
+    std::function<void(const QString &path, int line)> onOpenPath;
     std::function<void(const QString &)> onToggleExplorer;   // open the explorer, or close it again
     std::function<void(const QString &turnId)> onOpenTurn;   // "✦ N tool calls" link or palette
     // Right-click menu entries the window owns: new pane, close pane, tasks (issue #X2F1).
@@ -1014,6 +1020,54 @@ public:
     // capability are only offered when the pane's backend reports it.
     bool terminalCan(int capability) const { return m_backend && (m_backend->capabilities() & capability); }
     bool jumpToPrompt(int direction) { return m_backend && m_backend->scrollToPrompt(direction); }
+
+    // ----- links in the output (issues YZTK and GWXM) ---------------------------------------
+    // Where a clicked or keyboard-selected link goes. `fromMouse` teaches the keyboard path.
+    void openOutputTarget(const QString &target, int line, bool fromMouse) {
+        if (target.isEmpty()) return;
+        if (target.contains(QStringLiteral("://")) || target.startsWith(QStringLiteral("mailto:"))) {
+            QDesktopServices::openUrl(QUrl(target));
+            return;
+        }
+        if (!QFileInfo::exists(target)) { status(QStringLiteral("No such file or folder: ") + target); return; }
+        if (fromMouse)
+            hint(QStringLiteral("links.step"),
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("links.step")),
+                                                QStringLiteral("step through the links in the output")));
+        if (onOpenPath) onOpenPath(target, line > 0 ? line : 0);
+    }
+    bool canWalkOutputLinks() const { return terminalCan(relay::TerminalBackend::LinkWalk); }
+    bool outputLinkWalkActive() const { return m_backend && m_backend->linkWalkActive(); }
+    // Ctrl+Shift+L and the arrows: highlight the previous (-1) or next (+1) link.
+    void stepOutputLink(int delta) {
+        if (!m_backend) return;
+        if (!canWalkOutputLinks()) {
+            status(QStringLiteral("This pane's engine cannot read the screen; start a pane with the Relay engine to step through links."));
+            return;
+        }
+        relay::TerminalBackend::Link link;
+        int index = 0, count = 0;
+        if (!m_backend->stepLink(delta, &link, &index, &count)) {
+            m_walkLink = {};
+            status(QStringLiteral("No files, folders or links in this pane's output."));
+            return;
+        }
+        m_walkLink = link;
+        const QString where = link.line > 0 ? QStringLiteral("%1:%2").arg(link.target).arg(link.line) : link.target;
+        status(QStringLiteral("%1 of %2 · %3 · Enter opens, Esc leaves").arg(index + 1).arg(count).arg(where));
+    }
+    void openOutputLink() {
+        const relay::TerminalBackend::Link link = m_walkLink;
+        endOutputLinkWalk();
+        openOutputTarget(link.target, link.line, false);
+    }
+    void endOutputLinkWalk() {
+        m_walkLink = {};
+        if (m_backend) m_backend->endLinkWalk();
+    }
+    // Only the active pane opens a link on a plain click; in any other pane the first click
+    // moves the focus and Ctrl+click still follows the link.
+    void setLinkClicksArmed(bool armed) { if (m_backend) m_backend->setPlainClickOpensLinks(armed); }
     int findInTerminal(const QString &text, bool backwards) { return m_backend ? m_backend->find(text, backwards) : 0; }
     // Clearing behind Readline's back (write \x1b[2J to the display, then ask for a redraw)
     // leaves the shell one line out of step: Readline still believes its prompt is where it drew
@@ -1085,9 +1139,10 @@ public:
             if (target.startsWith(QStringLiteral("http://")) || target.startsWith(QStringLiteral("https://"))
                 || target.startsWith(QStringLiteral("mailto:")) || target.startsWith(QStringLiteral("file://")))
                 state.link = target;
-            else if (!target.isEmpty() && QFileInfo::exists(target))
+            else if (!target.isEmpty() && QFileInfo::exists(target)) {
                 state.filePath = target;
-            Q_UNUSED(line);
+                m_menuFileLine = line;
+            }
             Q_UNUSED(column);
         }
         auto *menu = new QMenu(this);
@@ -1126,7 +1181,7 @@ public:
         if (id == QStringLiteral("find")) { openFindInView(); return; }
         if (id == QStringLiteral("openLink")) { QDesktopServices::openUrl(QUrl(link)); return; }
         if (id == QStringLiteral("copyLink")) { QApplication::clipboard()->setText(link); return; }
-        if (id == QStringLiteral("openFile")) { if (onOpenPath) onOpenPath(file); return; }
+        if (id == QStringLiteral("openFile")) { if (onOpenPath) onOpenPath(file, m_menuFileLine); return; }
         if (!m_backend) return;
         if (id == QStringLiteral("copy")) { if (!copySelection()) status(QStringLiteral("Nothing is selected.")); return; }
         if (id == QStringLiteral("paste")) { m_backend->paste(); return; }
@@ -1323,7 +1378,7 @@ public:
         out.write(markdown.toUtf8());
         if (!out.commit()) { status(out.errorString()); return; }
         toast(QStringLiteral("Exported to .relay/exports"));
-        if (onOpenPath) onOpenPath(path);
+        if (onOpenPath) onOpenPath(path, 0);
     }
 
     // ----- subagents UI (running-agents list, transcripts) ------------------------------------
@@ -1410,7 +1465,7 @@ protected:
         if (object == m_cwdLabel && event->type() == QEvent::MouseButtonRelease
             && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && !m_cwdLabel->hasSelectedText()) {
             if (onToggleExplorer) onToggleExplorer(m_cwd);
-            else if (onOpenPath) onOpenPath(m_cwd);
+            else if (onOpenPath) onOpenPath(m_cwd, 0);
             hint(QStringLiteral("files.explorer.mouse"),
                  relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("files.explorer")),
                                                 QStringLiteral("the file explorer")));
@@ -1587,7 +1642,7 @@ private:
         m_cwdChip->setObjectName(QStringLiteral("stripChip"));
         m_cwdChip->setFocusPolicy(Qt::NoFocus);
         m_cwdChip->setCursor(Qt::PointingHandCursor);
-        connect(m_cwdChip, &QToolButton::clicked, this, [this] { if (onOpenPath) onOpenPath(m_cwd); });
+        connect(m_cwdChip, &QToolButton::clicked, this, [this] { if (onOpenPath) onOpenPath(m_cwd, 0); });
         routeRow->addWidget(m_cwdChip);
         m_modeChip = new QToolButton;
         m_modeChip->setObjectName(QStringLiteral("stripChip"));
@@ -2414,7 +2469,7 @@ private:
         file.write(body.toUtf8());
         file.commit();
         QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner);
-        if (onOpenPath) onOpenPath(path);
+        if (onOpenPath) onOpenPath(path, 0);
     }
 
     // Worker events added by the sessions protocol. Returns true when the event was handled here.
@@ -3659,13 +3714,11 @@ private:
             if (!m_capturing || m_capture.size() >= kCommandCaptureCap) return;
             m_capture.append(bytes.left(kCommandCaptureCap - m_capture.size()));
         };
+        // Clickable paths (issue YZTK): a file opens in a preview pane at its line, a folder in
+        // an explorer pane, a URL in the browser. The engine only reports paths that exist.
         m_backend->onLinkActivated = [this](const QString &target, int line, int column) {
-            if (target.startsWith(QStringLiteral("http")) || target.startsWith(QStringLiteral("relay://"))) {
-                QDesktopServices::openUrl(QUrl(target));
-                return;
-            }
-            Q_UNUSED(line); Q_UNUSED(column);
-            if (onOpenPath && QFileInfo::exists(target)) onOpenPath(target);
+            Q_UNUSED(column);
+            openOutputTarget(target, line, true);
         };
         // The part has loaded Relay's profile; the shell should see the user's own XDG paths.
         relay::theme::restoreXdgEnvironment();
@@ -3727,7 +3780,7 @@ private:
                     hideAtPopup();
                     m_recentFiles.removeAll(absolute); m_recentFiles.prepend(absolute);
                     while (m_recentFiles.size() > 20) m_recentFiles.removeLast();
-                    onOpenPath(absolute);
+                    onOpenPath(absolute, 0);
                     return;
                 }
             }
@@ -4568,6 +4621,10 @@ public:
         m_toast->show();
         placeToast();
         m_toastTimer.start(milliseconds);
+        const QRegion visible = m_toast->visibleRegion();  // TODO(wmh-debug)
+        fprintf(stderr, "[wmh] toast shown pos=%d,%d size=%dx%d visibleRegion=%dx%d\n",
+                m_toast->x(), m_toast->y(), m_toast->width(), m_toast->height(),
+                visible.boundingRect().width(), visible.boundingRect().height());
     }
 
     // The toast sits at the terminal host's bottom-right corner. Re-anchored while it is up so a
@@ -4578,6 +4635,7 @@ public:
         const QPoint corner = anchor->mapTo(this, QPoint(anchor->width(), anchor->height()));
         m_toast->move(corner.x() - m_toast->width() - 16, corner.y() - m_toast->height() - 12);
         m_toast->raise();
+        fprintf(stderr, "[wmh] placeToast pos=%d,%d\n", m_toast->x(), m_toast->y());  // TODO(wmh-debug)
     }
 private:
 
@@ -6572,6 +6630,7 @@ private:
     bool m_capturing = false;
     char m_lastPromptMark = 0;      // OSC 133 A/B/C/D, engine panes with the shell integration
     int m_lastMarkExitCode = -1;
+    relay::TerminalBackend::Link m_walkLink;   // the link Ctrl+Shift+L is sitting on
     QTimer m_programPoll;
     HideReason m_hideReason = HideReason::None;
     bool m_altScreen = false, m_waiting = false, m_remoteHandled = false, m_remoteProgram = false;
@@ -6605,6 +6664,7 @@ private:
     // agent sessions UI
     QLabel *m_planChip = nullptr, *m_ctxLabel = nullptr;
     QToolButton *m_interruptButton = nullptr;
+    int m_menuFileLine = 0;   // the line the right-clicked path pointed at, for "Open file"
     // voice transcription (issue NY7Z): the chip, the recorder, and the clip in flight
     QToolButton *m_mic = nullptr;
     relay::voice::Capture *m_voiceCapture = nullptr;
@@ -7666,6 +7726,35 @@ protected:
             // Only the palette key itself (to close) acts while the palette has focus.
             if (Keymap::instance().match(key) != QStringLiteral("palette.open")) return QMainWindow::eventFilter(object, event);
         }
+        // Keyboard walk over the links in the output (issue GWXM). While it runs, Enter opens
+        // the highlighted link, Esc leaves and the arrows move; the keys are taken here, so the
+        // walk works with the prompt box focused, which is the normal state. Anything else ends
+        // the walk and is handled as usual, so typing is never swallowed.
+        if (m_active && m_active->outputLinkWalkActive() && !m_sidebar->isVisible()) {
+            Pane *walking = m_active;
+            switch (key->key()) {
+            case Qt::Key_Return: case Qt::Key_Enter:
+            case Qt::Key_Escape:
+            case Qt::Key_Up: case Qt::Key_Left:
+            case Qt::Key_Down: case Qt::Key_Right: {
+                event->accept();
+                if (event->type() != QEvent::KeyPress || key->isAutoRepeat()) return true;
+                const int pressed = key->key();
+                QTimer::singleShot(0, this, [walking, pressed] {
+                    if (pressed == Qt::Key_Return || pressed == Qt::Key_Enter) walking->openOutputLink();
+                    else if (pressed == Qt::Key_Escape) walking->endOutputLinkWalk();
+                    else if (pressed == Qt::Key_Down || pressed == Qt::Key_Right) walking->stepOutputLink(1);
+                    else walking->stepOutputLink(-1);
+                });
+                return true;
+            }
+            default:
+                if (event->type() == QEvent::KeyPress && !key->text().isEmpty()
+                    && Keymap::instance().match(key) != QStringLiteral("links.step"))
+                    walking->endOutputLinkWalk();
+                break;
+            }
+        }
         const QString id = Keymap::instance().match(key);
         if (id.isEmpty()) return QMainWindow::eventFilter(object, event);
         // A program such as vim owns its keys, unless the program_keys rule lets this shortcut act.
@@ -7926,6 +8015,7 @@ private:
         else if (!pane) return;
         else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
         else if (id == QStringLiteral("pane.restartShell")) pane->restartStopped();
+        else if (id == QStringLiteral("links.step")) pane->stepOutputLink(-1);
         else if (id == QStringLiteral("control.human")) pane->takeControl();
         else if (id == QStringLiteral("control.prompt")) pane->showPrompt();
         else if (id == QStringLiteral("input.toggle")) pane->toggleInputMode();
@@ -8732,6 +8822,15 @@ private:
                     items << jump;
                 }
             }
+            if (m_active->canWalkOutputLinks()) {
+                PaletteItem walk;
+                walk.key = QStringLiteral("links.step"); walk.section = terminal;
+                walk.label = QStringLiteral("Step through links in the output");
+                walk.detail = QStringLiteral("Files, folders and URLs · Enter opens, Esc leaves · %1")
+                                  .arg(Keymap::instance().shortcutText(QStringLiteral("links.step")));
+                walk.run = [this] { if (m_active) m_active->stepOutputLink(-1); };
+                items << walk;
+            }
             if (m_active->terminalCan(relay::TerminalBackend::Search)) {
                 PaletteItem find;
                 find.key = QStringLiteral("terminal.find"); find.section = terminal;
@@ -9318,7 +9417,7 @@ private:
             w->updateTitles();
         };
         pane->onShellExited = [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, false); };
-        pane->onOpenPath = [guard](const QString &path) { if (auto *w = windowOf(guard)) w->openPath(path, 0, guard); };
+        pane->onOpenPath = [guard](const QString &path, int line) { if (auto *w = windowOf(guard)) w->openPath(path, line, guard); };
         pane->onToggleExplorer = [guard](const QString &path) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleExplorer(path, guard); } };
         // Right-click menu entries the window owns (issue #X2F1).
         pane->onWindowAction = [guard](const QString &action) {
@@ -9441,6 +9540,10 @@ private:
             m_active = panes.isEmpty() ? nullptr : panes.first();
         }
         if (page) m_lastActive.insert(page, leaf);
+        // Clickable paths: only the active pane opens a link on a plain click, so the click
+        // that moves the focus into another pane cannot open a file by accident (issue YZTK).
+        for (int i = 0; i < m_tabs->count(); ++i)
+            for (Pane *p : panesIn(m_tabs->widget(i))) p->setLinkClicksArmed(p == m_active);
         syncToolbar();
         updateTitles();
     }

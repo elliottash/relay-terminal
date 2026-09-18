@@ -12,7 +12,6 @@
 | `#C1HH` | [Agent drives interactive programs in the visible pane, with take-over](features/2026-09-17-agent-delegate-and-take-over.md) | ready |  |  |  |
 | `#G8DK` | [Aliased terminal commands and prompts (Warp workflows)](features/2026-09-17-aliases-and-workflows.md) | ready |  |  |  |
 | `#GDQN` | [Two-way sync between the Switchboard and GitHub Issues](features/2026-09-17-github-issues-sync.md) | ready |  |  |  |
-| `#GWXM` | [Keyboard shortcut to step through files, folders and links in output](features/2026-09-17-keyboard-jump-to-output-links.md) | ready |  |  |  |
 | `#SSRQ` | [MCP server support](features/2026-09-17-mcp-support.md) | ready |  |  |  |
 | `#YJK8` | [Portable terminal engine for macOS and Windows](features/2026-09-17-portable-terminal-engine.md) | ready |  |  |  |
 | `#YR21` | [Detect programs waiting for input from the screen text (new engine)](features/2026-09-17-screen-text-input-detection.md) | ready |  |  |  |
@@ -22,9 +21,10 @@
 | `#05J2` | [Export settings, and an optional sync across machines](features/2026-09-17-settings-export-and-sync.md) | ready |  |  |  |
 | `#0JA7` | [Colour themes](features/2026-09-17-color-themes.md) | ready |  |  |  |
 | `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | ready |  |  |  |
-| `#YZTK` | [Clickable file and folder paths open Relay panes](features/2026-09-17-clickable-paths.md) | in-progress |  |  |  |
 | `#W5N2` | [Remote access from a phone and multiplayer shared terminals](features/2026-09-17-remote-phone-and-multiplayer.md) | in-progress |  |  |  |
+| `#YZTK` | [Clickable file and folder paths open Relay panes](features/needs_qa_llm/2026-09-17-clickable-paths.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
 | `#EM1E` | [Image context in agent prompts](features/needs_qa_llm/2026-09-17-image-context.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
+| `#GWXM` | [Keyboard shortcut to step through files, folders and links in output](features/needs_qa_llm/2026-09-17-keyboard-jump-to-output-links.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
 | `#NY7Z` | [Voice transcription mode (microphone button, hold Right Alt)](features/needs_qa_llm/2026-09-17-voice-transcription.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
 | `#BPK3` | [Show agent output live while a program owns the terminal](features/needs_qa_llm/2026-09-17-agent-output-while-program-runs.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
 | `#W011` | [Tell the agent which program owns the terminal](features/needs_qa_llm/2026-09-17-agent-program-context.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
