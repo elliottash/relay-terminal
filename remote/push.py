@@ -33,6 +33,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 PUSH_TTL = 60                      # a stale "agent finished" is worse than a missed one
+PAD_LAST = b"\x02"                 # the aes128gcm padding delimiter for the last record
 VAPID_SUBJECT = "mailto:relay@relay-terminal.ai"
 
 
@@ -47,8 +48,10 @@ def unb64url(value: str) -> bytes:
 # ---- the inner seal ---------------------------------------------------------------------------
 
 def seal(push_key: bytes, body: dict) -> bytes:
-    """A body only the desktop could have constructed: AES-GCM, fresh nonce, the kind in the
-    associated data so a sealed `agent_finished` cannot be replayed as `password`."""
+    """A body only the desktop could have constructed: AES-GCM with a fresh nonce.
+
+    The whole body — the kind included — is inside the seal, so a sealed `agent_finished` cannot
+    be re-labelled `password` on the way; the associated data pins the scheme, not the kind."""
     nonce = os.urandom(12)
     associated = b"relay-push-v1"
     ciphertext = AESGCM(push_key).encrypt(nonce, json.dumps(body, separators=(",", ":")).encode(),
@@ -77,18 +80,24 @@ def rfc8291_encrypt(p256dh: bytes, auth: bytes, plaintext: bytes) -> bytes:
     shared = server.exchange(ec.ECDH(), ua_public)
     server_public = server.public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
 
-    prk = HKDF(algorithm=hashes.SHA256(), length=32, salt=auth,
-               info=b"WebPush: info\x00" + server_public + p256dh).derive(shared)
+    # key_info is `ua_public || as_public`, in that order (RFC 8291 section 3.4). The other order
+    # is self-consistent and every browser refuses it, which no test that only talks to itself can
+    # see; the RFC's own Appendix A vector is what catches it.
+    ikm = HKDF(algorithm=hashes.SHA256(), length=32, salt=auth,
+               info=b"WebPush: info\x00" + p256dh + server_public).derive(shared)
 
     salt = os.urandom(16)
 
     def expand(info: bytes, length: int) -> bytes:
         return HKDF(algorithm=hashes.SHA256(), length=length, salt=salt,
-                    info=info).derive(prk)
+                    info=info).derive(ikm)
 
     cek = expand(b"Content-Encoding: aes128gcm\x00", 16)
     nonce = expand(b"Content-Encoding: nonce\x00", 12)
-    ciphertext = AESGCM(cek).encrypt(nonce, plaintext, b"")
+    # aes128gcm records are padded and the pad is delimited (RFC 8188 section 2): the last record
+    # ends its plaintext with 0x02. A receiver strips from that byte, so a record without one is
+    # either refused or read one byte short — again invisible to a round trip against ourselves.
+    ciphertext = AESGCM(cek).encrypt(nonce, plaintext + PAD_LAST, b"")
     record = bytearray(salt)
     record += (4096).to_bytes(4, "big")            # rs: the whole message is one record
     record.append(len(server_public))
@@ -109,16 +118,27 @@ def rfc8291_decrypt(ua_private: bytes, auth: bytes, blob: bytes) -> bytes:
     ua_public = ua.public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
     shared = ua.exchange(ec.ECDH(),
                          ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), server_public))
-    prk = HKDF(algorithm=hashes.SHA256(), length=32, salt=auth,
-               info=b"WebPush: info\x00" + server_public + ua_public).derive(shared)
+    ikm = HKDF(algorithm=hashes.SHA256(), length=32, salt=auth,
+               info=b"WebPush: info\x00" + ua_public + server_public).derive(shared)
 
     def expand(info: bytes, length: int) -> bytes:
         return HKDF(algorithm=hashes.SHA256(), length=length, salt=salt,
-                    info=info).derive(prk)
+                    info=info).derive(ikm)
 
     cek = expand(b"Content-Encoding: aes128gcm\x00", 16)
     nonce = expand(b"Content-Encoding: nonce\x00", 12)
-    return AESGCM(cek).decrypt(nonce, blob[21 + idlen:], b"")
+    padded = AESGCM(cek).decrypt(nonce, blob[21 + idlen:], b"")
+    return unpad(padded)
+
+
+def unpad(padded: bytes) -> bytes:
+    """Strip an aes128gcm record's padding: trailing zeros, then the delimiter (RFC 8188)."""
+    end = len(padded)
+    while end and padded[end - 1] == 0:
+        end -= 1
+    if not end or padded[end - 1] not in (1, 2):
+        raise ValueError("aes128gcm record has no padding delimiter.")
+    return padded[:end - 1]
 
 
 # ---- VAPID (the rendezvous proves it is the sender the subscription was made under) ------------
