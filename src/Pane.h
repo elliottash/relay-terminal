@@ -2251,6 +2251,8 @@ private:
             || type == QStringLiteral("skills_imported") || type == QStringLiteral("skills_updates")) {
             if (m_skillsDialog) m_skillsDialog->handleEvent(event);
             else if (type != QStringLiteral("skills")) status(QStringLiteral("Skills: ") + type);
+            // The dialog's list is the fresher one after a refine or an import: `/name` follows it.
+            if (type == QStringLiteral("skills")) setSkillCommands(event.value(QStringLiteral("items")).toArray());
             if (type == QStringLiteral("skills_refined")) {
                 const auto items = event.value(QStringLiteral("items")).toArray();
                 if (!items.isEmpty() && onOpenDocument) onOpenDocument(items.first().toObject().value(QStringLiteral("path")).toString());
@@ -4058,6 +4060,7 @@ private:
             {QStringLiteral("continue"), QString(), QStringLiteral("Continue the agent turn (after a step limit)")},
             {QStringLiteral("agents"), QString(), QStringLiteral("Subagents: definitions and running agents")},
             {QStringLiteral("skills"), QString(), QStringLiteral("Skills: list, exclude, refine, import from a repository")},
+            {QStringLiteral("skill"), QStringLiteral("<name> [input]"), QStringLiteral("Run a skill (same as /name; this form wins over a built-in of the same name)")},
             {QStringLiteral("instructions"), QString(), QStringLiteral("Choose instruction files (CLAUDE.md, AGENTS.md, WARP.md…)")},
             {QStringLiteral("rename"), QStringLiteral("[name]"), QStringLiteral("Name this pane (no name: edit it in the header; empty: back to automatic)")},
             {QStringLiteral("rename-tab"), QStringLiteral("[name]"), QStringLiteral("Name this tab (no name: edit it in the tab)")},
@@ -4089,9 +4092,19 @@ private:
             commands.append({alias.name, alias.params.isEmpty() ? QString() : QStringLiteral("[args]"),
                              relay::aliases::paletteDetail(alias)});
         }
+        // Then the skills, `/clean-commit` (feature intake 2026-09-18, "like warp"): last, so a
+        // built-in or an alias of the same name keeps it, and `/skill <name>` still reaches the skill.
+        QStringList taken;
+        for (const auto &command : std::as_const(commands)) taken << command.name;
+        for (const auto &skill : std::as_const(m_skillCommands)) {
+            if (taken.contains(skill.name)) continue;
+            QString description = skill.description;
+            if (description.size() > 60) description = description.left(59).trimmed() + QChar(0x2026);
+            commands.append({skill.name, skill.args, QStringLiteral("Skill · ") + description});
+        }
         for (int i = 0; i < commands.size(); ++i) {
             // Name prefix first, then names containing the query; descriptions do not match.
-            const QString &name = commands[i].name;
+            const QString name = commands[i].name.toLower();
             const int score = name.startsWith(query) ? 3000 - i : name.contains(query) ? 2000 - i : 0;
             if (score > 0) ranked.append({score, i});
         }
@@ -4153,10 +4166,11 @@ private:
             return;
         }
         m_editor->clear();
-        // An alias name that reached the popup is not a built-in (issue G8DK).
+        // An alias name that reached the popup is not a built-in (issue G8DK); a skill is neither.
         if (std::none_of(slashCommands().cbegin(), slashCommands().cend(),
                          [&](const auto &c) { return c.name == name; })) {
-            runAlias(name, QString(), false);
+            if (relay::aliases::names(m_aliasList).contains(name) || !skillCommand(name)) runAlias(name, QString(), false);
+            else submitAgent(QStringLiteral("/") + name, false);
             return;
         }
         runSlashCommand(name, QString());
@@ -4184,7 +4198,76 @@ private:
         for (const auto &command : slashCommands()) names << command.name;
         for (const auto &alias : m_aliasList)
             if (!alias.shadowed && !names.contains(alias.name)) names << alias.name;
+        for (const auto &skill : m_skillCommands)
+            if (!names.contains(skill.name)) names << skill.name;
         return names;
+    }
+
+    // ----- skills as `/name` (feature intake 2026-09-18: "add skills as / commands like warp, eg
+    // /clean-commit") ------------------------------------------------------------------------------
+    // The worker lists the skills its agent can load (`configured.skill_commands`). `/clean-commit
+    // tidy the readme` goes to the agent as typed, with `skills: ["clean-commit"]` on the `ask`, and
+    // the worker sends that SKILL.md along as the turn's instructions. A built-in or an alias of the
+    // same name wins `/name`; `/skill <name>` always means the skill.
+    void setSkillCommands(const QJsonArray &items) {
+        m_skillCommands.clear();
+        for (const QJsonValue &value : items) {
+            const QJsonObject item = value.toObject();
+            // A `skills_list` row (the /skills dialog) that the agent does not load.
+            if (item.value(QStringLiteral("excluded")).toBool() || item.contains(QStringLiteral("shadowed_by"))) continue;
+            const QString name = item.value(QStringLiteral("name")).toString();
+            if (name.isEmpty()) continue;
+            m_skillCommands.append({name, QStringLiteral("[input]"),
+                                    item.value(QStringLiteral("description")).toString().simplified()});
+        }
+    }
+
+    const SlashCommand *skillCommand(const QString &name) const {
+        for (const auto &skill : m_skillCommands)
+            if (skill.name == name) return &skill;
+        return nullptr;
+    }
+
+    // The skill a prompt runs: `/name …` when no built-in or alias has that name, or `/skill name …`.
+    QString skillFor(const QString &text) const {
+        static const QRegularExpression pattern(
+            QStringLiteral("^/(skill\\s+)?([A-Za-z0-9][A-Za-z0-9._-]*)(?:\\s[\\s\\S]*)?$"));
+        const auto match = pattern.match(text.trimmed());
+        if (!match.hasMatch()) return {};
+        const QString name = match.captured(2);
+        if (!skillCommand(name)) return {};
+        if (match.capturedLength(1) == 0
+            && (std::any_of(slashCommands().cbegin(), slashCommands().cend(), [&](const auto &c) { return c.name == name; })
+                || relay::aliases::names(m_aliasList).contains(name)))
+            return {};
+        return name;
+    }
+
+    QJsonArray skillsFor(const QString &text) const {
+        const QString name = skillFor(text);
+        return name.isEmpty() ? QJsonArray() : QJsonArray{name};
+    }
+
+    bool tryRunSkillSlash(const QString &text) {
+        if (skillFor(text).isEmpty() || text.trimmed().startsWith(QStringLiteral("/skill "))) return false;
+        hideSlashPopup();
+        submitAgent(text.trimmed(), true);
+        return true;
+    }
+
+    // The slow path the hint teaches: asking for a skill by name in prose ("use the clean-commit
+    // skill to …") when `/clean-commit …` says the same thing and sends the skill with it. Shown
+    // when that turn ends: while it runs, the turn's own status holds the same spot.
+    void skillSlashHint(const QString &text) {
+        if (text.startsWith('/') || !text.contains(QStringLiteral("skill"), Qt::CaseInsensitive)) return;
+        for (const auto &skill : std::as_const(m_skillCommands)) {
+            if (skill.name.size() < 3) continue;
+            const QRegularExpression word(QStringLiteral("(?<![\\w/-])%1(?![\\w-])").arg(QRegularExpression::escape(skill.name)),
+                                          QRegularExpression::CaseInsensitiveOption);
+            if (!word.match(text).hasMatch()) continue;
+            m_skillHintPending = skill.name;
+            return;
+        }
     }
 
     // A `/command` Relay does not have. It used to fall through to the router, which sent the line
@@ -4329,6 +4412,19 @@ private:
         else if (name == QStringLiteral("agents")) {
             if (onShowAgents) onShowAgents();
             else { m_agentsListPending = true; send({{"type", "agents_list"}, {"workspace", m_workspace}}); }
+        } else if (name == QStringLiteral("skill")) {
+            if (args.isEmpty()) { openSkills(); return; }
+            const QString text = QStringLiteral("/skill ") + args;
+            if (skillFor(text).isEmpty()) {
+                const QString wanted = args.section(QRegularExpression(QStringLiteral("\\s")), 0, 0);
+                QStringList known;
+                for (const auto &skill : std::as_const(m_skillCommands)) known << skill.name;
+                const QStringList close = relay::slash::closest(wanted, known, 2);
+                status(close.isEmpty() ? QStringLiteral("No skill named “%1” · /skills lists them").arg(wanted)
+                                       : QStringLiteral("No skill named “%1” · did you mean %2?").arg(wanted, close.join(QStringLiteral(" or "))));
+                return;
+            }
+            submitAgent(text, false);
         } else if (name == QStringLiteral("skills")) {
             openSkills();
         } else if (name == QStringLiteral("help")) {
@@ -4371,6 +4467,7 @@ private:
         QJsonObject request{{"type", "ask"}, {"id", steer.requestId}, {"text", entry.text}, {"when", "steer"}, {"requeue", false}};
         if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
         if (!entry.cards.isEmpty()) request.insert(QStringLiteral("cards"), entry.cards);
+        if (const QJsonArray skills = skillsFor(entry.text); !skills.isEmpty()) request.insert(QStringLiteral("skills"), skills);
         send(request);
         m_lastSteerRequest = steer.requestId; m_lastSteeredAt.start();
         rebuildQueueStrip(); changed();
@@ -5038,12 +5135,16 @@ private:
             if (submitAliasFields()) return;
             if (tryRunSlashCommand(m_editor->toPlainText())) return;
             if (tryRunAliasSlash(m_editor->toPlainText())) return;
+            if (tryRunSkillSlash(m_editor->toPlainText())) return;
             // A `/command` that is not one of the above never reaches the router: Relay says so
             // itself rather than letting Bash answer with "command not found".
             if (reportUnknownSlashCommand(m_editor->toPlainText())) return;
             clearAiGhost();
         } else if (const SlashCommand *command = slashCommandFor(m_editor->toPlainText())) {
             setRouteText(QStringLiteral("COMMAND · /%1 · %2").arg(command->name, command->description));
+            return;
+        } else if (const QString skill = skillFor(m_editor->toPlainText()); !skill.isEmpty()) {
+            setRouteText(QStringLiteral("SKILL · /%1 · %2").arg(skill, skillCommand(skill)->description));
             return;
         } else if (const QString name = relay::slash::attemptedName(m_editor->toPlainText());
                    !name.isEmpty() && !slashNames().contains(name)) {
@@ -5194,6 +5295,7 @@ private:
             m_configured = true; m_configuring = false;
             m_model = event.value(QStringLiteral("model")).toString();
             m_skillCount = event.value(QStringLiteral("skills")).toInt();
+            setSkillCommands(event.value(QStringLiteral("skill_commands")).toArray());
             // Model roles (protocol 13): the worker reports the effective model of every role and
             // which role this pane runs (a role that could not be used falls back to "main").
             m_roleSummary = event.value(QStringLiteral("roles")).toObject();
@@ -5477,6 +5579,10 @@ private:
             // redrawn prompt into the middle of the next turn's output. Close once the queue is idle.
             if (!moreTurnsPending()) closeInline();
             status(moreTurnsPending() ? QStringLiteral("Next queued prompt…") : QStringLiteral("Ready"));
+            if (!m_skillHintPending.isEmpty() && !moreTurnsPending()) {
+                hint(QStringLiteral("skills.slash"), QStringLiteral("Next time: /%1 runs that skill").arg(m_skillHintPending));
+                m_skillHintPending.clear();
+            }
             finishFixTurn(type == QStringLiteral("done"));
         } else if (type == QStringLiteral("error")) {
             const auto text = event.value(QStringLiteral("text")).toString();
@@ -6586,7 +6692,7 @@ private:
             status(QStringLiteral("No agent provider is configured."));
             return;
         }
-        if (fromEditor) { m_editor->remember(text); m_editor->clear(); }
+        if (fromEditor) { m_editor->remember(text); m_editor->clear(); skillSlashHint(text); }
         QueueEntry entry;
         entry.agent = true; entry.text = text; entry.why = why; entry.attachments = attachmentsFor(text);
         entry.shellText = shellText;
@@ -6678,6 +6784,7 @@ private:
         QJsonObject request{{"type", "ask"}, {"text", entry.text}, {"when", when}};
         if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
         if (!entry.cards.isEmpty()) request.insert(QStringLiteral("cards"), entry.cards);
+        if (const QJsonArray skills = skillsFor(entry.text); !skills.isEmpty()) request.insert(QStringLiteral("skills"), skills);
         const QString program = processBusy() ? foregroundCommandLine() : QString();
         // The terminal's directory always goes along: `cd` in the terminal must move the agent too.
         QJsonObject context{{"terminal_cwd", m_cwd}};
@@ -8517,6 +8624,8 @@ private:
     QLabel *m_toast = nullptr;
     QLabel *m_prefixChip = nullptr;
     QPointer<relay::SkillsDialog> m_skillsDialog;
+    QList<SlashCommand> m_skillCommands;   // `/name` for each skill the agent can load
+    QString m_skillHintPending;            // a skill asked for in prose; hinted at the turn's end
     QPointer<relay::KeysDialog> m_keysDialog;
     QPointer<relay::RolesDialog> m_rolesDialog;
     QTimer m_assistDebounce, m_assistHold;

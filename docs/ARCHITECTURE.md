@@ -323,7 +323,7 @@ from the link or palette (→ `/continue` or `agent.continue`), wrong-mode submi
 mode → `input.toggle`, with the mode chip flashing), dropping an image on the prompt box (→ the
 paste shortcut) and "Screenshot this pane" from the palette (→ `agent.screenshotPane`,
 Ctrl+Shift+G), running an alias from the palette (→ `/name`, and for a command the name typed in
-terminal mode), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
+terminal mode), asking for a skill by name in a prompt that says "skill" (→ `/name`), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
 starting a card edit in the Switchboard with the Edit button, a click on the title or a
 double-click in the text (→ `e`),
 and rotating idle tips 4 s after a finished agent turn with an

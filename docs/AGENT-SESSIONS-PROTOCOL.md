@@ -195,6 +195,14 @@ without touching originals → `skills_refined {items: [{name, path, from}]}`.
 `~/.local/share/relay/skill-imports/<repo>@<commit>/` and enables them → `skills_imported {items}`.
 No automatic updates; `skills_check_updates {url}` → `skills_updates {url, current, latest}`.
 
+**Skills as `/name`** (2026-09-18). `configured` carries `skill_commands: [{name, description}]`, the skills
+the pane's agent can load (excluded and shadowed ones are not in it); the composer offers each as `/name`
+after the built-ins and aliases, which win a clash, and `/skill <name> [input]` always means the skill.
+Running one sends the line as typed with `ask {…, skills: [name]}` (at most 5 names; an unknown one is an
+`error` naming it). The worker attaches that SKILL.md, plus the list of the skill's other files, as a `kind:
+"skill"` block framed as this request's instructions, with the text after `/name` as its input — unlike an
+`@file`, which is data (`SkillIndex.invoked`, `attachments.format_block`).
+
 ### 11.1 Backend implementation notes and deviations (2026-09-17)
 
 Implemented in `backend/relay_core/{router,route_assist,provider,agent,queue,skills,skill_manage,observe_protocol}.py`;

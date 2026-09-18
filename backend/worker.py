@@ -169,6 +169,8 @@ def main():
                 event["agents"] = len(agent_catalog.definitions)  # subagents
                 if board_summary is not None:
                     event["board"] = board_summary   # Switchboard (protocol 17)
+                if agent.executor.skills is not None:
+                    event["skill_commands"] = agent.executor.skills.commands()
                 if skill_index is not None and skill_index.skipped:
                     event["skills_skipped"] = skill_index.skipped[:50]
                 emit(event)
@@ -237,6 +239,18 @@ def main():
                     loaded = (loaded or []) + board_protocol.card_attachments(
                         str(agent.executor.workspace.root), request["cards"],
                         board.tools.board if board.tools is not None else None)
+                if request.get("skills"):
+                    # `/clean-commit` in the composer: that skill's SKILL.md goes with the prompt as
+                    # its instructions (protocol 11, skill commands).
+                    agent = turns.agent
+                    if agent is None:
+                        raise ValueError("Configure a provider and workspace first.")
+                    if agent.executor.skills is None:
+                        raise ValueError("No skills are available in this pane.")
+                    try:
+                        loaded = (loaded or []) + agent.executor.skills.invoked(request["skills"])
+                    except skills.SkillError as exc:
+                        raise ValueError(f"Skill: {exc}") from None
                 turns.submit(request.get("text", ""), request.get("when", "now"), request.get("id"),
                              request.get("context"), loaded or None,
                              requeue=request.get("requeue", True))

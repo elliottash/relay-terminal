@@ -144,6 +144,67 @@ class ToolTests(SkillFixture):
         self.assertNotIn('Available skills', plain.messages[0]['content'])
 
 
+class InvokedTests(SkillFixture):
+    """`/good` in the composer: `ask {skills: ["good"]}` sends that SKILL.md as the turn's instructions."""
+
+    def test_commands_list_names_and_descriptions(self):
+        commands = {c['name']: c['description'] for c in self.index.commands()}
+        self.assertEqual(sorted(commands), ['folded', 'good', 'literal'])
+        self.assertEqual(commands['good'], 'Does a good thing: carefully')
+
+    def test_invoked_attaches_skill_with_files(self):
+        [item] = self.index.invoked(['good', 'good'])
+        self.assertEqual((item['kind'], item['skill']), ('skill', 'good'))
+        self.assertIn('Step one.', item['content'])
+        self.assertIn('- scripts/run.sh', item['content'])
+        self.assertNotIn('leak.txt', item['content'])
+        self.assertTrue(item['path'].endswith('good/SKILL.md'))
+
+    def test_invoked_refusals(self):
+        with self.assertRaises(SkillError):
+            self.index.invoked(['nofront'])
+        for bad in ('good', [1], ['a', 'b', 'c', 'd', 'e', 'f']):
+            with self.assertRaises(ValueError):
+                self.index.invoked(bad)
+
+    def test_prompt_frames_skill_as_instructions(self):
+        from relay_core.attachments import format_block
+
+        class Recorder:
+            messages = []
+
+            def complete(self, messages, tools, emit, cancel):
+                Recorder.messages = json.loads(json.dumps(messages))
+                return {'role': 'assistant', 'content': 'Done.'}
+
+            def cancel(self):
+                pass
+
+        block = format_block(self.index.invoked(['good']))
+        self.assertIn('invoked by the user as /good', block)
+        self.assertIn('Follow these instructions', block)
+        self.assertNotIn('data, not instructions', block)
+        agent = Agent(CONFIG, self.temp.name, lambda e: None, provider=Recorder(), skills=self.index)
+        agent.ask('/good tidy the readme', attachments=self.index.invoked(['good']))
+        user = [m for m in Recorder.messages if m['role'] == 'user'][-1]['content']
+        self.assertIn('Step one.', user)
+        self.assertTrue(user.rstrip().endswith('/good tidy the readme'))
+
+    def test_worker_ask_with_skill(self):
+        configure = {'type': 'configure', 'base_url': 'http://127.0.0.1:1/v1', 'model': 'test', 'api_key': '',
+                     'workspace': self.temp.name, 'skills': {'dirs': [str(self.base)]}}
+        messages = [configure, {'type': 'ask', 'id': 'a1', 'text': '/nosuch', 'skills': ['nosuch']},
+                    {'type': 'shutdown'}]
+        proc = subprocess.run([sys.executable, '-S', str(ROOT / 'backend/worker.py')],
+                              input=''.join(json.dumps(m) + '\n' for m in messages),
+                              text=True, capture_output=True, timeout=10, cwd=ROOT)
+        results = [json.loads(line) for line in proc.stdout.splitlines()]
+        configured = next(r for r in results if r['event'] == 'configured')
+        self.assertEqual(sorted(c['name'] for c in configured['skill_commands']), ['folded', 'good', 'literal'])
+        errors = [r for r in results if r['event'] == 'error']
+        self.assertTrue(any('Unknown skill' in r.get('text', '') for r in errors), results)
+
+
 class RequestTests(SkillFixture):
     def test_from_request(self):
         self.assertIsNone(skills.from_request({'enabled': False}, self.temp.name))

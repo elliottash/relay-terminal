@@ -212,6 +212,30 @@ class SkillIndex:
                 "content": data[:MAX_SKILL_BYTES].decode("utf-8", "replace"),
                 "truncated": truncated, "files": files}
 
+    def commands(self) -> list[dict]:
+        """`configured.skill_commands`: what the composer offers as `/name` (protocol 11)."""
+        return [{"name": skill.id, "description": skill.description} for skill in self.skills.values()]
+
+    def invoked(self, names) -> list[dict]:
+        """`ask {skills: [name]}`: the SKILL.md of a skill the user ran as `/name`, as an attachment.
+
+        Unlike an @file, this block is instructions: the user asked for the skill by name, so the
+        agent follows it for this request instead of deciding whether to load it.
+        """
+        if not isinstance(names, list) or len(names) > 5 or not all(isinstance(n, str) for n in names):
+            raise ValueError("skills must be a list of at most 5 skill names.")
+        out = []
+        for name in dict.fromkeys(names):
+            loaded = self.load_skill(name)
+            content = loaded["content"]
+            if loaded["files"]:
+                content += ("\n\nSupporting files in this skill (read them with read_skill_file):\n"
+                            + "\n".join(f"- {path}" for path in loaded["files"]))
+            out.append({"path": str(self.skills[name].root / "SKILL.md"), "kind": "skill", "skill": name,
+                        "content": content, "bytes": len(content.encode("utf-8")),
+                        "truncated": loaded["truncated"]})
+        return out
+
     def read_file(self, name, relative) -> dict:
         skill = self.get(name)
         if not isinstance(relative, str) or not relative.strip() or "\x00" in relative:
