@@ -111,6 +111,10 @@ private Q_SLOTS:
         QCOMPARE(remoteHost(QStringLiteral("ssh -V")), QString());
         QCOMPARE(remoteHost(QStringLiteral("mosh --ssh=\"ssh -p 2222\" me@box -- tmux a")), QStringLiteral("me@box"));
         QCOMPARE(remoteHost(QStringLiteral("mosh-client -# 'me@box' 10.0.0.2 60001")), QStringLiteral("me@box"));
+        // Relay's mosh wrapper (#S5SH): the ssh options inside --ssh are not the destination.
+        QCOMPARE(remoteHost(QStringLiteral("mosh-client -# --ssh=ssh -o ControlMaster=auto -o ControlPath=/run/r/%C "
+                                           "-o ControlPersist=600 --experimental-remote-ip=remote localhost | 127.0.0.1 60001")),
+                 QStringLiteral("localhost"));
         QCOMPARE(remoteHost(QStringLiteral("telnet towel.blinkenlights.nl 23")), QStringLiteral("towel.blinkenlights.nl"));
         QCOMPARE(remoteHost(QStringLiteral("vim notes")), QString());
     }

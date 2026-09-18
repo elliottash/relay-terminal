@@ -82,11 +82,16 @@ Parsed parse(const QStringList &argv) {
     if (program == QStringLiteral("ssh")) return parseSsh(argv.mid(1));
     if (program == QStringLiteral("mosh")) return parseMosh(argv.mid(1));
     if (program == QStringLiteral("mosh-client")) {
-        // mosh-client -# 'the original mosh arguments | IP PORT' IP PORT
-        const int at = argv.indexOf(QStringLiteral("-#"));
-        if (at < 0 || at + 1 >= argv.size()) return {};
-        const QString original = argv[at + 1].section(QStringLiteral(" | "), 0, 0);
-        return parseMosh(original.split(' ', Qt::SkipEmptyParts));
+        // mosh execs `mosh-client "-# <the original mosh arguments> |" IP PORT`: one argument
+        // holds the flag and the words (seen with mosh 1.4); a separate "-#" is read too.
+        for (int i = 1; i < argv.size(); ++i) {
+            if (!argv[i].startsWith(QStringLiteral("-#"))) continue;
+            QString original = argv[i].size() > 2 ? argv[i].mid(2) : argv.value(i + 1);
+            const int bar = original.lastIndexOf(QStringLiteral(" |"));
+            if (bar >= 0) original.truncate(bar);
+            return parseMosh(original.split(' ', Qt::SkipEmptyParts));
+        }
+        return {};
     }
     return {};
 }

@@ -19,3 +19,5 @@ window half (Connect to host, Split on the same host, Options).
 
 Logs of the first run: `login_begin program=ssh resolvable=1`, `login_resolved shared=1`,
 `login_enhance bytes=1473`, `login_end`.
+| `implementer-08` | `mosh localhost` (the driver with `mosh` for `ssh`): the chip names the host, and the prompt box typed `echo …; hostname` into the session. Before the follow-up the alternate screen hid the login entirely and the line was queued locally, and the chip read "ControlMaster=auto". |
+| `implementer-09` | Under mosh the agent's `run_command` ran on the host over the connection mosh's ssh left behind (`ran … on localhost · exit 0`); the reply stays in the side panel by design. |

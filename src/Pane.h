@@ -7283,7 +7283,11 @@ private:
     }
 
     // Where inline output may go now: a local shell idle at its prompt, or a remote one (#S5SH).
-    bool inlineReady() const { return shellIdleAtPrompt() || loginAtPrompt(); }
+    // Not under mosh: mosh-client repaints the whole screen from the server's copy, which has
+    // never heard of Relay's lines, so they would be drawn over; its replies stay in the panel.
+    bool inlineReady() const {
+        return shellIdleAtPrompt() || (loginAtPrompt() && !m_login.program.startsWith(QStringLiteral("mosh")));
+    }
 
     void flushInline() {
         if (m_inlinePending.isEmpty() || !inlineReady()) return;
@@ -8297,6 +8301,10 @@ private:
     // ----- program state: alternate screen, passwords, waiting for input ----------------------
     // Called from the backend's onAltScreenChanged.
     void onPrimaryScreen(bool primary) {
+        // mosh-client draws the remote screen on the alternate screen for as long as it runs, so
+        // for mosh it says nothing about a full-screen program: the login is treated like ssh's
+        // (card #S5SH). Full-screen programs on the host are left to the screen classifier.
+        if (!primary && foregroundProgramName() == QStringLiteral("mosh-client")) { m_altScreen = false; updateTakeControl(); return; }
         m_altScreen = !primary;
         if (!primary) {
             if (m_native) return;

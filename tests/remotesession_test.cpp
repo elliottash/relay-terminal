@@ -41,6 +41,12 @@ private slots:
                                 "1.2.3.4", "60001"}),
                  (QStringList{"-G", "-o", "ControlMaster=auto", "-o", "ControlPath=/r/%C", "filly"}));
         QCOMPARE(destination({"mosh-client", "-#", "filly | 1.2.3.4 60001", "1.2.3.4", "60001"}), QStringLiteral("filly"));
+        // What mosh 1.4 actually runs (read from /proc): the flag and the words are one argument.
+        QCOMPARE(dumpArguments({"mosh-client", "-# localhost -- sleep 20 |", "127.0.0.1", "60003"}),
+                 (QStringList{"-G", "localhost"}));
+        QCOMPARE(dumpArguments({"mosh-client", "-# --ssh=ssh -o ControlMaster=auto -o ControlPath=/r/%C "
+                                "-o ControlPersist=600 --experimental-remote-ip=remote filly |", "127.0.0.1", "60001"}),
+                 (QStringList{"-G", "-o", "ControlMaster=auto", "-o", "ControlPath=/r/%C", "-o", "ControlPersist=600", "filly"}));
         QVERIFY(dumpArguments({"mosh-client", "1.2.3.4", "60001"}).isEmpty());
     }
 

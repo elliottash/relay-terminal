@@ -101,7 +101,10 @@ QString remoteHost(const QString &commandLine) {
     if (program == QStringLiteral("ssh") || program == QStringLiteral("autossh"))
         valued = QStringLiteral("BbcDEeFIiJLlMmOoPpQRSWw");
     else if (program == QStringLiteral("mosh"))
-        valued = QStringLiteral("p");   // mosh -p PORT; the rest are --long=value
+        // mosh -p PORT; the rest are --long=value. mosh-client's -# string has lost its quotes, so
+        // the words of --ssh="ssh -o ControlPath=…" (Relay's wrapper, #S5SH) arrive loose: read
+        // them with ssh's valued letters, which include p, so "-o X" is never taken for the host.
+        valued = QStringLiteral("BbcDEeFIiJLlMmOoPpQRSWw");
     else if (program == QStringLiteral("telnet"))
         valued = QStringLiteral("bEeklnSX");
     else

@@ -134,6 +134,15 @@ own prompt and nothing is lost.
 Anything printed while the remote side is busy (a command running on the host) still goes to the
 side panel and into the terminal at the next remote prompt, not only when ssh exits.
 
+**mosh.** mosh-client draws the remote screen on the alternate screen for its whole life and
+repaints it from the server's copy, so two things differ. The alternate screen is not taken as "a
+full-screen program" while mosh-client owns it (`Pane::onPrimaryScreen`); the login, the prompt box
+and the agent's `host` work as with ssh, the prompt found from the screen. And the agent's reply
+stays in the side panel: a line Relay wrote into mosh's screen would be painted over by the next
+diff from the server. mosh execs `mosh-client "-# <the original arguments> |" IP PORT` (one
+argument, read from `/proc` with mosh 1.4); both `src/RemoteSession.cpp` and
+`relay::panestatus::remoteHost` read the destination and the wrapper's `--ssh` options from it.
+
 ### 7. The agent works on the host
 
 The ask context gains `remote_session`:
