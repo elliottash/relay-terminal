@@ -109,6 +109,9 @@ p { margin: 0 0 14px; }
 
 .gallery { display: grid; gap: 24px; margin-top: 40px; grid-template-columns: 1fr 1fr; }
 .gallery .shot:first-child { grid-column: 1 / -1; }
+/* The two small shots have different aspect ratios; keep their captions on one line. */
+.gallery .shot { display: flex; flex-direction: column; }
+.gallery figcaption { margin-top: auto; padding-top: 10px; }
 @media (max-width: 640px) { .gallery { grid-template-columns: 1fr; } }
 
 .note {
