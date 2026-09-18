@@ -184,9 +184,51 @@ class ValidityTests(unittest.TestCase):
             sentinel = Path(d) / "sentinel"
             for text in [f"touch '{sentinel}'", f"echo $(touch '{sentinel}')", f"echo `touch '{sentinel}'`",
                          f"nope123 && touch '{sentinel}'", f"(touch '{sentinel}')"]:
-                for mode in ("auto", "shell"):
+                for mode in ("auto", "shell", "agent"):
                     classify(text, mode, path=PATH, cwd=d)
             self.assertFalse(sentinel.exists())
+
+
+class WrongModeSignalTests(unittest.TestCase):
+    """agent_signal and agent-mode validity: the wrong-mode hints (2026-09-17).
+
+    Terminal mode flags text that clearly belongs to the agent; agent mode reports whether
+    the text is a runnable command so the GUI can suggest the terminal when it fails."""
+
+    def test_terminal_mode_requests_signal(self):
+        # A NATURAL prefix that is no live alias, or runnable input that reads like a sentence.
+        for text in ["why does this fail", "explain the last error", "please sort the output",
+                     "find the largest files in this repo", "sort these results by date"]:
+            with self.subTest(text=text):
+                self.assertTrue(classify(text, "shell", path=PATH).agent_signal, text)
+
+    def test_terminal_mode_commands_and_typos_do_not_signal(self):
+        for text in ["ls -la", "git status", "make -j", "nope123 --now", "frobnicate",
+                     "shutdown now", "make all", "echo 'why does this fail?'"]:
+            with self.subTest(text=text):
+                self.assertFalse(classify(text, "shell", path=PATH).agent_signal, text)
+
+    def test_live_alias_named_like_a_word_is_not_a_signal(self):
+        result = classify("explain the build", "shell", known_commands=["explain"], path=PATH)
+        self.assertFalse(result.agent_signal)
+        self.assertTrue(result.valid)
+
+    def test_agent_mode_reports_runnability(self):
+        command = classify("git stauts", "agent", path=PATH)
+        self.assertEqual((command.route, command.valid, command.agent_signal), ("agent", True, False))
+        request = classify("why does this fail", "agent", path=PATH)
+        self.assertEqual(request.route, "agent")
+        self.assertFalse(request.valid)
+        self.assertTrue(request.agent_signal)
+        self.assertIn("command not found", request.invalid_reason)
+        typo = classify("nope123 x", "agent", path=PATH)
+        self.assertFalse(typo.valid)
+        self.assertFalse(typo.agent_signal)
+
+    def test_signal_is_in_the_decision_dict(self):
+        d = classify("explain this error", "shell", path=PATH).to_dict()
+        self.assertTrue(d["agent_signal"])
+        self.assertTrue(d["valid"] is False)
 
 
 # Words that are both installed commands and ordinary English, paired as a request and as the real

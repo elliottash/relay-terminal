@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16181d">
+<title>Relay</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<header id="bar">
+  <span id="desktop-name">Relay</span>
+  <span id="capability" class="chip quiet"></span>
+  <span id="link-status" class="chip">starting</span>
+</header>
+
+<main>
+  <section class="screen" id="screen-welcome">
+    <div class="pad">
+      <h1>Relay</h1>
+      <p>This phone is not paired with a desktop yet.</p>
+      <p class="muted">On your desktop open <strong>Settings → Remote → Pair device</strong> and
+        scan the QR code with your camera.</p>
+      <p id="welcome-note" class="note"></p>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-pair" hidden>
+    <div class="pad">
+      <h1>Pairing</h1>
+      <p id="pair-state">Connecting…</p>
+      <div class="code" id="pair-code">·····</div>
+      <p class="muted">Your desktop is showing a five-digit code. Allow the device only if it
+        matches the one above.</p>
+      <dl class="facts">
+        <dt>This device</dt><dd id="pair-device"></dd>
+        <dt>Desktop key</dt><dd id="pair-fingerprint" class="mono"></dd>
+      </dl>
+      <button type="button" id="pair-retry" hidden>Try again</button>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-inbox" hidden>
+    <div id="pane-list"></div>
+    <p id="inbox-empty" class="pad muted"></p>
+    <div class="pad"><button type="button" id="forget" class="quiet-button">Unpair this device</button></div>
+  </section>
+
+  <section class="screen" id="screen-thread" hidden>
+    <div id="thread-bar">
+      <button type="button" id="thread-back" aria-label="Back">‹</button>
+      <div>
+        <div id="thread-title"></div>
+        <div id="thread-cwd" class="muted small"></div>
+      </div>
+    </div>
+    <div id="thread-body"></div>
+    <div id="thread-note" class="muted small pad"></div>
+    <div id="composer">
+      <textarea id="composer-text" rows="1" placeholder="Ask the agent…"
+                autocapitalize="sentences" autocomplete="off"></textarea>
+      <button type="button" id="composer-stop" hidden>Stop</button>
+      <button type="button" id="composer-send">Send</button>
+    </div>
+  </section>
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

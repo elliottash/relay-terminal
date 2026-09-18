@@ -44,6 +44,11 @@ class Decision:
     # sentence). route is the local best guess; the GUI may ask the model with route_assist.
     needs_assist: bool = False
     assist_reason: str = ""
+    # Wrong-mode hints: the text reads like a natural-language request, not a command.
+    # Terminal mode shows a "switch to agent" hint on errors when this is set; agent mode
+    # treats valid text without it as a shell command. High confidence only
+    # (_reads_like_request), so typos and real commands never trigger it.
+    agent_signal: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -486,6 +491,25 @@ def check_runnable(text: str, known_commands: Iterable[str] = (), path: str | No
     return not reason, reason, ok, error
 
 
+def _reads_like_request(trimmed: str, known: set[str], valid: bool, cwd: str | None) -> bool:
+    """True when the text reads like a natural-language request rather than a command.
+
+    High confidence only, in two shapes: a NATURAL prefix whose first word is not a live
+    alias/function ("explain this error"), or runnable input whose assist score clears
+    the threshold ("find the largest files", "sort these results by date"). Used by the
+    fixed modes for the wrong-mode hints; auto mode routes on its own.
+    """
+    if not NATURAL.match(trimmed):
+        return valid and assist_signals(trimmed, cwd)[0] >= ASSIST_THRESHOLD
+    try:
+        first = shlex.split(trimmed, posix=True)[0]
+    except (ValueError, IndexError):
+        first = trimmed.split(maxsplit=1)[0]
+    if first in known and first not in BUILTINS:
+        return False   # a live alias or function named like the word still runs
+    return True
+
+
 def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
              path: str | None = None, cwd: str | None = None) -> Decision:
     text = validate_input(text)
@@ -501,14 +525,21 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
     trimmed = text.strip()
     if not trimmed:
         return Decision("empty", text, "Type a shell command or an agent request.")
-    if forced == "agent":
-        return Decision("agent", text, "Explicit agent destination; nothing runs in the shell.")
-    if forced == "shell":
-        valid, reason, ok, error = check_runnable(text, known_commands, path, cwd)
-        why = "Explicit terminal destination." if valid else f"Explicit terminal destination · {reason}; the agent will fix it."
-        return Decision("shell", text, why, ok, error, valid, reason)
-
     known = set(known_commands)
+    if forced in {"agent", "shell"}:
+        # Fixed modes get the full picture so the GUI can flag a wrong-mode submission:
+        # agent mode also learns whether the text is a runnable command, and both learn
+        # whether it reads like a request (agent_signal). Auto mode decides below.
+        valid, reason, ok, error = check_runnable(text, known_commands, path, cwd)
+        signal = _reads_like_request(trimmed, known, valid, cwd)
+        if forced == "agent":
+            return Decision("agent", text, "Explicit agent destination; nothing runs in the shell.",
+                            syntax_ok=ok, syntax_error=error, valid=valid, invalid_reason=reason,
+                            agent_signal=signal)
+        why = "Explicit terminal destination." if valid else f"Explicit terminal destination · {reason}; the agent will fix it."
+        return Decision("shell", text, why, syntax_ok=ok, syntax_error=error, valid=valid,
+                        invalid_reason=reason, agent_signal=signal)
+
     if NATURAL.match(trimmed):
         # A user-defined function named "explain" can still be a real command.
         try:
@@ -527,7 +558,7 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
                 why = f"“{first}” is a command and an English word; reads like a request"
                 return Decision("agent", text, why + " · best guess: agent request", ok, error, valid, reason,
                                 True, why)
-        return Decision("agent", text, "Natural-language request. Sent only after you submit.")
+        return Decision("agent", text, "Natural-language request. Sent only after you submit.", agent_signal=True)
     valid, reason, ok, error = check_runnable(text, known, path, cwd)
     if valid:
         score, signals, first = assist_signals(trimmed, cwd)

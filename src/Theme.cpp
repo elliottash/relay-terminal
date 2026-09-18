@@ -205,6 +205,9 @@ QToolButton#stripChip:hover { color: @text; border-color: @accent; }
 /* The mode chip takes the destination's colour, like the caret. */
 QToolButton#stripChip[dest="shell"] { color: #3ec5f0; border-color: #3ec5f0; }
 QToolButton#stripChip[dest="agent"] { color: #b48ef7; border-color: #b48ef7; }
+/* Wrong-mode hints: a blinking fill while the chip suggests the other input mode (Pane::flashModeChip). */
+QToolButton#stripChip[flash="agent"] { color: #b48ef7; border-color: #b48ef7; background: rgba(180, 142, 247, 0.22); }
+QToolButton#stripChip[flash="shell"] { color: #3ec5f0; border-color: #3ec5f0; background: rgba(62, 197, 240, 0.22); }
 QToolButton#stripChip::menu-indicator { image: none; width: 0; }
 /* Voice: the microphone chip while a recording is running, with the elapsed time beside it. */
 QToolButton#stripChip[recording="true"] { color: #f7768e; border-color: #f7768e; }

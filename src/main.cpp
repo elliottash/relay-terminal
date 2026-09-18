@@ -327,7 +327,7 @@ private:
         add("terminal.native", "terminal", "Toggle native terminal input (keys go straight to the terminal)", {QStringLiteral("F12")});
         add("pane.restartShell", "terminal", "Restart this pane's shell or agent after it stopped", {QStringLiteral("Ctrl+Shift+R")});
         add("terminal.interrupt", "terminal", "Interrupt the running command (Esc)", {});
-        add("agent.newChat", "agent", "Start a new agent conversation", {});
+        add("agent.newChat", "agent", "Start a new agent conversation and clear the terminal", {});
         add("agent.clearQueue", "agent", "Clear queued agent prompts", {});
         add("agent.resumeQueue", "agent", "Resume the paused agent queue", {});
         add("agent.stop", "agent", "Stop the agent turn", {});
@@ -553,7 +553,13 @@ public:
 // conversation. Windows arrange panes in tabs and splits; the toolbar acts on the active pane.
 class Pane final : public QWidget {
 public:
-    struct QueueEntry { quint64 id = 0; bool agent = false, fix = false, watch = false; QString text, why; QJsonArray attachments; };
+    struct QueueEntry {
+        quint64 id = 0; bool agent = false, fix = false, watch = false;
+        QString text, why; QJsonArray attachments;
+        // Wrong-mode hints (2026-09-17): natural marks a terminal submission that reads like an
+        // agent request; shellText carries an agent submission that is a runnable shell command.
+        bool natural = false; QString shellText;
+    };
     // Why the prompt box is hidden, so it can come back by itself when the reason ends.
     enum class HideReason { None, AltScreen, Remote, Manual };
     Pane(const QString &workspace, const QString &cwd, bool cleanShell,
@@ -688,6 +694,16 @@ public:
     void newChat() {
         if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn first.")); return; }
         send({{"type", "reset"}}); clearFix();
+        // Agent turns print into the terminal, so a new conversation that left the old ones on
+        // screen looked as though /new had done nothing: clear it, the way "Clear terminal" does.
+        // The note then goes to the toast rather than the screen, because printing it would erase
+        // the prompt Readline has just repainted and nothing puts that prompt back.
+        if (m_backend && shellIdleAtPrompt()) {
+            clearTerminal();
+            toast(QStringLiteral("New agent conversation"), 3000);
+            return;
+        }
+        // A program owns the screen: leave it alone and let the note queue until the prompt is back.
         printInline(QStringLiteral("New agent conversation\n"), Ink::Note); closeInline();
     }
     int queuedPrompts() const { return m_entries.size(); }
@@ -955,11 +971,21 @@ public:
     bool terminalCan(int capability) const { return m_backend && (m_backend->capabilities() & capability); }
     bool jumpToPrompt(int direction) { return m_backend && m_backend->scrollToPrompt(direction); }
     int findInTerminal(const QString &text, bool backwards) { return m_backend ? m_backend->find(text, backwards) : 0; }
+    // Clearing behind Readline's back (write \x1b[2J to the display, then ask for a redraw)
+    // leaves the shell one line out of step: Readline still believes its prompt is where it drew
+    // it, so the repaint is a no-op and the screen ends up blank with no prompt. Ctrl+L is
+    // Readline's own clear-screen, so it wipes the screen and repaints the prompt itself, and its
+    // idea of the cursor stays true. Konsole's scrollback is dropped separately.
+    // Falls back to the raw clear when a program owns the screen, where Ctrl+L belongs to it.
     void clearTerminal() {
         if (!m_backend) return;
         closeInline();
-        m_backend->clear();
-        if (shellIdleAtPrompt()) m_backend->redrawPrompt();
+        if (shellIdleAtPrompt()) {
+            m_backend->clearScrollback();
+            m_backend->sendInput(QByteArrayLiteral("\x0c"));
+        } else {
+            m_backend->clear();
+        }
     }
     QString engineLabel() const {
         return m_engine == relay::EngineKind::Relay
@@ -2701,8 +2727,8 @@ private:
     struct SlashCommand { QString name, args, description; };
     static const QList<SlashCommand> &slashCommands() {
         static const QList<SlashCommand> commands{
-            {QStringLiteral("new"), QString(), QStringLiteral("Start a new conversation")},
-            {QStringLiteral("clear"), QString(), QStringLiteral("Start a new conversation (same as /new)")},
+            {QStringLiteral("new"), QString(), QStringLiteral("Start a new conversation and clear the terminal")},
+            {QStringLiteral("clear"), QString(), QStringLiteral("Start a new conversation and clear the terminal (same as /new)")},
             {QStringLiteral("model"), QStringLiteral("[name]"), QStringLiteral("Switch model, keeping the conversation")},
             {QStringLiteral("effort"), QStringLiteral("[low|medium|high|max]"), QStringLiteral("Set reasoning effort")},
             {QStringLiteral("compact"), QStringLiteral("[focus]"), QStringLiteral("Summarize older turns to free context")},
@@ -3505,7 +3531,9 @@ private:
             } else if (id == m_previewId || id == m_pendingSubmit) {
                 if (route == QStringLiteral("shell") && !event.value(QStringLiteral("valid")).toBool(true))
                     setRouteText(QStringLiteral("TERMINAL · ") + event.value(QStringLiteral("invalid_reason")).toString()
-                                          + QStringLiteral(" · the agent will fix it"));
+                                         + (event.value(QStringLiteral("agent_signal")).toBool()
+                                                ? QStringLiteral(" · this reads like a request for the agent")
+                                                : QStringLiteral(" · the agent will fix it")));
                 else
                     setRouteText(route.toUpper() + QStringLiteral(" · ") + event.value(QStringLiteral("reason")).toString());
                 m_routeLabel->setToolTip(event.value(QStringLiteral("syntax_error")).toString());
@@ -3626,6 +3654,11 @@ private:
             QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
             const PendingPrompt prompt = m_itemPrompts.value(m_currentItem);
             m_fixAwaitingAgent = prompt.fix;
+            // Wrong-mode hints: the shell command this turn was submitted with, if any, so a
+            // failing run_command of the same text can suggest the terminal (see tool_result).
+            m_turnShellPrompt = prompt.shellText;
+            m_modeHintShown = false;
+            m_runCommands.clear();
             if (!prompt.program.isEmpty()) m_transcriptProgram = prompt.program;
             if (!prompt.fix && !prompt.text.isEmpty()) {
                 ensureLineStart();
@@ -3643,6 +3676,8 @@ private:
             if (m_activeValid && m_active.agent) m_activeValid = false;
             QTimer::singleShot(0, this, [this] { pumpQueue(); rebuildQueueStrip(); });
             m_itemPrompts.remove(event.value(QStringLiteral("id")).toString());
+            m_turnShellPrompt.clear();
+            m_runCommands.clear();
             if (m_currentItem == event.value(QStringLiteral("id")).toString()) m_currentItem.clear();
             m_agentBusy = !m_runningItem.isEmpty() && m_runningItem != event.value(QStringLiteral("id")).toString();
             if (!m_agentBusy) { stopTurnClock(); m_idleTip.start(); }
@@ -3695,6 +3730,11 @@ private:
                          : title == QStringLiteral("WRITE FILE") ? QStringLiteral("write")
                          : event.value(QStringLiteral("tool")).toString();
             QString head = body.isEmpty() ? QString() : body.takeFirst();
+            // Wrong-mode hints: remember this run_command's full text (multi-line commands
+            // continue in the body), keyed by call_id for the tool_result handler.
+            if (title == QStringLiteral("RUN COMMAND"))
+                m_runCommands.insert(event.value(QStringLiteral("call_id")).toString(),
+                                     (head + (body.isEmpty() ? QString() : QStringLiteral("\n") + body.join(QLatin1Char('\n')))).trimmed());
             if (verb != QStringLiteral("$") && head.startsWith(m_workspace + '/')) head = head.mid(m_workspace.size() + 1);
             ensureLineStart();
             printInline(QStringLiteral("⚙ ") + verb + ' ' + head + '\n', Ink::Tool);
@@ -3713,6 +3753,17 @@ private:
             if (skipped > 0) printInline(QStringLiteral("  … %1 more lines\n").arg(skipped), Ink::Note);
         } else if (type == QStringLiteral("tool_result")) {
             const auto result = event.value(QStringLiteral("result")).toObject();
+            // Wrong-mode hints: a run_command that failed, while in agent mode, whose text is the
+            // prompt the turn started from, means the submission was a shell command in the wrong
+            // mode. At most once per turn.
+            if (event.value(QStringLiteral("tool")).toString() == QStringLiteral("run_command")) {
+                const QString runText = m_runCommands.take(event.value(QStringLiteral("call_id")).toString());
+                if (!m_modeHintShown && !runText.isEmpty() && result.value(QStringLiteral("exit_code")).toInt() != 0
+                    && m_modeValue == QStringLiteral("agent") && commandMatchesPrompt(runText, m_turnShellPrompt)) {
+                    m_modeHintShown = true;
+                    wrongModeHint(false);
+                }
+            }
             ensureLineStart();
             // What the collapsed output cost: the result line carries the size the pane did not show.
             const int lines = m_toolLines + (m_toolPartialLine ? 1 : 0);
@@ -3788,12 +3839,25 @@ private:
             const bool valid = decision.value(QStringLiteral("valid")).toBool(decision.value(QStringLiteral("syntax_ok")).toBool(true));
             const QString problem = decision.value(QStringLiteral("invalid_reason")).toString(
                 decision.value(QStringLiteral("syntax_error")).toString());
+            // Wrong-mode hints: agent_signal says the text reads like a request, not a command.
+            const bool readsLikeRequest = decision.value(QStringLiteral("agent_signal")).toBool();
             if (mode == QStringLiteral("shell")) {
                 // Terminal mode (Ctrl+Shift+Enter): always the terminal. An invalid command
                 // goes to the agent to be fixed; a failing run is fixed and re-run.
+                if (!valid && readsLikeRequest) {
+                    // Wrong mode, not a broken command: nothing runs and nothing is cleared, so
+                    // Ctrl+I followed by Enter resubmits the same text to the agent.
+                    wrongModeHint(true);
+                    ensureLineStart();
+                    printInline(QStringLiteral("✗ %1 · this reads like a request for the agent, not a command\n")
+                                    .arg(problem.isEmpty() ? QStringLiteral("not a valid command") : problem),
+                                Ink::Error);
+                    closeInline();
+                    return;
+                }
                 m_editor->remember(text); m_editor->clear();
                 if (!valid) { startFix(text, problem.isEmpty() ? QStringLiteral("not a valid command") : problem, 1); return; }
-                submitTerminal(text, true);
+                submitTerminal(text, true, readsLikeRequest);
                 return;
             }
             if (!valid) { submitAgent(text, true, problem); return; }
@@ -3803,11 +3867,17 @@ private:
             // Show why non-command input went to the agent, e.g. "command not found: foo".
             const QString why = !decision.value(QStringLiteral("valid")).toBool(true) && mode != QStringLiteral("agent")
                 ? decision.value(QStringLiteral("invalid_reason")).toString() : QString();
-            submitAgent(text, true, why);
+            // Wrong-mode hints: remember a runnable command submitted in agent mode, so a failing
+            // run_command of the same text can suggest the terminal (see the tool_result handler).
+            const QString shellText = mode == QStringLiteral("agent")
+                                      && decision.value(QStringLiteral("valid")).toBool(true)
+                                      && !decision.value(QStringLiteral("agent_signal")).toBool()
+                                      ? text : QString();
+            submitAgent(text, true, why, QString(), shellText);
         }
     }
 
-    bool runInTerminal(const QString &text, bool watch, int attempt) {
+    bool runInTerminal(const QString &text, bool watch, int attempt, bool natural = false) {
         if (!m_backend || !m_shellReady || m_loading || m_native) {
             status(QStringLiteral("Shell is not at an integrated prompt. Use native input; Relay will not type into a running program."));
             return false;
@@ -3826,6 +3896,7 @@ private:
         m_pendingHash = QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
         m_pendingCommand = text; m_loading = true; m_shellReady = false; m_promptReported = false;
         m_fixCommand = watch ? text : QString(); m_fixAttempt = attempt; m_fixWatch = watch; m_fixArmed = false;
+        m_commandNatural = natural;   // wrong-mode hints: reads like a request (agent_signal)
         // Stage text via a bound Readline function. Enter is sent only after its hash acknowledgement.
         sendShellInput(QString(QChar(24)) + QChar(18));
         const quint64 serial = ++m_loadSerial;
@@ -4068,9 +4139,63 @@ private:
 
     // A small notice over the bottom-right of the terminal that fades after a moment.
     // Shortcut hints (Superhuman-style); see Hints.h and docs/ARCHITECTURE.md "Shortcut hints".
-    void hint(const QString &id, const QString &text, int limit = 3) {
-        if (text.isEmpty()) return;
-        if (relay::ShortcutHints::instance().shouldShow(id, limit)) toast(text, 5000);
+    // Returns whether it was shown, so a caller can tie another visual (the mode chip flash) to
+    // the same gates: per-hint limit, cooldown and the global "Shortcut hints" setting.
+    bool hint(const QString &id, const QString &text, int limit = 3) {
+        if (text.isEmpty()) return false;
+        if (!relay::ShortcutHints::instance().shouldShow(id, limit)) return false;
+        toast(text, 5000);
+        return true;
+    }
+
+    // Wrong-mode hints (2026-09-17): a submission that errored and clearly belongs in the other
+    // input mode. The mode chip flashes in the suggested mode's colour and a hint names
+    // input.toggle, built from the live Keymap. Both go through the shortcut-hint gates, so a
+    // user who turned hints off sees neither; an unbound action teaches nothing and stays quiet.
+    void wrongModeHint(bool towardAgent) {
+        const QString key = Keymap::instance().shortcutText(QStringLiteral("input.toggle"));
+        if (key.isEmpty()) return;
+        const QString text = towardAgent
+            ? QStringLiteral("That read like a request, not a command · %1 switches to agent mode").arg(key)
+            : QStringLiteral("Shell command in agent mode · %1 cycles input modes · ! runs one line in the terminal").arg(key);
+        if (hint(towardAgent ? QStringLiteral("mode.requestInTerminal") : QStringLiteral("mode.commandInAgent"), text))
+            flashModeChip(towardAgent ? QStringLiteral("agent") : QStringLiteral("shell"));
+    }
+
+    // Blink the input-mode chip for ~1.4 s in the destination mode's colour (Theme.cpp, the
+    // stripChip[flash] rules), so the eye lands on the control that fixes the wrong mode.
+    void flashModeChip(const QString &dest) {
+        if (!m_modeChip) return;
+        m_chipFlashDest = dest;
+        if (!m_chipFlash) {
+            m_chipFlash = new QTimer(this);
+            m_chipFlash->setInterval(170);
+            connect(m_chipFlash, &QTimer::timeout, this, [this] {
+                m_chipFlashOn = --m_chipFlashLeft % 2 == 0 && m_chipFlashLeft > 0;
+                if (m_chipFlashLeft <= 0) m_chipFlash->stop();
+                applyChipFlash();
+            });
+        }
+        m_chipFlashLeft = 8;   // four blinks
+        m_chipFlashOn = true;
+        applyChipFlash();
+        m_chipFlash->start();
+    }
+
+    void applyChipFlash() {
+        if (!m_modeChip) return;
+        m_modeChip->setProperty("flash", m_chipFlashOn ? m_chipFlashDest : QVariant());
+        m_modeChip->style()->unpolish(m_modeChip);
+        m_modeChip->style()->polish(m_modeChip);
+    }
+
+    // Whether a failing run_command is the prompt the user submitted in agent mode. The agent is
+    // told to reproduce terminal commands as `cd <dir> && <command>`, so that prefix is stripped
+    // before comparing with whitespace collapsed.
+    static bool commandMatchesPrompt(const QString &command, const QString &prompt) {
+        if (command.isEmpty() || prompt.isEmpty()) return false;
+        static const QRegularExpression cd(QStringLiteral("^cd\\s+\\S+\\s*&&\\s*"));
+        return command.simplified().remove(cd) == prompt.simplified();
     }
 
     void showIdleTip() {
@@ -4579,7 +4704,8 @@ private:
     // Agent prompts and terminal commands share one queue per pane, in the order entered. An item
     // starts at once when nothing is queued ahead of it and its resource (agent or shell) is free;
     // otherwise it waits. The worker only ever receives one agent turn at a time from here.
-    void submitAgent(const QString &text, bool fromEditor, const QString &why = QString(), QString when = QString()) {
+    void submitAgent(const QString &text, bool fromEditor, const QString &why = QString(), QString when = QString(),
+                     const QString &shellText = QString()) {
         if (!m_configured) {
             if (fromEditor) { configure(); return; }
             status(QStringLiteral("No agent provider is configured."));
@@ -4588,6 +4714,7 @@ private:
         if (fromEditor) { m_editor->remember(text); m_editor->clear(); }
         QueueEntry entry;
         entry.agent = true; entry.text = text; entry.why = why; entry.attachments = attachmentsFor(text);
+        entry.shellText = shellText;
         if (when == QStringLiteral("interrupt") && m_agentBusy) {
             // Bypasses the queue: stop the running turn and run this now. Queued items keep their order.
             m_interruptPending = true;
@@ -4603,14 +4730,14 @@ private:
         enqueue(entry);
     }
 
-    void submitTerminal(const QString &text, bool watch) {
+    void submitTerminal(const QString &text, bool watch, bool natural = false) {
         if (!m_resubmitAtFront && m_entries.isEmpty() && !m_activeValid && shellIdleForQueue()) {
-            runInTerminal(text, watch, 0);
+            runInTerminal(text, watch, 0, natural);
             return;
         }
         m_editor->remember(text);
         if (m_editor->toPlainText() == m_submittedDraft) m_editor->clear();
-        QueueEntry entry; entry.agent = false; entry.text = text; entry.watch = watch;
+        QueueEntry entry; entry.agent = false; entry.text = text; entry.watch = watch; entry.natural = natural;
         enqueue(entry);
     }
 
@@ -4636,7 +4763,7 @@ private:
 
     void startAgentEntry(const QueueEntry &entry, bool fromQueue, const QString &when = QStringLiteral("now")) {
         PendingPrompt prompt;
-        prompt.text = entry.text; prompt.why = entry.why; prompt.fix = entry.fix;
+        prompt.text = entry.text; prompt.why = entry.why; prompt.fix = entry.fix; prompt.shellText = entry.shellText;
         if (!entry.fix) m_subagents.clearFinished();   // subagents UI: finished rows linger until a new user turn
         QJsonObject request{{"type", "ask"}, {"text", entry.text}, {"when", when}};
         if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
@@ -4665,7 +4792,7 @@ private:
             if (!shellIdleForQueue()) return;
             m_entries.removeFirst();
             m_active = head; m_activeValid = true; m_activeLoaded = false;
-            if (!runInTerminal(head.text, head.watch, 0)) { m_entries.prepend(head); m_activeValid = false; return; }
+        if (!runInTerminal(head.text, head.watch, 0, head.natural)) { m_entries.prepend(head); m_activeValid = false; return; }
         }
         if (m_selected >= m_entries.size()) m_selected = m_entries.size() - 1;
         rebuildQueueStrip(); changed();
@@ -5366,7 +5493,7 @@ private:
         if (was) refreshProgramHint();
     }
 
-    struct PendingPrompt { QString text, why, program; bool fix = false; };
+struct PendingPrompt { QString text, why, program; bool fix = false; QString shellText; };
 
     // Another turn will start without user action: something is queued and the queue is not paused.
     // Another turn will start without user action: queued items, or a turn that is interrupting this one.
@@ -5612,12 +5739,16 @@ private:
                 } else if (status == 130) {
                     clearFix();  // Interrupted with Ctrl+C: the user stopped it on purpose.
                 } else {
+                    // Wrong-mode hints: the command ran and failed but read like a request, so the
+                    // pane is probably in the wrong input mode. The fix attempt continues regardless.
+                    if (m_commandNatural && m_modeValue == QStringLiteral("shell")) wrongModeHint(true);
                     // Defer until Readline has drawn the prompt and put the tty in raw mode.
                     QTimer::singleShot(200, this, [this, command, attempt, status] {
                         startFix(command, QStringLiteral("exited with status %1").arg(status), attempt + 1);
                     });
                 }
             }
+            m_commandNatural = false;   // consumed by this completion either way
             // The command Relay ran has finished: index its line, exit status and captured output.
             finishCommandCapture(status);
             QTimer::singleShot(120, this, [this] { flushInline(); });
@@ -5820,6 +5951,17 @@ private:
     QString m_submitMode, m_model, m_turnText, m_fixCommand;
     int m_fixAttempt = 0;
     bool m_fixWatch = false, m_fixArmed = false, m_fixAwaitingAgent = false, m_turnHeader = false;
+    // Wrong-mode hints (2026-09-17): a terminal submission that reads like a request
+    // (m_commandNatural), the shell command an agent-mode turn started from
+    // (m_turnShellPrompt), its run_command texts by call_id (m_runCommands), whether the
+    // hint already fired this turn (m_modeHintShown), and the mode chip's flash state.
+    bool m_commandNatural = false, m_modeHintShown = false;
+    QString m_turnShellPrompt;
+    QHash<QString, QString> m_runCommands;
+    QTimer *m_chipFlash = nullptr;
+    QString m_chipFlashDest;
+    int m_chipFlashLeft = 0;
+    bool m_chipFlashOn = false;
     bool m_inlineOpen = false, m_atLineStart = true;
     QList<QPair<QString, Ink>> m_inlinePending;
     QList<QPair<QString, QString>> m_stored;
@@ -7793,7 +7935,7 @@ private:
         items << actionItem(agent, QStringLiteral("Model roles…"),
                             QStringLiteral("Default provider and the Main / Flash / Lite models"),
                             QStringLiteral("agent.modelRoles"));
-        items << actionItem(agent, QStringLiteral("New chat"), QStringLiteral("Start a new conversation in this pane"), QStringLiteral("agent.newChat"));
+        items << actionItem(agent, QStringLiteral("New chat"), QStringLiteral("Start a new conversation in this pane and clear the terminal"), QStringLiteral("agent.newChat"));
         items << actionItem(agent, QStringLiteral("Stop agent"), pane && pane->agentBusy() ? QStringLiteral("Cancel the running turn") : QStringLiteral("Agent is idle"), QStringLiteral("agent.stop"));
         // --- subagents UI ---
         {

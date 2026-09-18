@@ -114,7 +114,7 @@ Tunnel. That host serves about a dozen sites through one nginx, so server-side c
 | Component | What it does | Where (recommended first) | Alternative |
 |---|---|---|---|
 | **Web app (PWA)** | Static HTML/JS/CSS, service worker, manifest | **`app.relay-terminal.ai`**, a separate origin so marketing-page scripts can never share key storage. Same host, one new docroot and vhost (owner action). Fallback with no server change: `site/app/` under the existing `deploy.sh` | Cloudflare Pages |
-| **Rendezvous `relay-rendezvous`** | Device registry (SQLite: device id, public key, push subscription, desktop id), signaling, ciphertext WebSocket relay, Web Push sender (holds the VAPID key), rate limits, invites (P4) | One static Go or Rust binary as a systemd service on the same host, published by a **cloudflared ingress rule `rv.relay-terminal.ai → localhost:PORT` that bypasses nginx** | Cloudflare Workers + one Durable Object per desktop (hibernating WebSockets [39]); Fly.io |
+| **Rendezvous `relay-rendezvous`** | Device registry (SQLite: device id, public key, push subscription, desktop id), signaling, ciphertext WebSocket relay, Web Push sender (holds the VAPID key), rate limits, invites (P4) | **Python (asyncio, `websockets`, SQLite) in `rendezvous/`** (owner decision, section 12), run as a systemd service on the same host and published by a **cloudflared ingress rule `rv.relay-terminal.ai → localhost:PORT` that bypasses nginx**. Same toolchain as `backend/`, so `ci.yml` tests it with the existing pytest job and a self-hoster needs nothing new | Cloudflare Workers + one Durable Object per desktop (hibernating WebSockets [39]); Fly.io |
 | **TURN** (later, only if P2P matters for latency) | Relay UDP for WebRTC | Cloudflare Realtime TURN [40] | coturn needs public UDP ports, which don't pass through the Tunnel |
 | **Push** | Web Push now; APNs/FCM in P5 | Rendezvous | n/a |
 | **Accounts (P4)** | Passkeys, GitHub OAuth | Rendezvous | Magic links need an email provider (extra cost and deliverability work) |
@@ -144,8 +144,8 @@ agent events, compact binary (CBOR or MessagePack) for screen diffs. The desktop
 
 | Stream | Content | Why this shape |
 |---|---|---|
-| **Screen** | `screen_snapshot {pane, rows, cols, cells, cursor, alt, title, cwd, seq}` then `screen_diff {seq, rows: [dirty rows]}`, from the engine's `VtCore::updateFrame` dirty rows (`docs/ENGINE.md`) | Host size stays authoritative, so the phone **never resizes the pane** (Warp #13474 [4]). Resync is one snapshot, not a replay. Floods cost at most N frames/s, not the PTY byte rate. Text is already decoded (avoids Warp #16060 [5]). The phone needs a cell-grid renderer, not a second emulator |
-| **Scrollback** | On demand: `history_get {pane, before_row, count}` → pages of styled lines | Fixes mosh's lost scrollback [14] without streaming history continuously |
+| **Screen** | `screen_snapshot {pane, rows, cols, cells, cursor, alt, title, cwd, seq}` then `screen_diff {seq, rows: [dirty rows]}`, built from the `ViewportFrame` **`TerminalView` has already produced** (`engine/view/TerminalView.cpp`), not from a second `VtCore::updateFrame` call: that call *consumes* the dirty state (`engine/core/VtCore.h`), so a second consumer would stop the local view repainting (section 12) | Host size stays authoritative, so the phone **never resizes the pane** (Warp #13474 [4]). Resync is one snapshot, not a replay. Floods cost at most N frames/s, not the PTY byte rate. Text is already decoded (avoids Warp #16060 [5]). The phone needs a cell-grid renderer, not a second emulator |
+| **Scrollback** | On demand: `history_get {pane, before_row, count}` → pages of styled lines. Needs a **new const `VtCore::historyLines(from, count, out)`** in both cores; `historyText` is plain text and `scrollViewportToRow` would drag the desktop user's own viewport (section 12) | Fixes mosh's lost scrollback [14] without streaming history continuously |
 | **Agent** | Filtered worker events (`agent_started`, `delta`, `thinking_delta/done`, `tool_started/result`, `turn_summary`, `done`, `error`, `cancelled`, `queued`, `queue_changed`, `subagent_*`, `plan_written`, `recap`, `context`, `mode_changed`) plus on-demand `turn_transcript_get` and `tool_output_get` (`docs/AGENT-SESSIONS-PROTOCOL.md`) | Already structured with `turn_id`; phones render cards, not a terminal transcript |
 | **Pane state** | `panes {items: [{id, title, cwd, program, control: human\|agent\|remote:<device>, status: idle\|running\|waiting_input\|password\|finished\|failed}]}` | Drives the inbox and notifications. Status comes from `state.json`, the termios password check and OSC 133 marks |
 | **Input (phone → desktop)** | `compose {pane, text, when}` (goes through `route` like the composer), `agent {cancel\|queue_remove\|agent_stop\|set_mode\|recap_request}`, `keys {pane, bytes}` (take-over only), `paste {pane, text}`, `voice {pane, audio(opus/webm), final}` | Allow-list. **Never allowed remotely:** `store_key`, `import_warp`, `configure` with key material, skills import, keybinding and settings changes, plan-file writes outside the plan flow |
@@ -264,9 +264,9 @@ owner can.
 
 | Phase | Scope | Needs | Effort |
 |---|---|---|---|
-| **P0 Spec** | RRP/1 message spec (new `docs/REMOTE-PROTOCOL.md`), Noise suite choice, security review of this doc, rendezvous API | Owner answers below | S (≈1 wk) |
-| **P1 Agent companion** | `relay-rendezvous` (registry, signaling, WebSocket relay, Web Push); `RemoteHub` in the GUI; PWA with QR pairing, inbox, thread, composer, queue, Stop, plan review, voice via desktop, notifications; device list and revoke; desktop indicator. **Works with KonsolePart** (no Screen stream) | Hosting actions (app origin, cloudflared ingress rule) | M (≈5–7 wks) |
-| **P2 Terminal view** | Screen snapshot/diff from the engine, scrollback pages, resync, WebRTC P2P upgrade (desktop: libdatachannel, MPL-2.0 **(verify licence fit)**), latency display | Engine panes (`--engine=vterm`) | M (≈3–4 wks) |
+| **P0 Spec** | RRP/1 message spec (`docs/REMOTE-PROTOCOL.md`), Noise suite choice, security review of this doc, rendezvous API, pairing written so settings sync (`#05J2`) reuses it | Owner answers below | S (≈1 wk) |
+| **P1 Agent companion** | `relay-rendezvous` (registry, signaling, WebSocket relay, Web Push); `RemoteHub` in the GUI; PWA with QR pairing, inbox, thread, composer, queue, Stop, plan review, voice via desktop, notifications; device list and revoke; desktop indicator; remote privacy page on the site and the `ROADMAP.md` non-goal edits (section 3.2). **Works with KonsolePart** (no Screen stream); generic "waiting for input" is best-effort until `#YR21` (section 12) | Hosting actions (app origin, cloudflared ingress rule) | M (≈5–7 wks) |
+| **P2 Terminal view** | Screen snapshot/diff from the view's frame, **`VtCore::historyLines` in both cores**, scrollback pages, resync, WebRTC P2P upgrade (desktop: libdatachannel, MPL-2.0, GPL-compatible under MPL §3.3), latency display | Engine panes (`--engine=relay`) | M (≈4–5 wks) |
 | **P3 Take over** | `keys`/`paste`/line input, extra-keys row, control token with the delegate/take-over work, secure password field, WebAuthn re-check | P2; delegate/take-over control model | S–M (≈2–3 wks) |
 | **P4 Multiplayer** | Accounts (passkeys + GitHub), invites, knock, roles, presence and follow, guest prompt moderation, audit log, pause and end; guests use the same web app | P3 | L (≈6–10 wks) |
 | **P5 Native apps** | Android (Kotlin or React Native) then iOS; APNs/FCM through the rendezvous with encrypted payloads; notification actions (Stop, Reply) | P1–P3 protocol stable | L (≈8–12 wks per platform, less with a shared RN codebase) |
@@ -323,3 +323,92 @@ Recommendations accepted for 1, 2, 5, 6, 7, 8, 9 and 10. Changes:
   email), no account needed. When accounts arrive: passkeys plus GitHub and Google sign-in.
 - **4. Guest agent prompts:** a guest's first command asks the owner to approve, with **Approve once** or
   **Approve always** (for that guest).
+
+## 12. Design review against the code (2026-09-17)
+
+This section records what a pass over `engine/`, `src/`, `backend/` and `docs/ARCHITECTURE.md`
+changed in the design above, and the owner decisions that came out of it.
+
+### 12.1 Corrections
+
+| Claim in the first draft | What the code says | Now |
+|---|---|---|
+| Screen diffs come from `VtCore::updateFrame` dirty rows | `updateFrame` **consumes** the dirty state (`engine/core/VtCore.h`, pinned by `engine/tests/CoreTest.cpp`), and `engine/view/TerminalView.cpp` is its only caller. A second consumer would steal dirty rows and stop the local view repainting | `RemoteHub` taps the `ViewportFrame` the view already built. No core change, and the phone is guaranteed to see what the desktop sees |
+| `history_get` returns pages of styled lines | There is no styled history read. `VtCore::historyText(maxLines)` is plain text, and `scrollViewportToRow` is stateful and shared, so a phone paging back would drag the desktop user's viewport | P2 adds a const `VtCore::historyLines(from, count, out)` to **both** cores (libvterm and ghostty) with tests. P2 grows to ≈4–5 weeks |
+| libdatachannel licence "(verify licence fit)" | MPL-2.0 §3.3 permits distributing a larger work under the GPL; Relay is GPL-3.0-or-later | Resolved, no constraint |
+| Voice needs a phone-side transcription path | `backend/relay_core/voice.py` already takes a **path**, accepts `.webm`, and treats the clip as untrusted data with an anti-injection system prompt | P1 writes the received blob into the pane's 0700 runtime dir and reuses that path |
+| `--engine=vterm` | `--engine=relay` is the flag; `--engine=vterm` is a documented alias (`docs/ENGINE.md`) | Written as `--engine=relay` |
+
+### 12.2 Decisions (2026-09-17)
+
+- **Scrollback:** add the styled `historyLines` API to both cores rather than shipping plain-text
+  scrollback. The phone's scrollback must not look worse than the live screen above it.
+- **Rendezvous:** Python (asyncio, `websockets`, SQLite) in `rendezvous/`, not a Go or Rust binary.
+  The server only fans out ciphertext, so throughput is not the constraint, and `backend/` already
+  requires the toolchain that `ci.yml` and every self-hoster would need.
+- **`waiting for input` notifications:** ship P1 with the known gap and document it. Per
+  `ARCHITECTURE.md` section 9, detecting a program blocked in `read()` needs
+  `/proc/<pid>/syscall`, which `sudo`, `doas`, `pkexec`, `su` and other users' processes do not
+  expose; only their *password* prompts are detected. Password prompts and agent events are
+  reliable today and carry most of the value. `#YR21` (screen-text input detection) improves the
+  general case later with no protocol change.
+
+### 12.3 Settled in the protocol spec, not here
+
+`docs/REMOTE-PROTOCOL.md` carries these; they are noted here so the design is not read as silent
+on them.
+
+- **`RemoteHub` is one per process**, like `NotificationCenter` ("one centre per process, shared by
+  every window", `src/Notifications.h`), keyed by the pane session token that `Notification::source`
+  already carries, in a new `src/RemoteHub.{h,cpp}` — not in `src/main.cpp`, which is 9 678 lines.
+- **Remote password entry** (owner decision 5) must not weaken the `Secret` invariants of
+  `ARCHITECTURE.md` section 9: a password reaches only the masked field and `relay::input::Secret`,
+  never the queue, ledger, session file or logs. So it travels in its own frame type, outside the
+  `seq` ring and outside replay, is never queued while offline, and is redacted in the audit log,
+  with tests mirroring `tests/inputpolicy_test.cpp`.
+- **Guest identity without an account.** Owner decision 4's "Approve always" for a guest needs an
+  identity, and decision 3 allows invites that are a bare unguessable link. The approval is bound to
+  the **device key pinned at join**; revoking the device or burning the invite revokes it.
+- **Pairing is specified on its own**, so settings sync (`#05J2`, which plans to use "the same
+  pairing machinery as remote access") reuses it instead of growing a second one.
+
+### 12.4 Security review (2026-09-17)
+
+P0's security review found four critical and nine high findings. They are recorded as normative
+rules in `docs/REMOTE-PROTOCOL.md`; the ones that changed the design rather than only the wording:
+
+- **The rendezvous must never hold push subscription keys.** `p256dh` and `auth` are content keys,
+  so a rendezvous holding them could forge a "password prompt" notification and read every body.
+  The subscription now goes to the desktop inside the Noise session, and the body is sealed to the
+  device's pinned key inside the RFC 8291 payload. The push subscribe endpoint is gone.
+- **`agent` was shell access.** A remote `compose` entered the composer's own routing, which honours
+  a shell prefix, so an `agent` device could run commands with no agent in the loop. A remote
+  `compose` is now always routed to the agent; the shell route needs `full`.
+- **Revocation and downgrade have to reach live sessions.** They only governed the next handshake,
+  and a session may live for days.
+- **Pairing needed an authentication string.** The dialog was approving a name the device chose for
+  itself. Both ends now derive a five-digit code from the handshake hash and the user compares them.
+- **`plan_execute` took a path**, which `planning.read_plan` would have read from anywhere on disk
+  and fed into a prompt and back to the phone. It takes a desktop-minted id now, and the general
+  rule is that no path, filename or worker request type is ever accepted from the wire.
+- **Registration needed proof of possession** and a `desktop_id` derived from the key, or anyone
+  knowing a public key could take a token for that desktop.
+- **One transport at a time.** A Noise cipherstate has no reorder window, so "frames simply arrive
+  on the other path" would have forced a replay window on the very path the rendezvous sits on.
+
+Outstanding, in parts that are refused rather than half-built: the `secret_input` path needs a
+desktop-minted prompt nonce and a fresh termios read at write time (P3), WebAuthn user verification
+must be bound to the desktop or dropped from the threat table, and the `transport_switch` handshake
+is unwritten (P2).
+
+### 12.5 Still open
+
+- **Hosting actions are owner-only and on the critical path**: the `app.relay-terminal.ai` vhost and
+  the `rv.` cloudflared ingress rule are server-side changes on a box running a dozen sites, exactly
+  what `deploy.sh` refuses to touch. P1 can be built and tested against a loopback rendezvous, but
+  cannot be demonstrated on a real phone until they are done. Schedule them early in P1.
+- **QA evidence for a phone client** does not fit `docs/qa_evidence/` and the `needs_qa_llm` lane as
+  they stand. Proposal: a loopback rendezvous plus a headless-browser check in `ci.yml`, with
+  screenshots as the evidence artefact. To be settled when P1 starts.
+- Sections 6 and 7 and the P4 row still describe accounts as arriving with multiplayer; section 11
+  loosened that (link invites without accounts, plus Google sign-in). Reconcile when P4 is planned.

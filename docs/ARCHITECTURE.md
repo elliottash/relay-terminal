@@ -247,7 +247,9 @@ triggers: toolbar and palette activations of actions with shortcuts, pane button
 tab close and ⧉ buttons, clicking into another pane, mouse model/effort/mode pickers, clicking
 the directory line (`@`), the queue ×, `/shell ` and `/agent ` (`!`, `*`), palette rewinds, pane
 drags, the first `relay://` link, the Tasks chip and `/tasks`, `/requests`, `/todos` (→ `agent.requests`, Ctrl+Shift+K), Continue
-from the link or palette (→ `/continue` or `agent.continue`), and rotating idle tips 4 s after a finished agent turn with an
+from the link or palette (→ `/continue` or `agent.continue`), wrong-mode submissions (section 5,
+"Wrong-mode hints": a request that failed in terminal mode or a failing shell command in agent
+mode → `input.toggle`, with the mode chip flashing), and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
 in `WARP.md`); tests in `tests/hints_test.cpp`.
 
@@ -363,7 +365,10 @@ executes input:
 
 1. Control characters (other than newline and tab) are rejected. Limit 128 KiB.
 2. A leading `/shell ` or `/agent ` forces a destination.
-3. Agent mode returns `agent`. Terminal mode returns `shell` plus a validity check.
+3. Fixed modes run the validity check in both directions: terminal mode returns `shell` plus
+   validity; agent mode returns `agent` plus `valid`/`invalid_reason` (a runnable command
+   submitted in agent mode is valid). Either may set `agent_signal: true` — the text reads like
+   a request for the agent, not a broken command (protocol 11.2).
 4. Auto mode: text matching the natural-language pattern (`why`, `how`, `please`,
    `explain`, `find the`, …) goes to the agent, unless the first word is a live alias or
    function and the text is runnable.
@@ -383,11 +388,24 @@ GUI dispatch (`Pane::dispatch`):
 | Decision and mode | Action |
 |---|---|
 | `shell`, a program owns the terminal, not terminal mode | send to the agent with a note |
+| `shell`, terminal mode, invalid, `agent_signal` | wrong-mode hint (below): nothing runs, the text stays, Ctrl+I then Enter resubmits |
 | `shell`, terminal mode, invalid | start the fix loop (section 7) without running |
 | `shell`, terminal mode, valid | run in the terminal and watch the exit status |
 | `shell`, auto, invalid | send to the agent with the reason |
 | `shell`, auto, valid | run in the terminal |
 | `agent` | `submitAgent` |
+
+**Wrong-mode hints (protocol 11.2).** A submission that errors and clearly belongs in the other
+input mode flashes the mode chip in the suggested mode's colour (`Pane::flashModeChip`, Theme's
+`stripChip[flash]` rules) and shows a shortcut hint naming `input.toggle`. Terminal mode: an
+invalid command with `agent_signal` skips the fix loop entirely — nothing runs, the composer
+keeps the text, one `✗ … · this reads like a request for the agent, not a command` line prints,
+and Ctrl+I then Enter resubmits it to the agent; a command that runs and fails with `agent_signal`
+gets the hint alongside the normal fix attempt. Agent mode: a runnable command submitted as a
+prompt is remembered for the turn, and when the agent's own `run_command` of that same text exits
+non-zero (whitespace-collapsed match, a leading `cd <dir> && ` stripped), the hint fires once.
+Both the flash and the toast go through `Pane::hint()`, so the per-hint limit, the cooldown and
+the global "Shortcut hints" setting apply, and an unbound `input.toggle` gets nothing.
 
 Routing is a convenience, not a security classifier. Natural language can be valid Bash.
 
@@ -427,9 +445,12 @@ against hostile processes running as the same user.
 
 Applies only to terminal mode (Ctrl+Shift+Enter, `/shell `, or the Terminal picker).
 
-- An invalid command is not run. The agent is asked to fix it (attempt 1).
+- An invalid command is not run. The agent is asked to fix it (attempt 1) — unless it carries
+  `agent_signal` (it reads like a request, not a command): then the wrong-mode hint fires instead,
+  nothing runs and the composer keeps the text (section 5, "Wrong-mode hints").
 - A valid command runs. At the next `ready` event: exit 0 ends the loop, exit 130 (Ctrl+C)
-  ends it silently, any other status starts a fix turn.
+  ends it silently, any other status starts a fix turn. A failing run that carried `agent_signal`
+  also shows the wrong-mode hint.
 - The fix prompt carries the command, terminal cwd and problem, and tells the agent it cannot
   see terminal output. The reply must end with a fenced `relay-run` block.
 - Fix prompts are submitted through the agent queue, so a busy agent queues them.

@@ -191,6 +191,26 @@ tests in `tests/test_routing_thinking_skills.py`; live evidence in
 and works before the pane's agent is configured. Without that key it falls back to the pane's model
 (reasoning models took 2–12 s; send a longer `timeout_ms`).
 
+### 11.2 Wrong-mode signals on `route` (v1.7, 2026-09-17)
+
+`route` decisions gain `agent_signal: bool` (false unless true): the text reads like a request for
+the agent rather than a broken command — the natural-language signals of 11.1 (question words,
+articles, connectives, a trailing `?`, …) detected in **any** mode, not only auto. Fixed modes run
+the validity check in both directions now:
+
+- Terminal mode (`mode: "shell"`) still returns `route: "shell"` with `valid`/`invalid_reason`/
+  `syntax_error`, plus `agent_signal`.
+- Agent mode (`mode: "agent"`) returns `route: "agent"` and now also carries `valid` and
+  `invalid_reason` (a runnable command submitted in agent mode is `valid: true`,
+  `agent_signal: false`); previously it carried no validity fields.
+- Auto mode's natural-language route sets `agent_signal: true`.
+
+All additive: `agent_signal` defaults to false and unknown fields are ignored. The GUI uses the
+signal for wrong-mode hints (`docs/ARCHITECTURE.md` section 5, "Wrong-mode hints"): flash the
+input-mode chip and show a shortcut hint naming `input.toggle` when a submission errored and
+clearly belongs in the other mode. Source: `issues/features/needs_qa_llm/2026-09-17-wrong-mode-hints.md`;
+tests: `tests/test_router.py` (`WrongModeSignalTests`).
+
 ## 12. Request ledger, todos, completion check, turn limits (v1.2, 2026-09-17)
 
 Implements items 1–5, 7 and 8 of `docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md` section 6 (owner decisions in its
