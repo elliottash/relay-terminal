@@ -1605,8 +1605,8 @@ The protocol, the cryptography and the phone's web client live in a Python sidec
 
 | Direction | What crosses |
 |---|---|
-| GUI → sidecar | the pane's title, cwd and status; a screen frame whenever the view pulls one; each worker event; the answer to a pairing question |
-| sidecar → GUI | the pairing URL and its QR matrix; a pairing request to put to the person; the keystrokes a phone sent; a prompt a phone submitted |
+| GUI → sidecar | the pane's title, cwd and status; a screen frame whenever the view pulls one; each worker event; the answer to a pairing question; the transcript of a voice clip |
+| sidecar → GUI | the pairing URL and its QR matrix; a pairing request to put to the person; the keystrokes a phone sent; a prompt a phone submitted; a voice clip to transcribe |
 
 **One prompt box.** A client has a single box, like Relay's own. What is typed arrives as
 `compose`, and `Pane::submitRemote` routes it through the worker's router exactly as the composer
@@ -1619,6 +1619,14 @@ composer, because the person at the keyboard may be mid-draft.
 **(security)** Routing can reach the shell, so a client may only ask for it when its device was
 allowed to type. A device paired for the agent gets `submitAgent` and nothing else; a device paired
 for viewing cannot compose at all.
+
+**Voice from the phone.** The phone records a clip and sends it in; the pane hands it to the same
+worker `transcribe` request the microphone beside the prompt box uses, and the words go back to the
+device that spoke (`Pane::transcribeForRemote`). The API key never leaves the desktop and the phone
+never talks to a transcription provider — that is the whole reason the audio travels rather than
+the key. The transcript is routed by the request id the clip carried, so it can no more land in the
+desktop's composer than a remote prompt can, and the clip itself is unlinked as soon as the worker
+has answered.
 
 Two rules decide the shape:
 

@@ -695,13 +695,20 @@ against **real shells** — including Relay's own panes, from the share button i
 | `transport_switch` (§2) | `remote/host.py`, `remote/client.py` | The handshake, tested. There is no second transport yet |
 | Local attach | `remote/attach.py` | The desktop's own terminal joins the same shell, so both ends drive it |
 | In the app | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` | The share chip beside the microphone, the QR and approval dialog, and a sidecar that carries one of Relay's own panes (`ARCHITECTURE.md` section 19) |
+| Voice (§6.4) | `app/app.js`, `remote/gui_host.py`, `src/Pane.h` (`transcribeForRemote`) | A `MediaRecorder` clip from the phone, carried to the pane and transcribed by its own worker on the desktop's key; the text returns to the phone's prompt box, matched to the clip by id. Tested through a headless browser with Chrome's fake capture device; not yet tried with a real microphone on a real phone |
 
 Every Relay pane is an engine pane, so every pane can be shared.
 
 Not implemented, and refused explicitly rather than silently: `history_get` (the bridge can page
 plain text, but scrollback is to be styled, which needs a const `VtCore::historyLines` in both
-cores); `voice` from a GUI pane (`GuiPaneSource.transcribe` has no route to the pane's worker yet);
-and all of section 10. Notifications are half-wired, as the table says.
+cores); and all of section 10. Notifications are half-wired, as the table says.
+
+`voice` from a GUI pane now works: the sidecar sends the clip to the GUI as a `voice` line with an
+id it minted, the pane writes it to a 0600 temp file whose name and extension it chooses itself and
+hands it to the same worker `transcribe` request its own microphone uses, and the `transcribed`
+answer comes back by that id. A remote transcript never reaches the desktop's prompt box, and the
+desktop's own is never sent to a device. A clip the GUI does not answer within 90 seconds is an
+error the phone shows, not a spinner that never stops.
 
 The desktop endpoint runs as Python today. `RemoteHub` in the GUI (§1) is still the target for P2,
 where screen frames come from `TerminalView` in process; for P1, where everything the hub needs
