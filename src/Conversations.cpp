@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Conversations.h"
 
+#include <QAbstractTextDocumentLayout>
+#include <QAction>
 #include <QApplication>
 #include <algorithm>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -13,12 +16,18 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
+#include <QPainter>
 #include <QPushButton>
+#include <QScrollBar>
+#include <QSignalBlocker>
 #include <QSplitter>
+#include <QStyledItemDelegate>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTextBrowser>
+#include <QTextDocument>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -28,6 +37,14 @@ namespace relay::conversations {
 namespace {
 constexpr int kIdRole = Qt::UserRole + 1;
 constexpr int kItemRole = Qt::UserRole + 2;
+// What a row draws (see RowDelegate): a title with short tags and a muted line under it, or rich
+// text that wraps. kKindRole says what the row is: "session", "thread", "group" or "preview".
+constexpr int kTitleRole = Qt::UserRole + 3;
+constexpr int kSubRole = Qt::UserRole + 4;
+constexpr int kBadgeRole = Qt::UserRole + 5;
+constexpr int kHtmlRole = Qt::UserRole + 6;
+constexpr int kKindRole = Qt::UserRole + 7;
+constexpr int kLoadedRole = Qt::UserRole + 8;
 }  // namespace
 
 // ----- pure helpers ------------------------------------------------------------------------
@@ -123,20 +140,335 @@ QString stripAnsi(const QByteArray &bytes, int maxChars) {
     return out;
 }
 
+QString dateGroup(double epochSeconds, const QDateTime &now) {
+    if (epochSeconds <= 0) return QStringLiteral("Older");
+    const QDate when = QDateTime::fromSecsSinceEpoch(qint64(epochSeconds)).date();
+    const QDate today = now.date();
+    if (when >= today) return QStringLiteral("Today");            // a clock skew reads as today
+    if (when == today.addDays(-1)) return QStringLiteral("Yesterday");
+    if (when >= today.addDays(-6)) return QStringLiteral("This week");
+    if (when >= today.addDays(-29)) return QStringLiteral("This month");
+    return QStringLiteral("Older");
+}
+
+QStringList dateGroupOrder() {
+    return {QStringLiteral("Today"), QStringLiteral("Yesterday"), QStringLiteral("This week"),
+            QStringLiteral("This month"), QStringLiteral("Older")};
+}
+
+namespace {
+
+const char *const kOperatorKeys[] = {"project", "file", "model", "branch", "before", "after", "has", "is", "in"};
+
+bool isOperatorKey(const QString &key) {
+    for (const char *known : kOperatorKeys) if (key == QLatin1String(known)) return true;
+    return false;
+}
+
+// One token of a query, the way conv_index._scan_tokens splits it: a leading `-` negates, `key:`
+// counts only as a bare ASCII word before the colon, and a value may be quoted.
+struct Token {
+    bool negated = false, hasKey = false;
+    QString key, value;
+    int start = 0, length = 0;
+};
+
+QList<Token> scanTokens(const QString &text) {
+    QList<Token> out;
+    const int size = text.size();
+    int index = 0;
+    while (index < size) {
+        if (text.at(index).isSpace()) { ++index; continue; }
+        Token token;
+        token.start = index;
+        if (text.at(index) == QLatin1Char('-') && index + 1 < size && !text.at(index + 1).isSpace()) {
+            token.negated = true;
+            ++index;
+        }
+        auto ascii = [](QChar ch, bool first) {
+            const ushort code = ch.unicode();
+            if ((code >= 'a' && code <= 'z') || (code >= 'A' && code <= 'Z')) return true;
+            return !first && ((code >= '0' && code <= '9') || code == '_');
+        };
+        if (index < size && ascii(text.at(index), true)) {
+            int end = index + 1;
+            while (end < size && ascii(text.at(end), false)) ++end;
+            if (end < size && text.at(end) == QLatin1Char(':')) {
+                token.key = text.mid(index, end - index).toLower();
+                token.hasKey = true;
+                index = end + 1;
+            }
+        }
+        if (index < size && text.at(index) == QLatin1Char('"')) {
+            const int close = text.indexOf(QLatin1Char('"'), index + 1);
+            if (close < 0) { token.value = text.mid(index + 1); index = size; }
+            else { token.value = text.mid(index + 1, close - index - 1); index = close + 1; }
+        } else {
+            int stop = index;
+            while (stop < size && !text.at(stop).isSpace()) ++stop;
+            token.value = text.mid(index, stop - index);
+            index = stop;
+        }
+        token.length = index - token.start;
+        out.append(token);
+    }
+    return out;
+}
+
+}  // namespace
+
+QString chipText(const QJsonObject &op) {
+    const QString key = op.value(QStringLiteral("key")).toString();
+    const QString value = op.value(QStringLiteral("value")).toString();
+    const bool negated = op.value(QStringLiteral("negated")).toBool();
+    if (key.isEmpty() || key == QLatin1String("text"))
+        return negated ? QStringLiteral("not: ") + value : value;
+    return (negated ? QStringLiteral("not ") : QString()) + key + QStringLiteral(": ") + value;
+}
+
+QString removeOperator(const QString &query, const QJsonObject &op) {
+    const QString key = op.value(QStringLiteral("key")).toString();
+    const QString value = op.value(QStringLiteral("value")).toString();
+    const bool negated = op.value(QStringLiteral("negated")).toBool();
+    if (value.isEmpty()) return query;
+    const QList<Token> tokens = scanTokens(query);
+    for (const Token &token : tokens) {
+        bool match = false;
+        if (key.isEmpty() || key == QLatin1String("text")) {
+            // An excluded word or phrase: `-word`, `-"a phrase"`, or `-notakey:value`, whose whole
+            // token is the excluded text. The reply has already taken the quotes off.
+            const QString text = token.hasKey ? token.key + QLatin1Char(':') + token.value : token.value;
+            match = token.negated == negated && !isOperatorKey(token.key)
+                    && text.compare(value, Qt::CaseInsensitive) == 0;
+        } else {
+            match = token.hasKey && token.negated == negated && token.key == key
+                    && token.value.compare(value, Qt::CaseInsensitive) == 0;
+        }
+        if (!match) continue;
+        QString out = query;
+        out.remove(token.start, token.length);
+        return out.simplified();
+    }
+    return query;   // nothing in the box matches it: leave what the user typed alone
+}
+
+QString closedAgo(qint64 closedAtMs, qint64 nowMs) {
+    if (closedAtMs <= 0) return {};
+    const qint64 seconds = std::max<qint64>(0, (nowMs - closedAtMs) / 1000);
+    if (seconds < 60) return QStringLiteral("closed just now");
+    if (seconds < 3600) return QStringLiteral("closed %1 min ago").arg(seconds / 60);
+    if (seconds < 86400) return QStringLiteral("closed %1 h ago").arg(seconds / 3600);
+    if (seconds < 2 * 86400) return QStringLiteral("closed yesterday");
+    return QStringLiteral("closed %1 days ago").arg(seconds / 86400);
+}
+
+QStringList badges(const QJsonObject &item, bool openNow, const QString &closedText) {
+    QStringList tags;
+    if (item.value(QStringLiteral("pinned")).toInt() > 0) tags << QStringLiteral("pinned");
+    if (openNow) tags << QStringLiteral("open");
+    else if (!closedText.isEmpty()) tags << closedText;
+    if (item.value(QStringLiteral("unfinished")).toBool()) tags << QStringLiteral("unfinished");
+    const int files = item.value(QStringLiteral("files_count")).toInt();
+    if (files > 0)
+        tags << (files == 1 ? QStringLiteral("edits · 1 file") : QStringLiteral("edits · %1 files").arg(files));
+    else if (item.value(QStringLiteral("has_edits")).toBool())
+        tags << QStringLiteral("edits");
+    const QString branch = item.value(QStringLiteral("branch")).toString();
+    if (!branch.isEmpty() && branch != QLatin1String("main") && branch != QLatin1String("master"))
+        tags << branch;
+    return tags;
+}
+
+QString elideMiddleText(const QString &text, int maxChars) {
+    if (maxChars <= 1 || text.size() <= maxChars) return text;
+    if (!text.contains(QLatin1Char('/'))) return text.left(maxChars - 1) + QChar(0x2026);
+    // A path: the name at the end is what identifies it, so the middle goes and the name stays
+    // whole when it fits at all.
+    const int name = text.size() - text.lastIndexOf(QLatin1Char('/')) - 1;
+    int keepRight = (maxChars - 1) * 2 / 3;
+    if (name > keepRight && name <= maxChars - 2) keepRight = name;
+    const int keepLeft = maxChars - 1 - keepRight;
+    return text.left(keepLeft) + QChar(0x2026) + text.right(keepRight);
+}
+
+QJsonArray continueItems(const QJsonArray &items, const QString &project,
+                         const QSet<QString> &closedIds, int max) {
+    QList<QJsonObject> picked;
+    for (const auto &value : items) {
+        const QJsonObject item = value.toObject();
+        const QString source = item.value(QStringLiteral("source")).toString();
+        if (source == QLatin1String("subagent") || source == QLatin1String("terminal")) continue;
+        if (!project.isEmpty() && item.value(QStringLiteral("project")).toString() != project) continue;
+        const bool pinned = item.value(QStringLiteral("pinned")).toInt() > 0;
+        const bool unfinished = item.value(QStringLiteral("unfinished")).toBool();
+        const bool closed = closedIds.contains(item.value(QStringLiteral("session_id")).toString());
+        if (!pinned && !unfinished && !closed) continue;
+        picked.append(item);
+    }
+    std::stable_sort(picked.begin(), picked.end(), [](const QJsonObject &a, const QJsonObject &b) {
+        return a.value(QStringLiteral("updated")).toDouble() > b.value(QStringLiteral("updated")).toDouble();
+    });
+    QJsonArray out;
+    for (int i = 0; i < picked.size() && (max <= 0 || i < max); ++i) out.append(picked.at(i));
+    return out;
+}
+
+QString compactTokens(double tokens) {
+    if (tokens >= 1000000) return QString::number(tokens / 1000000.0, 'f', 1) + QLatin1Char('M');
+    if (tokens >= 1000) return QString::number(tokens / 1000.0, 'f', 1) + QLatin1Char('k');
+    return QString::number(qint64(tokens));
+}
+
+QString estimateText(const QJsonObject &event) {
+    const int count = event.value(QStringLiteral("count")).toInt();
+    const QString scope = event.value(QStringLiteral("scope")).toString() == QLatin1String("all")
+                              ? QStringLiteral("all projects") : QStringLiteral("this project");
+    if (count <= 0)
+        return QStringLiteral("Every conversation in %1 already has a summary. There is nothing to do.").arg(scope);
+    QString model = event.value(QStringLiteral("model")).toString();
+    if (model.isEmpty()) model = QStringLiteral("the chores model");
+    return QStringLiteral("%1 conversation%2 in %3 %4 no summary. Summarising them costs about %5 input "
+                          "and %6 output tokens on %7. Nothing is summarised unless you press Start.")
+        .arg(count)
+        .arg(count == 1 ? QString() : QStringLiteral("s"),
+             scope, count == 1 ? QStringLiteral("has") : QStringLiteral("have"),
+             compactTokens(event.value(QStringLiteral("approx_input_tokens")).toDouble()),
+             compactTokens(event.value(QStringLiteral("approx_output_tokens")).toDouble()), model);
+}
+
 // ----- the session manager pane -------------------------------------------------------------
 
 namespace {
 bool isThread(const QJsonObject &item) { return item.value(QStringLiteral("source")).toString() == QLatin1String("subagent"); }
 bool isTerminal(const QJsonObject &item) { return item.value(QStringLiteral("source")).toString() == QLatin1String("terminal"); }
+
+QString escaped(const QString &text) { return text.simplified().toHtmlEscaped(); }
+
+// A row of the list draws itself: the title with its short tags, the muted summary under it, and —
+// for the rows an unfolded session holds — rich text that wraps, so a summary paragraph and a
+// highlighted match line read as prose rather than as one elided line.
+class RowDelegate : public QStyledItemDelegate {
+public:
+    explicit RowDelegate(QTreeWidget *tree) : QStyledItemDelegate(tree), m_tree(tree) {}
+
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
+        if (index.column() == 0) {
+            const QString html = index.data(kHtmlRole).toString();
+            if (!html.isEmpty()) {
+                QTextDocument document;
+                document.setDefaultFont(option.font);
+                document.setHtml(html);
+                document.setTextWidth(textWidth(index));
+                return QSize(int(document.idealWidth()), int(document.size().height()) + 4);
+            }
+            if (!index.data(kTitleRole).toString().isEmpty()) {
+                const QFontMetrics metrics(option.font);
+                const bool two = !index.data(kSubRole).toString().isEmpty() || !index.data(kBadgeRole).toStringList().isEmpty();
+                return QSize(160, metrics.height() * (two ? 2 : 1) + 8);
+            }
+        }
+        return QStyledItemDelegate::sizeHint(option, index);
+    }
+
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
+        const QString html = index.data(kHtmlRole).toString();
+        const QString title = index.data(kTitleRole).toString();
+        if (index.column() != 0 || (html.isEmpty() && title.isEmpty())) {
+            QStyledItemDelegate::paint(painter, option, index);
+            return;
+        }
+        QStyleOptionViewItem opt(option);
+        initStyleOption(&opt, index);
+        opt.text.clear();
+        const QWidget *widget = opt.widget;
+        QStyle *style = widget ? widget->style() : QApplication::style();
+        style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, widget);
+
+        const bool selected = opt.state & QStyle::State_Selected;
+        const QColor ink = selected ? opt.palette.color(QPalette::HighlightedText)
+                                    : opt.palette.color(QPalette::Text);
+        QColor muted = selected ? ink : opt.palette.color(QPalette::PlaceholderText);
+        if (selected) muted.setAlphaF(0.75);
+        const QRect rect = opt.rect.adjusted(3, 2, -4, -2);
+        painter->save();
+        painter->setFont(opt.font);
+        if (!html.isEmpty()) {
+            QTextDocument document;
+            document.setDefaultFont(opt.font);
+            document.setHtml(html);
+            document.setTextWidth(rect.width());
+            painter->translate(rect.topLeft());
+            QAbstractTextDocumentLayout::PaintContext context;
+            context.palette.setColor(QPalette::Text, ink);
+            context.clip = QRectF(0, 0, rect.width(), rect.height());
+            document.documentLayout()->draw(painter, context);
+            painter->restore();
+            return;
+        }
+        // The title owns the first line: a narrow pane must not turn "Fix the FTS index" into
+        // "Fix the …" to make room for tags. The tags lead the second line, the summary follows.
+        const QFontMetrics metrics(opt.font);
+        painter->setPen(ink);
+        painter->drawText(QRect(rect.left(), rect.top(), rect.width(), metrics.height()),
+                          Qt::AlignLeft | Qt::AlignVCenter, metrics.elidedText(title, Qt::ElideRight, rect.width()));
+        const QStringList tags = index.data(kBadgeRole).toStringList();
+        const QString sub = index.data(kSubRole).toString();
+        if (tags.isEmpty() && sub.isEmpty()) { painter->restore(); return; }
+        const int lineTop = rect.top() + metrics.height() + 2;
+        int x = rect.left();
+        painter->setPen(muted);
+        for (const QString &tag : tags) {
+            const int width = metrics.horizontalAdvance(tag) + 10;
+            if (x + width > rect.right()) break;
+            const QRect box(x, lineTop + 1, width, metrics.height() - 2);
+            painter->drawRoundedRect(box, 4, 4);
+            painter->drawText(box, Qt::AlignCenter, tag);
+            x += width + 6;
+        }
+        if (!sub.isEmpty() && x < rect.right() - 24)
+            painter->drawText(QRect(x, lineTop, rect.right() - x, metrics.height()),
+                              Qt::AlignLeft | Qt::AlignVCenter,
+                              metrics.elidedText(sub, Qt::ElideRight, rect.right() - x));
+        painter->restore();
+    }
+
+private:
+    // How wide column 0 is for this row: the column less the indentation its depth costs.
+    int textWidth(const QModelIndex &index) const {
+        int depth = 1;
+        for (QModelIndex parent = index.parent(); parent.isValid(); parent = parent.parent()) ++depth;
+        return std::max(80, m_tree->columnWidth(0) - depth * m_tree->indentation() - 10);
+    }
+    QTreeWidget *m_tree = nullptr;
+};
 }  // namespace
 
 SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     setObjectName(QStringLiteral("sessionManager"));
 
     m_search = new QLineEdit;
+    m_search->setObjectName(QStringLiteral("sessionsSearch"));
     m_search->setClearButtonEnabled(true);
-    m_search->setPlaceholderText(QStringLiteral("Search every session and Relay's terminal history · \"quoted\" for a phrase"));
+    m_search->setPlaceholderText(QStringLiteral("Search every session · \"a phrase\" · file: model: branch: is:pinned -not · ? for the list"));
     m_search->installEventFilter(this);
+    m_help = new QToolButton;
+    m_help->setObjectName(QStringLiteral("sessionsHelp"));
+    m_help->setText(QStringLiteral("?"));
+    m_help->setAutoRaise(true);
+    m_help->setToolTip(QStringLiteral("What the search box understands"));
+    connect(m_help, &QToolButton::clicked, this, &SessionManager::showOperatorHelp);
+
+    m_chipRow = new QWidget;
+    m_chipRow->setObjectName(QStringLiteral("sessionsChips"));
+    auto *chips = new QHBoxLayout(m_chipRow);
+    chips->setContentsMargins(0, 0, 0, 0);
+    chips->setSpacing(6);
+    chips->addStretch(1);
+    m_chipRow->setVisible(false);
+    m_ignored = new QLabel;
+    m_ignored->setObjectName(QStringLiteral("dialogHint"));
+    m_ignored->setWordWrap(true);
+    m_ignored->setVisible(false);
 
     m_scope = new QComboBox;
     m_scope->addItem(QStringLiteral("This project"), QStringLiteral("project"));
@@ -152,12 +484,48 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_date->addItem(QStringLiteral("Today"), QStringLiteral("today"));
     m_date->addItem(QStringLiteral("Last 7 days"), QStringLiteral("week"));
     m_date->addItem(QStringLiteral("Last 30 days"), QStringLiteral("month"));
+    m_branch = new QComboBox;
+    m_branch->setObjectName(QStringLiteral("sessionsBranch"));
+    m_branch->addItem(QStringLiteral("Any branch"), QString());
+    m_branch->setVisible(false);            // shown once the facets name more than one branch
+    m_group = new QComboBox;
+    m_group->setObjectName(QStringLiteral("sessionsGroup"));
+    m_group->addItem(QStringLiteral("By project"), QStringLiteral("project"));
+    m_group->addItem(QStringLiteral("By date"), QStringLiteral("date"));
+    m_group->addItem(QStringLiteral("No grouping"), QStringLiteral("none"));
     m_sort = new QComboBox;
+    m_sort->setObjectName(QStringLiteral("sessionsSort"));
     m_sort->addItem(QStringLiteral("Newest first"), QStringLiteral("recent"));
     m_sort->addItem(QStringLiteral("Oldest first"), QStringLiteral("oldest"));
     m_sort->addItem(QStringLiteral("Most turns"), QStringLiteral("longest"));
-    m_sort->addItem(QStringLiteral("Most matches"), QStringLiteral("relevance"));
-    m_open = new QCheckBox(QStringLiteral("Open tasks"));
+    m_sort->addItem(QStringLiteral("Best match"), QStringLiteral("relevance"));
+
+    // The three-state filters of protocol 14.3, as a menu so the filter row stays one line in a
+    // narrow pane. Unticked means "do not filter", never "only the ones without it".
+    m_filters = new QToolButton;
+    m_filters->setObjectName(QStringLiteral("sessionsFilters"));
+    m_filters->setText(QStringLiteral("More ▾"));
+    m_filters->setPopupMode(QToolButton::InstantPopup);
+    m_filterMenu = new QMenu(this);
+    m_filters->setMenu(m_filterMenu);
+    auto toggle = [this](const QString &label, const QString &name) {
+        auto *action = m_filterMenu->addAction(label);
+        action->setObjectName(name);
+        action->setCheckable(true);
+        connect(action, &QAction::toggled, this, &SessionManager::requery);
+        return action;
+    };
+    m_hasEdits = toggle(QStringLiteral("Has edits"), QStringLiteral("filterHasEdits"));
+    m_unfinished = toggle(QStringLiteral("Unfinished"), QStringLiteral("filterUnfinished"));
+    m_pinnedOnly = toggle(QStringLiteral("Pinned"), QStringLiteral("filterPinned"));
+    m_hasSummary = toggle(QStringLiteral("Has a summary"), QStringLiteral("filterHasSummary"));
+    m_openTasks = toggle(QStringLiteral("Open tasks"), QStringLiteral("filterOpenTasks"));
+    m_filterMenu->addSeparator();
+    m_summariseAll = m_filterMenu->addAction(QStringLiteral("Summarise all…"));
+    m_summariseAll->setObjectName(QStringLiteral("summariseAll"));
+    m_summariseAll->setToolTip(QStringLiteral("What it would cost first; nothing is summarised until you press Start"));
+    connect(m_summariseAll, &QAction::triggered, this, &SessionManager::askEstimate);
+
     // Owner, 2026-09-18: threads are findable here, but off unless asked for.
     m_threads = new QCheckBox(QStringLiteral("Subagent threads"));
     m_threads->setObjectName(QStringLiteral("sessionsThreads"));
@@ -177,6 +545,11 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    m_tree->setItemDelegateForColumn(0, new RowDelegate(m_tree));
+    // The unfolded rows wrap, so their height depends on how wide the first column is.
+    connect(m_tree->header(), &QHeaderView::sectionResized, this,
+            [this](int section, int, int) { if (section == 0) m_tree->doItemsLayout(); });
+    connect(m_tree, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem *item) { unfold(item); });
     m_tree->installEventFilter(this);
 
     m_header = new QLabel;
@@ -185,11 +558,19 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_preview = new QTextBrowser;
     m_preview->setOpenExternalLinks(false);
     m_preview->setObjectName(QStringLiteral("conversationPreview"));
+    m_summarise = new QPushButton(QStringLiteral("Summarise"));
+    m_summarise->setObjectName(QStringLiteral("summariseOne"));
+    m_summarise->setToolTip(QStringLiteral("Write a short summary of this conversation with the chores model"));
+    m_summarise->setVisible(false);
+    connect(m_summarise, &QPushButton::clicked, this, &SessionManager::summariseSelected);
 
     auto *right = new QWidget;
     auto *rightBox = new QVBoxLayout(right);
     rightBox->setContentsMargins(0, 0, 0, 0);
-    rightBox->addWidget(m_header);
+    auto *headerRow = new QHBoxLayout;
+    headerRow->addWidget(m_header, 1);
+    headerRow->addWidget(m_summarise, 0, Qt::AlignTop);
+    rightBox->addLayout(headerRow);
     rightBox->addWidget(m_preview, 1);
 
     auto *splitter = new QSplitter(Qt::Horizontal);
@@ -200,6 +581,56 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
 
     m_status = new QLabel;
     m_status->setTextFormat(Qt::PlainText);
+    m_status->setWordWrap(true);
+    m_cancelBatch = new QPushButton(QStringLiteral("Cancel"));
+    m_cancelBatch->setObjectName(QStringLiteral("cancelSummaries"));
+    m_cancelBatch->setVisible(false);
+    connect(m_cancelBatch, &QPushButton::clicked, this, [this] {
+        if (onSummariseCancel) onSummariseCancel();
+        m_note = QStringLiteral("Stopping after the conversation being summarised…");
+        updateStatus();
+    });
+
+    // "Summarise all…" asks what it would cost and waits here for a Start. It is a row of the pane,
+    // not a modal box: the list stays readable while the number is read.
+    m_confirm = new QFrame;
+    m_confirm->setObjectName(QStringLiteral("summariseConfirm"));
+    m_confirm->setFrameShape(QFrame::StyledPanel);
+    m_confirm->setVisible(false);
+    m_confirmText = new QLabel;
+    m_confirmText->setObjectName(QStringLiteral("summariseEstimate"));
+    m_confirmText->setWordWrap(true);
+    auto *start = new QPushButton(QStringLiteral("Start"));
+    start->setObjectName(QStringLiteral("summariseStart"));
+    start->setEnabled(false);
+    auto *cancelConfirm = new QPushButton(QStringLiteral("Cancel"));
+    auto *confirmRow = new QHBoxLayout(m_confirm);
+    confirmRow->setContentsMargins(8, 6, 8, 6);
+    confirmRow->addWidget(m_confirmText, 1);
+    confirmRow->addWidget(cancelConfirm);
+    confirmRow->addWidget(start);
+    connect(start, &QPushButton::clicked, this, &SessionManager::startBatch);
+    connect(cancelConfirm, &QPushButton::clicked, this, [this] { m_confirm->setVisible(false); });
+
+    // Nothing matched, or nothing is saved yet: say which, and offer the way out of it.
+    m_empty = new QLabel;
+    m_empty->setObjectName(QStringLiteral("dialogHint"));
+    m_empty->setWordWrap(true);
+    m_searchAll = new QPushButton(QStringLiteral("Search all projects"));
+    m_searchAll->setObjectName(QStringLiteral("searchAllProjects"));
+    connect(m_searchAll, &QPushButton::clicked, this, [this] {
+        m_scope->setCurrentIndex(m_scope->findData(QStringLiteral("all")));
+    });
+    m_clearFilters = new QPushButton(QStringLiteral("Clear filters"));
+    m_clearFilters->setObjectName(QStringLiteral("clearFilters"));
+    connect(m_clearFilters, &QPushButton::clicked, this, &SessionManager::clearFilters);
+    m_emptyRow = new QWidget;
+    auto *emptyRow = new QHBoxLayout(m_emptyRow);
+    emptyRow->setContentsMargins(0, 0, 0, 0);
+    emptyRow->addWidget(m_empty, 1);
+    emptyRow->addWidget(m_searchAll);
+    emptyRow->addWidget(m_clearFilters);
+    m_emptyRow->setVisible(false);
 
     m_resume = new QPushButton(QStringLiteral("Resume here"));
     m_resume->setDefault(true);
@@ -214,8 +645,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     auto *close = new QPushButton(QStringLiteral("Close"));
 
     // Two rows, so no filter is cut short in a pane half the window wide: what the list holds,
-    // then how it is narrowed and ordered.
-    for (QComboBox *combo : {m_scope, m_kind, m_model, m_date, m_sort})
+    // then how it is narrowed, grouped and ordered.
+    for (QComboBox *combo : {m_scope, m_kind, m_model, m_date, m_sort, m_branch, m_group})
         combo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     auto *filters = new QHBoxLayout;
     filters->setSpacing(8);
@@ -226,14 +657,28 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     auto *narrow = new QHBoxLayout;
     narrow->setSpacing(8);
     narrow->addWidget(m_model);
+    narrow->addWidget(m_branch);
     narrow->addWidget(m_date);
+    narrow->addWidget(m_group);
     narrow->addWidget(m_sort);
-    narrow->addWidget(m_open);
+    narrow->addWidget(m_filters);
     narrow->addStretch(1);
+
+    auto *searchRow = new QHBoxLayout;
+    searchRow->setSpacing(6);
+    searchRow->addWidget(m_search, 1);
+    searchRow->addWidget(m_help);
 
     auto *statusRow = new QHBoxLayout;
     statusRow->addWidget(m_status, 1);
+    statusRow->addWidget(m_cancelBatch);
     statusRow->addWidget(m_more);
+
+    m_reopen = new QPushButton(QStringLiteral("Reopen where it was"));
+    m_reopen->setObjectName(QStringLiteral("reopenClosed"));
+    m_reopen->setToolTip(QStringLiteral("Put the pane, tab or window this conversation was in back where it was (Alt+Enter)"));
+    m_reopen->setVisible(false);
+    connect(m_reopen, &QPushButton::clicked, this, &SessionManager::reopenClosed);
 
     auto *buttons = new QHBoxLayout;
     buttons->setSpacing(8);
@@ -242,6 +687,7 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     buttons->addWidget(m_pin);
     buttons->addWidget(m_delete);
     buttons->addStretch(1);
+    buttons->addWidget(m_reopen);
     buttons->addWidget(m_newPane);
     buttons->addWidget(m_resume);
     buttons->addWidget(close);
@@ -250,12 +696,16 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     auto *box = new QVBoxLayout(list);
     box->setContentsMargins(8, 8, 8, 8);
     box->setSpacing(6);
-    box->addWidget(m_search);
+    box->addLayout(searchRow);
+    box->addWidget(m_chipRow);
+    box->addWidget(m_ignored);
     box->addLayout(filters);
     box->addLayout(narrow);
     box->addLayout(statusRow);
+    box->addWidget(m_confirm);
+    box->addWidget(m_emptyRow);
     box->addWidget(splitter, 1);
-    auto *hint = new QLabel(QStringLiteral("Enter resumes in this pane · Shift+Enter opens a new pane · on a thread, Enter opens its history · Ctrl+I info · Esc closes"));
+    auto *hint = new QLabel(QStringLiteral("Enter resumes here · Shift+Enter a new pane · → a quick look · F2 rename · Ctrl+P pin · Ctrl+F search · Esc closes"));
     hint->setObjectName(QStringLiteral("dialogHint"));
     hint->setWordWrap(true);
     box->addWidget(hint);
@@ -281,10 +731,26 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_debounce->setInterval(120);
     connect(m_debounce, &QTimer::timeout, this, &SessionManager::requery);
 
-    connect(m_search, &QLineEdit::textChanged, this, &SessionManager::scheduleQuery);
-    for (QComboBox *combo : {m_scope, m_kind, m_model, m_date, m_sort})
+    connect(m_search, &QLineEdit::textChanged, this, [this](const QString &text) {
+        // Searching wants the best match first, listing wants the newest — until the user picks a
+        // sort by hand, after which their choice stands whatever they type.
+        if (!m_sortChosen) {
+            const QString want = text.trimmed().isEmpty() ? QStringLiteral("recent") : QStringLiteral("relevance");
+            if (m_sort->currentData().toString() != want) {
+                const QSignalBlocker quiet(m_sort);
+                m_sort->setCurrentIndex(m_sort->findData(want));
+            }
+        }
+        scheduleQuery();
+    });
+    for (QComboBox *combo : {m_scope, m_kind, m_model, m_date, m_sort, m_branch})
         connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &SessionManager::requery);
-    connect(m_open, &QCheckBox::toggled, this, &SessionManager::requery);
+    // Grouping is drawn here, not asked of the worker.
+    connect(m_group, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this] { rebuildTree(selectedId()); });
+    // A sort the user picked by hand is theirs: the query text stops changing it. The list's own
+    // switches happen under a QSignalBlocker, so any change that arrives here is the user's.
+    connect(m_sort, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] { m_sortChosen = true; });
     connect(m_threads, &QCheckBox::toggled, this, [this](bool on) {
         m_tree->headerItem()->setText(0, on ? QStringLiteral("Session / subagent thread") : QStringLiteral("Session"));
         requery();
@@ -367,14 +833,45 @@ void SessionManager::showEvent(QShowEvent *event) {
     requery();
 }
 
-void SessionManager::requery() {
-    if (!onQuery) return;
+QString SessionManager::scopeId() const { return m_scope->currentData().toString(); }
+
+bool SessionManager::anyFilter() const {
+    return m_hasEdits->isChecked() || m_unfinished->isChecked() || m_pinnedOnly->isChecked()
+           || m_hasSummary->isChecked() || m_openTasks->isChecked()
+           || !m_model->currentData().toString().isEmpty() || !m_branch->currentData().toString().isEmpty()
+           || m_date->currentData().toString() != QLatin1String("any")
+           || !m_kind->currentData().toString().isEmpty();
+}
+
+void SessionManager::clearFilters() {
+    const QSignalBlocker quietModel(m_model), quietBranch(m_branch), quietDate(m_date), quietKind(m_kind);
+    m_model->setCurrentIndex(0);
+    m_branch->setCurrentIndex(0);
+    m_date->setCurrentIndex(0);
+    m_kind->setCurrentIndex(0);
+    for (QAction *action : {m_hasEdits, m_unfinished, m_pinnedOnly, m_hasSummary, m_openTasks}) {
+        const QSignalBlocker quiet(action);
+        action->setChecked(false);
+    }
+    requery();
+}
+
+// The `conversations` request body for what the box and the filters say (protocol 14.3). The
+// operators the user types are the worker's business: they are left in `query` untouched, and the
+// filters only ever add their own explicit fields, so the two never fight over one thing.
+QJsonObject SessionManager::queryRequest() const {
     QJsonObject request{{QStringLiteral("query"), m_search->text()},
-                        {QStringLiteral("scope"), m_scope->currentData().toString()},
+                        {QStringLiteral("scope"), scopeId()},
                         {QStringLiteral("limit"), 100}};
-    if (m_open->isChecked()) request.insert(QStringLiteral("has_open_tasks"), true);
+    if (m_openTasks->isChecked()) request.insert(QStringLiteral("has_open_tasks"), true);
+    if (m_hasEdits->isChecked()) request.insert(QStringLiteral("has_edits"), true);
+    if (m_unfinished->isChecked()) request.insert(QStringLiteral("unfinished"), true);
+    if (m_pinnedOnly->isChecked()) request.insert(QStringLiteral("pinned"), true);
+    if (m_hasSummary->isChecked()) request.insert(QStringLiteral("has_summary"), true);
     const QString model = m_model->currentData().toString();
     if (!model.isEmpty()) request.insert(QStringLiteral("model"), model);
+    const QString branch = m_branch->currentData().toString();
+    if (!branch.isEmpty()) request.insert(QStringLiteral("branch"), branch);
     const double since = sinceFor(m_date->currentData().toString(), QDateTime::currentDateTime());
     if (since > 0) request.insert(QStringLiteral("since"), since);
     const QString kind = m_kind->currentData().toString();
@@ -382,25 +879,20 @@ void SessionManager::requery() {
     if (m_threads->isChecked()) request.insert(QStringLiteral("include_threads"), true);
     const QString sort = m_sort->currentData().toString();
     if (sort != QLatin1String("recent")) request.insert(QStringLiteral("sort"), sort);
+    return request;
+}
+
+void SessionManager::requery() {
+    if (!onQuery) return;
     m_nextOffset = -1;
-    onQuery(request);
+    m_previewFor.clear();          // a new list: the side preview is asked for afresh
+    onQuery(queryRequest());
 }
 
 void SessionManager::requestMore() {
     if (!onQuery || m_nextOffset < 0) return;
-    QJsonObject request{{QStringLiteral("query"), m_search->text()},
-                        {QStringLiteral("scope"), m_scope->currentData().toString()},
-                        {QStringLiteral("limit"), 100}, {QStringLiteral("offset"), m_nextOffset}};
-    if (m_open->isChecked()) request.insert(QStringLiteral("has_open_tasks"), true);
-    const QString model = m_model->currentData().toString();
-    if (!model.isEmpty()) request.insert(QStringLiteral("model"), model);
-    const double since = sinceFor(m_date->currentData().toString(), QDateTime::currentDateTime());
-    if (since > 0) request.insert(QStringLiteral("since"), since);
-    const QString kind = m_kind->currentData().toString();
-    if (!kind.isEmpty()) request.insert(QStringLiteral("sources"), QJsonArray{kind});
-    if (m_threads->isChecked()) request.insert(QStringLiteral("include_threads"), true);
-    const QString sort = m_sort->currentData().toString();
-    if (sort != QLatin1String("recent")) request.insert(QStringLiteral("sort"), sort);
+    QJsonObject request = queryRequest();
+    request.insert(QStringLiteral("offset"), m_nextOffset);
     onQuery(request);
 }
 
@@ -421,80 +913,228 @@ void SessionManager::setResults(const QJsonObject &event) {
     m_nextOffset = event.contains(QStringLiteral("next_offset")) ? event.value(QStringLiteral("next_offset")).toInt() : -1;
     m_more->setVisible(m_nextOffset >= 0);
     m_elapsed = event.value(QStringLiteral("elapsed_ms")).toDouble();
+    // The scope the worker actually used: `project:` in the box means all projects, whatever the
+    // menu says, and the menu follows rather than lying about what is listed (protocol 14.3).
+    const QString scope = event.value(QStringLiteral("scope")).toString();
+    if (!scope.isEmpty() && scope != scopeId() && m_scope->findData(scope) >= 0) {
+        const QSignalBlocker quiet(m_scope);
+        m_scope->setCurrentIndex(m_scope->findData(scope));
+    }
+    rebuildChips(event.value(QStringLiteral("parsed")).toObject());
+    fillFacets(event.value(QStringLiteral("facets")).toObject());
     rebuildTree(keep);
+}
+
+void SessionManager::rebuildChips(const QJsonObject &parsed) {
+    auto *row = qobject_cast<QHBoxLayout *>(m_chipRow->layout());
+    while (row->count() > 1) {                       // the trailing stretch stays
+        QLayoutItem *item = row->takeAt(0);
+        if (QWidget *widget = item->widget()) { widget->hide(); widget->setParent(nullptr); widget->deleteLater(); }
+        delete item;
+    }
+    const QJsonArray operators = parsed.value(QStringLiteral("operators")).toArray();
+    for (const auto &value : operators) {
+        const QJsonObject op = value.toObject();
+        auto *chip = new QToolButton;
+        chip->setObjectName(QStringLiteral("stripChip"));
+        chip->setProperty("chipKey", op.value(QStringLiteral("key")).toString());
+        chip->setText(chipText(op) + QStringLiteral("  ×"));
+        chip->setToolTip(QStringLiteral("Take this out of the search"));
+        connect(chip, &QToolButton::clicked, this,
+                [this, op] { m_search->setText(removeOperator(m_search->text(), op)); });
+        row->insertWidget(row->count() - 1, chip);
+    }
+    m_chipRow->setVisible(!operators.isEmpty());
+    const QJsonArray ignored = parsed.value(QStringLiteral("ignored")).toArray();
+    QStringList words;
+    for (const auto &value : ignored) words << value.toString();
+    m_ignored->setText(words.isEmpty() ? QString()
+                                       : QStringLiteral("ignored: ") + words.join(QStringLiteral(" · ")));
+    m_ignored->setVisible(!words.isEmpty());
+}
+
+// The model and branch menus are the distinct values of the rows the filters select, so they never
+// need a second request and never empty out as the user types (protocol 14.3).
+void SessionManager::fillFacets(const QJsonObject &facets) {
+    auto fill = [](QComboBox *combo, const QJsonArray &values, const QString &any) {
+        const QString keep = combo->currentData().toString();
+        const QSignalBlocker quiet(combo);
+        combo->clear();
+        combo->addItem(any, QString());
+        for (const auto &value : values) {
+            const QString text = value.toString();
+            if (!text.isEmpty()) combo->addItem(text, text);
+        }
+        // A value that has gone out of the facets stays selectable until the user drops it.
+        if (!keep.isEmpty() && combo->findData(keep) < 0) combo->addItem(keep, keep);
+        combo->setCurrentIndex(std::max(0, combo->findData(keep)));
+        return combo->count() - 1;
+    };
+    if (facets.contains(QStringLiteral("models")))
+        fill(m_model, facets.value(QStringLiteral("models")).toArray(), QStringLiteral("Any model"));
+    if (facets.contains(QStringLiteral("branches"))) {
+        const int branches = fill(m_branch, facets.value(QStringLiteral("branches")).toArray(), QStringLiteral("Any branch"));
+        m_branch->setVisible(branches > 1);          // one branch everywhere is not a filter
+    }
+}
+
+// One row of the list: the title with its tags, the muted summary under it, and the columns.
+QTreeWidgetItem *SessionManager::addSessionRow(QTreeWidgetItem *parent, const QJsonObject &item) {
+    const bool terminal = isTerminal(item);
+    const int open = item.value(QStringLiteral("open_requests")).toInt();
+    auto *row = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_tree);
+    row->setText(1, whenText(item.value(QStringLiteral("updated")).toDouble(), QDateTime::currentDateTime()));
+    row->setText(2, QString::number(item.value(QStringLiteral("turns")).toInt())
+                        + (open > 0 ? QStringLiteral(" · %1 open").arg(open) : QString()));
+    row->setText(3, terminal ? QStringLiteral("terminal") : item.value(QStringLiteral("model")).toString());
+    decorate(row, item);
+    // An arrow to unfold the quick look: the row needs a child before it has one.
+    auto *placeholder = new QTreeWidgetItem(row);
+    placeholder->setData(0, kKindRole, QStringLiteral("preview"));
+    placeholder->setData(0, kHtmlRole, QStringLiteral("Loading the quick look…"));
+    placeholder->setFirstColumnSpanned(true);
+    placeholder->setFlags(Qt::ItemIsEnabled);
+    return row;
+}
+
+void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
+    const QString sessionId = item.value(QStringLiteral("session_id")).toString();
+    const bool thread = isThread(item);
+    row->setData(0, kIdRole, sessionId);
+    row->setData(0, kItemRole, QString::fromUtf8(QJsonDocument(item).toJson(QJsonDocument::Compact)));
+    row->setData(0, kKindRole, thread ? QStringLiteral("thread") : QStringLiteral("session"));
+
+    QString title = item.value(QStringLiteral("title")).toString();
+    if (title.isEmpty()) title = QStringLiteral("Untitled");
+    if (thread) {
+        const QString agent = item.value(QStringLiteral("agent_id")).toString();
+        const QString type = item.value(QStringLiteral("agent_type")).toString();
+        title = QStringLiteral("↳ %1%2 · %3").arg(agent, type.isEmpty() ? QString() : QLatin1Char(' ') + type, title);
+    } else if (isTerminal(item)) {
+        title = QStringLiteral("$ ") + title;
+    }
+    row->setText(0, title);            // the plain text a screen reader and the tests read
+    row->setData(0, kTitleRole, title);
+
+    // What the conversation was about, in one muted line: its summary, else how it opened.
+    QString sub = item.value(QStringLiteral("summary")).toString().simplified();
+    if (sub.isEmpty()) sub = item.value(QStringLiteral("first_prompt")).toString().simplified();
+    if (sub.isEmpty()) sub = item.value(QStringLiteral("snippet")).toString().simplified();
+    row->setData(0, kSubRole, thread ? QString() : sub);
+
+    QString closedText;
+    if (const auto it = m_closed.constFind(sessionId); it != m_closed.constEnd())
+        closedText = closedAgo(it->second, QDateTime::currentMSecsSinceEpoch());
+    row->setData(0, kBadgeRole, thread ? QStringList() : badges(item, m_openSessions.contains(sessionId), closedText));
+
+    QString tip = item.value(QStringLiteral("workspace")).toString();
+    if (thread)
+        tip = QStringLiteral("Subagent thread %1 (%2) of “%3”%4\n%5")
+                  .arg(item.value(QStringLiteral("agent_id")).toString(), item.value(QStringLiteral("agent_type")).toString(),
+                       item.value(QStringLiteral("owner_title")).toString(),
+                       item.value(QStringLiteral("spawn_turn")).isDouble()
+                           ? QStringLiteral(", started in turn %1").arg(item.value(QStringLiteral("spawn_turn")).toInt()) : QString(),
+                       tip);
+    const QJsonArray rowMatches = item.value(QStringLiteral("matches")).toArray();
+    if (!rowMatches.isEmpty()) {
+        const QJsonObject match = rowMatches.first().toObject();
+        tip += QStringLiteral("\nturn %1 · %2").arg(match.value(QStringLiteral("turn")).toInt())
+                   .arg(kindLabel(match.value(QStringLiteral("kind")).toString()));
+    } else if (!sub.isEmpty()) {
+        tip += QLatin1Char('\n') + sub;
+    }
+    row->setToolTip(0, tip);
+    m_rows.insert(sessionId, row);
 }
 
 void SessionManager::rebuildTree(const QString &keep) {
     m_filling = true;
+    // A refresh must leave the reader where they were: the same row selected, the same rows
+    // unfolded and the list scrolled to the same place.
+    QSet<QString> unfolded;
+    std::function<void(QTreeWidgetItem *)> collect = [&](QTreeWidgetItem *row) {
+        for (int i = 0; i < row->childCount(); ++i) {
+            QTreeWidgetItem *child = row->child(i);
+            if (child->isExpanded() && !child->data(0, kIdRole).toString().isEmpty())
+                unfolded.insert(child->data(0, kIdRole).toString());
+            collect(child);
+        }
+    };
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *top = m_tree->topLevelItem(i);
+        if (top->isExpanded() && !top->data(0, kIdRole).toString().isEmpty())
+            unfolded.insert(top->data(0, kIdRole).toString());
+        collect(top);
+    }
+    const int scroll = m_tree->verticalScrollBar()->value();
     m_tree->clear();
+    m_rows.clear();
 
-    // Remember every model we have seen so the filter keeps working across queries.
-    QStringList models;
-    for (int i = 1; i < m_model->count(); ++i) models << m_model->itemData(i).toString();
-
-    // Sessions first, so a thread can hang under its owner when the owner is in the list.
-    QHash<QString, QTreeWidgetItem *> groups, rowsById;
+    QHash<QString, QTreeWidgetItem *> groups;
     QTreeWidgetItem *first = nullptr, *wanted = nullptr;
     const QDateTime now = QDateTime::currentDateTime();
+    const QString grouping = m_group->currentData().toString();
     int matches = 0, sessions = 0, threads = 0;
-    auto groupFor = [this, &groups](const QString &project) {
-        QTreeWidgetItem *group = groups.value(project);
+    auto groupFor = [this, &groups](const QString &name) -> QTreeWidgetItem * {
+        QTreeWidgetItem *group = groups.value(name);
         if (!group) {
-            group = new QTreeWidgetItem(m_tree, {project.isEmpty() ? QStringLiteral("(no project)") : project});
+            group = new QTreeWidgetItem(m_tree, {name.isEmpty() ? QStringLiteral("(no project)") : name});
             group->setFirstColumnSpanned(true);
             group->setFlags(Qt::ItemIsEnabled);
             group->setExpanded(true);
+            group->setData(0, kKindRole, QStringLiteral("group"));
             QFont font = group->font(0);
             font.setBold(true);
             group->setFont(0, font);
-            groups.insert(project, group);
+            groups.insert(name, group);
         }
         return group;
     };
-    auto fill = [&](QTreeWidgetItem *row, const QJsonObject &item) {
-        const QString sessionId = item.value(QStringLiteral("session_id")).toString();
-        row->setData(0, kIdRole, sessionId);
-        row->setData(0, kItemRole, QString::fromUtf8(QJsonDocument(item).toJson(QJsonDocument::Compact)));
-        const QJsonArray rowMatches = item.value(QStringLiteral("matches")).toArray();
-        matches += item.value(QStringLiteral("match_count")).toInt();
-        QString tip = item.value(QStringLiteral("workspace")).toString();
-        if (isThread(item))
-            tip = QStringLiteral("Subagent thread %1 (%2) of “%3”%4\n%5")
-                      .arg(item.value(QStringLiteral("agent_id")).toString(), item.value(QStringLiteral("agent_type")).toString(),
-                           item.value(QStringLiteral("owner_title")).toString(),
-                           item.value(QStringLiteral("spawn_turn")).isDouble()
-                               ? QStringLiteral(", started in turn %1").arg(item.value(QStringLiteral("spawn_turn")).toInt()) : QString(),
-                           tip);
-        if (!rowMatches.isEmpty()) {
-            const QJsonObject match = rowMatches.first().toObject();
-            tip += QStringLiteral("\nturn %1 · %2").arg(match.value(QStringLiteral("turn")).toInt())
-                       .arg(kindLabel(match.value(QStringLiteral("kind")).toString()));
-        } else if (!item.value(QStringLiteral("snippet")).toString().isEmpty()) {
-            tip += QLatin1Char('\n') + item.value(QStringLiteral("snippet")).toString();
-        }
-        row->setToolTip(0, tip);
-        const QString model = item.value(QStringLiteral("model")).toString();
-        if (!model.isEmpty() && !models.contains(model)) { models << model; m_model->addItem(model, model); }
+    auto note = [&](QTreeWidgetItem *row, const QJsonObject &item) {
         if (!first) first = row;
-        if (!keep.isEmpty() && sessionId == keep) wanted = row;
+        if (!keep.isEmpty() && item.value(QStringLiteral("session_id")).toString() == keep) wanted = row;
     };
+
+    // "Continue": with nothing typed, what this project was in the middle of — pinned, unfinished
+    // or just closed — above everything else. Grouped by project it is not repeated below (it would
+    // sit two rows from itself); grouped by date it is, because a date group with a hole in it lies.
+    QSet<QString> continued;
+    if (m_search->text().trimmed().isEmpty()) {
+        QSet<QString> closedIds;
+        for (auto it = m_closed.cbegin(); it != m_closed.cend(); ++it) closedIds.insert(it.key());
+        const QJsonArray top = continueItems(m_items, m_project, closedIds);
+        if (!top.isEmpty()) {
+            QTreeWidgetItem *group = groupFor(QStringLiteral("Continue"));
+            for (const auto &value : top) {
+                const QJsonObject item = value.toObject();
+                note(addSessionRow(group, item), item);
+                if (grouping == QLatin1String("project"))
+                    continued.insert(item.value(QStringLiteral("session_id")).toString());
+            }
+        }
+    }
+    // Grouped by date the buckets read in their own order, not in the order the rows arrive.
+    if (grouping == QLatin1String("date")) {
+        QSet<QString> used;
+        for (const auto &value : std::as_const(m_items)) {
+            const QJsonObject item = value.toObject();
+            if (!isThread(item)) used.insert(dateGroup(item.value(QStringLiteral("updated")).toDouble(), now));
+        }
+        for (const QString &name : dateGroupOrder()) if (used.contains(name)) groupFor(name);
+    }
+
     for (const auto &value : std::as_const(m_items)) {
         const QJsonObject item = value.toObject();
         if (isThread(item)) continue;
-        const bool terminal = isTerminal(item);
-        const bool pinned = item.value(QStringLiteral("pinned")).toInt() > 0;
-        const int open = item.value(QStringLiteral("open_requests")).toInt();
-        QString title = item.value(QStringLiteral("title")).toString();
-        if (title.isEmpty()) title = QStringLiteral("Untitled");
-        const QString label = (pinned ? QStringLiteral("📌 ") : QString()) + (terminal ? QStringLiteral("$ ") : QString()) + title;
-        auto *row = new QTreeWidgetItem(groupFor(item.value(QStringLiteral("project")).toString()), {label,
-            whenText(item.value(QStringLiteral("updated")).toDouble(), now),
-            QString::number(item.value(QStringLiteral("turns")).toInt()) + (open > 0 ? QStringLiteral(" · %1 open").arg(open) : QString()),
-            terminal ? QStringLiteral("terminal") : item.value(QStringLiteral("model")).toString()});
-        rowsById.insert(item.value(QStringLiteral("session_id")).toString(), row);
-        fill(row, item);
         ++sessions;
+        matches += item.value(QStringLiteral("match_count")).toInt();
+        if (continued.contains(item.value(QStringLiteral("session_id")).toString())) continue;
+        QTreeWidgetItem *parent = nullptr;
+        if (grouping == QLatin1String("project")) parent = groupFor(item.value(QStringLiteral("project")).toString());
+        else if (grouping == QLatin1String("date")) parent = groupFor(dateGroup(item.value(QStringLiteral("updated")).toDouble(), now));
+        note(addSessionRow(parent, item), item);
     }
+    auto rowsById = m_rows;   // the sessions placed so far: a thread hangs under its owner
     // Threads: under their parent thread, else under their owner session, else in the project
     // group with the owner named on the row. A thread whose parent is still to be placed waits a
     // round; once a round places nothing, the rest go under their owners.
@@ -527,56 +1167,89 @@ void SessionManager::rebuildTree(const QString &keep) {
                                         {QStringLiteral("workspace"), item.value(QStringLiteral("workspace"))},
                                         {QStringLiteral("project"), item.value(QStringLiteral("project"))},
                                         {QStringLiteral("owner_only"), true}};
+                // Muted, not italic: one mark is enough and italic muted text is hard to read
+                // (docs/ARCHITECTURE.md, "Legible text").
                 parent = new QTreeWidgetItem(groupFor(item.value(QStringLiteral("project")).toString()),
                                              {owner.value(QStringLiteral("title")).toString(), QString(), QString(), QString()});
-                QFont italic = parent->font(0);
-                italic.setItalic(true);
-                parent->setFont(0, italic);
                 parent->setForeground(0, m_tree->palette().color(QPalette::PlaceholderText));
                 parent->setData(0, kIdRole, ownerId);
                 parent->setData(0, kItemRole, QString::fromUtf8(QJsonDocument(owner).toJson(QJsonDocument::Compact)));
+                parent->setData(0, kKindRole, QStringLiteral("session"));
                 parent->setToolTip(0, QStringLiteral("Owner session of these threads (it does not match this search itself)"));
                 rowsById.insert(ownerId, parent);
+                m_rows.insert(ownerId, parent);
                 if (!keep.isEmpty() && ownerId == keep) wanted = parent;
             }
-            QString title = item.value(QStringLiteral("title")).toString();
-            const QString agent = item.value(QStringLiteral("agent_id")).toString();
-            const QString type = item.value(QStringLiteral("agent_type")).toString();
-            const QString label = QStringLiteral("↳ %1%2 · %3").arg(agent, type.isEmpty() ? QString() : QLatin1Char(' ') + type, title);
             if (!parent) parent = groupFor(item.value(QStringLiteral("project")).toString());   // no owner recorded
             const QString status = item.value(QStringLiteral("status")).toString();
-            auto *row = new QTreeWidgetItem(parent, {label,
+            auto *row = new QTreeWidgetItem(parent, {QString(),
                 whenText(item.value(QStringLiteral("updated")).toDouble(), now),
                 status.isEmpty() ? QStringLiteral("thread") : status,
                 item.value(QStringLiteral("model")).toString()});
             row->setForeground(0, m_tree->palette().color(QPalette::PlaceholderText));
             parent->setExpanded(true);
+            decorate(row, item);
             rowsById.insert(item.value(QStringLiteral("session_id")).toString(), row);
-            fill(row, item);
+            note(row, item);
+            matches += item.value(QStringLiteral("match_count")).toInt();
             ++threads;
         }
         // Nothing placed this round (a cycle, or parents that never arrive): stop waiting.
         waitForParents = later.size() < pending.size();
         pending = later;
     }
+
+    // Back where the reader was: the same rows unfolded (from what was already fetched), the same
+    // row current, the same scroll offset.
+    for (const QString &id : std::as_const(unfolded))
+        for (QTreeWidgetItem *row : m_rows.values(id))
+            if (row->data(0, kKindRole).toString() == QLatin1String("session")) row->setExpanded(true);
+    m_matches = matches;
+    m_sessions = sessions;
+    m_threadCount = threads;
     m_filling = false;
     if (QTreeWidgetItem *select = wanted ? wanted : first) m_tree->setCurrentItem(select);
-    const QString scope = m_scope->currentData().toString() == QLatin1String("project")
-                              ? QStringLiteral("this project") : QStringLiteral("all projects");
-    const QString counted = m_threads->isChecked()
-        ? QStringLiteral("%1 session(s), %2 thread(s)").arg(sessions).arg(threads)
-        : QStringLiteral("%1 session(s)").arg(sessions);
-    m_status->setText(m_search->text().trimmed().isEmpty()
-        ? QStringLiteral("%1 in %2 · %3 ms").arg(counted, scope).arg(m_elapsed)
-        : QStringLiteral("%1, %2 match(es) in %3 · %4 ms").arg(counted).arg(matches).arg(scope).arg(m_elapsed));
-    if (m_items.isEmpty()) {
-        m_header->clear();
-        m_preview->setPlainText(m_search->text().trimmed().isEmpty()
-            ? QStringLiteral("No saved sessions yet in this scope.")
-            : QStringLiteral("No session%1 or terminal command matches “%2”.")
-                  .arg(m_threads->isChecked() ? QStringLiteral(", subagent thread") : QString(), m_search->text()));
-    }
+    m_tree->verticalScrollBar()->setValue(std::min(scroll, m_tree->verticalScrollBar()->maximum()));
+    updateStatus();
+    updateEmptyState();
     updateButtons();
+}
+
+void SessionManager::updateStatus() {
+    if (!m_note.isEmpty()) { m_status->setText(m_note); return; }
+    const QString scope = scopeId() == QLatin1String("project") ? QStringLiteral("this project")
+                                                                : QStringLiteral("all projects");
+    const QString counted = m_threads->isChecked()
+        ? QStringLiteral("%1 session(s), %2 thread(s)").arg(m_sessions).arg(m_threadCount)
+        : QStringLiteral("%1 session(s)").arg(m_sessions);
+    QString text = m_search->text().trimmed().isEmpty()
+        ? QStringLiteral("%1 in %2 · %3 ms").arg(counted, scope).arg(m_elapsed)
+        : QStringLiteral("%1, %2 match(es) in %3 · %4 ms").arg(counted).arg(m_matches).arg(scope).arg(m_elapsed);
+    // The "open" tag means a pane already holds it; resuming would load it twice, so Enter goes
+    // to that pane instead. Say so rather than letting the key surprise anyone.
+    if (m_openSessions.contains(selectedId()))
+        text += QStringLiteral(" · already open: Enter goes to that pane");
+    else if (m_closed.contains(selectedId()))
+        text += QStringLiteral(" · Alt+Enter reopens it where it was");
+    m_status->setText(text);
+}
+
+void SessionManager::updateEmptyState() {
+    const bool empty = m_items.isEmpty();
+    const bool searching = !m_search->text().trimmed().isEmpty();
+    m_emptyRow->setVisible(empty);
+    m_searchAll->setVisible(empty && scopeId() == QLatin1String("project"));
+    m_clearFilters->setVisible(empty && anyFilter());
+    if (!empty) return;
+    m_header->clear();
+    m_empty->setText(searching
+        ? QStringLiteral("Nothing matches “%1”.").arg(m_search->text())
+        : anyFilter() ? QStringLiteral("No conversation matches these filters.")
+                      : QStringLiteral("No saved conversations here yet. One is saved as soon as an agent answers."));
+    m_preview->setPlainText(searching
+        ? QStringLiteral("No session%1 or terminal command matches “%2”.")
+              .arg(m_threads->isChecked() ? QStringLiteral(", subagent thread") : QString(), m_search->text())
+        : QStringLiteral("No saved sessions yet in this scope."));
 }
 
 QString SessionManager::selectedId() const {
@@ -591,8 +1264,14 @@ QJsonObject SessionManager::selectedItem() const {
 }
 
 void SessionManager::selectionChanged() {
-    updateButtons();
     if (m_filling) return;
+    // The rows an unfolded session holds are not conversations: walking through them leaves the
+    // side preview and the buttons on the session itself.
+    if (QTreeWidgetItem *current = m_tree->currentItem();
+        current && current->data(0, kIdRole).toString().isEmpty()) return;
+    if (!m_batchRunning) m_note.clear();          // a one-off message lasts until the next row
+    updateButtons();
+    updateStatus();
     const QString id = selectedId();
     if (id.isEmpty()) { m_header->clear(); m_preview->clear(); return; }
     const QJsonObject item = selectedItem();
@@ -607,17 +1286,136 @@ void SessionManager::selectionChanged() {
                          highlighted(match.value(QStringLiteral("line")).toString(),
                                      match.value(QStringLiteral("ranges")).toArray()));
     }
-    m_preview->setHtml(html.isEmpty() ? QStringLiteral("<p>Loading…</p>") : html);
+    // The same row after a refresh: what the worker sent for it is still right, so it is shown
+    // again rather than asked for again.
+    const bool same = id == m_previewFor;
+    m_preview->setHtml(same ? m_previewHtml : html.isEmpty() ? QStringLiteral("<p>Loading…</p>") : html);
     QString sub = item.value(QStringLiteral("workspace")).toString().toHtmlEscaped();
     if (isThread(item))
         sub = QStringLiteral("Subagent thread of “%1”<br>%2")
                   .arg(item.value(QStringLiteral("owner_title")).toString().toHtmlEscaped(), sub);
     m_header->setText(QStringLiteral("<b>%1</b><br>%2").arg(item.value(QStringLiteral("title")).toString().toHtmlEscaped(), sub));
-    if (onPreview) onPreview(id, m_search->text());
+    if (!same) requestPreview(id);
+}
+
+// One request per conversation: the side preview and an unfolded row are the same `conversation`
+// reply, so selecting a row and unfolding it does not ask twice.
+void SessionManager::requestPreview(const QString &sessionId) {
+    if (sessionId.isEmpty() || !onPreview || m_previewPending == sessionId) return;
+    m_previewPending = sessionId;
+    onPreview(sessionId, m_search->text());
+}
+
+// → , Space or the arrow on a session row: the quick look, built from the reply's `overview`
+// (protocol 14.4) and kept, so folding and unfolding it again costs nothing.
+void SessionManager::unfold(QTreeWidgetItem *row) {
+    if (!row || row->data(0, kKindRole).toString() != QLatin1String("session")) return;
+    if (row->data(0, kLoadedRole).toBool()) return;
+    const QString id = row->data(0, kIdRole).toString();
+    if (m_overviews.contains(id)) { fillUnfolded(row, m_overviews.value(id)); return; }
+    if (!m_filling) requestPreview(id);
+}
+
+void SessionManager::fillUnfolded(QTreeWidgetItem *row, const QJsonObject &overview) {
+    if (!row) return;
+    for (int i = row->childCount() - 1; i >= 0; --i)
+        if (row->child(i)->data(0, kKindRole).toString() == QLatin1String("preview"))
+            delete row->takeChild(i);
+    const QJsonObject item = QJsonDocument::fromJson(row->data(0, kItemRole).toString().toUtf8()).object();
+    const QString sessionId = row->data(0, kIdRole).toString();
+    int at = 0;
+    auto add = [&](const QString &html) {
+        auto *line = new QTreeWidgetItem;
+        line->setData(0, kKindRole, QStringLiteral("preview"));
+        line->setData(0, kHtmlRole, html);
+        line->setFirstColumnSpanned(true);
+        line->setFlags(Qt::ItemIsEnabled);
+        row->insertChild(at++, line);
+        return line;
+    };
+    auto say = [&](const QString &label, const QString &body) {
+        if (body.trimmed().isEmpty()) return;
+        add(QStringLiteral("<b>%1</b> %2").arg(label.toHtmlEscaped(), escaped(body)));
+    };
+    // What matched comes first: it is why this row is in the list at all.
+    const QJsonArray matches = item.value(QStringLiteral("matches")).toArray();
+    if (!m_search->text().trimmed().isEmpty())
+        for (const auto &value : matches) {
+            const QJsonObject match = value.toObject();
+            add(QStringLiteral("<b>turn %1 · %2</b> %3")
+                    .arg(match.value(QStringLiteral("turn")).toInt())
+                    .arg(kindLabel(match.value(QStringLiteral("kind")).toString()),
+                         highlighted(match.value(QStringLiteral("line")).toString(),
+                                     match.value(QStringLiteral("ranges")).toArray())));
+        }
+    const QString summary = overview.value(QStringLiteral("summary")).toString();
+    if (!summary.trimmed().isEmpty()) {
+        say(QStringLiteral("Summary"), summary);
+    } else if (onSummarise && !isTerminal(item)) {
+        // No summary yet: the button to write one sits where the summary would be.
+        QTreeWidgetItem *line = add(QString());
+        // Short: the row is indented three levels deep and a long label is clipped in a narrow pane.
+        auto *button = new QPushButton(m_summarising.contains(sessionId) ? QStringLiteral("Summarising…")
+                                                                        : QStringLiteral("Summarise"));
+        button->setToolTip(QStringLiteral("Write a two-sentence summary of this conversation (a cheap model call)"));
+        button->setObjectName(QStringLiteral("summariseRow"));
+        button->setEnabled(!m_summarising.contains(sessionId));
+        connect(button, &QPushButton::clicked, this, [this, item] { summarise(item); });
+        // The row is a spanned cell with no text of its own: it has to be told how tall the
+        // button is, and the button sits at the left rather than stretching across the row.
+        auto *holder = new QWidget;
+        auto *box = new QHBoxLayout(holder);
+        box->setContentsMargins(0, 2, 0, 2);
+        button->setMinimumWidth(button->sizeHint().width());
+        box->addWidget(button);
+        box->addStretch(1);
+        line->setSizeHint(0, QSize(button->sizeHint().width() + 8, button->sizeHint().height() + 6));
+        m_tree->setItemWidget(line, 0, holder);
+    }
+    say(QStringLiteral("First:"), overview.value(QStringLiteral("first_prompt")).toString());
+    const QJsonArray turns = overview.value(QStringLiteral("last_turns")).toArray();
+    for (const auto &value : turns) {
+        const QJsonObject turn = value.toObject();
+        say(QStringLiteral("You:"), turn.value(QStringLiteral("prompt")).toString());
+        say(QStringLiteral("Agent:"), turn.value(QStringLiteral("reply")).toString());
+    }
+    const QJsonArray files = overview.value(QStringLiteral("files")).toArray();
+    if (!files.isEmpty()) {
+        const int total = overview.value(QStringLiteral("files_count")).toInt(files.size());
+        QStringList shown;
+        for (int i = 0; i < files.size() && i < 12; ++i)
+            shown << elideMiddleText(files.at(i).toString(), 70).toHtmlEscaped();
+        if (total > shown.size()) shown << QStringLiteral("and %1 more").arg(total - shown.size());
+        add(QStringLiteral("<b>Files (%1)</b> %2").arg(total).arg(shown.join(QStringLiteral(" · "))));
+    }
+    const QJsonArray todos = overview.value(QStringLiteral("todos")).toArray();
+    QStringList open;
+    for (const auto &value : todos) {
+        const QJsonObject todo = value.toObject();
+        const QString status = todo.value(QStringLiteral("status")).toString();
+        if (status == QLatin1String("completed") || status == QLatin1String("cancelled")) continue;
+        open << escaped(todo.value(QStringLiteral("text")).toString());
+    }
+    if (!open.isEmpty())
+        add(QStringLiteral("<b>Still to do</b> %1").arg(open.join(QStringLiteral(" · "))));
+    if (at == 0) add(QStringLiteral("Nothing was indexed for this conversation yet."));
+    row->setData(0, kLoadedRole, true);
 }
 
 void SessionManager::setPreview(const QJsonObject &event) {
     const QString id = event.value(QStringLiteral("session_id")).toString();
+    if (!id.isEmpty()) {
+        if (m_previewPending == id) m_previewPending.clear();
+        if (event.contains(QStringLiteral("overview"))) {
+            const QJsonObject overview = event.value(QStringLiteral("overview")).toObject();
+            m_overviews.insert(id, overview);
+            const auto rows = m_rows.values(id);
+            for (QTreeWidgetItem *row : rows)
+                if (row->isExpanded()) fillUnfolded(row, overview);
+            const QString summary = overview.value(QStringLiteral("summary")).toString();
+            if (!summary.isEmpty()) updateItemSummary(id, summary);
+        }
+    }
     if (id != selectedId()) return;
     const QJsonArray items = event.value(QStringLiteral("items")).toArray();
     const bool thread = event.value(QStringLiteral("source")).toString() == QLatin1String("subagent");
@@ -646,6 +1444,8 @@ void SessionManager::setPreview(const QJsonObject &event) {
     }
     if (html.isEmpty()) html = QStringLiteral("<p>This conversation has no indexed turns.</p>");
     m_preview->setHtml(html);
+    m_previewFor = id;
+    m_previewHtml = html;
     const int found = event.value(QStringLiteral("match_count")).toInt();
     QString sub = event.value(QStringLiteral("workspace")).toString().toHtmlEscaped();
     if (thread)
@@ -670,14 +1470,24 @@ void SessionManager::updateButtons() {
     m_pin->setText(item.value(QStringLiteral("pinned")).toInt() > 0 ? QStringLiteral("Unpin") : QStringLiteral("Pin"));
     m_resume->setToolTip(terminal ? QStringLiteral("Terminal history cannot be resumed; it is here to be searched.")
                          : thread ? QStringLiteral("Open this subagent thread's history, with the way back to its owner session.")
-                                  : QStringLiteral("Replace this pane's conversation with the selected one."));
+                         : m_openSessions.contains(selectedId())
+                             ? QStringLiteral("This conversation is already open: Relay goes to that pane rather than loading it twice.")
+                             : QStringLiteral("Replace this pane's conversation with the selected one."));
+    const QString sessionId = item.value(QStringLiteral("session_id")).toString();
+    m_reopen->setVisible(m_closed.contains(sessionId));
+    const bool summarisable = has && !thread && !terminal && bool(onSummarise);
+    const bool waiting = m_summarising.contains(sessionId);
+    m_summarise->setVisible(summarisable && (waiting || item.value(QStringLiteral("summary")).toString().trimmed().isEmpty()));
+    m_summarise->setEnabled(!waiting);
+    m_summarise->setText(waiting ? QStringLiteral("Summarising…") : QStringLiteral("Summarise"));
 }
 
 void SessionManager::activate(bool newPane) {
     const QJsonObject item = selectedItem();
     if (item.isEmpty()) return;
     if (isTerminal(item)) {
-        m_status->setText(QStringLiteral("Terminal history cannot be resumed; use the preview."));
+        m_note = QStringLiteral("Terminal history cannot be resumed; use the preview.");
+        updateStatus();
         return;
     }
     if (isThread(item)) {
@@ -685,6 +1495,200 @@ void SessionManager::activate(bool newPane) {
         return;
     }
     if (onResume) onResume(item, newPane);
+}
+
+// Ctrl+Enter. The worker can only fork the conversation it is holding, so a saved one that nobody
+// has loaded is opened in a new pane instead; whoever wires onFork says which it is.
+void SessionManager::fork() {
+    const QJsonObject item = selectedItem();
+    if (item.isEmpty() || isTerminal(item) || isThread(item)) return;
+    if (onFork) onFork(item);
+    else activate(true);
+}
+
+// Alt+Enter: this conversation's pane, tab or window was closed — put it back where it was, with
+// everything else that went with it, rather than resuming it alone here.
+void SessionManager::reopenClosed() {
+    const QString id = selectedId();
+    const auto it = m_closed.constFind(id);
+    if (it == m_closed.constEnd()) {
+        m_note = QStringLiteral("That conversation was not closed from this window; Enter resumes it here.");
+        updateStatus();
+        return;
+    }
+    if (onReopenClosed) onReopenClosed(it->first);
+}
+
+void SessionManager::summariseSelected() { summarise(selectedItem()); }
+
+void SessionManager::summarise(const QJsonObject &item) {
+    const QString sessionId = item.value(QStringLiteral("session_id")).toString();
+    if (sessionId.isEmpty() || !onSummarise || m_summarising.contains(sessionId)) return;
+    m_summarising.insert(sessionId);
+    onSummarise(sessionId, item.value(QStringLiteral("session_dir")).toString());
+    // Both the button in the header and the one in the unfolded row say what is happening.
+    for (QTreeWidgetItem *row : m_rows.values(sessionId)) {
+        row->setData(0, kLoadedRole, false);
+        if (row->isExpanded()) fillUnfolded(row, m_overviews.value(sessionId));
+    }
+    updateButtons();
+}
+
+// `conversation_summary`: one saved conversation, asked for by the button.
+void SessionManager::setSummary(const QJsonObject &event) {
+    const QString id = event.value(QStringLiteral("session_id")).toString();
+    m_summarising.remove(id);
+    const QString error = event.value(QStringLiteral("error")).toString();
+    if (!error.isEmpty()) {
+        m_note = QStringLiteral("Could not summarise: ") + error;
+        for (QTreeWidgetItem *row : m_rows.values(id))
+            if (row->isExpanded()) {
+                row->setData(0, kLoadedRole, false);
+                fillUnfolded(row, m_overviews.value(id));
+                auto *line = new QTreeWidgetItem;
+                line->setData(0, kKindRole, QStringLiteral("preview"));
+                line->setData(0, kHtmlRole, QStringLiteral("<b>Summary failed</b> ") + error.toHtmlEscaped());
+                line->setFirstColumnSpanned(true);
+                line->setFlags(Qt::ItemIsEnabled);
+                row->insertChild(0, line);
+            }
+        updateStatus();
+        updateButtons();
+        return;
+    }
+    updateItemSummary(id, event.value(QStringLiteral("summary")).toString());
+    updateButtons();
+}
+
+// `session_summary`: the conversation a pane is holding summarised itself as it went.
+void SessionManager::setSessionSummary(const QJsonObject &event) {
+    updateItemSummary(event.value(QStringLiteral("session_id")).toString(),
+                      event.value(QStringLiteral("summary")).toString());
+}
+
+// A row whose summary has just arrived reads the new one at once: no re-query, no lost place.
+void SessionManager::updateItemSummary(const QString &sessionId, const QString &summary) {
+    if (sessionId.isEmpty() || summary.trimmed().isEmpty()) return;
+    for (int i = 0; i < m_items.size(); ++i) {
+        QJsonObject item = m_items.at(i).toObject();
+        if (item.value(QStringLiteral("session_id")).toString() != sessionId) continue;
+        if (item.value(QStringLiteral("summary")).toString() == summary) return;
+        item.insert(QStringLiteral("summary"), summary);
+        m_items.replace(i, item);
+    }
+    if (m_overviews.contains(sessionId)) {
+        QJsonObject overview = m_overviews.value(sessionId);
+        overview.insert(QStringLiteral("summary"), summary);
+        m_overviews.insert(sessionId, overview);
+    }
+    for (QTreeWidgetItem *row : m_rows.values(sessionId)) {
+        if (row->data(0, kKindRole).toString() != QLatin1String("session")) continue;
+        QJsonObject item = QJsonDocument::fromJson(row->data(0, kItemRole).toString().toUtf8()).object();
+        item.insert(QStringLiteral("summary"), summary);
+        decorate(row, item);
+        if (row->isExpanded()) {
+            row->setData(0, kLoadedRole, false);
+            fillUnfolded(row, m_overviews.value(sessionId));
+        }
+    }
+    updateButtons();
+}
+
+// "Summarise all…": what it would cost first, and a Start that has to be pressed.
+void SessionManager::askEstimate() {
+    if (!onSummariseEstimate) return;
+    m_batchScope = scopeId();
+    m_confirmText->setText(QStringLiteral("Working out what that would cost…"));
+    if (auto *start = m_confirm->findChild<QPushButton *>(QStringLiteral("summariseStart"))) start->setEnabled(false);
+    m_confirm->setVisible(true);
+    onSummariseEstimate(m_batchScope);
+}
+
+void SessionManager::setSummariseEstimate(const QJsonObject &event) {
+    const QString scope = event.value(QStringLiteral("scope")).toString();
+    if (!scope.isEmpty()) m_batchScope = scope;
+    m_confirmText->setText(estimateText(event));
+    if (auto *start = m_confirm->findChild<QPushButton *>(QStringLiteral("summariseStart")))
+        start->setEnabled(event.value(QStringLiteral("count")).toInt() > 0 && !m_batchRunning);
+    m_confirm->setVisible(true);
+}
+
+void SessionManager::startBatch() {
+    m_confirm->setVisible(false);
+    if (!onSummariseAll || m_batchRunning) return;
+    m_batchRunning = true;
+    m_summariseAll->setEnabled(false);
+    m_cancelBatch->setVisible(true);
+    m_note = QStringLiteral("Summarising…");
+    updateStatus();
+    onSummariseAll(m_batchScope.isEmpty() ? scopeId() : m_batchScope);
+}
+
+void SessionManager::setSummariseProgress(const QJsonObject &event) {
+    const QString id = event.value(QStringLiteral("session_id")).toString();
+    if (!id.isEmpty()) {
+        m_summarising.remove(id);
+        updateItemSummary(id, event.value(QStringLiteral("summary")).toString());
+    }
+    const int done = event.value(QStringLiteral("done")).toInt();
+    const int total = event.value(QStringLiteral("total")).toInt();
+    if (!event.value(QStringLiteral("finished")).toBool()) {
+        m_note = QStringLiteral("Summarising %1 of %2…").arg(done).arg(total);
+        updateStatus();
+        return;
+    }
+    m_batchRunning = false;
+    m_summariseAll->setEnabled(true);
+    m_cancelBatch->setVisible(false);
+    const int failed = event.value(QStringLiteral("failed")).toInt();
+    m_note.clear();
+    m_status->setText(event.value(QStringLiteral("cancelled")).toBool()
+        ? QStringLiteral("Stopped after %1 of %2 summaries.").arg(done).arg(total)
+        : QStringLiteral("Summarised %1 conversation(s)%2.").arg(done)
+              .arg(failed > 0 ? QStringLiteral(", %1 failed").arg(failed) : QString()));
+    QTimer::singleShot(0, this, &SessionManager::requery);
+}
+
+void SessionManager::setProject(const QString &project) {
+    if (m_project == project) return;
+    m_project = project;
+    if (!m_items.isEmpty()) rebuildTree(selectedId());
+}
+
+void SessionManager::setOpenSessions(const QStringList &sessionIds) {
+    if (m_openSessions == sessionIds) return;
+    m_openSessions = sessionIds;
+    if (!m_items.isEmpty()) rebuildTree(selectedId());
+}
+
+void SessionManager::setClosedSessions(const QHash<QString, QPair<QString, qint64>> &closed) {
+    if (m_closed == closed) return;
+    m_closed = closed;
+    if (!m_items.isEmpty()) rebuildTree(selectedId());
+}
+
+// What the box understands, in the box's own words. A popup rather than a dialog: it is a reminder,
+// not a decision.
+void SessionManager::showOperatorHelp() {
+    auto *popup = new QFrame(this, Qt::Popup);
+    popup->setObjectName(QStringLiteral("operatorHelp"));
+    popup->setFrameShape(QFrame::StyledPanel);
+    popup->setAttribute(Qt::WA_DeleteOnClose);
+    popup->setAutoFillBackground(true);
+    auto *text = new QLabel(QStringLiteral(
+        "<b>Words</b> match anywhere in a conversation; <b>\"a phrase\"</b> matches together.<br>"
+        "<b>-word</b> leaves out conversations that hold it.<br>"
+        "<b>project:</b>name · <b>file:</b>part-of-a-path · <b>model:</b>name · <b>branch:</b>name<br>"
+        "<b>after:</b>2026-09-01 · <b>before:</b>today · <b>after:</b>7d<br>"
+        "<b>has:</b>tasks|edits|summary · <b>is:</b>pinned|unfinished · <b>in:</b>terminal|agent<br>"
+        "Naming a project searches every project."));
+    text->setTextFormat(Qt::RichText);
+    auto *box = new QVBoxLayout(popup);
+    box->setContentsMargins(10, 8, 10, 8);
+    box->addWidget(text);
+    popup->adjustSize();
+    popup->move(m_help->mapToGlobal(QPoint(m_help->width() - popup->width(), m_help->height() + 2)));
+    popup->show();
 }
 
 void SessionManager::rename() {
@@ -729,16 +1733,26 @@ void SessionManager::remove() {
 
 bool SessionManager::eventFilter(QObject *object, QEvent *event) {
     if (event->type() != QEvent::KeyPress) return QWidget::eventFilter(object, event);
+    if (object != m_search && object != m_tree) return QWidget::eventFilter(object, event);
     auto *key = static_cast<QKeyEvent *>(event);
-    if (key->key() == Qt::Key_Escape && (object == m_search || object == m_tree)) {
-        if (object == m_search && !m_search->text().isEmpty()) { m_search->clear(); return true; }
+    const bool plain = !(key->modifiers() & ~Qt::KeypadModifier);
+    if (key->key() == Qt::Key_Escape) {
+        // The query first, the pane second: Esc should never lose a list you are still reading.
+        if (!m_search->text().isEmpty()) { m_search->clear(); m_search->setFocus(); return true; }
         if (onClose) onClose();
         return true;
     }
-    if (key->key() == Qt::Key_I && key->modifiers() == Qt::ControlModifier && (object == m_search || object == m_tree)) {
-        m_info->click();
+    if (key->key() == Qt::Key_I && key->modifiers() == Qt::ControlModifier) { m_info->click(); return true; }
+    if (key->key() == Qt::Key_F && key->modifiers() == Qt::ControlModifier) { focusSearch(); return true; }
+    if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
+        if (key->modifiers() & Qt::ControlModifier) fork();
+        else if (key->modifiers() & Qt::AltModifier) reopenClosed();
+        else activate(key->modifiers() & Qt::ShiftModifier);
         return true;
     }
+    if (key->key() == Qt::Key_P && key->modifiers() == Qt::ControlModifier) { togglePin(); return true; }
+    if (key->key() == Qt::Key_F2 && plain) { rename(); return true; }
+
     if (object == m_search) {
         switch (key->key()) {
         case Qt::Key_Down:
@@ -747,18 +1761,40 @@ bool SessionManager::eventFilter(QObject *object, QEvent *event) {
         case Qt::Key_PageUp:
             QApplication::sendEvent(m_tree, key);
             return true;
-        case Qt::Key_Return:
-        case Qt::Key_Enter:
-            activate(key->modifiers() & Qt::ShiftModifier);
-            return true;
+        case Qt::Key_Right:
+            // At the end of what was typed there is nothing left to walk through, so → unfolds the
+            // row the list is on, the same as it does with the keyboard in the list.
+            if (plain && !m_search->hasSelectedText() && m_search->cursorPosition() == m_search->text().size()) {
+                if (QTreeWidgetItem *row = m_tree->currentItem()) row->setExpanded(true);
+                return true;
+            }
+            break;
+        case Qt::Key_Left:
+            if (plain && !m_search->hasSelectedText() && m_search->cursorPosition() == 0) {
+                if (QTreeWidgetItem *row = m_tree->currentItem()) row->setExpanded(false);
+                return true;
+            }
+            break;
         default:
             break;
         }
         return QWidget::eventFilter(object, event);
     }
-    if (object == m_tree && (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)) {
-        activate(key->modifiers() & Qt::ShiftModifier);
+
+    // On the rows: Space unfolds, Delete deletes, / goes to the box, and anything else you type is
+    // the start of a search — the same keyboard the "Recently closed" list has.
+    if (key->key() == Qt::Key_Space && plain) {
+        if (QTreeWidgetItem *row = m_tree->currentItem()) row->setExpanded(!row->isExpanded());
         return true;
+    }
+    if (key->key() == Qt::Key_Delete && plain) { remove(); return true; }
+    if (plain) {
+        const QString text = key->text();
+        if (!text.isEmpty() && text.at(0).isPrint()) {
+            m_search->setFocus(Qt::OtherFocusReason);
+            if (text != QLatin1String("/")) m_search->insert(text);   // "/" only moves the keyboard
+            return true;
+        }
     }
     return QWidget::eventFilter(object, event);
 }

@@ -4,19 +4,55 @@
 #include "Conversations.h"
 #include "SessionInfo.h"
 
+#include <QAction>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPushButton>
 #include <QTabBar>
 #include <QTest>
 #include <QTextBrowser>
+#include <QToolButton>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QUrl>
 
 using namespace relay::conversations;
+
+// The roles the rows carry (src/Conversations.cpp): a row's tags and the rich text of the rows an
+// unfolded session holds. They are private to the file, so the test names them once, here.
+static constexpr int kBadgeRole = Qt::UserRole + 5;
+static constexpr int kHtmlRole = Qt::UserRole + 6;
+
+static QString unfoldedText(QTreeWidgetItem *row) {
+    QString all;
+    for (int i = 0; i < row->childCount(); ++i) all += row->child(i)->data(0, kHtmlRole).toString() + QLatin1Char('\n');
+    return all;
+}
+
+// A session row always carries one quick-look child (the arrow needs it); these are the others.
+static QList<QTreeWidgetItem *> rowChildren(QTreeWidgetItem *row) {
+    QList<QTreeWidgetItem *> out;
+    for (int i = 0; i < row->childCount(); ++i)
+        if (row->child(i)->data(0, Qt::UserRole + 7).toString() != QStringLiteral("preview")) out << row->child(i);
+    return out;
+}
+static QTreeWidgetItem *rowTitled(QTreeWidget *tree, const QString &title) {
+    for (QTreeWidgetItemIterator it(tree); *it; ++it)
+        if ((*it)->text(0) == title) return *it;
+    return nullptr;
+}
+
+static QJsonObject sessionItem(const QString &id, const QString &title, const QString &project = QStringLiteral("relay")) {
+    return QJsonObject{{QStringLiteral("session_id"), id}, {QStringLiteral("source"), QStringLiteral("agent")},
+                       {QStringLiteral("title"), title}, {QStringLiteral("project"), project},
+                       {QStringLiteral("session_dir"), QStringLiteral("/data/sessions")},
+                       {QStringLiteral("updated"), 1.0e9}, {QStringLiteral("turns"), 3}};
+}
 
 static const QString kOpen = QStringLiteral("<span style=\"background-color:#f5d76e;color:#101216;\">");
 static const QString kClose = QStringLiteral("</span>");
@@ -147,7 +183,7 @@ private slots:
         QCOMPARE(tree->topLevelItemCount(), 2);                 // one group per project
         QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("relay-terminal"));
         QCOMPARE(tree->topLevelItem(0)->childCount(), 1);
-        QVERIFY(tree->topLevelItem(1)->child(0)->text(0).contains(QStringLiteral("📌")));
+        QVERIFY(tree->topLevelItem(1)->child(0)->data(0, kBadgeRole).toStringList().contains(QStringLiteral("pinned")));
         QVERIFY(tree->topLevelItem(0)->child(0)->text(2).contains(QStringLiteral("1 open")));
 
         // Terminal history cannot be resumed.
@@ -204,22 +240,24 @@ private slots:
         QTreeWidgetItem *group = tree->topLevelItem(0);
         QTreeWidgetItem *ownerRow = group->child(0);
         QCOMPARE(ownerRow->text(0), QStringLiteral("Owner title"));
-        QCOMPARE(ownerRow->childCount(), 1);
-        QVERIFY(ownerRow->child(0)->text(0).contains(QStringLiteral("Find it")));
-        QCOMPARE(ownerRow->child(0)->childCount(), 1);                           // nested under its parent
-        QVERIFY(ownerRow->child(0)->child(0)->text(0).contains(QStringLiteral("Nested dig")));
-        // A thread whose owner is not in the list still hangs under it: a muted owner row.
+        QCOMPARE(rowChildren(ownerRow).size(), 1);
+        QTreeWidgetItem *threadRow = rowChildren(ownerRow).first();
+        QVERIFY(threadRow->text(0).contains(QStringLiteral("Find it")));
+        QCOMPARE(rowChildren(threadRow).size(), 1);                              // nested under its parent
+        QVERIFY(rowChildren(threadRow).first()->text(0).contains(QStringLiteral("Nested dig")));
+        // A thread whose owner is not in the list still hangs under it: a muted owner row (muted
+        // only — not italic as well, per the legibility rules in docs/ARCHITECTURE.md).
         QTreeWidgetItem *lostOwner = group->child(1);
         QCOMPARE(lostOwner->text(0), QStringLiteral("Owner title"));
-        QVERIFY(lostOwner->font(0).italic());
-        QCOMPARE(lostOwner->childCount(), 1);
-        QVERIFY(lostOwner->child(0)->text(0).contains(QStringLiteral("Lost owner")));
+        QVERIFY(!lostOwner->font(0).italic());
+        QCOMPARE(rowChildren(lostOwner).size(), 1);
+        QVERIFY(rowChildren(lostOwner).first()->text(0).contains(QStringLiteral("Lost owner")));
         // Enter on a thread opens its history, never a resume.
         QJsonObject opened;
         bool resumed = false;
         manager.onOpenThread = [&opened](const QJsonObject &row) { opened = row; };
         manager.onResume = [&resumed](const QJsonObject &, bool) { resumed = true; };
-        tree->setCurrentItem(ownerRow->child(0));
+        tree->setCurrentItem(threadRow);
         QTest::keyClick(tree, Qt::Key_Return);
         QCOMPARE(opened.value(QStringLiteral("session_id")).toString(), thread);
         QVERIFY(!resumed);
@@ -319,6 +357,493 @@ private slots:
         view.onClose = [&closed] { closed = true; };
         QTest::keyClick(view.findChild<QTextBrowser *>(), Qt::Key_Escape);
         QVERIFY(closed);
+    }
+
+    // ----- the list's own helpers (cards #R6J0, #CCKY) ------------------------------------------
+
+    void dateGroups() {
+        const QDateTime now = QDateTime::fromString(QStringLiteral("2026-09-17T12:00:00"), Qt::ISODate);
+        auto at = [&now](int days, int hours = 0) {
+            return double(now.addDays(-days).addSecs(-hours * 3600).toSecsSinceEpoch());
+        };
+        QCOMPARE(dateGroup(at(0), now), QStringLiteral("Today"));
+        QCOMPARE(dateGroup(at(0, 11), now), QStringLiteral("Today"));          // 01:00 is still today
+        QCOMPARE(dateGroup(at(1), now), QStringLiteral("Yesterday"));
+        QCOMPARE(dateGroup(at(2), now), QStringLiteral("This week"));
+        QCOMPARE(dateGroup(at(6), now), QStringLiteral("This week"));
+        QCOMPARE(dateGroup(at(7), now), QStringLiteral("This month"));
+        QCOMPARE(dateGroup(at(29), now), QStringLiteral("This month"));
+        QCOMPARE(dateGroup(at(30), now), QStringLiteral("Older"));
+        QCOMPARE(dateGroup(0, now), QStringLiteral("Older"));
+        // A stamp from the future (a clock that went back) is today, never a group of its own.
+        QCOMPARE(dateGroup(double(now.addDays(2).toSecsSinceEpoch()), now), QStringLiteral("Today"));
+        QCOMPARE(dateGroupOrder().size(), 5);
+        QCOMPARE(dateGroupOrder().first(), QStringLiteral("Today"));
+        QCOMPARE(dateGroupOrder().last(), QStringLiteral("Older"));
+    }
+
+    void chipTextAndRemoval() {
+        auto op = [](const QString &key, const QString &value, bool negated = false) {
+            QJsonObject out{{QStringLiteral("key"), key}, {QStringLiteral("value"), value}};
+            if (negated) out.insert(QStringLiteral("negated"), true);
+            return out;
+        };
+        QCOMPARE(chipText(op(QStringLiteral("file"), QStringLiteral("parser.cpp"))), QStringLiteral("file: parser.cpp"));
+        QCOMPARE(chipText(op(QStringLiteral("text"), QStringLiteral("pelican"), true)), QStringLiteral("not: pelican"));
+        QCOMPARE(chipText(op(QStringLiteral("model"), QStringLiteral("kimi"), true)), QStringLiteral("not model: kimi"));
+        QCOMPARE(chipText(op(QStringLiteral("is"), QStringLiteral("pinned"))), QStringLiteral("is: pinned"));
+
+        // Removing one operator leaves the rest of the box as it was.
+        QCOMPARE(removeOperator(QStringLiteral("file:parser.cpp index"), op(QStringLiteral("file"), QStringLiteral("parser.cpp"))),
+                 QStringLiteral("index"));
+        QCOMPARE(removeOperator(QStringLiteral("index file:parser.cpp more"), op(QStringLiteral("file"), QStringLiteral("parser.cpp"))),
+                 QStringLiteral("index more"));
+        // A quoted value, with the quotes the reply does not carry.
+        QCOMPARE(removeOperator(QStringLiteral("file:\"my file.py\" index"), op(QStringLiteral("file"), QStringLiteral("my file.py"))),
+                 QStringLiteral("index"));
+        // Negation: the chip's × takes the `-` with it, and the plain word of the same name stays.
+        QCOMPARE(removeOperator(QStringLiteral("pelican -pelican"), op(QStringLiteral("text"), QStringLiteral("pelican"), true)),
+                 QStringLiteral("pelican"));
+        QCOMPARE(removeOperator(QStringLiteral("-\"a phrase\" rest"), op(QStringLiteral("text"), QStringLiteral("a phrase"), true)),
+                 QStringLiteral("rest"));
+        QCOMPARE(removeOperator(QStringLiteral("-model:kimi rest"), op(QStringLiteral("model"), QStringLiteral("kimi"), true)),
+                 QStringLiteral("rest"));
+        // A negated operator's chip must not take the plain one away.
+        QCOMPARE(removeOperator(QStringLiteral("model:kimi -model:kimi"), op(QStringLiteral("model"), QStringLiteral("kimi"), true)),
+                 QStringLiteral("model:kimi"));
+        // An operator that is not in the box any more changes nothing.
+        QCOMPARE(removeOperator(QStringLiteral("index"), op(QStringLiteral("file"), QStringLiteral("parser.cpp"))),
+                 QStringLiteral("index"));
+        QCOMPARE(removeOperator(QString(), op(QStringLiteral("file"), QStringLiteral("x"))), QString());
+    }
+
+    void badgeComposition() {
+        const QDateTime now = QDateTime::fromString(QStringLiteral("2026-09-17T12:00:00"), Qt::ISODate);
+        const qint64 nowMs = now.toMSecsSinceEpoch();
+        QCOMPARE(closedAgo(0, nowMs), QString());
+        QCOMPARE(closedAgo(nowMs - 30'000, nowMs), QStringLiteral("closed just now"));
+        QCOMPARE(closedAgo(nowMs - 5 * 60'000, nowMs), QStringLiteral("closed 5 min ago"));
+        QCOMPARE(closedAgo(nowMs - 3 * 3600'000LL, nowMs), QStringLiteral("closed 3 h ago"));
+        QCOMPARE(closedAgo(nowMs - 3 * 86400'000LL, nowMs), QStringLiteral("closed 3 days ago"));
+
+        QJsonObject item{{QStringLiteral("pinned"), 1}, {QStringLiteral("unfinished"), true},
+                         {QStringLiteral("files_count"), 3}, {QStringLiteral("has_edits"), true},
+                         {QStringLiteral("branch"), QStringLiteral("feature/x")}};
+        QCOMPARE(badges(item, false, QString()),
+                 QStringList({QStringLiteral("pinned"), QStringLiteral("unfinished"),
+                              QStringLiteral("edits · 3 files"), QStringLiteral("feature/x")}));
+        // Open wins over closed: a conversation cannot be both, and the pane it is in matters more.
+        QCOMPARE(badges(item, true, QStringLiteral("closed 5 min ago")).at(1), QStringLiteral("open"));
+        QCOMPARE(badges(item, false, QStringLiteral("closed 5 min ago")).at(1), QStringLiteral("closed 5 min ago"));
+        QCOMPARE(badges({{QStringLiteral("files_count"), 1}, {QStringLiteral("has_edits"), true}}, false, QString()),
+                 QStringList{QStringLiteral("edits · 1 file")});
+        // The trunk is not worth a tag, and a plain conversation carries none at all.
+        QCOMPARE(badges({{QStringLiteral("branch"), QStringLiteral("main")}}, false, QString()), QStringList());
+        QCOMPARE(badges({{QStringLiteral("branch"), QStringLiteral("master")}}, false, QString()), QStringList());
+        QCOMPARE(badges({}, false, QString()), QStringList());
+    }
+
+    void elidesPathsInTheMiddle() {
+        QCOMPARE(elideMiddleText(QStringLiteral("short"), 20), QStringLiteral("short"));
+        const QString path = QStringLiteral("/home/u/relay-terminal/src/Conversations.cpp");
+        const QString cut = elideMiddleText(path, 24);
+        QCOMPARE(cut.size(), 24);
+        QVERIFY(cut.contains(QChar(0x2026)));
+        QVERIFY(cut.endsWith(QStringLiteral("Conversations.cpp")));     // the name survives
+        // Plain text has no path to protect, so it is cut at the end.
+        const QString words = elideMiddleText(QStringLiteral("a very long sentence of words"), 10);
+        QVERIFY(words.endsWith(QChar(0x2026)));
+        QVERIFY(words.startsWith(QStringLiteral("a very")));
+    }
+
+    void continueSectionPicksWhatIsUnfinished() {
+        QJsonObject pinned = sessionItem(QStringLiteral("p"), QStringLiteral("Pinned"));
+        pinned.insert(QStringLiteral("pinned"), 1);
+        pinned.insert(QStringLiteral("updated"), 100.0);
+        QJsonObject unfinished = sessionItem(QStringLiteral("u"), QStringLiteral("Unfinished"));
+        unfinished.insert(QStringLiteral("unfinished"), true);
+        unfinished.insert(QStringLiteral("updated"), 300.0);
+        QJsonObject closed = sessionItem(QStringLiteral("c"), QStringLiteral("Closed"));
+        closed.insert(QStringLiteral("updated"), 200.0);
+        QJsonObject plain = sessionItem(QStringLiteral("x"), QStringLiteral("Plain"));
+        QJsonObject elsewhere = sessionItem(QStringLiteral("e"), QStringLiteral("Other project"), QStringLiteral("other"));
+        elsewhere.insert(QStringLiteral("pinned"), 1);
+        QJsonObject terminal = sessionItem(QStringLiteral("t"), QStringLiteral("Terminal"));
+        terminal.insert(QStringLiteral("source"), QStringLiteral("terminal"));
+        terminal.insert(QStringLiteral("pinned"), 1);
+        const QJsonArray items{pinned, unfinished, closed, plain, elsewhere, terminal};
+        const QJsonArray picked = continueItems(items, QStringLiteral("relay"), {QStringLiteral("c")});
+        QCOMPARE(picked.size(), 3);
+        QCOMPARE(picked.at(0).toObject().value(QStringLiteral("session_id")).toString(), QStringLiteral("u"));
+        QCOMPARE(picked.at(1).toObject().value(QStringLiteral("session_id")).toString(), QStringLiteral("c"));
+        QCOMPARE(picked.at(2).toObject().value(QStringLiteral("session_id")).toString(), QStringLiteral("p"));
+        QCOMPARE(continueItems(items, QStringLiteral("relay"), {}, 1).size(), 1);
+        QCOMPARE(continueItems(items, QStringLiteral("nothing-here"), {}).size(), 0);
+    }
+
+    void estimateSentenceAlwaysAsksFirst() {
+        const QJsonObject event{{QStringLiteral("scope"), QStringLiteral("project")}, {QStringLiteral("count"), 12},
+                                {QStringLiteral("approx_input_tokens"), 45000},
+                                {QStringLiteral("approx_output_tokens"), 3840},
+                                {QStringLiteral("model"), QStringLiteral("glm-4.6")}};
+        const QString text = estimateText(event);
+        for (const char *needle : {"12 conversation", "this project", "45.0k input", "3.8k output", "glm-4.6",
+                                   "Nothing is summarised unless you press Start"})
+            QVERIFY2(text.contains(QString::fromUtf8(needle)), needle);
+        QVERIFY(estimateText({{QStringLiteral("count"), 0}}).contains(QStringLiteral("already has a summary")));
+        QVERIFY(estimateText({{QStringLiteral("count"), 1}, {QStringLiteral("scope"), QStringLiteral("all")}})
+                    .contains(QStringLiteral("1 conversation in all projects has no summary")));
+        QCOMPARE(compactTokens(812), QStringLiteral("812"));
+        QCOMPARE(compactTokens(1250000), QStringLiteral("1.3M"));
+    }
+
+    // ----- the list itself ----------------------------------------------------------------------
+
+    void rowsCarryTheirSummaryAndTags() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.setOpenSessions({QStringLiteral("b")});
+        manager.setClosedSessions({{QStringLiteral("c"), {QStringLiteral("closed-1"),
+                                                          QDateTime::currentMSecsSinceEpoch() - 5 * 60'000}}});
+        manager.show();
+        QJsonObject withSummary = sessionItem(QStringLiteral("a"), QStringLiteral("Index work"));
+        withSummary.insert(QStringLiteral("summary"), QStringLiteral("Rebuilt the conversation index."));
+        withSummary.insert(QStringLiteral("files_count"), 2);
+        QJsonObject open = sessionItem(QStringLiteral("b"), QStringLiteral("Open elsewhere"));
+        open.insert(QStringLiteral("first_prompt"), QStringLiteral("make the list nicer"));
+        QJsonObject closed = sessionItem(QStringLiteral("c"), QStringLiteral("Just closed"));
+        manager.setResults({{QStringLiteral("items"), QJsonArray{withSummary, open, closed}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        // The just-closed one is what "Continue" is for, so it heads the list; the others sit in
+        // their project's group.
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Continue"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("relay"));
+        QTreeWidgetItem *indexed = rowTitled(tree, QStringLiteral("Index work"));
+        QTreeWidgetItem *opened = rowTitled(tree, QStringLiteral("Open elsewhere"));
+        QTreeWidgetItem *justClosed = rowTitled(tree, QStringLiteral("Just closed"));
+        QVERIFY(indexed && opened && justClosed);
+        QCOMPARE(justClosed->parent(), tree->topLevelItem(0));
+        QCOMPARE(indexed->data(0, Qt::UserRole + 4).toString(), QStringLiteral("Rebuilt the conversation index."));
+        QVERIFY(indexed->data(0, kBadgeRole).toStringList().contains(QStringLiteral("edits · 2 files")));
+        // No summary yet: the first prompt says what it was about instead.
+        QCOMPARE(opened->data(0, Qt::UserRole + 4).toString(), QStringLiteral("make the list nicer"));
+        QVERIFY(opened->data(0, kBadgeRole).toStringList().contains(QStringLiteral("open")));
+        QVERIFY(justClosed->data(0, kBadgeRole).toStringList().contains(QStringLiteral("closed 5 min ago")));
+        // Selecting the open one says what Enter will do with it.
+        tree->setCurrentItem(opened);
+        auto *status = manager.findChild<QLabel *>();
+        Q_UNUSED(status);
+        bool said = false;
+        for (QLabel *label : manager.findChildren<QLabel *>())
+            said = said || label->text().contains(QStringLiteral("Enter goes to that pane"));
+        QVERIFY(said);
+    }
+
+    void unfoldAsksOnceAndFillsFromTheOverview() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        QStringList asked;
+        manager.onPreview = [&asked](const QString &id, const QString &) { asked << id; };
+        manager.show();
+        manager.setResults({{QStringLiteral("items"), QJsonArray{sessionItem(QStringLiteral("a"), QStringLiteral("First")),
+                                                                sessionItem(QStringLiteral("b"), QStringLiteral("Second"))}}});
+        QCOMPARE(asked, QStringList{QStringLiteral("a")});      // the selected row, not both
+        asked.clear();
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QTreeWidgetItem *second = tree->topLevelItem(0)->child(1);
+        second->setExpanded(true);
+        QCOMPARE(asked, QStringList{QStringLiteral("b")});
+        const QJsonObject overview{{QStringLiteral("summary"), QStringLiteral("What it did.")},
+                                   {QStringLiteral("first_prompt"), QStringLiteral("do the thing")},
+                                   {QStringLiteral("last_turns"), QJsonArray{QJsonObject{
+                                        {QStringLiteral("turn"), 3}, {QStringLiteral("prompt"), QStringLiteral("and now?")},
+                                        {QStringLiteral("reply"), QStringLiteral("done")}}}},
+                                   {QStringLiteral("files"), QJsonArray{QStringLiteral("src/a.cpp")}},
+                                   {QStringLiteral("files_count"), 4},
+                                   {QStringLiteral("todos"), QJsonArray{
+                                        QJsonObject{{QStringLiteral("text"), QStringLiteral("write the test")}, {QStringLiteral("status"), QStringLiteral("pending")}},
+                                        QJsonObject{{QStringLiteral("text"), QStringLiteral("done one")}, {QStringLiteral("status"), QStringLiteral("completed")}}}}};
+        manager.setPreview({{QStringLiteral("session_id"), QStringLiteral("b")}, {QStringLiteral("overview"), overview},
+                            {QStringLiteral("items"), QJsonArray{}}});
+        const QString text = unfoldedText(second);
+        for (const char *needle : {"What it did.", "First:", "do the thing", "You:", "and now?", "Agent:",
+                                   "src/a.cpp", "Files (4)", "and 3 more", "write the test"})
+            QVERIFY2(text.contains(QString::fromUtf8(needle)), needle);
+        QVERIFY(!text.contains(QStringLiteral("done one")));      // finished todos are not "still to do"
+        // Folding and unfolding again is free: the overview is kept.
+        second->setExpanded(false);
+        second->setExpanded(true);
+        QCOMPARE(asked, QStringList{QStringLiteral("b")});
+    }
+
+    void refreshKeepsTheSelectionAndWhatWasUnfolded() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        int previews = 0;
+        manager.onPreview = [&previews](const QString &, const QString &) { ++previews; };
+        manager.show();
+        const QJsonArray items{sessionItem(QStringLiteral("a"), QStringLiteral("First")),
+                               sessionItem(QStringLiteral("b"), QStringLiteral("Second"))};
+        manager.setResults({{QStringLiteral("items"), items}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        tree->setCurrentItem(tree->topLevelItem(0)->child(1));
+        tree->topLevelItem(0)->child(1)->setExpanded(true);
+        manager.setPreview({{QStringLiteral("session_id"), QStringLiteral("b")},
+                            {QStringLiteral("overview"), QJsonObject{{QStringLiteral("summary"), QStringLiteral("Kept.")}}},
+                            {QStringLiteral("items"), QJsonArray{}}});
+        const int before = previews;
+        manager.setResults({{QStringLiteral("items"), items}});
+        QTreeWidgetItem *second = tree->topLevelItem(0)->child(1);
+        QCOMPARE(tree->currentItem(), second);
+        QVERIFY(second->isExpanded());
+        QVERIFY(unfoldedText(second).contains(QStringLiteral("Kept.")));
+        QCOMPARE(previews, before);            // nothing was asked for a second time
+    }
+
+    void chipsFollowTheParsedQueryAndTakeItBack() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.show();
+        manager.setQuery(QStringLiteral("file:parser.cpp -pelican index"));
+        const QJsonObject parsed{{QStringLiteral("text"), QStringLiteral("index")},
+                                 {QStringLiteral("operators"), QJsonArray{
+                                      QJsonObject{{QStringLiteral("key"), QStringLiteral("file")}, {QStringLiteral("value"), QStringLiteral("parser.cpp")}},
+                                      QJsonObject{{QStringLiteral("key"), QStringLiteral("text")}, {QStringLiteral("value"), QStringLiteral("pelican")},
+                                                  {QStringLiteral("negated"), true}}}},
+                                 {QStringLiteral("ignored"), QJsonArray{QStringLiteral("before:someday")}}};
+        manager.setResults({{QStringLiteral("items"), QJsonArray{}}, {QStringLiteral("parsed"), parsed}});
+        const auto chips = manager.findChildren<QToolButton *>(QStringLiteral("stripChip"));
+        QCOMPARE(chips.size(), 2);
+        QVERIFY(chips.at(0)->text().startsWith(QStringLiteral("file: parser.cpp")));
+        QVERIFY(chips.at(1)->text().startsWith(QStringLiteral("not: pelican")));
+        bool noted = false;
+        for (QLabel *label : manager.findChildren<QLabel *>())
+            noted = noted || (label->isVisibleTo(&manager) && label->text() == QStringLiteral("ignored: before:someday"));
+        QVERIFY(noted);
+        chips.at(0)->click();
+        QCOMPARE(manager.query(), QStringLiteral("-pelican index"));
+        // An empty `parsed` takes the chips away again.
+        manager.setResults({{QStringLiteral("items"), QJsonArray{}}, {QStringLiteral("parsed"), QJsonObject{}}});
+        QCOMPARE(manager.findChildren<QToolButton *>(QStringLiteral("stripChip")).size(), 0);
+    }
+
+    void searchingSortsByBestMatchUntilTheUserSaysOtherwise() {
+        SessionManager manager;
+        QList<QJsonObject> asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked << request; };
+        manager.show();
+        QVERIFY(!asked.last().contains(QStringLiteral("sort")));         // listing: newest first
+        manager.setQuery(QStringLiteral("pelican"));
+        QTest::qWait(200);                                              // the box is debounced
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("relevance"));
+        manager.setQuery(QString());
+        QTest::qWait(200);
+        QVERIFY(!asked.last().contains(QStringLiteral("sort")));
+        // A sort the user picks by hand stands, whatever they type next.
+        auto *sort = manager.findChild<QComboBox *>(QStringLiteral("sessionsSort"));
+        sort->setCurrentIndex(sort->findData(QStringLiteral("longest")));
+        emit sort->activated(sort->currentIndex());
+        manager.setQuery(QStringLiteral("pelican"));
+        QTest::qWait(200);
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("longest"));
+    }
+
+    void filtersSendTheirOwnFieldsAndClear() {
+        SessionManager manager;
+        QList<QJsonObject> asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked << request; };
+        manager.show();
+        auto action = [&manager](const QString &name) { return manager.findChild<QAction *>(name); };
+        action(QStringLiteral("filterHasEdits"))->setChecked(true);
+        action(QStringLiteral("filterUnfinished"))->setChecked(true);
+        QVERIFY(asked.last().value(QStringLiteral("has_edits")).toBool());
+        QVERIFY(asked.last().value(QStringLiteral("unfinished")).toBool());
+        action(QStringLiteral("filterPinned"))->setChecked(true);
+        action(QStringLiteral("filterHasSummary"))->setChecked(true);
+        action(QStringLiteral("filterOpenTasks"))->setChecked(true);
+        QVERIFY(asked.last().value(QStringLiteral("pinned")).toBool());
+        QVERIFY(asked.last().value(QStringLiteral("has_summary")).toBool());
+        QVERIFY(asked.last().value(QStringLiteral("has_open_tasks")).toBool());
+        // Nothing matched and a filter is on: the way out is offered, and it clears every one.
+        manager.setResults({{QStringLiteral("items"), QJsonArray{}}});
+        auto *clear = manager.findChild<QPushButton *>(QStringLiteral("clearFilters"));
+        QVERIFY(clear->isVisibleTo(&manager));
+        QVERIFY(manager.findChild<QPushButton *>(QStringLiteral("searchAllProjects"))->isVisibleTo(&manager));
+        clear->click();
+        QVERIFY(!asked.last().contains(QStringLiteral("has_edits")));
+        QVERIFY(!asked.last().contains(QStringLiteral("has_open_tasks")));
+        // The facets fill the model and branch menus; one branch everywhere is not a filter.
+        manager.setResults({{QStringLiteral("items"), QJsonArray{}},
+                            {QStringLiteral("facets"), QJsonObject{
+                                 {QStringLiteral("models"), QJsonArray{QStringLiteral("glm-5"), QStringLiteral("kimi")}},
+                                 {QStringLiteral("branches"), QJsonArray{QStringLiteral("main")}}}}});
+        QCOMPARE(manager.findChild<QComboBox *>(QStringLiteral("sessionsBranch"))->isVisibleTo(&manager), false);
+        manager.setResults({{QStringLiteral("items"), QJsonArray{}},
+                            {QStringLiteral("facets"), QJsonObject{
+                                 {QStringLiteral("branches"), QJsonArray{QStringLiteral("main"), QStringLiteral("work")}}}}});
+        auto *branch = manager.findChild<QComboBox *>(QStringLiteral("sessionsBranch"));
+        QVERIFY(branch->isVisibleTo(&manager));
+        branch->setCurrentIndex(branch->findData(QStringLiteral("work")));
+        QCOMPARE(asked.last().value(QStringLiteral("branch")).toString(), QStringLiteral("work"));
+    }
+
+    void groupingByDateAndTheContinueSection() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.setProject(QStringLiteral("relay"));
+        manager.show();
+        const QDateTime now = QDateTime::currentDateTime();
+        QJsonObject today = sessionItem(QStringLiteral("a"), QStringLiteral("Today's work"));
+        today.insert(QStringLiteral("updated"), double(now.toSecsSinceEpoch()));
+        today.insert(QStringLiteral("unfinished"), true);
+        QJsonObject older = sessionItem(QStringLiteral("b"), QStringLiteral("Last month"));
+        older.insert(QStringLiteral("updated"), double(now.addDays(-40).toSecsSinceEpoch()));
+        manager.setResults({{QStringLiteral("items"), QJsonArray{today, older}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        // Grouped by project, the unfinished one heads the list and is not repeated below it.
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Continue"));
+        QCOMPARE(tree->topLevelItem(0)->childCount(), 1);
+        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("relay"));
+        QCOMPARE(tree->topLevelItem(1)->childCount(), 1);
+        QCOMPARE(tree->topLevelItem(1)->child(0)->text(0), QStringLiteral("Last month"));
+        // Grouped by date it is in its date group too: a date group with a hole in it would lie.
+        auto *group = manager.findChild<QComboBox *>(QStringLiteral("sessionsGroup"));
+        group->setCurrentIndex(group->findData(QStringLiteral("date")));
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Continue"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("Today"));
+        QCOMPARE(tree->topLevelItem(1)->child(0)->text(0), QStringLiteral("Today's work"));
+        QCOMPARE(tree->topLevelItem(2)->text(0), QStringLiteral("Older"));
+        // No grouping: the rows stand on their own, the Continue group still first.
+        group->setCurrentIndex(group->findData(QStringLiteral("none")));
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Continue"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("Today's work"));
+        // With something typed there is nothing to continue: the query is what matters.
+        manager.setQuery(QStringLiteral("month"));
+        manager.setResults({{QStringLiteral("items"), QJsonArray{today, older}}});
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Today's work"));
+    }
+
+    void keysReachEveryAction() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.setClosedSessions({{QStringLiteral("a"), {QStringLiteral("closed-7"), QDateTime::currentMSecsSinceEpoch()}}});
+        manager.show();
+        QJsonObject item = sessionItem(QStringLiteral("a"), QStringLiteral("First"));
+        item.insert(QStringLiteral("pinned"), 0);
+        manager.setResults({{QStringLiteral("items"), QJsonArray{item}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        auto *search = manager.findChild<QLineEdit *>(QStringLiteral("sessionsSearch"));
+        int resumed = 0, newPane = 0;
+        QString forked, reopened, pinned;
+        manager.onResume = [&resumed, &newPane](const QJsonObject &, bool other) { other ? ++newPane : ++resumed; };
+        manager.onFork = [&forked](const QJsonObject &row) { forked = row.value(QStringLiteral("session_id")).toString(); };
+        manager.onReopenClosed = [&reopened](const QString &id) { reopened = id; };
+        manager.onPin = [&pinned](const QString &id, bool on) { pinned = id + (on ? QStringLiteral(" on") : QStringLiteral(" off")); };
+        QTest::keyClick(tree, Qt::Key_Return);
+        QCOMPARE(resumed, 1);
+        QTest::keyClick(tree, Qt::Key_Return, Qt::ShiftModifier);
+        QCOMPARE(newPane, 1);
+        QTest::keyClick(tree, Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(forked, QStringLiteral("a"));
+        QTest::keyClick(tree, Qt::Key_Return, Qt::AltModifier);
+        QCOMPARE(reopened, QStringLiteral("closed-7"));
+        QTest::keyClick(tree, Qt::Key_P, Qt::ControlModifier);
+        QCOMPARE(pinned, QStringLiteral("a on"));
+        // Space unfolds, → unfolds, ← folds.
+        QTreeWidgetItem *row = tree->topLevelItem(0)->child(0);
+        QTest::keyClick(tree, Qt::Key_Space);
+        QVERIFY(row->isExpanded());
+        QTest::keyClick(tree, Qt::Key_Space);
+        QVERIFY(!row->isExpanded());
+        // Typing on the rows types in the box; "/" and Ctrl+F only move the keyboard there.
+        QTest::keyClick(tree, Qt::Key_Z);
+        QCOMPARE(search->text(), QStringLiteral("z"));
+        QCOMPARE(manager.focusWidget(), search);
+        tree->setFocus();
+        QTest::keyClick(tree, Qt::Key_Slash);
+        QCOMPARE(search->text(), QStringLiteral("z"));
+        QCOMPARE(manager.focusWidget(), search);
+        // Esc clears the query first and closes second.
+        bool closed = false;
+        manager.onClose = [&closed] { closed = true; };
+        QTest::keyClick(search, Qt::Key_Escape);
+        QVERIFY(search->text().isEmpty());
+        QVERIFY(!closed);
+        QTest::keyClick(search, Qt::Key_Escape);
+        QVERIFY(closed);
+    }
+
+    void summariesFromTheButtonAndTheBatch() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        QString summarised, estimated, started;
+        manager.onSummarise = [&summarised](const QString &id, const QString &) { summarised = id; };
+        manager.onSummariseEstimate = [&estimated](const QString &scope) { estimated = scope; };
+        manager.onSummariseAll = [&started](const QString &scope) { started = scope; };
+        manager.show();
+        manager.setResults({{QStringLiteral("items"), QJsonArray{sessionItem(QStringLiteral("a"), QStringLiteral("No summary"))}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QTreeWidgetItem *row = tree->topLevelItem(0)->child(0);
+        auto *button = manager.findChild<QPushButton *>(QStringLiteral("summariseOne"));
+        QVERIFY(button->isVisibleTo(&manager));
+        // The unfolded row offers it too, where the summary would have been.
+        row->setExpanded(true);
+        manager.setPreview({{QStringLiteral("session_id"), QStringLiteral("a")}, {QStringLiteral("overview"), QJsonObject{}},
+                            {QStringLiteral("items"), QJsonArray{}}});
+        QVERIFY(manager.findChild<QPushButton *>(QStringLiteral("summariseRow")));
+        button->click();
+        QCOMPARE(summarised, QStringLiteral("a"));
+        QCOMPARE(button->text(), QStringLiteral("Summarising…"));
+        QVERIFY(!button->isEnabled());
+        manager.setSummary({{QStringLiteral("session_id"), QStringLiteral("a")},
+                            {QStringLiteral("summary"), QStringLiteral("It did the thing.")}});
+        QCOMPARE(row->data(0, Qt::UserRole + 4).toString(), QStringLiteral("It did the thing."));
+        QVERIFY(unfoldedText(row).contains(QStringLiteral("It did the thing.")));
+        QVERIFY(!button->isVisibleTo(&manager));            // it has one now
+        // An error says so on the row rather than disappearing.
+        manager.setResults({{QStringLiteral("items"), QJsonArray{sessionItem(QStringLiteral("b"), QStringLiteral("Second"))}}});
+        tree->topLevelItem(0)->child(0)->setExpanded(true);
+        manager.setPreview({{QStringLiteral("session_id"), QStringLiteral("b")}, {QStringLiteral("overview"), QJsonObject{}},
+                            {QStringLiteral("items"), QJsonArray{}}});
+        manager.findChild<QPushButton *>(QStringLiteral("summariseRow"))->click();
+        manager.setSummary({{QStringLiteral("session_id"), QStringLiteral("b")}, {QStringLiteral("error"), QStringLiteral("no chores model")}});
+        QVERIFY(unfoldedText(tree->topLevelItem(0)->child(0)).contains(QStringLiteral("no chores model")));
+
+        // The batch: the estimate first, and Start is the only thing that runs it.
+        manager.findChild<QAction *>(QStringLiteral("summariseAll"))->trigger();
+        QCOMPARE(estimated, QStringLiteral("project"));
+        auto *start = manager.findChild<QPushButton *>(QStringLiteral("summariseStart"));
+        QVERIFY(!start->isEnabled());
+        manager.setSummariseEstimate({{QStringLiteral("scope"), QStringLiteral("project")}, {QStringLiteral("count"), 4},
+                                      {QStringLiteral("approx_input_tokens"), 20000},
+                                      {QStringLiteral("approx_output_tokens"), 1280},
+                                      {QStringLiteral("model"), QStringLiteral("glm-4.6")}});
+        auto *estimate = manager.findChild<QLabel *>(QStringLiteral("summariseEstimate"));
+        QVERIFY(estimate->text().contains(QStringLiteral("4 conversations in this project")));
+        QVERIFY(estimate->text().contains(QStringLiteral("Nothing is summarised unless you press Start")));
+        QVERIFY(start->isEnabled());
+        QVERIFY(started.isEmpty());
+        start->click();
+        QCOMPARE(started, QStringLiteral("project"));
+        QVERIFY(!manager.findChild<QAction *>(QStringLiteral("summariseAll"))->isEnabled());
+        auto *cancel = manager.findChild<QPushButton *>(QStringLiteral("cancelSummaries"));
+        QVERIFY(cancel->isVisibleTo(&manager));
+        manager.setSummariseProgress({{QStringLiteral("done"), 1}, {QStringLiteral("total"), 4},
+                                      {QStringLiteral("session_id"), QStringLiteral("b")},
+                                      {QStringLiteral("summary"), QStringLiteral("Live from the batch.")}});
+        QCOMPARE(tree->topLevelItem(0)->child(0)->data(0, Qt::UserRole + 4).toString(), QStringLiteral("Live from the batch."));
+        bool progress = false;
+        for (QLabel *label : manager.findChildren<QLabel *>())
+            progress = progress || label->text() == QStringLiteral("Summarising 1 of 4…");
+        QVERIFY(progress);
+        manager.setSummariseProgress({{QStringLiteral("done"), 4}, {QStringLiteral("total"), 4},
+                                      {QStringLiteral("finished"), true}, {QStringLiteral("failed"), 1}});
+        QVERIFY(manager.findChild<QAction *>(QStringLiteral("summariseAll"))->isEnabled());
+        QVERIFY(!cancel->isVisibleTo(&manager));
+        // `session_summary` for the conversation a pane is holding updates its row where it stands.
+        manager.setSessionSummary({{QStringLiteral("session_id"), QStringLiteral("b")},
+                                   {QStringLiteral("summary"), QStringLiteral("From the pane.")}, {QStringLiteral("turn"), 3}});
+        QCOMPARE(tree->topLevelItem(0)->child(0)->data(0, Qt::UserRole + 4).toString(), QStringLiteral("From the pane."));
     }
 
     void findBarCountsBothSides() {

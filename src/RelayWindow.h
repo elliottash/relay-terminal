@@ -967,7 +967,6 @@ private:
             if (Keymap::instance().shortcutText(id).isEmpty())
                 hint(QStringLiteral("info.click"), QStringLiteral("Next time: /status in the prompt box"));
         }
-
         else if (id == QStringLiteral("conversations.open")) pane->openConversations();
         else if (id == QStringLiteral("find.inView")) pane->openFindInView();
         else if (id == QStringLiteral("agent.recap")) pane->requestRecap();
@@ -2609,6 +2608,7 @@ public:
         if (!page) return;
         ToolPane *tool = sessionsPaneIn(page);
         relay::conversations::SessionManager *view = sessionsViewOf(tool);
+        const bool fresh = !tool;
         if (!tool) {
             view = new relay::conversations::SessionManager;
             tool = new ToolPane(ToolPane::Kind::Sessions, view, view, owner->cwd());
@@ -2618,6 +2618,28 @@ public:
                 if (QWidget *widget = extra.make ? extra.make(this) : nullptr) view->addTab(extra.id, extra.label, widget);
             insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
         }
+        // What is open and what was closed is the window's knowledge, not the list's: it is pushed
+        // in here, and again whenever the recently-closed list changes, so the "open" and
+        // "closed 5 min ago" tags on the rows stay true (card #R6J0).
+        QPointer<relay::conversations::SessionManager> viewGuard(view);
+        QPointer<RelayWindow> windowGuard(this);
+        auto feed = [viewGuard, windowGuard] {
+            if (!viewGuard || !windowGuard) return;
+            viewGuard->setOpenSessions(windowGuard->openSessionIds());
+            QHash<QString, QPair<QString, qint64>> closed;
+            const QList<relay::closed::Record> records = windowGuard->m_manager->closedRecords();
+            for (const relay::closed::Record &record : records)
+                for (const QString &sessionId : relay::closed::sessionIds(record))
+                    if (!closed.contains(sessionId) || closed.value(sessionId).second < record.closedAt)
+                        closed.insert(sessionId, {record.id, record.closedAt});
+            viewGuard->setClosedSessions(closed);
+        };
+        if (fresh) m_manager->watchClosed(view, feed);
+        feed();
+        view->setProject(QFileInfo(owner->workspace().isEmpty() ? owner->cwd() : owner->workspace()).fileName());
+        view->onReopenClosed = [windowGuard](const QString &closedId) {
+            if (windowGuard) windowGuard->m_manager->restoreClosed(windowGuard, closedId);
+        };
         // Bound to the pane that asked, every time: Enter resumes where /resume was typed.
         owner->bindSessionManager(view);
         QPointer<ToolPane> guard(tool);
@@ -4396,7 +4418,7 @@ public:
     void closeTab(int index, bool record) {
         QWidget *page = m_tabs->widget(index);
         if (!page) return;
-        if (record) {
+        if (record && !serializeTab(index).isEmpty()) {
             ClosedItem item;
             item.window = this;
             item.record.kind = relay::closed::Record::Tab;

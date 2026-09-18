@@ -1121,6 +1121,16 @@ already open in some pane is focused there instead (`paneWithSession`). The "Sub
 ⓘ pane. Other features add tabs beside the list with `RelayWindow::addSessionsTab(id, label,
 factory)` and open one with `RelayWindow::openSessions(tab)`.
 
+What a row shows and what the box understands (card #SM4R, 2026-09-18): the title on one line, the
+tags and the agent-written summary (protocol §18.4; the first prompt until there is one) on the
+next; `→` unfolds a quick look built from `conversation_get`'s `overview`, fetched once per session.
+The box's operators (`file:`, `project:`, `-word`, … — protocol §14) are parsed by the worker, which
+returns them as `parsed` so the pane draws a chip per operator, and `facets` fill the model and
+branch menus. "Continue" heads an unfiltered list with the project's pinned, unfinished and recently
+closed sessions (the window feeds the manager what is open and what was closed through
+`setOpenSessions` / `setClosedSessions`; the manager never looks at a window). Summarise, on a row
+or for every session in a scope, always goes through the pane's worker and never starts on its own.
+
 The **ⓘ pane** is `src/SessionInfo.{h,cpp}` (`relay::sessioninfo::InfoView`, `ToolPane` kind
 `Info`, `paneType` `info`): opened by the painted ⓘ button in an agent pane's header row
 (`agent.info`) or `/status`, beside that pane, one per pane. It renders the worker's

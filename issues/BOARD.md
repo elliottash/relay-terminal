@@ -159,6 +159,7 @@
 | `#308N` | [Next command and next prompt suggestions never appear](changes/needs_qa_llm/2026-09-17-suggestions-not-working.md) | needs-qa-llm | agent |  |  |
 | `#4PW5` | [A new pane is not active: typing and Ctrl+W do nothing](changes/needs_qa_llm/2026-09-17-new-pane-not-active.md) | needs-qa-llm | agent |  |  |
 | `#RDQ7` | [A small second window opens when Relay starts](changes/needs_qa_llm/2026-09-17-second-window-on-start.md) | needs-qa-llm | agent |  |  |
+| `#SM4R` | [The session manager, completed: operators, summaries, quick look, Continue](changes/needs_qa_llm/2026-09-18-session-manager-complete.md) | needs-qa-llm | agent |  |  |
 | `#T9ZS` | [Ctrl+? does not open the shortcuts overlay](changes/needs_qa_llm/2026-09-17-ctrl-question-shortcuts.md) | needs-qa-llm | agent |  |  |
 | `#G152` | [Ctrl+H shrinks a pane to almost nothing](changes/needs_qa_llm/2026-09-17-ctrl-h-shrinks-pane.md) | needs-qa-llm | agent |  |  |
 | `#GDWE` | [@ file completion runs synchronous git on the GUI thread (multi-second block)](changes/needs_qa_llm/2026-09-17-file-completion-runs-synchronous-git-on-the-gui.md) | needs-qa-llm |  |  | [2](threads/GDWE.md) |

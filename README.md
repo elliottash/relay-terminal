@@ -168,12 +168,12 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   `/context`, `/rewind` (rewind chat: the conversation only, files untouched; also Esc Esc in
   an empty prompt), `/rewind-code` (restores the files the agent changed, after showing them and
   asking; "Code and chat" does both), `/fork` (continues in a new pane),
-  `/resume` (with a recap), `/conversations`, `/find`, `/plan`, `/recap`, `/tasks`, `/continue`, `/agents`, `/skills`, `/instructions`, `/export`
+  `/resume` (with a recap; `/sessions` is the same), `/conversations`, `/find`, `/plan`, `/recap`, `/tasks`, `/continue`, `/agents`, `/skills`, `/instructions`, `/export`
   (Markdown under `.relay/exports`), `/main` and `/flash` (this pane's model tier), `/glm` and `/kimi`
   (switch provider), `/help` (the card `?` shows). A `/command` Relay does not have is answered by
   Relay, not by the shell: it names the closest real commands and points at `/` and `/help`. Coming back to the window after 3 minutes, with a finished
   turn and an empty prompt, prints a short recap (Options › General turns it off).
-- **Sessions: list and full-text search.** Ctrl+Shift+Y (also `/resume`, `/conversations`, Actions ›
+- **Sessions: list and full-text search.** Ctrl+Shift+Y (also `/resume`, `/sessions`, `/conversations`, Actions ›
   Sessions… and the list button in the title bar) opens every saved conversation, grouped by project and newest first, with a
   search field that filters as you type. The search covers **both** agent threads (your prompts,
   the agent's replies, its tool calls and their output) and **Relay's terminal history** (the

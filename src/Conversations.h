@@ -9,16 +9,23 @@
 #include "PaneView.h"
 
 #include <QDateTime>
+#include <QHash>
+#include <QPair>
+#include <QSet>
+#include <QStringList>
 #include <QWidget>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
 #include <functional>
 
+class QAction;
 class QCheckBox;
 class QComboBox;
+class QFrame;
 class QLabel;
 class QLineEdit;
+class QMenu;
 class QPushButton;
 class QTabWidget;
 class QTextBrowser;
@@ -47,6 +54,38 @@ double sinceFor(const QString &id, const QDateTime &now);
 // bytes removed, trailing blank lines dropped, capped at maxChars.
 QString stripAnsi(const QByteArray &bytes, int maxChars = 4000);
 
+// "Today", "Yesterday", "This week", "This month", "Older" — the group a conversation falls in
+// when the list is grouped by date. `dateGroupOrder()` is the order those groups are shown in.
+QString dateGroup(double epochSeconds, const QDateTime &now);
+QStringList dateGroupOrder();
+
+// The chip label for one entry of the reply's `parsed.operators`: "file: parser.cpp", an excluded
+// word (`{key: "text", negated: true}`) as "not: pelican", a negated operator as "not model: kimi".
+QString chipText(const QJsonObject &op);
+// The query with that operator's token taken out, quotes and negation included; the rest of the
+// text keeps its spelling. Only the first matching token goes, so "a a" loses one "a".
+QString removeOperator(const QString &query, const QJsonObject &op);
+
+// "closed 5 min ago" for a recently-closed stamp (milliseconds since the epoch); empty when the
+// stamp is not set. Mirrors relay::closed::age, which this library cannot link against.
+QString closedAgo(qint64 closedAtMs, qint64 nowMs);
+// The short text tags in a row's title cell: pinned, open, closed …, unfinished, edits · N files,
+// and the branch when it is not the trunk. `openNow` is "a pane already has this conversation".
+QStringList badges(const QJsonObject &item, bool openNow, const QString &closedText);
+// A path elided in the middle ("src/…/Conversations.cpp"); other text is elided at the end.
+QString elideMiddleText(const QString &text, int maxChars);
+
+// The "Continue" rows for an empty query: the conversations of `project` that are pinned,
+// unfinished or recently closed, newest first, at most `max` of them.
+QJsonArray continueItems(const QJsonArray &items, const QString &project,
+                         const QSet<QString> &closedIds, int max = 5);
+
+// The sentence the "Summarise all…" confirmation shows, from a `conversations_summarize_estimate`
+// event. It always ends by saying that nothing runs until Start is pressed.
+QString estimateText(const QJsonObject &event);
+// "12.3k" / "812" for a token count.
+QString compactTokens(double tokens);
+
 // ----- the session manager pane (card #R6J0) ----------------------------------------------
 
 // Every saved session, newest first, grouped by project, searchable; with "Subagent threads"
@@ -74,12 +113,33 @@ public:
     std::function<void(const QString &sessionId, bool pinned)> onPin;
     std::function<void(const QString &sessionId)> onDelete;
     std::function<void()> onClose;     // Esc, Close, or after a resume
+    // Ctrl+Enter: continue the conversation in a new pane without disturbing this one.
+    std::function<void(const QJsonObject &item)> onFork;
+    // Alt+Enter on a row whose pane, tab or window was closed: put it back where it was.
+    std::function<void(const QString &closedId)> onReopenClosed;
+    // The summaries of protocol section 18.4 / 14: one session, the cost of doing every session in
+    // a scope ("project"/"all"), the batch itself, and stopping it.
+    std::function<void(const QString &sessionId, const QString &sessionDir)> onSummarise;
+    std::function<void(const QString &scope)> onSummariseEstimate;
+    std::function<void(const QString &scope)> onSummariseAll;
+    std::function<void()> onSummariseCancel;
 
     // Worker events.
     void setResults(const QJsonObject &event);
     void setPreview(const QJsonObject &event);
+    // `conversation_summary` (one saved session) and `session_summary` (the session a pane holds).
+    void setSummary(const QJsonObject &event);
+    void setSessionSummary(const QJsonObject &event);
+    void setSummariseEstimate(const QJsonObject &event);
+    void setSummariseProgress(const QJsonObject &event);
     // Row gone: drop it and re-run the query.
     void removed(const QString &sessionId);
+
+    // Fed by the window, which knows what is open and what was closed; the manager never looks at
+    // a window itself. `closed` maps a session id to {closed-list id, closed-at in milliseconds}.
+    void setProject(const QString &project);
+    void setOpenSessions(const QStringList &sessionIds);
+    void setClosedSessions(const QHash<QString, QPair<QString, qint64>> &closed);
 
     void focusSearch();
     QString query() const;
@@ -106,9 +166,30 @@ private:
     void requery();
     void requestMore();
     void scheduleQuery();
+    QJsonObject queryRequest() const;
     void rebuildTree(const QString &keep);
+    QTreeWidgetItem *addSessionRow(QTreeWidgetItem *parent, const QJsonObject &item);
+    void decorate(QTreeWidgetItem *row, const QJsonObject &item);
     void selectionChanged();
+    void requestPreview(const QString &sessionId);
+    void unfold(QTreeWidgetItem *row);
+    void fillUnfolded(QTreeWidgetItem *row, const QJsonObject &overview);
     void activate(bool newPane);
+    void fork();
+    void reopenClosed();
+    void summariseSelected();
+    void summarise(const QJsonObject &item);
+    void updateItemSummary(const QString &sessionId, const QString &summary);
+    void rebuildChips(const QJsonObject &parsed);
+    void showOperatorHelp();
+    void askEstimate();
+    void startBatch();
+    void clearFilters();
+    bool anyFilter() const;
+    void fillFacets(const QJsonObject &facets);
+    void updateStatus();
+    void updateEmptyState();
+    QString scopeId() const;
     QString selectedId() const;
     QJsonObject selectedItem() const;
     void rename();
@@ -120,19 +201,38 @@ private:
     QTabWidget *m_tabs = nullptr;
     QWidget *m_inset = nullptr;
     QLineEdit *m_search = nullptr;
-    QComboBox *m_scope = nullptr, *m_model = nullptr, *m_date = nullptr, *m_kind = nullptr, *m_sort = nullptr;
-    QCheckBox *m_open = nullptr, *m_threads = nullptr;
+    QComboBox *m_scope = nullptr, *m_model = nullptr, *m_date = nullptr, *m_kind = nullptr,
+              *m_sort = nullptr, *m_branch = nullptr, *m_group = nullptr;
+    QCheckBox *m_threads = nullptr;
+    QToolButton *m_help = nullptr, *m_filters = nullptr;
+    QMenu *m_filterMenu = nullptr;
+    QAction *m_hasEdits = nullptr, *m_unfinished = nullptr, *m_pinnedOnly = nullptr,
+            *m_hasSummary = nullptr, *m_openTasks = nullptr, *m_summariseAll = nullptr;
+    QWidget *m_chipRow = nullptr;
+    QLabel *m_ignored = nullptr;
     QTreeWidget *m_tree = nullptr;
     QTextBrowser *m_preview = nullptr;
-    QLabel *m_status = nullptr, *m_header = nullptr;
+    QLabel *m_status = nullptr, *m_header = nullptr, *m_empty = nullptr;
+    QWidget *m_emptyRow = nullptr;
+    QPushButton *m_searchAll = nullptr, *m_clearFilters = nullptr;
     QPushButton *m_resume = nullptr, *m_newPane = nullptr, *m_info = nullptr, *m_rename = nullptr,
-                *m_pin = nullptr, *m_delete = nullptr, *m_more = nullptr;
+                *m_pin = nullptr, *m_delete = nullptr, *m_more = nullptr, *m_summarise = nullptr,
+                *m_cancelBatch = nullptr, *m_reopen = nullptr;
+    QFrame *m_confirm = nullptr;
+    QLabel *m_confirmText = nullptr;
     QJsonArray m_items;
-    QString m_pendingSelect;
-    int m_nextOffset = -1;
+    // A conversation can have two rows (the "Continue" group and its own group), so both are kept.
+    QMultiHash<QString, QTreeWidgetItem *> m_rows;
+    QHash<QString, QJsonObject> m_overviews;   // what an unfolded row shows, once fetched
+    QSet<QString> m_summarising;
+    QStringList m_openSessions;
+    QHash<QString, QPair<QString, qint64>> m_closed;
+    QString m_project, m_pendingSelect, m_previewPending, m_batchScope, m_note;
+    QString m_previewFor, m_previewHtml;      // the side preview as last filled, and for which row
+    int m_nextOffset = -1, m_matches = 0, m_sessions = 0, m_threadCount = 0;
     double m_elapsed = 0;
     QTimer *m_debounce = nullptr;
-    bool m_filling = false;
+    bool m_filling = false, m_sortChosen = false, m_batchRunning = false;
 };
 
 // ----- Ctrl+F find in view ----------------------------------------------------------------

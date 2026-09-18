@@ -4240,6 +4240,24 @@ private:
             if (type == QStringLiteral("conversation_deleted")) status(QStringLiteral("Conversation deleted."));
             return true;
         }
+        // ----- summaries (protocol section 18.4): the session manager's rows and its batch -------
+        if (type == QStringLiteral("session_summary")) {
+            if (m_conversations) m_conversations->setSessionSummary(event);
+            return true;
+        }
+        if (type == QStringLiteral("conversation_summary")) {
+            if (m_conversations) m_conversations->setSummary(event);
+            return true;
+        }
+        if (type == QStringLiteral("conversations_summarize_estimate")) {
+            if (m_conversations) m_conversations->setSummariseEstimate(event);
+            return true;
+        }
+        if (type == QStringLiteral("conversations_summarize_progress")) {
+            if (m_conversations) m_conversations->setSummariseProgress(event);
+            return true;
+        }
+        if (type == QStringLiteral("conversations_summarize_cancelled")) return true;
         if (type == QStringLiteral("terminal_history_indexed") || type == QStringLiteral("index_rebuilt")) {
             if (type == QStringLiteral("index_rebuilt"))
                 status(QStringLiteral("Conversation index rebuilt: %1 conversation(s), %2 entries, %3 ms")
@@ -4445,6 +4463,34 @@ public:
                                   {"session_id", sessionId}, {"query", query}});
         };
         view->onResume = [self](const QJsonObject &item, bool newPane) { if (self) self->openSavedSession(item, newPane); };
+        // Ctrl+Enter. `fork` copies the conversation the worker is holding (protocol 5), so a saved
+        // one nobody has loaded cannot be forked in one step: it opens in a new pane instead, and
+        // the pane says which of the two happened rather than pretending.
+        view->onFork = [self](const QJsonObject &item) {
+            if (!self) return;
+            const QString sessionId = item.value(QStringLiteral("session_id")).toString();
+            if (sessionId == self->m_sessionId) { self->requestFork(); return; }
+            self->status(QStringLiteral("Only the conversation a pane is holding can be forked; opening this one in a new pane."));
+            self->openSavedSession(item, true);
+        };
+        view->onSummarise = [self](const QString &sessionId, const QString &directory) {
+            if (!self) return;
+            QJsonObject message{{"type", "conversation_summarize"}, {"id", QStringLiteral("conv-summary")},
+                                {"session_id", sessionId}};
+            if (!directory.isEmpty()) message.insert(QStringLiteral("session_dir"), directory);
+            self->send(message);
+        };
+        view->onSummariseEstimate = [self](const QString &scope) {
+            if (self) self->send({{"type", "conversations_summarize_estimate"}, {"id", QStringLiteral("conv-estimate")},
+                                  {"scope", scope}, {"workspace", self->m_workspace}});
+        };
+        view->onSummariseAll = [self](const QString &scope) {
+            if (self) self->send({{"type", "conversations_summarize_all"}, {"id", QStringLiteral("conv-batch")},
+                                  {"scope", scope}, {"workspace", self->m_workspace}});
+        };
+        view->onSummariseCancel = [self] {
+            if (self) self->send({{"type", "conversations_summarize_cancel"}});
+        };
         view->onOpenThread = [self](const QJsonObject &item) {
             if (self && self->onOpenThreadInfo)
                 self->onOpenThreadInfo(item.value(QStringLiteral("session_id")).toString(),
@@ -4658,6 +4704,7 @@ private:
             {QStringLiteral("rewind-code"), QString(), QStringLiteral("Restore files the agent changed since an earlier turn")},
             {QStringLiteral("fork"), QString(), QStringLiteral("Continue this conversation in a new pane")},
             {QStringLiteral("resume"), QStringLiteral("[words]"), QStringLiteral("Sessions: resume, search, subagent threads (same as /conversations)")},
+            {QStringLiteral("sessions"), QStringLiteral("[words]"), QStringLiteral("Sessions: the same pane as /resume, under the name on its header")},
             {QStringLiteral("conversations"), QStringLiteral("[words]"), QStringLiteral("Sessions: search every session and Relay's terminal history")},
             {QStringLiteral("status"), QString(), QStringLiteral("Conversation info: model, tokens, file and history with subagent threads (the ⓘ button)")},
             {QStringLiteral("info"), QString(), QStringLiteral("Conversation info (same as /status)")},
@@ -4973,7 +5020,7 @@ private:
         } else if (name == QStringLiteral("rewind")) openRewind();
         else if (name == QStringLiteral("rewind-code")) openRewind(QStringLiteral("code"));
         else if (name == QStringLiteral("fork")) requestFork();
-        else if (name == QStringLiteral("resume")) {
+        else if (name == QStringLiteral("resume") || name == QStringLiteral("sessions")) {
             openResume(args);
             if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.resume")); !keys.isEmpty())
                 hint(QStringLiteral("resume.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("sessions")));
