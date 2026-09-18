@@ -3744,6 +3744,35 @@ private:
                 ? QStringLiteral("Model: %1 · conversation kept").arg(m_model)
                 : QStringLiteral("%1: %2 · conversation kept").arg(roleLabel(role), m_model);
             status(what); toast(what);
+            if (later) {
+                // The clock owns the status line while a turn runs, so the "not now, next step" part
+                // goes in the transcript too; `model_applied` marks where it landed.
+                ensureLineStart();
+                printInline(QStringLiteral("↻ %1 takes over %2 · %3 is not interrupted\n")
+                    .arg(m_model, applies == QStringLiteral("turn_end") ? QStringLiteral("after this turn")
+                                                                        : QStringLiteral("at the next step"),
+                         inFlight), Ink::Note);
+            }
+            changed();
+            return true;
+        }
+        if (type == QStringLiteral("model_applied")) {
+            // The moment a mid-turn switch takes effect (issue 3ES1): at a step boundary, before the
+            // next request, or once the turn is over. One line in the transcript, where it happened.
+            const QString model = event.value(QStringLiteral("model")).toString();
+            const qint64 window = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
+            if (window > 0) m_ctxWindow = window;
+            QString line = QStringLiteral("→ now on %1").arg(model);
+            if (event.value(QStringLiteral("at")).toString() == QStringLiteral("turn_end"))
+                line += QStringLiteral(" · from the next turn");
+            if (event.value(QStringLiteral("history_converted")).toBool())
+                line += QStringLiteral(" · conversation converted from %1").arg(event.value(QStringLiteral("from_model")).toString());
+            if (event.value(QStringLiteral("compacts")).toBool())
+                line += QStringLiteral(" · its window is smaller, compacting first");
+            ensureLineStart();
+            printInline(line + '\n', Ink::Note);
+            if (!m_agentBusy && !moreTurnsPending()) closeInline();
+            updateContextLabel();
             changed();
             return true;
         }
@@ -3838,35 +3867,6 @@ private:
             }
             m_turnsCompleted = std::max(0, event.value(QStringLiteral("turn")).toInt() - 1);
             return true;
-            if (later) {
-                // The clock owns the status line while a turn runs, so the "not now, next step" part
-                // goes in the transcript too; `model_applied` marks where it landed.
-                ensureLineStart();
-                printInline(QStringLiteral("↻ %1 takes over %2 · %3 is not interrupted\n")
-                    .arg(m_model, applies == QStringLiteral("turn_end") ? QStringLiteral("after this turn")
-                                                                        : QStringLiteral("at the next step"),
-                         inFlight), Ink::Note);
-            }
-            changed();
-            return true;
-        }
-        if (type == QStringLiteral("model_applied")) {
-            // The moment a mid-turn switch takes effect (issue 3ES1): at a step boundary, before the
-            // next request, or once the turn is over. One line in the transcript, where it happened.
-            const QString model = event.value(QStringLiteral("model")).toString();
-            const qint64 window = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
-            if (window > 0) m_ctxWindow = window;
-            QString line = QStringLiteral("→ now on %1").arg(model);
-            if (event.value(QStringLiteral("at")).toString() == QStringLiteral("turn_end"))
-                line += QStringLiteral(" · from the next turn");
-            if (event.value(QStringLiteral("history_converted")).toBool())
-                line += QStringLiteral(" · conversation converted from %1").arg(event.value(QStringLiteral("from_model")).toString());
-            if (event.value(QStringLiteral("compacts")).toBool())
-                line += QStringLiteral(" · its window is smaller, compacting first");
-            ensureLineStart();
-            printInline(line + '\n', Ink::Note);
-            if (!m_agentBusy && !moreTurnsPending()) closeInline();
-            updateContextLabel();
         }
         if (type == QStringLiteral("fork_state")) {
             if (!m_forkPending) return true;
