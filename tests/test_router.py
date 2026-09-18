@@ -1,16 +1,68 @@
-import os
 import tempfile
 import unittest
 from pathlib import Path
-from relay_core.router import (ASSIST_THRESHOLD, BARE_WORD_ODD, ENGLISH_COMMANDS, LITERAL_TEXT,
-                               _one_edit_apart,
-                               SIGNAL_WORDS, assist_signals, classify, validate_input)
+from relay_core import router
+from relay_core.router import (ASSIST_THRESHOLD, BARE_WORD_ODD, ENGLISH_COMMANDS, FixedCommands,
+                               LITERAL_TEXT, _one_edit_apart,
+                               SIGNAL_WORDS, assist_signals, validate_input)
+
+# ----- What is installed, as far as these tests are concerned ------------------------------------
+# The router asks the machine whether a word names a program, so what a line routes to used to
+# depend on what happened to be installed where the suite ran: "Docker ps" is a capitalised command
+# where docker exists and a nonsense word where it does not, and `test_table_routes_correctly`, the
+# two semicolon cases and the sentence-punctuation case passed here only because this machine has
+# docker (reported by session relay-terminal-71, 2026-09-18, after they failed on a second machine).
+#
+# So the cases state what exists instead of asking. The table is an ordinary Linux box: coreutils
+# and util-linux, the shell tools the routing table names as real commands, and the few developer
+# programs the typo cases are slips of — `git` for "gti", `python` for "pyton", `docker` for
+# "docekr", `ls` for "lls", `grep` for "grpe", `make` for "mkae", `id` for "is". Words the cases
+# rely on *not* being programs are absent on purpose and belong there: `resume` (card #T4JV: one
+# edit from `resize`, which is here, and still not a typo of it), `search`, `check`, `symlink`,
+# `explain`, `why`, `hello`, `something`. Programs that exist on other systems but not here are
+# passed as `known_commands` instead — see SIMULATED_COMMANDS.
+#
+# One real program is left real on purpose: `bash_syntax` runs `/bin/bash -n` with a fixed
+# environment of its own, and the syntax half of every case below is that run. The rest of the
+# machine — PATH, and the cwd for the cases that name a file — is stated, not asked.
+INSTALLED = FixedCommands("""
+    basename cat chgrp chmod chown cksum comm cp csplit cut date dd df dirname du echo env expand
+    expr factor false fmt fold groups head id install join link ln logname ls md5sum mkdir mktemp
+    mv nl numfmt od paste pr printf ptx pwd readlink realpath rm rmdir seq shred shuf sleep sort
+    split stat stty sum sync tac tail tee test timeout touch tr true truncate tsort tty uname
+    unexpand uniq unlink users wc who whoami yes nice nohup
+    column dmesg eject hexdump kill last logger look lscpu more mount rev script su umount wall
+    write free pgrep pkill ps top uptime watch
+    find xargs grep egrep fgrep diff cmp patch tar gzip gunzip zip unzip bzip2 xz
+    curl wget ping ssh scp host dig route netstat ip
+    awk sed perl ruby git make cmake ctest gcc node npm python python3 pip pip3 docker
+    less man vim nano which whereis file clear reset resize open view browse prune transform
+    cancel prove sudo apt shutdown reboot halt
+""".split())
+
+
+def classify(text, mode="auto", **kw):
+    """`router.classify` against INSTALLED rather than this machine's PATH.
+
+    It shadows the import on purpose, so that no case in this file can come to depend on what
+    happens to be installed where the suite runs. A case that does want the real PATH passes
+    `path=os.environ["PATH"]` itself, and says why.
+    """
+    kw.setdefault("path", INSTALLED)
+    return router.classify(text, mode, **kw)
+
+
+REPO = str(Path(__file__).resolve().parent.parent)
+
 
 class RouterTests(unittest.TestCase):
     def test_shell_commands(self):
+        # `./scripts/build.sh` is resolved as a file rather than a command, so this one needs a cwd
+        # that has it: the repo, named outright rather than whichever directory the suite was
+        # started from (ctest sets one; `python3 -m unittest` from elsewhere does not).
         for command in ["git status", "ls -la", "cd ..", "printf '%s\\n' hello", "find . -type f -size +100M", "VAR=3", "./scripts/build.sh", "echo 'why does this fail?'", "for i in 1 2; do echo $i; done", "cat <<'EOF'\nhello\nEOF\n"]:
             with self.subTest(command=command):
-                result = classify(command, path=os.environ["PATH"])
+                result = classify(command, cwd=REPO)
                 self.assertEqual(result.route, "shell")
                 self.assertTrue(result.syntax_ok, result.syntax_error)
 
@@ -61,12 +113,9 @@ class RouterTests(unittest.TestCase):
             self.assertFalse(path.exists())
 
 
-PATH = os.environ["PATH"]
-
-
 class ValidityTests(unittest.TestCase):
     def check(self, text, **kw):
-        return classify(text, path=PATH, **kw)
+        return classify(text, **kw)
 
     def assertValid(self, text, **kw):
         result = self.check(text, **kw)
@@ -163,9 +212,9 @@ class ValidityTests(unittest.TestCase):
         self.assertValid("for f in *; do continue; done")
         self.assertValid("continue 2")
         # An explicit terminal destination still runs it.
-        self.assertEqual(classify("continue", "shell", path=PATH).route, "shell")
+        self.assertEqual(classify("continue", "shell").route, "shell")
         # Terminal mode flags it as belonging to the agent (the wrong-mode hint).
-        self.assertTrue(classify("continue", "shell", path=PATH).agent_signal)
+        self.assertTrue(classify("continue", "shell").agent_signal)
 
     def test_only_a_mistyped_command_explains_itself(self):
         # Owner reports 2026-09-18: "symlink from ~/projects to here" and a lone "resume" were both
@@ -251,7 +300,7 @@ class ValidityTests(unittest.TestCase):
         for text in ["ls", "pwd", "clear", "history", "jobs", "times"]:
             with self.subTest(text=text):
                 self.assertEqual(self.check(text).route, "shell", text)
-        self.assertEqual(classify("wait", "shell", path=PATH).route, "shell")
+        self.assertEqual(classify("wait", "shell").route, "shell")
 
     def test_a_semicolon_in_a_sentence_is_not_a_command(self):
         # Card #W954: "hmm; not sure" went to the agent with "command not found: hmm" under it. A
@@ -371,12 +420,12 @@ class ValidityTests(unittest.TestCase):
             self.assertEqual(self.check(text).route, "shell", text)
 
     def test_shell_mode_always_shell_but_reports_validity(self):
-        result = classify("nope123 --now", "shell", path=PATH)
+        result = classify("nope123 --now", "shell")
         self.assertEqual(result.route, "shell")
         self.assertFalse(result.valid)
         self.assertIn("nope123", result.invalid_reason)
         self.assertIn("agent will fix", result.reason)
-        ok = classify("ls -la", "shell", path=PATH)
+        ok = classify("ls -la", "shell")
         self.assertEqual((ok.route, ok.valid), ("shell", True))
         self.assertEqual(classify("/shell nope123").route, "shell")
         self.assertFalse(classify("/shell nope123").valid)
@@ -394,7 +443,7 @@ class ValidityTests(unittest.TestCase):
             for text in [f"touch '{sentinel}'", f"echo $(touch '{sentinel}')", f"echo `touch '{sentinel}'`",
                          f"nope123 && touch '{sentinel}'", f"(touch '{sentinel}')"]:
                 for mode in ("auto", "shell", "agent"):
-                    classify(text, mode, path=PATH, cwd=d)
+                    classify(text, mode, cwd=d)
             self.assertFalse(sentinel.exists())
 
 
@@ -409,33 +458,33 @@ class WrongModeSignalTests(unittest.TestCase):
         for text in ["why does this fail", "explain the last error", "please sort the output",
                      "find the largest files in this repo", "sort these results by date"]:
             with self.subTest(text=text):
-                self.assertTrue(classify(text, "shell", path=PATH).agent_signal, text)
+                self.assertTrue(classify(text, "shell").agent_signal, text)
 
     def test_terminal_mode_commands_and_typos_do_not_signal(self):
         for text in ["ls -la", "git status", "make -j", "nope123 --now", "frobnicate",
                      "shutdown now", "make all", "echo 'why does this fail?'"]:
             with self.subTest(text=text):
-                self.assertFalse(classify(text, "shell", path=PATH).agent_signal, text)
+                self.assertFalse(classify(text, "shell").agent_signal, text)
 
     def test_live_alias_named_like_a_word_is_not_a_signal(self):
-        result = classify("explain the build", "shell", known_commands=["explain"], path=PATH)
+        result = classify("explain the build", "shell", known_commands=["explain"])
         self.assertFalse(result.agent_signal)
         self.assertTrue(result.valid)
 
     def test_agent_mode_reports_runnability(self):
-        command = classify("git stauts", "agent", path=PATH)
+        command = classify("git stauts", "agent")
         self.assertEqual((command.route, command.valid, command.agent_signal), ("agent", True, False))
-        request = classify("why does this fail", "agent", path=PATH)
+        request = classify("why does this fail", "agent")
         self.assertEqual(request.route, "agent")
         self.assertFalse(request.valid)
         self.assertTrue(request.agent_signal)
         self.assertIn("command not found", request.invalid_reason)
-        typo = classify("nope123 x", "agent", path=PATH)
+        typo = classify("nope123 x", "agent")
         self.assertFalse(typo.valid)
         self.assertFalse(typo.agent_signal)
 
     def test_signal_is_in_the_decision_dict(self):
-        d = classify("explain this error", "shell", path=PATH).to_dict()
+        d = classify("explain this error", "shell").to_dict()
         self.assertTrue(d["agent_signal"])
         self.assertTrue(d["valid"] is False)
 
@@ -560,7 +609,7 @@ class EnglishWordCommandTests(unittest.TestCase):
     def routes(self):
         with tempfile.TemporaryDirectory() as cwd:
             for text, expected in ROUTING_TABLE:
-                yield text, expected, classify(text, known_commands=SIMULATED_COMMANDS, path=PATH, cwd=cwd)
+                yield text, expected, classify(text, known_commands=SIMULATED_COMMANDS, cwd=cwd)
 
     def test_table_routes_correctly(self):
         wrong = [f"{text!r}: want {expected}, got {result.route} ({result.reason})"

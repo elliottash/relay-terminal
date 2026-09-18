@@ -117,6 +117,33 @@ now. Every slip except the two below keeps its note in every column; every shell
   after a typo. Judged the right trade — the comma is far more often prose than a slip, and the
   agent still gets the line.
 
+## Follow-up, 2026-09-18: the tests asked this machine what was installed
+
+Reported by session relay-terminal-71 and verified on a second machine: four of the cases above
+passed here only because this machine happens to have docker. The router answers "is this word a
+command?" from the machine's own PATH (`on_path`, `path_executables`), so `Docker ps` is a
+capitalised real command where docker is installed and a nonsense word where it is not — and the
+cases that assert the note is printed (`test_sentence_punctuation_is_not_a_mistyped_command`,
+`test_a_semicolon_in_a_sentence_is_not_a_command` with `ok; Docker ps`) flipped. Reproduced on
+`193bcfd` by running the suite with a PATH of every program on this machine except `docker` and
+`dockerd`: those two cases fail. With `PATH=/nonexistent`, 20 of the 42 fail, including
+`test_table_routes_correctly` and `test_ambiguous_sentences_ask_instead_of_guessing_silently`.
+
+The rules of #T4JV and #W954 are unchanged; what changed is where the lookup comes from.
+`backend/relay_core/router.py` now has one place that answers "does this program exist?", a
+`Commands` source with two questions on it — `has(word)` and `names()`, the candidate list for the
+one-edit typo test. `PathCommands` is the default and reads this machine's PATH exactly as before
+(same per-directory cache, same `shutil.which` fallback), and `FixedCommands` answers from a table.
+`classify`, `check_runnable` and `explain_invalid` take either one as their existing `path`
+argument — a PATH string, as the worker and the GUI still send, or a `Commands` — so there is one
+knob rather than two to disagree, and the internals pass the source down instead of a PATH string.
+
+`tests/test_router.py` states what is installed instead of asking: a module-level `INSTALLED`
+table (an ordinary Linux box, plus the programs the typo cases are slips of) and a `classify`
+wrapper that applies it to every case, so no case can quietly come to depend on the machine again.
+`test_shell_commands` also names the repo as its cwd, for the one case that is a path
+(`./scripts/build.sh`) rather than a command.
+
 ## QA checklist
 
 1. **The owner's line.** In auto mode submit
@@ -135,5 +162,12 @@ now. Every slip except the two below keeps its note in every column; every shell
    `"ls" -la` runs in the terminal.
 8. **Lone replies.** `wait`, `true`, `false`, `done`: agent, no note, reason "… on its own is a
    reply". `wait %1`, `true && ls`, `ls`, `pwd`, `jobs`, `times`: terminal.
-9. **Tests.** `RELAY_KEYRING=off PYTHONPATH=backend python3 -m unittest tests.test_router` (41)
+9. **Tests.** `RELAY_KEYRING=off PYTHONPATH=backend python3 -m unittest tests.test_router` (42)
    passes. The before/after table in the evidence folder can be regenerated with its `corpus.py`.
+10. **Machine independence** (the follow-up above). The same run passes with the PATH taken away —
+    `env -i HOME=$HOME RELAY_KEYRING=off PYTHONPATH=$PWD/backend PATH=/nonexistent /usr/bin/python3 -m unittest tests.test_router`
+    — and with a PATH holding nothing but programs named after the words the cases call nonsense
+    (`symlink`, `resume`, `gti`, `yeah`, `hmm` …). All three runs agree. In the app nothing
+    changes: on a machine with docker, `Docker ps` and `ok; Docker ps` still print their note, and
+    on one without it they are still quiet — that reading of the machine is the router's job and is
+    deliberately untouched.

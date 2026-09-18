@@ -177,7 +177,7 @@ def _is_question_word(word: str) -> bool:
     return "?" in word[len(bare):] and bare.isalpha() and not any(ch in bare for ch in "*?[")
 
 
-def _resolve(word: str, known: set[str], path: str, cwd: str) -> str:
+def _resolve(word: str, known: set[str], commands: Commands, cwd: str) -> str:
     """Return "" if the word can run as a command, else the reason it cannot."""
     if PLACEHOLDER in word or "$" in word:
         return ""  # Expanded at run time; cannot be judged statically.
@@ -201,15 +201,15 @@ def _resolve(word: str, known: set[str], path: str, cwd: str) -> str:
         if not os.access(target, os.X_OK):
             return f"not executable: {word}"
         return ""
-    return "" if on_path(word, path) else f"command not found: {word}"
+    return "" if commands.has(word) else f"command not found: {word}"
 
 
-def _check_words(text: str, known: set[str], path: str, cwd: str, depth: int = 0) -> str:
+def _check_words(text: str, known: set[str], commands: Commands, cwd: str, depth: int = 0) -> str:
     if depth > MAX_DEPTH:
         raise _TooComplex("nesting")
     outer, inner = _extract_substitutions(text)
     for sub in inner:
-        reason = _check_words(sub, known, path, cwd, depth + 1)
+        reason = _check_words(sub, known, commands, cwd, depth + 1)
         if reason:
             return reason
     # Arithmetic commands, case statements, heredocs and arrays are not modelled.
@@ -283,7 +283,7 @@ def _check_words(text: str, known: set[str], path: str, cwd: str, depth: int = 0
             i += 2  # name() { ...; } defines a function; the name need not exist yet.
             known.add(value)
             continue
-        reason = _resolve(value, known, path, cwd)
+        reason = _resolve(value, known, commands, cwd)
         if reason:
             return reason
         if value in WRAPPERS:
@@ -345,6 +345,74 @@ def on_path(word: str, path: str) -> bool:
             return True
     # A chmod +x does not change the directory mtime; fall back to a direct lookup on a miss.
     return shutil.which(word, path=path) is not None
+
+
+# ----- Where "does this program exist?" is answered ---------------------------------------------
+# The router asks the machine exactly two questions — does this one word run, and what are all the
+# names, for the one-edit typo test — and both go through a Commands. The default reads this
+# machine's PATH, which is what the app wants and what every caller gets by passing a PATH string
+# (or nothing) as `path`. A caller that passes a FixedCommands instead decides for itself what is
+# installed, so its result does not depend on the machine it is computed on: `tests/test_router.py`
+# does that, because "Docker ps" and "ok; Docker ps" are read one way where docker is installed and
+# another way where it is not, and the tests used to pass here only by accident (report from
+# relay-terminal-71, 2026-09-18).
+class Commands:
+    """The set of program names that can run. Subclassed twice, just below, and nowhere else."""
+
+    __slots__ = ()
+
+    def has(self, word: str) -> bool:
+        raise NotImplementedError
+
+    def names(self) -> frozenset[str]:
+        """Every name, for the typo test. Only asked for once a word has failed to resolve."""
+        raise NotImplementedError
+
+
+class PathCommands(Commands):
+    """The default: this machine's PATH, through the per-directory cache above (so a program
+    installed while Relay runs appears, and a repeated lookup costs a dict hit)."""
+
+    __slots__ = ("path",)
+
+    def __init__(self, path: str | None = None):
+        self.path = path or os.environ.get("PATH") or os.defpath
+
+    def has(self, word: str) -> bool:
+        return on_path(word, self.path)
+
+    def names(self) -> frozenset[str]:
+        return frozenset(path_executables(self.path))
+
+
+class FixedCommands(Commands):
+    """Exactly these programs exist; the machine is never consulted. For tests, so that what a line
+    routes to is a property of the router and the table, not of what happens to be installed."""
+
+    __slots__ = ("table",)
+
+    def __init__(self, names: Iterable[str]):
+        self.table = frozenset(names)
+
+    def has(self, word: str) -> bool:
+        return word in self.table
+
+    def names(self) -> frozenset[str]:
+        return self.table
+
+
+def as_commands(source: str | Commands | None) -> Commands:
+    """The `path` argument of the public functions as a lookup source.
+
+    A PATH string — or None, meaning this process's PATH — reads that PATH; a Commands is already
+    one. Anything else is a mistake worth a loud one: the worker forwards `path` straight from the
+    GUI's route request.
+    """
+    if source is None or isinstance(source, str):
+        return PathCommands(source)
+    if isinstance(source, Commands):
+        return source
+    raise ValueError("path must be a PATH string or a Commands source.")
 
 
 # ----- Routing assist: commands that are also everyday English words -----------------------------------
@@ -544,11 +612,11 @@ def _one_edit_apart(typed: str, command: str) -> bool:
     return True
 
 
-def _looks_mistyped(word: str, known: set[str], path: str) -> bool:
+def _looks_mistyped(word: str, known: set[str], commands: Commands) -> bool:
     """True when `word` is one slip away from a command this machine actually has."""
     if len(word) < 2:
         return False
-    candidates = known | path_executables(path)
+    candidates = known | commands.names()
     return any(_one_edit_apart(word, name) for name in candidates
                if abs(len(name) - len(word)) <= 1 and name[:1] in {word[:1], word[1:2]})
 
@@ -707,7 +775,7 @@ def _sentence_after_command(segment: str, words: list[str], cwd: str) -> bool:
     return sum(SIGNAL_WORDS[w] for w in signals) >= ASSIST_THRESHOLD
 
 
-def _meant_as_command(segment: str, known: set[str], path: str, cwd: str) -> bool:
+def _meant_as_command(segment: str, known: set[str], commands: Commands, cwd: str) -> bool:
     """Whether one sentence of a line — already free of shell syntax — reads as an attempt at a
     command: flags, a first word that runs here, a name that is not a word, or a word one slip away
     from a command this machine has."""
@@ -717,7 +785,7 @@ def _meant_as_command(segment: str, known: set[str], path: str, cwd: str) -> boo
     if any(a.startswith(("-", "+")) and a not in {"-", "--"} for a in words[1:]):
         return True                             # flags are nobody's English; a lone dash is
     first = words[0]
-    if first in known or first in BUILTINS or first in KEYWORDS or on_path(first, path):
+    if first in known or first in BUILTINS or first in KEYWORDS or commands.has(first):
         return not _sentence_after_command(segment, words, cwd)     # "hmm; ls" would have run ls
     bare, punctuated = _bare_word(first)
     if not any(ch.isalpha() for ch in bare):
@@ -742,14 +810,14 @@ def _meant_as_command(segment: str, known: set[str], path: str, cwd: str) -> boo
             return False                        # "three things:", "two questions,". Not "gti stauts."
     if punctuated:
         return False                            # "yeah,", "ok.", "wait... what": a sentence
-    if lowered != bare and (lowered in known or lowered in BUILTINS or on_path(lowered, path)):
+    if lowered != bare and (lowered in known or lowered in BUILTINS or commands.has(lowered)):
         return True                             # "Docker ps", "Ls": a real command, capitalised
     # "Gti status" is still a typo with a capital; "Yeah" and "Sounds good" are not near anything.
-    return _looks_mistyped(lowered, known, path)
+    return _looks_mistyped(lowered, known, commands)
 
 
-def explain_invalid(text: str, reason: str, known: Iterable[str] = (), path: str | None = None,
-                    cwd: str | None = None) -> bool:
+def explain_invalid(text: str, reason: str, known: Iterable[str] = (),
+                    path: str | Commands | None = None, cwd: str | None = None) -> bool:
     """Whether the GUI should print `reason` under a line auto-routed to the agent.
 
     The note is for the moment a command was meant and mistyped ("gti status", "echo 'unfinished"),
@@ -782,16 +850,16 @@ def explain_invalid(text: str, reason: str, known: Iterable[str] = (), path: str
     if segments is None:
         return True
     known = set(known)
-    path = path or os.environ.get("PATH") or os.defpath
+    commands = as_commands(path)
     cwd = cwd or os.getcwd()
-    if any(_meant_as_command(s, known, path, cwd) for s in segments[:MAX_SEGMENTS]):
+    if any(_meant_as_command(s, known, commands, cwd) for s in segments[:MAX_SEGMENTS]):
         return True                             # "gti; ls", "cd /tmp\nmkae", "echo (hello)"
     if not ambiguous:
         return False
     return not any(_is_writing(w) for w in " ".join(segments).split())
 
 
-def _first_word_reason(text: str, known: set[str], path: str, cwd: str) -> str:
+def _first_word_reason(text: str, known: set[str], commands: Commands, cwd: str) -> str:
     try:
         words = shlex.split(text, posix=True)
     except ValueError:
@@ -801,11 +869,11 @@ def _first_word_reason(text: str, known: set[str], path: str, cwd: str) -> str:
             return ""  # An expansion inside the assignment hides where the next word starts.
         if ASSIGNMENT.match(word) or word in KEYWORDS_CMD or word in WRAPPERS or word.startswith("-"):
             continue
-        return _resolve(word, known, path, cwd)
+        return _resolve(word, known, commands, cwd)
     return ""
 
 
-def check_runnable(text: str, known_commands: Iterable[str] = (), path: str | None = None,
+def check_runnable(text: str, known_commands: Iterable[str] = (), path: str | Commands | None = None,
                    cwd: str | None = None) -> tuple[bool, str, bool, str]:
     """Static runnability check. NEVER executes input.
 
@@ -816,14 +884,14 @@ def check_runnable(text: str, known_commands: Iterable[str] = (), path: str | No
         first = error.splitlines()[0] if error else "invalid Bash syntax"
         return False, "syntax error: " + re.sub(r"^(?:/bin/)?bash: line \d+: ", "", first), ok, error
     known = set(known_commands)
-    path = path or os.environ.get("PATH") or os.defpath
+    commands = as_commands(path)
     cwd = cwd or os.getcwd()
     try:
-        reason = _check_words(text, known, path, cwd)
+        reason = _check_words(text, known, commands, cwd)
     except _TooComplex:
         # Heredocs, arithmetic, case and arrays: bash -n already passed, so only the
         # first command word is checked.
-        reason = _first_word_reason(text, known, path, cwd)
+        reason = _first_word_reason(text, known, commands, cwd)
     return not reason, reason, ok, error
 
 
@@ -958,9 +1026,13 @@ def _classify_remote(text: str, trimmed: str, forced: str | None, host: str) -> 
 
 
 def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
-             path: str | None = None, cwd: str | None = None, remote: dict | None = None) -> Decision:
+             path: str | Commands | None = None, cwd: str | None = None,
+             remote: dict | None = None) -> Decision:
     """Where a submitted line goes. `remote` ({"host": …}) says the terminal is at a prompt on that
-    ssh host: the local PATH, aliases and cwd are then ignored (card #S5SH)."""
+    ssh host: the local PATH, aliases and cwd are then ignored (card #S5SH).
+
+    `path` is this machine's PATH, the string the GUI sends; a `Commands` source in its place says
+    exactly which programs exist, so a caller can decide that instead of the machine."""
     text = validate_input(text)
     if mode not in {"auto", "shell", "agent"}:
         raise ValueError("Unknown input mode.")
@@ -978,11 +1050,12 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
     if host:
         return _classify_remote(text, trimmed, forced, host)
     known = set(known_commands)
+    commands = as_commands(path)
     if forced in {"agent", "shell"}:
         # Fixed modes get the full picture so the GUI can flag a wrong-mode submission:
         # agent mode also learns whether the text is a runnable command, and both learn
         # whether it reads like a request (agent_signal). Auto mode decides below.
-        valid, reason, ok, error = check_runnable(text, known_commands, path, cwd)
+        valid, reason, ok, error = check_runnable(text, known_commands, commands, cwd)
         signal = _reads_like_request(trimmed, known, valid, cwd)
         if forced == "agent":
             return Decision("agent", text, "Explicit agent destination; nothing runs in the shell.",
@@ -1009,19 +1082,19 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
         except (ValueError, IndexError):
             first = trimmed.split(maxsplit=1)[0]
         if first in known and first not in BUILTINS:
-            valid, reason, ok, error = check_runnable(text, known, path, cwd)
+            valid, reason, ok, error = check_runnable(text, known, commands, cwd)
             if valid:
                 return Decision("shell", text, f"Runnable shell alias/function: {first}", ok, error, valid, reason)
         elif first in ENGLISH_COMMANDS and first not in KEYWORDS and "\n" not in trimmed:
             # "make the tests pass", "find the config": a real command in a sentence. Agent is the
             # local guess; the model can confirm.
-            valid, reason, ok, error = check_runnable(text, known, path, cwd)
+            valid, reason, ok, error = check_runnable(text, known, commands, cwd)
             if valid:
                 why = f"“{first}” is a command and an English word; reads like a request"
                 return Decision("agent", text, why + " · best guess: agent request", ok, error, valid, reason,
                                 True, why)
         return Decision("agent", text, "Natural-language request. Sent only after you submit.", agent_signal=True)
-    valid, reason, ok, error = check_runnable(text, known, path, cwd)
+    valid, reason, ok, error = check_runnable(text, known, commands, cwd)
     if valid:
         score, signals, first = assist_signals(trimmed, cwd)
         if score >= ASSIST_THRESHOLD:
@@ -1031,7 +1104,7 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
                                                   else " · best guess: shell command"),
                             ok, error, valid, reason, True, why)
         return Decision("shell", text, "Runnable shell command.", ok, error, valid, reason)
-    explain = explain_invalid(text, reason, known, path, cwd)
+    explain = explain_invalid(text, reason, known, commands, cwd)
     # The route line under the composer follows the note: bash's complaint about a sentence is not
     # why it went to the agent ("syntax error near unexpected token `('" for a parenthesis).
     why = f"Not a runnable command ({reason})" if explain else "Reads like a request"
