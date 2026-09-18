@@ -527,18 +527,103 @@ payload alone; the client re-queries the pane's live status over the Noise sessi
 
 ## 10. Multiplayer additions (P4)
 
-Additive to everything above; the same wire, the same handshake.
+Additive to everything above; the same wire, the same handshake. The host desktop is the hub of a
+star: every participant has a pairwise Noise session with it, and removing someone means closing
+their session. There is no group key.
 
-| Type | Body |
+**Scope of v1.** Invites are bare unguessable links and a guest is known by the device key pinned
+when the owner admits them. Accounts (passkeys, GitHub) need the hosted rendezvous and are a
+follow-up; nothing below depends on them. The owner's controls (create an invite, admit, change a
+role, remove, pause, end) exist **on the desktop only**: the same messages from any remote device,
+an owner's own phone included, are refused with `not_permitted`.
+
+### 10.1 Roles and what a participant can reach
+
+| Role | May |
 |---|---|
-| `invite_create` | `{pane, role, expires, uses, require_github?}` → `{url}` |
-| `knock` | participant → desktop: `{name, identity?}`; the owner admits or refuses |
-| `participants` | `{items: [{id, name, role, pane, driving, following}]}` |
-| `role_set`, `participant_remove` | owner only |
-| `control_request`, `control_grant`, `control_revoke` | one driver per pane; the owner's physical keystroke always wins |
-| `guest_prompt` | a participant's `compose`; the owner sees **Approve once** / **Approve always** |
+| `owner` | The host user and their own paired devices. Everything in sections 5 to 9 |
+| `editor` | See the shared pane; submit agent prompts, which wait for the owner (10.4); ask for terminal control and, while holding it, send `keys`, `paste` and `line` |
+| `viewer` | See the shared pane. The default for a new invite |
 
-**Guest identity without an account.** Owner decision 4's "Approve always for that guest" binds to
+A participant is **scoped to the panes of their invite**. `panes` lists only those; any message
+naming another pane is `not_permitted`, and no event for another pane is ever fanned out to them.
+Whatever their role a participant never gets: `secret_input`, `compose` with `agent:false` (the
+routing that can reach the shell), `set_mode`, model changes, reset, queue edits of other people's
+items, `voice`, `history_get` beyond the shared pane, push notifications, or the device list.
+
+Agent events reach a participant under a **narrower allow-list** than section 6.4's,
+`GUEST_EVENTS` in `remote/wire.py`, a strict subset of `FORWARDED_EVENTS` enforced by a test: the
+turn lifecycle, `status`, `queued`, `queue_changed` and `error`. The agent's words already reach
+them on the screen, because Relay prints them into the terminal; stored transcripts and tool
+output (`turn_transcript_get`, `tool_output_get`) are refused, since they hold every file the
+agent read.
+
+### 10.2 Invites and knocking
+
+The invite link is `<app>/join#v=1&d=<desktop public key>&i=<invite secret>&r=<room>`. The secret is
+128 bits, lives in the fragment, and is compared in constant time. An invite records
+`{id, panes, role, expires, uses_left}`; expiry defaults to 24 hours and is capped at 7 days, which
+is why a rendezvous room may be opened with a `ttl` (section 8). Five wrong secrets burn the invite,
+as with pairing.
+
+| Type | Direction | Body |
+|---|---|---|
+| `knock` | participant → desktop, first message after the handshake | `{invite: <base64url secret>, name, platform}` |
+| `knock_pending` | desktop → participant | `{code}`: the five-digit code of section 5, shown on both screens |
+| `admitted` | desktop → participant | `{participant, role, desktop_name, expires}`, followed by `panes` and `participants` |
+| `error` `not_admitted` | desktop → participant | The owner refused, or did not answer in 2 minutes. The channel closes |
+
+A knock consumes nothing until it is admitted; admitting takes one use. On `admitted` the desktop
+stores a **participant record** (the pinned device key, name, role, panes, invite id, expiry)
+beside the device list, so the guest reconnects with an ordinary `hello` until it expires. A
+participant record is never a device record: it cannot appear in, or be promoted through, the
+paired-device list. Names pass through `clean_label`, and a second "alice" is shown as "alice (2)".
+Knocks are rate-limited per invite (5 a minute) and at most 3 wait at once.
+
+### 10.3 Presence and control
+
+| Type | Direction | Body |
+|---|---|---|
+| `participants` | desktop → everyone on the pane | `{pane, items: [{id, name, role, driving, you}]}`, sent on join, leave, role change and handoff |
+| `control_request` | editor → desktop | `{pane}`, as section 6.6. For a participant it is a request, not a grant |
+| `control_pending` | desktop → that editor | `{pane}` while the owner decides; lapses after 60 s |
+| `control` | desktop → everyone on the pane | `{pane, holder: "owner" \| "agent" \| "participant:<id>", name}` |
+| `control_release` | holder → desktop | `{pane}`, as section 6.6 |
+
+One driver per pane. It is the same token as the human/agent handoff (`ARCHITECTURE.md` section 9),
+so "the agent is driving" and "alice is driving" are one state. **The owner's physical keystroke
+in the pane always takes control back**, without asking, and the participant is told with
+`control`. Input from anyone who is not the holder is refused with `not_driving`. A participant's
+input is refused at a password prompt exactly as a device's is, and they are never offered the
+password field.
+
+### 10.4 Guest prompts
+
+An editor sends an ordinary `compose`. The hub does not pass it on: it answers `prompt_pending
+{id}` and asks the owner, who sees the guest's name and the whole text. `prompt_decided {id,
+approved}` follows; an approved prompt goes to the pane's agent (never the router) with origin
+`guest:<participant>`, and its queue row names its author. A pending prompt lapses after 10
+minutes, a guest may have 3 waiting, and `plan_execute` from a guest is treated as a prompt.
+
+The owner's other option, *guest prompts run immediately*, is per share and off by default.
+
+### 10.5 The owner's controls (desktop only)
+
+Between the GUI and its sidecar (`remote/gui_host.py`), as line JSON, never on the wire:
+`invite_create {pane, role, expires, uses}` → `invite {id, url, qr}`; `invite_revoke {id}`;
+`knock {participant, name, platform, code, role, pane}` → `knock_answer {participant, admit, role}`;
+`participants {items}`; `control_ask {pane, participant}` → `control_answer {pane, participant,
+grant}`; `control_take {pane}` (the owner's keystroke); `prompt_ask {id, participant, pane, text}` →
+`prompt_answer {id, approve}`; `role_set {participant, role}`; `participant_remove {participant}`;
+`share_pause {on}`; `share_end`.
+
+**Pause** refuses every participant's input and prompts with `paused` while the screen keeps
+streaming. **End** closes every participant session, burns the pane's invites and deletes the
+participant records. Removing one participant does the same for that one, and burns the invite
+they came in on. With *guests can act only while I am present* on, the hub treats an inactive
+desktop window (the `window_active` line of section 9) as a pause.
+
+**Guest identity without an account, and why v1 has no "Approve always".** Owner decision 4's "Approve always for that guest" binds to
 the **device key pinned at join**, not to a login, because decision 3 allows an invite to be a bare
 unguessable link.
 
@@ -548,9 +633,16 @@ all** for a bare-link invite with no identity: approving one prompt's text is no
 calls that prompt will make, and decisions 3 and 4 interact badly — an anonymous link-holder would
 otherwise get permanent unreviewed access to an agent holding the owner's keys and shell.
 
-**Audit log**, local only, `~/.local/share/relay/remote/audit-YYYY-MM.jsonl`: pairings, joins, role
-changes, control handoffs, prompts submitted (text), lines sent by others (text; raw keys as byte
-counts), password-field use (redacted, §6.7), revocations. **(security)** Never uploaded, written
+Every v1 invite is a bare link, so v1 offers **Approve once** only; "Approve always" arrives with
+invites that require an identity.
+
+### 10.6 Audit log
+
+Local only, `~/.local/share/relay/remote/audit-YYYY-MM.jsonl`: pairings, invites made and revoked,
+knocks, admissions and refusals, joins and leaves, role changes, control handoffs, prompts submitted
+and how they were decided (text), lines sent by others (text; raw keys and pastes as byte counts),
+password-field use (redacted, §6.7), pause, end, revocations. Each line names who, by participant or
+device id. It is written **before** the action it records. **(security)** Never uploaded, written
 0600 inside a 0700 directory as `logs.py` requires of every Relay log, and size-capped — but not
 rotated the way `logs.py` rotates, because nothing in it is ever deleted: a month past 5 MiB goes on
 in numbered parts (`audit-YYYY-MM.2.jsonl`, `.3`, …), each capped, so files grow with volume, not time.
@@ -581,7 +673,7 @@ and P3 clients interoperate at P1's level.
 | `historyLines` matches `historyText` and does not move the viewport | `engine/tests/CoreTest.cpp`, both cores |
 | End to end | Loopback rendezvous plus a headless browser client in `ci.yml` |
 
-## 14. What exists today (2026-09-17)
+## 14. What exists today (2026-09-18)
 
 P0 is written; P1 runs against a demo agent source, and the P2 screen stream and P3 take-over run
 against **real shells** — including Relay's own panes, from the share button in the app.
@@ -590,23 +682,26 @@ against **real shells** — including Relay's own panes, from the share button i
 |---|---|---|
 | Noise `IK_25519_AESGCM_SHA256` | `remote/noise.py`, `app/noise.js` | Both halves, cross-checked against each other in `tests/test_remote_noise.py` under Node |
 | Framing and the relay envelope | `remote/envelope.py`, `remote/ws.py` | Done. WebSocket server and client are standard-library only |
-| Rendezvous | `rendezvous/server.py` | Registry with proof of possession, derived desktop ids, pairing rooms, the ciphertext relay, metadata with 7-day retention. Web Push delivery is **not** wired up: `/v1/push/send` accepts and does not deliver |
+| Rendezvous | `rendezvous/server.py` | Registry with proof of possession, derived desktop ids, pairing rooms, the ciphertext relay, metadata with 7-day retention. `/v1/push/key` and a `/v1/push/send` that signs with VAPID and delivers bytes it cannot read; rooms may be opened with a `ttl` for invites |
 | Desktop hub | `remote/host.py`, `remote/identity.py`, `remote/panes.py` | Pairing, capabilities, live revoke and downgrade, streams and resume, the event allow-list, rate limits. `PaneSource` is the seam the GUI will implement; `DemoPaneSource` stands in |
 | Web client | `app/` | Pairing with the confirmation code, inbox, thread, composer, plan cards, reconnect. Installable; the service worker does not cache |
 | Python client | `remote/client.py` | For tests and scripts; also where the client-side pinning rule is tested |
 | Dev harness | `remote/cli.py` | `python3 -m remote.cli share` shares a real shell; `dev` runs the demo agent. Both print the pairing QR |
 | Screen stream (P2) | `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `app/screen.js` | A real PTY parsed by Relay's own emulator, streamed as styled rows, painted as a cell grid on the phone |
 | Take-over (P3) | `remote/host.py`, `app/app.js` | `keys`, `paste`, `line`, `control_request`/`control_release`, an extra-keys row and a line box, refused at a password prompt |
+| Password entry (§6.7) | `remote/host.py`, `src/Pane.h` (`submitRemoteSecret`), `app/app.js` | A desktop-minted single-use nonce bound to the prompt, a per-device switch that is off by default, a fresh termios check in the hub and again at the write, a password field in the client. Tested; not yet tried on a real phone |
+| Push crypto | `remote/push.py`, `app/sw.js` | RFC 8291 encryption, the inner seal, VAPID signing; the service worker opens the seal and discards what it cannot open. **Not connected yet**: the client does not subscribe and the hub sends nothing |
+| Audit log | `remote/audit.py` | Local, 0600, split by month and size. Records pairing, revoke, prompt detection and password use so far |
+| `transport_switch` (§2) | `remote/host.py`, `remote/client.py` | The handshake, tested. There is no second transport yet |
 | Local attach | `remote/attach.py` | The desktop's own terminal joins the same shell, so both ends drive it |
 | In the app | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` | The share chip beside the microphone, the QR and approval dialog, and a sidecar that carries one of Relay's own panes (`ARCHITECTURE.md` section 19) |
 
-Sharing from the app works on **engine panes only** (`--engine=relay`): KonsolePart cannot hand
-over a frame, and the button says so rather than failing quietly.
+Every Relay pane is an engine pane, so every pane can be shared.
 
-Not implemented, and refused explicitly rather than silently: `history_get` — scrollback paging
-needs the const `VtCore::historyLines` in both cores — and `secret_input`, which stays refused until
-the desktop can mint the prompt-bound nonce §6.7 requires. A phone therefore cannot answer a
-password prompt; it can see that one is waiting, and ordinary input is refused while it is.
+Not implemented, and refused explicitly rather than silently: `history_get` (the bridge can page
+plain text, but scrollback is to be styled, which needs a const `VtCore::historyLines` in both
+cores); `voice` from a GUI pane (`GuiPaneSource.transcribe` has no route to the pane's worker yet);
+and all of section 10. Notifications are half-wired, as the table says.
 
 The desktop endpoint runs as Python today. `RemoteHub` in the GUI (§1) is still the target for P2,
 where screen frames come from `TerminalView` in process; for P1, where everything the hub needs
