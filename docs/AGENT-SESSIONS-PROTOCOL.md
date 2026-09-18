@@ -1059,7 +1059,366 @@ call**. The only judgement is whether the panes are on the same work: one phrase
 (`titles.related_text`, mirrored in `src/PaneTitles.cpp`) is that every title shares a content word
 with the first, and it is what the GUI uses until the worker answers and whenever no model is
 configured. A failed call is not an error: the offline answer is sent instead.
-## 18. The agent types into the program in the visible pane (v1.7, 2026-09-17)
+
+## 19. Switchboard: cards, threads and the Switchboard agent (v1.7, 2026-09-17)
+
+Phase 1 of `docs/SWITCHBOARD-DESIGN.md` (sections 4–6, 9.1 and the owner decisions in 12). The
+Switchboard **is** the repository's `issues/` tree: `backend/relay_core/board.py` owns the bytes
+(format: `docs/SWITCHBOARD-FORMAT.md`), `backend/relay_core/board_tools.py` owns the six agent
+tools and their guardrails, `backend/relay_core/board_protocol.py` owns the messages below, and
+`backend/relay_core/board_policy.md` is the versioned system-prompt block. The GUI never parses a
+card: it asks for rows and detail and sends back intents. Tests: `tests/test_board_tools.py`,
+`tests/test_board_protocol.py`, `tests/test_board.py`.
+
+Everything here is inert unless the workspace has an `issues/board.yaml`. The file's presence is
+the switch.
+
+### 19.1 `configure` additions
+
+`configure` gains an optional `board {dir?, autonomy?, limits?}`: `dir` overrides `<workspace>/issues`,
+`autonomy` overrides `board.yaml`'s `agent.autonomy` (`off` | `suggest` | `auto`; a per-user local
+override), and `limits` lowers `max_creates_per_turn`, `max_writes_per_turn` or
+`max_creates_per_hour`. When a board is found, `configured` gains
+
+```json
+"board": {"dir": "/repo/issues", "autonomy": "auto", "limits": {}, "cards": 86}
+```
+
+and is absent otherwise, so the GUI knows whether to offer the pane. Two instances of the tools are
+built per worker: the **agent's**, with the guardrails of 17.7, and the **owner's**, used by the
+messages below with the rate limit and the duplicate check off — the guardrails exist to keep an
+agent honest, not the person typing.
+
+### 19.2 Reading the board
+
+| Message | Reply |
+|---|---|
+| `board_open {id?}` | `board {id, rev, root, workspace, config, cards: [row], problems}` |
+| `board_refresh {id?}` | `board_changed {id?, rev, upserts: [row], removed: [card_id], problems}` |
+| `board_card_get {id?, card, thread_entries?≤50}` | `board_card {id, card_id, hash, path, front, title, body, sections, tasks, thread, thread_total}` |
+| `board_check {id?}` | `board_problems {id, items: [{code, path, message, severity}]}` |
+
+`config` is `{tabs, columns, autonomy, statuses, column_statuses, labels}`: `tabs` as `board.yaml`
+lists them (each names a `folder` or a `filter`), `columns` as the board configures them, and
+`column_statuses` mapping each column to the statuses it collects, so the pane's column model needs
+no table of its own.
+
+A **row** is `{id, title, type, status, tab, labels, assignee, waiting_on, rank, private, path,
+thread_entries, tasks_done, tasks_total, created, milestone, component, implemented_by}` — enough to
+draw a card without reading the file.
+
+`board_refresh` is what the GUI sends when its `QFileSystemWatcher` fires (and after a `git pull`).
+The worker diffs the tree against the rows it last sent, so a change to one card is one upsert, not
+a reload. `rev` increases on every `board_changed`; a GUI that has missed revisions re-opens.
+
+**On every event, `id` is the request id and `card_id` is the card.** A card id never travels as
+`id` on an event.
+
+### 19.3 Writing from the pane
+
+| Message | Reply |
+|---|---|
+| `board_create {id?, tab, status, text, title?, card_type?, labels?, source?, author?}` | `board_written` + `board_changed` |
+| `board_update {id?, card, base_hash, patch, author?}` | `board_written` + `board_changed` |
+| `board_move {id?, card, status?, tab?, before?, after?, reason?, evidence?, author?}` | `board_written` + `board_changed` |
+| `board_comment {id?, card, text, kind?, author?}` | `board_written` + `board_changed` |
+| `board_undo {id?, write_id}` | `board_undone` + `board_changed` |
+
+`board_create` is quick add: `text` is stored **verbatim** as the card's `## Request`, and the title
+is its first line (shortened) unless one is given. `patch` holds the `board_update_card` arguments
+(`fields`, `title`, `append_section`, `replace_section`, `tasks`). `before`/`after` are the card ids
+a drag dropped this card between; the worker computes the fractional rank. `author` names the
+person, and defaults to `owner`.
+
+`board_written` carries `{id, kind, card_id, write_id, …}` plus whatever the tool returned (the new
+`hash`, `path`, `status`). A refusal is the ordinary `error` event with a `code` — notably
+`board_conflict` (with `current_hash`, after which the GUI re-reads and reapplies) and
+`board_not_found`.
+
+`board_undo` is the 30-second toast. It restores the file bytes recorded before the write and
+truncates the thread back to its length at that moment, then records the undo itself as a thread
+event. Undoing a *creation* deletes the file only when git has never seen it; a committed card is
+closed with `done`/`dropped` instead, and the undo is refused.
+
+### 19.4 `board_ask`: the Switchboard agent
+
+| Message | Events |
+|---|---|
+| `board_ask {id?, card, text, author?}` | `board_thread_appended` (the question), then an ordinary turn tagged with `card_id`, then `board_thread_appended` (the answer) |
+
+The Switchboard agent is **a worker per window**, started by the GUI exactly like a pane's worker
+but configured with `agent_role: "switchboard"`, so its model is the `switchboard` role of section
+13 — which defaults to the main agent. Card chats therefore never enter a pane's conversation.
+
+The question is appended to the card's thread **before** the model is called, so a crash or a
+provider failure never loses what the user typed. The agent is stateless per card: the first
+question about a card resets the conversation and seeds it with the card's front matter, its body
+(capped at 16 KiB) and the last 10 thread entries; later questions about the same card reuse that
+conversation (owner decision 12.5, option D). Any change to the card file invalidates it and the
+next question reseeds — the file is the memory, so a collaborator's Relay, or this machine after
+its local state is gone, continues the same thread.
+
+Turn events (`delta`, `thinking`, `tool_started`, `tool_result`, `turn_summary`, `status`, `done`,
+`error`, `cancelled`) carry `card_id` while a `board_ask` turn runs, so the pane routes them to the
+right card detail view. On `done` the assembled answer is appended to the thread as an `agent`
+comment carrying the model and `session/turn`; on `error` or `cancelled` nothing is written.
+
+### 19.5 `board_activity`: what the agent did, in the pane that caused it
+
+Every agent write (and every write from the pane) emits, before its `board_changed`:
+
+```json
+{"event": "board_activity", "write_id": "w-1a0b", "id": "K7Q2", "action": "move",
+ "actor": "agent", "model": "anthropic/claude-opus-5", "pane": "2", "turn_id": "t-14",
+ "summary": "In progress to Needs QA (LLM)", "path": "issues/features/x.md", "undo_seconds": 30}
+```
+
+The pane draws one inline line (`◆ #K7Q2 … · moved to Needs QA (LLM)`) plus a toast with **Open**
+and **Undo**. This is the only board event a terminal pane needs to handle.
+
+### 19.6 `ask {cards: [...]}`
+
+`ask` gains `cards: [{id} | "K7Q2"]` (at most 10): the `#K7Q2` references resolved in the composer.
+Each becomes an attachment-shaped block labelled `Switchboard card #K7Q2` — front matter, body
+(16 KiB cap), open tasks and the last 10 thread entries — so the pane agent has the card in context
+and can post progress back with `board_comment`. The block is labelled as a card rather than as a
+file the user picked with `@`, and it is still data, not instructions.
+
+### 19.7 The agent tools and their guardrails
+
+`board_list`, `board_read`, `board_create_card`, `board_update_card`, `board_move_card` and
+`board_comment` are added to the pane agent's tool list whenever the workspace has a board and
+autonomy is not `off`, together with `board_policy.md` in the system prompt. Plan mode keeps the two
+read tools and drops the four writes.
+
+- **No delete tool.** Closing a card is `board_move_card` to `done` or `dropped` with a reason.
+- **Immutable through `board_update_card`:** `id`, `type`, `created`, `source`, `rank`, `status`,
+  `private`. `status` and `rank` are `board_move_card`'s job; the rest are the record.
+- **Owner text may be rewritten** (decision 12.3, superseding the refusal in design 6.3): a replaced
+  `## Request`, or a new title, writes a `rewrite` thread entry holding the old *and* the new text,
+  so the discussion history shows the change and it can be put back. The card hash now detects an
+  *unlogged* edit rather than preventing an edit.
+- **Every write appends a thread entry** with `author`, `model`, `pane` and `turn`.
+- **Writes are atomic and hash-checked**, exactly like `write_file`: a stale `base_hash` returns
+  `{"code": "board_conflict", "current_hash"}` and nothing is overwritten.
+- **Limits:** 5 creates and 20 other writes per turn, 30 creates per hour per workspace (the hourly
+  count lives in `<workspace>/.relay/board-rate.json` under `flock`, so panes share it). Over the
+  limit the tool returns `{"code": "board_rate_limited", "scope": "turn"|"hour"}` and the policy
+  tells the agent to summarize the rest in its reply.
+- **A fuzzy duplicate check** on create returns `{"code": "board_possible_duplicate",
+  "possible_duplicates": [{id, title, score}]}`; the agent repeats the call with `not_duplicate_of`
+  once it has read them.
+- **QA rules:** into `needs-qa-*` requires `evidence` and `implemented_by`; out of a QA lane to
+  `done`/`dropped` requires a verdict section in the body and a **different model family** from the
+  one that implemented it.
+- **A `decision` comment must quote the user verbatim** (text in quotation marks), or it is refused.
+
+### 19.8 Notes and deviations
+
+- The design's "new section 12" is this section 17: 12 is the request ledger.
+- Design 6.1 named the update argument `replace_agent_section`. It is `replace_section` here, since
+  decision 12.3 lets it touch owner sections too (with a logged rewrite); the old name is still
+  accepted.
+- Phase 1 does **not** implement `board_scan`, `board_convert`, `board_cleanup_sources` or the
+  `suggest` proposal flow (design 7 and phase 2). `autonomy: suggest` is accepted and stated in the
+  prompt, but writes still apply directly.
+- `board.yaml`'s `agent.autonomy: off` reads back as the YAML boolean `false`; the backend maps it,
+  so no board file has to quote the word.
+- Thread entry ids are second-resolution, so `board.append_thread` now picks the next free suffix
+  after the last id **on disk, under the lock**. Two writes in the same second stay ordered and
+  `relay-board.py check` stays clean.
+
+## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
+
+Issue `#G8DK`. An alias is a saved terminal command or agent prompt with `{{parameter}}`
+placeholders, Warp-workflow style. Owner decisions: one Markdown file per alias with defaults;
+**global** aliases in the global Switchboard and **local** ones in the repository Switchboard; run
+from the palette, from `/name`, and by typing the name in terminal mode, with parameters filled in
+the composer and Tab between the fields; **import** Warp workflows and shell aliases **with a
+preview**; the agent **may suggest** an alias for a repeated command — a suggestion only, and
+logged.
+
+Implementation: `backend/relay_core/aliases.py` (the store, the format, substitution),
+`backend/relay_core/alias_import.py` (the importers), `backend/relay_core/session_protocol.py`
+(the handlers), `src/Aliases.*` (the composer's fields and the invocation rules, `relay-aliases`).
+
+### 20.1 Where an alias lives
+
+| Scope | Root | Files |
+|---|---|---|
+| global | `$XDG_CONFIG_HOME/relay/switchboard` (override: `RELAY_GLOBAL_SWITCHBOARD`) | `aliases/<name>.md` |
+| local | `<repo>/issues` when it has a Switchboard, else `<repo>/.relay` | `aliases/<name>.md` |
+
+An alias is a Switchboard card (`docs/SWITCHBOARD-FORMAT.md`) of the new type `alias`, with the
+fields `name`, `kind` (`command` \| `prompt`) and `shell` on top of the common ones, statuses
+`active` and `retired`, and `retired` cards under `aliases/archive/`. `relay-board.py check`
+validates them like any other card.
+
+```markdown
+---
+id: A7K2
+type: alias
+status: active
+name: squash
+kind: command
+rank: 0i
+created: '2026-09-17'
+source: 'Warp workflow "Squash the last N commits together"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
+# Squash the last N commits together
+
+Squashes the last n commits together.
+
+## Run
+
+```sh
+git reset --soft HEAD~{{num_commits}} && git commit
+```
+
+## Parameters
+
+- `num_commits` = `2` — the number of commits to squash
+```
+
+The runnable text is the first fenced block of `## Run` (or, with no fence, the section itself, so
+a prompt is plain prose). The parameters are a Markdown list in `## Parameters`: a code-span name,
+an optional `= ` code-span default, and an optional `— ` description. **Defaults live in the body,
+not the front matter,** because front matter scalars are single-line (format section 2.1) and a
+default may hold commas, braces or quotes that a YAML flow sequence could not carry. A placeholder
+with no declared default is a required parameter.
+
+**Precedence.** A local alias hides a global one of the same name. The hidden one still appears in
+the list with `shadowed: true`, so the UI can say so instead of silently dropping it.
+
+### 20.2 `aliases`
+
+`aliases {workspace?, id?}` → `aliases {workspace, items: [...], problems: [{path, message}], id?}`
+
+Each item: `{name, kind, title, description, text, params: [{name, default|null, description}],
+placeholders: [name, …], required: [name, …], scope, labels, shell, source, id, path, status,
+shadowed}`. `text` is the **template**, placeholders and all — the GUI needs it to show the fields
+before any value is known. A card that cannot be read becomes a `problems` entry, never an error:
+one bad file does not cost the user the rest of the list.
+
+This needs **no configured provider**, because the palette and `/name` want the list before a key
+has been entered. The GUI asks for it on `ready` and after every write.
+
+### 20.3 `alias_run`
+
+`alias_run {name, values: {param: text}, scope?, workspace?, id?}`
+→ `alias_expanded {name, kind, scope, title, path, text, id?}`
+
+`text` is the alias with its placeholders filled. **The worker does the substitution**, so the
+quoting rules live in one place. A parameter with no value falls back to its declared default; a
+required parameter with neither is an `error` naming it, never a half-filled command line.
+
+All three invocation paths send this same message:
+
+| Path | GUI side |
+|---|---|
+| palette | `relay::aliases::render()` into fields; the values as edited |
+| `/name args` | `matchSlash`, then the words of `args` fill the fields in order |
+| the name typed in terminal mode | `matchTyped`, then the same positional fill |
+
+`matchTyped` fires only in terminal mode, only when the first word is exactly an alias name, and
+never for a line starting with `!`, `*`, `/`, `.`, `~` or `#`, or whose first word contains `=`.
+
+### 20.4 `alias_save`, `alias_delete`
+
+`alias_save {name, kind, text, title?, description?, params?, labels?, source?, status?, scope?,
+workspace?, id?}` → `alias_saved {name, kind, scope, path, alias_id, id?}`, then a fresh `aliases`.
+
+`alias_delete {name, scope?, workspace?, id?}` → `alias_deleted {name, scope, path, id?}`, then a
+fresh `aliases`. `scope` defaults to `local`.
+
+A name is 1–32 characters of `a-z`, `0-9`, `-` or `_`, starting with a letter or digit — short
+enough to type, and with nothing in it that could read as a path. Saving over an existing alias
+keeps that card's id, rank and creation date, so its identity and its thread survive an edit.
+
+### 20.5 `alias_import_preview`, `alias_import_apply`
+
+`alias_import_preview {sources?: ["warp", "shell"], workspace?, id?}`
+→ `alias_import_preview {preview_id, sources, workspace, items: [...], skipped: [{origin, reason}],
+problems, id?}`
+
+Each item: `{source: "warp-sqlite"|"warp-yaml"|"shell", origin, name, kind, title, description,
+text, params, labels, shell, conflict: "local"|"global"|null, warnings: [string, …]}`.
+
+Sources read:
+
+* **Warp's desktop database** — `$XDG_STATE_HOME/warp-terminal/warp.sqlite`, table `workflows`,
+  one JSON blob per row. The file is **copied** to a temporary directory and opened read-only, so
+  the import can neither block nor alter a running Warp. A row with `type: "agent_mode"` carries a
+  `query` rather than a `command`: that is a saved prompt and imports as `kind: prompt`.
+* **Warp workflow YAML** under `~/.warp/workflows/`, `~/.config/warp-terminal/workflows/` and
+  `<repo>/.warp/workflows/`, read with a parser for exactly the shape Warp writes. A file outside
+  that shape is skipped with a reason rather than guessed at.
+* **Shell startup files** — `.bashrc`, `.bash_aliases`, `.bash_profile`, `.zshrc`, `.zshenv`,
+  `.profile`, `.config/fish/config.fish`. Only lines beginning `alias ` are read, and the value is
+  unquoted the way a shell unquotes one word (so bash's own `'\''` escape comes out right). A
+  continued or unbalanced line is reported, never guessed at. A symlinked startup file, or one
+  over 4 MiB, is refused.
+
+`warnings` is what to read before saying yes: that this would replace an existing alias, that the
+name is also a program on `PATH`, that the text contains `sudo`, `rm -rf`, `curl`/`wget` or a pipe
+into a shell, or that the name had to be shortened. A row carrying a warning starts **unticked**.
+
+`alias_import_apply {preview_id, names: [name, …], renames?: {name: name}, scope?, workspace?, id?}`
+→ `alias_imported {scope, written: [{name, kind, scope, path, id}], failed: [{name, reason}], id?}`,
+then a fresh `aliases`.
+
+The worker holds the preview and writes from **its own** copy of it: `names` selects rows and
+`renames` may store one under a different name, but the caller cannot supply text. So an import can
+only ever store bytes the worker read and showed. A `preview_id` it is not holding is an error
+("that preview has expired"), and a name that was not in it is refused.
+
+### 20.6 `suggest {kind: "alias"}`
+
+`suggest {kind: "alias", commands: [string, …], id?}`
+→ `suggestion {kind: "alias", text, reason, alias?: {…}, repeated?: [{command, count}], id?}`
+
+`aliases.repeats()` is a pure rule — a command seen three times or more, most repeated first — and
+it runs **before** any model call, so nothing repeated means no call at all (`reason:
+"no_repeats"`). When there is something, one cheap `suggestions`-role side call proposes a name, a
+title and where the `{{placeholders}}` go; the reply is validated into a real alias, and a reply
+the rules reject comes back empty (`reason: "rejected: …"`) rather than as a half-formed alias.
+
+**Suggestion only, and logged.** The worker writes `alias suggestion requested` and `alias
+suggested` to `worker.log`; nothing is stored until the user saves it, and a saved suggestion
+records `source: 'agent suggestion, <date>'` on its card.
+
+### 20.7 What an alias can and cannot do
+
+* An alias is **stored text**, not a program. Relay never executes an alias file, and neither the
+  import nor the preview runs anything — they read.
+* Expanding an alias puts the line in the **prompt box**; a command then goes through the shell
+  bridge (architecture section 6), which stages it on the prompt line under a hash check before
+  Enter. So an alias can do anything the user could have typed, at the moment they ask for it, and
+  nothing on its own: no background execution, no execution on import, none at start-up.
+* A **parameter value is always data**. `aliases.substitute()` tracks the shell quoting state of
+  the template and escapes each value for the context it lands in — `shlex.quote` outside quotes,
+  `'\''` inside single quotes, and a quoted word spliced in inside double quotes — so a value
+  containing `;`, `&&`, `$(…)`, a backtick or `!` becomes one literal word and never new syntax.
+  `"{{name}}"` and `'{{name}}'` are recognised whole, so the common spelling stays readable. A
+  prompt is substituted as plain text, because it is prose for the model, not a command line.
+* An alias **expands once**. An expansion is never matched against the alias names again, so
+  `ll = "ll -h"` runs `ll -h` rather than looping, exactly as a shell alias does.
+* An alias **cannot shadow a built-in slash command**: `/name` matches only after the built-ins,
+  and the palette and the popup list the built-ins first.
+* An alias **can** shadow a program on `PATH` when its name is typed in terminal mode. The import
+  preview says so, and the staged line is visible on the prompt before Enter.
+
+### 20.8 Remote
+
+All six events — `aliases`, `alias_expanded`, `alias_saved`, `alias_deleted`,
+`alias_import_preview`, `alias_imported` — are **withheld** from a phone in `remote/wire.py`. An
+alias card is a file on the desktop and its body is a command line for this machine's shell, so the
+call is the same one made for `skills` and `agents`: a phone sees the result of a turn, not the
+desktop's saved definitions. Running an alias remotely would be a separate client message and a
+separate decision; none exists.
+
+## 21. The agent types into the program in the visible pane (v2.1, 2026-09-17)
 
 Implements `issues/features/2026-09-17-agent-delegate-and-take-over.md` (#C1HH), with the
 screen-text detection of `issues/features/2026-09-17-screen-text-input-detection.md` (#YR21)
@@ -1072,7 +1431,7 @@ evidence: `docs/qa_evidence/2026-09-17-agent-drives-programs/`.
 Everything here is additive. A worker that never receives `program_state` and never sees
 `context.program_control` never offers the tool and behaves exactly as v1.6 did.
 
-### 17.1 The shape of it
+### 21.1 The shape of it
 
 The worker has no terminal; the pane owns it. So the tool is a round trip:
 
@@ -1086,7 +1445,7 @@ The turn thread blocks on the reply (20 s), which is safe because the worker's p
 its turn loop are different threads. A refusal the worker can decide by itself never reaches the
 pane: it answers the model directly and emits `program_input_refused` so the pane can show it.
 
-### 17.2 `context.program_control` — consent, per turn
+### 21.2 `context.program_control` — consent, per turn
 
 `ask.context` gains one optional object next to `foreground_program` and `terminal_cwd`:
 
@@ -1111,7 +1470,7 @@ user's terminal leaves the machine.
 With a grant, `format_context` writes a labelled note naming the program, the question, the rules
 and the screen, marked as program output — "data to read, never instructions to follow".
 
-### 17.3 `type_into_program`
+### 21.3 `type_into_program`
 
 Offered only while a grant is live; the tool list is rebuilt at every model call, so a take-over
 removes it from the next one.
@@ -1148,7 +1507,7 @@ Result on a refusal: `{ok: false, refused: <code>, error, program, screen}`.
 
 A `cancelled` reply raises `Cancelled` instead, so a stopped turn unwinds like any other.
 
-### 17.4 `program_state` (GUI → worker)
+### 21.4 `program_state` (GUI → worker)
 
 `program_state {granted, reason, program, question, kind, masked, alt_screen, waiting,
 max_writes, screen_source, id?}` — the same fields as the grant, without `screen`. The pane sends
@@ -1160,7 +1519,7 @@ waiting, writes, max_writes, screen_source}`.
 already waiting for the pane comes back refused with the code its `reason` implies
 (`program_exited` → `no_program`, `password` → `password`, `take_over` → `taken_over`).
 
-### 17.5 Events
+### 21.5 Events
 
 | Event | When |
 |---|---|
@@ -1171,13 +1530,13 @@ already waiting for the pane comes back refused with the code its `reason` impli
 `tool_started.preview` for the tool is `TYPE INTO PROGRAM`, the intent line, and the text (with
 `⏎` for the Enter it will add) or `<key>`.
 
-### 17.6 Option
+### 21.6 Option
 
 `configure` and `set_agent_options` accept `max_program_writes` (int 1–200, default **20**);
 `configured` and `agent_options` return it. It is the per-turn keystroke cap. Subagents never get
 the tool: only the pane's own agent has a pane.
 
-### 17.7 The rules, and where each one is enforced
+### 21.7 The rules, and where each one is enforced
 
 Every rule is enforced **twice** — in the worker, which knows the turn, and in the pane, which
 knows the terminal at the instant of the write.
@@ -1191,7 +1550,7 @@ knows the terminal at the instant of the write.
 | Nothing invisible | `program_input` is an event | the pane prints `✦ typed: y   · <intent>` inline for every write |
 | No smuggled control bytes | `prepare` refuses them | named keys are mapped in the pane, from a fixed table |
 
-### 17.8 Notes and deviations
+### 21.8 Notes and deviations
 
 - **Consent is a pane mode, not a guess at the prompt text.** `Ctrl+Shift+J`
   (`program.delegate`), the banner's "Let the agent drive" button and the palette turn it on; with
@@ -1206,170 +1565,3 @@ knows the terminal at the instant of the write.
   screen in the result is the screen the keystroke produced.
 - **No separate "read the screen" tool.** The screen arrives with the grant and again with every
   result; a tool that only looks would be one more round trip for the same bytes.
-## 19. Switchboard: cards, threads and the Switchboard agent (v1.7, 2026-09-17)
-
-Phase 1 of `docs/SWITCHBOARD-DESIGN.md` (sections 4–6, 9.1 and the owner decisions in 12). The
-Switchboard **is** the repository's `issues/` tree: `backend/relay_core/board.py` owns the bytes
-(format: `docs/SWITCHBOARD-FORMAT.md`), `backend/relay_core/board_tools.py` owns the six agent
-tools and their guardrails, `backend/relay_core/board_protocol.py` owns the messages below, and
-`backend/relay_core/board_policy.md` is the versioned system-prompt block. The GUI never parses a
-card: it asks for rows and detail and sends back intents. Tests: `tests/test_board_tools.py`,
-`tests/test_board_protocol.py`, `tests/test_board.py`.
-
-Everything here is inert unless the workspace has an `issues/board.yaml`. The file's presence is
-the switch.
-
-### 17.1 `configure` additions
-
-`configure` gains an optional `board {dir?, autonomy?, limits?}`: `dir` overrides `<workspace>/issues`,
-`autonomy` overrides `board.yaml`'s `agent.autonomy` (`off` | `suggest` | `auto`; a per-user local
-override), and `limits` lowers `max_creates_per_turn`, `max_writes_per_turn` or
-`max_creates_per_hour`. When a board is found, `configured` gains
-
-```json
-"board": {"dir": "/repo/issues", "autonomy": "auto", "limits": {}, "cards": 86}
-```
-
-and is absent otherwise, so the GUI knows whether to offer the pane. Two instances of the tools are
-built per worker: the **agent's**, with the guardrails of 17.7, and the **owner's**, used by the
-messages below with the rate limit and the duplicate check off — the guardrails exist to keep an
-agent honest, not the person typing.
-
-### 17.2 Reading the board
-
-| Message | Reply |
-|---|---|
-| `board_open {id?}` | `board {id, rev, root, workspace, config, cards: [row], problems}` |
-| `board_refresh {id?}` | `board_changed {id?, rev, upserts: [row], removed: [card_id], problems}` |
-| `board_card_get {id?, card, thread_entries?≤50}` | `board_card {id, card_id, hash, path, front, title, body, sections, tasks, thread, thread_total}` |
-| `board_check {id?}` | `board_problems {id, items: [{code, path, message, severity}]}` |
-
-`config` is `{tabs, columns, autonomy, statuses, column_statuses, labels}`: `tabs` as `board.yaml`
-lists them (each names a `folder` or a `filter`), `columns` as the board configures them, and
-`column_statuses` mapping each column to the statuses it collects, so the pane's column model needs
-no table of its own.
-
-A **row** is `{id, title, type, status, tab, labels, assignee, waiting_on, rank, private, path,
-thread_entries, tasks_done, tasks_total, created, milestone, component, implemented_by}` — enough to
-draw a card without reading the file.
-
-`board_refresh` is what the GUI sends when its `QFileSystemWatcher` fires (and after a `git pull`).
-The worker diffs the tree against the rows it last sent, so a change to one card is one upsert, not
-a reload. `rev` increases on every `board_changed`; a GUI that has missed revisions re-opens.
-
-**On every event, `id` is the request id and `card_id` is the card.** A card id never travels as
-`id` on an event.
-
-### 17.3 Writing from the pane
-
-| Message | Reply |
-|---|---|
-| `board_create {id?, tab, status, text, title?, card_type?, labels?, source?, author?}` | `board_written` + `board_changed` |
-| `board_update {id?, card, base_hash, patch, author?}` | `board_written` + `board_changed` |
-| `board_move {id?, card, status?, tab?, before?, after?, reason?, evidence?, author?}` | `board_written` + `board_changed` |
-| `board_comment {id?, card, text, kind?, author?}` | `board_written` + `board_changed` |
-| `board_undo {id?, write_id}` | `board_undone` + `board_changed` |
-
-`board_create` is quick add: `text` is stored **verbatim** as the card's `## Request`, and the title
-is its first line (shortened) unless one is given. `patch` holds the `board_update_card` arguments
-(`fields`, `title`, `append_section`, `replace_section`, `tasks`). `before`/`after` are the card ids
-a drag dropped this card between; the worker computes the fractional rank. `author` names the
-person, and defaults to `owner`.
-
-`board_written` carries `{id, kind, card_id, write_id, …}` plus whatever the tool returned (the new
-`hash`, `path`, `status`). A refusal is the ordinary `error` event with a `code` — notably
-`board_conflict` (with `current_hash`, after which the GUI re-reads and reapplies) and
-`board_not_found`.
-
-`board_undo` is the 30-second toast. It restores the file bytes recorded before the write and
-truncates the thread back to its length at that moment, then records the undo itself as a thread
-event. Undoing a *creation* deletes the file only when git has never seen it; a committed card is
-closed with `done`/`dropped` instead, and the undo is refused.
-
-### 17.4 `board_ask`: the Switchboard agent
-
-| Message | Events |
-|---|---|
-| `board_ask {id?, card, text, author?}` | `board_thread_appended` (the question), then an ordinary turn tagged with `card_id`, then `board_thread_appended` (the answer) |
-
-The Switchboard agent is **a worker per window**, started by the GUI exactly like a pane's worker
-but configured with `agent_role: "switchboard"`, so its model is the `switchboard` role of section
-13 — which defaults to the main agent. Card chats therefore never enter a pane's conversation.
-
-The question is appended to the card's thread **before** the model is called, so a crash or a
-provider failure never loses what the user typed. The agent is stateless per card: the first
-question about a card resets the conversation and seeds it with the card's front matter, its body
-(capped at 16 KiB) and the last 10 thread entries; later questions about the same card reuse that
-conversation (owner decision 12.5, option D). Any change to the card file invalidates it and the
-next question reseeds — the file is the memory, so a collaborator's Relay, or this machine after
-its local state is gone, continues the same thread.
-
-Turn events (`delta`, `thinking`, `tool_started`, `tool_result`, `turn_summary`, `status`, `done`,
-`error`, `cancelled`) carry `card_id` while a `board_ask` turn runs, so the pane routes them to the
-right card detail view. On `done` the assembled answer is appended to the thread as an `agent`
-comment carrying the model and `session/turn`; on `error` or `cancelled` nothing is written.
-
-### 17.5 `board_activity`: what the agent did, in the pane that caused it
-
-Every agent write (and every write from the pane) emits, before its `board_changed`:
-
-```json
-{"event": "board_activity", "write_id": "w-1a0b", "id": "K7Q2", "action": "move",
- "actor": "agent", "model": "anthropic/claude-opus-5", "pane": "2", "turn_id": "t-14",
- "summary": "In progress to Needs QA (LLM)", "path": "issues/features/x.md", "undo_seconds": 30}
-```
-
-The pane draws one inline line (`◆ #K7Q2 … · moved to Needs QA (LLM)`) plus a toast with **Open**
-and **Undo**. This is the only board event a terminal pane needs to handle.
-
-### 17.6 `ask {cards: [...]}`
-
-`ask` gains `cards: [{id} | "K7Q2"]` (at most 10): the `#K7Q2` references resolved in the composer.
-Each becomes an attachment-shaped block labelled `Switchboard card #K7Q2` — front matter, body
-(16 KiB cap), open tasks and the last 10 thread entries — so the pane agent has the card in context
-and can post progress back with `board_comment`. The block is labelled as a card rather than as a
-file the user picked with `@`, and it is still data, not instructions.
-
-### 17.7 The agent tools and their guardrails
-
-`board_list`, `board_read`, `board_create_card`, `board_update_card`, `board_move_card` and
-`board_comment` are added to the pane agent's tool list whenever the workspace has a board and
-autonomy is not `off`, together with `board_policy.md` in the system prompt. Plan mode keeps the two
-read tools and drops the four writes.
-
-- **No delete tool.** Closing a card is `board_move_card` to `done` or `dropped` with a reason.
-- **Immutable through `board_update_card`:** `id`, `type`, `created`, `source`, `rank`, `status`,
-  `private`. `status` and `rank` are `board_move_card`'s job; the rest are the record.
-- **Owner text may be rewritten** (decision 12.3, superseding the refusal in design 6.3): a replaced
-  `## Request`, or a new title, writes a `rewrite` thread entry holding the old *and* the new text,
-  so the discussion history shows the change and it can be put back. The card hash now detects an
-  *unlogged* edit rather than preventing an edit.
-- **Every write appends a thread entry** with `author`, `model`, `pane` and `turn`.
-- **Writes are atomic and hash-checked**, exactly like `write_file`: a stale `base_hash` returns
-  `{"code": "board_conflict", "current_hash"}` and nothing is overwritten.
-- **Limits:** 5 creates and 20 other writes per turn, 30 creates per hour per workspace (the hourly
-  count lives in `<workspace>/.relay/board-rate.json` under `flock`, so panes share it). Over the
-  limit the tool returns `{"code": "board_rate_limited", "scope": "turn"|"hour"}` and the policy
-  tells the agent to summarize the rest in its reply.
-- **A fuzzy duplicate check** on create returns `{"code": "board_possible_duplicate",
-  "possible_duplicates": [{id, title, score}]}`; the agent repeats the call with `not_duplicate_of`
-  once it has read them.
-- **QA rules:** into `needs-qa-*` requires `evidence` and `implemented_by`; out of a QA lane to
-  `done`/`dropped` requires a verdict section in the body and a **different model family** from the
-  one that implemented it.
-- **A `decision` comment must quote the user verbatim** (text in quotation marks), or it is refused.
-
-### 17.8 Notes and deviations
-
-- The design's "new section 12" is this section 17: 12 is the request ledger.
-- Design 6.1 named the update argument `replace_agent_section`. It is `replace_section` here, since
-  decision 12.3 lets it touch owner sections too (with a logged rewrite); the old name is still
-  accepted.
-- Phase 1 does **not** implement `board_scan`, `board_convert`, `board_cleanup_sources` or the
-  `suggest` proposal flow (design 7 and phase 2). `autonomy: suggest` is accepted and stated in the
-  prompt, but writes still apply directly.
-- `board.yaml`'s `agent.autonomy: off` reads back as the YAML boolean `false`; the backend maps it,
-  so no board file has to quote the word.
-- Thread entry ids are second-resolution, so `board.append_thread` now picks the next free suffix
-  after the last id **on disk, under the lock**. Two writes in the same second stay ordered and
-  `relay-board.py check` stays clean.

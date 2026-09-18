@@ -1,0 +1,29 @@
+=== issues/aliases ===
+total 12
+drwxrwxr-x 2 elliott elliott 4096 Sep 17 21:28 .
+drwxrwxr-x 3 elliott elliott 4096 Sep 17 21:28 ..
+-rw-r--r-- 1 elliott elliott  313 Sep 17 21:28 recent.md
+
+=== recent.md ===
+---
+id: XWT6
+type: alias
+status: active
+name: recent
+kind: command
+rank: i1
+created: '2026-09-17'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
+# git log --oneline -{{count}} -- {{path}}
+
+## Run
+
+```sh
+git log --oneline -{{count}} -- {{path}}
+```
+
+## Parameters
+
+- `count`
+- `path`

@@ -583,7 +583,7 @@ public:
         if (option.state & QStyle::State_Selected) painter->fillRect(r, relay::theme::SurfaceRaised.lighter(135));
         const bool agent = index.data(Qt::UserRole + 1).toBool();
         painter->setFont(option.font);
-        painter->setPen(agent ? relay::theme::Accent : QColor(0xe5, 0xc0, 0x7b));
+        painter->setPen(agent ? relay::theme::Accent : relay::theme::Warning);
         painter->drawText(QRect(r.left() + 4, r.top(), 18, r.height()), Qt::AlignCenter, agent ? QStringLiteral("✦") : QStringLiteral("$"));
         painter->setPen(relay::theme::Text);
         const QString text = option.fontMetrics.elidedText(index.data(Qt::DisplayRole).toString().simplified(), Qt::ElideRight, std::max(20, r.width() - 54));
@@ -2519,7 +2519,7 @@ public:
         m_skillsDialog->refresh();
     }
 
-    // ----- aliases: saved commands and prompts (issue G8DK, protocol 19) ----------------------
+    // ----- aliases: saved commands and prompts (issue G8DK, protocol 20) ----------------------
     // An alias runs three ways — the actions palette, `/name`, and the name typed in terminal mode.
     // All three end here: the template's `{{parameters}}` become fields in the prompt box, Tab moves
     // between them, and submitting sends the values to the worker, which does the substitution and
@@ -2630,6 +2630,7 @@ public:
 
     // `/name …` typed in the composer, when `name` is an alias and not a built-in command.
     bool tryRunAliasSlash(const QString &text) {
+        if (m_aliasExpanding) return false;   // an alias expands once; see tryRunAliasTyped
         QStringList reserved;
         for (const auto &command : slashCommands()) reserved << command.name;
         const auto match = relay::aliases::matchSlash(text.trimmed(), relay::aliases::names(m_aliasList), reserved);
@@ -2644,7 +2645,9 @@ public:
     // The alias name typed on its own in terminal mode. Only in terminal mode: in agent mode the
     // same word is prose, and in auto mode the router decides what a bare word means.
     bool tryRunAliasTyped(const QString &text, const QString &mode) {
-        if (mode != QStringLiteral("shell")) return false;
+        // Never while an expansion is being submitted: `alias ll = "ll -h"` would otherwise match
+        // its own output and expand for ever. An alias expands once, like a shell alias.
+        if (m_aliasExpanding || mode != QStringLiteral("shell")) return false;
         const auto match = relay::aliases::matchTyped(text, relay::aliases::names(m_aliasList));
         if (!match.matched) return false;
         m_editor->remember(text.trimmed());
@@ -2697,7 +2700,9 @@ public:
                     break;
                 }
             }
+            m_aliasExpanding = true;
             requestRoute(true, prompt ? QStringLiteral("agent") : QStringLiteral("shell"));
+            m_aliasExpanding = false;
             return true;
         }
         if (type == QStringLiteral("alias_saved")) {
@@ -2780,7 +2785,7 @@ public:
         m_aliasImport = dialog;
         dialog->setAttribute(Qt::WA_DeleteOnClose);
         dialog->setWindowTitle(QStringLiteral("Import workflows and shell aliases"));
-        dialog->resize(900, 560);
+        dialog->resize(1180, 560);
         auto *layout = new QVBoxLayout(dialog);
         auto *caption = new QLabel(QStringLiteral(
             "Nothing here has been run, and nothing is saved until you press Import. "
@@ -2848,7 +2853,7 @@ private:
     QList<relay::aliases::Alias> m_aliasList;
     relay::aliases::Rendered m_aliasFields;
     QString m_aliasName, m_aliasKind, m_aliasRunId, m_aliasRunKind, m_aliasRunName;
-    bool m_aliasFromPalette = false, m_aliasRunFromPalette = false;
+    bool m_aliasFromPalette = false, m_aliasRunFromPalette = false, m_aliasExpanding = false;
     QPointer<QDialog> m_aliasImport;
 
     // ----- voice transcription (issue NY7Z, protocol 16) -------------------------------------
@@ -3804,6 +3809,9 @@ private:
     void updateSlashPopup() {
         const QString text = m_editor ? m_editor->toPlainText() : QString();
         if (!m_editor || m_native || !text.startsWith('/') || text.contains(QRegularExpression(QStringLiteral("\\s")))) { hideSlashPopup(); return; }
+        // The first `/` of a command is the cue to re-read the aliases, for the same reason the
+        // palette does: they are files somebody else may have written (issue G8DK).
+        if (text == QStringLiteral("/")) refreshAliases();
         const QString query = text.mid(1).toLower();
         struct Ranked { int score; int index; };
         QList<Ranked> ranked;
@@ -8107,7 +8115,7 @@ protected:
         const bool closing = m_glyph == Glyph::Close;
         if (hovered) {
             painter.setPen(Qt::NoPen);
-            painter.setBrush(closing ? QColor(0xc0, 0x39, 0x2b) : relay::theme::SurfaceRaised);
+            painter.setBrush(closing ? relay::theme::Error.darker(130) : relay::theme::SurfaceRaised);
             const qreal radius = std::min(width(), height()) * 5.0 / kSize;
             painter.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), radius, radius);
         }
@@ -9147,6 +9155,9 @@ private:
         m_returnPane = m_active;
         m_returnFocus = QApplication::focusWidget();
         m_terminalContext = m_active && m_active->ownsTerminalWidget(m_returnFocus);
+        // Aliases are files: one may have arrived from an agent, a git pull or an editor since the
+        // list was last read, so ask again on the way in (issue G8DK).
+        if (m_active) m_active->refreshAliases();
         m_stack.clear();
         m_filter->clear();
         renderPalette();
@@ -9336,6 +9347,50 @@ private:
                                   QStringLiteral("Forget the saved layout; the next start opens one new window"),
                                   QStringLiteral("Forget"), [this] { startFreshWindowSet(); });
         sections << general;
+
+        // Colour themes (issue 0JA7). One theme file carries the UI tokens and the 16-colour
+        // terminal palette, so the picker restyles the chrome, both terminal engines and the
+        // prompt box's syntax colours at once. The actions palette renders these rows too.
+        relay::SettingsSection appearance;
+        appearance.id = QStringLiteral("appearance");
+        appearance.title = QStringLiteral("Appearance");
+        appearance.blurb = QStringLiteral("One file per theme. Built-in themes ship with Relay; your own go in "
+                                          "~/.config/relay/themes as <name>.toml — copy a built-in one and edit it.");
+        {
+            QStringList ids, labels;
+            for (const relay::theme::ThemeChoice &choice : relay::theme::availableThemes()) {
+                ids << choice.id;
+                labels << (choice.builtin ? choice.name : choice.name + QStringLiteral(" (yours)"));
+            }
+            appearance.rows << choiceRow(QStringLiteral("option:theme"), QStringLiteral("Theme"),
+                                         QStringLiteral("Applies at once: the app, the terminal palette and the "
+                                                        "prompt box's colours"),
+                                         ids, labels, relay::theme::activeThemeId(), [this](const QString &id) {
+                if (!relay::theme::setActiveTheme(id)) {
+                    notice(QStringLiteral("That theme could not be read."), 6000);
+                    return;
+                }
+                notice(QStringLiteral("Theme: %1.").arg(relay::theme::active().name), 4000);
+            });
+        }
+        appearance.rows << buttonRow(QStringLiteral("theme.reload"), QStringLiteral("Reload themes"),
+                                     QStringLiteral("Pick up a theme file you added or edited"),
+                                     QStringLiteral("Reload"), [this] {
+            relay::theme::refreshThemes();
+            relay::theme::setActiveTheme(relay::theme::activeThemeId());
+            if (m_settings) m_settings->rebuild();
+            notice(QStringLiteral("Themes reloaded. A theme added while Relay runs reaches new terminal panes; "
+                                  "restart to give it to the ones already open."), 8000);
+        });
+        appearance.rows << buttonRow(QStringLiteral("theme.folder"), QStringLiteral("Your themes folder"),
+                                     QStringLiteral("~/.config/relay/themes"), QStringLiteral("Open…"), [this] {
+            const QString dir = QDir(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation))
+                                    .absoluteFilePath(QStringLiteral("relay/themes"));
+            QDir().mkpath(dir);
+            QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+            notice(dir, 8000);
+        });
+        sections << appearance;
 
         relay::SettingsSection models;
         models.id = QStringLiteral("models");

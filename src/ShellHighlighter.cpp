@@ -11,15 +11,17 @@ namespace relay {
 namespace {
 
 // One palette for both the caret and the tokens, so a shell line reads the same as the chip.
-const QColor kCommand{0x3e, 0xc5, 0xf0};   // Relay accent: the command word
-const QColor kUnknown{0xf0, 0x71, 0x78};   // Terminal mode only: this command does not resolve
-const QColor kFlag{0xe5, 0xc0, 0x7b};      // -r, --force
-const QColor kString{0x7e, 0xc8, 0x8c};    // "quoted"
-const QColor kPath{0x66, 0xd0, 0xc0};      // paths and globs
-const QColor kOperator{0x80, 0x87, 0x96};  // | && > ;
-const QColor kVariable{0xb4, 0x8e, 0xf7};  // $VAR, $(...)
-const QColor kAgent{0xb4, 0x8e, 0xf7};     // agent destination
-const QColor kToken{0x3e, 0xc5, 0xf0};     // @file and /command in an agent prompt
+// These follow the selected theme ([syntax] in the theme file, issue 0JA7): they are read at
+// highlight time and the constructor rehighlights when the theme changes.
+const QColor &kCommand() { return relay::theme::SyntaxCommand; }   // the command word
+const QColor &kUnknown() { return relay::theme::SyntaxUnknown; }   // Terminal mode only: does not resolve
+const QColor &kFlag() { return relay::theme::SyntaxFlag; }         // -r, --force
+const QColor &kString() { return relay::theme::SyntaxString; }     // "quoted"
+const QColor &kPath() { return relay::theme::SyntaxPath; }         // paths and globs
+const QColor &kOperator() { return relay::theme::SyntaxOperator; } // | && > ;
+const QColor &kVariable() { return relay::theme::SyntaxVariable; } // $VAR, $(...)
+const QColor &kAgent() { return relay::theme::SyntaxAgent; }       // agent destination
+const QColor &kToken() { return relay::theme::SyntaxToken; }       // @file and /command in an agent prompt
 
 QTextCharFormat charFormat(const QColor &color, bool bold = false) {
     QTextCharFormat text;
@@ -30,7 +32,11 @@ QTextCharFormat charFormat(const QColor &color, bool bold = false) {
 
 }  // namespace
 
-InputHighlighter::InputHighlighter(QTextDocument *document) : QSyntaxHighlighter(document) {}
+InputHighlighter::InputHighlighter(QTextDocument *document) : QSyntaxHighlighter(document) {
+    // Colour themes (issue 0JA7): a theme switch must recolour the line already in the box.
+    QObject::connect(relay::theme::notifier(), &relay::theme::Notifier::themeChanged, this,
+                     [this] { rehighlight(); });
+}
 
 // Bash builtins and keywords are commands even though they are not files on PATH; the shell's
 // command list does not always carry them (`test one two` was being marked unknown).
@@ -66,16 +72,16 @@ static const QSet<QString> &pathCommands() {
 }
 
 QColor InputHighlighter::commandColor(const QString &word) const {
-    if (!m_flagUnknown) return kCommand;
-    if (word.contains('/') || word.startsWith('.') || word.contains('$')) return kCommand;
-    if (m_known.contains(word) || shellBuiltins().contains(word) || pathCommands().contains(word)) return kCommand;
-    return kUnknown;
+    if (!m_flagUnknown) return kCommand();
+    if (word.contains('/') || word.startsWith('.') || word.contains('$')) return kCommand();
+    if (m_known.contains(word) || shellBuiltins().contains(word) || pathCommands().contains(word)) return kCommand();
+    return kUnknown();
 }
 
 QColor InputHighlighter::colorFor(Destination destination) {
     switch (destination) {
-    case Destination::Shell: return kCommand;
-    case Destination::Agent: return kAgent;
+    case Destination::Shell: return kCommand();
+    case Destination::Agent: return kAgent();
     case Destination::Auto: break;
     }
     return relay::theme::Text;
@@ -117,7 +123,7 @@ void InputHighlighter::highlightShell(const QString &text) {
     QVector<QPair<int, int>> literals;
     for (auto it = quoted.globalMatch(text); it.hasNext();) {
         const auto match = it.next();
-        setFormat(match.capturedStart(), match.capturedLength(), charFormat(kString));
+        setFormat(match.capturedStart(), match.capturedLength(), charFormat(kString()));
         literals.append({match.capturedStart(), match.capturedEnd()});
     }
     auto inLiteral = [&literals](int position) {
@@ -132,7 +138,7 @@ void InputHighlighter::highlightShell(const QString &text) {
 
     for (auto it = operators.globalMatch(text); it.hasNext();) {
         const auto match = it.next();
-        if (!inLiteral(match.capturedStart())) setFormat(match.capturedStart(), match.capturedLength(), charFormat(kOperator));
+        if (!inLiteral(match.capturedStart())) setFormat(match.capturedStart(), match.capturedLength(), charFormat(kOperator()));
     }
 
     // The first word of the line, and of each pipeline stage, is a command name.
@@ -147,9 +153,9 @@ void InputHighlighter::highlightShell(const QString &text) {
             expectCommand = false;
             continue;
         }
-        if (value.startsWith('-') || value.startsWith('+')) setFormat(start, value.size(), charFormat(kFlag));
+        if (value.startsWith('-') || value.startsWith('+')) setFormat(start, value.size(), charFormat(kFlag()));
         else if (value.contains('/') || value.contains('~') || value.contains('*') || value.contains('?'))
-            setFormat(start, value.size(), charFormat(kPath));
+            setFormat(start, value.size(), charFormat(kPath()));
     }
     // A pipe or a semicolon starts a new command word.
     for (int i = 0; i + 1 < text.size(); ++i) {
@@ -158,13 +164,13 @@ void InputHighlighter::highlightShell(const QString &text) {
             static const QRegularExpression next(QStringLiteral("[^\\s|&;<>()]+"));
             const auto match = next.match(text, i + 1);
             if (match.hasMatch())
-                setFormat(match.capturedStart(), match.capturedLength(), charFormat(kCommand, true));
+                setFormat(match.capturedStart(), match.capturedLength(), charFormat(kCommand(), true));
         }
     }
 
     for (auto it = variable.globalMatch(text); it.hasNext();) {
         const auto match = it.next();
-        setFormat(match.capturedStart(), match.capturedLength(), charFormat(kVariable));
+        setFormat(match.capturedStart(), match.capturedLength(), charFormat(kVariable()));
     }
 }
 
@@ -175,7 +181,7 @@ void InputHighlighter::highlightAgent(const QString &text) {
     for (auto it = token.globalMatch(text); it.hasNext();) {
         const auto match = it.next();
         const int lead = match.captured().startsWith(' ') ? 1 : 0;
-        setFormat(match.capturedStart() + lead, match.capturedLength() - lead, charFormat(kToken));
+        setFormat(match.capturedStart() + lead, match.capturedLength() - lead, charFormat(kToken()));
     }
 }
 

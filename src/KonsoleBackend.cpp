@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "KonsoleBackend.h"
 
+#include "Theme.h"
+
 #include <KParts/ReadOnlyPart>
 #include <KPluginFactory>
 #include <KPluginMetaData>
@@ -55,9 +57,12 @@ KonsoleBackend::KonsoleBackend(QObject *parent)
     m_sessionProbe.setInterval(200);
     connect(&m_sessionProbe, &QTimer::timeout, this, [this] {
         connectSession();
-        if (m_watchedSession)
+        if (m_watchedSession) {
+            applyTheme();   // a pane opened after a switch still starts on the chosen theme
             m_sessionProbe.stop();
+        }
     });
+    connect(theme::notifier(), &theme::Notifier::themeChanged, this, [this] { applyTheme(); });
 }
 
 KonsoleBackend::~KonsoleBackend()
@@ -143,6 +148,19 @@ void KonsoleBackend::connectSession()
     // alternate screen (vim, less, htop, tmux); connecting to a string-based signal
     // needs a real slot, hence the public slot on this object.
     QObject::connect(session, SIGNAL(primaryScreenInUse(bool)), this, SLOT(primaryScreenInUse(bool)));
+}
+
+// Konsole caches profiles by name and builds its list once, so relay::theme writes one generated
+// profile per theme before QApplication starts and this only has to name the right one.
+void KonsoleBackend::applyTheme()
+{
+    QObject *session = konsoleSession();
+    if (!session)
+        return;
+    const QString profile = theme::konsoleProfileName(theme::activeThemeId());
+    if (profile.isEmpty() || session->metaObject()->indexOfMethod("setProfile(QString)") < 0)
+        return;
+    QMetaObject::invokeMethod(session, "setProfile", Qt::DirectConnection, Q_ARG(QString, profile));
 }
 
 void KonsoleBackend::primaryScreenInUse(bool primary)

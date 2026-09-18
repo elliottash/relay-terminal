@@ -1,0 +1,54 @@
+# Relay's default dark theme (issue 0JA7).
+#
+# One file per theme: the UI tokens the stylesheet is built from and the 16-colour ANSI palette
+# both engines use. Copy this file to ~/.config/relay/themes/<your-id>.toml to make your own; a
+# user file with the same name replaces the built-in one.
+
+[theme]
+name = "Relay Dark"
+variant = "dark"
+description = "Relay's default: near-black chrome with a cyan accent."
+
+[ui]
+background = "#0f1115"
+surface = "#16181d"
+surface_raised = "#1c1f26"
+border = "#2a2e37"
+# The focused pane's outline. Grey on purpose: the accent means "shell" in Relay's visual
+# language (the composer, prompt chips), so panes must not compete with it.
+border_strong = "#4a5260"
+text = "#e6e8ec"
+text_muted = "#8b919c"
+accent = "#3ec5f0"
+accent_text = "#061a22"
+accent_hover = "#5bcef3"
+selection = "#1f6278"
+disabled = "#5d6169"
+success = "#7ec88c"
+warning = "#e5c07b"
+error = "#e06c75"
+# The two input destinations; the mode chip, the caret and the prefix chips take these.
+shell = "#3ec5f0"
+agent = "#b48ef7"
+
+[syntax]
+command = "#3ec5f0"
+unknown = "#f07178"
+flag = "#e5c07b"
+string = "#7ec88c"
+path = "#66d0c0"
+operator = "#808796"
+variable = "#b48ef7"
+agent = "#b48ef7"
+token = "#3ec5f0"
+
+[terminal]
+background = "#0f1115"
+foreground = "#d8dce3"
+cursor = "#f0f2f6"
+background_intense = "#16181d"
+foreground_intense = "#f5f7fa"
+palette = [
+  "#1d2027", "#f2777a", "#7dd399", "#ecc476", "#61afef", "#c692e9", "#56c8d8", "#c8cdd6",
+  "#636975", "#ff8c8f", "#98e5b0", "#f8d58e", "#81c4ff", "#d8aaf5", "#78ddea", "#f0f2f6",
+]

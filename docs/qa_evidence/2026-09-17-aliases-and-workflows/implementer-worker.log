@@ -1,0 +1,4 @@
+2026-09-18T01:28:06.594Z INFO relay.worker pane=65f7e762 worker_start version=0.1.0 pid=959000 level=info
+2026-09-18T01:28:30.965Z INFO relay.aliases pane=65f7e762 alias saved name=recent kind=command scope=local
+2026-09-18T01:29:46.126Z INFO relay.aliases pane=65f7e762 alias import previewed items=9 skipped=2
+2026-09-18T01:29:54.251Z INFO relay.aliases pane=65f7e762 aliases imported written=6 failed=0 scope=global

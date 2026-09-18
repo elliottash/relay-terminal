@@ -1,0 +1,13 @@
+[wmh] hint id=alias.run.recent: showing
+[wmh] dispatch route=shell mode=shell valid=1 signal=0 text='git log --oneline -5 -- src'
+[wmh] runInTerminal watch=1 natural=0 text='git log --oneline -5 -- src'
+[wmh] ready fail: natural=0 mode=shell
+[wmh] dispatch route=shell mode=shell valid=1 signal=0 text='git log --oneline -3 -- docs'
+[wmh] runInTerminal watch=1 natural=0 text='git log --oneline -3 -- docs'
+[wmh] ready fail: natural=0 mode=shell
+[wmh] dispatch route=shell mode=shell valid=1 signal=0 text='git log --oneline -2 -- backend'
+[wmh] runInTerminal watch=1 natural=0 text='git log --oneline -2 -- backend'
+[wmh] ready fail: natural=0 mode=shell
+[wmh] dispatch route=shell mode=shell valid=1 signal=0 text='git log --oneline -1 -- 'a;touch''
+[wmh] runInTerminal watch=1 natural=0 text='git log --oneline -1 -- 'a;touch''
+[wmh] ready fail: natural=0 mode=shell

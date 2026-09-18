@@ -273,7 +273,8 @@ from the link or palette (→ `/continue` or `agent.continue`), wrong-mode submi
 "Wrong-mode hints": a request that failed in terminal mode or a failing shell command in agent
 mode → `input.toggle`, with the mode chip flashing), dropping an image on the prompt box (→ the
 paste shortcut) and "Screenshot this pane" from the palette (→ `agent.screenshotPane`,
-Ctrl+Shift+G), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
+Ctrl+Shift+G), running an alias from the palette (→ `/name`, and for a command the name typed in
+terminal mode), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
 and rotating idle tips 4 s after a finished agent turn with an
 from the link or palette (→ `/continue` or `agent.continue`), the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
@@ -661,7 +662,7 @@ over. `Ctrl+Shift+J` (`program.delegate`), the banner's "Let the agent drive" bu
 palette action turn it on; with text in the prompt box the same key also sends that text to the
 agent. The pane then prints `✦ <program> handed to the agent · Ctrl+H takes it back`, the banner
 becomes "Agent driving apt · 3 keystroke(s) · apt is asking: …" with a "Take over" button, and
-every prompt submitted for that program carries `context.program_control` (protocol section 17),
+every prompt submitted for that program carries `context.program_control` (protocol section 21),
 including the screen.
 
 Every write is a round trip: the worker's `type_into_program` emits `program_input`, the pane
@@ -1064,6 +1065,29 @@ which on GLM is `glm-5.3-flash`. When the turn ends, each image is replaced in t
 one-line description and its path, and an image is estimated as a flat `context.IMAGE_TOKENS` so it
 cannot compact its own turn.
 
+### Aliases: saved commands and prompts
+
+`src/Aliases.*` and `backend/relay_core/aliases.py` (issue `#G8DK`, protocol section 20). An alias
+is a saved terminal command or agent prompt with `{{parameter}}` placeholders, stored as one
+Switchboard card per alias: **global** aliases in the global Switchboard
+(`$XDG_CONFIG_HOME/relay/switchboard/aliases/`), **local** ones in the repository Switchboard
+(`issues/aliases/`, or `.relay/aliases/` before a board exists). A local alias hides a global one
+of the same name.
+
+It runs three ways — the "Aliases…" palette submenu, `/name` in the composer, and the name typed on
+its own in terminal mode — and all three send one `alias_run`, so the substitution happens once, in
+the worker. A template whose parameters all have values runs straight away; one with a blank lands
+in the prompt box with the blank selected and Tab moving between the fields. Nothing runs without
+passing through the prompt box, and a line edited past recognition stops being an alias and goes to
+the router as itself (`relay::aliases::reparse`).
+
+Substitution is **quote-aware**: a value is escaped for the shell context it lands in, so a value
+holding `;`, `$(…)` or a backtick is one literal word, never new syntax. Importing Warp workflows
+(from a read-only copy of `warp.sqlite`, and from workflow YAML) and shell aliases (read, never
+sourced) always shows a preview of exactly what would be stored, with the origin and any warning;
+the worker writes from its own copy of that preview. The agent may propose an alias for a command
+run three times or more — a suggestion only, logged in `worker.log`.
+
 ## 12. Keys, keyring and imports
 
 `backend/relay_core/keystore.py`.
@@ -1166,14 +1190,48 @@ deadline that ends a turn whose model has gone quiet (docs/AGENT-SESSIONS-PROTOC
 
 ## 14. Theme
 
-`src/Theme.{h,cpp}`: Fusion style, a dark `QPalette`, and one stylesheet built from color
-tokens. `polishWindow()` tags unnamed widgets.
+One file per theme, in TOML, is the single source of truth for colour: the UI tokens the
+stylesheet is built from, the composer's syntax colours and the 16-colour ANSI terminal palette,
+all in one place (issue `0JA7`).
 
-The terminal uses `data/theme/konsole/Relay.profile` and `RelayDark.colorscheme`. KonsolePart
-has no API to select a profile, so Relay prepends `data/theme` to `XDG_CONFIG_DIRS` and
-`XDG_DATA_DIRS` before `QApplication` starts; `relayrc` sets `DefaultProfile=Relay.profile`.
-Both variables are restored before each shell starts, so user programs see their original
-paths. Nothing is written to `~/.config` or `~/.local/share/konsole`.
+| Piece | Where |
+|---|---|
+| Built-in themes | `data/theme/themes/*.toml` — `relay-dark`, `relay-light`, `solarized-dark`, `gruvbox-dark` |
+| User themes | `~/.config/relay/themes/*.toml`; a file of the same id replaces the built-in one |
+| Reader, token contract, discovery, generated Konsole files | `src/ThemeFile.{h,cpp}` (`relay-theme`, `tests/theme_test.cpp`) |
+| Live palette, stylesheet, the switch | `src/Theme.{h,cpp}` |
+| Picker | Settings › Appearance (built in `src/main.cpp`; the actions palette renders the same row) |
+
+A theme file has `[theme]` (name, variant `dark`/`light`, description), `[ui]`, `[syntax]`,
+`[terminal]` (background, foreground, cursor and a 16-entry `palette`) and `[flags]`. Missing
+tokens fall back to Relay Dark, so a short user theme still renders; unknown tables, keys and
+flags are kept in `ThemeSpec::extra`/`flags` rather than rejected, so a later token or per-theme
+boolean needs no format change.
+
+**The tokens are variables, not constants.** `relay::theme::Background`, `Text`, `Accent`,
+`Success`, `Warning`, `Error`, `Shell`, `Agent` and the `Syntax*` colours are assigned by
+`setActiveTheme()`, so painting code that reads them at paint time (`ChromeButton`,
+`SubagentsPanel`, `RequestsPanel`, the turn transcript, `InputHighlighter`) follows along.
+`setActiveTheme()` rebuilds the `QPalette` and the stylesheet, regenerates the terminal schemes,
+re-polishes every window and emits `theme::notifier()->themeChanged()`. Anything that *caches* a
+colour — a per-widget stylesheet, a palette copied onto a label — has to move into the global
+stylesheet or rebuild on that signal. Setting: `theme/name`.
+
+`polishWindow()` still tags unnamed widgets by object name.
+
+**The terminal.** The Konsole colour scheme is generated, never checked in. Before
+`QApplication` starts, `exposeKonsoleProfile()` writes one `.colorscheme` and one `.profile` per
+known theme into `$XDG_CACHE_HOME/relay/theme/konsole/`, plus a `relayrc` naming the chosen one,
+and prepends that directory and `data/theme` to `XDG_CONFIG_DIRS` and `XDG_DATA_DIRS`.
+`data/theme/konsole/Relay.profile` is the base the generated profiles are built from, so the
+font, margins, scrollback and link settings stay in one place. Every theme is written up front
+because Konsole builds its profile list once: on a switch `KonsoleBackend::applyTheme()` only has
+to name the right profile through the Session object's scriptable `setProfile()`, and the pane
+recolours in place. `EngineBackend::applyThemeColors()` reads the active `ThemeSpec` straight into
+the view. Both are connected to `themeChanged()`, so neither engine needs a new pane. A theme file
+*added* while Relay is running reaches new panes only after a restart ("Reload themes" says so).
+Both XDG variables are restored before each shell starts, so user programs see their original
+paths, and nothing is written to `~/.config` or `~/.local/share/konsole`.
 
 ## 15. Packaging layout
 
@@ -1184,7 +1242,7 @@ Installed tree (`CMakeLists.txt` `install()`):
 | `bin/relay` | the application |
 | `share/relay/backend/`, `share/relay/shell/` | worker, `relay_core`, Bash integration |
 | `share/relay/scripts/` | `relay-open`, `relay-agent.py` |
-| `share/relay/theme/` | `relayrc`, Konsole profile and color scheme, icons used by the stylesheet |
+| `share/relay/theme/` | `themes/*.toml` (the built-in colour themes), `relayrc`, the base Konsole profile, icons used by the stylesheet |
 | `share/applications/org.relayterminal.Relay.desktop` | desktop entry |
 | `share/metainfo/org.relayterminal.Relay.metainfo.xml` | AppStream metadata |
 | `share/icons/hicolor/…` | PNG and SVG icons |
@@ -1286,7 +1344,8 @@ Other limits:
 | `src/RichEditor.*` | composer editor |
 | `src/FilePanes.*` | explorer and preview widgets |
 | `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Switchboard: card rows, tabs, columns, filters; the pane and card detail; the per-window Switchboard worker |
-| `src/Theme.*` | palette, stylesheet, Konsole profile exposure |
+| `src/Theme.*` | live tokens, palette, stylesheet, the theme switch, generated Konsole profiles |
+| `src/ThemeFile.*` | the theme file format: reader, token contract, discovery, generated colour scheme |
 | `src/Hints.*` | shortcut hint limits and idle tips |
 | `src/OutputLinks.*` | which spans of terminal output are files, folders or URLs, what they resolve to, and the keyboard cursor over them |
 | `src/Notifications.*` | notification centre behind the header bell |
@@ -1299,22 +1358,19 @@ Other limits:
 | `src/PaneTitles.*` | pane titles and the tab labels made from them: tidying a title, the offline "same work" rule, joining and shortening |
 | `src/InputPolicy.*` | who may type where: the prompt-box-only rules, passwords, and whether the agent may type into the program |
 | `src/ScreenPrompt.*` | the screen-text classifier: is the foreground program waiting for input, and for what (section 9.1) |
+| `src/Aliases.*` | aliases (saved commands and prompts): the composer's `{{parameter}}` fields and Tab, re-reading the values out of an edited line, and whether a typed line names an alias |
 | `src/Voice.*` | voice transcription: capture tool and arguments, the hold key, the transcript's place in the composer, WAV repair |
 | `src/RemoteShare.*` | sharing a pane with a phone: the sidecar process, the pane's frames going out, the keys coming back, and the QR/approval dialog (section 19) |
 | `remote/`, `rendezvous/`, `app/` | the remote protocol and its Noise handshake, the ciphertext-only relay, and the phone's web client (`docs/REMOTE-PROTOCOL.md`) |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
-| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search), `logs` (rotating `worker.log`) |
-| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and tab labels), `voice` (transcription) |
-| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `voice` (transcription), `program_input` (the agent typing into the visible pane) |
-| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Switchboard messages) |
-| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `voice` (transcription) |
+| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and tab labels), `voice` (transcription), `program_input` (the agent typing into the visible pane), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Switchboard messages), `aliases` and `alias_import` (saved commands and prompts, and importing Warp workflows and shell aliases) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `src/KonsoleBackend.*`, `src/EngineBackend.*` | the two `TerminalBackend` implementations |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |
 | `shell/relay-integration.bash`, `.zsh` | opt-in OSC 7 / OSC 133 marks |
 | `engine/` | Relay's terminal engine: cores, PTY, session, view, `TerminalBackend.h` |
-| `data/` | theme, Konsole profile, icons |
+| `data/` | colour themes, base Konsole profile, icons |
 | `packaging/`, `.github/workflows/`, `site/` | packages, CI, release, website |
 | `tests/` | Python backend and PTY tests, Qt editor and file pane tests |
 | `issues/` | file-based tracker, and the Switchboard's storage (`board.yaml`, cards, `threads/`) |
