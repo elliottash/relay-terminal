@@ -43,8 +43,28 @@ python3 "$fake" "$port" "$out/live-requests.jsonl" &
 fake_pid=$!
 Xvfb "$display" -screen 0 1500x950x24 >/dev/null 2>&1 &
 xvfb_pid=$!
-# `tailscale serve` is tailnet-wide state, not this jail's: take it down however the run ends.
-trap 'kill "${relay_pid:-0}" "$xvfb_pid" "$fake_pid" 2>/dev/null; tailscale serve reset >/dev/null 2>&1; rm -rf "$jail"' EXIT
+# `tailscale serve` is this machine's state, not this jail's, and the owner's own share dialog may
+# have put one up. Remember whether anything was serving before this run, and reset only what this
+# run created — never somebody else's share (asked for by the session on card #W5N2).
+tailscale serve status --json >"$jail/serve-before.json" 2>/dev/null || echo none >"$jail/serve-before.json"
+# An empty configuration prints `{}`; one that is serving has a "TCP" object in it.
+serve_was_up() { grep -q '"TCP"' "$jail/serve-before.json" 2>/dev/null; }
+# Publishing would replace whatever is there, so a run that finds a share already up stops rather
+# than taking the address from under it. `tailscale serve reset` by hand, or stop the share.
+if serve_was_up; then
+  echo "tailscale serve is already publishing something on this machine — stop that share first,"
+  echo "or run 'tailscale serve reset'. This run would replace it."
+  exit 1
+fi
+
+release_serve() {
+  if serve_was_up; then
+    echo "leaving tailscale serve alone: something was already serving before this run"
+    return
+  fi
+  tailscale serve reset >/dev/null 2>&1
+}
+trap 'kill "${relay_pid:-0}" "$xvfb_pid" "$fake_pid" 2>/dev/null; release_serve; rm -rf "$jail"' EXIT
 sleep 1
 export DISPLAY=$display
 
