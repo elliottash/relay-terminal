@@ -94,11 +94,15 @@ stripped to a host name's characters before it goes into OSC 7, so a name with a
 cannot close the sequence early and hand the terminal one of the host's choosing (the iTerm2
 `it2ssh` class, in the research notes). It installs nothing and edits
 no file. Relay types it into the remote shell once per login as one line with a leading space
-(kept out of history by `HISTCONTROL=ignorespace`/`HIST_IGNORE_SPACE`, which the script also sets):
+(kept out of history by `HISTCONTROL=ignorespace`/`HIST_IGNORE_SPACE`, which the script also sets;
+bash deletes the entry it already read, and zsh, which cannot, keeps it out of the file on the host
+with `HISTORY_IGNORE` instead):
 
     ␠eval "$(printf %s '<base64 of gzip of RELAY_R=<rows> and the script>' | base64 -d | gzip -dc)"
 
-The row count travels inside the payload rather than in front of the line: a shell that is neither
+What is typed is the script without its comments or blank lines (the GUI strips them; the file
+keeps them), which is what holds the line under two kilobytes. The row count travels inside the
+payload rather than in front of the line: a shell that is neither
 bash nor zsh must at least be able to parse what Relay types, or it answers by printing the two
 kilobytes back at the user. fish reads `eval "$(…)"` and then fails on the sh inside it, briefly.
 

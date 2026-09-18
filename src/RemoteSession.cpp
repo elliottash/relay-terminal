@@ -215,8 +215,18 @@ QString bootstrapLine(const QByteArray &script, int promptColumn, int columns) {
     // shell that is not bash or zsh has to be able to *parse* what Relay types, or it answers by
     // printing the two kilobytes back at the user. fish reads `eval "$(…)"` and then fails on the
     // sh inside it, in one short message; a prefix assignment it cannot parse at all (#S5SH).
+    // What the comments explain belongs in the file, not on the wire: the line is typed into a
+    // terminal whose input buffer is four kilobytes, so full-line comments and blank lines are
+    // left behind (nothing else is touched — the script is moved, not rewritten).
+    QByteArray bare;
+    bare.reserve(script.size());
+    for (const QByteArray &row : script.split('\n')) {
+        const QByteArray trimmed = row.trimmed();
+        if (trimmed.isEmpty() || trimmed.startsWith('#')) continue;
+        bare += row + '\n';
+    }
     const auto line = [&](int rows) {
-        const QByteArray payload = "RELAY_R=" + QByteArray::number(rows) + "\n" + script;
+        const QByteArray payload = "RELAY_R=" + QByteArray::number(rows) + "\n" + bare;
         return QStringLiteral(" eval \"$(printf %s '%1' | base64 -d | gzip -dc)\"")
             .arg(QString::fromLatin1(gzip(payload).toBase64()));
     };

@@ -247,7 +247,9 @@ def typed_line(rows):
     nor zsh has to be able to parse the line, and a prefix assignment it cannot parse makes it
     print the whole payload back at the user.
     """
-    payload = f"RELAY_R={rows}\n".encode() + REMOTE.read_bytes()
+    bare = b"".join(row + b"\n" for row in REMOTE.read_bytes().split(b"\n")
+                    if row.strip() and not row.strip().startswith(b"#"))
+    payload = f"RELAY_R={rows}\n".encode() + bare
     b64 = base64.b64encode(gzip.compress(payload, mtime=0)).decode()
     return f" eval \"$(printf %s '{b64}' | base64 -d | gzip -dc)\""
 
@@ -621,7 +623,8 @@ class RemoteScriptTests(unittest.TestCase):
     def test_small_enough_to_type(self):
         # What matters is the line typed into the remote shell: it goes in one write, and a tty's
         # input buffer holds 4 KB. The script's own size only bounds that.
-        self.assertLess(len(REMOTE.read_bytes()), 3968)
+        # The file may grow: what is typed is the file without its comments and blank lines.
+        self.assertLess(len(REMOTE.read_bytes()), 6144)
         self.assertLess(len(typed_line(10)), 2400)
 
 

@@ -42,12 +42,15 @@ __relay_r_ps";; esac
 case ${__relay_r_q%% PROMPT_COMMAND*} in *x*) export -n PROMPT_COMMAND;; esac
 case :${HISTCONTROL-}: in *:ignorespace:*|*:ignoreboth:*) ;; *) HISTCONTROL=${HISTCONTROL:+$HISTCONTROL:}ignorespace;; esac
 __relay_r_n=$(HISTTIMEFORMAT= history 1)
-case $__relay_r_n in *RELAY_R=*) history -d ${__relay_r_n%%[!0-9 ]*};; esac
+case $__relay_r_n in *"| gzip -dc)"*) history -d ${__relay_r_n%%[!0-9 ]*};; esac
 case $BASH_VERSION in [123].*|4.[0-3].*) [ -z "$(trap -p DEBUG)" ] && trap __relay_r_c DEBUG;;
 *) case ${PS0-} in *133\;C*) ;; *) PS0=$__relay_r_e'\033]133;C\007'$__relay_r_f${PS0-};; esac;; esac
 for __relay_r_m in emacs-standard vi-insert vi-move; do bind -m $__relay_r_m -x '"\C-x\C-p":__relay_r_redraw' 2>/dev/null; done
 else
 setopt HIST_IGNORE_SPACE
+# The line was read before HIST_IGNORE_SPACE existed, and zsh cannot delete an entry: keep it out
+# of the file on the host instead, where it would otherwise sit in every Ctrl+R for good.
+case ${HISTORY_IGNORE-} in '') HISTORY_IGNORE='*| gzip -dc)*';; *) HISTORY_IGNORE="(${HISTORY_IGNORE})|(*| gzip -dc)*)";; esac
 __relay_r_p=$(printf "$__relay_r_e") __relay_r_s=$(printf "$__relay_r_f")  # zsh's PS1 wants bytes
 __relay_r_pc() { local s=$?; [ -n "${__relay_r_x-}" ] && __relay_r_o "133;D;$s"; __relay_r_x=; __relay_r_7
 case $PS1 in *133\;A*) ;; *) PS1="%{$__relay_r_p"$'\e]133;A\a'"$__relay_r_s%}"$PS1"%{$__relay_r_p"$'\e]133;B\a'"$__relay_r_s%}";; esac; return $s; }
