@@ -301,10 +301,30 @@ class HandlerTests(RegistryCase):
         self.assertEqual(gone, [{'event': 'local_endpoint_deleted', 'id': 4, 'endpoint_id': 'local:bonsai', 'removed': True}])
 
     def test_a_detect_that_finds_nothing_is_an_error_event_not_a_crash(self):
+        port = free_port()
         events = self.collect({'type': 'local_endpoint_save', 'id': 5, 'detect': True,
-                               'endpoint': {'base_url': f'http://127.0.0.1:{free_port()}/v1'}})
+                               'endpoint': {'base_url': f'http://127.0.0.1:{port}/v1'}})
         self.assertEqual([(e['event'], e['id']) for e in events], [('error', 5)])
-        self.assertIn('model id', events[0]['text'])
+        self.assertIn(f'127.0.0.1:{port}', events[0]['text'])       # the start hint, not "needs a model id"
+        self.assertEqual(L.catalog(), {})
+
+    def test_detect_waits_for_a_server_that_is_loading(self):
+        server = FakeServer({'/props': (503, LOADING)})
+        self.addCleanup(server.close)
+
+        def finish_loading():
+            server.routes.update(llama_routes(n_ctx=65536))
+        timer = threading.Timer(0.3, finish_loading)
+        timer.start()
+        self.addCleanup(timer.cancel)
+        with mock.patch.object(L, 'LOADING_POLL_S', 0.05):
+            filled, found = L.detect({'base_url': server.root}, wait=10)
+            self.assertEqual((found.state, filled['model'], filled['context_window']), ('ready', 'bonsai-2-27b', 65536))
+            stuck = FakeServer({'/props': (503, LOADING)})
+            self.addCleanup(stuck.close)
+            _, still = L.detect({'base_url': stuck.root}, wait=0.2)
+        self.assertFalse(still.ok)
+        self.assertIn('still loading', still.error)
         with self.assertRaises(ValueError):
             L.handle({'type': 'local_endpoint_save', 'endpoint': {'base_url': 'https://x.example/v1', 'model': 'm'}}, lambda e: None)
 

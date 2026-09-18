@@ -1,0 +1,39 @@
+
+
+Loading model... |-\|/-\|/-\|/-\|/-\ 
+
+▄▄ ▄▄
+██ ██
+██ ██  ▀▀█▄ ███▄███▄  ▀▀█▄    ▄████ ████▄ ████▄
+██ ██ ▄█▀██ ██ ██ ██ ▄█▀██    ██    ██ ██ ██ ██
+██ ██ ▀█▄██ ██ ██ ██ ▀█▄██ ██ ▀████ ████▀ ████▀
+                                    ██    ██
+                                    ▀▀    ▀▀
+
+build      : b10706-1a07bfa5f
+model      : /home/elliott/data/llms/models/bonsai-2-27b/Ternary-Bonsai-2-27B-PQ2_0.gguf
+ftype      : PQ2_0 - 2.13 bpw (group 128)
+modalities : text
+
+available commands:
+  /exit or Ctrl+C     stop or exit
+  /regen              regenerate the last response
+  /clear              clear the chat history
+  /read <file>        add a text file
+  /glob <pattern>     add text files using globbing pattern
+
+
+
+> Write one sentence about the sea.
+
+[Start thinking]
+
+We need to respond to user: "Write one sentence about the sea." Simple. Final one sentence only likely. Ensure one sentence.
+[End thinking]
+
+The sea is a vast, ever-moving expanse of water that shapes coastlines and sustains countless forms of life.
+
+[ Prompt: 196.6 t/s | Generation: 24.3 t/s ]
+
+
+Exiting...

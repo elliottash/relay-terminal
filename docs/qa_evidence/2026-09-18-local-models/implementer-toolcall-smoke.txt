@@ -1,0 +1,271 @@
+# llama-server tool-calling smoke test, trimmed from /home/elliott/data/llms/logs/bonsai-2-toolcall-smoke.json
+{
+ "nonstreaming": {
+  "request": {
+   "model": "bonsai-2-27b",
+   "messages": [
+    {
+     "role": "user",
+     "content": "List the files in the current directory using the tool."
+    }
+   ],
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "run_command",
+      "description": "Run a shell command on the local machine and return its output.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "command": {
+         "type": "string",
+         "description": "The shell command to run."
+        }
+       },
+       "required": [
+        "command"
+       ]
+      }
+     }
+    }
+   ],
+   "stream": false
+  },
+  "response": {
+   "choices": [
+    {
+     "finish_reason": "tool_calls",
+     "index": 0,
+     "message": {
+      "role": "assistant",
+      "content": "",
+      "reasoning_content": "The user wants to list the files in the current directory using a tool. I should use run_command with `ls` (or `ls -la`). Let's just do it simply: `ls -la`.\n",
+      "tool_calls": [
+       {
+        "type": "function",
+        "function": {
+         "name": "run_command",
+         "arguments": "{\"command\":\"ls -la\"}"
+        },
+        "id": "Gq6zA7CG4FTrSW0CawIIMrG9IGLJYQzg"
+       }
+      ]
+     }
+    }
+   ],
+   "created": 1789755978,
+   "model": "bonsai-2-27b",
+   "system_fingerprint": "b10706-1a07bfa5f",
+   "object": "chat.completion",
+   "usage": {
+    "completion_tokens": 75,
+    "prompt_tokens": 333,
+    "total_tokens": 408,
+    "prompt_tokens_details": {
+     "cached_tokens": 0
+    }
+   },
+   "id": "chatcmpl-moVyl1gq2qeyeIalrITucma3DBphuuY0"
+  },
+  "wall_seconds": 3.57
+ },
+ "streaming": {
+  "request": {
+   "model": "bonsai-2-27b",
+   "messages": [
+    {
+     "role": "user",
+     "content": "List the files in the current directory using the tool."
+    }
+   ],
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "run_command",
+      "description": "Run a shell command on the local machine and return its output.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "command": {
+         "type": "string",
+         "description": "The shell command to run."
+        }
+       },
+       "required": [
+        "command"
+       ]
+      }
+     }
+    }
+   ],
+   "stream": true,
+   "stream_options": {
+    "include_usage": true
+   },
+   "parallel_tool_calls": false
+  },
+  "chunks": [
+   {
+    "choices": [
+     {
+      "finish_reason": null,
+      "index": 0,
+      "delta": {
+       "role": "assistant",
+       "content": null
+      }
+     }
+    ],
+    "created": 1789755978,
+    "id": "chatcmpl-wRipBslZ0DpfJSepryiMtZw2GQRZucYM",
+    "model": "bonsai-2-27b",
+    "system_fingerprint": "b10706-1a07bfa5f",
+    "object": "chat.completion.chunk"
+   },
+   {
+    "choices": [
+     {
+      "finish_reason": null,
+      "index": 0,
+      "delta": {
+       "reasoning_content": "The"
+      }
+     }
+    ],
+    "created": 1789755978,
+    "id": "chatcmpl-wRipBslZ0DpfJSepryiMtZw2GQRZucYM",
+    "model": "bonsai-2-27b",
+    "system_fingerprint": "b10706-1a07bfa5f",
+    "object": "chat.completion.chunk"
+   },
+   {
+    "choices": [
+     {
+      "finish_reason": null,
+      "index": 0,
+      "delta": {
+       "reasoning_content": " user"
+      }
+     }
+    ],
+    "created": 1789755978,
+    "id": "chatcmpl-wRipBslZ0DpfJSepryiMtZw2GQRZucYM",
+    "model": "bonsai-2-27b",
+    "system_fingerprint": "b10706-1a07bfa5f",
+    "object": "chat.completion.chunk"
+   },
+   {
+    "choices": [
+     {
+      "finish_reason": null,
+      "index": 0,
+      "delta": {
+       "reasoning_content": " wants"
+      }
+     }
+    ],
+    "created": 1789755978,
+    "id": "chatcmpl-wRipBslZ0DpfJSepryiMtZw2GQRZucYM",
+    "model": "bonsai-2-27b",
+    "system_fingerprint": "b10706-1a07bfa5f",
+    "object": "chat.completion.chunk"
+   },
+   {
+    "choices": [
+     {
+      "finish_reason": null,
+      "index": 0,
+      "delta": {
+       "reasoning_content": " to"
+      }
+     }
+    ],
+    "created": 1789755978,
+    "id": "chatcmpl-wRipBslZ0DpfJSepryiMtZw2GQRZucYM",
+    "model": "bonsai-2-27b",
+    "system_fingerprint": "b10706-1a07bfa5f",
+    "object": "chat.completion.chunk"
+   },
+   {
+    "choices": [
+     {
+      "finish_reason": null,
+      "index": 0,
+      "delta": {
+       "reasoning_content": " list"
+      }
+     }
+    ],
+    "created": 1789755978,
+    "id": "chatcmpl-wRipBslZ0DpfJSepryiMtZw2GQRZucYM",
+    "model": "bonsai-2-27b",
+    "system_fingerprint": "b10706-1a07bfa5f",
+    "object": "chat.completion.chunk"
+   }
+  ],
+  "n_chunks": 39,
+  "wall_seconds": 2.6
+ },
+ "second_turn": {
+  "request": {
+   "model": "bonsai-2-27b",
+   "messages": [
+    {
+     "role": "user",
+     "content": "List the files in the current directory using the tool."
+    },
+    {
+     "role": "assistant",
+     "content": "",
+     "tool_calls": [
+      {
+       "type": "function",
+       "function": {
+        "name": "run_command",
+        "arguments": "{\"command\":\"ls -la\"}"
+       },
+       "id": "Gq6zA7CG4FTrSW0CawIIMrG9IGLJYQzg"
+      }
+     ]
+    },
+    {
+     "role": "tool",
+     "tool_call_id": "Gq6zA7CG4FTrSW0CawIIMrG9IGLJYQzg",
+     "name": "run_command",
+     "content": "README.md\nnotes.txt\nsrc\n"
+    }
+   ],
+   "tools": [
+    {
+     "type": "function",
+     "function": {
+      "name": "run_command",
+      "description": "Run a shell command on the local machine and return its output.",
+      "parameters": {
+       "type": "object",
+       "properties": {
+        "command": {
+         "type": "string",
+         "description": "The shell command to run."
+        }
+       },
+       "required": [
+        "command"
+       ]
+      }
+     }
+    }
+   ],
+   "stream": false
+  },
+  "response": {
+   "choices": [
+    {
+     "finish_reason": "stop",
+     "index": 0,
+     "message": {
+      "role": "assistant",
+      "content": "Here are the files in the current directory:\n\n- **README.md**\n- **notes.txt**\n- **src** (directory)",
+      "reasoning_content": "The user asked to list the 

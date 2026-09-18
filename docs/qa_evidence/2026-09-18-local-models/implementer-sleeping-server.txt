@@ -1,0 +1,30 @@
+# A Relay turn against a sleeping llama-server (implementer, 2026-09-18)
+# a second instance of serve-bonsai-2.sh on 127.0.0.1:8081 with --sleep-idle-seconds 20
+
+$ relay-local.py add --id sleepy --base-url http://127.0.0.1:8081 --detect     # started while the model was still loading
+http://127.0.0.1:8081/v1: llama.cpp, ready, window 131,072
+  bonsai-2-27b  (131,072 tokens, tools, thinking)
+Saved local:sleepy: bonsai-2-27b at http://127.0.0.1:8081/v1, window 131,072. Pick it in the model dropdown, or: scripts/relay-agent.py --provider local:sleepy
+
+$ relay-local.py probe     # after the 20 s idle timer
+http://127.0.0.1:8081/v1: llama.cpp, sleeping, window 131,072
+  bonsai-2-27b  (131,072 tokens, tools, thinking)
+               total        used        free      shared  buff/cache   available
+Mem:           121Gi        40Gi        29Gi       817Mi        35Gi        81Gi
+
+$ relay-agent.py --provider local:sleepy --yes --prompt '...'     # the server is asleep
+
+[status] Requesting model · step 3/256
+
+[status] Model is reasoning…
+The workspace contains one file:
+
+- `note.txt`
+[done] 
+
+wall 20.060003874 s
+
+http://127.0.0.1:8081/v1: llama.cpp, ready, window 131,072
+  bonsai-2-27b  (131,072 tokens, tools, thinking)
+               total        used        free      shared  buff/cache   available
+Mem:           121Gi        57Gi        28Gi       1.3Gi        33Gi        64Gi

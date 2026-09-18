@@ -485,13 +485,27 @@ def probe(base_url: str, *, timeout: float = CONNECT_PROBE_TIMEOUT) -> Probe:
                              "(llama.cpp, Ollama, LM Studio, vLLM or an OpenAI-compatible /v1/models).")
 
 
-def detect(spec: dict, *, timeout: float = CONNECT_PROBE_TIMEOUT) -> tuple[dict, Probe]:
+LOADING_POLL_S = 1.0
+DETECT_WAIT_S = 120.0     # a 27B model loads from a cold disk in well under this
+
+
+def detect(spec: dict, *, timeout: float = CONNECT_PROBE_TIMEOUT, wait: float = 0.0) -> tuple[dict, Probe]:
     """Fill what a probe can know (server kind, base URL, model, window, capabilities) into ``spec``.
 
     What the caller wrote wins, except the window: the served window is a fact, not a preference.
+    A server that is still loading its weights knows none of this yet, so it is polled for up to
+    ``wait`` seconds; one that is still loading after that is reported as such, not as "no model".
     """
+    import time
+    deadline = time.monotonic() + max(0.0, wait)
     found = probe(spec.get("base_url", ""), timeout=timeout)
+    while found.ok and found.state == "loading" and time.monotonic() < deadline:
+        time.sleep(LOADING_POLL_S)
+        found = probe(spec.get("base_url", ""), timeout=timeout)
     out = dict(spec)
+    if found.ok and found.state == "loading":
+        found.error = "The server is still loading its model. Try again when it is ready."
+        found.ok = False
     if not found.ok:
         return out, found
     out["base_url"] = found.base_url
@@ -542,7 +556,9 @@ def handle(request: dict, emit) -> threading.Thread | None:
 
         def work():
             try:
-                filled, found = detect(spec)
+                filled, found = detect(spec, wait=DETECT_WAIT_S)
+                if not found.ok:
+                    raise ValueError(found.error or "Nothing to detect at that address.")
                 endpoint = save(filled)
                 emit({"event": "local_endpoint_saved", "id": request_id, "endpoint": endpoint.to_dict(),
                       "probe": found.to_dict()})

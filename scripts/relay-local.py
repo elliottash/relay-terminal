@@ -129,7 +129,7 @@ def main() -> int:
         spec['tool_text_recovery'] = True
     try:
         if args.detect:
-            spec, found = localmodels.detect(spec)
+            spec, found = localmodels.detect(spec, wait=localmodels.DETECT_WAIT_S)
             show(found)
             if not found.ok:
                 return 1
