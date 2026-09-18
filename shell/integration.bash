@@ -101,7 +101,10 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
         # latency. It is only needed to find a ControlMaster or ControlPath the user set, so it is
         # asked only when their configuration mentions one at all, under a timeout, and the answer
         # is remembered for the rest of this shell.
-        if [[ -z ${__relay_ssh_configured+set} ]]; then
+        # A configuration file named on the command line can say anything, so it is always read.
+        local named=
+        for arg in "${args[@]}"; do [[ $arg == -F* ]] && named=1; done
+        if [[ -z $named && -z ${__relay_ssh_configured+set} ]]; then
             __relay_ssh_configured=
             local file line pattern
             local -a files=("$HOME/.ssh/config" /etc/ssh/ssh_config)
@@ -119,14 +122,14 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
             done
             for file in "${files[@]}"; do
                 [[ -r $file ]] || continue
-                if grep -qiE '^[[:space:]]*(controlmaster|controlpath|match)' "$file" 2>/dev/null; then
+                if grep -qiE '^[[:space:]]*(controlmaster|controlpath|controlpersist|match)' "$file" 2>/dev/null; then
                     __relay_ssh_configured=1
                     break
                 fi
             done
         fi
-        [[ -n $__relay_ssh_configured ]] || return 0
-        if [[ -n ${__relay_ssh_asked[$host]+set} ]]; then
+        [[ -n $named || -n $__relay_ssh_configured ]] || return 0
+        if [[ -z $named && -n ${__relay_ssh_asked[$host]+set} ]]; then
             return "${__relay_ssh_asked[$host]}"
         fi
         # A hook that never returns must not take the shell with it; without `timeout`, no ssh -G.

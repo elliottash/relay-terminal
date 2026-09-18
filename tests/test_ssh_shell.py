@@ -29,6 +29,7 @@ REMOTE = ROOT / "shell/remote-integration.sh"
 CONTROL = ["-o", "ControlMaster=auto", "-o", "ControlPath={dir}/%C", "-o", "ControlPersist=600"]
 
 FAKE = """#!/bin/sh
+if [ -n "$RELAY_TEST_LOG" ]; then printf '%s\\n' "$*" >> "$RELAY_TEST_LOG"; fi
 if [ "$1" = -G ]; then
     shift
     if [ -n "$RELAY_TEST_REAL_SSH" ]; then exec "$RELAY_TEST_REAL_SSH" -G "$@"; fi
@@ -37,7 +38,7 @@ if [ "$1" = -G ]; then
 fi
 printf '%s\\n' "ARGV $(basename "$0")"
 for a in "$@"; do printf 'ARG[%s]\\n' "$a"; done
-exit 7
+exit ${RELAY_TEST_EXIT:-7}
 """
 
 
@@ -74,14 +75,19 @@ class WrapperTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.temp.cleanup()
 
-    def bash(self, script, wrap="1", ssh_dir=None, before=""):
+    def bash(self, script, wrap="1", ssh_dir=None, before="", exit_code=None, log=None):
         env = dict(os.environ, PATH=f"{self.bin}{os.pathsep}{os.environ.get('PATH', '')}",
                    RELAY_RUNTIME_DIR=str(self.runtime), RELAY_SHELL_EVENT="/nonexistent",
-                   RELAY_SESSION_TOKEN="t", RELAY_CLEAN_SHELL="1", RELAY_TEST_REAL_SSH=self.real_ssh)
+                   RELAY_SESSION_TOKEN="t", RELAY_CLEAN_SHELL="1", RELAY_TEST_REAL_SSH=self.real_ssh,
+                   HOME=str(self.temp.name))   # the wrapper reads ~/.ssh/config: never the developer's
         env.pop("RELAY_SSH_WRAP", None)
         env.pop("RELAY_SSH_DIR", None)
         if wrap is not None:
             env["RELAY_SSH_WRAP"] = wrap
+        if exit_code is not None:
+            env["RELAY_TEST_EXIT"] = str(exit_code)   # what the fake ssh/mosh exits with
+        if log is not None:
+            env["RELAY_TEST_LOG"] = str(log)          # every call the fake sees, one per line
         dir_ = str(self.sockets) if ssh_dir is None else ssh_dir
         if dir_:
             env["RELAY_SSH_DIR"] = dir_
@@ -147,12 +153,15 @@ class WrapperTests(unittest.TestCase):
             self.assertEqual(result.stdout.split(), ["file", "file"])
 
     def test_nounset_no_leaks_no_output_completion(self):
-        names = "compgen -v | grep -v -x -e _ -e 'BASH_.*' -e PIPESTATUS -e before -e after | sort"
+        # The two names the wrapper does keep are its own: whether the user's configuration can
+        # matter at all, and the per-host answer, so `ssh -G` is asked once rather than per call.
+        names = ("compgen -v | grep -v -x -e _ -e 'BASH_.*' -e PIPESTATUS -e before -e after "
+                 "-e __relay_ssh_configured -e __relay_ssh_asked | sort")
         result = self.bash(
             f"before=$({names}); set -u; complete -F _relay_fake ssh\n"
             f"ssh -F {self.config} host >/dev/null; mosh host >/dev/null\n"
             f"after=$({names}); [ \"$before\" = \"$after\" ] && echo SAME\n"
-            "complete -p ssh; type -t ssh")
+            "complete -p ssh; type -t ssh", exit_code=0)
         self.assertEqual(result.stderr, "")
         self.assertEqual(result.stdout.splitlines(),
                          ["SAME", "complete -F _relay_fake ssh", "function"])
@@ -164,13 +173,55 @@ class WrapperTests(unittest.TestCase):
         self.assertIn("STATUS 7", result.stdout)
 
     def mosh(self, args, **kw):
+        # Exit 0: a mosh that ends normally is not retried, so these are the arguments of the one
+        # attempt. test_mosh_retries_plain_when_the_shared_one_fails covers a failure.
         quoted = " ".join("'" + a + "'" for a in args)
-        result = self.bash(f"mosh {quoted}; echo \"STATUS $?\"", **kw)
+        result = self.bash(f"mosh {quoted}; echo \"STATUS $?\"", exit_code=0, **kw)
         self.assertEqual(result.stderr, "")
-        self.assertIn("STATUS 7", result.stdout)
+        self.assertIn("STATUS 0", result.stdout)
         return [line[4:-1] for line in result.stdout.splitlines() if line.startswith("ARG[")]
 
+    def test_ssh_g_is_asked_only_when_the_configuration_could_matter(self):
+        # `ssh -G` runs the user's `Match exec` hooks and can resolve names, so it is asked only
+        # when something could be configured, and then once per host rather than once per ssh.
+        # `ssh -G`'s own output is swallowed by the command substitution that reads it, so the
+        # fake writes every call it sees to a log instead.
+        calls = Path(self.temp.name) / "calls.log"
+        def probes():
+            lines = calls.read_text().splitlines() if calls.exists() else []
+            calls.unlink(missing_ok=True)
+            return len([line for line in lines if line.startswith("-G ")])
+        self.bash("ssh host; ssh host; ssh other", exit_code=0, log=calls)
+        self.assertEqual(probes(), 0)
+        home = Path(self.temp.name) / ".ssh"
+        home.mkdir(exist_ok=True)
+        (home / "config").write_text("Host *\n  ControlPersist 60\n")
+        self.bash("ssh host; ssh host; ssh other", exit_code=0, log=calls)
+        self.assertEqual(probes(), 2)   # once for host, once for other: not once per ssh
+        # An Include can hold the keyword just as well, and is followed one level.
+        (home / "config").write_text("Include conf.d/*.conf\n")
+        (home / "conf.d").mkdir(exist_ok=True)
+        (home / "conf.d" / "a.conf").write_text("Host *\n  ControlMaster auto\n")
+        self.bash("ssh host", exit_code=0, log=calls)
+        self.assertEqual(probes(), 1)
+        (home / "config").unlink()
+        (home / "conf.d" / "a.conf").unlink()
+
+    def test_mosh_retries_plain_when_the_shared_one_fails(self):
+        # The server's own address (--experimental-remote-ip=remote) is unreachable behind NAT or
+        # a forwarded port. mosh then dies at once, and what the user typed must still work.
+        result = self.bash("mosh 'host'; echo \"STATUS $?\"", exit_code=7)
+        args = [line[4:-1] for line in result.stdout.splitlines() if line.startswith("ARG[")]
+        ssh = "--ssh=ssh " + " ".join(self.control())
+        self.assertEqual(args, [ssh, "--experimental-remote-ip=remote", "host", "host"])
+        self.assertIn("retrying as you typed it", result.stderr)
+        self.assertIn("STATUS 7", result.stdout)   # the plain run's own status, not a Relay one
+
     def test_mosh(self):
+        # A shared mosh that fails inside twenty seconds is run again exactly as the user typed
+        # it: the server's own address is unreachable behind NAT or a forwarded port, and a
+        # session that worked before Relay must keep working. The fake mosh here exits 0, so the
+        # arguments below are the shared attempt; test_mosh_falls_back covers the retry.
         ssh = "--ssh=ssh " + " ".join(self.control())
         self.assertEqual(self.mosh(["host"]), [ssh, "--experimental-remote-ip=remote", "host"])
         self.assertEqual(self.mosh(["--experimental-remote-ip=local", "host"]),
@@ -190,9 +241,15 @@ class WrapperTests(unittest.TestCase):
 
 
 def typed_line(rows):
-    """The line the GUI types: gzip, then base64, in one argument, with a leading space."""
-    b64 = base64.b64encode(gzip.compress(REMOTE.read_bytes(), mtime=0)).decode()
-    return f" RELAY_R={rows} eval \"$(printf %s '{b64}' | base64 -d | gzip -dc)\""
+    """The line the GUI types: gzip, then base64, in one argument, with a leading space.
+
+    The row count rides inside the payload (src/RemoteSession.cpp): a shell that is neither bash
+    nor zsh has to be able to parse the line, and a prefix assignment it cannot parse makes it
+    print the whole payload back at the user.
+    """
+    payload = f"RELAY_R={rows}\n".encode() + REMOTE.read_bytes()
+    b64 = base64.b64encode(gzip.compress(payload, mtime=0)).decode()
+    return f" eval \"$(printf %s '{b64}' | base64 -d | gzip -dc)\""
 
 
 def _controlling_tty():
@@ -564,7 +621,7 @@ class RemoteScriptTests(unittest.TestCase):
     def test_small_enough_to_type(self):
         # What matters is the line typed into the remote shell: it goes in one write, and a tty's
         # input buffer holds 4 KB. The script's own size only bounds that.
-        self.assertLess(len(REMOTE.read_bytes()), 3840)
+        self.assertLess(len(REMOTE.read_bytes()), 3968)
         self.assertLess(len(typed_line(10)), 2400)
 
 

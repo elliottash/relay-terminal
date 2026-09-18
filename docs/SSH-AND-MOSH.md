@@ -55,7 +55,8 @@ sharing so the agent can reuse the login:
   suppresses an alias, not a function.
 - Asking `ssh -G` what the user configured is not free: it runs their `Match exec` hooks (a VPN
   probe, a token touch) and can resolve names, so it is asked only when their configuration
-  mentions `ControlMaster`, `ControlPath` or `Match` at all (`Include`s are followed one level),
+  mentions `ControlMaster`, `ControlPath`, `ControlPersist` or `Match` at all (`Include`s are
+  followed one level, and a `-F` file on the command line is always read),
   under `timeout 5`, and the answer is kept for the rest of that shell. A user with none of those
   keywords — most users — pays nothing.
 - mosh's shared connection needs `--experimental-remote-ip=remote`, which reads the server's own
