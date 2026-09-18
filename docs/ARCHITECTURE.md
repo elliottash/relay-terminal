@@ -334,7 +334,7 @@ in `WARP.md`); tests in `tests/hints_test.cpp`.
 Palette items also match hidden alias words (`paletteAliases()`, keyed by label/key/section
 substrings, half weight), e.g. "undo" → Rewind, "reasoning" → effort, "detach" → move actions.
 
-`Keymap` (`src/main.cpp`) is a process-wide registry of named actions. Each action has an id,
+`Keymap` (`src/Keymap.h`) is a process-wide registry of named actions. Each action has an id,
 a category, a description and default keys.
 
 | Source, lowest to highest priority | Where |
@@ -381,7 +381,7 @@ Unbound by default: `conversations.open`, `files.open`, `terminal.interrupt`, `a
 `keybindings.edit`, `keybindings.reload`.
 
 **Actions** (Ctrl+Shift+A or Ctrl+?). The action catalog (`rootItems()` in
-`src/main.cpp`) is the same list the palette overlay used to render: items with a stable key and
+`src/RelayWindow.h`) is the same list the palette overlay used to render: items with a stable key and
 either a run function or a submenu (Model, Input mode, Reasoning effort, Aliases, Agents, Log
 detail). Since 2026-09-18 it is rendered by the Settings pane (section 12, "Settings pane"): the
 Actions tab lists every item with its keys — Recent (from `palette/recent`) first, then Agent,
@@ -1003,7 +1003,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
 - A stream without `[DONE]` or a `stop`/`tool_calls` finish, or with `length` or
   `content_filter`, is an error; partial tool calls never run. HTTP error bodies are not echoed.
 
-Presets (`backend/relay_core/presets.py`; the advanced dialog in `src/main.cpp` keeps a copy that
+Presets (`backend/relay_core/presets.py`; the advanced dialog in `src/Pane.h` keeps a copy that
 `tests/test_presets.py` checks for drift). Every endpoint and model id was verified against the
 provider's own documentation on 2026-09-17, and the doc URL sits beside the entry it supports.
 
@@ -1295,7 +1295,7 @@ panel that returns to the prompt, opencode's one command list that carries the t
 
 ## 13. Per-pane isolation
 
-`namespace isolation` in `src/main.cpp`, probed once with `systemd-run --user --scope -- true`.
+`namespace isolation` in `src/Isolation.h`, probed once with `systemd-run --user --scope -- true`.
 
 | Unit | Properties (defaults) |
 |---|---|
@@ -1352,7 +1352,7 @@ all in one place (issue `0JA7`).
 | User themes | `~/.config/relay/themes/*.toml`; a file of the same id replaces the built-in one |
 | Reader, token contract, discovery | `src/ThemeFile.{h,cpp}` (`relay-theme`, `tests/theme_test.cpp`) |
 | Live palette, stylesheet, the switch | `src/Theme.{h,cpp}` |
-| Picker | Settings › Appearance (built in `src/main.cpp`; the Settings pane renders and searches it) |
+| Picker | Settings › Appearance (built in `src/RelayWindow.h`; the Settings pane renders and searches it) |
 
 A theme file has `[theme]` (name, variant `dark`/`light`, description), `[ui]`, `[syntax]`,
 `[terminal]` (background, foreground, cursor and a 16-entry `palette`) and `[flags]`. Missing

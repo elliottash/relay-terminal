@@ -1,6 +1,6 @@
 # Agent sessions, planning, subagents and suggestions: worker protocol (v1, 2026-09-17)
 
-Contract between the GUI (`src/main.cpp`) and the per-pane worker (`backend/worker.py`).
+Contract between the GUI (`Pane`, in `src/Pane.h`) and the per-pane worker (`backend/worker.py`).
 Additive to the existing protocol (route, configure, ask, cancel, queue_*, reset, presets,
 store_key, import_warp, keybindings). All messages are one JSON object per line.
 Unknown fields are ignored. Errors use the existing `error` event.
@@ -603,7 +603,7 @@ falls back reports `agent_role: "main"`. `configure` with an unusable `agent_rol
 
 Backend: `backend/relay_core/conv_index.py` (the index) with command handlers in
 `session_protocol.py` and the autosave hook in `sessions.py`; GUI: `src/Conversations.{h,cpp}`
-and `src/main.cpp`; tests: `tests/test_conv_index.py`, `tests/conversations_test.cpp`. Source:
+and `src/Pane.h`; tests: `tests/test_conv_index.py`, `tests/conversations_test.cpp`. Source:
 `issues/features/needs_qa_llm/2026-09-17-conversation-list-and-search.md` (owner, 2026-09-17).
 All additive: a worker that never receives these messages behaves exactly as before.
 
@@ -893,7 +893,7 @@ presets of the same company are both offered.
 ## 16. Voice transcription (v1.6, 2026-09-17)
 
 Implements issue `#NY7Z`. GUI: `src/Voice.{h,cpp}` (capture, the hold key, the transcript) and the
-microphone chip in `src/main.cpp`; backend: `backend/relay_core/voice.py`; tests:
+microphone chip in `src/Pane.h`; backend: `backend/relay_core/voice.py`; tests:
 `tests/voice_test.cpp`, `tests/test_voice.py`.
 
 ### 16.1 The message
@@ -957,7 +957,7 @@ whose layout types with AltGr (`/etc/default/keyboard`).
 ## 17. Image context in agent prompts (v1.7, 2026-09-17)
 
 Implements issue `#EM1E`. GUI: `src/Images.{h,cpp}`, the composer hook in `src/RichEditor.cpp` and
-the pane's `attachImages` / `screenshotPane` in `src/main.cpp`; backend:
+the pane's `attachImages` / `screenshotPane` in `src/Pane.h`; backend:
 `backend/relay_core/{attachments,provider,presets,roles,agent}.py`; tests: `tests/images_test.cpp`,
 `tests/editor_test.cpp` and `tests/test_images.py`.
 
@@ -1064,7 +1064,7 @@ screenshot action from the palette hints Ctrl+Shift+G.
 ## 18. Pane title and tab label (v1.8, 2026-09-17)
 
 Backend: `backend/relay_core/titles.py` with the state on `Agent` and the handlers in
-`session_protocol.py`; GUI: `src/PaneTitles.{h,cpp}` and `src/main.cpp`; tests:
+`session_protocol.py`; GUI: `src/PaneTitles.{h,cpp}` and `src/Pane.h`; tests:
 `tests/test_titles.py`, `tests/panetitles_test.cpp`. Source:
 `issues/features/needs_qa_llm/2026-09-17-pane-title-summary.md` (owner, 2026-09-17). Additive: a
 worker that never sends `session_title` leaves the header showing the pane's directory, and a
@@ -1636,7 +1636,7 @@ screen-text detection of `issues/features/2026-09-17-screen-text-input-detection
 behind it. Backend: `backend/relay_core/program_input.py`, wired into
 `relay_core/{tools,agent}.py` and `backend/worker.py`; tests `tests/test_program_input.py`.
 GUI: `src/ScreenPrompt.{h,cpp}` (the classifier), `src/InputPolicy.{h,cpp}` (the rules) and the
-pane in `src/main.cpp`; tests `tests/screenprompt_test.cpp`, `tests/inputpolicy_test.cpp`. Live
+pane in `src/Pane.h`; tests `tests/screenprompt_test.cpp`, `tests/inputpolicy_test.cpp`. Live
 evidence: `docs/qa_evidence/2026-09-17-agent-drives-programs/`.
 
 Everything here is additive. A worker that never receives `program_state` and never sees
