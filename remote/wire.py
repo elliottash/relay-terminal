@@ -330,6 +330,13 @@ WITHHELD_EVENTS: dict[str, str] = {
     "local_endpoints": "provider configuration and loopback URLs",
     "local_endpoint_saved": "provider configuration and loopback URLs",
     "local_endpoint_deleted": "desktop-local administration",
+    # Relay Free's allowance (protocol 13.9): `{limit, used, resets_at}` for the owner's hosted
+    # account, and the reply to the desktop's own `hosted_quota` request rather than anything
+    # about the pane a phone is watching. Same call as `presets` and `configured`: what the
+    # owner's provider arrangement is stays on the desktop. Classified by the security review of
+    # 2026-09-18 because the "denied by default" test had gone red waiting for somebody to; the
+    # session that added it can move it to FORWARDED_EVENTS if a phone should show the chip.
+    "hosted_quota": "the owner's hosted-account allowance; a reply to the desktop's own request",
 }
 
 # Every event name backend/relay_core and backend/worker.py emit today. The test that compares this
