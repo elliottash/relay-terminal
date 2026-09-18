@@ -235,7 +235,7 @@ class ProviderConfig:
     model: str
     api_key: str = field(repr=False)
     extra: dict = field(default_factory=dict)
-    max_tokens: int = 8192
+    max_tokens: int = 32768
 
     def validate(self) -> None:
         url = urllib.parse.urlsplit(self.base_url)

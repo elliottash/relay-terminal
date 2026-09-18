@@ -190,6 +190,7 @@ Waiting for QA (`issues/changes/needs_qa_llm/`):
 - `2026-09-17-terminal-not-directly-typable.md`
 - `2026-09-18-unknown-slash-command.md`
 - `2026-09-18-scrollback-survives-restart.md`
+- `2026-09-18-output-token-limit-defaults-to-32k.md`
 
 Closed (`issues/features/done/`): `2026-09-17-review-opencode-agent-design.md` (research) and
 `2026-09-17-terminal-first-agent-fallback.md` (superseded before QA).

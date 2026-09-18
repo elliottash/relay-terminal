@@ -70,6 +70,14 @@ class StreamTests(unittest.TestCase):
         with self.assertRaises(ValueError): ProviderConfig('https://example.com/v1','m','k',{'messages':[]}).validate()
         ProviderConfig('https://api.z.ai/api/paas/v4','glm-5.3','k',{'thinking':{'type':'enabled'},'reasoning_effort':'high'}).validate()
 
+    def test_the_output_token_limit_defaults_to_32k(self):
+        # The owner's default (2026-09-18), also the top of the allowed range; the GUI falls back to the same.
+        from relay_core.session_protocol import provider_config
+        self.assertEqual(ProviderConfig('https://example.com/v1', 'm', 'k').max_tokens, 32768)
+        request = {'base_url': 'https://example.com/v1', 'model': 'm', 'api_key': 'k'}
+        self.assertEqual(provider_config(request).max_tokens, 32768)
+        self.assertEqual(provider_config({**request, 'max_tokens': 4096}).max_tokens, 4096)  # a saved value stands
+
 class HTTPTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

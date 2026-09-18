@@ -943,7 +943,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
 - HTTPS required, except plain HTTP to `localhost`, `127.0.0.1` or `::1`. No credentials,
   query or fragment in the URL. Redirects are refused.
 - Extra request keys are limited to `thinking`, `reasoning`, `reasoning_effort`,
-  `temperature`, `top_p`. `max_tokens` 256–32768.
+  `temperature`, `top_p`. `max_tokens` 256–32768, default 32768 (the Settings pane, the provider dialog and every fallback when `provider/max_tokens` is unset).
 - Limits: 8 MiB request and response, 2 MiB per SSE event, 16 tool calls per response,
   30 s socket timeout. Cancel closes the response from another thread.
 - Tool-call fragments are assembled by index. `reasoning_content` and OpenRouter's

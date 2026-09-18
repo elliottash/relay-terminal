@@ -883,7 +883,7 @@ public:
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
               {"model", preset.value(QStringLiteral("model")).toString()},
               {"extra", preset.value(QStringLiteral("extra")).toObject()},
-              {"max_tokens", QSettings().value(QStringLiteral("provider/max_tokens"), 8192).toInt()}});
+              {"max_tokens", QSettings().value(QStringLiteral("provider/max_tokens"), 32768).toInt()}});
         QSettings().setValue(QStringLiteral("provider/preset"), id);
         m_currentPreset = id; changed();
     }
@@ -6557,7 +6557,7 @@ private:
         if (preset.isEmpty()) return;
         if (m_workspace.isEmpty()) m_workspace = QDir::currentPath();
         QSettings settings;
-        const int tokens = settings.value(QStringLiteral("provider/max_tokens"), 8192).toInt();
+        const int tokens = settings.value(QStringLiteral("provider/max_tokens"), 32768).toInt();
         settings.setValue("provider/preset", id);
         settings.setValue("provider/base", preset.value(QStringLiteral("base_url")).toString());
         settings.setValue("provider/model", preset.value(QStringLiteral("model")).toString());
@@ -8343,7 +8343,7 @@ private:
         auto *key = new QLineEdit(m_apiKey); key->setEchoMode(QLineEdit::Password);
         auto *extra = new QPlainTextEdit(settings.value(QStringLiteral("provider/extra"), QStringLiteral("{\"reasoning_effort\":\"high\"}")).toString());
         extra->setMaximumHeight(90);
-        auto *tokens = new QSpinBox; tokens->setRange(256, 32768); tokens->setValue(settings.value("provider/max_tokens", 8192).toInt());
+        auto *tokens = new QSpinBox; tokens->setRange(256, 32768); tokens->setValue(settings.value("provider/max_tokens", 32768).toInt());
         auto *workspace = new QLineEdit(m_workspace);
         auto *workspaceRow = new QWidget; auto *workspaceLayout = new QHBoxLayout(workspaceRow); workspaceLayout->setContentsMargins(0, 0, 0, 0);
         auto *browse = new QPushButton(QStringLiteral("Choose…")); workspaceLayout->addWidget(workspace); workspaceLayout->addWidget(browse);
@@ -10306,7 +10306,7 @@ private:
         models.rows << toggleRow(QStringLiteral("agent/panes_flash"), QStringLiteral("New panes use the Flash agent"),
                                  QStringLiteral("Off: every pane starts on the main agent. On: the first pane of a window keeps it"), false);
         models.rows << numberRow(QStringLiteral("provider/max_tokens"), QStringLiteral("Output token limit"),
-                                 QStringLiteral("Per model call; applies to the next conversation"), 8192, 256, 32768);
+                                 QStringLiteral("Per model call; applies to the next conversation"), 32768, 256, 32768);
         models.rows << buttonRow(QStringLiteral("agent.provider"), QStringLiteral("Advanced provider settings"),
                                  QStringLiteral("Base URL, model id, extra request JSON and the agent workspace"),
                                  QStringLiteral("Open…"), [this] { runAction(QStringLiteral("agent.provider")); });
@@ -11131,7 +11131,7 @@ public:
                               {QStringLiteral("api_key"), QString()},
                               {QStringLiteral("base_url"), settings.value(QStringLiteral("provider/base")).toString()},
                               {QStringLiteral("model"), settings.value(QStringLiteral("provider/model")).toString()},
-                              {QStringLiteral("max_tokens"), settings.value(QStringLiteral("provider/max_tokens"), 8192).toInt()}};
+                              {QStringLiteral("max_tokens"), settings.value(QStringLiteral("provider/max_tokens"), 32768).toInt()}};
         if (!preset.isEmpty()) configure.insert(QStringLiteral("preset"), preset);
         const QJsonObject extra = QJsonDocument::fromJson(
             settings.value(QStringLiteral("provider/extra")).toString().toUtf8()).object();

@@ -122,7 +122,7 @@ def usage_total(usage: dict) -> int | None:
 
 
 class ContextTracker:
-    def __init__(self, window: int, threshold: float = DEFAULT_THRESHOLD, max_tokens: int = 8192):
+    def __init__(self, window: int, threshold: float = DEFAULT_THRESHOLD, max_tokens: int = 32768):
         self.window = window
         self.threshold = threshold
         self.max_tokens = max_tokens

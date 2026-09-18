@@ -55,7 +55,7 @@ def provider_config(request: dict) -> ProviderConfig:
         if not api_key:
             raise ValueError("No stored key for this provider. Import from Warp or enter a key.")
     config = ProviderConfig(request.get("base_url", ""), request.get("model", ""), api_key,
-                            request.get("extra", {}), request.get("max_tokens", 8192))
+                            request.get("extra", {}), request.get("max_tokens", 32768))
     config.validate()
     return config
 
