@@ -2,7 +2,7 @@
      edit the card files and regenerate. -->
 # Board
 
-111 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+115 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
 ## Features (80)
 
@@ -89,7 +89,7 @@
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 
-## Bugs (29)
+## Bugs (33)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -101,8 +101,12 @@
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | ready |  |  | [2](threads/9MYY.md) |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | agent |  |  |
 | `#M2C1` | [The model box does nothing when you pick anything that is not a provider](changes/needs_qa_llm/2026-09-18-model-dropdown-selection.md) | needs-qa-llm | agent |  |  |
+| `#P7QK` | [Model roles names providers, offers only the ones you hold a key for, and gives a tier that provider's tier model](changes/needs_qa_llm/2026-09-18-model-roles-provider-names.md) | needs-qa-llm | agent |  |  |
+| `#P43F` | [Button labels painted past the button's edge](changes/needs_qa_llm/2026-09-18-button-labels-clipped.md) | needs-qa-llm | agent |  |  |
 | `#C6YX` | [Four model commands in the composer, and the Flash role stops calling itself "fast"](changes/needs_qa_llm/2026-09-18-model-tier-commands-and-flash-naming.md) | needs-qa-llm | agent |  |  |
+| `#Q4SD` | [An unknown `/command` is answered by Relay, not by the shell](changes/needs_qa_llm/2026-09-18-unknown-slash-command.md) | needs-qa-llm | agent |  |  |
 | `#9V1F` | [Queued items are edited in the prompt box, and the highlighted top item holds the queue](changes/needs_qa_llm/2026-09-18-queue-items-edit-in-the-prompt-box.md) | needs-qa-llm | agent |  |  |
+| `#SB7K` | [Scrollback survives a quit and restart](changes/needs_qa_llm/2026-09-18-scrollback-survives-restart.md) | needs-qa-llm | agent |  |  |
 | `#XXP5` | [Retire KonsolePart: Relay's own engine is the only terminal](changes/needs_qa_llm/2026-09-18-retire-konsolepart.md) | needs-qa-llm | agent |  |  |
 | `#SP4N` | [Settings as a full pane, with sub-tabs and one search over settings and actions](changes/needs_qa_llm/2026-09-18-settings-as-a-full-pane.md) | needs-qa-llm | agent |  |  |
 | `#90JF` | [Check that a terminal command will run before it is sent](changes/needs_qa_llm/2026-09-17-pre-submit-run-check.md) | needs-qa-llm |  |  |  |

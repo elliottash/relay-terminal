@@ -1,13 +1,20 @@
+---
+id: P43F
+type: work
+status: needs-qa-llm
+labels: [change, bug]
+component: [gui]
+milestone: desktop-alpha
+workstream: terminal
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code session), 2026-09-18
+rank: b
+created: '2026-09-18'
+acceptance: 'No shipped button label paints wider than its button in any theme, proved by `relay-buttonfit-tests` (which fails its own self-check if the measurement stops measuring); a non-Claude QA session confirms the API keys modal reads correctly'
+source: 'owner in chat, 2026-09-18, with a screenshot of the API keys modal: "in the ''model keys'' modal, this button text is going off the button" and "if easy, see if we can algorithmically check all buttons in case there are others"'
+links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-button-labels-clipped/'], related: [], github: null}
+---
 # Button labels painted past the button's edge
-
-**Status:** needs-qa-llm
-**Component:** theme
-**Milestone:** 0.1-preview
-**Workstream:** terminal
-**Assignee:** Claude Opus 5 (coordinator session)
-**Source:** Owner report, 2026-09-18, with a screenshot of the API keys modal: "in the 'model keys'
-modal, this button text is going off the button", showing `Add / replace…` clipped at both ends.
-Same report: "if easy, see if we can algorithmically check all buttons in case there are others".
 
 ## What was wrong
 
