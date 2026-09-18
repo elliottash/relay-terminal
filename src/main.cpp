@@ -411,6 +411,15 @@ private:
             {QStringLiteral("Ctrl+F"), QStringLiteral("Ctrl+Shift+F")});
         add("agent.recap", "agent", "Recap this agent session", {});
         add("agent.requests", "agent", "Tasks: show or hide the agent's task list (/tasks)", {QStringLiteral("Ctrl+Shift+K")});
+        // The reasoning panel from the keyboard (owner report, 2026-09-18: "need a keyboard
+        // shortcut for showing / hiding the reasoning traces, maybe an F# key -- ... or alt+R").
+        // Alt+R is his suggestion and no preset binds it: the only Alt+letter Relay has is Alt+F
+        // (fast agent), and the four preset tables override no Alt+letter at all, so all of them
+        // inherit this default. No Ctrl+Shift twin (Ctrl+Shift+R is pane.restartShell) and no
+        // F-key twin yet: which F-keys Relay should claim is docs/F-KEYS.md's question, not a thing
+        // to settle one action at a time.
+        add("agent.thinkingPanel", "agent", "Reasoning: show or hide the thinking panel for this pane",
+            {QStringLiteral("Alt+R")});
         add("agent.continue", "agent", "Continue the agent turn after a step limit (/continue)", {});
         add("agent.instructions", "agent", "Choose agent instruction files", {});
         add("agent.export", "agent", "Export the conversation as Markdown", {});
@@ -2645,12 +2654,15 @@ private:
             // minimum and make the splitter redistribute the whole row (#G152).
             m_thinking->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
             auto *box = new QVBoxLayout(m_thinking); box->setContentsMargins(10, 4, 6, 6); box->setSpacing(2);
-            auto *header = new QHBoxLayout;
+            // The header is a widget wrapping its row, not a bare layout, so placeThinking() can
+            // measure what the panel spends on chrome instead of assuming a number (thinkingChrome).
+            m_thinkingHeaderRow = new QWidget;
+            auto *header = new QHBoxLayout(m_thinkingHeaderRow); header->setContentsMargins(0, 0, 0, 0);
             m_thinkingHeader = new QLabel; m_thinkingHeader->setObjectName(QStringLiteral("transcriptHeader"));
             header->addWidget(m_thinkingHeader, 1);
             auto *close = new QToolButton; close->setText(QStringLiteral("×")); close->setAutoRaise(true); close->setFocusPolicy(Qt::NoFocus);
             close->setToolTip(QStringLiteral("Hide for this turn (Actions › Agent options › Show thinking turns it off)"));
-            connect(close, &QToolButton::clicked, this, [this] { m_thinkingDismissed = true; hideBubble(m_thinking); });
+            connect(close, &QToolButton::clicked, this, [this] { m_thinkingDismissed = true; m_thinkingHeld = false; hideBubble(m_thinking); });
             auto *expand = new QToolButton; expand->setAutoRaise(true); expand->setFocusPolicy(Qt::NoFocus);
             expand->setText(QStringLiteral("▴"));
             expand->setToolTip(QStringLiteral("Show more of the reasoning"));
@@ -2662,7 +2674,7 @@ private:
             });
             header->addWidget(expand);
             header->addWidget(close);
-            box->addLayout(header);
+            box->addWidget(m_thinkingHeaderRow);
             m_thinkingView = new QPlainTextEdit;
             // Its own name, not transcriptView's: the overlay is styled quieter than the transcript.
             m_thinkingView->setObjectName(QStringLiteral("thinkingView"));
@@ -2678,6 +2690,7 @@ private:
         if (!m_thinkingShown) {
             m_thinkingShown = true;
             m_thinkingDismissed = false;
+            m_thinkingHeld = false;   // this turn owns the panel now, not the key that reopened the last one
             m_thinkingView->clear();
             m_thinkingHeader->setText(QStringLiteral("Thinking… · %1").arg(m_model.isEmpty() ? QStringLiteral("agent") : m_model));
         }
@@ -2687,6 +2700,20 @@ private:
         cursor.insertText(sanitize(text), format);
         m_thinkingView->verticalScrollBar()->setValue(m_thinkingView->verticalScrollBar()->maximum());
         if (!m_thinkingDismissed) placeThinking();   // it decides whether there is room to show it
+    }
+
+    // Everything in the panel that is not a line of reasoning: the frame's margins, the spacing, the
+    // header row with its ▴ and × buttons, and the text view's own document margin. Measured rather
+    // than assumed, because a hard-coded 30 px was less than half of it: the compact panel came out
+    // 64 px tall with 15 px of viewport for a 17 px line, so it drew its header over an empty box —
+    // the same half-drawn window cefdb02 set out to stop. Whoever presses Alt+R wants the reasoning,
+    // not the frame around it.
+    int thinkingChrome() const {
+        if (!m_thinking || !m_thinkingView) return 0;
+        const QMargins pad = m_thinking->layout() ? m_thinking->layout()->contentsMargins() : QMargins();
+        const int spacing = m_thinking->layout() ? m_thinking->layout()->spacing() : 0;
+        const int header = m_thinkingHeaderRow ? m_thinkingHeaderRow->sizeHint().height() : 0;
+        return pad.top() + pad.bottom() + spacing + header + 2 * int(m_thinkingView->document()->documentMargin());
     }
 
     // The height the reasoning panel asks the pane's column for. It is a row now rather than an
@@ -2700,17 +2727,21 @@ private:
         // panel is dismissible by hand anyway.
         const int taken = m_queueStrip && m_queueStrip->isVisible()
                           ? m_queueStrip->height() + (layout() ? layout()->spacing() : 0) : 0;
-        if (!m_thinkingShown || m_thinkingDismissed || !roomForBubble(taken)) { hideBubble(m_thinking); return; }
+        // m_thinkingHeld is the keyboard holding it open between turns (toggleThinkingPanel): with no
+        // turn running there is nothing to stream, but the last turn's reasoning is still in the
+        // view and the key asked for it.
+        if ((!m_thinkingShown && !m_thinkingHeld) || m_thinkingDismissed || !roomForBubble(taken)) { hideBubble(m_thinking); return; }
         showBubble(m_thinking);
         // Compact by default: the panel takes the terminal's space now, so it must take as little
         // as it can. The ▴ button expands it when the reasoning is worth reading.
         const int lineHeight = std::max(14, m_thinkingView->fontMetrics().height());
+        const int chrome = thinkingChrome();
         const int span = bubbleSpan();
-        const int wanted = m_thinkingExpanded ? span / 3 : lineHeight * 2 + 30;
-        int height = std::min(m_thinkingExpanded ? 220 : 90, std::max(wanted, lineHeight + 30));
+        const int wanted = m_thinkingExpanded ? span / 3 : lineHeight * 2 + chrome;
+        int height = std::min(m_thinkingExpanded ? 220 : lineHeight * 2 + chrome, std::max(wanted, lineHeight + chrome));
         // Never more than half of what it shares with the terminal: in a pane squeezed down to a
         // few rows the terminal keeps the other half rather than vanishing under the panel.
-        height = std::min(height, std::max(lineHeight + 30, span / 2));
+        height = std::min(height, std::max(lineHeight + chrome, span / 2));
         setBubbleHeight(m_thinking, height);
     }
 
@@ -2822,6 +2853,52 @@ private:
     }
 
 public:
+    bool thinkingPanelVisible() const { return m_thinking && m_thinking->isVisible(); }
+
+    // Alt+R shows and hides this pane's reasoning panel (owner report, 2026-09-18: "need a keyboard
+    // shortcut for showing / hiding the reasoning traces, maybe an F# key ... or alt+R").
+    //
+    // Between turns the key reopens the last turn's reasoning rather than going inert. That text is
+    // still in the view — endThinking() only hides the panel — so there is something honest to show,
+    // and a key that answers only during the seconds an agent happens to be thinking reads as broken
+    // for the rest of the session. Reopened after the turn the header says which turn it is, so a
+    // finished trace is never mistaken for a live one.
+    //
+    // Both refusals speak. A pane too short to draw the panel hides it on purpose (placeThinking),
+    // and a pane that has never streamed reasoning has nothing to draw; silence in either case would
+    // look like the same dead key.
+    void toggleThinkingPanel() {
+        const QString key = Keymap::instance().shortcutText(QStringLiteral("agent.thinkingPanel"));
+        if (thinkingPanelVisible()) {
+            m_thinkingDismissed = true;   // the state the × button sets: hidden for the rest of this turn
+            m_thinkingHeld = false;
+            placeThinking();
+            toast(key.isEmpty() ? QStringLiteral("Reasoning hidden")
+                                : QStringLiteral("Reasoning hidden · %1 shows it again").arg(key));
+            return;
+        }
+        if (!m_thinking || m_thinkingView->document()->isEmpty()) {
+            toast(showThinking() ? QStringLiteral("No reasoning yet in this pane")
+                                 : QStringLiteral("Show thinking is off · Settings › General turns it on"));
+            return;
+        }
+        // Second in line for room, behind the queue strip — the way placeThinking() measures it.
+        const int taken = m_queueStrip && m_queueStrip->isVisible()
+                          ? m_queueStrip->height() + (layout() ? layout()->spacing() : 0) : 0;
+        if (!roomForBubble(taken)) {
+            toast(QStringLiteral("This pane is too short for the reasoning panel · make it taller"));
+            return;
+        }
+        m_thinkingDismissed = false;
+        if (!m_thinkingShown) {
+            m_thinkingHeld = true;   // no turn is running: the key holds it up until the next one starts
+            if (m_thinkingHeader)
+                m_thinkingHeader->setText(QStringLiteral("Thought · last turn · %1")
+                                              .arg(m_model.isEmpty() ? QStringLiteral("agent") : m_model));
+        }
+        placeThinking();
+    }
+
     void openSkills() {
         if (!m_skillsDialog) {
             m_skillsDialog = new relay::SkillsDialog(window());
@@ -8356,13 +8433,15 @@ private:
     QStringList m_turnOrder;
     QHash<QString, QPointer<relay::TurnTranscriptView>> m_turnViews;
     QString m_lastTurnId;
-    bool m_thinkingShown = false, m_thinkingDismissed = false, m_thinkingExpanded = false;
+    // m_thinkingHeld: the panel reopened by the keyboard between turns (toggleThinkingPanel).
+    bool m_thinkingShown = false, m_thinkingDismissed = false, m_thinkingExpanded = false, m_thinkingHeld = false;
     bool m_queueWanted = false;   // the queue has something to show; room decides whether it does
     int m_toolLines = 0;              // lines of the running tool's collapsed output
     bool m_toolPartialLine = false;   // its last chunk had no trailing newline
     QFrame *m_thinking = nullptr;
     QLabel *m_thinkingHeader = nullptr;
     QPlainTextEdit *m_thinkingView = nullptr;
+    QWidget *m_thinkingHeaderRow = nullptr;
     QString m_prefixMode, m_prefixPrevMode;
     QTimer m_idleTip;
     QFrame *m_banner = nullptr;
@@ -9769,6 +9848,7 @@ private:
         else if (id == QStringLiteral("find.inView")) pane->openFindInView();
         else if (id == QStringLiteral("agent.recap")) pane->requestRecap();
         else if (id == QStringLiteral("agent.requests")) pane->toggleRequests();
+        else if (id == QStringLiteral("agent.thinkingPanel")) pane->toggleThinkingPanel();
         else if (id == QStringLiteral("agent.continue")) pane->continueTurn(Keymap::instance().shortcutText(id).isEmpty());
         else if (id == QStringLiteral("agent.instructions")) pane->openInstructions();
         else if (id == QStringLiteral("agent.export")) pane->exportConversation();
@@ -10574,6 +10654,11 @@ private:
         items << actionItem(agent, QStringLiteral("Tasks…"),
                             pane && !pane->tasksProgress().isEmpty() ? pane->tasksProgress() + QStringLiteral(" · the agent's task list · /tasks")
                                                                      : QStringLiteral("Task list: what the agent is working on · /tasks"), QStringLiteral("agent.requests"));
+        items << actionItem(agent, QStringLiteral("Reasoning panel"),
+                            pane && pane->thinkingPanelVisible()
+                                ? QStringLiteral("Hide the agent's reasoning in this pane")
+                                : QStringLiteral("Show the agent's reasoning · the last turn's, between turns"),
+                            QStringLiteral("agent.thinkingPanel"), pane && pane->thinkingPanelVisible());
         items << actionItem(agent, QStringLiteral("Continue agent turn"),
                             pane && pane->limitReached() ? QStringLiteral("The last turn stopped at its step limit · /continue")
                                                          : QStringLiteral("Send “Continue” to the agent · /continue"), QStringLiteral("agent.continue"));
@@ -10761,6 +10846,7 @@ private:
             {QStringLiteral("audit"), QStringLiteral("unaddressed missed requests check todos")},
             {QStringLiteral("shortcut hint"), QStringLiteral("tips tutorial learn keys hints help")},
             {QStringLiteral("thinking"), QStringLiteral("reasoning chain of thought visibility show")},
+            {QStringLiteral("reasoning panel"), QStringLiteral("thinking chain of thought trace show hide panel bubble")},
             {QStringLiteral("agents"), QStringLiteral("subagents workers background explore tasks")},
             {QStringLiteral("rewind"), QStringLiteral("undo checkpoint restore revert history back chat code files")},
             {QStringLiteral("fork"), QStringLiteral("branch copy duplicate conversation")},
