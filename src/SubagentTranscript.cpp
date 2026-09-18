@@ -110,12 +110,14 @@ bool SubagentTranscriptView::eventFilter(QObject *object, QEvent *event) {
 void SubagentTranscriptView::append(const QString &text, Ink ink) {
     const QString clean = sanitize(text);
     if (clean.isEmpty()) return;
+    // Same two-level scheme as the terminal's inks (main.cpp, owner 2026-09-18): user lines carry
+    // a destination colour and machine lines are grey. Every user line here goes to an agent, so
+    // "User" is the agent violet, not the shell cyan.
     QColor color(226, 229, 235);
     switch (ink) {
     case Ink::Agent: break;
-    case Ink::User: color = QColor(62, 197, 240); break;
-    case Ink::Tool: color = QColor(229, 192, 123); break;
-    case Ink::ToolOutput: case Ink::Note: color = QColor(128, 135, 150); break;
+    case Ink::User: color = QColor(180, 142, 247); break;
+    case Ink::Tool: case Ink::ToolOutput: case Ink::Note: color = QColor(128, 135, 150); break;
     case Ink::DiffAdd: color = QColor(126, 200, 140); break;
     case Ink::DiffRemove: case Ink::Error: color = QColor(240, 113, 120); break;
     }

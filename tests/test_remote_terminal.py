@@ -18,7 +18,7 @@ from remote import identity as identity_mod
 from remote import terminal as terminal_mod
 from remote import wire
 from rendezvous.server import Store, build
-from tests.browser import Browser, find_chrome
+from tests.browser import SCREENS_SHOWN, Browser, find_chrome, shown
 
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
 BRIDGE = terminal_mod.find_bridge()
@@ -191,21 +191,27 @@ class BrowserTerminalTests(unittest.TestCase):
                 await browser.start()
                 try:
                     await browser.navigate(url)
-                    await browser.wait_for("!document.getElementById('screen-inbox').hidden",
+                    await browser.wait_for(shown('screen-inbox'),
                                            timeout=40)
                     await browser.evaluate("document.querySelectorAll('.pane-row')[0].click()")
                     # The Terminal tab is chosen automatically when the desktop offers a screen.
-                    await browser.wait_for("!document.getElementById('terminal-pane').hidden",
+                    await browser.wait_for(shown('terminal-pane'),
                                            timeout=20)
                     await browser.wait_for(
                         "document.querySelectorAll('.screen-row').length > 1", timeout=30)
 
+                    # One screen, and the terminal tab shows only its own controls: not the
+                    # agent composer, and not the typing controls until you take over.
+                    self.assertEqual(await browser.evaluate(SCREENS_SHOWN), 1)
+                    self.assertFalse(await browser.evaluate(shown('composer')))
+                    self.assertFalse(await browser.evaluate(shown('term-keys')))
+
                     # Read only until you take over.
                     self.assertFalse(await browser.evaluate(
-                        "document.getElementById('term-composer').hidden === false"))
+                        shown('term-composer')))
                     await browser.evaluate("document.getElementById('term-take').click()")
                     await browser.wait_for(
-                        "!document.getElementById('term-composer').hidden", timeout=20)
+                        shown('term-composer'), timeout=20)
 
                     await browser.evaluate("""
                         (() => {

@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from tests.browser import Browser
+from tests.browser import SCREENS_SHOWN, Browser, shown
 
 
 async def main(url: str) -> None:
@@ -23,17 +23,17 @@ async def main(url: str) -> None:
             "? document.getElementById('pair-code').textContent : ''", timeout=60)
         print("phone shows code", code, flush=True)
 
-        await browser.wait_for("!document.getElementById('screen-inbox').hidden", timeout=90)
+        await browser.wait_for(shown('screen-inbox'), timeout=90)
         print("paired", flush=True)
 
         await browser.evaluate("document.querySelectorAll('.pane-row')[0].click()")
-        await browser.wait_for("!document.getElementById('terminal-pane').hidden", timeout=30)
+        await browser.wait_for(shown('terminal-pane'), timeout=30)
         await browser.wait_for("document.querySelectorAll('.screen-row').length > 1", timeout=30)
         text = await browser.evaluate("document.querySelector('.screen-grid').textContent")
         print("phone sees:", " ".join(text.split())[:200], flush=True)
 
         await browser.evaluate("document.getElementById('term-take').click()")
-        await browser.wait_for("!document.getElementById('term-composer').hidden", timeout=20)
+        await browser.wait_for(shown('term-composer'), timeout=20)
         await browser.evaluate(
             "(() => { const box = document.getElementById('term-line');"
             " box.value = 'printf \"typed from the phone\\\\n\"';"

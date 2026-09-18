@@ -301,17 +301,13 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
 {
     setWindowTitle(QStringLiteral("Share this pane"));
     setModal(false);
+    setMinimumWidth(380);
     auto *column = new QVBoxLayout(this);
     column->setSpacing(10);
 
     m_status = new QLabel(QStringLiteral("Starting…"));
     m_status->setWordWrap(true);
     column->addWidget(m_status);
-
-    m_qr = new QLabel;
-    m_qr->setAlignment(Qt::AlignCenter);
-    m_qr->setMinimumSize(240, 240);
-    column->addWidget(m_qr);
 
     // Which address the phone should reach this machine on. Getting it wrong is the most likely
     // reason a phone says it cannot reach the site, so the choice is in front of the QR code.
@@ -324,6 +320,15 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
         if (!address.isEmpty()) RemoteShare::instance().useAddress(address);
     });
     column->addWidget(m_address);
+
+    m_qr = new QLabel;
+    m_qr->setAlignment(Qt::AlignCenter);
+    m_qr->setFixedSize(260, 260);
+    // A QR code must never be squeezed or overlapped: a phone cannot read a partial one. The
+    // label has a fixed size and the dialog grows to fit whatever else it has to say.
+    column->addWidget(m_qr, 0, Qt::AlignHCenter);
+    column->setSizeConstraint(QLayout::SetMinimumSize);
+
 
     m_url = new QLabel;
     m_url->setTextFormat(Qt::PlainText);
@@ -352,12 +357,12 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     askColumn->addWidget(m_askCode);
     auto *askRow = new QHBoxLayout;
     auto *refuse = new QPushButton(QStringLiteral("Refuse"));
+    m_refuse = refuse;
     auto *allow = new QPushButton(QStringLiteral("Allow typing"));
     // Refuse is the default and holds the focus. Allowing a device is handing it the keyboard of
     // a live shell, so it takes a deliberate click — never a stray Return in a window that just
     // appeared while the person was typing somewhere else.
     refuse->setDefault(true);
-    refuse->setFocus();
     allow->setAutoDefault(false);
     askRow->addWidget(refuse);
     askRow->addWidget(allow);
@@ -412,15 +417,20 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
 
 void RemoteShareDialog::showPairing(const QString &url, const QrMatrix &qr, int expires)
 {
-    m_qr->setPixmap(qrPixmap(qr, 260));
-    m_url->setText(url);
+    const QPixmap code = qrPixmap(qr, 260);
+    m_qr->setFixedSize(code.size().expandedTo(QSize(1, 1)));
+    m_qr->setPixmap(code);
+    // Only the address, not the link: the full link is in the QR already, and its fragment is
+    // the one-time secret — no reason to also print it in the window.
+    m_url->setText(QStringLiteral("Phone connects to %1").arg(url.section(QLatin1Char('/'), 0, 2)));
     QString text = QStringLiteral("Scan this with your phone's camera. The code lasts %1 s.")
                        .arg(expires);
     if (m_address->count() > 1) {
-        text += QStringLiteral("\nIf your phone says it cannot reach the site, pick the other "
-                               "address under the code — the phone has to be on that network.");
+        text += QStringLiteral("\nIf your phone says it cannot reach the site, choose the other "
+                               "address in the list — the phone has to be on that network.");
     }
     m_status->setText(text);
+    fit();
 }
 
 void RemoteShareDialog::showAsk(int id, const QString &name, const QString &platform,
@@ -433,6 +443,12 @@ void RemoteShareDialog::showAsk(int id, const QString &name, const QString &plat
                            .arg(name, platform, peer, fingerprint));
     m_askCode->setText(code);
     m_askBox->show();
+    fit();
+    // Bring the question forward, with Refuse holding the focus. Focus set while the box was
+    // hidden would not stick, so it is set here, the moment there is something to refuse.
+    raise();
+    activateWindow();
+    m_refuse->setFocus(Qt::OtherFocusReason);
 }
 
 void RemoteShareDialog::answer(bool allow)
@@ -443,6 +459,20 @@ void RemoteShareDialog::answer(bool allow)
     m_askBox->hide();
     m_status->setText(allow ? QStringLiteral("Paired. Your phone can watch and type.")
                             : QStringLiteral("Refused."));
+}
+
+// Wrapped labels need more height the narrower they are, and a top-level window's automatic
+// minimum ignores that, so the layout would squeeze the rows onto one another — on top of the QR
+// code, which a phone then cannot read. Work out the real height for this width and hold it.
+void RemoteShareDialog::fit()
+{
+    QLayout *column = layout();
+    if (!column) return;
+    column->activate();
+    const int needed = column->hasHeightForWidth() ? column->totalHeightForWidth(width())
+                                                   : column->totalMinimumSize().height();
+    setMinimumHeight(needed);
+    if (height() < needed) resize(width(), needed);
 }
 
 void RemoteShareDialog::showAddresses(const QJsonArray &addresses)
@@ -461,6 +491,7 @@ void RemoteShareDialog::showAddresses(const QJsonArray &addresses)
     }
     m_address->setVisible(m_address->count() > 1);
     m_address->blockSignals(false);
+    fit();
 }
 
 void RemoteShareDialog::showDevices(const QJsonArray &items)

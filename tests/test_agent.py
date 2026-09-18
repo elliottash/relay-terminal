@@ -85,6 +85,14 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(calls, results)
         self.assertIn('not finished', agent.messages[-1]['content'])
 
+class SystemPromptTests(unittest.TestCase):
+    def test_replies_are_asked_for_in_markdown(self):
+        # The GUI renders agent replies as Markdown in the terminal (src/MarkdownAnsi.cpp).
+        from relay_core import agent as agent_module
+        self.assertIn("Format replies as Markdown", agent_module.SYSTEM)
+        self.assertIn("fenced code blocks", agent_module.SYSTEM)
+
+
 class StallRetryTests(unittest.TestCase):
     """Issue SQAM: a stalled model call is retried once, and only when nothing of the answer arrived."""
 

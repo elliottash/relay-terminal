@@ -283,11 +283,12 @@ QLabel#opaqueHint { color: @warning; }
 QLabel#planChip { color: @onAgent; background: @agent; border-radius: 4px; padding: 1px 6px; font-weight: 700; letter-spacing: 1px; font-size: 8pt; }
 QLabel#contextLabel { color: @muted; font-family: "@mono"; font-size: 9pt; padding: 0 4px; }
 QLabel#contextLabel[warn="true"] { color: @warning; }
-QToolButton#requestsChip { color: @muted; border: 1px solid @border; border-radius: 6px; padding: 2px 8px; font-size: 11px; background: @raised; }
-QToolButton#requestsChip[state="running"] { color: @text; }
-QToolButton#requestsChip[state="done"] { color: @success; border-color: @successBorder; }
-QToolButton#requestsChip[state="attention"] { color: @warning; border-color: @warningBorder; }
-QToolButton#requestsChip:hover { color: @text; border-color: @accent; }
+QToolButton#workChip { color: @muted; border: 1px solid @border; border-radius: 6px; padding: 2px 8px; font-size: 11px; background: @raised; min-height: 16px; }
+QToolButton#workChip[state="running"] { color: @text; }
+QToolButton#workChip[state="done"] { color: @success; border-color: @successBorder; }
+QToolButton#workChip[state="attention"] { color: @warning; border-color: @warningBorder; }
+QToolButton#workChip:hover { color: @text; border-color: @accent; }
+QToolButton#workChip::menu-indicator { image: none; width: 0; }
 QPlainTextEdit#planText { background: @bg; border: none; font-family: "@mono"; font-size: 10pt; padding: 8px; }
 QLabel#planNotice { color: @muted; }
 QFrame#queueStrip QToolButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 1px 6px; }
@@ -321,9 +322,11 @@ QLabel#keyCap { background: @surface; border: 1px solid @border; border-radius: 
 QLabel#helpText { color: @muted; font-size: 12px; }
 QLabel#helpFooter { color: @muted; font-size: 11px; padding-top: 6px; border-top: 1px solid @border; }
 
-/* Warp-style chips in the composer's status strip: a slightly raised rectangle each. */
+/* Warp-style chips in the composer's status strip: a slightly raised rectangle each. The
+   min-height is a line of the chips' 11px text, so an icon-only chip (Switchboard, tasks,
+   microphone, share) is exactly as tall as the text chip beside it (2026-09-17). */
 QToolButton#stripChip { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px;
-                        color: @muted; font-size: 11px; }
+                        color: @muted; font-size: 11px; min-height: 16px; }
 QToolButton#stripChip:hover { color: @text; border-color: @accent; }
 /* The mode chip takes the destination's colour, like the caret. */
 QToolButton#stripChip[dest="shell"] { color: @shell; border-color: @shell; }
@@ -453,6 +456,44 @@ QLabel#filePreviewInfo { color: @text; }
 QWidget#fileExplorer QToolButton, QWidget#filePreview QToolButton { color: @muted; border: 1px solid transparent; border-radius: 6px; padding: 3px 8px; }
 QWidget#fileExplorer QToolButton:hover, QWidget#filePreview QToolButton:hover { color: @text; border-color: @border; background: @raised; }
 QToolButton#fileExplorerHidden:checked { color: @accent; border-color: @accentBorder; }
+
+/* Switchboard (src/BoardPane.cpp; docs/SWITCHBOARD-AESTHETIC.md intervention 3): flat @surface
+   columns with engraved (uppercase, mono, letter-spaced) headers on the pane's @bg. The cards
+   themselves are painted by CardDelegate from the same tokens, so they follow a theme switch. */
+QWidget#boardView, QWidget#boardColumns, QScrollArea#boardScroll { background: @bg; }
+QTabBar#boardTabs::tab { padding: 4px 9px; margin: 0 2px 0 0; }
+QLineEdit#boardFilter { padding: 4px 8px; }
+QToolButton#boardAddButton { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 10px; }
+QToolButton#boardAddButton:hover { border-color: @accent; }
+QFrame#boardColumnFrame { background: @surface; border: 1px solid @border; border-radius: 8px; }
+QLabel#boardColumnHeader { color: @muted; font-family: "@mono"; font-size: 8pt; font-weight: 600; letter-spacing: 1px; }
+QLabel#boardColumnCount { color: @muted; font-family: "@mono"; font-size: 8pt; }
+QToolButton#boardColumnAdd { color: @muted; background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; }
+QToolButton#boardColumnAdd:hover { color: @text; border-color: @border; background: @raised; }
+QListWidget#boardColumn { background: transparent; border: none; }
+QListWidget#boardColumn QScrollBar:vertical { width: 6px; margin: 0; }
+QLineEdit#boardQuickAdd { background: @raised; border-color: @accentBorder; }
+QLabel#boardProblems { color: @warning; border: 1px solid @warningBorder; border-radius: 6px; padding: 4px 8px; }
+QFrame#boardNotice { background: @raised; border: 1px solid @accentBorder; border-radius: 6px; }
+QFrame#boardNotice[error="true"] { border-color: @error; }
+QLabel#boardNoticeText { color: @text; }
+QToolButton#boardTextButton { color: @muted; background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 2px 8px; }
+QToolButton#boardTextButton:hover { color: @text; border-color: @border; background: @raised; }
+QToolButton#boardTextButton:disabled { color: @disabled; }
+QLabel#boardEmpty { color: @muted; }
+QLabel#boardKeys { color: @muted; font-size: 8pt; padding: 4px 10px; border-top: 1px solid @border; }
+QWidget#boardDetail { background: @bg; }
+QLabel#boardCardRef { color: @muted; font-family: "@mono"; }
+QLabel#boardCardTitle { color: @text; font-size: 12pt; font-weight: 600; }
+QToolButton#boardCardClose { color: @muted; background: transparent; border: 1px solid transparent; border-radius: 4px; font-size: 12pt; padding: 0 6px; }
+QToolButton#boardCardClose:hover { color: @text; border-color: @border; background: @raised; }
+QComboBox#boardPicker { padding: 2px 26px 2px 8px; min-height: 18px; }
+QLabel#boardCardMeta { color: @text; font-size: 9pt; }
+QTextBrowser#boardCardDocument { background: @surface; color: @text; border: 1px solid @border; border-radius: 8px; padding: 0; }
+QLabel#boardCardError { color: @error; }
+QFrame#boardReply { background: @surface; border: 1px solid @border; border-radius: 8px; }
+QPlainTextEdit#boardReplyEditor { background: transparent; border: none; padding: 2px; }
+QPushButton#boardReplyButton, QFrame#boardReply QPushButton#primary { padding: 4px 12px; }
 )");
     const QColor selection = spec.uiColor(QStringLiteral("selection"), Accent.darker(200));
     const QColor caution = blend(Warning, Error, 0.7);

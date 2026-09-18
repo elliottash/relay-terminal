@@ -1089,6 +1089,12 @@ built per worker: the **agent's**, with the guardrails of 17.7, and the **owner'
 messages below with the rate limit and the duplicate check off — the guardrails exist to keep an
 agent honest, not the person typing.
 
+The board is set up **before** the provider is resolved (2026-09-17). A `configure` that fails for
+want of a key answers `error` and no `configured`, but the board messages below still work: only
+`board_ask` needs the model. The GUI therefore sends `board_open` straight after `configure`
+(stdin is read in order) instead of waiting for `configured`, which never comes in a window with
+no key — that window used to show "Loading the Switchboard…" forever.
+
 ### 19.2 Reading the board
 
 | Message | Reply |
@@ -1134,6 +1140,11 @@ person, and defaults to `owner`.
 `hash`, `path`, `status`). A refusal is the ordinary `error` event with a `code` — notably
 `board_conflict` (with `current_hash`, after which the GUI re-reads and reapplies) and
 `board_not_found`.
+
+The pane gives every request an `id` with a prefix of its own and matches `board_written`,
+`board_undone` and `error` by it: its own move or creation shows a notice with **Undo** (and
+Ctrl+Z), and its own refused write — a drop into Needs QA without evidence, say — shows the
+refusal's text where the card was dropped rather than nothing at all.
 
 `board_undo` is the 30-second toast. It restores the file bytes recorded before the write and
 truncates the thread back to its length at that moment, then records the undo itself as a thread

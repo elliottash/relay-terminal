@@ -139,6 +139,15 @@ class ValidityTests(unittest.TestCase):
             self.assertInvalid("./missing.sh", "no such file", cwd=d)
             self.assertInvalid("./", "is a directory", cwd=d)
 
+    def test_arithmetic_and_bare_globs_are_not_commands(self):
+        # Owner report 2026-09-18: "35*30" ran in the shell because a glob in command position was
+        # treated as un-decidable; bare arithmetic and a lone glob belong to the agent.
+        self.assertInvalid("35*30", "command not found: 35*30")
+        self.assertInvalid("35 * 30", "command not found: 35")
+        self.assertInvalid("*", "command not found: *")
+        # A letter-bearing glob in command position stays un-decidable, so still runnable.
+        self.assertValid("p* --version")
+
     def test_syntax_errors(self):
         result = self.assertInvalid("don't break the build", "syntax error:")
         self.assertFalse(result.syntax_ok)

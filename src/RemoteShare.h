@@ -123,6 +123,7 @@ private:
     void showDevices(const QJsonArray &items);
     void showAddresses(const QJsonArray &addresses);
     void answer(bool allow);
+    void fit();
 
     QString m_paneId;
     QLabel *m_status = nullptr;
@@ -133,6 +134,7 @@ private:
     QWidget *m_askBox = nullptr;
     QLabel *m_askText = nullptr;
     QLabel *m_askCode = nullptr;
+    QPushButton *m_refuse = nullptr;
     QListWidget *m_devices = nullptr;
     QPushButton *m_stop = nullptr;
     int m_askId = -1;

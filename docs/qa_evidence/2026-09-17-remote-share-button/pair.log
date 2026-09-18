@@ -1,21 +1,5 @@
-phone shows code 69309
-Traceback (most recent call last):
-  File "/home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-17-remote-share-button/browser_pair.py", line 51, in <module>
-    asyncio.run(asyncio.wait_for(main(sys.argv[1]), 240))
-  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
-    return runner.run(main)
-           ^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
-    return future.result()
-           ^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
-    return await fut
-           ^^^^^^^^^
-  File "/home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-17-remote-share-button/browser_pair.py", line 26, in main
-    await browser.wait_for("!document.getElementById('screen-inbox').hidden", timeout=90)
-  File "/home/elliott/repos/relay-terminal/tests/browser.py", line 147, in wait_for
-    raise AssertionError(f"timed out waiting for {expression!r}; last value {last!r}; "
-AssertionError: timed out waiting for "!document.getElementById('screen-inbox').hidden"; last value False; console: []
+phone shows code 46183
+paired
+phone sees: elliott@spark-dcc9:/tmp/tmp.sc2bYq0abN$ printf "shared from the desktop\\n" shared from the desktop elliott@spark-dcc9:/tmp/tmp.sc2bYq0abN$
+phone sees after typing: elliott@spark-dcc9:/tmp/tmp.sc2bYq0abN$ printf "shared from the desktop\\n" shared from the desktop elliott@spark-dcc9:/tmp/tmp.sc2bYq0abN$ printf "typed from the phone\n" typed from the phone elliott@spark-dcc9:/tmp/tmp.sc2bYq0abN$
+console problems: []

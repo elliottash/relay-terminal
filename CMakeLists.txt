@@ -162,6 +162,13 @@ target_include_directories(relay-outputlinks PUBLIC src)
 target_link_libraries(relay-outputlinks PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-outputlinks PRIVATE -Wall -Wextra -Wpedantic)
 
+# Agent replies in the terminal: streaming Markdown to ANSI (headings, emphasis, code, lists,
+# quotes, links, tables). Plain QtCore so chunk boundaries can be tested without a terminal.
+add_library(relay-markdown STATIC src/MarkdownAnsi.cpp src/MarkdownAnsi.h)
+target_include_directories(relay-markdown PUBLIC src)
+target_link_libraries(relay-markdown PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-markdown PRIVATE -Wall -Wextra -Wpedantic)
+
 # Aliases: saved commands and prompts (issue G8DK): turning an alias's template into composer
 # fields, walking them with Tab, and deciding whether a typed line names an alias. Plain QtCore so
 # every rule is testable without a window; the worker owns the files and the shell-safe parameter
@@ -218,7 +225,7 @@ if(RELAY_BUILD_APP)
         src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-outputlinks relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-board relay-aliases ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-board relay-aliases ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -287,6 +294,9 @@ if(BUILD_TESTING)
     add_executable(relay-outputlinks-tests tests/outputlinks_test.cpp)
     target_link_libraries(relay-outputlinks-tests PRIVATE relay-outputlinks ${RELAY_QT}::Test)
     add_test(NAME outputlinks COMMAND relay-outputlinks-tests)
+    add_executable(relay-markdown-tests tests/markdownansi_test.cpp)
+    target_link_libraries(relay-markdown-tests PRIVATE relay-markdown ${RELAY_QT}::Test)
+    add_test(NAME markdown COMMAND relay-markdown-tests)
     add_executable(relay-backends-tests tests/backends_test.cpp)
     target_link_libraries(relay-backends-tests PRIVATE relay-backends ${RELAY_QT}::Test)
     add_test(NAME backends COMMAND relay-backends-tests)

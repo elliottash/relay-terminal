@@ -354,6 +354,7 @@ private:
         add("files.explorer", "pane", "Open or close this pane's folder in an explorer pane",
             {QStringLiteral("Ctrl+B"), QStringLiteral("Ctrl+Shift+B")});
         add("files.open", "pane", "Open a file in a preview pane", {});
+        add("board.open", "pane", "Switchboard: cards, threads and plans", {QStringLiteral("Ctrl+Shift+S")});
         add("control.human", "terminal", "Take control of the terminal (the only way keys reach it; works from the prompt box)", {QStringLiteral("Ctrl+H")});
         add("control.prompt", "terminal", "Back to the Relay prompt (the agent is in control)", {QStringLiteral("Ctrl+Shift+H")});
         add("program.delegate", "terminal", "Let the agent drive the program in this pane (with text in the prompt box, ask it now)",
@@ -694,6 +695,7 @@ public:
     std::function<void(const QString &path, int line)> onOpenPath;
     std::function<void(const QString &)> onToggleExplorer;   // open the explorer, or close it again
     std::function<void()> onOpenBoard;                 // Switchboard: /switchboard from this pane
+    std::function<void(const QString &)> onOpenCard;   // Switchboard: one card, from the work chip
     std::function<void(const QString &turnId)> onOpenTurn;   // "✦ N tool calls" link or palette
     // Right-click menu entries the window owns: new pane, close pane, tasks (issue #X2F1).
     std::function<void(const QString &action)> onWindowAction;
@@ -1588,8 +1590,10 @@ public:
         if (fresh && m_agentBusy) { status(QStringLiteral("Stop the agent turn before executing in a fresh context.")); return; }
         send({{"type", "plan_execute"}, {"path", path}, {"fresh", fresh},
               {"when", m_agentBusy ? QStringLiteral("queue") : QStringLiteral("now")}});
+        // An agent-bound action the user took, so it gets the agent echo: violet, and the ✦ glyph
+        // the site and BoardPane already use for agent lines (› is the shell glyph).
         ensureLineStart();
-        printInline(QStringLiteral("› Execute the plan %1%2\n").arg(QFileInfo(path).fileName(), fresh ? QStringLiteral(" (fresh context)") : QString()), Ink::User);
+        printInline(QStringLiteral("✦ Execute the plan %1%2\n").arg(QFileInfo(path).fileName(), fresh ? QStringLiteral(" (fresh context)") : QString()), Ink::UserAgent);
         focusInput();
     }
     void keepPlanning() {
@@ -1894,6 +1898,11 @@ private:
         // Clicking the directory line opens it in the explorer pane.
         m_cwdLabel->setCursor(Qt::PointingHandCursor);
         m_cwdLabel->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+        // A QLabel's minimum is its whole text. With the long "TERMINAL <path> │ AGENT
+        // WORKSPACE <path>" form that made the pane refuse to go under ~1000 px, so a pane
+        // opened beside it (the Switchboard, 2026-09-17) got a third of the window instead of
+        // half. Clipped from the left instead; the tooltip has the full paths.
+        m_cwdLabel->setMinimumWidth(1);
         m_cwdLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         m_cwdLabel->installEventFilter(this);
         m_cwdLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -1918,8 +1927,15 @@ private:
         m_composer = composer;
         auto *composerLayout = new QVBoxLayout(composer);
         auto *routeRow = new QHBoxLayout;
-        // The strip under the prompt box (owner design, 2026-09-17): directory and mode on the
-        // left, context left / model / microphone on the right, each in a Warp-style chip.
+        // The strip under the prompt box (owner design, 2026-09-17): directory, Switchboard and
+        // tasks on the left, context left / model / microphone on the right, each in a Warp-style
+        // chip. Where the line goes is not in the strip: the mode chip sits in the prompt box's
+        // top-right corner (owner, 2026-09-17), on the text it routes, with the `!` / `*` and
+        // password chips that qualify it. The corner is a column of its own, so text wraps before
+        // it rather than running underneath.
+        auto *corner = new QHBoxLayout;
+        corner->setContentsMargins(0, 0, 0, 0);
+        corner->setSpacing(6);
         m_cwdChip = new QToolButton;
         m_cwdChip->setObjectName(QStringLiteral("stripChip"));
         m_cwdChip->setFocusPolicy(Qt::NoFocus);
@@ -1940,19 +1956,20 @@ private:
             }
             m_modeChip->setMenu(menu);
         }
-        routeRow->addWidget(m_modeChip);
+        setupWorkChip(routeRow);               // Switchboard: this pane's issues, tasks and plan
         // `!` / `*` typed first in an empty prompt: terminal / agent mode for this submission.
         m_prefixChip = new QLabel;
         m_prefixChip->setObjectName(QStringLiteral("prefixChip"));
         m_prefixChip->hide();
-        routeRow->addWidget(m_prefixChip);
+        corner->addWidget(m_prefixChip);
         // "password for sudo" while the prompt box is masked.
         m_secretChip = new QLabel;
         m_secretChip->setObjectName(QStringLiteral("secretChip"));
         m_secretChip->setTextFormat(Qt::PlainText);
         m_secretChip->setToolTip(QStringLiteral("The line is written to the program and never stored"));
         m_secretChip->hide();
-        routeRow->addWidget(m_secretChip);
+        corner->addWidget(m_secretChip);
+        corner->addWidget(m_modeChip);
         // The routing verdict has no chip of its own: it is the mode chip's tooltip. The label
         // survives only as the place that text and tooltip live, so it is parented to the composer
         // and never added to a layout or shown. A parentless QWidget that is shown becomes a
@@ -1964,7 +1981,6 @@ private:
         m_opaqueHint->hide();
         routeRow->addWidget(m_opaqueHint, 1);
         routeRow->addStretch(1);
-        setupRequestsUi(routeRow);             // tasks chip, hidden unless something is unfinished
         buildSessionControls(routeRow);        // plan chip and the context chip, next to the model
         m_modelBox = new QComboBox;
         m_modelBox->setObjectName(QStringLiteral("statusPicker"));
@@ -2015,7 +2031,19 @@ private:
         m_highlighter = new relay::InputHighlighter(m_editor->document());
         QTimer::singleShot(0, this, [this] { refreshDestinationColor(); });
         m_editor->setAutoHeight(1, 8);   // one line when idle, growing with the text
-        composerLayout->addWidget(m_editor);
+        auto *inputRow = new QHBoxLayout;
+        inputRow->setContentsMargins(0, 0, 0, 0);
+        inputRow->setSpacing(6);
+        auto *inputColumn = new QVBoxLayout;
+        inputColumn->setContentsMargins(0, 0, 0, 0);
+        inputColumn->addWidget(m_editor);
+        inputRow->addLayout(inputColumn, 1);
+        auto *cornerColumn = new QVBoxLayout;
+        cornerColumn->setContentsMargins(0, 0, 0, 0);
+        cornerColumn->addLayout(corner);
+        cornerColumn->addStretch(1);
+        inputRow->addLayout(cornerColumn);
+        composerLayout->addLayout(inputRow);
         // Password prompts (checkPasswordPrompt): the prompt box becomes a masked field whose
         // line goes to the running program. It is a separate widget so the password can never
         // reach the composer's document, its history, its undo stack or route assist.
@@ -2026,7 +2054,7 @@ private:
         m_secretEdit->setPlaceholderText(QStringLiteral("Password · Enter sends it to the program, Esc cancels"));
         m_secretEdit->hide();
         connect(m_secretEdit, &QLineEdit::returnPressed, this, [this] { submitSecret(); });
-        composerLayout->addWidget(m_secretEdit);
+        inputColumn->addWidget(m_secretEdit);
         composerLayout->addLayout(routeRow);
         // No key-hints row: Ctrl+? lists every shortcut, and the strip stays quiet.
         m_help = nullptr;
@@ -2909,7 +2937,11 @@ public:
             if (auto *engine = dynamic_cast<relay::VTermBackend *>(m_backend)) {
                 hooks.view = engine->view();
             }
-            hooks.title = [this] { return paneTitle(); };
+            // The same label the tab shows: the pane's title, or its folder until it has one.
+            // Never the internal id, which is what a phone saw before.
+            hooks.title = [this] {
+                return m_title.isEmpty() ? QFileInfo(m_cwd).fileName() : m_title;
+            };
             hooks.cwd = [this] { return m_cwd; };
             hooks.status = [this] { return shareStatus(); };
             hooks.input = [this](const QByteArray &bytes) {
@@ -3324,6 +3356,8 @@ private:
         }
         if (type == QStringLiteral("plan_written")) {
             const QString path = event.value(QStringLiteral("path")).toString();
+            m_lastPlanPath = path;
+            updateWorkChip();
             ensureLineStart();
             printInline(QStringLiteral("Plan written: %1\n").arg(QDir(m_workspace).relativeFilePath(path)), Ink::Note);
             if (onPlanWritten) QTimer::singleShot(0, this, [this, path] { if (onPlanWritten) onPlanWritten(path, this); });
@@ -4175,25 +4209,28 @@ private:
     // ----- end subagents UI ---------------------------------------------------------------------
 
     // ----- request ledger UI (protocol section 12) ----------------------------------------------
-    void setupRequestsUi(QHBoxLayout *row) {
-        m_routeRow = row;
-        m_requestsChip = new QToolButton;
-        m_requestsChip->setObjectName(QStringLiteral("requestsChip"));
-        m_requestsChip->setFocusPolicy(Qt::NoFocus);
-        m_requestsChip->setAccessibleName(QStringLiteral("Tasks"));
-        m_requestsChip->setIcon(stripIcon(QStringLiteral("tasks")));
-        m_requestsChip->setIconSize(QSize(13, 13));
-        m_requestsChip->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-        m_requestsChip->hide();
-        row->addWidget(m_requestsChip);
-        connect(m_requestsChip, &QToolButton::clicked, this, [this] {
-            toggleRequests();
-            hint(QStringLiteral("tasks.chip"), requestsShortcutHint());
-        });
+    // One Switchboard chip for what this pane is working on (owner, 2026-09-17): the cards it
+    // referenced, the agent's task list and its plan, summed up as "#K7Q2 · 2/5 · plan". A click
+    // opens a menu with each part and a way into the Switchboard itself.
+    void setupWorkChip(QHBoxLayout *row) {
+        m_workChip = new QToolButton;
+        m_workChip->setObjectName(QStringLiteral("workChip"));
+        m_workChip->setFocusPolicy(Qt::NoFocus);
+        m_workChip->setAccessibleName(QStringLiteral("Switchboard: issues, tasks and plan"));
+        m_workChip->setIcon(stripIcon(QStringLiteral("board")));
+        m_workChip->setIconSize(QSize(14, 14));
+        m_workChip->setCursor(Qt::PointingHandCursor);
+        m_workChip->setPopupMode(QToolButton::InstantPopup);
+        auto *menu = new QMenu(m_workChip);
+        connect(menu, &QMenu::aboutToShow, this, [this, menu] { fillWorkMenu(menu); });
+        m_workChip->setMenu(menu);
+        row->addWidget(m_workChip);
         m_ledger.onChanged = [this] {
-            updateRequestsChip();
+            updateWorkChip();
             if (m_requestsPanel) m_requestsPanel->refresh();
         };
+        Keymap::instance().listen(this, [this] { updateWorkChip(); });
+        updateWorkChip();
     }
 
     QString requestsShortcutHint() const {
@@ -4202,18 +4239,85 @@ private:
                               : relay::ShortcutHints::nextTime(keys, QStringLiteral("task list"));
     }
 
-    void updateRequestsChip() {
-        if (!m_requestsChip) return;
-        const bool show = m_ledger.hasTasks();
-        m_requestsChip->setText(m_ledger.chipText());
-        const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.requests"));
-        m_requestsChip->setToolTip(m_ledger.chipToolTip() + QStringLiteral("\nClick, /tasks%1: the agent's task list")
-                                       .arg(keys.isEmpty() ? QString() : QStringLiteral(" or ") + keys));
-        m_requestsChip->setProperty("state", m_ledger.chipState());
-        m_requestsChip->style()->unpolish(m_requestsChip); m_requestsChip->style()->polish(m_requestsChip);
-        const bool wasVisible = m_requestsChip->isVisible();
-        m_requestsChip->setVisible(show);
-        if (wasVisible != show && m_queueStrip && m_queueStrip->isVisible()) rebuildQueueStrip();
+    void noteWorkCard(const QString &id) {
+        if (id.isEmpty()) return;
+        m_workCards.removeAll(id);
+        m_workCards.prepend(id);
+        while (m_workCards.size() > 8) m_workCards.removeLast();
+        updateWorkChip();
+    }
+
+    // The icon alone until there is something to show.
+    void updateWorkChip() {
+        if (!m_workChip) return;
+        QStringList parts;
+        if (m_workCards.size() == 1) parts << QStringLiteral("#") + m_workCards.first();
+        else if (!m_workCards.isEmpty()) parts << QStringLiteral("%1 cards").arg(m_workCards.size());
+        const bool tasks = m_ledger.hasTasks();
+        if (tasks) parts << m_ledger.summary().progress();
+        if (!m_lastPlanPath.isEmpty()) parts << QStringLiteral("plan");
+        m_workChip->setText(parts.join(QStringLiteral(" · ")));
+        m_workChip->setToolButtonStyle(parts.isEmpty() ? Qt::ToolButtonIconOnly : Qt::ToolButtonTextBesideIcon);
+        const QString keys = Keymap::instance().shortcutText(QStringLiteral("board.open"));
+        m_workChip->setToolTip((tasks ? m_ledger.chipToolTip() + '\n' : QString())
+                               + QStringLiteral("Issues, tasks and plan for this pane")
+                               + (keys.isEmpty() ? QString() : QStringLiteral(" · %1 opens the Switchboard").arg(keys)));
+        m_workChip->setProperty("state", m_ledger.chipState());
+        m_workChip->style()->unpolish(m_workChip); m_workChip->style()->polish(m_workChip);
+    }
+
+    void fillWorkMenu(QMenu *menu) {
+        menu->clear();
+        auto &keys = Keymap::instance();
+        // addSection draws a bare line in Relay's menu style, so each section is a disabled bold
+        // row of its own, with a separator above it.
+        auto section = [menu](const QString &title) {
+            if (!menu->isEmpty()) menu->addSeparator();
+            QAction *head = menu->addAction(title);
+            head->setEnabled(false);
+            QFont bold = head->font();
+            bold.setBold(true);
+            head->setFont(bold);
+        };
+        section(QStringLiteral("Issues"));
+        if (m_workCards.isEmpty()) {
+            menu->addAction(QStringLiteral("Type # in the prompt to reference a card"))->setEnabled(false);
+        }
+        for (const QString &id : m_workCards) {
+            const relay::board::Card *card = m_cardIndex.card(id);
+            const QString label = card ? QStringLiteral("#%1  %2  ·  %3").arg(id, card->title, relay::board::statusTitle(card->status))
+                                       : QStringLiteral("#") + id;
+            menu->addAction(label, this, [this, id] { if (onOpenCard) onOpenCard(id); });
+        }
+        section(QStringLiteral("Tasks"));
+        QList<relay::TaskItem> tasks = m_ledger.tasks();
+        int batch = 0;
+        for (const auto &task : tasks) batch = std::max(batch, task.batch);
+        int shown = 0;
+        for (const auto &task : tasks) {
+            if (task.batch != batch) continue;
+            if (++shown > 8) break;
+            QAction *row = menu->addAction(relay::RequestLedgerModel::todoGlyph(task.status) + QStringLiteral("  ") + task.text,
+                                           this, [this] { openRequests(); });
+            row->setToolTip(task.note);
+        }
+        if (!shown) menu->addAction(QStringLiteral("No task list yet"))->setEnabled(false);
+        QAction *list = menu->addAction(QStringLiteral("Show task list"), this, [this] { toggleRequests(); });
+        if (const QString k = keys.keysFor(QStringLiteral("agent.requests")).value(0); !k.isEmpty()) list->setShortcut(QKeySequence(k));
+        section(QStringLiteral("Plan"));
+        if (!m_lastPlanPath.isEmpty()) {
+            const QString path = m_lastPlanPath;
+            menu->addAction(QStringLiteral("Open %1").arg(QDir(m_workspace).relativeFilePath(path)), this,
+                            [this, path] { if (onPlanWritten) onPlanWritten(path, this); });
+        }
+        QAction *plan = menu->addAction(QStringLiteral("Plan mode"), this, [this] { togglePlanMode(); });
+        plan->setCheckable(true);
+        plan->setChecked(m_agentMode == QStringLiteral("plan"));
+        if (const QString k = keys.keysFor(QStringLiteral("agent.planToggle")).value(0); !k.isEmpty()) plan->setShortcut(QKeySequence(k));
+        menu->addSeparator();
+        QAction *board = menu->addAction(stripIcon(QStringLiteral("board")), QStringLiteral("Open the Switchboard"), this,
+                                         [this] { if (onOpenBoard) onOpenBoard(); });
+        if (const QString k = keys.keysFor(QStringLiteral("board.open")).value(0); !k.isEmpty()) board->setShortcut(QKeySequence(k));
     }
 
 public:
@@ -4341,6 +4445,8 @@ private:
     }
 
     // "▸ Continue" as a terminal hyperlink (relay://continue/<pane>), like the tool-calls link.
+    // The link text is white (owner, 2026-09-18): it continues the agent's turn, so it sits with
+    // the agent's prose rather than the grey machinery around it.
     void printContinueLink() {
         const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.continue"));
         const QString fast = keys.isEmpty() ? QStringLiteral("/continue") : keys + QStringLiteral(" or /continue");
@@ -4349,7 +4455,7 @@ private:
         QByteArray out;
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; }
         if (!m_atLineStart) out += "\r\n";
-        out += "\x1b]8;;" + url + "\x1b\\" + inkCode(Ink::User) + QByteArray("▸ Continue") + "\x1b[0m" + "\x1b]8;;\x1b\\";
+        out += "\x1b]8;;" + url + "\x1b\\" + inkCode(Ink::Agent) + QByteArray("▸ Continue") + "\x1b[0m" + "\x1b]8;;\x1b\\";
         out += inkCode(Ink::Note) + QStringLiteral("  (Ctrl+click · %1)").arg(fast).toUtf8() + "\x1b[0m\r\n";
         m_atLineStart = true;
         writeTerminal(out);
@@ -5037,9 +5143,16 @@ private:
             submitTerminal(text, false);
         } else {
             // "agent", or a legacy "ambiguous" decision: the agent is the default for invalid input.
-            // Show why non-command input went to the agent, e.g. "command not found: foo".
-            const QString why = !decision.value(QStringLiteral("valid")).toBool(true) && mode != QStringLiteral("agent")
+            // Show why non-command input went to the agent, e.g. "command not found: foo" — but only
+            // when the named word could have been a mistyped command. "35 * 30" routes here as
+            // "command not found: 35", and printing that under the prompt reads as the failure of a
+            // command the user never meant to run, so a word with no letters stays quiet
+            // (owner report, 2026-09-18).
+            QString why = !decision.value(QStringLiteral("valid")).toBool(true) && mode != QStringLiteral("agent")
                 ? decision.value(QStringLiteral("invalid_reason")).toString() : QString();
+            static const QString notFound = QStringLiteral("command not found: ");
+            if (why.startsWith(notFound) && !why.mid(notFound.size()).contains(QRegularExpression(QStringLiteral("[A-Za-z]"))))
+                why.clear();
             // Wrong-mode hints: remember a runnable command submitted in agent mode, so a failing
             // run_command of the same text can suggest the terminal (see the tool_result handler).
             const QString shellText = mode == QStringLiteral("agent")
@@ -5688,22 +5801,35 @@ private:
     // ----- inline output in the terminal -------------------------------------------------
     enum class Ink { Agent, User, UserAgent, Tool, ToolOutput, DiffAdd, DiffRemove, Error, Note, Recap };
 
-    static QByteArray inkCode(Ink ink) {
+    // Two levels (owner, 2026-09-18): the conversation carries colour — cyan for what the user
+    // sent to the shell, violet for what they sent to the agent, white for the agent's prose —
+    // and everything the machine did on its own (tools, tool output, recaps, notes) is the same
+    // muted grey, so prose stands out and the amber/violet tokens keep their meanings (warn,
+    // agent destination). Diffs keep the add/remove pair and failures keep red: content, not
+    // chrome.
+    // Agent lines follow the active theme: the colours come from the live tokens (src/Theme.h),
+    // so a light theme gets dark text instead of the near-white a dark theme uses. Lines already
+    // printed keep the colours they were written in; the terminal cannot recolour its scrollback.
+    static QColor inkColor(Ink ink) {
+        namespace t = relay::theme;
         switch (ink) {
-        case Ink::Agent: return "\x1b[38;2;226;229;235m";
-        case Ink::User: return "\x1b[1;38;2;62;197;240m";
-        // A line that went to the agent is echoed in the agent's violet, the same colour the caret
-        // and the mode chip use for that destination.
-        case Ink::UserAgent: return "\x1b[1;38;2;180;142;247m";
-        case Ink::Tool: return "\x1b[38;2;229;192;123m";
-        case Ink::ToolOutput: return "\x1b[38;2;128;135;150m";
-        case Ink::DiffAdd: return "\x1b[38;2;126;200;140m";
-        case Ink::DiffRemove: return "\x1b[38;2;232;120;128m";
-        case Ink::Error: return "\x1b[38;2;240;113;120m";
-        case Ink::Note: return "\x1b[3;38;2;128;135;150m";
-        case Ink::Recap: return "\x1b[38;2;190;160;240m";
+        case Ink::Agent: return t::Text;
+        case Ink::User: return t::Shell;
+        case Ink::UserAgent: return t::Agent;
+        case Ink::Tool: case Ink::ToolOutput: case Ink::Note: case Ink::Recap: return t::TextMuted;
+        case Ink::DiffAdd: return t::Success;
+        case Ink::DiffRemove: case Ink::Error: return t::Error;
         }
-        return {};
+        return t::Text;
+    }
+
+    static QByteArray inkCode(Ink ink) {
+        const QColor c = inkColor(ink);
+        // Bold for the lines the user typed, italic for notes, plain otherwise.
+        const QByteArray style = (ink == Ink::User || ink == Ink::UserAgent) ? QByteArray("1;")
+                               : ink == Ink::Note ? QByteArray("3;") : QByteArray();
+        return "\x1b[" + style + "38;2;" + QByteArray::number(c.red()) + ';' + QByteArray::number(c.green())
+               + ';' + QByteArray::number(c.blue()) + 'm';
     }
 
     bool shellIdleAtPrompt() const {
@@ -5731,20 +5857,6 @@ private:
             if (u == '\n' || u == '\t' || (u >= 0x20 && u != 0x7f && !(u >= 0x80 && u < 0xa0))) clean += c;
         }
         return clean;
-    }
-
-    static QColor inkColor(Ink ink) {
-        switch (ink) {
-        case Ink::Agent: return QColor(226, 229, 235);
-        case Ink::User: return QColor(62, 197, 240);
-        case Ink::UserAgent: return QColor(180, 142, 247);
-        case Ink::Tool: return QColor(229, 192, 123);
-        case Ink::ToolOutput: case Ink::Note: return QColor(128, 135, 150);
-        case Ink::DiffAdd: return QColor(126, 200, 140);
-        case Ink::DiffRemove: case Ink::Error: return QColor(240, 113, 120);
-        case Ink::Recap: return QColor(190, 160, 240);
-        }
-        return QColor(226, 229, 235);
     }
 
     void buildTranscript() {
@@ -5872,11 +5984,13 @@ private:
         resetTranscript();
     }
 
+    // The turn's first line is machinery — which model is about to speak — not one of the user's
+    // lines, so it is grey like the rest of the machine's own output, not cyan (owner, 2026-09-18).
     void turnHeader() {
         if (m_turnHeader) return;
         m_turnHeader = true;
         ensureLineStart();
-        printInline(QStringLiteral("▸ ") + (m_model.isEmpty() ? QStringLiteral("agent") : m_model) + '\n', Ink::User);
+        printInline(QStringLiteral("▸ ") + (m_model.isEmpty() ? QStringLiteral("agent") : m_model) + '\n', Ink::Note);
     }
 
 
@@ -5922,6 +6036,7 @@ private:
         entry.agent = true; entry.text = text; entry.why = why; entry.attachments = attachmentsFor(text);
         entry.shellText = shellText;
         entry.cards = cardsFor(text);   // Switchboard: `#K7Q2` in the prompt (protocol 17.6)
+        for (const QJsonValue &card : entry.cards) noteWorkCard(card.toObject().value(QStringLiteral("id")).toString());
         if (when == QStringLiteral("interrupt") && m_agentBusy) {
             // Bypasses the queue: stop the running turn and run this now. Queued items keep their order.
             m_interruptPending = true;
@@ -6508,6 +6623,7 @@ private:
         const QString summary = event.value(QStringLiteral("summary")).toString();
         if (id.isEmpty()) return;
         m_cardIndexAsked = false;   // the rows changed; refresh the picker on its next use
+        noteWorkCard(id);
         const QString line = QStringLiteral("◆ #%1 · %2").arg(id, summary);
         status(line);
         toast(line, 4000);
@@ -6967,23 +7083,17 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
         while (QLayoutItem *item = layout->takeAt(0)) {
             if (QWidget *w = item->widget()) { if (w != m_queueList) w->deleteLater(); }
             else if (QLayout *l = item->layout()) {
-                while (QLayoutItem *inner = l->takeAt(0)) { if (inner->widget() && inner->widget() != m_requestsChip) inner->widget()->deleteLater(); delete inner; }
+                while (QLayoutItem *inner = l->takeAt(0)) { if (inner->widget()) inner->widget()->deleteLater(); delete inner; }
             }
             delete item;
         }
         m_queueStrip->setVisible(visible);
-        // The Tasks chip sits in the queue strip while it shows, else in the composer row.
-        if (m_requestsChip && m_routeRow && (!visible || !m_ledger.hasTasks()) && m_routeRow->indexOf(m_requestsChip) < 0) {
-            m_routeRow->insertWidget(3, m_requestsChip);
-            m_requestsChip->setVisible(m_ledger.hasTasks());
-        }
         if (!visible) return;
         auto *header = new QHBoxLayout;
         auto *title = new QLabel(m_entriesPaused ? QStringLiteral("QUEUE · PAUSED") : QStringLiteral("QUEUE"));
         title->setObjectName(QStringLiteral("queueTitle"));
         title->setToolTip(m_pauseReason);
         header->addWidget(title, 1);
-        if (m_requestsChip && m_ledger.hasTasks()) { header->addWidget(m_requestsChip); m_requestsChip->show(); }
         auto *hint = new QLabel(QStringLiteral("↑ select · Ctrl+↑↓ move · Enter edit · Del remove"));
         hint->setObjectName(QStringLiteral("queueHint"));
         header->addWidget(hint);
@@ -7747,8 +7857,9 @@ private:
     relay::SubagentModel m_subagents;
     // request ledger UI
     relay::RequestLedgerModel m_ledger;
-    QToolButton *m_requestsChip = nullptr;
-    QHBoxLayout *m_routeRow = nullptr;
+    QToolButton *m_workChip = nullptr;
+    QStringList m_workCards;     // cards this pane referenced or the agent changed, newest first
+    QString m_lastPlanPath;      // the plan this pane's agent wrote last
     QPointer<relay::RequestsPanel> m_requestsPanel;
     bool m_limitReached = false;   // the last turn stopped at the step or tool-call limit
     relay::SubagentsPanel *m_agentsPanel = nullptr;
@@ -7891,6 +8002,9 @@ public:
     void syncHeaderInset() {
         if (auto *pane = dynamic_cast<Pane *>(parentWidget()))
             pane->setHeaderRightInset(isVisible() ? width() + 10 : 0);
+        // The Switchboard's first row is its tab bar, which these buttons would otherwise cover.
+        else if (auto *tool = dynamic_cast<ToolPane *>(parentWidget()); tool && tool->board())
+            tool->board()->setHeaderRightInset(isVisible() ? width() + 4 : 0);
     }
 
 protected:
@@ -9057,6 +9171,7 @@ private:
             const QString file = pickFileForPreview();
             if (!file.isEmpty()) openPath(file, 0, m_activeLeaf);
         }
+        else if (id == QStringLiteral("board.open")) toggleBoardPane();
         else if (id == QStringLiteral("palette.open")) togglePalette();
         else if (id == QStringLiteral("keybindings.reload")) Keymap::instance().reload();
         else if (id == QStringLiteral("help.shortcuts")) showShortcutsOverlay();
@@ -10505,6 +10620,22 @@ public:
         updateTitles();
     }
 
+    // One card in this tab's Switchboard, opening the Switchboard first if the tab has none.
+    void openBoardCard(const QString &id) {
+        auto boardInTab = [this]() -> ToolPane * {
+            for (QWidget *leaf : leavesIn(m_tabs->currentWidget()))
+                if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) return tool;
+            return nullptr;
+        };
+        if (!boardInTab()) toggleBoardPane();
+        ToolPane *tool = boardInTab();
+        if (!tool) return;
+        tool->board()->selectCard(id);
+        tool->board()->openSelected();
+        setActiveLeaf(tool);
+        focusLeaf(tool);
+    }
+
     // The nearest ancestor of the anchor pane's directory that has a Switchboard.
     QString boardWorkspace() const {
         QStringList candidates;
@@ -10532,8 +10663,6 @@ public:
                     for (QWidget *leaf : leavesIn(guard->m_tabs->widget(i)))
                         if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board())
                             tool->board()->handleEvent(event);
-                if (event.value(QStringLiteral("event")).toString() == QStringLiteral("configured"))
-                    guard->m_boardWorker->send({{QStringLiteral("type"), QStringLiteral("board_open")}});
             };
             m_boardWorker->onStatus = [guard](const QString &text) {
                 if (guard) guard->statusBar()->showMessage(text, 9000);
@@ -10594,8 +10723,7 @@ public:
             w->hint(QStringLiteral("board.") + id, relay::ShortcutHints::nextTime(keys));
         };
         startBoardWorker(workspace);
-        if (boardWorker()->configured())
-            boardWorker()->send({{QStringLiteral("type"), QStringLiteral("board_open")}});
+        boardWorker()->open();
         return tool;
     }
 
@@ -10722,6 +10850,7 @@ private:
         pane->onOpenPath = [guard](const QString &path, int line) { if (auto *w = windowOf(guard)) w->openPath(path, line, guard); };
         pane->onToggleExplorer = [guard](const QString &path) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleExplorer(path, guard); } };
         pane->onOpenBoard = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleBoardPane(); } };
+        pane->onOpenCard = [guard](const QString &id) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openBoardCard(id); } };
         // Right-click menu entries the window owns (issue #X2F1).
         pane->onWindowAction = [guard](const QString &action) {
             auto *w = windowOf(guard);
@@ -11192,16 +11321,19 @@ private:
         auto *left = new QWidget;
         left->setObjectName(QStringLiteral("windowChromeLeft"));
         auto *leftRow = new QHBoxLayout(left);
-        leftRow->setContentsMargins(12, 0, 10, 0);
+        leftRow->setContentsMargins(12, 0, 10, 6);   // bottom inset centres the mark on the tab labels
         leftRow->setSpacing(0);
         auto *icon = new QLabel;
         icon->setObjectName(QStringLiteral("windowIcon"));
-        const QIcon appIcon = QApplication::windowIcon();
+        // The bare mark, not the app icon: the icon's dark tile vanishes into the chrome and
+        // leaves only a speck of chevron at this size.
+        const QString markPath = relay::theme::themeDataDir() + QStringLiteral("/icons/relay-mark.svg");
+        const QIcon appIcon = QFileInfo::exists(markPath) ? QIcon(markPath) : QApplication::windowIcon();
         if (appIcon.isNull()) icon->setText(QStringLiteral("◈"));
         else {
             // QIcon::pixmap() ignores the screen's scale factor, so ask for the device pixels.
             const qreal scale = qApp->devicePixelRatio();
-            QPixmap mark = appIcon.pixmap(QSize(18, 18) * scale);
+            QPixmap mark = appIcon.pixmap(QSize(22, 22) * scale);
             mark.setDevicePixelRatio(scale);
             icon->setPixmap(mark);
         }

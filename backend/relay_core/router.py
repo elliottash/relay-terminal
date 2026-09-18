@@ -159,7 +159,14 @@ def _tokens(text: str) -> list[tuple[str, str]]:
 
 def _resolve(word: str, known: set[str], path: str, cwd: str) -> str:
     """Return "" if the word can run as a command, else the reason it cannot."""
-    if PLACEHOLDER in word or "$" in word or any(ch in word for ch in "*?["):
+    if PLACEHOLDER in word or "$" in word:
+        return ""  # Expanded at run time; cannot be judged statically.
+    if any(ch in word for ch in "*?["):
+        # A glob in command position only runs by matching an executable file name, and names a
+        # person means to run carry letters. A word with no letters at all — "35*30", "*",
+        # "3?" — is arithmetic or a stray glob, never a command (owner report, 2026-09-18).
+        if not any(ch.isalpha() for ch in word):
+            return f"command not found: {word}"
         return ""  # Expanded at run time; cannot be judged statically.
     if word in BUILTINS or word in KEYWORDS or word in known:
         return ""

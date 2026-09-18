@@ -24,6 +24,9 @@ public:
     // call with the same object is ignored, a different one reconfigures.
     void start(const QJsonObject &configure);
     void send(const QJsonObject &message);
+    // Ask for the board (`board_open`) once `configure` has gone out. It does not wait for
+    // `configured`: that never comes without a provider key, and the cards do not need one.
+    void open();
     void stop();
 
     bool running() const { return m_process.state() != QProcess::NotRunning; }
@@ -43,6 +46,7 @@ private:
     QList<QByteArray> m_pending;
     QJsonObject m_configure;
     bool m_connected = false, m_configured = false, m_stopping = false;
+    bool m_ready = false, m_openPending = false;   // `ready` seen; a board_open waiting for it
 };
 
 }  // namespace relay

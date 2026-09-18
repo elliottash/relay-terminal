@@ -1,31 +1,3 @@
-ERROR relay.httpd socket handler failed for 192.168.1.192:60442
-Traceback (most recent call last):
-  File "/home/elliott/repos/relay-terminal/remote/httpd.py", line 154, in _upgrade
-    await handler(socket)
-  File "/home/elliott/repos/relay-terminal/rendezvous/server.py", line 338, in connect
-    await _client_socket(socket, query)
-  File "/home/elliott/repos/relay-terminal/rendezvous/server.py", line 406, in _client_socket
-    message = await socket.recv()
-              ^^^^^^^^^^^^^^^^^^^
-  File "/home/elliott/repos/relay-terminal/remote/ws.py", line 126, in recv
-    fin, opcode, payload = await self._read_frame()
-                           ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/elliott/repos/relay-terminal/remote/ws.py", line 163, in _read_frame
-    first, second = await self._read_exactly(2)
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/elliott/repos/relay-terminal/remote/ws.py", line 157, in _read_exactly
-    return await self._reader.readexactly(count)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/lib/python3.12/asyncio/streams.py", line 752, in readexactly
-    await self._wait_for_data('readexactly')
-  File "/usr/lib/python3.12/asyncio/streams.py", line 545, in _wait_for_data
-    await self._waiter
-  File "/usr/lib/python3.12/asyncio/sslproto.py", line 648, in _do_shutdown
-    self._sslobj.unwrap()
-  File "/usr/lib/python3.12/ssl.py", line 921, in unwrap
-    return self._sslobj.shutdown()
-           ^^^^^^^^^^^^^^^^^^^^^^^
-ssl.SSLError: [SSL: APPLICATION_DATA_AFTER_CLOSE_NOTIFY] application data after close notify (_ssl.c:2696)
 Traceback (most recent call last):
   File "<frozen runpy>", line 198, in _run_module_as_main
   File "<frozen runpy>", line 88, in _run_code

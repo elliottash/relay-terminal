@@ -3,10 +3,12 @@
 // The Switchboard's pure logic: the rows the worker sends, the tabs and columns they fall into,
 // and the filter language. No widgets here, so it can be tested on its own
 // (tests/boardmodel_test.cpp). Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 17.
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
 #include <QMap>
+#include <QPair>
 #include <QString>
 #include <QStringList>
 
@@ -45,6 +47,29 @@ struct Tab {
 // "in-progress" -> "In progress"; used for column headers, chips and thread lines.
 QString statusTitle(const QString &status);
 QString tabTitle(const QString &id);
+
+// One badge in a card's footer (design 4.2): what it says and how the pane colours it.
+struct Badge {
+    enum Kind { Label, Agent, Assignee, Waiting, Status, Tasks, TasksDone, Thread, Private };
+    Kind kind;
+    QString text;
+};
+// The badges a card shows under its title, in reading order. `showStatus` is for columns that
+// collect several statuses (Waiting, Needs QA), where the exact one is otherwise invisible.
+QList<Badge> badges(const Card &card, bool showStatus);
+
+// The body without its leading `# Title` line when that only repeats the title: the card
+// detail already shows the title in its header, so the heading would be said twice.
+QString bodyWithoutTitle(const QString &body, const QString &title);
+
+// How long ago a thread entry was written, from its sortable id (`20260918T021603Z-tg`):
+// "just now", "12 min ago", "3 h ago", "yesterday", "Sep 16", or empty when the id has no time.
+QString entryAge(const QString &entryId, const QDateTime &now);
+
+// Where a card lands in a column: `order` is the column's ids top to bottom (it may contain
+// `moving`), `slot` the insertion row counted in `order` *without* `moving`. Returns the id the
+// card goes before and the id it goes after; either is empty at an end (protocol 17, board_move).
+QPair<QString, QString> placement(const QStringList &order, const QString &moving, int slot);
 
 class Model {
 public:

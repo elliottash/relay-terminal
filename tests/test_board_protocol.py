@@ -415,5 +415,36 @@ class ThreadSafetyTests(ProtocolTest):
         self.assertEqual(ids, sorted(ids))
 
 
+class KeylessWorkerTests(unittest.TestCase):
+    """The real worker process: the Switchboard opens even when `configure` finds no provider key
+    (only `board_ask` needs the agent). Before this, a keyless window showed "Loading" forever."""
+
+    def test_board_open_answers_after_a_configure_that_found_no_key(self):
+        import json
+        import os
+        import subprocess
+        import sys
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            issues = Path(tmp) / "issues"
+            issues.mkdir()
+            (issues / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
+            env = {k: v for k, v in os.environ.items() if not k.endswith("_API_KEY")}
+            env.update(RELAY_KEYRING="off", RELAY_PANE_ID="switchboard")
+            messages = [{"type": "configure", "workspace": tmp, "agent_role": "switchboard",
+                         "use_stored_key": True, "api_key": "", "preset": "kimi"},
+                        {"type": "board_open", "id": "o1"}, {"type": "shutdown"}]
+            proc = subprocess.run([sys.executable, "-S", str(root / "backend/worker.py")],
+                                  input="".join(json.dumps(m) + "\n" for m in messages),
+                                  text=True, capture_output=True, timeout=20, cwd=root, env=env)
+        events = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+        names = [e["event"] for e in events]
+        self.assertIn("error", names)                        # the provider part did fail
+        self.assertNotIn("configured", names)
+        opened = [e for e in events if e["event"] == "board" and e.get("id") == "o1"]
+        self.assertEqual(len(opened), 1, names)
+        self.assertEqual(opened[0]["cards"], [])
+
+
 if __name__ == "__main__":       # pragma: no cover
     unittest.main()

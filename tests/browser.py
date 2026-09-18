@@ -22,6 +22,21 @@ from remote import ws
 CHROME_NAMES = ("google-chrome", "chromium", "chromium-browser", "google-chrome-stable")
 
 
+def shown(element_id: str) -> str:
+    """JavaScript that is true when an element is actually drawn, not merely un-`hidden`.
+
+    Checking the `hidden` property is not enough: an author `display` rule beats the browser's own
+    [hidden] rule, and then an element can be "hidden" and on screen at the same time.
+    """
+    return (f"(e => !!e && getComputedStyle(e).display !== 'none' && e.getClientRects().length > 0)"
+            f"(document.getElementById('{element_id}'))")
+
+
+# How many of the app's screens are drawn right now. It must always be exactly one.
+SCREENS_SHOWN = ("[...document.querySelectorAll('.screen')]"
+                 ".filter(e => getComputedStyle(e).display !== 'none').length")
+
+
 def find_chrome() -> str | None:
     for name in CHROME_NAMES:
         path = shutil.which(name)

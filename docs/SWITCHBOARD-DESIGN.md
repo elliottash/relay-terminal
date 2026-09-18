@@ -124,6 +124,37 @@ anchor composer and focus it; `y` copy `#ID`; `o` open the file in a preview pan
 **Hints** (WARP.md rule, live Keymap text): palette/button → Ctrl+Shift+S; mouse drag → `m`; clicking `+` → `n`;
 "Send to terminal" button → `t`; typed `/board` → the open shortcut.
 
+### 4.5 As built (UX pass, 2026-09-17)
+
+What the pane does today where it differs from, or fills in, 4.2–4.4 (`src/BoardPane.cpp`, styles in `src/Theme.cpp`).
+Evidence: `docs/qa_evidence/2026-09-17-switchboard-ux/`.
+
+- **Chrome.** Two rows: the tabs (with counts) get the full width, then the filter and **+ New card**. The pane's hover
+  buttons reserve their room at the right of the tab row, as a terminal pane's header does. Format problems are one
+  warning line that links to the file. A key line at the bottom says what the keys do on what is on screen.
+- **Cards** are painted boxes: title up to 3 lines, then `#ID` and badges (labels, ✦ agent or assignee,
+  `waiting: …` in the warning colour, `☑ done/total`, `✎ thread`). Columns that hold several statuses (Waiting, Needs
+  QA) add a short status badge (`LLM QA`, `human QA`, `review`). Columns are `@surface` strips with engraved headers
+  (SWITCHBOARD-AESTHETIC intervention 3) and a `+` that adds into that column (not on Done).
+- **Moving.** A click opens a card; a drag shows the target column tinted and a line where the card lands, scrolls the
+  board and the column when held near an edge, and may drop on a tab (category move). A drop where the card already
+  was writes nothing; a reorder within a column keeps the exact status. Every move from the pane shows a notice that
+  floats over the bottom of the board (it never shifts the cards) with **Undo**, also **Ctrl+Z**; a refused move
+  (Needs QA without evidence) shows the worker's reason. Dragging a card onto the prompt box types its `#ID`.
+- **Updates in place.** A change inside the current tab refills the columns: scroll positions, focus, the selection
+  and an open quick-add field survive, and a card moved by keyboard keeps the focus in its new column. The watcher's
+  refresh after one's own write is ignored when nothing changed. The open card re-reads only when *its* file changes.
+- **Quick add** stays open after Enter for the next card; Esc or leaving it empty closes it. An empty tab says so once.
+- **Card detail** is one document: the body (its leading `# Title` dropped when it repeats the header, headings at a
+  panel scale), then the thread (events as one muted line, comments with author, model, kind and age). Below
+  ~900 px of pane it takes the whole pane (Esc goes back); wider, it sits beside the columns and follows the
+  selection. Each card keeps its own unsent reply. Enter asks the agent, **Ctrl+Shift+Enter** only comments (the
+  composer's "never the model" chord); while it answers, the button is **Stop** (`cancel`). An ask the agent cannot
+  take (no key) is reported on the card; the question is already in the thread. The header has **#ID → prompt** and
+  **Open file**; links in the body open the file they name.
+- **Not built** from 4.2–4.4: label chips and Mine/Agent/Waiting toggles (the filter language covers them), the
+  unread dot, `e` edit, `l`/`a`, `?`, Shift+Enter "own pane", thinking/tool collapse in the thread, tickable tasks.
+
 ## 5. Referencing cards from the terminal
 
 - **Picker.** In agent or auto mode, `#` at the start or after a space, followed by a character, opens a card picker

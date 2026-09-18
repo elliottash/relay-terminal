@@ -2,6 +2,8 @@
 #include "BoardModel.h"
 
 #include <QJsonValue>
+#include <QLocale>
+#include <QTimeZone>
 #include <algorithm>
 
 namespace relay {
@@ -120,6 +122,87 @@ QString tabTitle(const QString &id)
     if (!text.isEmpty())
         text[0] = text.at(0).toUpper();
     return text;
+}
+
+QList<Badge> badges(const Card &card, bool showStatus)
+{
+    QList<Badge> out;
+    if (showStatus && !card.status.isEmpty()) {
+        // Only the part the column header does not already say ("Needs QA" → "LLM QA").
+        static const QMap<QString, QString> shortNames{
+            {QStringLiteral("needs-qa-llm"), QStringLiteral("LLM QA")},
+            {QStringLiteral("needs-qa-human"), QStringLiteral("human QA")},
+            {QStringLiteral("needs-review"), QStringLiteral("review")},
+            {QStringLiteral("needs-labels"), QStringLiteral("labels")},
+            {QStringLiteral("needs-ab"), QStringLiteral("A/B")},
+            {QStringLiteral("dropped"), QStringLiteral("dropped")}};
+        out << Badge{Badge::Status, shortNames.value(card.status, statusTitle(card.status))};
+    }
+    for (const QString &label : card.labels)
+        out << Badge{Badge::Label, label};
+    if (card.assignee == QStringLiteral("agent"))
+        out << Badge{Badge::Agent, QStringLiteral("✦ agent")};
+    else if (!card.assignee.isEmpty())
+        out << Badge{Badge::Assignee, card.assignee};
+    if (!card.waitingOn.isEmpty())
+        out << Badge{Badge::Waiting, QStringLiteral("waiting: ") + card.waitingOn};
+    if (card.tasksTotal > 0)
+        out << Badge{card.tasksDone >= card.tasksTotal ? Badge::TasksDone : Badge::Tasks,
+                     QStringLiteral("☑ %1/%2").arg(card.tasksDone).arg(card.tasksTotal)};
+    if (card.threadEntries > 0)
+        out << Badge{Badge::Thread, QStringLiteral("✎ %1").arg(card.threadEntries)};
+    if (card.isPrivate)
+        out << Badge{Badge::Private, QStringLiteral("private")};
+    return out;
+}
+
+QString bodyWithoutTitle(const QString &body, const QString &title)
+{
+    // Leading blank lines are skipped; anything else before the heading means it is not a title.
+    int start = 0;
+    while (start < body.size() && (body.at(start) == QLatin1Char('\n') || body.at(start) == QLatin1Char('\r')))
+        ++start;
+    if (!QStringView(body).mid(start).startsWith(QLatin1String("# ")))
+        return body;
+    int end = body.indexOf(QLatin1Char('\n'), start);
+    if (end < 0)
+        end = body.size();
+    const QString heading = body.mid(start + 2, end - start - 2).trimmed();
+    if (heading.compare(title.trimmed(), Qt::CaseInsensitive) != 0)
+        return body;
+    while (end < body.size() && (body.at(end) == QLatin1Char('\n') || body.at(end) == QLatin1Char('\r')))
+        ++end;
+    return body.mid(end);
+}
+
+QString entryAge(const QString &entryId, const QDateTime &now)
+{
+    const QDateTime parsed = QDateTime::fromString(entryId.left(16), QStringLiteral("yyyyMMdd'T'HHmmss'Z'"));
+    if (!parsed.isValid())
+        return QString();
+    const QDateTime at(parsed.date(), parsed.time(), QTimeZone::utc());
+    const qint64 seconds = at.secsTo(now);
+    if (seconds < 60)
+        return QStringLiteral("just now");
+    if (seconds < 3600)
+        return QStringLiteral("%1 min ago").arg(seconds / 60);
+    const QDate day = at.toLocalTime().date(), today = now.toLocalTime().date();
+    if (day == today)
+        return QStringLiteral("%1 h ago").arg(seconds / 3600);
+    if (day.addDays(1) == today)
+        return QStringLiteral("yesterday");
+    const QLocale c = QLocale::c();
+    return day.year() == today.year() ? c.toString(day, QStringLiteral("MMM d"))
+                                      : c.toString(day, QStringLiteral("MMM d yyyy"));
+}
+
+QPair<QString, QString> placement(const QStringList &order, const QString &moving, int slot)
+{
+    QStringList others = order;
+    others.removeAll(moving);
+    slot = qBound(0, slot, int(others.size()));
+    return qMakePair(slot < others.size() ? others.at(slot) : QString(),
+                     slot > 0 ? others.at(slot - 1) : QString());
 }
 
 Card Card::fromJson(const QJsonObject &object)

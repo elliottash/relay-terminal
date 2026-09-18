@@ -529,6 +529,17 @@ window.addEventListener('DOMContentLoaded', () => {
     location.replace(location.pathname);
   });
 
+  // Opened as a pairing link, but the part after '#' — the one-time code — is gone. The usual
+  // cause is the certificate warning: after "visit this website" some browsers reload the page
+  // without the fragment. The code is still valid, so scanning again is the whole fix.
+  if (!location.hash.includes('v=1') && /\/pair\/?$/.test(location.pathname)) {
+    show('welcome');
+    $('welcome-note').textContent = 'This pairing link arrived without its code — usually because '
+      + 'the browser reloaded the page after the certificate warning. Scan the QR code on your '
+      + 'desktop again; it stays valid for five minutes.';
+    return;
+  }
+
   if (location.hash.includes('v=1')) {
     let link;
     try {

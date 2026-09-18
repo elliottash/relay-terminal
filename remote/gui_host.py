@@ -301,7 +301,9 @@ class Sidecar:
             self.address = message.get("address") or devtls.preferred_address()
             self.base = f"https://{self.address}:{self.tls_port}"
             self.note = ("The certificate is self-signed, so your phone warns once. Its SHA-256 "
-                         f"begins {devtls.fingerprint(identity_mod.state_dir())}.")
+                         f"begins {devtls.fingerprint(identity_mod.state_dir())}. After you "
+                         "accept the warning, scan the code again: some browsers drop the "
+                         "pairing code when they reload past it.")
 
         self.host = host_mod.Host(self.identity, self.devices, self.source, app_base=self.base,
                                   approver=self.ask, name=message.get("name", "this desktop"))

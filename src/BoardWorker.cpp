@@ -43,6 +43,7 @@ void BoardWorker::connectProcess()
     connect(&m_process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
             [this](int, QProcess::ExitStatus) {
                 m_configured = false;
+                m_ready = false;
                 if (!m_stopping && onStatus)
                     onStatus(QStringLiteral("The Switchboard worker exited."));
             });
@@ -61,9 +62,15 @@ void BoardWorker::handleLine(const QByteArray &line)
         return;
     const QJsonObject event = doc.object();
     const QString type = event.value(QStringLiteral("event")).toString();
-    if (type == QStringLiteral("ready") && !m_configure.isEmpty())
-        send(m_configure);
-    else if (type == QStringLiteral("configured"))
+    if (type == QStringLiteral("ready")) {
+        m_ready = true;
+        if (!m_configure.isEmpty())
+            send(m_configure);
+        if (m_openPending) {
+            m_openPending = false;
+            open();
+        }
+    } else if (type == QStringLiteral("configured"))
         m_configured = true;
     if (onEvent)
         onEvent(event);
@@ -85,6 +92,7 @@ void BoardWorker::start(const QJsonObject &configure)
     m_buffer.clear();
     m_pending.clear();
     m_configured = false;
+    m_ready = false;
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("RELAY_PANE_ID"), QStringLiteral("switchboard"));
     m_process.setProcessEnvironment(environment);
@@ -102,6 +110,16 @@ void BoardWorker::send(const QJsonObject &message)
         m_process.write(line);
     else if (m_process.state() == QProcess::Starting)
         m_pending.append(line);
+}
+
+void BoardWorker::open()
+{
+    // The worker reads its stdin in order, so a board_open written after `configure` is answered
+    // for the configured workspace whether or not the provider part of `configure` succeeded.
+    if (m_ready)
+        send({{QStringLiteral("type"), QStringLiteral("board_open")}});
+    else
+        m_openPending = true;
 }
 
 void BoardWorker::stop()

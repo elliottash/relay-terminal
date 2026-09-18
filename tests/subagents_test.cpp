@@ -194,11 +194,8 @@ private slots:
         const QImage image = panel.grab().toImage();
         if (!qEnvironmentVariableIsEmpty("RELAY_SUBAGENTS_SHOT")) image.save(qEnvironmentVariable("RELAY_SUBAGENTS_SHOT"));
         const int rowY = 2 + (panel.fontMetrics().height() + 6) * 3 / 2;
-        int hits = 0;
-        for (int x = panel.width() - 30; x > panel.width() / 2 && picked.size() < 2; x -= 4) {
+        for (int x = panel.width() - 30; x > panel.width() / 2 && picked.size() < 2; x -= 4)
             QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier, QPoint(x, rowY));
-            ++hits;
-        }
         QCOMPARE(picked.size(), 2);
         QCOMPARE(picked.last(), QStringLiteral("a1"));
         // The worker's answer updates the row and says when it applies.

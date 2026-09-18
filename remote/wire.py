@@ -89,7 +89,7 @@ FORWARDED_EVENTS = frozenset({
     "mode_changed", "model_changed", "plan_written", "provider_retry", "queue_changed", "queued",
     "ready", "recap", "request", "request_audit", "requests", "sessions", "status",
     "steer_delivered", "steer_escalated", "steer_returned", "subagent_event", "subagent_finished",
-    "subagent_handoff", "subagent_progress", "subagent_started", "subagent_transcript",
+    "subagent_handoff", "subagent_model", "subagent_progress", "subagent_started", "subagent_transcript",
     "suggestion", "thinking_delta", "thinking_done", "todos", "tool_output", "tool_result",
     "tool_started", "transcribed", "turn_summary", "turn_transcript", "usage",
     # Image context: which model actually served a turn, and why a picture could not be sent.

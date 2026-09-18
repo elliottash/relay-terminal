@@ -5,6 +5,10 @@
   --radius: 12px;
 }
 * { box-sizing: border-box; }
+/* The app switches screens and controls with the `hidden` attribute, and several of those elements
+   are flex containers. An author `display` rule beats the browser's own [hidden] rule, so without
+   this every screen draws at once. */
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--text);

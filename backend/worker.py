@@ -121,6 +121,10 @@ def main():
             elif kind == "configure":
                 if turns.busy:
                     raise ValueError("Stop the active agent turn before changing provider or workspace.")
+                # The Switchboard is files, not a model: set it up before the provider is resolved,
+                # so a missing key still lets the pane open and browse the cards (only board_ask
+                # needs the agent). Before 2026-09-17 a keyless window sat on "Loading…" forever.
+                board_summary = board.configure(request.get("workspace", os.getcwd()), request)
                 config = session_protocol.provider_config(request)
                 catalog = KeybindingCatalog.from_request(request.get("keybindings"))
                 workspace = request.get("workspace", os.getcwd())
@@ -130,7 +134,6 @@ def main():
                 tier_table = model_roles.validate_tiers(request.get("tiers"))
                 agent_role = model_roles.validate_role(request.get("agent_role") or "main")
                 options = session_protocol.agent_options(request, workspace)
-                board_summary = board.configure(workspace, request)
                 options["board"] = board.agent_tools(workspace, request)
                 resolver = model_roles.RoleResolver(config, options.get("preset_id"), role_table,
                                                     key_lookup=keystore.lookup, main_effort=options.get("effort"),

@@ -194,6 +194,11 @@ hairline rule under each, columns as flat `@surface` strips. **Cost: QSS only**,
 after `src/Theme.cpp:318`. **Wear risk: none** — it is typography. **Do it whether or not the rest
 of this document is approved.**
 
+**Status (2026-09-17, UX pass):** done in plain materials only: enamel-style headers (uppercase mono,
+letter-spaced, `@muted`) on flat `@surface` column strips, cards painted from the theme tokens, the
+`board*` rules at the end of the stylesheet in `src/Theme.cpp`. No brass, so nothing here depends on
+the `board.*` theme group of section 3.4. See `docs/SWITCHBOARD-DESIGN.md` section 4.5.
+
 ### 4. Remote pairing as a call being patched through · **DO (restrained)**
 
 `#W5N2` is the one place where the metaphor is literally true: a phone asks for a line, the desktop

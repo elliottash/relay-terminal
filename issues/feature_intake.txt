@@ -1,3 +1,4 @@
-make subagents show up beneath the prompt, rather than above it (make it the same as claude code)
+in the recap, agent should say the start and end time of the recent work, with time spent in hours and minutes. 
 
+make board card link mentions in the terminal (eg in the recap) clickable links that open the board and zoom to the card. 
 

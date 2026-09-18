@@ -18,7 +18,7 @@ from remote import identity as identity_mod
 from remote import panes as panes_mod
 from remote import wire
 from rendezvous.server import Store, build
-from tests.browser import Browser, find_chrome
+from tests.browser import SCREENS_SHOWN, Browser, find_chrome, shown
 
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
 
@@ -82,7 +82,7 @@ class BrowserClientTests(unittest.TestCase):
                         "? document.getElementById('pair-code').textContent : ''", timeout=40)
                     code = await browser.evaluate(
                         "document.getElementById('pair-code').textContent")
-                    await browser.wait_for("!document.getElementById('screen-inbox').hidden",
+                    await browser.wait_for(shown('screen-inbox'),
                                            timeout=40)
                     self.assertEqual(len(harness.requests), 1)
                     self.assertEqual(code, harness.requests[0].code)
@@ -104,6 +104,10 @@ class BrowserClientTests(unittest.TestCase):
                     """)
                     self.assertFalse(extractable, "the device key must not be extractable")
 
+                    # Exactly one screen is drawn. A stylesheet `display` rule once beat the
+                    # [hidden] attribute and drew every screen at once on a real phone.
+                    self.assertEqual(await browser.evaluate(SCREENS_SHOWN), 1)
+
                     # The inbox shows the panes the desktop published.
                     titles = await browser.wait_for(
                         "[...document.querySelectorAll('.pane-title')].map(n => n.textContent)")
@@ -112,7 +116,8 @@ class BrowserClientTests(unittest.TestCase):
                     # Open a pane and send a prompt; the agent's answer streams back.
                     await browser.evaluate(
                         "document.querySelectorAll('.pane-row')[0].click()")
-                    await browser.wait_for("!document.getElementById('screen-thread').hidden")
+                    await browser.wait_for(shown('screen-thread'))
+                    self.assertEqual(await browser.evaluate(SCREENS_SHOWN), 1)
                     await browser.evaluate("""
                         (() => {
                           const box = document.getElementById('composer-text');
@@ -154,8 +159,7 @@ class BrowserClientTests(unittest.TestCase):
                 try:
                     await browser.navigate(url)
                     await browser.wait_for(
-                        "document.getElementById('pair-retry') && "
-                        "!document.getElementById('pair-retry').hidden", timeout=60)
+                        shown('pair-retry'), timeout=60)
                     stored = await browser.evaluate("""
                         (async () => {
                           const db = await new Promise((res, rej) => {

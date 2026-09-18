@@ -5,7 +5,11 @@
 #include "BoardPane.h"
 
 #include <QJsonArray>
+#include <QLabel>
 #include <QListWidget>
+#include <QPlainTextEdit>
+#include <QPointer>
+#include <QTimeZone>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QtTest>
@@ -70,6 +74,14 @@ private slots:
     void statusTitlesAreHumanReadable();
     void theViewRendersTabsAndColumnsFromAnEvent();
     void theViewSendsAMoveWhenACardIsDropped();
+    void badgesSayWhatTheCardCarries();
+    void theBodyLosesOnlyAHeadingThatRepeatsTheTitle();
+    void threadEntriesSayHowLongAgo();
+    void placementNamesTheNeighboursOfTheSlot();
+    void aRefusedWriteIsShownAndAnAcceptedOneCanBeUndone();
+    void aChangeRefillsTheColumnsInPlace();
+    void theOpenCardRefetchesOnlyForItsOwnChanges();
+    void aQuestionTheAgentCannotTakeIsReportedOnTheCard();
 };
 
 void BoardModelTests::tabsComeFromTheConfigAndMemoryIsAlwaysThere()
@@ -341,6 +353,194 @@ void BoardModelTests::theViewSendsAMoveWhenACardIsDropped()
 
     view.setCurrentTab(QStringLiteral("bugs"));
     QCOMPARE(view.currentTab(), QStringLiteral("bugs"));
+}
+
+// ---- the card face and the detail view's helpers ----------------------------------------
+
+void BoardModelTests::badgesSayWhatTheCardCarries()
+{
+    Card card = Card::fromJson(row("K7Q2", "needs-qa-human", "features"));
+    card.labels = QStringList{QStringLiteral("voice")};
+    card.assignee = QStringLiteral("agent");
+    card.waitingOn = QStringLiteral("owner");
+    card.tasksDone = 3;
+    card.tasksTotal = 3;
+    card.threadEntries = 4;
+    const QList<relay::board::Badge> all = relay::board::badges(card, true);
+    QStringList texts;
+    for (const auto &badge : all)
+        texts << badge.text;
+    // The status says only what the column header does not ("Needs QA" → "human QA").
+    QCOMPARE(texts, (QStringList{"human QA", "voice", "✦ agent", "waiting: owner", "☑ 3/3", "✎ 4"}));
+    QCOMPARE(all.at(4).kind, relay::board::Badge::TasksDone);
+    QCOMPARE(all.at(3).kind, relay::board::Badge::Waiting);
+    // In a column of one status, and on a plain card, there is nothing to repeat.
+    QVERIFY(relay::board::badges(Card::fromJson(row("M3XJ", "ready", "features")), false).isEmpty());
+}
+
+void BoardModelTests::theBodyLosesOnlyAHeadingThatRepeatsTheTitle()
+{
+    using relay::board::bodyWithoutTitle;
+    QCOMPARE(bodyWithoutTitle(QStringLiteral("# Voice mode\n\n## Request\nhi\n"), QStringLiteral("Voice mode")),
+             QStringLiteral("## Request\nhi\n"));
+    QCOMPARE(bodyWithoutTitle(QStringLiteral("\n# voice MODE\ntext"), QStringLiteral("Voice mode")),
+             QStringLiteral("text"));
+    // A different heading, or text before it, is the author's and stays.
+    const QString other = QStringLiteral("# Something else\ntext");
+    QCOMPARE(bodyWithoutTitle(other, QStringLiteral("Voice mode")), other);
+    const QString later = QStringLiteral("Intro\n# Voice mode\n");
+    QCOMPARE(bodyWithoutTitle(later, QStringLiteral("Voice mode")), later);
+}
+
+void BoardModelTests::threadEntriesSayHowLongAgo()
+{
+    using relay::board::entryAge;
+    const QDateTime now(QDate(2026, 9, 18), QTime(12, 0, 0), QTimeZone::utc());
+    QCOMPARE(entryAge(QStringLiteral("20260918T115950Z-ab"), now), QStringLiteral("just now"));
+    QCOMPARE(entryAge(QStringLiteral("20260918T114000Z-ab"), now), QStringLiteral("20 min ago"));
+    QVERIFY(entryAge(QStringLiteral("20260916T080000Z-ab"), now).startsWith(QStringLiteral("Sep 1")));
+    QVERIFY(entryAge(QStringLiteral("20250101T080000Z-ab"), now).endsWith(QStringLiteral("2025")));
+    QVERIFY(entryAge(QStringLiteral("not-a-time"), now).isEmpty());
+}
+
+void BoardModelTests::placementNamesTheNeighboursOfTheSlot()
+{
+    using relay::board::placement;
+    const QStringList column{"A", "B", "C"};
+    // Moving B to the top: before A, after nothing.
+    QCOMPARE(placement(column, "B", 0), qMakePair(QString("A"), QString()));
+    // Moving B to the bottom: after C.
+    QCOMPARE(placement(column, "B", 2), qMakePair(QString(), QString("C")));
+    // A card from another column dropped between A and B.
+    QCOMPARE(placement(column, "X", 1), qMakePair(QString("B"), QString("A")));
+    // Into an empty column: no neighbours; a slot past the end is the end.
+    QCOMPARE(placement({}, "X", 0), qMakePair(QString(), QString()));
+    QCOMPARE(placement(column, "X", 99), qMakePair(QString(), QString("C")));
+}
+
+// ---- the view's answers to the worker ------------------------------------------------------
+
+namespace {
+QJsonObject opened(const QList<QJsonObject> &cards)
+{
+    return QJsonObject{{"event", "board"}, {"config", config()}, {"cards", rows(cards)},
+                       {"problems", QJsonArray{}}};
+}
+}  // namespace
+
+void BoardModelTests::aRefusedWriteIsShownAndAnAcceptedOneCanBeUndone()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "in-progress", "features")}));
+    view.selectCard(QStringLiteral("K7Q2"));
+    QListWidget *list = nullptr;
+    for (QListWidget *candidate : view.findChildren<QListWidget *>(QStringLiteral("boardColumn")))
+        if (candidate->count() == 1)
+            list = candidate;
+    QVERIFY(list);
+
+    // Alt+Shift+Right: to the next column. The request carries an id this view recognises.
+    QTest::keyClick(list, Qt::Key_Right, Qt::AltModifier | Qt::ShiftModifier);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_move"));
+    QCOMPARE(sent.last().value("status").toString(), QStringLiteral("needs-review"));
+    const QString moveId = sent.last().value("id").toString();
+    QVERIFY(!moveId.isEmpty());
+
+    // Refused: the reason is shown instead of nothing happening.
+    view.handleEvent(QJsonObject{{"event", "error"}, {"id", moveId}, {"text", "needs evidence"}});
+    QCOMPARE(view.notice(), QStringLiteral("needs evidence"));
+    // Another pane's error is not this view's business.
+    view.handleEvent(QJsonObject{{"event", "error"}, {"id", "elsewhere-1"}, {"text", "other"}});
+    QCOMPARE(view.notice(), QStringLiteral("needs evidence"));
+
+    // Accepted: a notice that names the move, and Undo sends board_undo for that write.
+    QTest::keyClick(list, Qt::Key_Right, Qt::AltModifier | Qt::ShiftModifier);
+    const QString secondId = sent.last().value("id").toString();
+    view.handleEvent(QJsonObject{{"event", "board_written"}, {"id", secondId}, {"kind", "board_move"},
+                                 {"card_id", "K7Q2"}, {"write_id", "w-42"}});
+    QCOMPARE(view.notice(), QStringLiteral("Moved #K7Q2 to Waiting"));
+    view.undoLast();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_undo"));
+    QCOMPARE(sent.last().value("write_id").toString(), QStringLiteral("w-42"));
+}
+
+void BoardModelTests::aChangeRefillsTheColumnsInPlace()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "ready", "features")}));
+    const QList<QListWidget *> before = view.findChildren<QListWidget *>(QStringLiteral("boardColumn"));
+    QCOMPARE(before.size(), 7);
+    QPointer<QListWidget> inbox = before.first();
+
+    // A card moving inside the same tab refills the lists; the widgets (and so their scroll
+    // positions, focus and an open quick-add field) survive.
+    view.handleEvent(QJsonObject{{"event", "board_changed"}, {"upserts", rows({row("K7Q2", "ready", "features")})},
+                                 {"removed", QJsonArray{}}});
+    QVERIFY(inbox);
+    QCOMPARE(view.findChildren<QListWidget *>(QStringLiteral("boardColumn")).size(), 7);
+    int cards = 0;
+    for (QListWidget *list : view.findChildren<QListWidget *>(QStringLiteral("boardColumn")))
+        cards += list->count();
+    QCOMPARE(cards, 2);
+    QCOMPARE(inbox->count(), 0);
+}
+
+void BoardModelTests::theOpenCardRefetchesOnlyForItsOwnChanges()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "ready", "features")}));
+    view.handleEvent(QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"}, {"title", "K7Q2 card"},
+                                 {"status", "inbox"}, {"tab", "features"}, {"body", "# K7Q2 card\ntext"},
+                                 {"thread", QJsonArray{}}, {"thread_total", 0}});
+    QVERIFY(view.detailOpen());
+    sent.clear();
+
+    // An agent writing to another card leaves the open one alone (it used to re-render and
+    // jump back to the top on every write anywhere on the board).
+    view.handleEvent(QJsonObject{{"event", "board_changed"}, {"upserts", rows({row("M3XJ", "discussing", "features")})},
+                                 {"removed", QJsonArray{}}});
+    QVERIFY(sent.isEmpty());
+    view.handleEvent(QJsonObject{{"event", "board_changed"}, {"upserts", rows({row("K7Q2", "ready", "features")})},
+                                 {"removed", QJsonArray{}}});
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_card_get"));
+    QCOMPARE(sent.last().value("card").toString(), QStringLiteral("K7Q2"));
+
+    // The watcher's refresh that finds nothing new sends nothing and changes nothing.
+    sent.clear();
+    view.handleEvent(QJsonObject{{"event", "board_changed"}, {"upserts", QJsonArray{}}, {"removed", QJsonArray{}}});
+    QVERIFY(sent.isEmpty());
+
+    view.closeDetail();
+    QVERIFY(!view.detailOpen());
+}
+
+void BoardModelTests::aQuestionTheAgentCannotTakeIsReportedOnTheCard()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    view.handleEvent(QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"}, {"title", "K7Q2 card"},
+                                 {"status", "inbox"}, {"tab", "features"}, {"body", "text"},
+                                 {"thread", QJsonArray{}}, {"thread_total", 0}});
+    auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    QVERIFY(reply);
+    reply->setPlainText(QStringLiteral("Which layout?"));
+    QTest::keyClick(reply, Qt::Key_Return);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_ask"));
+    const QString askId = sent.last().value("id").toString();
+
+    view.handleEvent(QJsonObject{{"event", "error"}, {"id", askId}, {"text", "Configure a provider first."}});
+    auto *error = view.findChild<QLabel *>(QStringLiteral("boardCardError"));
+    QVERIFY(error);
+    QVERIFY(!error->isHidden());
+    QVERIFY(error->text().contains(QStringLiteral("Configure a provider first.")));
+    QVERIFY(view.notice().isEmpty());   // on the card, not over the board
 }
 
 QTEST_MAIN(BoardModelTests)
