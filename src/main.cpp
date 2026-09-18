@@ -2613,7 +2613,7 @@ private:
         QTextCharFormat format; format.setForeground(relay::theme::TextMuted); format.setFontItalic(true);
         cursor.insertText(sanitize(text), format);
         m_thinkingView->verticalScrollBar()->setValue(m_thinkingView->verticalScrollBar()->maximum());
-        if (!m_thinkingDismissed && !m_thinking->isVisible()) { showBubble(m_thinking); placeThinking(); }
+        if (!m_thinkingDismissed) placeThinking();   // it decides whether there is room to show it
     }
 
     // The height the reasoning panel asks the pane's column for. It is a row now rather than an
@@ -2621,7 +2621,14 @@ private:
     // 2026-09-18: "the terminal needs to move up, rather than being covered up"); the two heights
     // the ▴ button switches between are the ones it always had.
     void placeThinking() {
-        if (!m_thinking || !m_thinking->isVisible() || !m_terminalHost) return;
+        if (!m_thinking || !m_terminalHost) return;
+        // Second in the queue for room, and hidden rather than clipped (owner, 2026-09-18). The
+        // reasoning is commentary on a turn: losing it costs less than losing the queue, and the
+        // panel is dismissible by hand anyway.
+        const int taken = m_queueStrip && m_queueStrip->isVisible()
+                          ? m_queueStrip->height() + (layout() ? layout()->spacing() : 0) : 0;
+        if (!m_thinkingShown || m_thinkingDismissed || !roomForBubble(taken)) { hideBubble(m_thinking); return; }
+        showBubble(m_thinking);
         // Compact by default: the panel takes the terminal's space now, so it must take as little
         // as it can. The ▴ button expands it when the reasoning is worth reading.
         const int lineHeight = std::max(14, m_thinkingView->fontMetrics().height());
@@ -2673,15 +2680,38 @@ private:
         pinTerminalBottom(bottom);
     }
 
-    // A bubble asks for its height as a maximum over a token minimum, never as a fixed height: a
+    // The least a bubble may be drawn at: one line of its header plus the padding around it. Under
+    // that it is hidden instead, because a half-drawn header reads as a broken window rather than
+    // as a small one (owner, 2026-09-18, from a three-high stack where both bubbles came out as
+    // 14px slivers with their titles sliced through).
+    int bubbleRow() const { return std::max(30, fontMetrics().height() + 14); }
+
+    // What the pane could give to bubbles without squeezing the rows around them: what is left once
+    // the header, the prompt box and two lines of terminal have what they need. Measured from the
+    // pane and its other rows, never from the terminal host, because none of those change as a
+    // bubble comes and goes — so the answer cannot oscillate. Measuring the terminal instead let a
+    // strip be shown in a pane too short to draw it, and Qt squeezed it past its own minimum: the
+    // header came out sliced through by the prompt box.
+    int bubbleRoom() const {
+        const QMargins margins = layout() ? layout()->contentsMargins() : QMargins();
+        const int spacing = layout() ? layout()->spacing() : 0;
+        int room = height() - margins.top() - margins.bottom() - 2 * spacing;
+        if (m_headerWidget && m_headerWidget->isVisible()) room -= m_headerWidget->sizeHint().height();
+        if (m_composer && m_composer->isVisible()) room -= m_composer->minimumSizeHint().height();
+        return room - (2 * std::max(14, fontMetrics().height()) + 8);
+    }
+
+    // Room for another bubble beside `taken` pixels of bubble already spoken for?
+    bool roomForBubble(int taken) const { return bubbleRoom() - taken >= bubbleRow(); }
+
+    // A bubble asks for its height as a maximum over a one-row minimum, never as a fixed height: a
     // row's minimum is part of this pane's minimum, and a fixed one made a pane in a three-high
     // stack overflow its own column, with the queue strip drawn through the prompt box. As a
     // maximum the bubble is squeezed along with the terminal and the prompt box when the pane is
     // too short for all three, and takes exactly what it asked for whenever there is room.
-    static constexpr int kBubbleFloor = 24;   // a sliver stays, so the bubble never vanishes silently
     void setBubbleHeight(QWidget *bubble, int height) {
         height = std::max(0, height);
-        const int floor = std::min(height, kBubbleFloor);
+        const int floor = std::min(height, bubbleRow());
         if (!bubble || (bubble->maximumHeight() == height && bubble->minimumHeight() == floor)) return;
         const bool bottom = terminalAtBottom();
         keepPaneSizes([bubble, height, floor] { bubble->setMinimumHeight(floor); bubble->setMaximumHeight(height); });
@@ -7336,6 +7366,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
             }
             delete item;
         }
+        m_queueWanted = visible;
         if (visible) showBubble(m_queueStrip); else hideBubble(m_queueStrip);
         if (!visible) return;
         auto *header = new QHBoxLayout;
@@ -7412,8 +7443,15 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
     // to move up, rather than being covered up").
     void placeQueueStrip() {
         QTimer::singleShot(0, this, [this] { placeThinking(); });
-        if (!m_queueStrip || !m_queueStrip->isVisible() || !m_terminalHost) return;
-        setBubbleHeight(m_queueStrip, std::min(m_queueStrip->sizeHint().height(), bubbleSpan() / 2));
+        if (!m_queueStrip || !m_terminalHost) return;
+        // Too short for a legible strip: nothing, rather than a clipped one (owner, 2026-09-18).
+        // The queue outranks the reasoning panel when only one of them fits, because it is the one
+        // holding work — what is queued, and the Resume and Clear that act on it. Queueing already
+        // says so on screen ("Queued · the command runs when the terminal is free"), so a strip
+        // that cannot be drawn is not the only word the person gets.
+        if (!m_queueWanted || !roomForBubble(0)) { hideBubble(m_queueStrip); return; }
+        showBubble(m_queueStrip);
+        setBubbleHeight(m_queueStrip, std::max(bubbleRow(), std::min(m_queueStrip->sizeHint().height(), bubbleSpan() / 2)));
     }
 
     // The "Take control (Ctrl+H)" button floats over the top-right of the terminal, so it does
@@ -7970,6 +8008,7 @@ private:
     QHash<QString, QPointer<relay::TurnTranscriptView>> m_turnViews;
     QString m_lastTurnId;
     bool m_thinkingShown = false, m_thinkingDismissed = false, m_thinkingExpanded = false;
+    bool m_queueWanted = false;   // the queue has something to show; room decides whether it does
     int m_toolLines = 0;              // lines of the running tool's collapsed output
     bool m_toolPartialLine = false;   // its last chunk had no trailing newline
     QFrame *m_thinking = nullptr;
