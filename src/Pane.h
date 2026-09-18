@@ -234,6 +234,7 @@ public:
         // Voice: a clip whose transcript never came back would otherwise outlive the pane.
         if (m_voiceCapture) m_voiceCapture->cancel();
         if (!m_voiceClip.isEmpty()) QFile::remove(m_voiceClip);
+        for (const QString &clip : std::as_const(m_remoteVoiceClips)) QFile::remove(clip);
         m_poll.stop();
         // Destroy the terminal before its private shell state directory is removed.
         m_backend = nullptr;
@@ -2954,6 +2955,10 @@ public:
                 submitRemote(text, route, origin);
             };
             hooks.stopAgent = [this] { stopAgent(); };
+            hooks.transcribe = [this](const QString &requestId, const QByteArray &audio,
+                                      const QString &format) {
+                transcribeForRemote(requestId, audio, format);
+            };
             QString error;
             if (!share.sharePane(m_token, hooks, &error)) {
                 status(error);
@@ -3108,6 +3113,12 @@ private:
     }
 
     void onTranscribed(const QJsonObject &event) {
+        // Whose clip this was. The worker echoes the id it was given, so a phone's transcript can
+        // never land in the desktop's prompt box (someone may be typing in it) and the desktop's
+        // own can never be sent to a phone.
+        const QString request = event.value(QStringLiteral("id")).toString();
+        if (m_remoteVoice.contains(request)) { onRemoteTranscribed(request, event); return; }
+        if (!request.isEmpty() && request != m_voiceRequest) return;
         // The clip has done its work; Relay keeps no audio.
         if (!m_voiceClip.isEmpty()) { QFile::remove(m_voiceClip); m_voiceClip.clear(); }
         m_voiceTranscribing = false;
@@ -3138,6 +3149,70 @@ private:
         focusInput();
         status(QStringLiteral("Transcribed %1 character%2 · Enter sends it")
                    .arg(text.size()).arg(text.size() == 1 ? QString() : QStringLiteral("s")));
+    }
+
+    // ----- a clip recorded on a paired phone (issue W5N2, protocol section 6.4) ---------------
+    // The phone has no key and never talks to a transcription provider: the audio arrives inside
+    // the Noise session, takes the same worker request the microphone beside the prompt box
+    // takes, and the text goes straight back to the device that spoke.
+
+    void transcribeForRemote(const QString &requestId, const QByteArray &audio,
+                             const QString &format) {
+        const auto refuse = [this, requestId](const QString &message) {
+            relay::RemoteShare::instance().voiceResult(m_token, requestId, false, QString(), message);
+            status(QStringLiteral("Voice from a paired device: ") + message);
+        };
+        if (!voiceEnabled()) {
+            refuse(QStringLiteral("Voice transcription is off on the desktop (Options › Voice).")); return;
+        }
+        if (!voiceKeyStored()) {
+            refuse(QStringLiteral("The desktop has no OpenRouter key for transcription.")); return;
+        }
+        if (audio.isEmpty()) { refuse(QStringLiteral("That clip was empty.")); return; }
+        // The extension is chosen here from a fixed table, never taken from the wire: the
+        // worker's reader picks its handling from it, and the name is this machine's to make.
+        static const QHash<QString, QString> extensions{
+            {QStringLiteral("webm"), QStringLiteral("webm")},
+            {QStringLiteral("ogg"), QStringLiteral("ogg")},
+            {QStringLiteral("wav"), QStringLiteral("wav")},
+            {QStringLiteral("mp3"), QStringLiteral("mp3")},
+            {QStringLiteral("m4a"), QStringLiteral("m4a")},
+        };
+        const QString extension = extensions.value(format.toLower());
+        if (extension.isEmpty()) { refuse(QStringLiteral("That recording format is not supported.")); return; }
+        const QString path = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
+            .filePath(QStringLiteral("relay-voice-%1.%2")
+                          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces), extension));
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
+            refuse(QStringLiteral("The desktop could not store the clip.")); return;
+        }
+        file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+        const bool written = file.write(audio) == audio.size();
+        file.close();
+        if (!written) {
+            QFile::remove(path);
+            refuse(QStringLiteral("The desktop could not store the clip."));
+            return;
+        }
+        const QString worker = QStringLiteral("rvoice-") + QString::number(++m_requestId);
+        m_remoteVoice.insert(worker, requestId);
+        m_remoteVoiceClips.insert(worker, path);
+        status(QStringLiteral("Transcribing a clip from a paired device…"));
+        send({{"type", "transcribe"}, {"id", worker}, {"path", path}, {"model", voiceModel()}});
+    }
+
+    void onRemoteTranscribed(const QString &worker, const QJsonObject &event) {
+        const QString requestId = m_remoteVoice.take(worker);
+        const QString clip = m_remoteVoiceClips.take(worker);
+        if (!clip.isEmpty()) QFile::remove(clip);      // no audio is kept, however it arrived
+        const bool ok = event.value(QStringLiteral("ok")).toBool();
+        const QString text = event.value(QStringLiteral("text")).toString();
+        QString message = event.value(QStringLiteral("error")).toString();
+        if (!ok && message.isEmpty()) message = QStringLiteral("The clip could not be transcribed.");
+        relay::RemoteShare::instance().voiceResult(m_token, requestId, ok, text, message);
+        status(ok ? QStringLiteral("Transcribed a clip from a paired device")
+                  : QStringLiteral("Voice from a paired device: ") + message);
     }
 
     void updateVoiceChip() {
@@ -8553,6 +8628,9 @@ private:
     QHash<QString, RemotePrompt> m_remotePrompts;
     relay::voice::Capture *m_voiceCapture = nullptr;
     QString m_voiceRequest, m_voiceClip;
+    // Clips from paired devices, by the worker request id: which remote request asked for it,
+    // and the file to unlink once the worker has answered.
+    QHash<QString, QString> m_remoteVoice, m_remoteVoiceClips;
     bool m_voiceHold = false, m_voiceTranscribing = false;
     QFrame *m_helpCard = nullptr;
     QComboBox *m_effortBox = nullptr;
