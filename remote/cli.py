@@ -215,8 +215,8 @@ def make_control_approver(mode: str, attachment=None):
     async def ask(request: host_mod.ControlRequest) -> bool:
         print("\n" + "─" * 60)
         print(f"  {request.name} is asking for the keyboard in {request.pane}")
-        print("  While they hold it, what they type goes to the shell. Ctrl-\\ and type to take")
-        print("  it back at any time.")
+        print("  While they hold it, what they type goes to the shell. Typing here takes it")
+        print("  straight back, with no question asked.")
         print("─" * 60)
         if mode == "auto":
             print("  --approve auto: handing it over.\n")

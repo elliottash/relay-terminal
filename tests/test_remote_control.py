@@ -1129,5 +1129,71 @@ class SidecarTests(unittest.TestCase):
         run(main())
 
 
+# ---- the terminal harness (remote/cli.py) ---------------------------------------------------------
+
+class CliApproverTests(unittest.TestCase):
+    """The owner answering at the terminal, which is how this is tried without the GUI."""
+
+    def ask(self, approver, request):
+        import contextlib as ctx
+        import io
+        out = io.StringIO()
+        with ctx.redirect_stdout(out):
+            answer = asyncio.run(approver(request))
+        return answer, out.getvalue()
+
+    def test_a_prompt_is_printed_whole_and_auto_approves(self):
+        from remote import cli
+        request = host_mod.PromptRequest(prompt_id="p1", participant="g1", name="alice",
+                                         pane="pane-1", text="line one\nline two", when="queue")
+        answer, printed = self.ask(cli.make_prompt_approver("auto"), request)
+        self.assertTrue(answer)
+        self.assertIn("alice", printed)
+        self.assertIn("line one", printed)
+        self.assertIn("line two", printed, "the whole text, never a preview")
+        self.assertIn("queued", printed)
+
+    def test_a_plan_says_so(self):
+        from remote import cli
+        request = host_mod.PromptRequest(prompt_id="p1", participant="g1", name="alice",
+                                         pane="pane-1", text="Execute the plan abc",
+                                         plan_id="abc")
+        _, printed = self.ask(cli.make_prompt_approver("auto"), request)
+        self.assertIn("plan abc", printed)
+
+    def test_control_names_the_pane_and_says_how_to_take_it_back(self):
+        from remote import cli
+        request = host_mod.ControlRequest(pane="pane-1", participant="g1", name="alice")
+        answer, printed = self.ask(cli.make_control_approver("auto"), request)
+        self.assertTrue(answer)
+        self.assertIn("alice", printed)
+        self.assertIn("pane-1", printed)
+        self.assertIn("Typing here takes it", printed)
+
+    def test_the_local_attachment_takes_control_back_by_typing(self):
+        """`remote.cli share` has no GUI to send `control_take`, so the attachment's own keys
+        are the owner's physical keystroke (section 10.3)."""
+        from remote import attach as attach_mod
+
+        class Source:
+            panes = {"pane-1": object()}
+
+            async def _write(self, pane, message):
+                self.wrote = message
+
+        taken = []
+
+        async def main():
+            source = Source()
+            attachment = attach_mod.Attachment.__new__(attach_mod.Attachment)
+            attachment.source = source
+            attachment.pane_id = "pane-1"
+            attachment.on_input = taken.append
+            await attach_mod.Attachment._send(attachment, b"x")
+
+        asyncio.run(main())
+        self.assertEqual(taken, ["pane-1"])
+
+
 if __name__ == "__main__":
     unittest.main()
