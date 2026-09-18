@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from relay_core.router import (ASSIST_THRESHOLD, BARE_WORD_ODD, ENGLISH_COMMANDS, LITERAL_TEXT,
+                               _one_edit_apart,
                                SIGNAL_WORDS, assist_signals, classify, validate_input)
 
 class RouterTests(unittest.TestCase):
@@ -148,22 +149,33 @@ class ValidityTests(unittest.TestCase):
         # A letter-bearing glob in command position stays un-decidable, so still runnable.
         self.assertValid("p* --version")
 
-    def test_only_a_command_attempt_explains_itself(self):
-        # Owner report 2026-09-18: "symlink from ~/projects to here" was answered by the agent, with
-        # "command not found: symlink" printed under it, which reads as a failed command. The note is
-        # for a mistyped command, so plain English keeps quiet.
-        for text in ["symlink from ~/projects to here", "add a note about this", "commit this",
-                     "deploy the site", "tell ryan about the meeting", "35 * 30"]:
+    def test_only_a_mistyped_command_explains_itself(self):
+        # Owner reports 2026-09-18: "symlink from ~/projects to here" and a lone "resume" were both
+        # answered by the agent with "command not found: ..." printed under them, which reads as a
+        # failed command. The note is for a command that was meant and mistyped, so it needs
+        # evidence of that: shell syntax, flags, a name that is not an English word, or a word one
+        # slip away from a command this machine has.
+        for text in ["symlink from ~/projects to here", "resume", "again", "status", "deploy",
+                     "add a note about this", "tell ryan about the meeting", "resume the meeting notes",
+                     "35 * 30"]:
             result = self.check(text)
             self.assertEqual(result.route, "agent", text)
             self.assertFalse(result.explain_invalid, text)
         for text in ["nonexistentcmd123", "gti status", "docekr ps -a", "pyton script.py",
-                     "ls | nonexistentcmd123"]:
+                     "ls | nonexistentcmd123", "lls"]:
             result = self.check(text)
             self.assertEqual(result.route, "agent", text)
             self.assertTrue(result.explain_invalid, text)
         # A syntax error is about a command however it is worded, so it is always explained.
         self.assertTrue(self.check("don't break the build").explain_invalid)
+
+    def test_one_edit_apart(self):
+        for typed, command in [("gti", "git"), ("pyton", "python"), ("docekr", "docker"),
+                               ("lls", "ls"), ("gi", "git"), ("gitt", "git")]:
+            self.assertTrue(_one_edit_apart(typed, command), (typed, command))
+        for typed, command in [("resume", "resize"), ("status", "stat"), ("git", "git"),
+                               ("deploy", "dpkg"), ("notes", "node")]:
+            self.assertFalse(_one_edit_apart(typed, command), (typed, command))
 
     def test_syntax_errors(self):
         result = self.assertInvalid("don't break the build", "syntax error:")

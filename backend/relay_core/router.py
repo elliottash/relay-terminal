@@ -486,12 +486,52 @@ at here there please and or of in on over under again back now then some any eve
 """.split())
 
 
-def explain_invalid(text: str, reason: str) -> bool:
+def _one_edit_apart(typed: str, command: str) -> bool:
+    """True when one insertion, deletion, substitution or swap turns `typed` into `command`.
+
+    The shapes a typo actually takes at a prompt: gti/git, pyton/python, docekr/docker, lls/ls.
+    Two edits apart is a different word, not a slip — resume/resize must not match.
+    """
+    if typed == command:
+        return False
+    short, long = sorted((typed, command), key=len)
+    if len(long) - len(short) > 1:
+        return False
+    if len(typed) == len(command):
+        differing = [i for i, (a, b) in enumerate(zip(typed, command)) if a != b]
+        if len(differing) == 1:
+            return True
+        return (len(differing) == 2 and differing[1] == differing[0] + 1
+                and typed[differing[0]] == command[differing[1]]
+                and typed[differing[1]] == command[differing[0]])
+    i = j = skipped = 0
+    while i < len(short) and j < len(long):
+        if short[i] != long[j]:
+            if skipped:
+                return False
+            skipped, j = 1, j + 1
+            continue
+        i, j = i + 1, j + 1
+    return True
+
+
+def _looks_mistyped(word: str, known: set[str], path: str) -> bool:
+    """True when `word` is one slip away from a command this machine actually has."""
+    if len(word) < 2:
+        return False
+    candidates = known | path_executables(path)
+    return any(_one_edit_apart(word, name) for name in candidates
+               if abs(len(name) - len(word)) <= 1 and name[:1] in {word[:1], word[1:2]})
+
+
+def explain_invalid(text: str, reason: str, known: Iterable[str] = (), path: str | None = None) -> bool:
     """Whether the GUI should print `reason` under a line auto-routed to the agent.
 
-    True for what reads as an attempt at a command: one bare word, flags, shell operators, or a
-    two-word invocation. False for plain English, where the missing "command" is just the first
-    word of a sentence and naming it reads as an error the user caused.
+    The note is for the moment a command was meant and mistyped ("gti status"), so it wants real
+    evidence of that: shell syntax, flags, a name that is not a plain English word, or a word one
+    slip away from a command that exists here. Everything else is language — a lone "resume", or a
+    sentence whose first word happens not to be a program — and naming its first word reads as the
+    failure of a command the user never ran (owner reports, 2026-09-18).
     """
     prefix = "command not found: "
     if not reason.startswith(prefix):
@@ -506,13 +546,19 @@ def explain_invalid(text: str, reason: str) -> bool:
         words = shlex.split(trimmed, posix=True)
     except ValueError:
         return True
-    if len(words) <= 1:
-        return True
     if any(a.startswith(("-", "+")) for a in words[1:]):
-        return True
-    if len(words) == 2:
-        return words[1].strip("?.,!:").lower() not in SENTENCE_LEAD
-    return False
+        return True                             # flags are nobody's English
+    if not word.isalpha() or not word.islower():
+        return True                             # kubectl2, pip3, ./run.sh: a name, not a word
+    if len(words) > 1:
+        # Short English words sit one edit from some command or other ("add" from "adb"), so a line
+        # that reads as a sentence is not rescued by the typo test below.
+        if words[1].strip("?.,!:").lower() in SENTENCE_LEAD:
+            return False
+        operandish = any("/" in a or "~" in a or "." in a.strip(".,?!") for a in words[1:])
+        if len(words) > 3 and not operandish:
+            return False
+    return _looks_mistyped(word, set(known), path or os.environ.get("PATH") or os.defpath)
 
 
 def _first_word_reason(text: str, known: set[str], path: str, cwd: str) -> str:
@@ -630,4 +676,4 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
                             ok, error, valid, reason, True, why)
         return Decision("shell", text, "Runnable shell command.", ok, error, valid, reason)
     return Decision("agent", text, f"Not a runnable command ({reason}) · sent to the agent", ok, error, valid, reason,
-                    explain_invalid=explain_invalid(text, reason))
+                    explain_invalid=explain_invalid(text, reason, known, path))
