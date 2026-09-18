@@ -233,6 +233,7 @@ private:
         add("pane.moveToNewTab", "pane", "Move pane to a new tab (keeps the shell and agent)", {});
         add("tab.moveToNewWindow", "tab", "Move tab to a new window (keeps its panes)", {});
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+Z")});
+        add("closed.list", "pane", "Recently closed: the last 25 panes, tabs and windows, any of them reopened", {});
         add("windows.fresh", "window", "Start a fresh window set (forget the saved window layout)", {});
         add("palette.open", "palette", "Actions: every action and its keys, in a filterable list (again to close it)", {QStringLiteral("Ctrl+Shift+A")});
         // One key opens and closes the explorer (issue #D60R). Ctrl+B is VS Code's sidebar key and

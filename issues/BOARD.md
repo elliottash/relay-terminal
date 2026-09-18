@@ -88,6 +88,7 @@
 | `#0JA7` | [Colour themes](features/needs_qa_llm/2026-09-17-color-themes.md) | needs-qa-llm | agent |  |  |
 | `#D60R` | [File explorer: right-click menu, navigate here, and a toggle shortcut](features/needs_qa_llm/2026-09-17-explorer-right-click-and-toggle.md) | needs-qa-llm | agent |  |  |
 | `#K13B` | [Update the website for the new engine and features](features/needs_qa_llm/2026-09-17-website-update-engine-features.md) | needs-qa-llm | agent |  |  |
+| `#RC7Z` | [Recently closed panes, tabs and windows](features/needs_qa_llm/2026-09-18-recently-closed.md) | needs-qa-llm | agent |  |  |
 | `#JRWQ` | [The pane header is an agent-written summary of the session](features/needs_qa_llm/2026-09-17-pane-title-summary.md) | needs-qa-llm | agent |  |  |
 | `#78BN` | [One key for a new pane, with an arrow to choose the side](features/needs_qa_llm/2026-09-17-new-pane-direction-by-arrow.md) | needs-qa-llm | agent |  |  |
 | `#X2F1` | [Bring the useful Konsole context-menu items to the engine panes](features/needs_qa_llm/2026-09-17-port-konsole-context-menus.md) | needs-qa-llm | agent |  |  |

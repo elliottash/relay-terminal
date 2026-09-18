@@ -359,7 +359,10 @@ public:
     QString scrollbackId() const { return m_scrollbackId; }
     // The two rules the replay prints around the restored block. They are also what the save
     // filters out, so a pane that has been restored twice does not stack them.
-    static QString scrollbackOpenMark() { return QStringLiteral("— scrollback from before the restart —"); }
+    // True of both ways a pane comes back: Relay restarted, or the pane was closed and reopened.
+    static QString scrollbackOpenMark() { return QStringLiteral("— scrollback from this pane's previous shell —"); }
+    // What the rule said until 2026-09-18; still filtered, for text saved under it.
+    static QString scrollbackLegacyOpenMark() { return QStringLiteral("— scrollback from before the restart —"); }
     static QString scrollbackCloseMark() { return QStringLiteral("— end of restored scrollback; this shell is new —"); }
     void saveScrollback() const {
         if (!terminalCan(relay::TerminalBackend::Scrollback)) return;
@@ -371,7 +374,7 @@ public:
         // The rules a previous restore printed are Relay's own chrome, not output: saving them
         // would stack one pair per restart inside the history. Each run prints its own.
         lines.erase(std::remove_if(lines.begin(), lines.end(), [](const QString &line) {
-                        return line == scrollbackOpenMark() || line == scrollbackCloseMark();
+                        return line == scrollbackOpenMark() || line == scrollbackLegacyOpenMark() || line == scrollbackCloseMark();
                     }),
                     lines.end());
         QString error;
@@ -7178,7 +7181,7 @@ private:
         // and the pane is left with no prompt at all (the same trap clearTerminal() documents).
         // An empty line is the shell's own way of printing a fresh prompt where the cursor now is.
         sendShellInput(QStringLiteral("\n"));
-        status(QStringLiteral("Restored %1 line(s) of scrollback from before the restart.").arg(lines.size()));
+        status(QStringLiteral("Restored %1 line(s) of scrollback from this pane's previous shell.").arg(lines.size()));
     }
 
     // Where inline output may go now: a local shell idle at its prompt, or a remote one (#S5SH).

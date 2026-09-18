@@ -31,6 +31,8 @@
 #include "TerminalBackends.h"
 #include "TerminalBackend.h"
 #include "WindowState.h"
+#include "ClosedStack.h"
+#include "ClosedList.h"
 #include "RuntimeDirs.h"
 #include "Voice.h"
 #include "Aliases.h"
@@ -40,6 +42,10 @@
 
 #include <QAbstractButton>
 #include <QDateTime>
+#include <QPair>
+#include <QUuid>
+#include <QHash>
+#include <QSet>
 #include <QAbstractItemView>
 #include <QAbstractScrollArea>
 #include <QAction>
@@ -100,21 +106,20 @@
 // Layout nodes (used to restore closed tabs and windows) are JSON:
 //   {"pane": {"cwd": "...", "workspace": "..."}}
 //   {"split": "h" | "v", "sizes": [..], "children": [node, ...]}
-// Restoring recreates shells in the same directories; scrollback and running programs
-// of a closed pane are not preserved, because closing a pane ends its shell.
+// Restoring recreates shells in the same directories, with the terminal text the pane had when
+// it closed and its conversation; running programs are not preserved, because closing a pane
+// ends its shell.
 
 class RelayWindow;
 
+// A closed pane, tab or window. `record` is everything that can be written down and is what
+// state/closed.json holds (src/ClosedStack.h); the two pointers are where it sat in this run, and
+// are null for an item that came back from the file — it then reopens in the window that asks.
 struct ClosedItem {
-    enum Kind { PaneItem, TabItem, WindowItem } kind = PaneItem;
+    relay::closed::Record record;
     QPointer<RelayWindow> window;
-    QPointer<QWidget> sibling;           // PaneItem: the pane that took focus
-    Qt::Orientation orientation = Qt::Horizontal;
-    bool before = false;                 // PaneItem: restored pane goes before the sibling
-    int index = 0;                       // TabItem: tab position; WindowItem: current tab
-    QJsonObject layout;                  // PaneItem / TabItem: a layout node
-    QJsonArray tabs;                     // WindowItem
-    QRect geometry;                      // WindowItem
+    QPointer<QWidget> anchor;            // Pane: what it sat beside — a pane, or a whole nested split
+    QPointer<QWidget> sibling;           // Pane: the pane that took focus, if the anchor is gone
 };
 
 class WindowManager {
@@ -165,11 +170,34 @@ public:
     RelayWindow *newWindowAt(const QString &cwd);
     RelayWindow *newEmptyWindow(const QRect &geometry);   // the caller adopts a tab into it
     void cycle(RelayWindow *from, int delta);
-    void remember(ClosedItem item) {
-        m_closed.append(std::move(item));
-        while (m_closed.size() > 25) m_closed.removeFirst();
-    }
+    // ----- recently closed (src/ClosedStack.h) --------------------------------------------------
+    // The last 25 closed panes, tabs and windows, newest last. `restore` brings the newest back
+    // (closed.restore); the "Recently closed" list and the palette reopen any of them by id.
+    void remember(ClosedItem item);
     void restore(RelayWindow *requester);
+    bool restoreClosed(RelayWindow *requester, const QString &id);
+    bool discardClosed(const QString &id);    // drop one item; its saved text goes at the next prune
+    QList<relay::closed::Record> closedRecords() const {
+        QList<relay::closed::Record> records;
+        for (const ClosedItem &item : m_closed) records.append(item.record);
+        return records;
+    }
+    // The newest closed item that holds this conversation; an empty id when there is none.
+    QString closedItemForSession(const QString &sessionId) const {
+        if (sessionId.isEmpty()) return {};
+        for (auto it = m_closed.crbegin(); it != m_closed.crend(); ++it)
+            if (relay::closed::sessionIds(it->record).contains(sessionId)) return it->record.id;
+        return {};
+    }
+    // Called after every change to the list, for as long as `context` lives.
+    void watchClosed(QObject *context, std::function<void()> changed) {
+        if (!context || !changed) return;
+        m_closedWatchers.append({QPointer<QObject>(context), std::move(changed)});
+    }
+    void forgetClosed();                      // drop the list and its file
+    void flushClosed();                       // the quit's last word: see settleClosed()
+    // Whether this Relay writes the state directory at all (restore is on and the layout is ours).
+    bool writesState();
     void forget(RelayWindow *window) { m_windows.removeAll(window); }
 
     // ----- saved window layout: "reopen where I left off" (src/WindowState.h) -------------------
@@ -200,11 +228,22 @@ private:
     QJsonArray captureWindows();
     void writeWindows(const QJsonArray &windows);
     void settleWindowClose();
+    void loadClosed();
+    void saveClosed();
+    void settleClosed();
+    void closedChanged();
+    void reopen(RelayWindow *requester, ClosedItem item);
+    QStringList openSessionIds();
 
     QString m_workspace;
     bool m_cleanShell = false;
     QList<QPointer<RelayWindow>> m_windows;
     QList<ClosedItem> m_closed;
+    QList<QPair<QPointer<QObject>, std::function<void()>>> m_closedWatchers;
+    // Windows remembered since the last settle. When the whole set goes (a quit) they are what the
+    // saved layout reopens on the next start, so they are not "closed" and leave the list again.
+    QStringList m_pendingWindowCloses;
+    QString m_closedPath;
     QTemporaryDir m_socketDir{QDir::tempPath() + QStringLiteral("/relay-open-XXXXXX")};
     QLocalServer m_server;
     // saved window layout
@@ -363,15 +402,41 @@ public:
     }
 
     // Restore a closed pane next to a sibling pane that still exists in this window.
-    bool restorePaneNextTo(QWidget *sibling, Qt::Orientation orientation, bool before, const QJsonObject &node) {
-        if (!sibling || sibling->window() != this || !isLeaf(sibling)) return false;
+    // `sizes`/`slot` are the divider positions of the splitter the pane left; they are put back
+    // only when the pane lands in a splitter of that shape again, in the slot it had.
+    bool restorePaneNextTo(QWidget *sibling, Qt::Orientation orientation, bool before, const QJsonObject &node,
+                           const QList<int> &sizes = {}, int slot = -1) {
+        // The sibling is a pane, or the nested split the pane sat beside (still in a tab here).
+        if (!sibling || sibling->window() != this || !(isLeaf(sibling) || dynamic_cast<QSplitter *>(sibling))
+            || leavesIn(sibling).isEmpty() || !pageOf(leavesIn(sibling).first())) return false;
         QWidget *leaf = nullptr;
         try { leaf = buildNode(node); }
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return true; }
         insertBeside(sibling, leaf, orientation, before);
+        // Queued: insertBeside() sizes a new two-pane splitter from a queued callback of its own,
+        // and the sizes the pane had must be the last word.
+        QPointer<QWidget> placed(leaf);
+        QTimer::singleShot(0, this, [placed, sizes, slot] {
+            auto *splitter = placed ? dynamic_cast<QSplitter *>(placed->parentWidget()) : nullptr;
+            if (splitter && slot >= 0 && splitter->count() == sizes.size() && splitter->indexOf(placed) == slot)
+                splitter->setSizes(sizes);
+        });
         m_tabs->setCurrentWidget(pageOf(leaf));
         setActiveLeaf(leaf); focusLeaf(leaf);
         return true;
+    }
+
+    // Recently closed: give reopened tabs the names the owner had set by hand. `first` is the
+    // index of the tab `names` starts at.
+    void nameTabs(const QStringList &names, int first = 0) {
+        for (int i = 0; i < names.size(); ++i)
+            if (!names.at(i).isEmpty() && m_tabs->widget(first + i)) renameTab(names.at(i), false, m_tabs->widget(first + i));
+    }
+    int currentTabIndex() const { return m_tabs->currentIndex(); }
+    QStringList openSessionIds() const {
+        QStringList ids;
+        for (Pane *pane : allPanes()) if (pane && !pane->sessionId().isEmpty()) ids.append(pane->sessionId());
+        return ids;
     }
 
     Pane *findPaneByToken(const QString &token) const {
@@ -830,6 +895,7 @@ private:
         else if (id == QStringLiteral("pane.moveToNewTab")) { if (m_activeLeaf) moveLeafToNewTab(m_activeLeaf); }
         else if (id == QStringLiteral("tab.moveToNewWindow")) moveTabToNewWindow(m_tabs->currentIndex());
         else if (id == QStringLiteral("closed.restore")) m_manager->restore(this);
+        else if (id == QStringLiteral("closed.list")) openClosedList();
         else if (id == QStringLiteral("files.explorer")) toggleExplorer(activeCwd(), m_activeLeaf);
         else if (id == QStringLiteral("files.open")) {
             const QString file = pickFileForPreview();
@@ -1948,6 +2014,29 @@ private:
         items << actionItem(panes, QStringLiteral("Move pane up"), QString(), QStringLiteral("pane.moveUp"));
         items << actionItem(panes, QStringLiteral("Move pane down"), QString(), QStringLiteral("pane.moveDown"));
         items << actionItem(panes, QStringLiteral("Restore closed"), QStringLiteral("Last closed pane, tab or window"), QStringLiteral("closed.restore"));
+        items << actionItem(panes, QStringLiteral("Recently closed…"), QStringLiteral("The last 25 closed panes, tabs and windows, in the Sessions pane"), QStringLiteral("closed.list"));
+        // Any of the last 25, newest first (src/ClosedStack.h). Searching the actions finds them by
+        // name and by directory.
+        if (const QList<relay::closed::Record> closed = m_manager->closedRecords(); !closed.isEmpty()) {
+            items << submenu(QStringLiteral("menu:closed"), panes, QStringLiteral("Recently closed"),
+                             QStringLiteral("%1 to reopen, with their text and conversations").arg(closed.size()), [this] {
+                QList<PaletteItem> children;
+                const QList<relay::closed::Record> records = m_manager->closedRecords();
+                const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                for (auto it = records.crbegin(); it != records.crend(); ++it) {
+                    PaletteItem item;
+                    const QString id = it->id;
+                    item.key = QStringLiteral("closed:") + id; item.section = QStringLiteral("Panes and tabs");
+                    item.label = QStringLiteral("Reopen %1: %2").arg(relay::closed::kindName(it->kind).toLower(), relay::closed::label(*it));
+                    item.detail = QStringList{relay::closed::place(*it, QDir::homePath()), relay::closed::age(it->closedAt, now)}
+                                      .filter(QRegularExpression(QStringLiteral("."))).join(QStringLiteral(" · "));
+                    item.aliases = QStringLiteral("restore closed undo reopen");
+                    item.run = [this, id] { m_manager->restoreClosed(this, id); };
+                    children << item;
+                }
+                return children;
+            });
+        }
         // "Reopen windows on start" is a row in Options › General.
         items << actionItem(panes, QStringLiteral("Start a fresh window set"),
                             QStringLiteral("Forget the saved layout; the next start opens one new window"),
@@ -2838,7 +2927,8 @@ private:
             if (!w) return;
             w->updateTitles();
         };
-        pane->onShellExited = [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, false); };
+        // `exit` (or the shell dying) closes the pane the way × does, so it can be reopened too.
+        pane->onShellExited = [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, true); };
         pane->onOpenPath = [guard](const QString &path, int line) { if (auto *w = windowOf(guard)) w->openPath(path, line, guard); };
         pane->onToggleExplorer = [guard](const QString &path) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleExplorer(path, guard); } };
         pane->onOpenBoard = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleBoardPane(); } };
@@ -4095,6 +4185,34 @@ private:
         return best < 0 ? nullptr : panes.at(best);
     }
 
+    // closed.list: the session manager pane, on its "Recently closed" tab (card #R6J0 owns the
+    // pane; registerClosedTab() below is what puts the tab in it).
+    void openClosedList() { openSessions(QStringLiteral("closed")); }
+
+public:
+    // The "Recently closed" tab of every session manager (src/ClosedList.h). One widget per pane,
+    // all showing the manager's one list and refreshed whenever it changes.
+    static void registerClosedTab() {
+        addSessionsTab(QStringLiteral("closed"), QStringLiteral("Recently closed"), [](RelayWindow *window) -> QWidget * {
+            auto *view = new relay::closed::ListView;
+            WindowManager *manager = window->m_manager;
+            QPointer<RelayWindow> guard(window);
+            view->setRecords(manager->closedRecords());
+            manager->watchClosed(view, [view, manager] { view->setRecords(manager->closedRecords()); });
+            view->onReopen = [manager, guard](const QString &id) { manager->restoreClosed(guard, id); };
+            view->onDiscard = [manager](const QString &id) { manager->discardClosed(id); };
+            view->onClear = [manager, guard, view] {
+                if (QMessageBox::question(view, QStringLiteral("Clear recently closed?"),
+                                          QStringLiteral("Forget all %1 closed items and the terminal text saved for them? "
+                                                         "Their conversations stay in Sessions.").arg(manager->closedRecords().size()),
+                                          QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) == QMessageBox::Yes)
+                    manager->forgetClosed();
+            };
+            return view;
+        });
+    }
+private:
+
     void closeActive() {
         QWidget *pane = m_activeLeaf;
         if (!pane) return;
@@ -4136,9 +4254,13 @@ public:
         QWidget *focusNext = neighborPanes.isEmpty() ? nullptr : (index > 0 ? neighborPanes.last() : neighborPanes.first());
         if (record && focusNext && !serializeNode(pane).isEmpty()) {
             ClosedItem item;
-            item.kind = ClosedItem::PaneItem; item.window = this; item.sibling = focusNext;
-            item.orientation = splitter->orientation(); item.before = index == 0;
-            item.layout = serializeNode(pane);
+            item.window = this; item.anchor = neighbor; item.sibling = focusNext;
+            item.record.kind = relay::closed::Record::Pane;
+            item.record.orientation = splitter->orientation(); item.record.before = index == 0;
+            item.record.sizes = splitter->sizes(); item.record.slot = index;
+            item.record.layout = serializeNode(pane);
+            item.record.titles = leafTitles(pane);
+            saveScrollbacksIn(pane);
             m_manager->remember(item);
         }
         if (auto *terminal = dynamic_cast<Pane *>(pane)) {
@@ -4169,8 +4291,13 @@ public:
         if (!page) return;
         if (record) {
             ClosedItem item;
-            item.kind = ClosedItem::TabItem; item.window = this; item.index = index;
-            item.layout = serializeTab(index);
+            item.window = this;
+            item.record.kind = relay::closed::Record::Tab;
+            item.record.index = index;
+            item.record.layout = serializeTab(index);
+            item.record.tabNames = QStringList{m_tabNames.value(page)};
+            item.record.titles = leafTitles(page);
+            saveScrollbacksIn(page);
             m_manager->remember(item);
         }
         for (Pane *pane : panesIn(page)) { pane->onStatus = nullptr; pane->onStateChanged = nullptr; pane->onShellExited = nullptr; }
@@ -4192,7 +4319,9 @@ private:
         for (int i = 0; i < m_tabs->count(); ++i) leafCount += leavesIn(m_tabs->widget(i)).size();
         QString text = QStringLiteral("Close this window and its %1 tab(s) and %2 pane(s)?").arg(m_tabs->count()).arg(leafCount);
         if (busy) text += QStringLiteral("\n\nA program or agent turn is still running and will be stopped.");
-        text += QStringLiteral("\n\nCtrl+Shift+W reopens it in the same directories, with new shells.");
+        const QString keys = Keymap::instance().shortcutText(QStringLiteral("closed.restore"));
+        text += QStringLiteral("\n\n%1 reopens it in the same directories, with its text and conversations and new shells.")
+                    .arg(keys.isEmpty() ? QStringLiteral("\"Restore closed\" in the palette") : keys);
         return QMessageBox::warning(this, QStringLiteral("Close window?"), text,
                                     QMessageBox::Close | QMessageBox::Cancel, QMessageBox::Cancel) == QMessageBox::Close;
     }
@@ -4205,12 +4334,42 @@ private:
 
     void rememberWindow() {
         if (m_skipRemember || m_tabs->count() == 0) return;
+        // Only the tabs that can be rebuilt, so the names and titles beside them stay in step.
         ClosedItem item;
-        item.kind = ClosedItem::WindowItem;
-        item.tabs = serializeTabs();
-        item.index = m_tabs->currentIndex();
-        item.geometry = geometry();
+        item.record.kind = relay::closed::Record::Window;
+        for (int i = 0; i < m_tabs->count(); ++i) {
+            const QJsonObject node = serializeTab(i);
+            if (node.isEmpty()) continue;
+            if (i <= m_tabs->currentIndex()) item.record.index = int(item.record.tabs.size());
+            item.record.tabs.append(node);
+            item.record.tabNames.append(m_tabNames.value(m_tabs->widget(i)));
+            item.record.titles += leafTitles(m_tabs->widget(i));
+        }
+        if (item.record.tabs.isEmpty()) return;
+        item.record.geometry = geometry();
+        // The panes' text is written by noteWindowClosing(), which runs next.
         m_manager->remember(item);
+    }
+
+    // Recently closed: what each leaf under `root` is called, in the order serializeNode() walks
+    // them and leaving out the ones it leaves out.
+    QStringList leafTitles(QWidget *root) const {
+        QStringList titles;
+        for (QWidget *leaf : leavesIn(root)) {
+            if (serializeNode(leaf).isEmpty()) continue;
+            if (auto *pane = dynamic_cast<Pane *>(leaf)) titles << pane->paneTitle();
+            else if (auto *tool = dynamic_cast<ToolPane *>(leaf)) titles << tool->title();
+            else titles << QString();
+        }
+        return titles;
+    }
+
+    // A pane that closes on its own takes its shell with it, so its terminal text is written now
+    // (the window-close and quit paths write every pane's; src/WindowState.h).
+    void saveScrollbacksIn(QWidget *root) const {
+        if (!m_manager->writesState()) return;
+        for (QWidget *leaf : leavesIn(root))
+            if (auto *pane = dynamic_cast<Pane *>(leaf)) pane->saveScrollback();
     }
 
     WindowManager *m_manager;

@@ -67,7 +67,8 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 | Ctrl+T, Ctrl+N | New tab, new window |
 | Ctrl+P, Ctrl+Shift+P | Split right, split down |
 | Alt+Arrows | Move between panes |
-| Ctrl+W, Ctrl+Shift+W | Close pane (then tab, then window); restore |
+| Ctrl+W, Ctrl+Shift+W | Close pane (then tab, then window) |
+| Ctrl+Shift+Z | Reopen the last closed pane, tab or window, with its text and conversation |
 | F12 | Toggle native terminal input (same hand-over as Ctrl+H) |
 | Ctrl+Shift+R | Restart a pane's shell or agent after it was stopped |
 | Ctrl+Tab, Ctrl+Shift+Tab | Next, previous tab |

@@ -304,6 +304,7 @@ int main(int argc, char **argv) {
         // both halves: the layout and each pane's terminal text.
         QObject::connect(&app, &QCoreApplication::aboutToQuit, &app, [&manager] {
             manager.saveScrollbacks();
+            manager.flushClosed();      // before the layout's prune reads the recently-closed list
             manager.saveLayoutNow();
         });
         QTimer::singleShot(1500, &app, [] { registerUrlHandler(); });

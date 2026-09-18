@@ -11,6 +11,7 @@
 
 #include "Theme.h"
 #include "WindowState.h"
+#include "ClosedStack.h"
 
 #include <QApplication>
 #include <QDir>
@@ -22,6 +23,8 @@
 #include <QScreen>
 #include <QTabWidget>
 #include <QUrl>
+#include <QUuid>
+#include <QDateTime>
 #include <QLockFile>
 #include <QTimer>
 
@@ -53,6 +56,14 @@ inline void WindowManager::setUpLayoutSaving() {
     m_saveTimer.setSingleShot(true);
     m_saveTimer.setInterval(1000);   // a crash loses at most this much
     QObject::connect(&m_saveTimer, &QTimer::timeout, &m_context, [this] { saveLayoutNow(); });
+    m_closedPath = relay::closed::defaultPath();
+    loadClosed();
+    RelayWindow::registerClosedTab();
+}
+
+inline bool WindowManager::writesState() {
+    if (m_saveSuspended || !restoreEnabled() || m_statePath.isEmpty()) return false;
+    return ownsLayout() || !m_stateLock;      // another Relay owns the state directory
 }
 
 inline bool WindowManager::ownsLayout() {
@@ -94,7 +105,9 @@ inline void WindowManager::writeWindows(const QJsonArray &windows) {
         fprintf(stderr, "relay: could not save the window layout: %s\n", qPrintable(error));
     // The saved layout is the list of panes that can still come back, so it is also the list of
     // scrollback files worth keeping: everything else belonged to a pane that is gone for good.
-    relay::windowstate::pruneScrollback(relay::windowstate::scrollbackIds(windows));
+    // So is the recently-closed list: its panes are gone from the layout but not for good.
+    relay::windowstate::pruneScrollback(relay::windowstate::scrollbackIds(windows)
+                                        + relay::closed::scrollbackIds(closedRecords()));
 }
 
 inline void WindowManager::saveLayoutNow() { writeWindows(captureWindows()); }
@@ -102,8 +115,7 @@ inline void WindowManager::saveLayoutNow() { writeWindows(captureWindows()); }
 // One pass over every live pane. Panes that cannot report their scrollback, and panes whose text
 // is empty, leave no file behind.
 inline void WindowManager::saveScrollbacks() {
-    if (m_saveSuspended || !restoreEnabled() || m_statePath.isEmpty()) return;
-    if (!ownsLayout() && m_stateLock) return;   // another Relay owns the state directory
+    if (!writesState()) return;
     m_windows.removeAll(nullptr);
     for (RelayWindow *window : std::as_const(m_windows))
         if (window) window->savePaneScrollbacks();
@@ -126,6 +138,7 @@ inline void WindowManager::settleWindowClose() {
     if (!m_cascadeActive) return;
     m_cascadeActive = false;
     m_windows.removeAll(nullptr);
+    settleClosed();                                             // before the prune below reads the list
     if (m_windows.isEmpty()) writeWindows(m_cascadeSnapshot);   // quit: keep what was open
     else saveLayoutNow();                                       // one window closed: drop it
     m_cascadeSnapshot = QJsonArray();
@@ -184,6 +197,9 @@ inline void WindowManager::forgetSavedLayout(bool suspend) {
     // Forgetting the layout forgets the terminal text with it: the saved scrollback is only there
     // to fill the panes the layout brings back, and it is the more private half of the pair.
     relay::windowstate::removeAllScrollback();
+    // The recently-closed list goes the same way on disk: it names that text and those
+    // conversations. It stays in memory, so what was closed in this run can still be reopened.
+    if (!m_closedPath.isEmpty()) QFile::remove(m_closedPath);
 }
 
 inline RelayWindow *WindowManager::newWindow(const QJsonArray &tabs, int current, const QRect &geometry) {
@@ -285,25 +301,156 @@ inline void WindowManager::cycle(RelayWindow *from, int delta) {
     next->showNormal(); next->raise(); next->activateWindow();
 }
 
-inline void WindowManager::restore(RelayWindow *requester) {
-    while (!m_closed.isEmpty()) {
-        ClosedItem item = m_closed.takeLast();
-        switch (item.kind) {
-        case ClosedItem::PaneItem:
-            if (item.window && item.sibling && item.window->restorePaneNextTo(item.sibling, item.orientation, item.before, item.layout)) return;
-            if (item.window) { item.window->addTab(item.layout); return; }
-            if (requester) { requester->addTab(item.layout); return; }
-            newWindow(QJsonArray{item.layout});
-            return;
-        case ClosedItem::TabItem:
-            if (item.window) { item.window->addTab(item.layout, item.index); return; }
-            newWindow(QJsonArray{item.layout});
-            return;
-        case ClosedItem::WindowItem:
-            newWindow(item.tabs, item.index, item.geometry);
-            return;
-        }
-    }
-    if (requester) requester->notice(QStringLiteral("Nothing to restore."));
+// ----- recently closed ---------------------------------------------------------------------------
+
+inline void WindowManager::loadClosed() {
+    if (m_closedPath.isEmpty() || !writesState()) return;   // not ours to read either: see ownsLayout()
+    QString error;
+    const QList<relay::closed::Record> records = relay::closed::load(m_closedPath, &error);
+    if (!error.isEmpty()) fprintf(stderr, "relay: list of closed items ignored: %s\n", qPrintable(error));
+    for (const relay::closed::Record &record : records) m_closed.append(ClosedItem{record, nullptr, nullptr, nullptr});
 }
 
+inline void WindowManager::saveClosed() {
+    if (m_closedPath.isEmpty() || !writesState()) return;
+    QString error;
+    if (!relay::closed::save(m_closedPath, closedRecords(), &error))
+        fprintf(stderr, "relay: could not save the list of closed items: %s\n", qPrintable(error));
+}
+
+inline void WindowManager::closedChanged() {
+    for (int i = m_closedWatchers.size() - 1; i >= 0; --i)
+        if (!m_closedWatchers.at(i).first) m_closedWatchers.removeAt(i);
+    const auto watchers = m_closedWatchers;   // a watcher may add or remove one
+    for (const auto &watcher : watchers)
+        if (watcher.first) watcher.second();
+}
+
+inline void WindowManager::remember(ClosedItem item) {
+    if (item.record.id.isEmpty()) item.record.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    if (item.record.closedAt <= 0) item.record.closedAt = QDateTime::currentMSecsSinceEpoch();
+    const bool isWindow = item.record.kind == relay::closed::Record::Window;
+    if (isWindow) m_pendingWindowCloses.append(item.record.id);
+    m_closed.append(std::move(item));
+    while (m_closed.size() > relay::closed::kMaxItems) m_closed.removeFirst();
+    // A window is written once it is known not to be part of a quit: settleClosed().
+    if (!isWindow) saveClosed();
+    closedChanged();
+}
+
+// A window that closes while others stay open was closed; windows that all go together are a quit,
+// and the saved layout brings them back on the next start. Listing those as closed as well would
+// offer each of them twice, and reopening one would resume its conversations a second time.
+inline void WindowManager::settleClosed() {
+    m_windows.removeAll(nullptr);
+    const bool quit = m_windows.isEmpty() && restoreEnabled() && !m_saveSuspended;
+    if (quit && !m_pendingWindowCloses.isEmpty()) {
+        for (int i = m_closed.size() - 1; i >= 0; --i)
+            if (m_pendingWindowCloses.contains(m_closed.at(i).record.id)) m_closed.removeAt(i);
+    }
+    const bool changed = quit && !m_pendingWindowCloses.isEmpty();
+    m_pendingWindowCloses.clear();
+    saveClosed();
+    if (changed) closedChanged();
+}
+
+// aboutToQuit: the last window's close may not have settled yet (its callback is queued).
+inline void WindowManager::flushClosed() { settleClosed(); }
+
+inline void WindowManager::forgetClosed() {
+    m_closed.clear();
+    m_pendingWindowCloses.clear();
+    saveClosed();                             // an empty list removes the file
+    saveLayoutNow();                          // and its prune takes the text the list was keeping
+    closedChanged();
+}
+
+inline bool WindowManager::discardClosed(const QString &id) {
+    for (int i = m_closed.size() - 1; i >= 0; --i) {
+        if (m_closed.at(i).record.id != id) continue;
+        m_closed.removeAt(i);
+        m_pendingWindowCloses.removeAll(id);
+        saveClosed();
+        scheduleSave();                       // the layout's prune drops the text nothing names now
+        closedChanged();
+        return true;
+    }
+    return false;
+}
+
+inline QStringList WindowManager::openSessionIds() {
+    m_windows.removeAll(nullptr);
+    QStringList ids;
+    for (RelayWindow *window : std::as_const(m_windows)) ids += window->openSessionIds();
+    return ids;
+}
+
+inline void WindowManager::reopen(RelayWindow *requester, ClosedItem item) {
+    using relay::closed::Record;
+    // A conversation that was resumed somewhere else since must not be resumed a second time: two
+    // workers would write one session file. The pane still comes back, with its directory and text.
+    int stripped = 0;
+    item.record = relay::closed::withoutSessions(item.record, openSessionIds(), &stripped);
+    const Record &record = item.record;
+    RelayWindow *home = item.window ? item.window.data() : requester;
+    RelayWindow *landed = nullptr;
+    switch (record.kind) {
+    case Record::Pane:
+        // Beside what it sat beside; failing that, beside the pane that took its focus.
+        if (item.window && item.anchor
+            && item.window->restorePaneNextTo(item.anchor, record.orientation, record.before, record.layout, record.sizes, record.slot)) {
+            landed = item.window;
+        } else if (item.window && item.sibling
+                   && item.window->restorePaneNextTo(item.sibling, record.orientation, record.before, record.layout, record.sizes, record.slot)) {
+            landed = item.window;
+        } else if (home) {
+            if (home->addTab(record.layout)) landed = home;
+        } else {
+            landed = newWindow(QJsonArray{record.layout});
+        }
+        break;
+    case Record::Tab:
+        if (home) {
+            // Its old position only means something in the window it came from.
+            if (home->addTab(record.layout, item.window ? record.index : -1)) {
+                landed = home;
+                home->nameTabs(record.tabNames, home->currentTabIndex());
+            }
+        } else if ((landed = newWindow(QJsonArray{record.layout}))) {
+            landed->nameTabs(record.tabNames);
+        }
+        break;
+    case Record::Window:
+        landed = newWindow(record.tabs, record.index, record.geometry);
+        if (landed && landed->tabCount() == record.tabNames.size()) landed->nameTabs(record.tabNames);
+        break;
+    }
+    if (landed) { landed->raise(); landed->activateWindow(); }
+    if (RelayWindow *tell = landed ? landed : requester; tell && stripped > 0)
+        tell->notice(stripped == 1
+                         ? QStringLiteral("Its conversation is already open in another pane, so this pane starts a new one.")
+                         : QStringLiteral("%1 of its conversations are already open in other panes; those panes start new ones.").arg(stripped),
+                     8000);
+}
+
+inline void WindowManager::restore(RelayWindow *requester) {
+    if (m_closed.isEmpty()) {
+        if (requester) requester->notice(QStringLiteral("Nothing to restore."));
+        return;
+    }
+    restoreClosed(requester, m_closed.last().record.id);
+}
+
+inline bool WindowManager::restoreClosed(RelayWindow *requester, const QString &id) {
+    for (int i = m_closed.size() - 1; i >= 0; --i) {
+        if (m_closed.at(i).record.id != id) continue;
+        ClosedItem item = m_closed.takeAt(i);
+        m_pendingWindowCloses.removeAll(id);
+        reopen(requester, std::move(item));
+        saveClosed();
+        closedChanged();
+        return true;
+    }
+    if (requester) requester->notice(QStringLiteral("That item is no longer in the list."));
+    return false;
+}

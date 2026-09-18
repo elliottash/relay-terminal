@@ -106,10 +106,19 @@ target_compile_options(relay-backends PRIVATE -Wall -Wextra -Wpedantic)
 
 # Saved window layout ("reopen where I left off"): reading/writing state/windows.json, screen
 # clamping and directory fallbacks. Plain QtCore so the rules can be tested without a window.
-add_library(relay-windowstate STATIC src/WindowState.cpp src/WindowState.h)
+# src/ClosedStack.* is the recently-closed list (state/closed.json): same directory, same node
+# shapes, same atomic write, so it lives in the same library.
+add_library(relay-windowstate STATIC src/WindowState.cpp src/WindowState.h src/ClosedStack.cpp src/ClosedStack.h)
 target_include_directories(relay-windowstate PUBLIC src)
 target_link_libraries(relay-windowstate PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-windowstate PRIVATE -Wall -Wextra -Wpedantic)
+
+# The "Recently closed" list widget (the session manager's second tab). Fed records and callbacks,
+# so it is tested offscreen without a window.
+add_library(relay-closedlist STATIC src/ClosedList.cpp src/ClosedList.h)
+target_include_directories(relay-closedlist PUBLIC src)
+target_link_libraries(relay-closedlist PUBLIC relay-windowstate ${RELAY_QT}::Widgets)
+target_compile_options(relay-closedlist PRIVATE -Wall -Wextra -Wpedantic)
 
 # Private runtime directories (/tmp/relay-XXXXXX, /tmp/relay-open-XXXXXX): the owner mark that says
 # which Relay is using one, and the startup sweep that removes the ones a crash left behind.
@@ -320,6 +329,7 @@ if(RELAY_BUILD_APP)
     # main.cpp was split into one header per unit on 2026-09-18 (scripts/split-main.py); it is
     # still one translation unit -- main.cpp includes them -- and they are listed so AUTOMOC and
     # IDEs see them.
+    target_link_libraries(relay PRIVATE relay-closedlist)
     add_executable(relay src/main.cpp
         src/AppPaths.h src/Keymap.h src/Isolation.h src/Pane.h src/PaneChrome.h
         src/WindowChrome.h src/RelayWindow.h src/WindowManagerImpl.h
@@ -382,6 +392,13 @@ if(BUILD_TESTING)
     target_link_libraries(relay-fileindex-tests PRIVATE relay-fileindex ${RELAY_QT}::Test)
     add_test(NAME fileindex COMMAND relay-fileindex-tests)
 
+    add_executable(relay-closedstack-tests tests/closedstack_test.cpp)
+    target_link_libraries(relay-closedstack-tests PRIVATE relay-windowstate ${RELAY_QT}::Test)
+    add_test(NAME closedstack COMMAND relay-closedstack-tests)
+    add_executable(relay-closedlist-tests tests/closedlist_test.cpp)
+    target_link_libraries(relay-closedlist-tests PRIVATE relay-closedlist ${RELAY_QT}::Test)
+    add_test(NAME closedlist COMMAND relay-closedlist-tests)
+    set_tests_properties(closedlist PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-requests-tests tests/requests_test.cpp)
     target_link_libraries(relay-requests-tests PRIVATE relay-requests ${RELAY_QT}::Test)
     add_test(NAME requests COMMAND relay-requests-tests)

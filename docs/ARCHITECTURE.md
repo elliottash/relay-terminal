@@ -123,10 +123,24 @@ Layout rules:
   "effort","preset","model","session_id"}}`, `{"explorer":{"path"}}`, `{"preview":{"path"}}`,
   `{"plan":{"path"}}`, `{"split":"h"|"v","sizes":[…],"children":[…]}`. Restoring starts **new
   shells** in the saved directories (`RELAY_START_DIR`, applied by `shell/integration.bash` after
-  `.bashrc`). Running programs are not restored. The node carries a `scrollback` id, but the text
-  behind it is only ever written when Relay quits (the saved window layout below), so a pane
-  reopened with Ctrl+Shift+W comes back empty unless a quit had saved that pane's text — in which
-  case it replays what was saved then, not what was on screen when it was closed.
+  `.bashrc`). Running programs are not restored. The node carries a `scrollback` id, and the text
+  behind it is written when the pane, its tab or its window closes (as well as on quit), so a
+  reopened pane replays what was on screen when it was closed, then resumes its conversation.
+- **Recently closed** (`src/ClosedStack.h`, `WindowManager::remember` / `restoreClosed`). The last
+  25 closed panes, tabs and windows, newest last, each with when it closed, where it sat (split
+  direction, divider sizes, tab position, window geometry), hand-set tab names and what its panes
+  were called. `closed.restore` (Ctrl+Shift+Z) reopens the newest; `closed.list` and the "Recently
+  closed" group in the Actions pane reopen any of them. The list is written to
+  `state/closed.json` (0600, atomic) on every change and read back on start, under the same
+  rules as the saved layout: only the Relay that owns the layout reads or writes it, and not at
+  all when `windows/restore` is off. A pane that ends because its shell exited (`exit`) is
+  recorded like any other close. Windows that all close together are a quit — the saved layout
+  reopens them — so they leave the list again (`settleClosed()`); a window closed while others
+  stay open is kept. The layout's scrollback prune spares every id the list names. An item loaded
+  from the file has no live window or sibling and reopens as a tab of the window that asked. A
+  conversation that is already open in another pane is not resumed twice: the pane comes back
+  with its directory and text and starts a new one. Not recorded: turn transcripts and the
+  Settings pane, which are views onto something still open.
   `serializeNode()` writes these
   nodes and `buildNode()` / `createPane()` rebuild them; the saved window layout below uses the
   same shapes, so there is only one layout format in the app.
@@ -363,8 +377,8 @@ nothing is re-run.
     read thousands of lines per pane. A crash therefore loses the scrollback, not just the
     debounce window.
   - **What it looks like.** At the restarted shell's first prompt the pane erases the prompt line,
-    prints the saved lines plain between two muted rules (“— scrollback from before the restart
-    —” / “— end of restored scrollback; this shell is new —”) and sends an empty line so the
+    prints the saved lines plain between two muted rules (“— scrollback from this pane's previous
+    shell —” / “— end of restored scrollback; this shell is new —”) and sends an empty line so the
     shell prints a fresh prompt underneath — `redrawPrompt()` is a no-op here, because Readline's
     idea of where its prompt sits has just scrolled away. The rules are Relay's own chrome and are
     filtered out of the next save, so they do not stack up over restarts, and restored lines go
@@ -372,8 +386,10 @@ nothing is re-run.
 - **Controls.** The setting `windows/restore` ("Reopen windows on start" in the palette, default
   on; turning it off deletes the file and the saved scrollback), `relay --fresh` (ignores the file
   once, keeps it), and the palette action `windows.fresh` ("Start a fresh window set": deletes the
-  file and stops saving for the rest of the session, with a shortcut hint pointing at `--fresh`). Ctrl+Shift+W
-  (`closed.restore`) is a separate, in-session stack and is unaffected by any of them.
+  file and stops saving for the rest of the session, with a shortcut hint pointing at `--fresh`). The
+  recently-closed list (`state/closed.json`) follows the same switch: neither read nor written
+  while restoring is off, and "Start a fresh window set" deletes the file with the scrollback it
+  names, though what was closed in this run can still be reopened from memory.
 
 ## 4. Keyboard: Keymap, presets, palette
 
@@ -436,7 +452,7 @@ Default window shortcuts:
 | Action | Key | Action | Key |
 |---|---|---|---|
 | New window | Ctrl+N | Close pane → tab → window | Ctrl+W |
-| Next / previous window | Alt+Tab / Alt+Shift+Tab | Restore closed | Ctrl+Shift+W |
+| Next / previous window | Alt+Tab / Alt+Shift+Tab | Restore closed | Ctrl+Shift+Z |
 | New tab | Ctrl+T | Actions pane / Options pane | Ctrl+Shift+A / Ctrl+Shift+O |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Take control (from composer) | Ctrl+H |
 | Split right / down | Ctrl+P / Ctrl+Shift+P | Back to the prompt | Ctrl+Shift+H |
