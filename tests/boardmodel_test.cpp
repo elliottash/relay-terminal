@@ -972,8 +972,22 @@ void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
 
     // The run's chatter and its writes: progress over the board, nothing on the card.
     view.handleEvent(cleanupEvent(QStringLiteral("delta"), {{"text", "thinking about the board"}}));
+    // Protocol § 23: the progress line is the call's concise line, not the tool's name. Without a
+    // label it falls back to the tool name, which is exactly what it printed before.
     view.handleEvent(cleanupEvent(QStringLiteral("tool_started"), {{"tool", "board_read"}}));
-    QVERIFY(view.notice().contains(QStringLiteral("board_read")));
+    QVERIFY(view.notice().contains(QStringLiteral("board read")));
+    view.handleEvent(cleanupEvent(QStringLiteral("tool_started"),
+                                  {{"tool", "board_list"},
+                                   {"label", QJsonObject{{"kind", "board"}, {"running", "listing cards"},
+                                                         {"title", "listed cards"}}}}));
+    QVERIFY(view.notice().contains(QStringLiteral("listing cards")));
+    view.handleEvent(cleanupEvent(QStringLiteral("tool_result"),
+                                  {{"tool", "board_list"},
+                                   {"label", QJsonObject{{"kind", "board"}, {"running", "listing cards"},
+                                                         {"title", "listed cards"},
+                                                         {"stats", QJsonArray{QStringLiteral("14 cards")}},
+                                                         {"ok", true}}}}));
+    QVERIFY(view.notice().contains(QStringLiteral("listed cards · 14 cards")));
     view.handleEvent(cleanupEvent(QStringLiteral("board_activity"),
                                   {{"id", "M3XJ"}, {"action", "move"},
                                    {"summary", "Inbox to Ready"}, {"write_id", "w-1"}}));

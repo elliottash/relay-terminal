@@ -47,7 +47,8 @@ target_compile_options(relay-editor PRIVATE -Wall -Wextra -Wpedantic)
 add_library(relay-board STATIC src/BoardModel.cpp src/BoardModel.h src/BoardPane.cpp src/BoardPane.h
     src/BoardWorker.cpp src/BoardWorker.h)
 target_include_directories(relay-board PUBLIC src)
-target_link_libraries(relay-board PUBLIC relay-editor ${RELAY_QT}::Widgets)
+# relay-toollabel: the cleanup run's progress line is the call's concise line (protocol section 23).
+target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel ${RELAY_QT}::Widgets)
 target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
 
 # Folder explorer and file preview panes: plain Qt, with optional syntax highlighting and PDF.

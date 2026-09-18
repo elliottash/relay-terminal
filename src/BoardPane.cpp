@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "BoardPane.h"
+#include "ToolLabel.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -3545,7 +3546,20 @@ bool BoardView::handleCleanupEvent(const QString &type, const QJsonObject &event
         return true;
     }
     if (type == QStringLiteral("tool_started")) {
-        showCleanupProgress(event.value(QStringLiteral("tool")).toString());
+        // One concise line rather than the bare tool name (protocol § 23): "reading agent.py",
+        // "running git status". Without a `label` this falls back to the legacy preview, and
+        // without that to the tool's own name, so an older worker says as much as it used to.
+        const toollabel::Label label = toollabel::fromEvent(event);
+        const QString line = label.runningLine().isEmpty() ? label.line() : label.runningLine();
+        showCleanupProgress(line.isEmpty() ? event.value(QStringLiteral("tool")).toString() : line);
+        return true;
+    }
+    if (type == QStringLiteral("tool_result")) {
+        // Past tense with its stats once the call has landed: "read 4 cards · 120 lines". A call
+        // that never happened says why on the same line, which is what line() already puts there.
+        const toollabel::Label label = toollabel::fromEvent(event);
+        if (!label.line().isEmpty())
+            showCleanupProgress(label.line());
         return true;
     }
     if (type == QStringLiteral("status")) {
