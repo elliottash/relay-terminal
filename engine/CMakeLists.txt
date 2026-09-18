@@ -105,6 +105,11 @@ if(RELAY_BUILD_ENGINE OR RELAY_BUILD_ENGINE_SPIKE)
 
     add_executable(relay-vterm-spike main.cpp)
     target_link_libraries(relay-vterm-spike PRIVATE relay-terminal-engine)
+
+    # Headless PTY + emulator, streaming screen state as line JSON. Used by remote access
+    # (docs/REMOTE-PROTOCOL.md section 6.5) until the GUI itself carries the hub.
+    add_executable(relay-screen-bridge tools/ScreenBridge.cpp)
+    target_link_libraries(relay-screen-bridge PRIVATE relay-terminal-engine)
 endif()
 
 if(BUILD_TESTING)

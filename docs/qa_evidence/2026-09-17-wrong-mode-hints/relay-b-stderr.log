@@ -1,0 +1,10 @@
+[wmh] dispatch route=shell mode=shell valid=1 signal=1 text='find the largest files'
+[wmh] runInTerminal watch=1 natural=1 text='find the largest files'
+[wmh] ready fail: natural=1 mode=shell
+[wmh] wrongModeHint towardAgent=1 key='Ctrl+I'
+[wmh] hint id=mode.requestInTerminal: showing
+[wmh] tool_result run='cd /tmp/relay-qa-wrong-mode && [Relay context: added by Relay, not typed by the ' prompt='' exit=127 mode=shell shown=0
+[wmh] hint id=turn.link: gated
+[wmh] dispatch route=shell mode=shell valid=0 signal=1 text='how do I list files by size'
+[wmh] wrongModeHint towardAgent=1 key='Ctrl+I'
+[wmh] hint id=mode.requestInTerminal: gated
