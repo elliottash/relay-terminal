@@ -156,6 +156,9 @@ WITHHELD_EVENTS: dict[str, str] = {
     "conversation_renamed": "desktop-local administration",
     # The ⓘ view (protocol 24): session file paths, instruction paths and the whole history.
     "session_info": "reply to the desktop's own request; local file paths",
+    # A todo handed to a subagent from the task list: the answer to the desktop's own click. The
+    # phone sees the result in `todos` and `subagent_started`.
+    "todo_subagent": "reply to the desktop's own request",
     "reset": "desktop-local administration",
     "rewound": "desktop-local administration",
     "fork_state": "opaque conversation state",
