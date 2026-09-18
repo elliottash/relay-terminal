@@ -85,11 +85,11 @@ def spec(name: str, description: str, properties: dict, required: list[str]) -> 
                            "additionalProperties": False}}}
 
 TOOLS = [
-    spec("run_command", "Run a non-interactive Bash command in the chosen workspace. NOT an OS sandbox. Does not share interactive shell variables or aliases. "
+    spec("run_command", "Run a non-interactive Bash command in the chosen workspace, or with host on the ssh host the Relay context names. NOT an OS sandbox. Does not share interactive shell variables or aliases. "
          "Waits up to timeout_seconds (default 30, at most 1800) for the command to finish. A command still running then is NOT killed: "
          "the result has still_running: true, a job_id and the output so far; read more with command_output (it can wait) and end it with stop_command. "
-         "Ask for the time a long build or test suite needs. For a server or watcher that should keep running, set background: true and stop it when done. "
-         "Stdin is closed, so a command that prompts fails instead of waiting.",
+         "Set timeout_seconds to the time a long build or test suite needs; do not ask the user how long it takes. For a server or watcher that should keep running, set background: true and stop it when done. "
+         "There is no tty and stdin is closed, so a command that prompts, needs sudo or logs in somewhere fails instead of waiting: hand that one to run_in_terminal when the tool is offered.",
          {"command": {"type": "string"}, "cwd": {"type": "string", "description": "Workspace-relative directory; default '.'"},
           "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": MAX_WAIT,
                               "description": "Seconds to wait before handing a still-running command back as a job; default 30."},

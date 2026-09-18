@@ -52,8 +52,10 @@ REFUSALS = {
               "was placed. Show the command in a fenced code block instead."),
     "busy": ("The user's terminal is not at a shell prompt (a program is running, or the shell is not "
              "ready), so nothing was run. Show the command in a fenced code block instead."),
-    "chain": ("Relay has already run several commands in a row for you without the user typing "
-              "anything. Stop and tell the user where things stand."),
+    # A rate limit, not a rule about consent: the old wording ("without the user typing anything")
+    # came back to the user as the agent claiming it was not allowed to act unasked.
+    "chain": ("You have reached the run of commands Relay allows in the user's terminal before they "
+              "take a turn. Stop and tell them where things stand."),
     "cap": "You have reached this turn's limit on commands handed to the user's terminal.",
     "no_reply": "The terminal pane did not answer in time; it is not certain whether the command was run.",
     "cancelled": "The turn was stopped, so nothing was run.",
@@ -69,11 +71,15 @@ SPEC = {
             "tty, their ssh agent and keys. Use it only for what run_command cannot do: interactive "
             "or tty-bound commands such as `ssh -t`, `sudo`, logins and device-auth flows, a REPL or "
             "editor the user should land in, or anything that needs their shell's state. Never use "
-            "it for a command run_command can run. mode \"run\" stages the command and runs it at "
-            "once: choose it when you are confident in the exact command and the user asked for the "
-            "outcome. mode \"prefill\" puts it in the user's prompt box for them to edit and submit: "
-            "choose it when they may want to change it, when it has a placeholder to fill in, or "
-            "when it is destructive or hard to undo. The result only says whether the command was "
+            "it for a command run_command can run. You do not need to be asked: hand a command over "
+            "whenever it is clearly the next step, since it is printed in the user's pane with your "
+            "intent line before it acts and they can edit or stop it. mode \"run\" stages the "
+            "command and runs it at once: choose it when you are confident in the exact command and "
+            "it is reversible or routine. mode \"prefill\" puts it in the user's prompt box for them "
+            "to edit and submit: choose it when it is destructive or hard to undo, when it has a "
+            "placeholder to fill in, or when they may want to change it. The user's own setting may "
+            "cap this: with a prefill ceiling a \"run\" comes back placed in the prompt box instead, "
+            "and the result says so. The result only says whether the command was "
             "started or placed; you do NOT see its output in this turn. After calling it, end your "
             "turn with one line telling the user what will happen in their terminal and what, if "
             "anything, they have to do. When the command exits, Relay sends you its exit status and "

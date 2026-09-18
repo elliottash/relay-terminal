@@ -226,13 +226,41 @@ class ContextTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_context({"terminal_handoff": "always"})
 
-    def test_the_field_alone_survives_validation_and_adds_no_note(self):
+    def test_the_field_alone_survives_validation_and_says_what_the_ceiling_is(self):
         self.assertEqual(validate_context({"terminal_handoff": "prefill"}), {"terminal_handoff": "prefill"})
-        self.assertEqual(format_context({"terminal_handoff": "prefill"}), "")
+        # The tool appearing in the list is not self-explanatory: a model that is not told the user
+        # opted in reads an unexplained tool as one to leave alone (owner report, 2026-09-18).
+        prefill = format_context({"terminal_handoff": "prefill"})
+        self.assertIn("only into the user's prompt box", prefill)
+        self.assertNotIn("stops you after a few in a row", prefill)
+        agent = format_context({"terminal_handoff": "agent"})
+        self.assertIn("This pane takes commands from you", agent)
+        self.assertIn("printed there with your intent line", agent)
+        self.assertEqual(format_context({}), "")
+
+    def test_the_ceiling_note_rides_along_with_the_terminal_directory(self):
+        note = format_context({"terminal_cwd": "/home/u", "terminal_handoff": "agent"})
+        self.assertIn("/home/u", note)
+        self.assertIn("This pane takes commands from you", note)
 
     def test_the_system_prompt_states_the_rules(self):
         self.assertIn("run_in_terminal", agent_module.SYSTEM)
         self.assertIn("relay-run", agent_module.SYSTEM)
+
+    def test_the_system_prompt_does_not_make_the_agent_wait_to_be_asked(self):
+        # Owner, 2026-09-18: the agent reasoned "I'm not supposed to enter commands for the user
+        # without being asked". Consent here is structural — the ceiling, the pane's echo, the
+        # chain breaker — so no prompt line may add an "only if they asked" gate on top of it.
+        self.assertIn("use it on your own initiative", agent_module.SYSTEM)
+        for gate in ("only when it is needed for the request",
+                     "the user asked for the outcome",
+                     "never send a keystroke the user's request does not call for"):
+            self.assertNotIn(gate, agent_module.SYSTEM)
+            self.assertNotIn(gate, module.SPEC["function"]["description"])
+        # The lines that are not up for loosening.
+        self.assertIn("Never type into a password or passphrase prompt", agent_module.SYSTEM)
+        self.assertIn("Never take destructive or irreversible action the user did not ask for",
+                      agent_module.SYSTEM)
 
 
 class ExecutorTests(unittest.TestCase):

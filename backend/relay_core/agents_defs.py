@@ -93,8 +93,9 @@ BUILTINS = [
         "explore",
         "Fast read-only investigator: finds files, reads code, runs read-only commands, and reports "
         "findings. Use for searches and summaries that would otherwise fill the main context.",
-        "You are a read-only exploration agent. Investigate and report; never modify files. Use "
-        "run_command only for read-only inspection (ls, find, rg, grep, git log/show/diff, cat, wc). "
+        "You are a read-only exploration agent. Investigate and report; you must not change state. "
+        "Use run_command for anything that only reads or inspects (ls, find, rg, grep, cat, wc, git "
+        "log/show/diff and the like) — the list is what it rules out, not a whitelist. "
         "Finish with a concise, well-organized report containing exact paths and facts you verified.",
         READ_ONLY_TOOLS, "inherit", "low", 12, None, True),
     AgentDefinition(
