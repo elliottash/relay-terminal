@@ -43,6 +43,39 @@ class Paired:
                    desktop_id=raw.get("desktop_id", ""))
 
 
+@dataclass
+class Joined:
+    """What a guest stores after being admitted, and needs to reconnect (section 10.2).
+
+    Deliberately not a :class:`Paired`: there is no ``device_id`` and no ``capability``, because a
+    participant is not a device and holds no capability. ``expires`` is when this stops working;
+    a `bye` with ``discard`` set, or a handshake the desktop refuses, means throw it away.
+    """
+    desktop_public: bytes
+    participant: str
+    role: str
+    panes: list[str]
+    expires: float
+    static_private: bytes
+    desktop_id: str = ""
+
+    def to_json(self) -> str:
+        return json.dumps({"desktop_public": pairing.b64(self.desktop_public),
+                           "participant": self.participant, "role": self.role,
+                           "panes": list(self.panes), "expires": self.expires,
+                           "static_private": pairing.b64(self.static_private),
+                           "desktop_id": self.desktop_id})
+
+    @classmethod
+    def from_json(cls, text: str) -> "Joined":
+        raw = json.loads(text)
+        return cls(desktop_public=pairing.un64(raw["desktop_public"]),
+                   participant=raw["participant"], role=raw["role"],
+                   panes=list(raw.get("panes", [])), expires=float(raw.get("expires", 0)),
+                   static_private=pairing.un64(raw["static_private"]),
+                   desktop_id=raw.get("desktop_id", ""))
+
+
 class Client:
     def __init__(self, rendezvous: str, *, static_private: bytes | None = None):
         self.rendezvous = rendezvous.rstrip("/")
@@ -101,12 +134,43 @@ class Client:
 
     async def connect(self, paired: Paired) -> dict:
         """Reconnect as an already-paired device, refusing any key but the pinned one."""
-        self.static_private = paired.static_private
+        return await self._reconnect(paired.static_private, paired.desktop_public,
+                                     paired.desktop_id, paired.device_id)
+
+    async def knock(self, url: str, *, name: str, platform: str) -> Joined:
+        """Follow an invite link: connect to its room, knock, and wait to be let in.
+
+        The five-digit code in `knock_pending` is the same derivation pairing uses and is left on
+        ``self.auth_code`` for the caller to show. A refusal — or two minutes with no answer —
+        arrives as `error not_admitted` and raises, because the channel is closing anyway.
+        """
+        link = pairing.parse_invite_url(url)
+        self.socket = await ws.connect(self._url(room=link["room"]))
+        await self._handshake(link["desktop_public"])
+        await self.send({"t": "knock", "invite": pairing.b64(link["secret"]),
+                         "name": name, "platform": platform})
+        await self.expect("knock_pending", timeout=30)
+        reply = await self.expect("admitted", timeout=180)
+        return Joined(desktop_public=link["desktop_public"], participant=reply["participant"],
+                      role=reply["role"], panes=list(reply.get("panes", [])),
+                      expires=float(reply.get("expires", 0)),
+                      static_private=self.static_private,
+                      desktop_id=reply.get("desktop", {}).get("id", ""))
+
+    async def rejoin(self, joined: Joined) -> dict:
+        """Reconnect as an admitted participant. An expired or removed one gets a `bye` carrying
+        ``discard``, which is the client's cue to forget this record rather than retry."""
+        return await self._reconnect(joined.static_private, joined.desktop_public,
+                                     joined.desktop_id, joined.participant)
+
+    async def _reconnect(self, private: bytes, desktop_public: bytes, desktop_id: str,
+                         channel_id: str) -> dict:
+        self.static_private = private
         self.static_public = noise.public_of(self.static_private)
-        desktop_id = paired.desktop_id or _derive_desktop_id(paired.desktop_public)
-        self.socket = await ws.connect(self._url(desktop=desktop_id, device=paired.device_id))
+        desktop_id = desktop_id or _derive_desktop_id(desktop_public)
+        self.socket = await ws.connect(self._url(desktop=desktop_id, device=channel_id))
         try:
-            await self._handshake(paired.desktop_public)
+            await self._handshake(desktop_public)
         except noise.NoiseError as error:
             raise PinMismatch("the desktop's key is not the one this device pinned.") from error
         await self.send({"t": "hello", "client": "relay-python/1", "proto": wire.PROTOCOL_VERSION})

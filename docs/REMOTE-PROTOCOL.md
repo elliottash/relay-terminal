@@ -224,7 +224,7 @@ rather than disconnects.
 | `resume` / `resumed` | both | §7 |
 | `transport_switch` | both | §2 |
 | `ping` / `pong` | both | `{at}`; a peer **must** answer `ping` within 5 s. Clients display the round trip |
-| `error` | both | `{code, message, id?}`. Codes: `unknown_type`, `not_permitted`, `no_such_pane`, `busy`, `rate_limited`, `stale_seq`, `internal` |
+| `error` | both | `{code, message, id?}`. Codes: `unknown_type`, `not_permitted`, `no_such_pane`, `busy`, `rate_limited`, `stale_seq`, `internal`, and from section 10 `not_admitted` and `not_driving` |
 | `bye` | both | `{reason}` before a clean close |
 
 `features` is how a phase is negotiated: a P1 desktop omits `screen`, so a newer client hides the
@@ -477,10 +477,16 @@ or forge content. Its whole API is:
 |---|---|---|
 | `/v1/challenge` | POST | → `{challenge, ephemeral_public}` for proof of possession |
 | `/v1/register` | POST | `{static_pubkey, challenge, proof}` → `{desktop_id, token}` |
-| `/v1/rooms` | POST | Open a pairing room: `{desktop_id, token, ttl}` → `{room}` |
+| `/v1/rooms` | POST | Open a room: `{desktop_id, token, ttl}` → `{room, expires_in}`. `expires_in` is the lifetime **granted** — the request's `ttl`, capped at 7 days — not a fixed five minutes, because an invite's room must outlive a pairing room (section 10.2) |
 | `/v1/connect` | WS | Both sides attach: `?room=` for pairing, `?desktop=` for a paired device. The server pairs up sockets and copies frames between them |
 | `/v1/push/send` | POST | A desktop posts an opaque payload and the endpoint to deliver it to |
 | `/v1/ice` | GET | STUN/TURN credentials (P2) |
+
+A room is **not** consumed by its first connection. Single use is a property of the *secret*,
+not of the room: the desktop burns a pairing room the moment a secret is proved, and an invite
+counts its own uses. That is what lets an invite with `uses > 1` work without a second mechanism
+at the rendezvous, and it changes nothing about what this server can see — a room is an id and a
+lifetime, and every byte through it is ciphertext.
 
 **(security) `desktop_id` is derived from the key**: the first 128 bits of `SHA-256(static_pubkey)`,
 computed by the server, never taken from the request. An id therefore cannot be squatted or rebound,
@@ -648,6 +654,22 @@ Whatever their role a participant never gets: `secret_input`, `compose` with `ag
 routing that can reach the shell), `set_mode`, model changes, reset, queue edits of other people's
 items, `voice`, `history_get` beyond the shared pane, push notifications, or the device list.
 
+What a participant **may** send is a second allow-list, `GUEST_TYPES` in `remote/wire.py`, keyed by
+the role each type needs; everything absent from it is refused, so this is denied-by-default in the
+same way `CLIENT_TYPES` is. The list above is written out beside it as `GUEST_NEVER`, with a reason
+each, so the refusals are something a reader can find rather than infer. `agent_stop`,
+`queue_remove` and `recap_request` are refused for the same reason: they are not among an editor's
+two actions, and they spend the owner's provider key or edit somebody else's queue.
+
+An editor's `keys`, `paste` and `line` are accepted only while that editor holds the pane's control
+token; anyone else's are refused with `not_driving` (10.3). Until control handoff exists nobody but
+the owner ever holds it, so today all three are refused with `not_driving` — which is the honest
+answer rather than a placeholder: a role alone never reaches the keyboard.
+
+The desktop-minted password nonce that rides on a `panes` item (6.7) is **stripped** on its way to a
+participant. A guest is never offered the password field, so they are never handed the permit
+either.
+
 Agent events reach a participant under a **narrower allow-list** than section 6.4's,
 `GUEST_EVENTS` in `remote/wire.py`, a strict subset of `FORWARDED_EVENTS` enforced by a test: the
 turn lifecycle, `status`, `queued`, `queue_changed` and `error`. The agent's words already reach
@@ -660,14 +682,21 @@ agent read.
 The invite link is `<app>/join#v=1&d=<desktop public key>&i=<invite secret>&r=<room>`. The secret is
 128 bits, lives in the fragment, and is compared in constant time. An invite records
 `{id, panes, role, expires, uses_left}`; expiry defaults to 24 hours and is capped at 7 days, which
-is why a rendezvous room may be opened with a `ttl` (section 8). Five wrong secrets burn the invite,
-as with pairing.
+is why a rendezvous room may be opened with a `ttl` (section 8) — the room is opened with the
+invite's own lifetime, so a week-long link does not point at a room forgotten after five minutes.
+Five wrong secrets burn the invite, as with pairing. The record keeps a **hash** of the secret and
+never the secret: the plaintext exists once, in the link the owner hands out, so a restarted desktop
+can still admit someone holding the link and can no longer re-display the link itself.
+
+An invite link is not a pairing link and cannot be used as one: `pair_prove` on a channel whose room
+belongs to a live invite is refused. No message on an invite channel reaches the paired-device
+list.
 
 | Type | Direction | Body |
 |---|---|---|
 | `knock` | participant → desktop, first message after the handshake | `{invite: <base64url secret>, name, platform}` |
 | `knock_pending` | desktop → participant | `{code}`: the five-digit code of section 5, shown on both screens |
-| `admitted` | desktop → participant | `{participant, role, desktop_name, expires}`, followed by `panes` and `participants` |
+| `admitted` | desktop → participant | `{participant, role, panes, desktop_name, expires, hub_epoch, code, desktop: {id, name, fingerprint}}`, followed by `panes` and `participants` |
 | `error` `not_admitted` | desktop → participant | The owner refused, or did not answer in 2 minutes. The channel closes |
 
 A knock consumes nothing until it is admitted; admitting takes one use. On `admitted` the desktop
@@ -676,6 +705,21 @@ beside the device list, so the guest reconnects with an ordinary `hello` until i
 participant record is never a device record: it cannot appear in, or be promoted through, the
 paired-device list. Names pass through `clean_label`, and a second "alice" is shown as "alice (2)".
 Knocks are rate-limited per invite (5 a minute) and at most 3 wait at once.
+
+That last rule is **structural** in `remote/guests.py`, not a convention: the two lists are
+different classes in different files (`guests.json` beside `devices.json`) whose **field names
+differ**, so a row of one kind loaded as the other raises and is dropped rather than half-read;
+admitting refuses a key the device store already knows; and the handshake looks a static key up in
+the device store first, so a key is a device *or* a participant and never both. There is no function
+anywhere from a role to a capability.
+
+**The reconnect.** A participant's `welcome` carries `{participant, role, panes, expires}` and
+deliberately **no `capability` and no `password_entry`** — those belong to a device record and a
+guest has none — followed by the scoped `panes` and a `participants` list for each pane. A guest
+whose record expired, who was removed, or whose share ended gets `bye {reason, discard: true}` and
+the channel closes; `discard` is the instruction to forget the record rather than retry. That answer
+is only given for a key this desktop pinned itself, so it tells an attacker nothing: an entirely
+unknown key still has the handshake refused with no explanation at all.
 
 ### 10.3 Presence and control
 
@@ -714,11 +758,23 @@ grant}`; `control_take {pane}` (the owner's keystroke); `prompt_ask {id, partici
 `prompt_answer {id, approve}`; `role_set {participant, role}`; `participant_remove {participant}`;
 `share_pause {on}`; `share_end`.
 
+These names are `OWNER_ONLY` in `remote/wire.py`, which is folded into `NEVER_FROM_CLIENT`, so the
+same message arriving over the wire from any device — the owner's own paired phone included — is
+refused `not_permitted` by the check every inbound message already passes through, and the existing
+"every type is classified" test covers them.
+
 **Pause** refuses every participant's input and prompts with `paused` while the screen keeps
 streaming. **End** closes every participant session, burns the pane's invites and deletes the
 participant records. Removing one participant does the same for that one, and burns the invite
-they came in on. With *guests can act only while I am present* on, the hub treats an inactive
-desktop window (the `window_active` line of section 9) as a pause.
+they came in on.
+
+A removed participant's row is kept, marked removed and holding no panes, until its own expiry
+passes — at most the 7 days of the invite — and is then dropped. It grants nothing: every lookup
+returns live records only. It exists so a guest whose phone was asleep when they were removed is
+*told* their access ended, rather than having a socket close on them for no stated reason.
+
+With *guests can act only while I am present* on, the hub treats an inactive desktop window (the
+`window_active` line of section 9) as a pause.
 
 **Guest identity without an account, and why v1 has no "Approve always".** Owner decision 4's "Approve always for that guest" binds to
 the **device key pinned at join**, not to a login, because decision 3 allows an invite to be a bare
@@ -739,7 +795,17 @@ Local only, `~/.local/share/relay/remote/audit-YYYY-MM.jsonl`: pairings, invites
 knocks, admissions and refusals, joins and leaves, role changes, control handoffs, prompts submitted
 and how they were decided (text), lines sent by others (text; raw keys and pastes as byte counts),
 password-field use (redacted, §6.7), pause, end, revocations. Each line names who, by participant or
-device id. It is written **before** the action it records. **(security)** Never uploaded, written
+device id. It is written **before** the action it records.
+
+The kinds, as written: `invite_create`, `invite_revoke`, `knock`, `knock_refused` (a wrong or spent
+secret), `refused`, `admitted`, `join`, `leave`, `role_set`, `participant_remove`, `share_end`,
+`guest_prompt`, `control_request`. Every one of them carries the participant id, which is minted at
+the knock, so a refusal and an admission name the same person as the join and the leave that follow.
+The one exception to *before* is `admitted`: admission is also where a key that is already a paired
+device is refused, so a line written first would record an admission that did not happen. It is
+written the moment the record exists and before the guest is told anything.
+
+**(security)** Never uploaded, written
 0600 inside a 0700 directory as `logs.py` requires of every Relay log, and size-capped — but not
 rotated the way `logs.py` rotates, because nothing in it is ever deleted: a month past 5 MiB goes on
 in numbered parts (`audit-YYYY-MM.2.jsonl`, `.3`, …), each capped, so files grow with volume, not time.
@@ -800,7 +866,18 @@ against **real shells** — including Relay's own panes, from the share button i
 
 Every Relay pane is an engine pane, so every pane can be shared.
 
-Not implemented, and refused explicitly rather than silently: all of section 10.
+Section 10 is part built. What exists (2026-09-18): guest identity and the participant store
+(`remote/guests.py`, `guests.json` beside `devices.json`), invite links and their rendezvous rooms,
+knock-to-admit with the same five-digit code as pairing and a two-minute refusal, reconnect by the
+pinned key, pane scoping and the `viewer`/`editor` roles enforced at every inbound message and every
+fan-out, the `GUEST_EVENTS` allow-list, the owner's controls as desktop-only sidecar lines and as
+`python3 -m remote.cli share --invite`, and the audit lines of 10.6 (`tests/test_remote_guests.py`).
+
+What is **not** built, and is the next piece: presence beyond the initial `participants` list,
+control handoff (10.3) — so an editor's `keys`, `paste` and `line` are refused `not_driving` — guest
+prompt approval (10.4) — so an editor's `compose` is answered `prompt_pending` and parked in a queue
+nothing drains but its ten-minute expiry — `share_pause`, and the desktop UI and web client for any
+of it. The two seams are `Host.ask_owner_about_prompt` and `Host.ask_owner_about_control`.
 
 `history_get` now works from both sources. The engine's `VtCore::historyLines` is const and moves
 nothing — not the viewport, the dirty state, the selection or the search — so a phone paging back

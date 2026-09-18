@@ -32,6 +32,23 @@ def allows(capability: str, needed: str) -> bool:
     return _RANK[capability] >= _RANK[needed]
 
 
+# ---- roles (multiplayer, section 10) ----------------------------------------------------------
+# A capability belongs to a **device** the owner paired; a role belongs to a **participant** the
+# owner invited to one pane. They are separate ladders on purpose: there is no function from one to
+# the other, so nothing can turn `editor` into `full`, and a participant's channel has no device
+# record for `allows` to read in the first place.
+
+VIEWER, EDITOR, OWNER = "viewer", "editor", "owner"
+GUEST_ROLES = (VIEWER, EDITOR)          # what an invite may grant; `owner` is never granted
+_ROLE_RANK = {VIEWER: 0, EDITOR: 1}
+
+
+def role_allows(role: str, needed: str) -> bool:
+    if role not in _ROLE_RANK or needed not in _ROLE_RANK:
+        return False
+    return _ROLE_RANK[role] >= _ROLE_RANK[needed]
+
+
 # ---- client → desktop -----------------------------------------------------------------------
 # Every type a client may send, with the capability it needs. Anything absent is refused, which is
 # what keeps store_key, import_warp, configure, skills imports and settings changes unreachable.
@@ -39,6 +56,7 @@ def allows(capability: str, needed: str) -> bool:
 CLIENT_TYPES: dict[str, str | None] = {
     "hello": None,                 # before a device is known
     "pair_prove": None,
+    "knock": None,                 # a guest's first message on an invite channel (section 10.2)
     "ping": None,
     "pong": None,
     "bye": None,
@@ -71,13 +89,71 @@ CLIENT_TYPES: dict[str, str | None] = {
     "secret_input": FULL,          # plus the per-device password switch; see host.py
 }
 
+# The owner's controls exist on the desktop only (section 10.5). They cross the GUI↔sidecar stdio
+# line as JSON, and they are refused on the wire from **any** device — the owner's own paired phone
+# included — because a phone that could mint an invite or change a role would be a second key to
+# the share, held by whoever holds the phone.
+OWNER_ONLY = frozenset({
+    "invite_create", "invite_revoke", "knock_answer", "role_set", "participant_remove",
+    "share_pause", "share_end", "control_answer", "prompt_answer",
+})
+
 # Named so a reader can see they were considered and refused, and so a test can assert it.
 NEVER_FROM_CLIENT = frozenset({
     "store_key", "remove_key", "test_key", "import_warp", "configure", "set_model",
     "import_skills_preview", "import_skills_confirm", "refine_skills", "skills_check_updates",
     "keybindings", "presets", "model_roles", "agent_options", "load_state", "fork", "reset",
     "rewind", "scan_instructions", "index_rebuild", "conversation_delete",
-})
+}) | OWNER_ONLY
+
+# ---- what a participant may send (section 10.1) ------------------------------------------------
+# A second, narrower allow-list on top of CLIENT_TYPES, keyed by the role floor. Anything absent is
+# refused whatever the role, so this is denied-by-default in exactly the way CLIENT_TYPES is: a new
+# client message reaches a guest only when somebody adds it here.
+
+GUEST_TYPES: dict[str, str] = {
+    "hello": VIEWER,               # a reconnect; `knock` is handled before a role exists
+    "knock": VIEWER,
+    "ping": VIEWER,
+    "pong": VIEWER,
+    "bye": VIEWER,
+    "resume": VIEWER,
+    "client_state": VIEWER,
+    "panes_get": VIEWER,
+    "pane_focus": VIEWER,
+    "pane_blur": VIEWER,
+    "screen_get": VIEWER,
+    "history_get": VIEWER,         # scrollback of the shared pane, which is already on their screen
+    # An editor's two actions are both *requests*: the hub parks them and answers `prompt_pending`
+    # or `control_pending`. Neither changes the pane by itself (sections 10.3 and 10.4).
+    "compose": EDITOR,
+    "plan_execute": EDITOR,        # 10.4: a guest's plan_execute is treated as a prompt
+    "control_request": EDITOR,
+    "control_release": EDITOR,
+    # Typing is an editor's *while holding control*; the hub refuses it with `not_driving` until
+    # the handoff exists, so a role alone never reaches the keyboard.
+    "keys": EDITOR,
+    "paste": EDITOR,
+    "line": EDITOR,
+}
+
+# Section 10.1's "whatever their role a participant never gets". Every one of these is also absent
+# from GUEST_TYPES; the set is written out so the refusal is a decision a reader can find, and so a
+# test can assert each is refused for both roles.
+GUEST_NEVER: dict[str, str] = {
+    "secret_input": "the password field is never offered to a guest",
+    "set_mode": "changes how the owner's agent behaves, not what it is asked",
+    "voice": "spends the owner's provider key, and is not the shared pane",
+    "queue_remove": "queue edits of other people's items",
+    "agent_stop": "stops the owner's turn; not among an editor's actions",
+    "recap_request": "spends the owner's provider key on stored conversation",
+    "turn_transcript_get": "stored transcripts hold every file the agent read",
+    "tool_output_get": "stored tool output holds every file the agent read",
+    "push_subscribe": "notifications belong to a device the owner paired",
+    "push_unsubscribe": "notifications belong to a device the owner paired",
+    # There is no client message that lists devices, so there is nothing to name here for the
+    # device list; it is unreachable because no type serves it, not because it is refused.
+}
 
 # ---- desktop → client -----------------------------------------------------------------------
 
@@ -85,6 +161,10 @@ SERVER_TYPES = frozenset({
     "welcome", "error", "ping", "pong", "bye", "paired", "revoked", "resumed",
     "transport_switched", "panes", "agent", "screen_snapshot", "screen_diff", "history",
     "push_state",
+    # Multiplayer (section 10). `knock_pending` carries the five digits on both screens,
+    # `admitted` the participant's own record, `participants` the presence list for a pane, and
+    # the two `*_pending` replies say the owner has been asked.
+    "knock_pending", "admitted", "participants", "prompt_pending", "control_pending",
 })
 
 # ---- worker events --------------------------------------------------------------------------
@@ -195,6 +275,22 @@ KNOWN_WORKER_EVENTS = frozenset(FORWARDED_EVENTS) | frozenset(WITHHELD_EVENTS)
 
 def may_forward(event: str) -> bool:
     return event in FORWARDED_EVENTS
+
+
+# A participant sees a **narrower** list than a device (section 10.1): the turn lifecycle, the
+# pane's status and its queue. Not the agent's words — those already reach a guest on the screen,
+# because Relay prints them into the terminal — and above all not `turn_summary`, `tool_started`,
+# `tool_result` or `tool_output`, which carry the paths and commands of every file the agent
+# touched. A test asserts this is a strict subset of FORWARDED_EVENTS, so an event a device may not
+# see can never become one a guest may.
+GUEST_EVENTS = frozenset({
+    "agent_started", "agent_finished", "agent_stopped", "cancelled",
+    "status", "queued", "queue_changed", "error",
+})
+
+
+def may_forward_to_guest(event: str) -> bool:
+    return event in GUEST_EVENTS and event in FORWARDED_EVENTS
 
 
 # ---- pane status ----------------------------------------------------------------------------

@@ -6,6 +6,9 @@ registers the desktop, opens a pairing room and prints the QR code. When the GUI
 Remote it will call the same ``remote.host.Host`` with a real pane source instead of the demo one.
 
     python3 -m remote.cli share --tls         # share this terminal with your phone
+    python3 -m remote.cli share --tls --invite --role editor
+                                              # ...and print an invite link for one guest too:
+                                              # they knock, you answer here (section 10)
     python3 -m remote.cli dev --tls           # the same, with a demo agent instead of a shell
     python3 -m remote.cli devices             # list paired devices
     python3 -m remote.cli revoke <device-id>
@@ -129,6 +132,44 @@ def make_approver(mode: str, capability: str, attachment=None):
     return approver
 
 
+def make_knock_approver(mode: str, attachment=None):
+    """The same question for a guest holding an invite link (section 10.2).
+
+    The owner may admit with a **lower** role than the invite offered and never a higher one; the
+    hub enforces that, so answering "v" to an editor invite lets them in as a viewer, and there is
+    no answer here that can raise anyone.
+    """
+    async def approver(request: host_mod.KnockRequest) -> tuple[bool, str]:
+        live = attachment[0] if attachment else None
+        if live is not None and not live.detached.is_set():
+            with live.suspend():
+                return await ask(request)
+        return await ask(request)
+
+    async def ask(request: host_mod.KnockRequest) -> tuple[bool, str]:
+        print("\n" + "─" * 60)
+        print(f"  {request.name} ({request.platform}) from {request.peer} is knocking")
+        print(f"  Guest key    {request.fingerprint}")
+        print(f"  Code on their screen must read   {request.code}")
+        print(f"  Invite       {request.role} on {', '.join(request.panes)}")
+        print("─" * 60)
+        if mode == "auto":
+            print(f"  --approve auto: admitting as {request.role}.\n")
+            return True, request.role
+        answer = await asyncio.to_thread(
+            input, "  Let them in? [y]es / [v]iewer only / [N]o ")
+        choice = answer.strip().lower()
+        if choice in ("v", "viewer"):
+            print("  Admitted as a viewer.\n")
+            return True, wire.VIEWER
+        if choice in ("y", "yes"):
+            print(f"  Admitted as {request.role}.\n")
+            return True, request.role
+        print("  Refused.\n")
+        return False, wire.VIEWER
+    return approver
+
+
 async def publish(server, args, directory) -> tuple[str, str, bool]:
     """Work out the base URL a phone can reach, starting the right listener. Returns
     (base, note, tailscale_used)."""
@@ -201,6 +242,7 @@ async def share(args) -> int:
     holder: list = [None]
     host = host_mod.Host(identity, devices, source, app_base=base,
                          approver=make_approver(args.approve, args.capability, holder),
+                         knock_approver=make_knock_approver(args.approve, holder),
                          name=args.name)
     try:
         await host.register(local)
@@ -220,6 +262,20 @@ async def share(args) -> int:
     print_pairing(identity, base, local, devices, url, room, note)
     print(f"  Sharing {pane.id}: {args.shell or os.environ.get('SHELL', '/bin/bash')} "
           f"in {pane.cwd}")
+    if args.invite:
+        # A second link, for someone who is not you (section 10). Scanning it knocks; the question
+        # comes back to this terminal, and admitting spends one of the invite's uses.
+        invite, invite_link = await host.invite_create(
+            [pane.id], args.role, expires_in=args.invite_hours * 3600, uses=args.invite_uses)
+        print()
+        print(f"  Invite — {invite.role} on {pane.id}, "
+              f"{invite.uses_left} use(s), {invite.seconds_left() // 3600}h left")
+        print()
+        if not print_qr(invite_link):
+            print("  (install the python 'qrcode' package to see a scannable code here)")
+        print(f"\n  Send this to your guest:\n  {invite_link}\n"
+              "  They knock; you answer here. Anyone holding the link can knock, so treat it\n"
+              "  like a door key: revoke it when you are done.\n")
     interactive = sys.stdin.isatty()
     if interactive:
         print("  Press Enter to attach this terminal to it. Detach with Ctrl-\\.\n")
@@ -360,6 +416,14 @@ def main(argv: list[str] | None = None) -> int:
     share_parser.add_argument("--approve", choices=("ask", "auto"), default="ask")
     share_parser.add_argument("--capability", choices=wire.CAPABILITIES, default=wire.FULL,
                               help="what a paired phone may do; 'full' lets it type")
+    share_parser.add_argument("--invite", action="store_true",
+                              help="also print an invite link for a guest (section 10)")
+    share_parser.add_argument("--role", choices=wire.GUEST_ROLES, default=wire.VIEWER,
+                              help="the most the invite may grant; you can still admit below it")
+    share_parser.add_argument("--invite-uses", type=int, default=1,
+                              help="how many guests the invite may let in (default 1)")
+    share_parser.add_argument("--invite-hours", type=float, default=24.0,
+                              help="how long the invite lives, up to 168 (default 24)")
     share_parser.add_argument("--shell", help="the shell to run (default: $SHELL)")
     share_parser.add_argument("--rows", type=int, help="override the shared size")
     share_parser.add_argument("--cols", type=int)

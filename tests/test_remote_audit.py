@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The remote-share audit log (remote/audit.py): capped parts, nothing rotated away."""
 import json
+import re
 import stat
 import tempfile
 import unittest
@@ -58,6 +59,42 @@ class AuditLogTests(unittest.TestCase):
         # About 40 lines of ~70 bytes in parts of 200: a dozen or so parts, not 40 files.
         self.assertLess(len(files), 20)
         self.assertEqual(len(self.lines()), 40)
+
+
+class MultiplayerAuditTests(unittest.TestCase):
+    """Section 10.6: every step of a share is on the record, and each line names who.
+
+    The end-to-end proof that the hub writes these is in ``tests/test_remote_guests.py``; what is
+    here is the vocabulary, so a kind that quietly stops being recorded fails a test rather than
+    leaving a hole in the record nobody notices until they go looking for it.
+    """
+
+    REQUIRED = {"invite_create", "invite_revoke", "knock", "knock_refused", "admitted", "refused",
+                "join", "leave", "role_set", "participant_remove", "share_end", "guest_prompt",
+                "control_request"}
+
+    def test_the_hub_records_every_multiplayer_step(self):
+        source = (Path(__file__).resolve().parent.parent / "remote" / "host.py").read_text()
+        recorded = set(re.findall(r'self\.audit\.record\(\s*"([a-z_]+)"', source))
+        missing = sorted(self.REQUIRED - recorded)
+        self.assertEqual(missing, [], "docs/REMOTE-PROTOCOL.md section 10.6 asks for these")
+
+    def test_a_line_names_the_participant_and_keeps_the_prompt_text(self):
+        with tempfile.TemporaryDirectory() as name:
+            directory = Path(name)
+            log = audit.AuditLog(directory)
+            log.record("admitted", participant="abc123", invite="inv1", role="viewer",
+                       panes=["p1"])
+            log.record("guest_prompt", participant="abc123", pane="p1", prompt="pr1",
+                       text="ship it")
+            log.record("leave", participant="abc123")
+            lines = [json.loads(line)
+                     for path in directory.glob("audit-*.jsonl")
+                     for line in path.read_text().splitlines()]
+            self.assertEqual([line["participant"] for line in lines], ["abc123"] * 3)
+            # 10.6: prompts submitted are recorded with their text.
+            self.assertEqual(lines[1]["text"], "ship it")
+            self.assertTrue(all("at" in line for line in lines))
 
 
 if __name__ == "__main__":

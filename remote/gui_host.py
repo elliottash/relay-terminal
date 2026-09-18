@@ -24,6 +24,15 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"history_page","pane":"p1","id":"h1","ok":true,"from_row":N,"total":N,"more":b,
      "lines":[<row>]}                                       the answer to a `history`
 
+  GUI → here, multiplayer (section 10.5). Desktop only: every one of these names is in
+  wire.OWNER_ONLY, so the same message over the wire from any device is refused.
+    {"t":"invite_create","pane":"p1","role":"viewer","expires":86400,"uses":1}  → `invite`
+    {"t":"invite_revoke","id":"<invite id>"}
+    {"t":"knock_answer","participant":"<id>","admit":true,"role":"viewer"}   the dialog's answer
+    {"t":"role_set","participant":"<id>","role":"editor"}
+    {"t":"participant_remove","participant":"<id>"}
+    {"t":"share_end","pane":"p1"}     {"t":"participants"}
+
   here → GUI
     {"t":"started","base":"...","fingerprint":"...","note":"...",
      "addresses":[{"value":"192.168.1.9","where":"this network","current":true}, ...]}
@@ -39,6 +48,16 @@ the GUI never links a crypto library and this process never touches a widget.
                                               scrollback, ending just below absolute row R
                                               (R < 0 asks for the newest page)
     {"t":"error","message":"..."}
+
+  here → GUI, multiplayer (section 10.5)
+    {"t":"invite","id":"<id>","url":"...","qr":[[0,1,...],...],"role":"viewer",
+     "panes":["p1"],"uses":1,"expires":86400}               the link and its QR
+    {"t":"knock","participant":"<id>","name":"alice","platform":"Chrome","code":"12345",
+     "fingerprint":"AB12 CD34 EF56","peer":"192.0.2.7","role":"viewer","pane":"p1",
+     "panes":["p1"],"invite":"<id>"}                        someone at the door; answer with
+                                                            `knock_answer` within two minutes
+    {"t":"participants","items":[{"id","name","platform","role","panes","invite",
+     "fingerprint","expires"}],"invites":[{"id","panes","role","uses","expires"}]}
 
 Input arrives here as RRP messages and leaves as `input`: the GUI writes the bytes into the pane's
 own session, so a phone drives the pane exactly as the keyboard does, and every capability and
@@ -57,8 +76,8 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from remote import devtls, host as host_mod, identity as identity_mod, panes as panes_mod, \
-    terminal as terminal_mod, wire
+from remote import devtls, guests as guests_mod, host as host_mod, identity as identity_mod, \
+    panes as panes_mod, terminal as terminal_mod, wire
 from rendezvous.server import Store, build
 
 log = logging.getLogger("relay.gui_host")
@@ -68,6 +87,10 @@ APP_DIR = Path(__file__).resolve().parent.parent / "app"
 # desktop, so this is generous; what it must never be is unbounded, because the phone is holding
 # a spinner open until it hears something.
 VOICE_TIMEOUT = 90.0
+
+# How long a knock may sit in the GUI's dialog. The hub applies its own two-minute refusal
+# (section 10.2) and this is the same number, so nothing waits on a dialog the hub gave up on.
+KNOCK_TIMEOUT = guests_mod.KNOCK_TIMEOUT
 
 # A scrollback page is a read of memory the GUI already holds, on its own thread, so this is a
 # wedged-GUI timeout and not a work budget. The phone is holding a scroll gesture open on it.
@@ -380,6 +403,10 @@ class Sidecar:
         self.serving: asyncio.Task | None = None
         self.asks: dict[int, asyncio.Future] = {}
         self.next_ask = 0
+        # Knocks waiting for the owner's dialog, by the participant id the hub minted for each
+        # (section 10.5). Keyed by that id rather than a counter of our own, so the `knock` line,
+        # the `knock_answer` that follows and every audit line name the same person.
+        self.knocks: dict[str, asyncio.Future] = {}
         # The presence rule (section 9). Until the GUI says otherwise this process assumes the
         # window is not the focused one, which is the safe default: a missed push is worse than
         # one you did not need.
@@ -450,6 +477,34 @@ class Sidecar:
                 self.devices.set_password_entry(message.get("device", ""),
                                                 bool(message.get("allow")))
                 self.report_devices()
+        # ---- multiplayer, section 10.5. Every one of these is desktop-only: the same names are
+        # in wire.OWNER_ONLY, so the identical message arriving over the wire from any device —
+        # the owner's own phone included — is refused `not_permitted` before it is dispatched.
+        elif kind == "invite_create":
+            await self.invite_create(message)
+        elif kind == "invite_revoke":
+            if self.host is not None and self.host.invite_revoke(str(message.get("id", ""))):
+                self.report_participants()
+        elif kind == "knock_answer":
+            future = self.knocks.pop(str(message.get("participant", "")), None)
+            if future is not None and not future.done():
+                future.set_result((bool(message.get("admit")),
+                                   str(message.get("role") or wire.VIEWER)))
+        elif kind == "role_set":
+            if self.host is not None:
+                await self.host.role_set(str(message.get("participant", "")),
+                                         str(message.get("role") or wire.VIEWER))
+                self.report_participants()
+        elif kind == "participant_remove":
+            if self.host is not None:
+                await self.host.participant_remove(str(message.get("participant", "")))
+                self.report_participants()
+        elif kind == "share_end":
+            if self.host is not None:
+                await self.host.share_end(str(message.get("pane", "")))
+                self.report_participants()
+        elif kind == "participants":
+            self.report_participants()
         elif kind == "stop":
             await self.stop()
 
@@ -483,7 +538,8 @@ class Sidecar:
                          "pairing code when they reload past it.")
 
         self.host = host_mod.Host(self.identity, self.devices, self.source, app_base=self.base,
-                                  approver=self.ask, name=message.get("name", "this desktop"))
+                                  approver=self.ask, name=message.get("name", "this desktop"),
+                                  knock_approver=self.knock)
         self.host.notifier.window_active(self.window_active)
         await self.host.register(local)
         self.serving = asyncio.create_task(self.host.serve())
@@ -537,6 +593,65 @@ class Sidecar:
         if allowed:
             self.loop.call_later(0.2, self.report_devices)
         return allowed, capability
+
+    # ---- multiplayer (section 10.5) --------------------------------------------------------------
+
+    async def invite_create(self, message: dict) -> None:
+        """``invite_create {pane, role, expires, uses}`` → ``invite {id, url, qr}``."""
+        if self.host is None:
+            self.emit({"t": "error", "message": "sharing is not running."})
+            return
+        panes = message.get("panes")
+        if not isinstance(panes, list):
+            panes = [message.get("pane", "")]
+        try:
+            expires = float(message.get("expires") or 0) or guests_mod.DEFAULT_EXPIRY
+            invite, url = await self.host.invite_create(
+                [str(pane) for pane in panes if pane],
+                str(message.get("role") or wire.VIEWER),
+                expires_in=expires, uses=int(message.get("uses") or 1))
+        except wire.WireError as error:
+            self.emit({"t": "error", "message": error.message})
+            return
+        self.emit({"t": "invite", "id": invite.invite_id, "url": url, "qr": qr_matrix(url),
+                   "role": invite.role, "panes": invite.panes, "uses": invite.uses_left,
+                   "expires": invite.seconds_left()})
+
+    async def knock(self, request: host_mod.KnockRequest) -> tuple[bool, str]:
+        """``knock {participant, name, platform, code, role, pane}`` → ``knock_answer``.
+
+        The same shape as :meth:`ask` for pairing: the question goes to the GUI and this waits.
+        No answer is a refusal — the hub's own two-minute timeout closes the door either way.
+        """
+        future = self.loop.create_future()
+        self.knocks[request.participant] = future
+        self.emit({"t": "knock", "participant": request.participant, "name": request.name,
+                   "platform": request.platform, "fingerprint": request.fingerprint,
+                   "code": request.code, "peer": request.peer, "role": request.role,
+                   "pane": request.panes[0] if request.panes else "", "panes": request.panes,
+                   "invite": request.invite})
+        try:
+            admit, role = await asyncio.wait_for(future, KNOCK_TIMEOUT)
+        except asyncio.TimeoutError:
+            self.knocks.pop(request.participant, None)
+            return False, wire.VIEWER
+        if admit:
+            self.loop.call_later(0.2, self.report_participants)
+        return admit, role
+
+    def report_participants(self) -> None:
+        """``participants {items}``: who is on which pane, for the sharing dialog."""
+        if self.host is None:
+            return
+        self.emit({"t": "participants", "items": [
+            {"id": p.participant_id, "name": p.name, "platform": p.platform, "role": p.role,
+             "panes": p.panes, "invite": p.invite, "fingerprint": p.fingerprint,
+             "expires": round(p.expires, 3)}
+            for p in self.host.guests.live()],
+            "invites": [
+            {"id": invite.invite_id, "panes": invite.panes, "role": invite.role,
+             "uses": invite.uses_left, "expires": invite.seconds_left()}
+            for invite in self.host.guests.live_invites()]})
 
     def report_devices(self) -> None:
         if self.devices is None:
