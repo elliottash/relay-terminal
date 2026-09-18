@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Provider presets, the Main/Flash/Lite tier table, and the GUI mirror in src/main.cpp.
+"""Provider presets, the Main/Flash/Lite tier table, and the GUI mirror in src/Pane.h.
 
 Nothing here touches the network or the keyring: the tables are plain data and the mirror check
 reads the C++ source as text.
@@ -172,10 +172,10 @@ class TierTableTests(unittest.TestCase):
 
 
 class GuiMirrorTests(unittest.TestCase):
-    """The advanced provider dialog in src/main.cpp keeps its own copy of the preset table."""
+    """The advanced provider dialog in src/Pane.h keeps its own copy of the preset table."""
 
     def test_the_cpp_preset_table_matches_presets_py(self):
-        source = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
+        source = (ROOT / "src/Pane.h").read_text(encoding="utf-8")
         block = source.split("// Mirrors backend/relay_core/presets.py", 1)[1].split("};", 1)[0]
         rows = re.findall(r'\{"([a-z0-9-]+)",\s*"([^"]*)",\s*"([^"]*)",\s*"([^"]*)",', block)
         mirrored = {row[0]: (row[1], row[2], row[3]) for row in rows if row[0] != "custom"}
@@ -183,7 +183,7 @@ class GuiMirrorTests(unittest.TestCase):
         self.assertEqual(mirrored, expected)
 
     def test_the_cpp_role_list_matches_roles_py(self):
-        source = (ROOT / "src/main.cpp").read_text(encoding="utf-8")
+        source = (ROOT / "src/Pane.h").read_text(encoding="utf-8")
         block = source.split("static QStringList roleIds() {", 1)[1].split("}", 1)[0]
         mirrored = re.findall(r'QStringLiteral\("([a-z_]+)"\)', block)
         self.assertEqual(sorted(mirrored), sorted(model_roles.SETTABLE))

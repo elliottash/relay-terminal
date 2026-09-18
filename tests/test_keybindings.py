@@ -259,10 +259,10 @@ class WorkerTests(unittest.TestCase):
 
 
 class GuiDefaultsTests(unittest.TestCase):
-    """The action registry lives in src/main.cpp; these read it as text (no window needed)."""
+    """The action registry lives in src/Keymap.h; these read it as text (no window needed)."""
 
     def defaults(self, action):
-        source = (ROOT / 'src/main.cpp').read_text(encoding='utf-8')
+        source = (ROOT / 'src/Keymap.h').read_text(encoding='utf-8')
         match = re.search(r'add\("' + re.escape(action) + r'",.*?\{(.*?)\}\);', source, re.S)
         self.assertIsNotNone(match, f'{action} is not in the action registry')
         return re.findall(r'QStringLiteral\("([^"]+)"\)', match.group(1))
@@ -280,7 +280,7 @@ class GuiDefaultsTests(unittest.TestCase):
         self.assertLessEqual(len(keys), MAX_KEYS, 'the agent tool caps an action at MAX_KEYS keys')
 
     def test_no_other_action_claims_a_shortcuts_overlay_key(self):
-        source = (ROOT / 'src/main.cpp').read_text(encoding='utf-8')
+        source = (ROOT / 'src/Keymap.h').read_text(encoding='utf-8')
         claimed = set(self.defaults('help.shortcuts'))
         for action, block in re.findall(r'add\("([a-zA-Z.]+)", "[a-z]+", "[^"]*",\s*\{(.*?)\}\);', source, re.S):
             if action == 'help.shortcuts':
