@@ -78,6 +78,37 @@ QString rgba(const QColor &c) {
 
 QColor withAlpha(const QColor &c, int alpha) { QColor out = c; out.setAlpha(alpha); return out; }
 
+// A colour from a table the reader does not know (ThemeSpec::extra), e.g. `[bevel] light`.
+QColor extraColor(const ThemeSpec &spec, const QString &key, const QColor &fallback) {
+    const QStringList raw = spec.extra.value(key);
+    const QColor color = raw.isEmpty() ? QColor() : QColor(raw.first().trimmed());
+    return color.isValid() ? color : fallback;
+}
+
+// `[flags] bevel = true` (IBM Beige): two-tone moulded edges instead of 1px hairlines, because a
+// hairline on a light ground reads as a stray mark. Light on the top and left, dark on the bottom
+// and right; inputs, the composer and the pane are sunken (the edges swap), which is what makes a
+// text field read as a well rather than a button. Only the surfaces a person touches are
+// bevelled; the other rules keep their hairline. Appended after the main sheet so it wins on
+// equal specificity, and only for a theme that asks, so every other theme's sheet is unchanged.
+QString bevelStylesheet(const ThemeSpec &spec) {
+    const QString light = hex(extraColor(spec, QStringLiteral("bevel.light"), SurfaceRaised.lighter(125)));
+    const QString dark = hex(extraColor(spec, QStringLiteral("bevel.dark"), SurfaceRaised.darker(160)));
+    QString css = QStringLiteral(R"(
+QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
+QFrame#paneChrome, QWidget#sidebar, QFrame#helpCard, QMenu, QFrame#notificationsPopup {
+    border-top: 2px solid %1; border-left: 2px solid %1; border-bottom: 2px solid %2; border-right: 2px solid %2; }
+QPushButton:pressed, QToolButton#stripChip:pressed {
+    border-top: 2px solid %2; border-left: 2px solid %2; border-bottom: 2px solid %1; border-right: 2px solid %1; }
+QLineEdit, QSpinBox, QPlainTextEdit, QTextEdit, QFrame#composer, QWidget#pane,
+QTreeView#fileExplorerView, QTreeWidget#turnTools, QScrollArea#filePreviewImageArea {
+    border-top: 2px solid %2; border-left: 2px solid %2; border-bottom: 2px solid %1; border-right: 2px solid %1; }
+QWidget#pane[relayActive="true"] { border: 2px solid @borderStrong; }
+QFrame#composer[relayActive="true"] { border: 2px solid @accent; }
+)");
+    return css.arg(light, dark);
+}
+
 // --- the theme registry -------------------------------------------------------------------------
 
 struct Registry {
@@ -449,11 +480,19 @@ QToolButton#fileExplorerHidden:checked { color: @accent; border-color: @accentBo
         {QStringLiteral("@agentSoft"), rgba(withAlpha(Agent, 56))}, {QStringLiteral("@agent"), hex(Agent)},
         {QStringLiteral("@mono"), mono},
         {QStringLiteral("@icons"), themeDataDir() + QStringLiteral("/icons")}};
+    // Per-theme chrome switches ([flags] in the theme file). A theme that sets neither gets the
+    // sheet above unchanged.
+    if (spec.flag(QStringLiteral("bevel"))) css += bevelStylesheet(spec);
     if (themeDataDir().isEmpty()) {
         // Without bundled icons, fall back to the style's own arrows and check marks.
         css.remove(QRegularExpression(QStringLiteral(R"([^\n]*url\(@icons[^\n]*\n)")));
     }
     for (const auto &token : tokens) css.replace(token.first, token.second);
+    // `[flags] square = true`: no rounded corners anywhere, as on the owner's other sites and on
+    // a 1995 desktop. One pass over the finished sheet rather than a token in every rule.
+    if (spec.flag(QStringLiteral("square")))
+        css.replace(QRegularExpression(QStringLiteral(R"(\b(border(?:-(?:top|bottom)-(?:left|right))?-radius):\s*\d+px)")),
+                    QStringLiteral("\\1: 0"));
     return css;
 }
 

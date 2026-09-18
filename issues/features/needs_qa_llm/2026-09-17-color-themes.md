@@ -10,7 +10,7 @@ rank: zz0j
 created: '2026-09-17'
 acceptance: switching theme in Settings restyles the app, the terminal and the composer colours without a restart
 source: '`issues/feature_intake.txt`, 2026-09-17: "allow different color themes."'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-17-color-themes/], related: [8E4Q], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-17-color-themes/, docs/qa_evidence/2026-09-18-copper-and-beige-themes/], related: [8E4Q], github: null}
 ---
 # Colour themes
 
@@ -185,3 +185,75 @@ All three stderr logs are clean.
   **not** implemented here; the format carries them without a change when that issue is decided.
 - No keyboard shortcut cycles themes, so no new shortcut hint was added. If a "next theme" key is wanted
   later it needs a hint under the standing WARP.md rule.
+
+## Audition: Dark Copper and IBM Beige (2026-09-18)
+
+Owner, 2026-09-18: *"lets keep the 4 generic themes but add my two themes and see if they are good /
+distinctive enough to be the preferred themes."* Implemented by Claude Opus 5 (1M context) in the
+`agent-a6680b33734cf1eb4` worktree, on the theme system above. No second loader. The four incumbents are
+unchanged and `relay-dark` stays the default.
+
+**Added**
+- `data/theme/themes/dark-copper.toml`: a charcoal ground with aged-copper chrome (`accent #c07a4a`, a
+  copper-tinted `surface_raised`, copper rules) and a **nickel** focus outline, taken from the owner's
+  switchboard reference. `shell`/`agent` stay cyan and violet, with the violet about 8° bluer. `warning`
+  and `error` are Relay Dark's, unchanged.
+- `data/theme/themes/ibm-beige.toml`: a PS/2 case ground sampled from the owner's beige-CRT reference, a
+  neutral "screen" `surface`, Windows 95 navy as `accent`/`selection`, the owner's grey-blue/grey-violet
+  destination pair (retuned to ΔE 20.3 apart), and every status, syntax and ANSI colour re-derived for
+  the light ground, with the ramp inverted.
+- `src/Theme.cpp` (+39 lines): two flag-gated additions. `[flags] bevel` adds two-tone bevels from a
+  `[bevel]` table, and `[flags] square` flattens every border-radius. Both are off unless a theme sets
+  them, so the incumbents' stylesheets are byte-for-byte unchanged (this is asserted).
+- `tests/theme_test.cpp` (+7 cases): the contrast contract for both new themes, the copper/amber/red
+  separation, destination-pair distinctness, the inverted ANSI ramp, and the flags. The existing
+  `everyShippedThemeIsComplete` test now covers the two new files as well.
+- `docs/THEMES.md`: the design rules, the measurement method, the incumbents measured, both themes'
+  token tables with measured numbers, and the verdict.
+- Evidence: `docs/qa_evidence/2026-09-18-copper-and-beige-themes/`. It contains all six themes in the
+  same scene, the contact sheets, `contrast.py`, and the measured tables.
+
+**Measured** (59 graded pairs per theme; `contrast.py check`)
+
+| theme | failing | worst pair | worst AA pair |
+|---|---|---|---|
+| dark-copper (new) | **0** | 3.32 ANSI 8 (UI) | 5.24 `error` on a chip |
+| relay-dark | 1 | 2.40 focus outline (UI, needs 3) | 4.57 operator, focused composer |
+| ibm-beige (new) | **0** | 4.11 focus outline (UI) | **4.65** `warning` on the case beige |
+| relay-light | 14 | 2.54 focus outline | 3.85 shell/command on the focused composer |
+
+**Verdict** (`docs/THEMES.md` §10)
+- **Dark Copper: keep as an option.** It is not yet distinctive enough to be the preferred theme: side
+  by side it clearly differs, but on its own it reads as Relay Dark with a warm composer. The one change
+  that would help most is `background = "#18120e"`, which puts warm charcoal on the frame and keeps the
+  terminal cool. Measured, every pair still passes. It is not applied.
+- **IBM Beige: the preferred light theme once the agent-text bug below is fixed.** It is unmistakably
+  distinctive and fails 0 pairs where Relay Light fails 14. It only just passes on warning ochre
+  (4.65:1) and on the grey destination pair (ΔE 20.3).
+
+**Found, not fixed (outside this change)**
+- **Agent-turn text ignores the theme.** `src/main.cpp:5693-5704` (`Ink::*`) and the `MarkdownAnsi` at
+  `:7588` hard-code 24-bit colours chosen for a dark ground. The agent's answer measures **1.13:1** on
+  IBM Beige and **1.22:1** on Relay Light, which is effectively invisible. This blocks any light theme
+  from being preferred. The fix is to emit palette-indexed SGR, or to build the `Ink` strings from the
+  live tokens on `themeChanged()`.
+- `main` at `c0ac7f7` does not build: `main.cpp` includes the uncommitted `MarkdownAnsi.h`. The audition
+  binary was built outside the tree with a CMake overlay (see the evidence README).
+- `test_remote_wire.test_every_worker_event_is_classified` fails on `main` (`subagent_model` is
+  unclassified). `relay-board.py check` flags `2026-09-17-wrong-mode-hints.md` id `94U5`: `U` is not
+  Crockford base32. Both were already on `main`, and this change touches neither.
+
+### QA checklist (audition)
+
+1. Settings › Appearance lists six themes. Both Dark Copper and IBM Beige apply live, with no restart.
+2. Open `contact-all-six-session.png` and the two `head-to-head-*.png` sheets. Judge whether each new
+   theme is distinctive against its incumbent.
+3. Dark Copper: no copper rule or chip should read as an amber warning or a red error. The focus outline
+   (nickel) should be findable. The terminal grid should carry no warm tint.
+4. IBM Beige: controls should be bevelled and square, with a sunken composer and a navy focus ring. The
+   destination chip should say TERMINAL or AGENT legibly. Check that the grey pair is still two colours
+   (Ctrl+I).
+5. Every other theme's chrome should be unchanged, with rounded corners and hairlines as before.
+6. Run `python3 docs/qa_evidence/2026-09-18-copper-and-beige-themes/contrast.py check` and confirm that
+   both new themes report 0 failures.
+7. Run `ctest -R theme` and confirm that all theme cases pass.

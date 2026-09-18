@@ -1,0 +1,97 @@
+# IBM Beige (issue 0JA7): a 1990s PC — PS/2 case, Windows 95 chrome — as a light theme.
+#
+# Every chrome colour is sampled from the owner's reference, a beige CRT and keyboard shot on a
+# white studio background (docs/qa_evidence/2026-09-18-copper-and-beige-themes/ref-beige.jpg).
+# The background measures #ffffff, so the white point is neutral and the hues can be taken
+# literally. The whole case is one family, hue 33-37 and saturation 12-39%:
+#   lit top surface  #f0e4d4  -> bevel.light       keycaps       #8e785d  -> bevel.dark
+#   deck face        #c5b296  -> background (lifted to #cdc0a8)  bezel recess  #655244  -> border_strong
+#   screen glass     #817e7d, saturation 3%  -> the reason `surface` is neutral
+# On a real beige machine the only unsaturated surface in the whole object is the screen, which
+# is Relay's own rule — chrome may have character, the surface you read stays neutral.
+#
+# Windows 95 supplies the accent: the navy of its title bars and selection highlight. It is
+# chrome, like Dark Copper's copper, so the destination pair is free to mean only destinations.
+
+[theme]
+name = "IBM Beige"
+variant = "light"
+description = "A 1990s PC: beige case, bevelled chrome, navy selection, a neutral screen."
+
+[ui]
+background = "#cdc0a8"
+# The screen: 2% saturation. The terminal, the idle composer, editors and previews.
+surface = "#f3f2f0"
+# A raised plastic face: chips, buttons, menus, the focused composer.
+surface_raised = "#ded3bf"
+border = "#9c8d74"
+border_strong = "#655244"
+text = "#1f1c16"
+# Muted text is read all day (cwd, hints, the status strip), so it gets margin: 5.19:1 on the
+# case beige, not the 4.59:1 the first cut had.
+text_muted = "#4d463a"
+accent = "#1a3070"
+accent_text = "#f3f2f0"
+accent_hover = "#243d85"
+selection = "#1a3070"
+disabled = "#8a8271"
+# Re-derived for the light ground, not inverted: each keeps its hue and drops in luminance until
+# it clears 4.5:1 on the darkest ground it is painted on — the case beige behind a notification
+# row, not the lighter chip face. Amber has to become ochre, and it is the tightest: 4.65:1.
+success = "#135427"
+warning = "#684800"
+error = "#931c17"
+# The owner's call for this theme: "terminal is dark gray-blue and agent is dark gray-violet" —
+# a slate and a pewter rather than a teal and a purple, so the pair sits with the plastic instead
+# of looking like a web app dropped into a 1992 case. Their first version (#354a59 / #4c4460) was
+# only CIELAB dE 14 apart at identical lightness; these move each about dE 3 to reach dE 20.3,
+# which is about the most a grey pair of matched lightness can give. Colour is the fourth channel
+# (word, glyph, position first), and this is the theme where that matters most.
+shell = "#324d5c"
+agent = "#4f4163"
+
+[syntax]
+# Checked against surface (idle composer) and surface_raised (focused composer, beige): the
+# focused one is the tight ground in this theme.
+command = "#324d5c"
+unknown = "#931c17"
+flag = "#684800"
+string = "#135427"
+path = "#0f5f5a"
+operator = "#5a554a"
+variable = "#4f4163"
+agent = "#4f4163"
+token = "#324d5c"
+
+[terminal]
+# The grid is the screen: neutral, and the lightest thing in the theme.
+background = "#f3f2f0"
+foreground = "#1f1c16"
+cursor = "#23211a"
+background_intense = "#ffffff"
+foreground_intense = "#14120d"
+# The ramp inverts on a light ground: ANSI 7 and 15 are the darkest entries, and "bright" means
+# more contrast, not more light, or \e[37m text vanishes on the page.
+palette = [
+  "#23211a", "#a8201a", "#18602f", "#7a5400", "#0a52a1", "#7a2f8f", "#0f5f5a", "#4a4638",
+  "#6e6858", "#8a140f", "#12522a", "#5e4200", "#06408a", "#5f2270", "#0a4a46", "#14120d",
+]
+
+[bevel]
+# Two-tone moulded edges instead of 1px hairlines: a hairline on paper reads as a stray mark.
+# Honoured by src/Theme.cpp when [flags] bevel is true; ignored by any other reader.
+light = "#f0e4d4"
+dark = "#8e785d"
+
+[board]
+# The switchboard materials. Brass does not survive a light ground (#c8a45c is 2.35:1 on white),
+# so it is oxidised rather than inverted: phenolic cream face, dark bronze metal.
+face = "#e0d6bd"
+metal = "#63492b"
+metal_dim = "#8a7550"
+
+[flags]
+# Windows 95 had no rounded corners and drew every control with a bevel.
+bevel = true
+square = true
+board_material = true
