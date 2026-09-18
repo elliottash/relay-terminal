@@ -1,0 +1,31 @@
+The real app, XDG_CONFIG_HOME isolated, RELAY_DATA_DIR pointing at a recording worker.
+Settings as the owner's are after a model switch with the model chip:
+
+[provider]
+base=https://api.moonshot.ai/v1
+extra={\"reasoning_effort\":\"high\"}
+max_tokens=32768
+model=kimi-k3
+preset=glm-coding
+
+[url_handler]
+announced=true
+
+[voice]
+hold_key=right-alt
+
+Ctrl+Shift+S opens the Switchboard. Every protocol message the GUI sent, by pane id
+("switchboard" is the board worker; the hex id is the terminal pane's):
+
+40be4a52 {"cwd":"/tmp/claude-1000/-home-elliott-repos-relay-terminal/61ecffcf-9b9c-4afd-ba55-cc2ff65ba55d/scratchpad/gui/ws","id":"1","known_commands":[],"mode":"auto","path":"","text":"","type":"route"}
+40be4a52 {"type":"presets"}
+40be4a52 {"type":"aliases","workspace":"/tmp/claude-1000/-home-elliott-repos-relay-terminal/61ecffcf-9b9c-4afd-ba55-cc2ff65ba55d/scratchpad/gui/ws"}
+40be4a52 {"id":"tab-1","titles":["ws","Switchboard"],"type":"tab_label"}
+switchboard {"agent_role":"switchboard","api_key":"","max_tokens":32768,"preset":"glm-coding","type":"configure","use_stored_key":true,"workspace":"/tmp/claude-1000/-home-elliott-repos-relay-terminal/61ecffcf-9b9c-4afd-ba55-cc2ff65ba55d/scratchpad/gui/ws"}
+switchboard {"type":"board_open"}
+40be4a52 {"type":"cancel"}
+40be4a52 {"type":"shutdown"}
+
+The board's configure carries the preset and no endpoint: the stale provider/base
+(api.moonshot.ai) and provider/model (kimi-k3) are not sent, so the glm-coding key
+cannot be posted to Moonshot. Before the fix all three travelled together.

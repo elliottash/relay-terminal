@@ -11121,21 +11121,35 @@ public:
 
     // The Switchboard worker runs an ordinary agent on the `switchboard` role (protocol 13), so
     // card threads never enter a pane's conversation.
+    //
+    // It names its provider the way a pane does — by the preset — rather than pasting an endpoint
+    // together out of separate settings keys. `provider/preset` is rewritten on every model switch
+    // (the model chip, /model, the palette), while `provider/base`, `provider/model` and
+    // `provider/extra` are only rewritten by a full re-configure, so from the first switch onwards
+    // the four disagree. A configure built from all four names one preset and carries another
+    // provider's URL, and the worker then posts the named preset's stored key to a foreign
+    // endpoint: HTTP 401, with nothing on screen saying which provider refused (owner report,
+    // 2026-09-18, "ask the agent didnt work. it said provider HTTP 401"). A named preset therefore
+    // travels alone and the worker fills in that preset's own base URL, model and extra
+    // (protocol 1). Only a custom endpoint, which has no preset to resolve, still carries them.
     void startBoardWorker(const QString &workspace) {
         QSettings settings;
         const QString preset = settings.value(QStringLiteral("provider/preset")).toString();
+        const bool named = !preset.isEmpty() && preset != QStringLiteral("custom");
         QJsonObject configure{{QStringLiteral("type"), QStringLiteral("configure")},
                               {QStringLiteral("workspace"), workspace},
                               {QStringLiteral("agent_role"), QStringLiteral("switchboard")},
                               {QStringLiteral("use_stored_key"), true},
                               {QStringLiteral("api_key"), QString()},
-                              {QStringLiteral("base_url"), settings.value(QStringLiteral("provider/base")).toString()},
-                              {QStringLiteral("model"), settings.value(QStringLiteral("provider/model")).toString()},
                               {QStringLiteral("max_tokens"), settings.value(QStringLiteral("provider/max_tokens"), 32768).toInt()}};
         if (!preset.isEmpty()) configure.insert(QStringLiteral("preset"), preset);
-        const QJsonObject extra = QJsonDocument::fromJson(
-            settings.value(QStringLiteral("provider/extra")).toString().toUtf8()).object();
-        if (!extra.isEmpty()) configure.insert(QStringLiteral("extra"), extra);
+        if (!named) {
+            configure.insert(QStringLiteral("base_url"), settings.value(QStringLiteral("provider/base")).toString());
+            configure.insert(QStringLiteral("model"), settings.value(QStringLiteral("provider/model")).toString());
+            const QJsonObject extra = QJsonDocument::fromJson(
+                settings.value(QStringLiteral("provider/extra")).toString().toUtf8()).object();
+            if (!extra.isEmpty()) configure.insert(QStringLiteral("extra"), extra);
+        }
         const QJsonObject roles = Pane::rolesObject();
         if (!roles.isEmpty()) configure.insert(QStringLiteral("roles"), roles);
         const QJsonObject tiers = Pane::tiersObject();

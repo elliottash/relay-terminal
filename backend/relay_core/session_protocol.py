@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import threading
 import uuid
+from urllib.parse import urlsplit
 
 from . import (alias_import, aliases, attachments, conv_index, instructions, keystore, logs,
                planning, suggestions, titles)
@@ -39,23 +40,46 @@ TYPES = {"set_model", "set_effort", "context", "compact", "checkpoints", "rewind
          "conversation_pin", "terminal_history", "index_rebuild"}
 
 
+def provider_name(preset_id: str, base_url: str = "") -> str:
+    """How to name a provider in an error a person reads: its preset label, else its host."""
+    if preset_id in PRESETS:
+        return f"{PRESETS[preset_id].label} ({preset_id})"
+    host = urlsplit(base_url).hostname if base_url else ""
+    return host or "this provider"
+
+
 def provider_config(request: dict) -> ProviderConfig:
-    """ProviderConfig from a configure/set_model request, using the stored key when asked."""
+    """ProviderConfig from a configure/set_model request, using the stored key when asked.
+
+    A request that names a built-in preset may leave out ``base_url``, ``model`` and ``extra``: the
+    preset supplies them, exactly as a ``roles`` entry does (protocol 13.4). That is what keeps a key
+    and an endpoint together. A caller that assembles the two out of separate settings can otherwise
+    name one preset and pass another provider's URL, and the stored key for the named preset is then
+    posted to a foreign endpoint - which is an HTTP 401 and nothing more legible. The Switchboard did
+    exactly that until 2026-09-18.
+    """
     api_key = request.get("api_key", "")
     if not isinstance(api_key, str):
         raise ValueError("API key must be text.")
+    named = request.get("preset")
+    preset = PRESETS.get(named) if isinstance(named, str) else None
+    base_url = str(request.get("base_url") or "") or (preset.base_url if preset else "")
+    model = str(request.get("model") or "") or (preset.model if preset else "")
+    extra = request.get("extra")
+    if extra is None:
+        extra = dict(preset.extra) if preset else {}
     if not api_key and request.get("use_stored_key"):
         # The key never crosses the frontend pipe in this path.
-        preset_id = request.get("preset", "")
-        if preset_id not in PRESETS:
+        preset_id = preset.id if preset else ""
+        if not preset_id:
             # "Custom" settings that point at a known endpoint still use its stored key.
-            match = match_preset(str(request.get("base_url", "")), str(request.get("model", "")))
+            match = match_preset(base_url, model)
             preset_id = match.id if match else ""
         api_key = keystore.lookup(preset_id) if preset_id else ""
         if not api_key:
-            raise ValueError("No stored key for this provider. Import from Warp or enter a key.")
-    config = ProviderConfig(request.get("base_url", ""), request.get("model", ""), api_key,
-                            request.get("extra", {}), request.get("max_tokens", 32768))
+            raise ValueError(f"No stored key for {provider_name(preset_id, base_url)}. "
+                             "Import from Warp or enter a key.")
+    config = ProviderConfig(base_url, model, api_key, extra, request.get("max_tokens", 32768))
     config.validate()
     return config
 

@@ -1,0 +1,18 @@
+--- configure sent by startBoardWorker (after) ---
+{
+    "type": "configure",
+    "workspace": "/tmp/tmp.KCz39u6gr3/ws",
+    "agent_role": "switchboard",
+    "use_stored_key": true,
+    "api_key": "",
+    "preset": "glm-coding",
+    "max_tokens": 32768
+}
+--- worker events ---
+configured: model=glm-5.3 base=http://127.0.0.1:36847/zai
+board_thread_appended: {"card_id": "A1B2", "author": "owner", "text": "say ok"}
+board_thread_appended: {"card_id": "A1B2", "author": "agent", "text": "ok", "turn_id": "24374b54671a4f52887e30da0e7b7853"}
+done: {"turn_id": "24374b54671a4f52887e30da0e7b7853", "card_id": "A1B2"}
+--- what the stand-in saw ---
+{'endpoint': '/zai', 'presented': '/zai', 'accepted': True}
+{'endpoint': '/zai', 'presented': '/zai', 'accepted': True}

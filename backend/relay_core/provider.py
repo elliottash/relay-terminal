@@ -313,6 +313,30 @@ class ChatProvider:
             return True
         return last is not None and not response_closed(last)
 
+    # ----- error text ----------------------------------------------------------------
+    def http_message(self, code: int) -> str:
+        """One line for an HTTP failure, naming the endpoint that produced it.
+
+        The response body is never included: providers quote the request they were sent, key
+        material and prompts with it. Only the status, the model and the host survive.
+
+        401/403 gets its own sentence. "Provider HTTP 401." on its own reads as "the agent broke",
+        and the user cannot tell which of their providers refused, nor that the answer is a key
+        rather than a retry - which is exactly how a Switchboard configured against the wrong
+        endpoint looked (owner report, 2026-09-18).
+        """
+        from .presets import match_preset
+        base_url = self.config.base_url
+        host = urllib.parse.urlsplit(base_url).hostname or base_url
+        preset = match_preset(base_url, self.config.model)
+        where = f"{self.config.model} at {host}" + (f" ({preset.label})" if preset else "")
+        if code in (401, 403):
+            return (f"Provider HTTP {code}: the API key was rejected for {where}. "
+                    "The stored key is missing, wrong, or belongs to a different endpoint of the "
+                    "same provider - open Settings › Models › API keys… to check it.")
+        return (f"Provider HTTP {code} for {where}. "
+                "Check endpoint, model access, key, quota, and parameters.")
+
     # ----- idle deadline -------------------------------------------------------------
     def _note_progress(self) -> None:
         self._progress = time.monotonic()
@@ -415,7 +439,7 @@ class ChatProvider:
             if getattr(exc, "fp", None) is not None:
                 hard_close(exc.fp)
             # Providers can echo submitted secrets/prompts in error bodies. Do not log them.
-            raise ProviderError(f"Provider HTTP {exc.code}. Check endpoint, model access, key, quota, and parameters.") from None
+            raise ProviderError(self.http_message(exc.code)) from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             # The watchdog's hard close surfaces here; report the stall, not a generic failure.
             self._maybe_stalled(cancel)

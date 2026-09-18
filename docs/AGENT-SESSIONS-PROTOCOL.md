@@ -25,6 +25,16 @@ Owner decisions this implements are recorded in
 
 `configured` event gains: `context_window`, `effort`, `mode`, `instructions` (list of loaded paths), `agents` (count), `session_id`.
 
+**A named preset is an endpoint.** In `configure` and `set_model`, `base_url`, `model` and `extra` are
+optional when `preset` names a built-in preset: the preset supplies each one that is missing, the same
+rule a `roles` entry follows (13.4). A caller that has only "which provider" to say should send only
+`preset`, because that is what keeps the key and the URL together — the stored key is looked up for the
+preset, so a request that names one preset and carries another provider's `base_url` sends that key to a
+foreign endpoint and is answered with HTTP 401. The Switchboard did exactly that until 2026-09-18 and now
+sends `preset` alone; the provider dialog, which lets the user edit the endpoint by hand, still sends all
+of them. Sending an endpoint with no preset is unchanged: the key is looked up for the preset whose
+`base_url` matches (`presets.match_preset`).
+
 ## 2. Model and effort without losing the conversation
 
 - `set_model {preset, base_url, model, extra, max_tokens, context_window, use_stored_key, api_key?}` → swaps the provider between turns (refused while a turn runs: error with `agent_busy`). Event `model_changed {model, preset, context_window}`.
