@@ -21,9 +21,16 @@ Action decide(const State &state, int key, Qt::KeyboardModifiers mods) {
         return state.selected + 1 < state.count ? Action::Down : Action::LeaveToPrompt;
     }
     if (mods == Qt::ControlModifier && (key == Qt::Key_Up || key == Qt::Key_Down)) {
-        // Reordering never falls off either end: at the front Ctrl+Up does nothing rather than
-        // quietly dropping the selection.
-        if (key == Qt::Key_Up) return state.selected > 0 ? Action::MoveUp : Action::None;
+        // A steer's place is "the next tool call", not a position among the others: Ctrl+Down
+        // takes it out of the turn to the head of the queue, and Ctrl+Up has nowhere to go.
+        if (state.selected < state.steers) return key == Qt::Key_Down ? Action::Unsteer : Action::None;
+        // The head of the queue goes one further up only by becoming a steer. Reordering never
+        // falls off either end: otherwise Ctrl+Up at the front does nothing rather than quietly
+        // dropping the selection.
+        if (key == Qt::Key_Up) {
+            if (state.selected > state.steers) return Action::MoveUp;
+            return state.headSteerable ? Action::Steer : Action::None;
+        }
         return state.selected + 1 < state.count ? Action::MoveDown : Action::None;
     }
     if (plain && enter) return Action::Save;

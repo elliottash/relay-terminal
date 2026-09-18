@@ -1,0 +1,10 @@
+# [hints] section of the jail's relay.conf, read while drive.sh was running (after shot 14)
+[hints]
+count\queue.edit=1
+count\queue.steer.drag=1
+count\queue.steer.remove.mouse=1
+last\queue.edit=1789761691
+last\queue.steer.drag=1789761749
+last\queue.steer.remove.mouse=1789761725
+last_any=1789761749
+

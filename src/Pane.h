@@ -130,24 +130,46 @@
 #include <termios.h>
 #include <unistd.h>
 
-// One row of the combined queue: a colored kind icon ($ terminal, ✦ agent), the text, and a
-// remove × at the right edge.
+// One row of the queue list, in delivery order: a steer waiting for the running turn's next tool
+// call ("↪ next tool call ✦", in the agent's colour), then queued agent prompts (✦) and terminal
+// commands ($). Every row has a remove × at the right edge; a steer that is being withdrawn is
+// greyed with "withdrawing…" and has none.
 class QueueRowDelegate final : public QStyledItemDelegate {
 public:
+    // Item data roles the pane fills in rebuildQueueStrip().
+    static constexpr int EntryIdRole = Qt::UserRole;        // a queued item's id (0 for a steer)
+    static constexpr int AgentRole = Qt::UserRole + 1;      // an agent prompt rather than a command
+    static constexpr int KindRole = Qt::UserRole + 2;       // "steer", "agent" or "command"
+    static constexpr int RowIdRole = Qt::UserRole + 3;      // "steer:<request id>" or "entry:<id>"
+    static constexpr int PendingRole = Qt::UserRole + 4;    // a steer being withdrawn
     using QStyledItemDelegate::QStyledItemDelegate;
     void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
         painter->save();
         const QRect r = option.rect;
         if (option.state & QStyle::State_Selected) painter->fillRect(r, relay::theme::SurfaceRaised.lighter(135));
-        const bool agent = index.data(Qt::UserRole + 1).toBool();
+        const bool steer = index.data(KindRole).toString() == QStringLiteral("steer");
+        const bool pending = index.data(PendingRole).toBool();
+        const bool agent = index.data(AgentRole).toBool();
         painter->setFont(option.font);
-        painter->setPen(agent ? relay::theme::Accent : relay::theme::Warning);
-        painter->drawText(QRect(r.left() + 4, r.top(), 18, r.height()), Qt::AlignCenter, agent ? QStringLiteral("✦") : QStringLiteral("$"));
-        painter->setPen(relay::theme::Text);
-        const QString text = option.fontMetrics.elidedText(index.data(Qt::DisplayRole).toString().simplified(), Qt::ElideRight, std::max(20, r.width() - 54));
-        painter->drawText(QRect(r.left() + 26, r.top(), r.width() - 54, r.height()), Qt::AlignVCenter | Qt::AlignLeft, text);
-        painter->setPen(relay::theme::TextMuted);
-        painter->drawText(QRect(r.right() - 22, r.top(), 18, r.height()), Qt::AlignCenter, QStringLiteral("×"));
+        int left = r.left() + 4;
+        if (steer) {
+            const QString lead = QStringLiteral("↪ next tool call");
+            painter->setPen(pending ? relay::theme::TextMuted : relay::theme::Agent);
+            painter->drawText(QRect(left, r.top(), r.width(), r.height()), Qt::AlignVCenter | Qt::AlignLeft, lead);
+            left += option.fontMetrics.horizontalAdvance(lead) + 8;
+        }
+        painter->setPen(pending ? relay::theme::TextMuted : (steer ? relay::theme::Agent : agent ? relay::theme::Accent : relay::theme::Warning));
+        painter->drawText(QRect(left, r.top(), 18, r.height()), Qt::AlignCenter, agent ? QStringLiteral("✦") : QStringLiteral("$"));
+        left += 22;
+        const QString suffix = pending ? QStringLiteral("  withdrawing…") : QString();
+        const int room = std::max(20, r.right() - 28 - left - option.fontMetrics.horizontalAdvance(suffix));
+        painter->setPen(pending ? relay::theme::TextMuted : (steer ? relay::theme::Agent : relay::theme::Text));
+        const QString text = option.fontMetrics.elidedText(index.data(Qt::DisplayRole).toString().simplified(), Qt::ElideRight, room) + suffix;
+        painter->drawText(QRect(left, r.top(), r.right() - 26 - left, r.height()), Qt::AlignVCenter | Qt::AlignLeft, text);
+        if (!pending) {
+            painter->setPen(relay::theme::TextMuted);
+            painter->drawText(QRect(r.right() - 22, r.top(), 18, r.height()), Qt::AlignCenter, QStringLiteral("×"));
+        }
         painter->restore();
     }
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
@@ -430,6 +452,7 @@ public:
     }
     // Ctrl+Enter: send to the agent. While the agent is busy, stop the current turn and send now.
     void interruptAgentWithPrompt() {
+        if (sendSelectedSteerNow()) return;   // a selected steer row: that steer, now
         const QString text = m_editor->toPlainText().trimmed();
         if (!m_agentBusy) {
             if (text.isEmpty()) { status(QStringLiteral("Type a prompt first.")); return; }
@@ -1585,12 +1608,16 @@ protected:
             hint(QStringLiteral("terminal.click"), QStringLiteral("The prompt box is the input · %1 types into the terminal")
                      .arg(Keymap::instance().shortcutText(QStringLiteral("control.human"))));
         if (m_queueList && object == m_queueList->viewport() && event->type() == QEvent::MouseButtonRelease) {
-            // The × at the right edge of a queue row removes it.
+            // The × at the right edge of a queue row removes it; on a steer it withdraws it. A steer
+            // already being withdrawn has no × to click.
             const QPoint pos = static_cast<QMouseEvent *>(event)->pos();
             const QModelIndex index = m_queueList->indexAt(pos);
             if (index.isValid() && pos.x() >= m_queueList->viewport()->width() - 26) {
-                removeEntry(index.data(Qt::UserRole).toULongLong());
-                hint(QStringLiteral("queue.remove.mouse"), QStringLiteral("Next time: ↑ opens a queued item in the prompt box, Shift+Delete removes, Ctrl+↑/↓ reorders"));
+                if (index.data(QueueRowDelegate::PendingRole).toBool()) return true;
+                const bool steer = index.data(QueueRowDelegate::KindRole).toString() == QStringLiteral("steer");
+                removeRow(index.data(QueueRowDelegate::RowIdRole).toString());
+                if (steer) hint(QStringLiteral("queue.steer.remove.mouse"), relay::ShortcutHints::nextTime(QStringLiteral("↑ then Shift+Delete")));
+                else hint(QStringLiteral("queue.remove.mouse"), QStringLiteral("Next time: ↑ opens a queued item in the prompt box, Shift+Delete removes, Ctrl+↑/↓ reorders"));
                 return true;
             }
         }
@@ -3746,11 +3773,26 @@ private:
             return true;
         }
         if (type == QStringLiteral("steer_removed")) {
+            // Withdrawn before the turn took it. Where it goes now is what the withdraw was for:
+            // nowhere (× or Shift+Delete), the prompt box (edited, already there), or the head of
+            // the queue (Ctrl+Down).
             const QString requestId = event.value(QStringLiteral("request_id")).toString();
-            for (int i = 0; i < m_steering.size(); ++i)
-                if (m_steering[i].requestId == requestId) { m_steering.removeAt(i); break; }
-            toast(QStringLiteral("Withdrawn · the agent never saw it"));
+            for (int i = 0; i < m_steering.size(); ++i) {
+                if (m_steering[i].requestId != requestId) continue;
+                const SteerEntry steer = m_steering[i];
+                forgetSteer(i);
+                if (steer.then == SteerEntry::ToQueue) {
+                    requeueSteer(steer);
+                    toast(QStringLiteral("Back in the queue · it runs after this turn"));
+                } else if (steer.then == SteerEntry::Edit) {
+                    toast(QStringLiteral("Taken back · the agent never saw it · Enter queues it again"));
+                } else {
+                    toast(QStringLiteral("Withdrawn · the agent never saw it"));
+                }
+                break;
+            }
             rebuildQueueStrip(); changed();
+            QTimer::singleShot(0, this, [this] { pumpQueue(); });
             return true;
         }
         if (type == QStringLiteral("steer_delivered")) {
@@ -3758,9 +3800,28 @@ private:
             for (const auto &value : requestIds) {
                 for (int i = 0; i < m_steering.size(); ++i) {
                     if (m_steering[i].requestId != value.toString()) continue;
+                    const SteerEntry steer = m_steering[i];
                     ensureLineStart();
-                    printInline(QStringLiteral("✦ ") + m_steering[i].text + QStringLiteral("  ↪ at the next tool call\n"), Ink::UserAgent);
-                    m_steering.removeAt(i);
+                    printInline(QStringLiteral("✦ ") + steer.text + QStringLiteral("  ↪ at the next tool call\n"), Ink::UserAgent);
+                    forgetSteer(i);
+                    if (steer.withdraw) {
+                        // The withdraw lost the race: the turn took it first, so the transcript line
+                        // above is where it went. The worker's "not queued" answer is expected now.
+                        m_withdrawnOnReturn.insert(steer.requestId);
+                        if (steer.then == SteerEntry::Edit) {
+                            // Its text was already put back in the prompt box. Untouched, that copy
+                            // goes; edited, it stays, because it is the user's words now.
+                            if (m_editor->toPlainText() == steer.editText) {
+                                m_editor->clear();
+                                status(QStringLiteral("Too late to edit · the agent already had it at its tool call"));
+                            } else {
+                                status(QStringLiteral("Too late · the agent already had the original at its tool call"
+                                                      " · your edit is still in the prompt box"));
+                            }
+                        } else {
+                            status(QStringLiteral("Too late to withdraw · the agent already had it at its tool call"));
+                        }
+                    }
                     break;
                 }
             }
@@ -3771,7 +3832,7 @@ private:
             const QString requestId = event.value(QStringLiteral("request_id")).toString();
             if (event.value(QStringLiteral("escalated")).toBool()) {
                 for (int i = 0; i < m_steering.size(); ++i)
-                    if (m_steering[i].requestId == requestId) { m_steering.removeAt(i); break; }
+                    if (m_steering[i].requestId == requestId) { forgetSteer(i); break; }
                 ensureLineStart();
                 printInline(QStringLiteral("Interrupting the current turn; completed actions are not rolled back.\n"), Ink::Note);
             } else {
@@ -3787,19 +3848,23 @@ private:
             const QString requestId = event.value(QStringLiteral("request_id")).toString();
             for (int i = 0; i < m_steering.size(); ++i) {
                 if (m_steering[i].requestId != requestId) continue;
-                if (m_steering[i].withdraw) {
-                    // × was clicked as the turn ended: it stays withdrawn rather than coming back,
-                    // and the worker's "not queued" answer to the × is expected, not news.
-                    m_withdrawnOnReturn.insert(requestId);
+                const SteerEntry steer = m_steering[i];
+                forgetSteer(i);
+                // A withdraw in flight as the turn ended: the worker's "not queued" answer to it is
+                // expected, not news.
+                if (steer.withdraw) m_withdrawnOnReturn.insert(requestId);
+                if (steer.withdraw && steer.then == SteerEntry::Drop) {
+                    // × was clicked as the turn ended: it stays withdrawn rather than coming back.
                     toast(QStringLiteral("Withdrawn · the agent never saw it"));
+                } else if (steer.withdraw && steer.then == SteerEntry::Edit) {
+                    toast(QStringLiteral("Taken back · the agent never saw it · Enter queues it again"));   // it is in the prompt box
                 } else if (!event.value(QStringLiteral("requeued")).toBool()) {
-                    // The turn ended before another tool call: the prompt becomes the next queue item.
-                    QueueEntry entry; entry.agent = true; entry.text = m_steering[i].text; entry.attachments = m_steering[i].attachments;
-                    entry.id = ++m_entrySerial;
-                    m_entries.prepend(entry);
-                    toast(QStringLiteral("The agent finished first · your message is next in the queue"));
+                    // The turn ended before another tool call (or Ctrl+Down asked for exactly this):
+                    // the prompt becomes the next queue item.
+                    requeueSteer(steer);
+                    toast(steer.withdraw ? QStringLiteral("Back in the queue · it runs next")
+                                         : QStringLiteral("The agent finished first · your message is next in the queue"));
                 }
-                m_steering.removeAt(i);
                 break;
             }
             rebuildQueueStrip(); changed();
@@ -4523,7 +4588,7 @@ private:
     void updateSlashPopup() {
         // A queued item is in the box, not a command being typed: its leading "/" must not open the
         // popup, which would take the arrow keys the queue is using.
-        if (m_selected >= 0) { hideSlashPopup(); return; }
+        if (inQueueSelection()) { hideSlashPopup(); return; }
         const QString text = m_editor ? m_editor->toPlainText() : QString();
         if (!m_editor || m_native || !text.startsWith('/') || text.contains(QRegularExpression(QStringLiteral("\\s")))) { hideSlashPopup(); return; }
         // The first `/` of a command is the cue to re-read the aliases, for the same reason the
@@ -4893,20 +4958,144 @@ private:
     }
 
     // ----- steering, away recaps, AI suggestions -------------------------------------------------
-    struct SteerEntry { QString requestId, itemId, text; QJsonArray attachments; bool withdraw = false; };
+    // A prompt the running turn takes at its next tool call. `withdraw` is set while a queue_remove
+    // for it is in flight; `then` says where it goes once the worker confirms (steer_removed).
+    struct SteerEntry {
+        enum Then { Drop, Edit, ToQueue };
+        QString requestId, itemId, text; QJsonArray attachments, cards;
+        bool withdraw = false; Then then = Drop;
+        QString editText;   // Edit: what was put in the prompt box, to tell an untouched copy from an edit
+    };
 
-    // The × on a "next tool call" row: withdraw a steer the running turn has not taken yet. The
-    // worker answers steer_removed; if the turn took it first, steer_delivered has already printed
-    // it into the transcript and the worker says it is no longer queued.
-    void withdrawSteer(const QString &requestId) {
+public:
+    // One row of the queue list, top to bottom in delivery order (queueRows()). `id` is stable for
+    // as long as the row exists and is what removeRow() takes: "running", "steer:<request id>" or
+    // "entry:<queue id>". kind: "running", "steer", "agent" or "command". state: "running",
+    // "waiting" (a steer before the next tool call), "withdrawing", "queued", "editing" (selected
+    // in the prompt box) or "paused".
+    struct QueueRow { QString id, kind, preview, state; };
+
+    // The rows the queue strip shows, in delivery order: what is running, then the steers, then
+    // the queued items. For publishing the queue elsewhere (a paired phone); nothing reads it yet.
+    QList<QueueRow> queueRows() const {
+        QList<QueueRow> rows;
+        if (const QString running = runningLabel(); !running.trimmed().isEmpty())
+            rows.append({QStringLiteral("running"), QStringLiteral("running"), running.simplified(), QStringLiteral("running")});
+        for (const auto &steer : m_steering)
+            rows.append({QStringLiteral("steer:") + steer.requestId, QStringLiteral("steer"), steer.text.simplified(),
+                         steer.withdraw ? QStringLiteral("withdrawing")
+                                        : steer.requestId == m_selectedSteer ? QStringLiteral("editing") : QStringLiteral("waiting")});
+        for (int i = 0; i < m_entries.size(); ++i) {
+            const QueueEntry &entry = m_entries[i];
+            rows.append({QStringLiteral("entry:%1").arg(entry.id), entry.agent ? QStringLiteral("agent") : QStringLiteral("command"),
+                         entry.label().simplified(),
+                         i == m_selected ? QStringLiteral("editing") : m_entriesPaused ? QStringLiteral("paused") : QStringLiteral("queued")});
+        }
+        return rows;
+    }
+
+    // Remove one row of the queue by its queueRows() id: a queued item is dropped, a steer is
+    // withdrawn if the turn has not taken it yet (the worker confirms with steer_removed). The ×
+    // on a row and Shift+Delete both come here. False when there is no such row, or it cannot be
+    // removed (what is running is stopped with Esc, not removed).
+    bool removeRow(const QString &rowId) {
+        if (rowId.startsWith(QStringLiteral("steer:"))) {
+            const QString requestId = rowId.mid(6);
+            const bool known = std::any_of(m_steering.cbegin(), m_steering.cend(),
+                                           [&](const SteerEntry &steer) { return steer.requestId == requestId && !steer.withdraw; });
+            if (known) withdrawSteer(requestId);
+            return known;
+        }
+        if (rowId.startsWith(QStringLiteral("entry:"))) {
+            bool ok = false;
+            const quint64 id = rowId.mid(6).toULongLong(&ok);
+            if (!ok || std::none_of(m_entries.cbegin(), m_entries.cend(), [id](const QueueEntry &e) { return e.id == id; })) return false;
+            removeEntry(id);
+            return true;
+        }
+        return false;
+    }
+
+private:
+    // Withdraw a steer the running turn has not taken yet: the × or Shift+Delete on its row
+    // (Drop), editing it (Edit: its text is already back in the prompt box) or Ctrl+Down (ToQueue).
+    // The row greys out as "withdrawing…" until the worker answers steer_removed; if the turn took
+    // it first, steer_delivered prints it into the transcript and the worker says it is no longer
+    // queued. A × before the worker named the item is sent when it does (the "queued" event).
+    void withdrawSteer(const QString &requestId, SteerEntry::Then then = SteerEntry::Drop) {
         for (auto &steer : m_steering) {
             if (steer.requestId != requestId || steer.withdraw) continue;
-            steer.withdraw = true;
+            steer.withdraw = true; steer.then = then;
+            if (then == SteerEntry::Edit) steer.editText = m_editor->toPlainText();
+            if (m_selectedSteer == requestId) {   // its text in the prompt box was the row's
+                m_selectedSteer.clear();
+                m_editor->clear();
+            }
             if (!steer.itemId.isEmpty()) send({{"type", "queue_remove"}, {"item", steer.itemId}, {"id", QStringLiteral("withdraw-") + requestId}});
-            status(QStringLiteral("Withdrawing it before the agent's next tool call…"));
-            rebuildQueueStrip();
+            status(then == SteerEntry::Edit    ? QStringLiteral("Taking it back to edit · the agent will not get it at its next tool call…")
+                   : then == SteerEntry::ToQueue ? QStringLiteral("Moving it back to the queue, to run after this turn…")
+                                                 : QStringLiteral("Withdrawing it before the agent's next tool call…"));
+            rebuildQueueStrip(); changed();
             return;
         }
+    }
+
+    // A steer has left m_steering's rows (delivered, withdrawn, returned, escalated). If it was the
+    // selected row its text in the prompt box was the row's, not the user's, so it goes too; any
+    // edit would already have taken it back (takeBackEditedSteer). The user is still in the list,
+    // so the selection moves to the row that took its place, as after Shift+Delete: otherwise the
+    // Esc meant to leave the list would land on an empty box and stop the agent. With no row left,
+    // an Esc in the next two seconds only says so (see the queue keys in handleComposerKey).
+    void forgetSteer(int index) {
+        if (index < 0 || index >= m_steering.size()) return;
+        if (m_steering[index].requestId == m_selectedSteer) {
+            const int row = selectedQueueRow();
+            m_selectedSteer.clear();
+            m_editor->clear();
+            QTimer::singleShot(0, this, [this, row] {
+                if (inQueueSelection() || !m_editor->toPlainText().isEmpty()) return;
+                const int rows = int(liveSteers().size() + m_entries.size());
+                if (rows > 0) selectQueueRow(std::min(row, rows - 1));
+                else m_selectionDroppedAt.start();
+            });
+        }
+        m_steering.removeAt(index);
+    }
+
+    // A steer that came back out of the turn becomes the head of the queue, where it runs next.
+    void requeueSteer(const SteerEntry &steer) {
+        const quint64 selected = selectedEntryId();
+        QueueEntry entry; entry.agent = true; entry.text = steer.text; entry.attachments = steer.attachments; entry.cards = steer.cards;
+        entry.id = ++m_entrySerial;
+        m_entries.prepend(entry);
+        keepSelectionOn(selected);   // every queued index just moved down one
+    }
+
+    // Turn a queued agent prompt into a steer: out of the queue, delivered inside the running turn
+    // at its next tool call. Enter on the empty box right after queuing, Ctrl+Up on the head of the
+    // queue and dropping a row above the steers all come here. Returns the steer's request id.
+    QString steerQueuedEntry(quint64 id) {
+        if (!m_agentBusy) return {};
+        const auto at = std::find_if(m_entries.cbegin(), m_entries.cend(), [id](const QueueEntry &e) { return e.id == id; });
+        if (at == m_entries.cend() || !at->agent || at->written()) return {};
+        const quint64 selected = selectedEntryId();
+        const QueueEntry entry = m_entries.takeAt(int(at - m_entries.cbegin()));
+        keepSelectionOn(selected);
+        if (entry.id == m_lastQueuedEntryId) m_lastQueuedAt.invalidate();
+        SteerEntry steer;
+        steer.requestId = QStringLiteral("steer-%1").arg(++m_askSerial);
+        steer.text = entry.text; steer.attachments = entry.attachments; steer.cards = entry.cards;
+        m_steering.append(steer);
+        QJsonObject request{{"type", "ask"}, {"id", steer.requestId}, {"text", entry.text}, {"when", "steer"}, {"requeue", false}};
+        if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
+        if (!entry.cards.isEmpty()) request.insert(QStringLiteral("cards"), entry.cards);
+        if (const QJsonArray skills = skillsFor(entry.text); !skills.isEmpty()) request.insert(QStringLiteral("skills"), skills);
+        send(request);
+        m_lastSteerRequest = steer.requestId; m_lastSteeredAt.start();
+        if (m_entries.isEmpty()) { m_entriesPaused = false; m_pauseReason.clear(); }
+        rebuildQueueStrip(); changed();
+        toast(QStringLiteral("Steering · delivered at the agent's next tool call · Enter again to interrupt and send now"));
+        return steer.requestId;
     }
 
     // Enter on an empty prompt right after queuing an agent prompt while the agent works: deliver that
@@ -4915,40 +5104,43 @@ private:
         if (!m_agentBusy || m_entries.isEmpty() || !m_lastQueuedAt.isValid() || m_lastQueuedAt.elapsed() > 15000) return false;
         const QueueEntry &last = m_entries.last();
         if (!last.agent || last.written() || last.id != m_lastQueuedEntryId) return false;
-        QueueEntry entry = m_entries.takeLast();
-        m_lastQueuedAt.invalidate();
-        SteerEntry steer;
-        steer.requestId = QStringLiteral("steer-%1").arg(++m_askSerial);
-        steer.text = entry.text; steer.attachments = entry.attachments;
-        m_steering.append(steer);
-        QJsonObject request{{"type", "ask"}, {"id", steer.requestId}, {"text", entry.text}, {"when", "steer"}, {"requeue", false}};
-        if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
-        if (!entry.cards.isEmpty()) request.insert(QStringLiteral("cards"), entry.cards);
-        if (const QJsonArray skills = skillsFor(entry.text); !skills.isEmpty()) request.insert(QStringLiteral("skills"), skills);
-        send(request);
-        m_lastSteerRequest = steer.requestId; m_lastSteeredAt.start();
-        rebuildQueueStrip(); changed();
-        toast(QStringLiteral("Steering · delivered at the agent's next tool call · Enter again to interrupt and send now"));
-        return true;
+        return !steerQueuedEntry(last.id).isEmpty();
     }
 
     // A third Enter on the empty prompt box, right after the steer: stop the running turn and run
-    // that prompt as its own turn instead. The worker decides: once the turn has taken the steer
+    // that prompt as its own turn instead.
+    bool escalateSteerToInterrupt() {
+        if (!m_agentBusy || !m_lastSteeredAt.isValid() || m_lastSteeredAt.elapsed() > 15000) return false;
+        if (!sendSteerNow(m_lastSteerRequest)) return false;
+        m_lastSteeredAt.invalidate();
+        return true;
+    }
+
+    // Stop the running turn and run this steer as its own turn instead: the third Enter, or
+    // Ctrl+Enter on a selected steer row. The worker decides: once the turn has taken the steer
     // (or given it back) the agent already has the prompt and there is nothing to interrupt for,
     // so it answers steer_escalated {escalated: false}. The reply carries the request id reserved
     // here, which keeps the prompt echo wired up the way startAgentEntry() does.
-    bool escalateSteerToInterrupt() {
-        if (!m_agentBusy || !m_lastSteeredAt.isValid() || m_lastSteeredAt.elapsed() > 15000) return false;
+    bool sendSteerNow(const QString &steerRequest) {
+        if (!m_agentBusy) return false;
         const auto pending = std::find_if(m_steering.cbegin(), m_steering.cend(),
-            [this](const SteerEntry &steer) { return steer.requestId == m_lastSteerRequest; });
+            [&](const SteerEntry &steer) { return steer.requestId == steerRequest && !steer.withdraw; });
         if (pending == m_steering.cend()) return false;
-        m_lastSteeredAt.invalidate();
         PendingPrompt prompt; prompt.text = pending->text;
         const QString requestId = QStringLiteral("ask-%1").arg(++m_askSerial);
         m_pendingPrompts.insert(requestId, prompt);
         m_interruptPending = true;   // set before the stop, so agent_finished does not pause the queue
         send({{"type", "queue_unsteer"}, {"request", pending->requestId}, {"as_request", requestId}});
         status(QStringLiteral("Interrupting the current turn to send it now…"));
+        return true;
+    }
+
+    // Ctrl+Enter while a steer row is selected and its text is untouched: that steer, now.
+    bool sendSelectedSteerNow() {
+        if (m_selectedSteer.isEmpty()) return false;
+        const QString requestId = m_selectedSteer;
+        if (!sendSteerNow(requestId)) return false;
+        leaveQueueSelection();
         return true;
     }
 
@@ -6958,7 +7150,7 @@ private:
         state.wantsRun = event.value(QStringLiteral("mode")).toString() == QStringLiteral("run");
         state.ceiling = relay::input::handoffCeiling(QSettings().value(QStringLiteral("agent/terminal_handoff")).toString());
         state.shellIdle = shellIdleForQueue() && !(m_activeValid && !m_active.agent);
-        state.boxFree = !m_native && m_selected < 0 && m_editor->toPlainText().trimmed().isEmpty();
+        state.boxFree = !m_native && !inQueueSelection() && m_editor->toPlainText().trimmed().isEmpty();
         state.chain = m_handoffChain;
         auto action = relay::input::handoffAction(state);
         ensureLineStart();
@@ -7520,6 +7712,7 @@ private:
     // remembered in prompt history and it must not be treated as a draft.
     void selectQueueEntry(int index) {
         if (index < 0 || index >= m_entries.size()) return;
+        m_selectedSteer.clear();   // before the text changes, so it does not read as editing the steer
         m_selected = index;
         m_editor->setPlainText(m_entries[index].written() ? QString() : m_entries[index].text);
         m_editor->moveCursor(QTextCursor::End);
@@ -7541,6 +7734,7 @@ private:
     // the queue and not to the user.
     void leaveQueueSelection() {
         m_selected = -1;
+        m_selectedSteer.clear();   // before the box empties, so that does not read as editing the steer
         m_editor->clear();
         rebuildQueueStrip(); changed();
         pumpQueue();   // nothing is held any more
@@ -7548,6 +7742,61 @@ private:
 
     quint64 selectedEntryId() const {
         return (m_selected >= 0 && m_selected < m_entries.size()) ? m_entries[m_selected].id : 0;
+    }
+
+    // ----- one list: steers, then queued items ----------------------------------------------------
+    // The keyboard walks one list in delivery order: steers still waiting for the next tool call,
+    // then the queue. A steer being withdrawn is shown greyed but is not a row the keys can land on.
+    // m_selected indexes m_entries and m_selectedSteer names a steer; at most one is set.
+    bool inQueueSelection() const { return m_selected >= 0 || !m_selectedSteer.isEmpty(); }
+    QStringList liveSteers() const {
+        QStringList ids;
+        for (const auto &steer : m_steering) if (!steer.withdraw) ids << steer.requestId;
+        return ids;
+    }
+    int selectedQueueRow() const {
+        const QStringList steers = liveSteers();
+        if (!m_selectedSteer.isEmpty()) return int(steers.indexOf(m_selectedSteer));
+        return (m_selected >= 0 && m_selected < m_entries.size()) ? int(steers.size()) + m_selected : -1;
+    }
+    void selectQueueRow(int row) {
+        const QStringList steers = liveSteers();
+        if (row < 0) return;
+        if (row < steers.size()) selectSteer(steers[row]);
+        else selectQueueEntry(row - int(steers.size()));
+    }
+
+    // Show a steer in the prompt box, like a queued item. It is still a steer while the text is
+    // untouched: the first edit takes it back out of the turn (takeBackEditedSteer), and so does
+    // Enter on it; Esc or arrowing away leaves it waiting.
+    void selectSteer(const QString &requestId) {
+        for (const auto &steer : m_steering) {
+            if (steer.requestId != requestId || steer.withdraw) continue;
+            m_selected = -1;
+            m_selectedSteer = requestId;
+            m_editor->setPlainText(steer.text);
+            m_editor->moveCursor(QTextCursor::End);
+            rebuildQueueStrip(); changed();
+            pumpQueue();   // a selection that left the head of the queue releases it
+            return;
+        }
+    }
+    QString selectedSteerText() const {
+        for (const auto &steer : m_steering) if (steer.requestId == m_selectedSteer) return steer.text;
+        return {};
+    }
+    // The prompt box changed while a steer was selected: that is an edit, so the steer is taken
+    // back for it (owner, 2026-09-18: "editing a steer takes it back"). The box's text becomes the
+    // user's draft, with its @file attachments in it as typed; Enter queues it as a new prompt.
+    void takeBackEditedSteer() {
+        if (m_selectedSteer.isEmpty() || m_editor->toPlainText() == selectedSteerText()) return;
+        takeBackSelectedSteer();
+    }
+    void takeBackSelectedSteer() {
+        const QString requestId = m_selectedSteer;
+        if (requestId.isEmpty()) return;
+        m_selectedSteer.clear();
+        withdrawSteer(requestId, SteerEntry::Edit);
     }
     // The queue changed under a selection (an item started running, one was removed, rows were
     // dragged): keep the selection on the same item by id, and if that item has gone, let the
@@ -7585,13 +7834,44 @@ private:
         if (!m_queueList) return;
         saveQueueEdit();   // m_entries is still in the old order, so the index is still the right one
         const quint64 selected = selectedEntryId();
+        // Steers keep their place at the top whatever the drop said. A queued row dropped above or
+        // among them goes as far up as a queued row can: the head of the queue, and for an agent
+        // prompt while the agent works, one step further, which is being a steer — the same as
+        // Ctrl+↑ on the head of the queue (owner, 2026-09-18: a delivery point is not a position).
+        int lastSteerRow = -1;
+        for (int row = 0; row < m_queueList->count(); ++row)
+            if (m_queueList->item(row)->data(QueueRowDelegate::KindRole).toString() == QStringLiteral("steer")) lastSteerRow = row;
         QList<QueueEntry> ordered;
+        quint64 promoted = 0;
         for (int row = 0; row < m_queueList->count(); ++row) {
-            const quint64 id = m_queueList->item(row)->data(Qt::UserRole).toULongLong();
+            const quint64 id = m_queueList->item(row)->data(QueueRowDelegate::EntryIdRole).toULongLong();
+            if (id == 0) continue;
             for (const auto &entry : std::as_const(m_entries)) if (entry.id == id) { ordered.append(entry); break; }
+            if (row < lastSteerRow && !promoted) promoted = id;
         }
-        if (ordered.size() == m_entries.size()) m_entries = ordered;
+        const bool whole = ordered.size() == m_entries.size();   // not mid-drop, with a row in two places
+        bool moved = false;
+        if (whole) {
+            for (int i = 0; i < ordered.size(); ++i) moved = moved || ordered[i].id != m_entries[i].id;
+            if (promoted) {
+                for (int i = 0; i < ordered.size(); ++i) if (ordered[i].id == promoted) { ordered.move(i, 0); break; }
+            }
+            m_entries = ordered;
+        }
         keepSelectionOn(selected);   // a dragged row keeps the highlight, at its new place
+        if (whole && promoted) {
+            if (m_agentBusy && m_entries.first().agent && !m_entries.first().written()) {
+                // Dragged to the top while the agent works: that is Ctrl+↑ on the head of the queue.
+                QTimer::singleShot(0, this, [this, promoted] { steerQueuedEntry(promoted); });
+                hint(QStringLiteral("queue.steer.drag"),
+                     relay::ShortcutHints::nextTime(QStringLiteral("Ctrl+↑"), QStringLiteral("sends it at the next tool call")));
+            } else {
+                status(QStringLiteral("Only an agent prompt, while the agent works, goes above the queue · it is first in the queue"));
+            }
+        } else if (whole && moved) {
+            hint(QStringLiteral("queue.reorder.drag"),
+                 relay::ShortcutHints::nextTime(QStringLiteral("↑ then Ctrl+↑↓"), QStringLiteral("moves a queued row")));
+        }
         QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); pumpQueue(); });
     }
 
@@ -7686,7 +7966,7 @@ private:
         // longer takes control of the terminal (owner, 2026-09-17: Esc only interrupts); the
         // keyboard goes to a program through Ctrl+H or the "Take control" button.
         if (mods == Qt::NoModifier && k == Qt::Key_Escape && !m_agentBusy && m_editor->toPlainText().isEmpty()
-            && m_selected < 0 && !(m_atList && m_atList->isVisible()) && m_configured) {
+            && !inQueueSelection() && !(m_atList && m_atList->isVisible()) && m_configured) {
             if (m_escTimer.isActive()) { m_escTimer.stop(); openRewind(); return true; }
             m_escTimer.setSingleShot(true);
             m_escTimer.setInterval(350);
@@ -7714,23 +7994,28 @@ private:
         }
         // Arrowing through the queue, with the selected item editable in the prompt box. The rules
         // (including when Up and Down belong to a multi-line item's text instead) are in
-        // relay::queuenav so they can be tested without a widget.
+        // relay::queuenav so they can be tested without a widget. The rows are one list in
+        // delivery order: steers waiting for the next tool call, then the queued items.
         {
+            const QStringList steers = liveSteers();
             relay::queuenav::State nav;
-            nav.selected = m_selected;
-            nav.count = int(m_entries.size());
+            nav.selected = selectedQueueRow();
+            nav.steers = int(steers.size());
+            nav.count = nav.steers + int(m_entries.size());
+            nav.headSteerable = m_agentBusy && !m_entries.isEmpty() && m_entries.first().agent && !m_entries.first().written();
             nav.promptEmpty = m_editor->toPlainText().isEmpty();
             nav.cursorLine = m_editor->textCursor().blockNumber();
             nav.lineCount = m_editor->document()->blockCount();
+            const bool onSteer = !m_selectedSteer.isEmpty();
             using Action = relay::queuenav::Action;
             switch (relay::queuenav::decide(nav, k, mods)) {
             case Action::Enter:
-                // In at the item nearest the prompt box, which is the one queued last.
-                selectQueueEntry(int(m_entries.size()) - 1);
+                // In at the top row: what is delivered first, so a waiting steer before the queue.
+                selectQueueRow(0);
                 queueEditHint();
                 return true;
-            case Action::Up:      saveQueueEdit(); selectQueueEntry(m_selected - 1); return true;
-            case Action::Down:    saveQueueEdit(); selectQueueEntry(m_selected + 1); return true;
+            case Action::Up:      saveQueueEdit(); selectQueueRow(nav.selected - 1); return true;
+            case Action::Down:    saveQueueEdit(); selectQueueRow(nav.selected + 1); return true;
             case Action::LeaveToHistory:
                 // Straight on past the front of the queue into earlier prompts: the editor's own
                 // history takes the key, so the box must be empty before it does.
@@ -7742,6 +8027,11 @@ private:
                 leaveQueueSelection();
                 return true;
             case Action::Save: {
+                if (onSteer) {
+                    // Enter on a steer is "edit it": out of the turn and into the prompt box.
+                    takeBackSelectedSteer();
+                    return true;
+                }
                 const bool held = queueHeldBySelection();
                 const bool edited = saveQueueEdit();
                 leaveQueueSelection();
@@ -7754,12 +8044,15 @@ private:
                 leaveQueueSelection();          // the edit is dropped: nothing was written back
                 return true;
             case Action::Remove: {
-                const quint64 id = m_entries[m_selected].id;
-                const int at = m_selected;
+                const QString rowId = onSteer ? QStringLiteral("steer:") + m_selectedSteer
+                                              : QStringLiteral("entry:%1").arg(m_entries[m_selected].id);
+                const int at = nav.selected;
                 leaveQueueSelection();
-                removeEntry(id);
-                // Stay in the queue on the item that moved up into the gap, so several can go in a row.
-                if (!m_entries.isEmpty()) selectQueueEntry(std::min(at, int(m_entries.size()) - 1));
+                removeRow(rowId);
+                // Stay in the list on the row that moved up into the gap, so several can go in a
+                // row. A steer being withdrawn is no longer a row, so the gap is there at once.
+                const int rows = int(liveSteers().size() + m_entries.size());
+                if (rows > 0) selectQueueRow(std::min(at, rows - 1));
                 return true;
             }
             case Action::MoveUp:
@@ -7770,8 +8063,33 @@ private:
                 selectQueueEntry(to);
                 return true;
             }
+            case Action::Steer: {
+                // Ctrl+Up on the head of the queue: one further up is the running turn itself.
+                saveQueueEdit();
+                const QString requestId = steerQueuedEntry(m_entries[m_selected].id);
+                if (!requestId.isEmpty()) selectSteer(requestId);   // the highlight follows it
+                return true;
+            }
+            case Action::Unsteer: {
+                // Ctrl+Down on a steer: back out of the turn, to the head of the queue once the
+                // worker confirms it had not taken it yet.
+                const QString requestId = m_selectedSteer;
+                leaveQueueSelection();
+                withdrawSteer(requestId, SteerEntry::ToQueue);
+                return true;
+            }
             case Action::None:
                 break;
+            }
+            // The selected steer was just delivered and the list emptied under the user: this Esc
+            // was meant for the selection, not for the running turn.
+            if (nav.selected < 0 && mods == Qt::NoModifier && k == Qt::Key_Escape && m_selectionDroppedAt.isValid()) {
+                const bool recent = m_selectionDroppedAt.elapsed() < 2000;
+                m_selectionDroppedAt.invalidate();
+                if (recent) {
+                    status(QStringLiteral("The agent already had it at its tool call · Esc again stops the turn"));
+                    return true;
+                }
             }
         }
         // --- subagents UI: Down on the last line (history at the draft) enters the running-agents list.
@@ -7803,6 +8121,7 @@ private:
     }
 
     void onComposerEdited() {
+        takeBackEditedSteer();   // typing over a selected steer takes it back out of the turn
         // A handed-over command the user wiped out is gone: what they type next is their own, and
         // so is the mode. The one-shot terminal mode came with the command and leaves with it.
         if ((m_handoffPrefill || m_handoffPrefix) && m_pendingSubmit.isEmpty() && m_editor->toPlainText().trimmed().isEmpty()) {
@@ -8763,8 +9082,18 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         return requestId;
     }
 
-    // The queue strip under the terminal: what is running, then queued terminal commands ($,
-    // amber) and agent prompts (✦, cyan) in order. Rows drag to reorder; × removes. It is a row of
+    // What the "▸ running" line of the queue strip says: the queue item or agent turn in progress.
+    QString runningLabel() const {
+        if (m_activeValid) return (m_active.agent ? QStringLiteral("✦ ") : QStringLiteral("$ ")) + m_active.label();
+        if (m_agentBusy) return QStringLiteral("✦ ") + m_itemPrompts.value(m_currentItem).text;
+        if (!m_promptReported && !m_pendingCommand.isEmpty()) return QStringLiteral("$ ") + m_pendingCommand;
+        return {};
+    }
+
+    // The queue strip under the terminal: what is running, then one list in delivery order —
+    // steers waiting for the running turn's next tool call (↪, the agent's colour), then queued
+    // terminal commands ($, amber) and agent prompts (✦, cyan). Every row is selected, edited and
+    // removed the same way (↑, Shift+Delete, ×); queued rows drag to reorder. It is a row of
     // the pane's column rather than an overlay, so showing it moves the terminal up instead of
     // covering its last lines (owner report, 2026-09-18), and the show runs through
     // keepPaneSizes() because the row's height is part of this pane's minimum height (#G152).
@@ -8793,10 +9122,24 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         if (!m_pauseReason.isEmpty()) why = why.isEmpty() ? m_pauseReason : why + QStringLiteral("\nAlso paused: ") + m_pauseReason;
         title->setToolTip(why);
         header->addWidget(title, 1);
-        auto *hint = new QLabel(m_selected >= 0
-                                    ? QStringLiteral("↑↓ item · Ctrl+↑↓ move · Enter save · Esc cancel · Shift+Del remove")
-                                    : QStringLiteral("↑ edit an item · Ctrl+↑↓ move · Shift+Del remove"));
+        const bool headSteerable = m_selected == 0 && m_agentBusy && !m_entries.isEmpty() && m_entries.first().agent
+                                   && !m_entries.first().written();
+        auto *hint = new QLabel(!m_selectedSteer.isEmpty()
+                                    ? QStringLiteral("Enter or type to edit · Ctrl+↓ back to the queue · Ctrl+Enter now · Shift+Del withdraw · Esc")
+                                : headSteerable
+                                    ? QStringLiteral("Ctrl+↑ next tool call · Ctrl+↓ move · Enter save · Esc cancel · Shift+Del remove")
+                                : m_selected >= 0
+                                    ? QStringLiteral("↑↓ row · Ctrl+↑↓ move · Enter save · Esc cancel · Shift+Del remove")
+                                    : QStringLiteral("↑ select a row · Ctrl+↑↓ move · Shift+Del remove"));
         hint->setObjectName(QStringLiteral("queueHint"));
+        hint->setToolTip(QStringLiteral(
+            "Rows run top to bottom. ↪ rows reach the agent inside this turn, at its next tool call; the rest run after it.\n"
+            "↑ on the empty prompt box selects the top row; ↑↓ move between rows.\n"
+            "A queued row is edited in the prompt box: Enter saves, Esc cancels. Ctrl+↑↓ reorders it;\n"
+            "Ctrl+↑ on the first queued prompt while the agent works sends it at the next tool call.\n"
+            "A ↪ row: Enter or typing takes it back into the prompt box to edit, Ctrl+↓ moves it back to\n"
+            "the queue, Ctrl+Enter interrupts the turn and sends it now.\n"
+            "Shift+Delete or × removes a queued row and withdraws a ↪ row the agent has not taken yet."));
         header->addWidget(hint);
         if (m_entriesPaused && !held) {
             auto *resume = new QToolButton; resume->setText(QStringLiteral("Resume")); resume->setFocusPolicy(Qt::NoFocus);
@@ -8809,32 +9152,11 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             header->addWidget(clear);
         }
         layout->addLayout(header);
-        QString running;
-        if (m_activeValid) running = (m_active.agent ? QStringLiteral("✦ ") : QStringLiteral("$ ")) + m_active.label();
-        else if (m_agentBusy) running = QStringLiteral("✦ ") + m_itemPrompts.value(m_currentItem).text;
-        else if (!m_promptReported && !m_pendingCommand.isEmpty()) running = QStringLiteral("$ ") + m_pendingCommand;
+        const QString running = runningLabel();
         if (!running.trimmed().isEmpty()) {
             auto *label = new QLabel(QStringLiteral("▸ running  ") + fontMetrics().elidedText(running.simplified(), Qt::ElideRight, std::max(160, width() - 180)));
             label->setObjectName(QStringLiteral("queueRunning"));
             layout->addWidget(label);
-        }
-        for (const auto &steer : std::as_const(m_steering)) {
-            auto *row = new QHBoxLayout;
-            auto *label = new QLabel(QStringLiteral("↪ next tool call  ✦ ") + fontMetrics().elidedText(steer.text.simplified(), Qt::ElideRight, std::max(160, width() - 250)));
-            label->setObjectName(QStringLiteral("queueSteer"));
-            label->setToolTip(QStringLiteral("Delivered inside the running turn at the agent's next tool call"
-                                            " · Enter on the empty prompt box interrupts the turn and sends it now"
-                                            " · × withdraws it while it is still waiting"));
-            label->setEnabled(!steer.withdraw);
-            row->addWidget(label, 1);
-            auto *remove = new QToolButton; remove->setText(QStringLiteral("×")); remove->setFocusPolicy(Qt::NoFocus);
-            remove->setAutoRaise(true);
-            remove->setToolTip(QStringLiteral("Withdraw · the agent will not see this message"));
-            remove->setEnabled(!steer.withdraw);
-            const QString requestId = steer.requestId;
-            connect(remove, &QToolButton::clicked, this, [this, requestId] { withdrawSteer(requestId); });
-            row->addWidget(remove);
-            layout->addLayout(row);
         }
         if (!m_queueList) {
             m_queueList = new QListWidget(m_queueStrip);
@@ -8851,19 +9173,44 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         }
         m_fillingQueueList = true;
         m_queueList->clear();
-        for (const auto &entry : std::as_const(m_entries)) {
+        using Row = QueueRowDelegate;
+        QListWidgetItem *current = nullptr;
+        // Steers first: they reach the agent before anything queued. Not draggable, because "the
+        // next tool call" is not a place among the others; Ctrl+↓ is how one goes back.
+        for (const auto &steer : std::as_const(m_steering)) {
+            auto *item = new QListWidgetItem(steer.text, m_queueList);
+            item->setData(Row::EntryIdRole, QVariant::fromValue<qulonglong>(0));
+            item->setData(Row::AgentRole, true);
+            item->setData(Row::KindRole, QStringLiteral("steer"));
+            item->setData(Row::RowIdRole, QStringLiteral("steer:") + steer.requestId);
+            item->setData(Row::PendingRole, steer.withdraw);
+            item->setToolTip(steer.withdraw
+                ? QStringLiteral("Withdrawing · unless the agent reaches its next tool call first")
+                : QStringLiteral("Delivered inside the running turn at the agent's next tool call\n%1\n\n"
+                                 "Enter or typing takes it back to edit · Ctrl+↓ back to the queue · Ctrl+Enter sends it now"
+                                 " · Shift+Delete or × withdraws it").arg(steer.text));
+            item->setFlags(steer.withdraw ? Qt::NoItemFlags : Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            if (steer.requestId == m_selectedSteer) current = item;
+        }
+        for (int i = 0; i < m_entries.size(); ++i) {
+            const QueueEntry &entry = m_entries[i];
             auto *item = new QListWidgetItem(entry.label(), m_queueList);
-            item->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(entry.id));
-            item->setData(Qt::UserRole + 1, entry.agent);
+            item->setData(Row::EntryIdRole, QVariant::fromValue<qulonglong>(entry.id));
+            item->setData(Row::AgentRole, entry.agent);
+            item->setData(Row::KindRole, entry.agent ? QStringLiteral("agent") : QStringLiteral("command"));
+            item->setData(Row::RowIdRole, QStringLiteral("entry:%1").arg(entry.id));
             item->setToolTip(entry.text);
             item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
+            if (i == m_selected) current = item;
         }
         m_fillingQueueList = false;
-        if (m_selected >= 0 && m_selected < m_queueList->count()) m_queueList->setCurrentRow(m_selected);
+        if (current) m_queueList->setCurrentItem(current);
         else { m_queueList->clearSelection(); m_queueList->setCurrentRow(-1); }
         const int rowHeight = std::max(20, fontMetrics().height() + 8);
-        m_queueList->setFixedHeight(std::min<int>(6, std::max<int>(1, m_entries.size())) * rowHeight + 4);
-        m_queueList->setVisible(!m_entries.isEmpty());
+        const int rows = int(m_steering.size() + m_entries.size());
+        m_queueList->setFixedHeight(std::min<int>(6, std::max<int>(1, rows)) * rowHeight + 4);
+        m_queueList->setVisible(rows > 0);
+        if (current) m_queueList->scrollToItem(current);
         layout->addWidget(m_queueList);
         placeQueueStrip();
         QTimer::singleShot(0, this, [this] { placeQueueStrip(); });
@@ -9594,6 +9941,8 @@ private:
     QString m_activeRequest, m_pauseReason;
     quint64 m_entrySerial = 0;
     int m_selected = -1;
+    QString m_selectedSteer;   // the steer row selected in the queue list (its request id); see selectSteer
+    QElapsedTimer m_selectionDroppedAt;   // a selected steer left the list and nothing took its place (forgetSteer)
     QListWidget *m_queueList = nullptr, *m_atList = nullptr;
     // Switchboard: the `#K7Q2` picker and the card rows behind it (protocol 17.2, 17.6).
     QListWidget *m_cardList = nullptr;

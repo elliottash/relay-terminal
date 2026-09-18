@@ -455,7 +455,11 @@ while todos are open: … ignore this if it is current"). No event; no extra mod
   has taken it (`steer_delivered`) or given it back (`steer_returned`) it is no longer a steer, and
   `queue_remove` answers the usual `error` "That prompt is not queued". The GUI sends the request with
   `id: "withdraw-<request id>"` so that error goes to the status line, not the transcript; a steer given
-  back after its × was clicked stays withdrawn in the GUI rather than being queued again.
+  back after its × was clicked stays withdrawn in the GUI rather than being queued again. The pane uses the
+  same `queue_remove` for every way out of a steer (#C4M8): × or Shift+Delete on its row drops it; editing it
+  (Enter or typing on the selected row) keeps its text in the prompt box; Ctrl+Down puts it back at the head
+  of the GUI queue when `steer_removed` (or `steer_returned`) arrives. Ctrl+Up on the head queued prompt, or
+  dropping it above the steers, sends the usual `ask {when: "steer", requeue: false}`. No new messages.
 - **Cancel, interrupt and failure** no longer remove the user's prompt, delivered steers or subagent notes from
   the conversation. A half-finished tool-call group is completed with
   `{"error": "Not completed: the turn stopped before this tool call finished. …"}` results, then a note says the

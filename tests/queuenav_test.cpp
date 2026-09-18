@@ -103,7 +103,7 @@ private slots:
         QCOMPARE(key(selected(1), Qt::Key_Down, Qt::ControlModifier), Action::MoveDown);
     }
     void reordering_stops_at_both_ends() {
-        QCOMPARE(key(selected(0), Qt::Key_Up, Qt::ControlModifier), Action::None);
+        QCOMPARE(key(selected(0), Qt::Key_Up, Qt::ControlModifier), Action::None);   // not steerable
         QCOMPARE(key(selected(2), Qt::Key_Down, Qt::ControlModifier), Action::None);
     }
     void shift_delete_removes_the_selected_item() {
@@ -118,6 +118,48 @@ private slots:
     void ordinary_typing_is_never_ours() {
         QCOMPARE(key(selected(1), Qt::Key_A), Action::None);
         QCOMPARE(key(selected(1), Qt::Key_Space), Action::None);
+    }
+
+    // ----- steers: rows at the top, delivered at the next tool call ------------------------
+    // Two steers above three queued items; the running turn is the agent's.
+    static State withSteers(int index, bool headSteerable = true) {
+        State state = selected(index, 5);
+        state.steers = 2;
+        state.headSteerable = headSteerable;
+        return state;
+    }
+    void arrows_walk_through_steers_like_any_row() {
+        QCOMPARE(key(withSteers(1), Qt::Key_Up), Action::Up);
+        QCOMPARE(key(withSteers(1), Qt::Key_Down), Action::Down);
+        QCOMPARE(key(withSteers(0), Qt::Key_Up), Action::LeaveToHistory);
+    }
+    void shift_delete_and_enter_reach_a_steer_too() {
+        QCOMPARE(key(withSteers(0), Qt::Key_Delete, Qt::ShiftModifier), Action::Remove);
+        QCOMPARE(key(withSteers(0), Qt::Key_Return), Action::Save);
+        QCOMPARE(key(withSteers(0), Qt::Key_Escape), Action::Cancel);
+    }
+    void ctrl_down_on_a_steer_sends_it_back_to_the_queue() {
+        QCOMPARE(key(withSteers(0), Qt::Key_Down, Qt::ControlModifier), Action::Unsteer);
+        QCOMPARE(key(withSteers(1), Qt::Key_Down, Qt::ControlModifier), Action::Unsteer);
+    }
+    void ctrl_up_on_a_steer_has_nowhere_to_go() {
+        QCOMPARE(key(withSteers(0), Qt::Key_Up, Qt::ControlModifier), Action::None);
+        QCOMPARE(key(withSteers(1), Qt::Key_Up, Qt::ControlModifier), Action::None);
+    }
+    void ctrl_up_on_the_head_of_the_queue_makes_it_a_steer() {
+        QCOMPARE(key(withSteers(2), Qt::Key_Up, Qt::ControlModifier), Action::Steer);
+        State none = selected(0);
+        none.headSteerable = true;
+        QCOMPARE(key(none, Qt::Key_Up, Qt::ControlModifier), Action::Steer);
+    }
+    // A command, a prompt Relay wrote, or an idle agent: the head has nowhere further up to go.
+    void a_head_that_cannot_steer_stays_put() {
+        QCOMPARE(key(withSteers(2, false), Qt::Key_Up, Qt::ControlModifier), Action::None);
+    }
+    void queued_items_still_reorder_below_the_steers() {
+        QCOMPARE(key(withSteers(3), Qt::Key_Up, Qt::ControlModifier), Action::MoveUp);
+        QCOMPARE(key(withSteers(2), Qt::Key_Down, Qt::ControlModifier), Action::MoveDown);
+        QCOMPARE(key(withSteers(4), Qt::Key_Down, Qt::ControlModifier), Action::None);
     }
 
     // ----- a stale selection ---------------------------------------------------------------

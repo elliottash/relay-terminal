@@ -408,7 +408,8 @@ context chip, while a turn runs. `nextTime(shortcut, what)` builds the
 text from the live Keymap, so rebinding changes the hint and unbound actions get none. Current
 triggers: toolbar and palette activations of actions with shortcuts, pane buttons, the tab "+",
 tab close and ⧉ buttons, clicking into another pane, mouse model/effort/mode pickers, clicking
-the directory line (`@`), the queue ×, `/shell ` and `/agent ` (`!`, `*`), `/help` (→ `?` in an
+the directory line (`@`), the queue × (on a steer row → ↑ then Shift+Delete), dragging a queued row
+(→ ↑ then Ctrl+↑↓; dropped above the steers → Ctrl+↑ sends it at the next tool call), `/shell ` and `/agent ` (`!`, `*`), `/help` (→ `?` in an
 empty prompt box), palette rewinds, pane
 drags, the first `relay://` link, a click on the pane's ⓘ button (→ `/status`), the Tasks chip and `/tasks`, `/requests`, `/todos` (→ `agent.requests`, Ctrl+Shift+K), Continue
 from the link or palette (→ `/continue` or `agent.continue`), wrong-mode submissions (section 5,
@@ -1379,7 +1380,25 @@ bottom of the terminal: running prompt, numbered queued prompts with ×, Clear, 
 "PAUSED · Resume". The palette offers Clear agent queue and Resume agent queue when relevant.
 Full protocol: [QUEUE-INTERRUPT.md](QUEUE-INTERRUPT.md).
 
-**Editing a queued item.** Up on an empty prompt box selects the item queued last and puts its text
+**One list, in delivery order** (2026-09-18, #C4M8). Under "▸ running", `m_queueList` holds every
+row the pane will deliver: first the steers still waiting for the running turn's next tool call
+(`m_steering`, drawn "↪ next tool call ✦" in the agent colour), then the queued prompts and
+commands (`m_entries`). `QueueRowDelegate` draws each by its kind role; each row has a stable id,
+`steer:<request id>` or `entry:<queue id>`. `Pane::queueRows()` returns the rows (id, kind,
+preview, state) in order and `Pane::removeRow(id)` removes a queued row or withdraws a steer, for a
+later remote path. The same keys reach every row: Up on the empty prompt box selects the **top** row,
+Shift+Delete and the row's × remove a queued row and withdraw a steer (`queue_remove`, the row greys
+to "withdrawing…" until `steer_removed`). A steer is shown in the prompt box when selected; Enter or
+the first edit takes it back (withdraw, text stays in the box as the user's draft, Enter queues it
+again), Ctrl+Down moves it back to the head of the queue (withdraw, then prepend on
+`steer_removed`), Ctrl+Enter sends it now. Ctrl+Up on the head queued agent prompt while the agent
+works makes it a steer (`steerQueuedEntry`, the path Enter-Enter uses). Steers do not drag; a
+queued row dropped above them goes to the head of the queue, and an agent prompt dropped there
+while the agent works becomes a steer, as Ctrl+Up would make it. If the turn takes a steer before
+its withdraw arrives, the transcript line stands and the status line says so; a copy put back in the
+prompt box for editing is cleared if untouched and kept if edited.
+
+**Editing a queued item.** Up on an empty prompt box selects the top row and puts its text
 in the prompt box, where it is edited in place; `Pane::selectQueueEntry` / `saveQueueEdit` /
 `leaveQueueSelection` own that, and `src/QueueNav.{h,cpp}` (`relay::queuenav::decide`) holds the key
 rules so they can be tested without a widget — chiefly when Up and Down move between items and when
