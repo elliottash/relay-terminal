@@ -247,7 +247,9 @@ triggers: toolbar and palette activations of actions with shortcuts, pane button
 tab close and ⧉ buttons, clicking into another pane, mouse model/effort/mode pickers, clicking
 the directory line (`@`), the queue ×, `/shell ` and `/agent ` (`!`, `*`), palette rewinds, pane
 drags, the first `relay://` link, the Tasks chip and `/tasks`, `/requests`, `/todos` (→ `agent.requests`, Ctrl+Shift+K), Continue
-from the link or palette (→ `/continue` or `agent.continue`), and rotating idle tips 4 s after a finished agent turn with an
+from the link or palette (→ `/continue` or `agent.continue`), dropping an image on the prompt box (→ the paste
+shortcut) and "Screenshot this pane" from the palette (→ `agent.screenshotPane`, Ctrl+Shift+G),
+and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
 in `WARP.md`); tests in `tests/hints_test.cpp`.
 
@@ -879,6 +881,25 @@ queued. Busy state follows `agent_started`/`agent_finished`. The queue strip flo
 bottom of the terminal: running prompt, numbered queued prompts with ×, Clear, and
 "PAUSED · Resume". The palette offers Clear agent queue and Resume agent queue when relevant.
 Full protocol: [QUEUE-INTERRUPT.md](QUEUE-INTERRUPT.md).
+
+### Image context
+
+`src/Images.{h,cpp}` and protocol section 17 (issue EM1E). Four inputs, one path: pasting or dropping
+a picture into the prompt box writes it to `$XDG_CACHE_HOME/relay/images` and inserts an `@path`
+token, an image file named by a drop or by `@path` is attached where it is, and
+`agent.screenshotPane` (Ctrl+Shift+G, Actions › "Screenshot this pane") grabs the pane as drawn.
+Everything after that is the existing `ask {attachments}` plumbing.
+
+The worker recognises an image by its first bytes, sends it as an OpenAI-compatible `image_url`
+content part with an inlined base64 data URL (never an http URL), and caps it at 3 MiB per image,
+4 images and 6 MiB per turn. A turn whose images the pane's model cannot read runs on the **vision
+model** for that turn only and then goes back, which `vision_route` / `vision_route_ended` say in the
+pane and in the model chip; with no vision model it is refused (`vision_unavailable` plus `error`)
+rather than sent and rejected. The vision model is the `vision` role, chosen in its own row beside
+the Main / Flash / Lite tiers in Settings › Models; its default is the provider's own image model,
+which on GLM is `glm-5.3-flash`. When the turn ends, each image is replaced in the conversation by a
+one-line description and its path, and an image is estimated as a flat `context.IMAGE_TOKENS` so it
+cannot compact its own turn.
 
 ## 12. Keys, keyring and imports
 
