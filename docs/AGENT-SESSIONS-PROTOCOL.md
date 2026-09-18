@@ -567,6 +567,7 @@ exactly as before.
 | `subagent` | subagents that do not name a model | Main tier (the pane's own model) |
 | `switchboard` | Switchboard card threads (stored now, used when the Switchboard lands) | Main tier |
 | `flash` | panes that default to the Flash agent | Flash tier |
+| `local` | panes switched to a model served on this machine (`/local`) | Local tier |
 | `summaries` | compaction summaries and recaps | Flash tier |
 | `suggestions` | next-command and next-prompt suggestions | Flash tier |
 | `chores` | duplicate checks, labels, titles, note scans | Lite tier |
@@ -589,7 +590,7 @@ the pane's own model). Each value is `null`, `{}` or `{"inherit": true}` for "sa
 
 | Field | Type | Meaning |
 |---|---|---|
-| `tier` | `main`/`flash`/`lite` | follow a tier (13.7); exclusive with the endpoint fields below |
+| `tier` | `main`/`flash`/`lite`/`local` | follow a tier (13.7); exclusive with the endpoint fields below |
 | `preset` | string | a built-in preset id (`kimi`, `kimi-code`, `glm`, `glm-coding`, `minimax`, `openrouter`, `openai`, `anthropic`, `gemini`) |
 | `base_url` + `model` | string | a custom endpoint instead of a preset (both required together) |
 | `model` | string | with `preset`: a different model id on that provider |
@@ -887,7 +888,7 @@ Diagnostics › Log detail) and passed to workers as `RELAY_LOG_LEVEL`; workers 
 **`verbose` additionally writes prompt text** (`turn_prompt`) and is the only level that does; it is
 off by default and labelled "Verbose (includes prompt text)" in the palette. Actions › Diagnostics ›
 Open log folder opens the directory, and "Stop a silent model after…" edits `stall_timeout_s`.
-### 13.7 Main / Flash / Lite tiers (v1.4, 2026-09-17)
+### 13.7 Main / Flash / Lite / Local tiers (v1.4, 2026-09-17; Local added v1.5, 2026-09-18)
 
 Eight roles were too many knobs for one screen, so the roles modal shows **three** models — Main, Flash and
 Lite — and every role follows one of them. Source: owner, 2026-09-17 ("lets have main, flash, and lite
@@ -901,12 +902,23 @@ presets … then advanced options, which would then reveal the specific actions"
 | `main` | agent turns, subagents, Switchboard threads | the pane's own model (`configure` / `set_model`) |
 | `flash` | terminal use, fast panes, summaries, suggestions | `TIER_DEFAULTS[<main preset>]["flash"]` |
 | `lite` | chores and the request audit | `TIER_DEFAULTS[<main preset>]["lite"]` |
+| `local` | panes on the Local agent (`/local`), and any role pinned to it | the `tiers.local` override, else the first saved local endpoint |
 
 **Options.** `configure` and `set_agent_options` accept `tiers`, an object keyed by tier name. `main` is
 rejected — it is the pane's own model. Each value is `null` (restore the provider's default) or
 `{preset?, base_url?, model?, extra?, effort?}` with the same meaning as a `roles` entry. `roles.<name>`
-additionally accepts `{"tier": "main"|"flash"|"lite", "effort"?}`, which is exclusive with
+additionally accepts `{"tier": "main"|"flash"|"lite"|"local", "effort"?}`, which is exclusive with
 `preset`/`base_url`/`model`/`extra`; giving both is an error.
+
+**The Local tier** (v1.5, 2026-09-18; owner: "add a `/local` command that switches to your chosen local
+LLM (make that as a 4th category with main, flash, lite, local)") is the one tier that belongs to no
+provider, so it has no row in `TIER_DEFAULTS` and the per-provider table stays three wide
+(`presets.PROVIDER_TIERS`). `tiers.local` accepts **only** a model server on this machine — a saved
+`local:<slug>` endpoint id (section 23), or a plain `http://` loopback `base_url` with its `model` — and a
+hosted preset there is an error. With no override it is the first endpoint in the registry, so one saved
+server just works. A local endpoint needs no key and none is looked up; a server that is simply not
+running is not a fallback case, and the turn fails with the transport's "No model server is answering
+on … start it with …".
 
 **A tier that names only a provider** (`{"preset": "glm-coding"}`, which is what the roles modal writes
 when you pick a provider for a row) runs **that provider's model for that tier**, not its headline model:
@@ -920,7 +932,10 @@ names `model` still wins outright.
 and the Main tier is the pane's own model, so resolution never hard-fails. The step-down is expected, not a
 misconfiguration, so it appears as `note` on the tier and the role (`"No stored key for the Lite model;
 using Flash."`) and **not** in `model_roles.warnings`; `warnings` stays reserved for a role the user pinned
-explicitly whose key is missing.
+explicitly whose key is missing. The Local tier is **not** a step on that ladder — it is a different trade,
+not a smaller model of the same provider — so a Local tier with no endpoint set up falls back to Main
+directly (`presets.tier_fallbacks("local") == ("local", "main")`) with the note
+`"No local model is set up; using Main."`.
 
 **Events.** `configured` and `model_roles` gain `tiers`:
 `{tier: {tier, label, model, preset, base_url, effort, source, using?, note?}}`, where `source` is

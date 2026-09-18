@@ -923,6 +923,7 @@ private:
         else if (id == QStringLiteral("program.delegate")) pane->delegateProgram();
         else if (id == QStringLiteral("input.toggle")) pane->toggleInputMode();
         else if (id == QStringLiteral("agent.flashAgent")) pane->toggleFlashAgent();   // model roles
+        else if (id == QStringLiteral("agent.localAgent")) pane->toggleLocalAgent();   // /local
         else if (id == QStringLiteral("agent.planToggle")) pane->togglePlanMode();
         else if (id == QStringLiteral("agent.effortUp")) pane->effortStep(1);
         else if (id == QStringLiteral("agent.effortDown")) pane->effortStep(-1);
@@ -1739,6 +1740,16 @@ private:
                                 (flash ? QStringLiteral("On · ") : QStringLiteral("Off · "))
                                     + (flashModel.isEmpty() ? QStringLiteral("the Flash model for this pane; the conversation is kept") : flashModel),
                                 QStringLiteral("agent.flashAgent"), flash);
+        }
+        if (pane && (pane->hasLocalEndpoint() || pane->agentRole() == QStringLiteral("local"))) {
+            // The Local agent (card #JH22), listed only when this machine serves a model. /local
+            // does the same thing from the prompt box.
+            const bool local = pane->agentRole() == QStringLiteral("local");
+            const QString localModel = pane->roleModel(QStringLiteral("local"));
+            items << actionItem(agent, QStringLiteral("Local agent for this pane"),
+                                (local ? QStringLiteral("On · ") : QStringLiteral("Off · "))
+                                    + (localModel.isEmpty() ? QStringLiteral("a model served on this machine; the conversation is kept · /local") : localModel),
+                                QStringLiteral("agent.localAgent"), local);
         }
         const QString mode = pane ? pane->mode() : QStringLiteral("auto");
         const QString modeName = mode == QStringLiteral("shell") ? QStringLiteral("Terminal") : mode == QStringLiteral("agent") ? QStringLiteral("Agent") : QStringLiteral("Auto");

@@ -514,9 +514,9 @@ public:
     // Mirrors relay_core.roles.ROLES minus "main" (the pane's own model).
     static QStringList roleIds() {
         return {QStringLiteral("terminal_use"), QStringLiteral("subagent"), QStringLiteral("switchboard"),
-                QStringLiteral("flash"), QStringLiteral("summaries"), QStringLiteral("suggestions"),
-                QStringLiteral("chores"), QStringLiteral("audit"), QStringLiteral("vision"),
-                QStringLiteral("route_assist")};
+                QStringLiteral("flash"), QStringLiteral("local"), QStringLiteral("summaries"),
+                QStringLiteral("suggestions"), QStringLiteral("chores"), QStringLiteral("audit"),
+                QStringLiteral("vision"), QStringLiteral("route_assist")};
     }
     // The pane-agent role was called "fast" until 2026-09-18 (see backend/relay_core/roles.py:
     // DEPRECATED_ROLES). Saved layouts and settings written before then still say "fast"; every
@@ -531,6 +531,7 @@ public:
             {QStringLiteral("subagent"), QStringLiteral("Subagent")},
             {QStringLiteral("switchboard"), QStringLiteral("Switchboard agent")},
             {QStringLiteral("flash"), QStringLiteral("Flash agent")},
+            {QStringLiteral("local"), QStringLiteral("Local agent")},
             {QStringLiteral("summaries"), QStringLiteral("Summaries")},
             {QStringLiteral("suggestions"), QStringLiteral("Suggestions")},
             {QStringLiteral("chores"), QStringLiteral("Chores")},
@@ -628,6 +629,25 @@ public:
     void initAgentRole(const QString &role) { if (!m_configured) m_agentRole = role; }
     void toggleFlashAgent() {
         setAgentRole(m_agentRole == QStringLiteral("flash") ? QStringLiteral("main") : QStringLiteral("flash"));
+    }
+    // What /local and the Local row say when this machine serves nothing: both ways to fix it.
+    static QString noLocalModelMessage() {
+        return QStringLiteral("No local model is set up. Settings › Local models, or "
+                              "scripts/relay-local.py add --detect.");
+    }
+    // Whether this machine serves a model at all: a `presets` row with `local: true` (card #24XJ).
+    // The Local agent is offered only when there is one, so /local and the chip's Local row never
+    // switch a pane onto a tier that would silently resolve back to Main.
+    bool hasLocalEndpoint() const {
+        for (const auto &item : m_presets)
+            if (item.toObject().value(QStringLiteral("local")).toBool()) return true;
+        return false;
+    }
+    // The Local agent, the same switch as the Flash one (owner, 2026-09-18: "add a /local command
+    // that switches to your chosen local LLM"). No default shortcut: /local is the fast path.
+    void toggleLocalAgent() {
+        if (m_agentRole != QStringLiteral("local") && !hasLocalEndpoint()) { status(noLocalModelMessage()); return; }
+        setAgentRole(m_agentRole == QStringLiteral("local") ? QStringLiteral("main") : QStringLiteral("local"));
     }
     // Live update after the roles modal changed something (applies to side calls and new subagents
     // at once). Both tables go together so the worker never resolves half a change.
@@ -1915,10 +1935,17 @@ private:
                 return;
             }
             if (data.startsWith(QStringLiteral("role:"))) {
-                chooseAgentRole(data.mid(5)); focusInput();
-                hint(QStringLiteral("model.role.mouse"),
-                     relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.flashAgent")),
-                                                    QStringLiteral("the Main and Flash agents")));
+                const QString role = data.mid(5);
+                chooseAgentRole(role); focusInput();
+                // The Local agent has no shortcut on purpose (it takes no key), so its hint names
+                // the fast path it does have: /local in the prompt box. WARP.md, "Shortcut hints".
+                if (role == QStringLiteral("local"))
+                    hint(QStringLiteral("model.role.local.mouse"),
+                         QStringLiteral("Tip: /local runs this pane on the local model, /main goes back"));
+                else
+                    hint(QStringLiteral("model.role.mouse"),
+                         relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.flashAgent")),
+                                                        QStringLiteral("the Main and Flash agents")));
                 return;
             }
             selectModel(data); focusInput();
@@ -4550,6 +4577,7 @@ private:
             {QStringLiteral("model"), QStringLiteral("[name]"), QStringLiteral("Switch model, keeping the conversation")},
             {QStringLiteral("main"), QString(), QStringLiteral("Run this pane on the Main model")},
             {QStringLiteral("flash"), QString(), QStringLiteral("Run this pane on the Flash model (same as Alt+F)")},
+            {QStringLiteral("local"), QString(), QStringLiteral("Run this pane on a model served on this machine")},
             {QStringLiteral("glm"), QString(), QStringLiteral("Switch to the GLM Coding Plan")},
             {QStringLiteral("kimi"), QString(), QStringLiteral("Switch to the Kimi Coding Plan")},
             {QStringLiteral("effort"), QStringLiteral("[low|medium|high|max]"), QStringLiteral("Set reasoning effort")},
@@ -4823,9 +4851,11 @@ private:
             const auto result = relay::agentui::pick(this, QStringLiteral("Model"), QStringLiteral("Switch this pane's model. The conversation is kept."),
                                                      {QStringLiteral("Model"), QString()}, rows, {{QStringLiteral("use"), QStringLiteral("Use"), true}});
             if (result.row >= 0) selectModel(m_stored.at(result.row).first);
-        } else if (name == QStringLiteral("main") || name == QStringLiteral("flash")) {
+        } else if (name == QStringLiteral("main") || name == QStringLiteral("flash")
+                   || name == QStringLiteral("local")) {
             // The pane's own agent, not the tier table: /flash runs this conversation on the Flash
             // model and /main puts it back, both keeping the conversation (the same switch as Alt+F).
+            // /local is the same switch onto a model served on this machine (owner, 2026-09-18).
             // Saying so even when the pane is already there means the command always reports where
             // it ended up, rather than looking like it did nothing.
             if (m_agentRole == name) {
@@ -4833,6 +4863,9 @@ private:
                 status(QStringLiteral("Already on the %1%2.").arg(roleLabel(name), model.isEmpty() ? QString() : QStringLiteral(" · ") + model));
                 return;
             }
+            // Nothing served here: say so and stay put, rather than switching to a role that would
+            // resolve straight back to the main model.
+            if (name == QStringLiteral("local") && !hasLocalEndpoint()) { status(noLocalModelMessage()); return; }
             setAgentRole(name);
         } else if (name == QStringLiteral("glm") || name == QStringLiteral("kimi")) {
             // One word for the two providers the owner actually pays for. The Coding Plan preset is
@@ -7033,6 +7066,9 @@ private:
         // main agent.
         m_modelBox->insertSeparator(m_modelBox->count());
         QStringList paneRoles{QStringLiteral("main"), QStringLiteral("flash")};
+        // The Local agent only when this machine serves something (card #JH22): a row that always
+        // resolved back to Main would be a promise the pane cannot keep.
+        if (hasLocalEndpoint()) paneRoles << QStringLiteral("local");
         if (!paneRoles.contains(m_agentRole)) paneRoles << m_agentRole;   // a role a session restored
         for (const QString &role : std::as_const(paneRoles)) {
             // A pane on another role reads as that role, not as its stored preset: the collapsed

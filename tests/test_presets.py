@@ -100,9 +100,11 @@ class PresetTableTests(unittest.TestCase):
 
 class TierTableTests(unittest.TestCase):
     def test_every_preset_has_all_three_tiers_pointing_at_real_presets(self):
+        # PROVIDER_TIERS, not TIERS: "local" is a fourth tier that belongs to no provider and is
+        # resolved from the local-endpoint registry, so it has no row here (2026-09-18).
         self.assertEqual(sorted(P.TIER_DEFAULTS), sorted(P.PRESETS))
         for provider, table in P.TIER_DEFAULTS.items():
-            self.assertEqual(sorted(table), sorted(P.TIERS), provider)
+            self.assertEqual(sorted(table), sorted(P.PROVIDER_TIERS), provider)
             for tier, (preset_id, model, extra) in table.items():
                 self.assertIn(preset_id, P.PRESETS, f"{provider}.{tier}")
                 self.assertTrue(model.strip(), f"{provider}.{tier}")

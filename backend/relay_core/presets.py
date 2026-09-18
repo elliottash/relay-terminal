@@ -174,11 +174,15 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
 # Three models per provider instead of eight roles. Each entry is (preset id, model, extra); a tier may
 # point at another provider, in which case a missing key falls back one tier towards Main (see
 # roles.RoleResolver._tier). Tier ids are also used by the GUI's roles modal.
-TIERS = ("main", "flash", "lite")
-TIER_LABELS = {"main": "Main", "flash": "Flash", "lite": "Lite"}
+# "local" is a fourth tier and is NOT one of these three: it belongs to no provider, so it has no
+# row in TIER_DEFAULTS. It resolves from the local-endpoint registry instead (roles._tier_entry).
+PROVIDER_TIERS = ("main", "flash", "lite")
+TIERS = ("main", "flash", "lite", "local")
+TIER_LABELS = {"main": "Main", "flash": "Flash", "lite": "Lite", "local": "Local"}
 TIER_HINTS = {"main": "the pane's agent and subagents",
               "flash": "terminal use and quick turns",
-              "lite": "titles, labels, duplicate checks"}
+              "lite": "titles, labels, duplicate checks",
+              "local": "a model served on this machine. No key, nothing leaves it"}
 
 # The cross-provider Lite default: Gemini 3.8 Flash through OpenRouter (slug verified against
 # https://openrouter.ai/api/v1/models on 2026-09-17).
@@ -223,7 +227,7 @@ RECOMMENDED = (("glm-coding", "openrouter"), ("kimi-code", "openrouter"))
 
 def validate_tier(tier) -> str:
     if tier not in TIERS:
-        raise ValueError("tier must be one of main, flash, lite.")
+        raise ValueError("tier must be one of main, flash, lite, local.")
     return tier
 
 
@@ -252,8 +256,15 @@ def provider_tier_model(preset_id: str, tier: str) -> tuple[str, dict]:
 
 
 def tier_fallbacks(tier: str) -> tuple[str, ...]:
-    """Tiers to try, in order, when a tier's provider has no stored key: towards Main, then Main."""
-    order = TIERS[:TIERS.index(validate_tier(tier)) + 1]
+    """Tiers to try, in order, when a tier's provider has no stored key: towards Main, then Main.
+
+    Local is not a step on that ladder — it is a different machine's worth of trade-off, not a
+    smaller model of the same provider — so a Local tier with nothing set up goes straight to Main
+    rather than through Lite and Flash.
+    """
+    if validate_tier(tier) == "local":
+        return ("local", "main")
+    order = PROVIDER_TIERS[:PROVIDER_TIERS.index(tier) + 1]
     return tuple(reversed(order))
 
 

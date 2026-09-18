@@ -77,7 +77,8 @@ QJsonObject tierSpec(const QString &id, const QString &label) {
 QJsonObject catalog() {
     return {{QStringLiteral("tiers"), QJsonArray{tierSpec(QStringLiteral("main"), QStringLiteral("Main")),
                                                  tierSpec(QStringLiteral("flash"), QStringLiteral("Flash")),
-                                                 tierSpec(QStringLiteral("lite"), QStringLiteral("Lite"))}},
+                                                 tierSpec(QStringLiteral("lite"), QStringLiteral("Lite")),
+                                                 tierSpec(QStringLiteral("local"), QStringLiteral("Local"))}},
             {QStringLiteral("recommended"), QJsonArray{QJsonArray{QStringLiteral("glm-coding"),
                                                                   QStringLiteral("kimi")}}}};
 }
@@ -99,6 +100,15 @@ QList<QComboBox *> tierProviderBoxes(const RolesDialog &dialog) {
         if (box->count() > 0 && box->itemText(0) == QLatin1String("Default provider")) out << box;
     }
     return out;
+}
+
+// The Local tier's own combo (card #JH22): it lists saved local endpoints, not providers, so it
+// carries its own accessible name and never appears among the provider boxes above.
+QComboBox *localTierBox(const RolesDialog &dialog) {
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    for (QComboBox *box : dialog.findChildren<QComboBox *>())
+        if (box->accessibleName() == QLatin1String("Local model")) return box;
+    return nullptr;
 }
 
 }  // namespace
@@ -228,6 +238,66 @@ private Q_SLOTS:
         QCOMPARE(QSettings().value(RolesDialog::tierSetting(QStringLiteral("flash"),
                                                             QStringLiteral("preset"))).toString(),
                  QStringLiteral("local:bonsai"));
+    }
+
+    // The fourth tier (card #JH22). It belongs to no provider, so its row offers the saved local
+    // endpoints and nothing else — no hosted provider, no model box, no effort box.
+    void theLocalTierRowListsOnlyLocalEndpointsAndStoresTheOneChosen() {
+        RolesDialog dialog;
+        dialog.setPresets(presetsWithLocal({QStringLiteral("kimi"), QStringLiteral("glm-coding")}),
+                          catalog(), {});
+        dialog.setProvider(QStringLiteral("kimi"));
+        QComboBox *local = localTierBox(dialog);
+        QVERIFY(local);
+        QCOMPARE(itemsOf(local), QStringList({QStringLiteral("Bonsai 2 27B")}));
+        QVERIFY(local->isEnabled());
+        // The hosted providers the other rows offer are not choices here.
+        QCOMPARE(local->findData(QStringLiteral("kimi")), -1);
+        QCOMPARE(local->findData(QStringLiteral("glm-coding")), -1);
+        local->setCurrentIndex(0);
+        Q_EMIT local->activated(0);
+        QCOMPARE(QSettings().value(RolesDialog::tierSetting(QStringLiteral("local"),
+                                                            QStringLiteral("preset"))).toString(),
+                 QStringLiteral("local:bonsai"));
+        // And the Local row is not one of the provider rows: those are still Flash and Lite only.
+        QCOMPARE(tierProviderBoxes(dialog).size(), 2);
+    }
+
+    void theLocalTierRowIsDisabledWhenThisMachineServesNothing() {
+        RolesDialog dialog;
+        dialog.setPresets(presets({QStringLiteral("kimi")}), catalog(), {});
+        dialog.setProvider(QStringLiteral("kimi"));
+        QComboBox *local = localTierBox(dialog);
+        QVERIFY(local);
+        QCOMPARE(itemsOf(local), QStringList({QStringLiteral("No local model is set up.")}));
+        QVERIFY(!local->isEnabled());
+        QVERIFY(!QSettings().contains(RolesDialog::tierSetting(QStringLiteral("local"),
+                                                               QStringLiteral("preset"))));
+    }
+
+    // Every job in Advanced can follow the Local tier too, by the same list the tier rows use.
+    void anAdvancedRowOffersTheLocalTier() {
+        const QJsonArray actions{QJsonObject{{QStringLiteral("role"), QStringLiteral("summaries")},
+                                             {QStringLiteral("label"), QStringLiteral("Summaries")},
+                                             {QStringLiteral("hint"), QStringLiteral("condensing")},
+                                             {QStringLiteral("tier"), QStringLiteral("flash")},
+                                             {QStringLiteral("settable"), true}}};
+        QSettings().setValue(QStringLiteral("roles/advanced_open"), true);
+        RolesDialog dialog;
+        dialog.setPresets(presetsWithLocal({QStringLiteral("kimi")}), catalog(), actions);
+        dialog.setProvider(QStringLiteral("kimi"));
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QComboBox *choice = nullptr;
+        for (QComboBox *box : dialog.findChildren<QComboBox *>())
+            if (box->accessibleName() == QLatin1String("Summaries")) choice = box;
+        QVERIFY(choice);
+        const int local = choice->findData(QStringLiteral("local"));
+        QVERIFY(local > 0);
+        choice->setCurrentIndex(local);
+        Q_EMIT choice->activated(local);
+        QCOMPARE(QSettings().value(RolesDialog::roleSetting(QStringLiteral("summaries"),
+                                                            QStringLiteral("tier"))).toString(),
+                 QStringLiteral("local"));
     }
 
     // …but it is not an API key to hold, so it stays out of the keys modal entirely: that dialog

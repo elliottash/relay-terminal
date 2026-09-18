@@ -280,6 +280,9 @@ private:
         add("app.settings", "window", "Options: what persists, a tab per section (again to close it)",
             {QStringLiteral("Ctrl+Shift+O"), QStringLiteral("Ctrl+,")});
         add("agent.flashAgent", "agent", "Switch this pane between the Main agent and the Flash agent", {QStringLiteral("Alt+F")});   // model roles
+        // No default key: /local in the prompt box is the fast path, and Alt+L is not worth
+        // claiming for a switch most panes never make (card #JH22).
+        add("agent.localAgent", "agent", "Switch this pane between the Main agent and the Local agent (a model served on this machine)", {});
         add("input.modeAuto", "agent", "Input mode: auto", {});
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
         add("input.modeAgent", "agent", "Input mode: agent", {});

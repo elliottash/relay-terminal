@@ -36,13 +36,15 @@ def _preset(preset_id):
 # built yet (owner decision 2026-09-17); "route_assist" keeps its own fast default.
 # "summaries", "suggestions" and "audit" were split out of "flash"/"chores" on 2026-09-17 so the roles
 # modal's Advanced list can name one action per row; their defaults resolve exactly as before.
-ROLES = ("main", "terminal_use", "subagent", "switchboard", "flash", "summaries", "suggestions",
-         "chores", "audit", "vision", "route_assist")
+# "local" (2026-09-18) is the pane role /local switches to, the way "flash" is the one /flash
+# switches to: a role a pane runs, not a job some side call does.
+ROLES = ("main", "terminal_use", "subagent", "switchboard", "flash", "local", "summaries",
+         "suggestions", "chores", "audit", "vision", "route_assist")
 SETTABLE = tuple(r for r in ROLES if r != "main")
 LABELS = {"main": "Main agent", "terminal_use": "Terminal-use agent", "subagent": "Subagent",
-          "switchboard": "Switchboard agent", "flash": "Flash agent", "summaries": "Summaries",
-          "suggestions": "Suggestions", "chores": "Chores", "audit": "Request audit",
-          "vision": "Vision", "route_assist": "Route assist"}
+          "switchboard": "Switchboard agent", "flash": "Flash agent", "local": "Local agent",
+          "summaries": "Summaries", "suggestions": "Suggestions", "chores": "Chores",
+          "audit": "Request audit", "vision": "Vision", "route_assist": "Route assist"}
 
 # The pane-agent role was called "fast" until 2026-09-18. It is renamed to "flash" so the one word
 # names the tier, the role and the /flash command, and so nothing in Relay says "fast" — in Codex and
@@ -63,6 +65,7 @@ ACTIONS: tuple[tuple[str, str, str], ...] = (
     ("subagent", "Subagents", "agents the main agent starts"),
     ("terminal_use", "Driving programs in the terminal", "answering prompts, fixing failed commands"),
     ("flash", "New panes (Flash agent)", "panes that open on the Flash agent"),
+    ("local", "Panes on the Local agent (/local)", "a model served on this machine; no key, nothing leaves it"),
     ("suggestions", "Next-command and next-prompt suggestions",
      "sends recent command output, so it stays on your own provider"),
     ("summaries", "Summaries, compaction and recaps", "condensing the conversation"),
@@ -82,7 +85,7 @@ MAX_URL = 400
 ROLE_TIERS: dict[str, str | None] = {
     "main": "main", "subagent": "main", "switchboard": "main",
     "terminal_use": "flash", "flash": "flash", "summaries": "flash", "suggestions": "flash",
-    "chores": "lite", "audit": "lite",
+    "chores": "lite", "audit": "lite", "local": "local",
     # Vision and route assist are not tiered: they have their own fixed defaults below.
     "vision": None, "route_assist": None,
 }
@@ -100,6 +103,8 @@ def tier_catalog() -> dict:
     """The per-provider tier table for the roles modal, sent with the ``presets`` event.
 
     Data only: labels, hints, the recommended pairings and, per provider, the model each tier picks.
+    ``providers`` covers the three provider tiers only; the Local tier belongs to no provider, and
+    the endpoints it can name are the ``presets`` rows with ``local: true`` in the same event.
     """
     from .presets import RECOMMENDED, TIER_DEFAULTS, TIER_HINTS
     return {
@@ -238,8 +243,24 @@ def validate_tiers(raw) -> dict[str, dict]:
             continue
         if "preset" not in entry and not (entry.get("base_url") and entry.get("model")):
             raise ValueError(f"tiers.{name}: give a preset, or both base_url and model.")
+        if name == "local" and not _is_local_endpoint(entry):
+            raise ValueError("tiers.local must name a model server on this machine: a saved local "
+                             "endpoint id, or a plain http:// base_url on localhost, 127.0.0.1 or "
+                             "::1 with its model.")
         out[name] = entry
     return out
+
+
+def _is_local_endpoint(entry: dict) -> bool:
+    """Whether a tier entry points at a model server on this machine (for the Local tier).
+
+    A hosted preset here would be a Local tier that is not local, which is the one thing the tier
+    promises, so it is refused rather than quietly accepted.
+    """
+    preset = entry.get("preset")
+    if preset:
+        return localmodels.find(preset) is not None
+    return localmodels.loopback_http(entry.get("base_url") or "")
 
 
 @dataclass
@@ -357,6 +378,13 @@ class RoleResolver:
                 extra = dict(preset.extra) if preset else {}
             match = match_preset(base_url, model)
             return (preset.id if preset else (match.id if match else None)), base_url, model, extra, override.get("effort")
+        if tier == "local":
+            # The Local tier belongs to no provider, so there is no TIER_DEFAULTS row to read: with
+            # no override it is the first saved endpoint, so one saved server just works.
+            endpoint = next(iter(localmodels.catalog().values()), None)
+            if endpoint is None:
+                return None
+            return endpoint.id, endpoint.base_url, endpoint.model, dict(endpoint.extra), None
         entry = tier_default(self.main_preset_id, tier)
         if entry is None:
             return None
@@ -384,6 +412,10 @@ class RoleResolver:
                 resolved.note = (f"No stored key for the {TIER_LABELS[tier]} model; "
                                  f"using {TIER_LABELS[candidate]}.")
             return resolved
+        if tier == "local":
+            # Nothing set up rather than no key, and Local is not a step on the ladder: it falls
+            # straight back to Main, with the note the roles modal shows inline.
+            return self._main(role, "main", tier="main", note="No local model is set up; using Main.")
         return self._main(role, "main", tier="main",
                           note=(f"No stored key for the {TIER_LABELS[tier]} model; using Main."
                                 if self._tier_entry(tier) is not None else None))

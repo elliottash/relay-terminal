@@ -273,17 +273,19 @@ QString KeysDialog::presetLabelFor(const QString &id) const {
 
 // ===== RolesDialog ==============================================================================
 //
-// Three rows — Main, Flash, Lite — over one default provider, plus an Advanced disclosure with one
-// row per job. Settings:
+// Four rows — Main, Flash, Lite, Local — over one default provider, plus an Advanced disclosure with
+// one row per job. Settings:
 //   provider/preset            the default provider (also the pane's own model)
 //   tiers/<flash|lite>/{preset,model,effort}   an override for that tier; unset = the provider default
-//   roles/<role>/tier          "", "main", "flash", "lite" or "custom"
+//   tiers/local/preset         a saved local endpoint id; unset = the first one in the registry
+//   roles/<role>/tier          "", "main", "flash", "lite", "local" or "custom"
 //   roles/<role>/{preset,model,effort}         used when roles/<role>/tier is "custom"
 // The worker resolves all of it (backend/relay_core/roles.py) and reports what each tier and role
 // landed on, which is what the rows display.
 
 QStringList RolesDialog::tierIds() {
-    return {QStringLiteral("main"), QStringLiteral("flash"), QStringLiteral("lite")};
+    return {QStringLiteral("main"), QStringLiteral("flash"), QStringLiteral("lite"),
+            QStringLiteral("local")};
 }
 
 QString RolesDialog::tierSetting(const QString &tier, const QString &field) {
@@ -446,6 +448,9 @@ void RolesDialog::chooseProvider(const QString &presetId) {
     // else is the whole point of the row — Main on Kimi with Flash on Z.AI — so it is kept.
     QSettings settings;
     for (const QString &tier : tierIds()) {
+        // The Local tier never followed the default provider, so a new one cannot invalidate it —
+        // even when the provider being left behind is itself a local endpoint (card #JH22).
+        if (tier == QStringLiteral("local")) continue;
         const QString pinned = settings.value(tierSetting(tier, QStringLiteral("preset"))).toString();
         if (!pinned.isEmpty() && pinned != previous && pinned != presetId) continue;
         for (const QString &field : {QStringLiteral("preset"), QStringLiteral("model"), QStringLiteral("effort")})
@@ -491,6 +496,34 @@ void RolesDialog::buildTierRow(QVBoxLayout *into, const QString &tier, const QJs
         auto *fixed = new QLabel(QStringLiteral("this pane's model"));
         fixed->setEnabled(false);
         box->addWidget(fixed);
+    } else if (tier == QStringLiteral("local")) {
+        // A model server on this machine (card #24XJ): the only thing to choose is *which* saved
+        // endpoint. No Model… and no effort box — a local server serves one model and an
+        // OpenAI-compatible endpoint has no effort knob Relay can rely on (its `efforts` is empty).
+        auto *endpoint = new QComboBox;
+        endpoint->setAccessibleName(QStringLiteral("Local model"));
+        endpoint->setToolTip(QStringLiteral("Which model server on this machine serves this tier. "
+                                            "Unset, it is the first saved endpoint."));
+        const QString override = settings.value(tierSetting(tier, QStringLiteral("preset"))).toString();
+        for (const auto &value : std::as_const(m_presets)) {
+            const QJsonObject item = value.toObject();
+            if (!item.value(QStringLiteral("local")).toBool()) continue;
+            endpoint->addItem(providerChoice(str(item, "id")), str(item, "id"));
+        }
+        if (endpoint->count() == 0) {
+            endpoint->addItem(QStringLiteral("No local model is set up."));
+            row->setEnabled(false);
+        } else {
+            const int index = endpoint->findData(override);
+            endpoint->setCurrentIndex(index >= 0 ? index : 0);
+            connect(endpoint, QOverload<int>::of(&QComboBox::activated), this, [this, endpoint](int i) {
+                QSettings().setValue(tierSetting(QStringLiteral("local"), QStringLiteral("preset")),
+                                     endpoint->itemData(i).toString());
+                if (onRolesChanged) onRolesChanged();
+                rebuild();
+            });
+        }
+        box->addWidget(endpoint);
     } else {
         auto *edit = new QPushButton(QStringLiteral("Model…"));
         edit->setToolTip(QStringLiteral("Model id on %1; empty restores the provider's default for this tier.")

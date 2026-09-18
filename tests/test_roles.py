@@ -412,7 +412,7 @@ class TierTests(unittest.TestCase):
     def test_tier_summary_reports_models_notes_and_no_keys(self):
         made = self.tiered("kimi", ("kimi",))
         summary = made.tier_summary()
-        self.assertEqual(sorted(summary), ["flash", "lite", "main"])
+        self.assertEqual(sorted(summary), ["flash", "lite", "local", "main"])
         self.assertEqual(summary["main"]["model"], "kimi-k3")
         self.assertEqual(summary["flash"]["model"], "kimi-k2.7-code-highspeed")
         self.assertEqual(summary["lite"]["using"], "flash")
