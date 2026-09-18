@@ -149,6 +149,24 @@ class ValidityTests(unittest.TestCase):
         # A letter-bearing glob in command position stays un-decidable, so still runnable.
         self.assertValid("p* --version")
 
+    def test_a_lone_loop_builtin_is_an_agent_prompt(self):
+        # Owner report 2026-09-18: `continue` typed on its own went to the shell, which answered
+        # "continue: only meaningful in a `for', `while', or `until' loop". It is a bash builtin,
+        # so the router called it runnable; but nothing it could do at a prompt is what was meant.
+        for text in ["continue", "break", "return", "  continue  "]:
+            with self.subTest(text=text):
+                result = self.check(text)
+                self.assertEqual(result.route, "agent", text)
+                self.assertTrue(result.agent_signal, text)
+                self.assertFalse(result.explain_invalid, text)
+        # Inside a real loop, and with anything after it, the word is shell again.
+        self.assertValid("for f in *; do continue; done")
+        self.assertValid("continue 2")
+        # An explicit terminal destination still runs it.
+        self.assertEqual(classify("continue", "shell", path=PATH).route, "shell")
+        # Terminal mode flags it as belonging to the agent (the wrong-mode hint).
+        self.assertTrue(classify("continue", "shell", path=PATH).agent_signal)
+
     def test_only_a_mistyped_command_explains_itself(self):
         # Owner reports 2026-09-18: "symlink from ~/projects to here" and a lone "resume" were both
         # answered by the agent with "command not found: ..." printed under them, which reads as a

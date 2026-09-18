@@ -402,6 +402,13 @@ BARE_WORD_ODD = frozenset("install open less more head tail file sort cut join s
                           "find patch strip truncate shred prove tidy spell sum transform".split())
 # Their arguments are literal text, so a sentence after them is still most likely a shell command.
 LITERAL_TEXT = frozenset("echo printf print say logger wall write notify send banner".split())
+
+# Builtins that only mean something inside a loop or a function: bash refuses them at a prompt
+# ("continue: only meaningful in a `for', `while', or `until' loop"), so a line that is one of
+# these words alone can only have been meant for the agent — and "continue" is the word people
+# use to tell it to carry on (owner report, 2026-09-18). Inside a longer line they are ordinary
+# shell, and an explicit terminal destination still runs them.
+LOOP_ONLY = frozenset("continue break return".split())
 ASSIST_THRESHOLD = 2
 # Operators and expansions that only appear in shell input. Globs (`*`, `[...]`) and `~` are left out
 # on purpose: "look at my letters in ~/admin/Advisees.*.docx for my style" is an English request that
@@ -605,6 +612,8 @@ def _reads_like_request(trimmed: str, known: set[str], valid: bool, cwd: str | N
     the threshold ("find the largest files", "sort these results by date"). Used by the
     fixed modes for the wrong-mode hints; auto mode routes on its own.
     """
+    if trimmed in LOOP_ONLY:
+        return True    # a lone "continue" in terminal mode is a wrong-mode submission
     if not NATURAL.match(trimmed):
         return valid and assist_signals(trimmed, cwd)[0] >= ASSIST_THRESHOLD
     try:
@@ -646,6 +655,11 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
         return Decision("shell", text, why, syntax_ok=ok, syntax_error=error, valid=valid,
                         invalid_reason=reason, agent_signal=signal)
 
+    if trimmed in LOOP_ONLY:
+        # Nothing to explain under the line: the word is spelt correctly and no command was meant,
+        # so a "command not found" note would read as the failure of something never run.
+        return Decision("agent", text, f"“{trimmed}” means nothing outside a loop; sent to the agent",
+                        agent_signal=True, explain_invalid=False)
     if NATURAL.match(trimmed):
         # A user-defined function named "explain" can still be a real command.
         try:
