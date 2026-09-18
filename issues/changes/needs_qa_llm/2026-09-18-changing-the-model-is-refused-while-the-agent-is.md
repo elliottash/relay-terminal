@@ -12,7 +12,7 @@ rank: zzzzzr
 created: '2026-09-18'
 source: issues/bug_intake.txt, 2026-09-18
 acceptance: 'A model switch (chip, /model, /glm, /kimi, the palette, Alt+F / /flash / /main) is accepted while a turn runs; the request in flight finishes on the old model; the next request of the same turn goes to the new model with the whole conversation; the transcript marks where it took effect; `tests/test_model_switch.py` passes; live glm-5.3 -> glm-5.3-flash and glm-5.3 -> kimi-k3 both finish the turn'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-model-switch-mid-turn/'], related: [WFJM, EM1E], github: null}
+links: {plans: [], commits: [f83d73d], evidence: ['docs/qa_evidence/2026-09-18-model-switch-mid-turn/'], related: [WFJM, EM1E], github: null}
 ---
 # Changing the model is refused while the agent is working
 
