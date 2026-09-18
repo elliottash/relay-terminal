@@ -9,7 +9,7 @@ import sys
 import threading
 import urllib.parse
 
-from relay_core import (__version__, board_protocol, keystore, keytest, localmodels, logs,
+from relay_core import (__version__, board_protocol, hosted, keystore, keytest, localmodels, logs,
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import agents_defs
@@ -198,16 +198,38 @@ def main():
                 # key_source says where each key comes from so the keys modal can show "from
                 # RELAY_*_API_KEY" instead of offering to remove something it cannot remove.
                 sources = keystore.sources()
+                # Relay Free (protocol 13.9): nothing is stored and nothing can be, so key_source
+                # says "included"; `available` (cryptography imports) is what makes the row usable,
+                # and `quota` is the last allowance seen, null before the first exchange.
+                relay_free = {"has_stored_key": False, "key_source": "included", **hosted.status()}
                 emit({"event": "presets", "id": request.get("id"), "warp_default": keystore.warp_default_preset(),
                       "tier_defaults": model_roles.tier_catalog(), "role_actions": model_roles.action_catalog(),
-                      "presets": [{**p.to_dict(), "has_stored_key": bool(sources[p.id]),
-                                   "key_source": sources[p.id]} for p in PRESETS.values()]
+                      "presets": [{**p.to_dict(), **(relay_free if p.hosted else
+                                                     {"has_stored_key": bool(sources[p.id]),
+                                                      "key_source": sources[p.id]})}
+                                  for p in PRESETS.values()]
                       # Model servers on this machine (protocol 23): no key to store, so
                       # has_stored_key stays false and `local` is what makes the row usable.
                       + [{**e.to_dict(), "has_stored_key": False, "key_source": "local"}
                          for e in localmodels.catalog().values()]})
             elif kind in localmodels.TYPES:
                 localmodels.handle(request, emit)
+            elif kind == "hosted_quota":
+                # Protocol 13.9: GET /v1/quota on a thread, so the loop never waits on the network;
+                # exactly one event follows, hosted_quota or error.
+                request_id = request.get("id")
+
+                def quota_work(request_id=request_id):
+                    try:
+                        emit({"event": "hosted_quota", "id": request_id, **hosted.session().fetch_quota()})
+                    except hosted.HostedUnavailable as exc:
+                        emit({"event": "error", "id": request_id, "text": str(exc), "code": exc.code,
+                              "resets_at": exc.resets_at})
+                    except Exception as exc:                # never lets a thread die silently
+                        emit({"event": "error", "id": request_id,
+                              "text": f"Relay Free quota check failed ({type(exc).__name__})."})
+
+                threading.Thread(target=quota_work, name="relay-hosted-quota", daemon=True).start()
             elif kind == "store_key":
                 keystore.store(request.get("preset", ""), request.get("api_key", ""))
                 emit({"event": "key_stored", "id": request.get("id"), "preset": request.get("preset")})

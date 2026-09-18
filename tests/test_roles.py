@@ -23,6 +23,7 @@ from relay_core.agents_defs import AgentDefinition
 ROOT = Path(__file__).resolve().parents[1]
 
 CONFIGS = {
+    "relay-free": ("https://api.relay-terminal.ai/v1", "relay-main"),
     "kimi": ("https://api.moonshot.ai/v1", "kimi-k3"),
     "kimi-code": ("https://api.kimi.ai/coding/v1", "k3"),
     "glm": ("https://api.z.ai/api/paas/v4", "glm-5.3"),
@@ -33,6 +34,9 @@ CONFIGS = {
 
 def main_config(preset="kimi", key="main-key"):
     base, model = CONFIGS[preset]
+    if preset == "relay-free":
+        # No key and no effort field: the gateway takes a token and owns reasoning per role.
+        return ProviderConfig(base, model, "", {}, 8192, hosted=True)
     return ProviderConfig(base, model, key, {"reasoning_effort": "high"}, 8192)
 
 
@@ -115,6 +119,42 @@ class DefaultTests(unittest.TestCase):
         self.assertEqual(with_or.model, route_assist.ROUTER_MODEL)
         self.assertEqual(with_or.config.base_url, route_assist.ROUTER_BASE_URL)
         self.assertTrue(resolver("kimi").resolve("route_assist").is_main)
+
+    # ----- Relay Free (protocol 13.9): every tier without a key stored ----------------------
+    def test_relay_free_tiers_resolve_with_no_keys_stored(self):
+        made = resolver("relay-free", keys=(), effort=None)
+        for role, model, tier in (("flash", "relay-flash", "flash"), ("terminal_use", "relay-flash", "flash"),
+                                  ("summaries", "relay-flash", "flash"), ("chores", "relay-lite", "lite"),
+                                  ("audit", "relay-lite", "lite")):
+            resolved = made.resolve(role)
+            self.assertEqual((resolved.model, resolved.preset_id, resolved.tier), (model, "relay-free", tier), role)
+            self.assertEqual(resolved.source, "default")
+            self.assertFalse(resolved.is_main)
+            self.assertIsNone(resolved.note)
+            self.assertTrue(resolved.config.hosted)
+            self.assertEqual(resolved.config.api_key, "")
+        # Nothing was asked of the keyring for the hosted preset: it has no entry there.
+        self.assertNotIn("relay-free", [c.args[0] for c in made.lookup_mock.call_args_list])
+        self.assertEqual(made.warnings, [])
+        self.assertTrue(made.has_key("relay-free"))
+
+    def test_route_assist_on_relay_free_is_the_gateways_lite_role_unless_openrouter_is_stored(self):
+        alone = resolver("relay-free", keys=(), effort=None).resolve("route_assist")
+        self.assertEqual((alone.model, alone.preset_id), ("relay-lite", "relay-free"))
+        self.assertFalse(alone.is_main)
+        # The fixed fast router still wins where its key exists, as it does for every other preset.
+        with_or = resolver("relay-free", keys=("openrouter",), effort=None).resolve("route_assist")
+        self.assertEqual((with_or.model, with_or.preset_id), (route_assist.ROUTER_MODEL, "openrouter"))
+        # Another preset without the OpenRouter key keeps routing on the main model: the table is
+        # per preset, and only Relay Free has an entry.
+        self.assertTrue(resolver("kimi").resolve("route_assist").is_main)
+
+    def test_relay_free_falls_back_like_a_missing_key_where_cryptography_is_absent(self):
+        with mock.patch.object(model_roles.hosted, "available", return_value=False):
+            made = resolver("relay-free", keys=(), effort=None)
+            self.assertFalse(made.has_key("relay-free"))
+            self.assertTrue(made.resolve("chores").is_main)
+            self.assertTrue(made.resolve("route_assist").is_main)
 
     def test_subagent_and_switchboard_follow_the_main_tier(self):
         made = resolver("kimi")

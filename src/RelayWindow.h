@@ -1497,8 +1497,9 @@ private:
         relay::SettingsSection models;
         models.id = QStringLiteral("models");
         models.title = QStringLiteral("Models");
-        models.blurb = QStringLiteral("Relay is bring-your-own-key. Keys live in the desktop keyring and are sent "
-                                      "only to the provider they belong to.");
+        models.blurb = QStringLiteral("Relay is bring-your-own-key: a key lives in the desktop keyring and requests on "
+                                      "it go to that provider and never touch Relay's server. Relay Free, the included "
+                                      "allowance, is the one exception: its prompts go through Relay's hosted service.");
         models.rows << buttonRow(QStringLiteral("agent.modelKeys"), QStringLiteral("API keys"),
                                  QStringLiteral("One row per provider: status, add or replace, remove, test"),
                                  QStringLiteral("API keys…"), [this] { runAction(QStringLiteral("agent.modelKeys")); });
@@ -1731,8 +1732,9 @@ private:
         relay::SettingsSection privacy;
         privacy.id = QStringLiteral("privacy");
         privacy.title = QStringLiteral("Privacy");
-        privacy.blurb = QStringLiteral("Relay has no telemetry. Everything below decides what leaves this machine, "
-                                       "and it only ever goes to the provider whose key you configured.");
+        privacy.blurb = QStringLiteral("Relay has no telemetry. Everything below decides what leaves this machine. "
+                                       "On your own key it goes to that provider only; on Relay Free it goes through "
+                                       "Relay's hosted service to the provider, and Relay keeps request metadata only.");
         {
             relay::SettingRow info;
             info.kind = relay::SettingRow::Info;
@@ -1740,6 +1742,9 @@ private:
             info.label = QStringLiteral(
                 "Keys are stored in the desktop keyring (secret-tool, service org.relayterminal.Relay) or read "
                 "from RELAY_<PROVIDER>_API_KEY. They are never written to Relay's settings files and never logged. "
+                "A request on your own key never touches Relay's server. On Relay Free, the pane's prompts and "
+                "tool context go to Relay's hosted service and on to the model provider; Relay logs request "
+                "metadata (time, size, outcome) and never the text. Pick another provider to switch it off. "
                 "Terminal history is not sent automatically. Shell commands the agent runs are NOT sandboxed: they "
                 "have your user permissions. File tools are restricted to the agent workspace.");
             privacy.rows << info;

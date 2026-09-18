@@ -364,8 +364,14 @@ regenerates `issues/BOARD.md`. A repository without `issues/board.yaml` never se
   copies Warp's custom-endpoint keys; **Import from Claude Code / Codex** copies an API key out of
   `~/.claude/settings.json` or `~/.codex/auth.json` — an OAuth login is not an API key and is never
   imported.
-- **No telemetry.** No analytics, crash reports, account or Relay server. Relay connects only to
-  the provider you configure, when you use the agent.
+- **Relay Free.** A fresh install with no key uses Relay Free, an included daily allowance served
+  by a Relay-operated gateway that holds the provider keys (Main, Flash and Lite are GLM,
+  DeepSeek and Gemini through OpenRouter to start). It is one more provider row: pick any other
+  provider and it is out of the path. Prompts, the conversation and tool results go to the gateway
+  and on to the provider; the gateway keeps request metadata only. `docs/RELAY-FREE.md` has the
+  details and the quotas.
+- **No telemetry.** No analytics, crash reports or account. On your own key Relay connects only to
+  the provider you configure, when you use the agent; on Relay Free, only to Relay's gateway.
 - **What goes to your provider.** Your agent prompts, the conversation, and tool results
   (command output, file contents the agent reads). Terminal output is not sent automatically.
 - **Tools run without asking.** The agent runs commands and writes files as your user as soon

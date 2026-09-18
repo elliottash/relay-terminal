@@ -271,7 +271,16 @@ def wire_messages(messages: list[dict], *, tool_arguments_as_object: bool = Fals
 
 
 class ProviderError(RuntimeError):
-    pass
+    """A model call failed. The message is for the user and never carries a key or a body.
+
+    ``code`` and ``resets_at`` are set only by Relay's own hosted service (``HostedChatProvider``):
+    one of ``hosted.ERROR_CODES`` and the unix time a quota refusal lifts, so the pane can word the
+    failure and offer a key of the user's own. Every other provider leaves them empty.
+    """
+    def __init__(self, text: str = "", code: str = "", resets_at: int | None = None):
+        super().__init__(text)
+        self.code = code
+        self.resets_at = resets_at
 
 
 def repair_tool_calls(calls) -> list:
@@ -371,6 +380,9 @@ class Cancelled(RuntimeError):
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     """Never forward an Authorization header to a redirected endpoint."""
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # urllib closes ``fp`` only after this returns; raising here would leak the redirect
+        # response and its socket, so close it first.
+        hard_close(fp)
         raise ProviderError("Provider redirected the request. Check the configured base URL.")
 
 @dataclass
@@ -391,6 +403,9 @@ class ProviderConfig:
     # turn of every tool conversation otherwise. The outgoing copy only (``wire_messages``).
     tool_arguments_as_object: bool = False
     context_window: int | None = None          # the served window, for the overflow message only
+    # Relay's own hosted service (hosted.py, the relay-free preset): no key is stored, because the
+    # transport takes a short-lived bearer token before each call. Only make_provider reads it.
+    hosted: bool = False
 
     def __post_init__(self) -> None:
         """Settle ``max_tokens`` at construction, so everything downstream — the request, the
@@ -417,7 +432,7 @@ class ProviderConfig:
             raise ValueError("Unencrypted HTTP is only allowed for a loopback/local model server.")
         if not self.model.strip():
             raise ValueError("A model ID is required.")
-        if not self.api_key.strip() and url.scheme == "https":
+        if not self.api_key.strip() and url.scheme == "https" and not self.hosted:
             raise ValueError("An API key is required for this remote provider.")
         if not isinstance(self.extra, dict):
             raise ValueError("Extra parameters must be a JSON object.")
@@ -428,6 +443,8 @@ class ProviderConfig:
             raise ValueError(f"Output token limit must be between {MIN_OUTPUT_TOKENS} and {MAX_OUTPUT_TOKENS}.")
         if self.local and not loopback_http(self.base_url):
             raise ValueError("Only plain HTTP to a loopback host is a local model server.")
+        if self.hosted and self.local:
+            raise ValueError("A provider is Relay's hosted service or a local model server, not both.")
         if self.tool_arguments_as_object and not self.local:
             raise ValueError("tool_arguments_as_object is only for a local model server: a hosted "
                              "provider takes tool-call arguments as a JSON string.")
@@ -579,10 +596,12 @@ class ChatProvider:
         if tools:
             # Side calls (summaries, recaps, suggestions) send no tools; some APIs reject "tools": [].
             payload["tools"] = tools
-        if self.config.local:
+        if self.config.local or self.config.hosted:
             # llama.cpp and Ollama stream no usage unless asked, and without it the context tracker
-            # estimates at four characters a token: tolerable at 1M, not at 32K.
+            # estimates at four characters a token: tolerable at 1M, not at 32K. Relay's gateway
+            # settles its quota from the same usage chunk, so it is asked for there too.
             payload["stream_options"] = {"include_usage": True}
+        if self.config.local:
             if tools and not self.config.parallel_tool_calls:
                 payload["parallel_tool_calls"] = False
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -640,14 +659,15 @@ class ChatProvider:
                     return self._normalize(message)
                 return self._stream(response, emit, cancel, started, tools)
         except urllib.error.HTTPError as exc:
-            # A local server's 400 says why (the prompt no longer fits); read it before the close.
-            reason = self._local_http_reason(exc)
+            # What the failure reads like is decided while the body is still readable (a local
+            # server's 400 says the prompt no longer fits; Relay's gateway says which quota).
+            error = self._http_error(exc)
             # The error carries the response, so it also carries the socket: close it here rather
             # than leaving it to the garbage collector.
             if getattr(exc, "fp", None) is not None:
                 hard_close(exc.fp)
             # Providers can echo submitted secrets/prompts in error bodies. Do not log them.
-            raise ProviderError(reason or self.http_message(exc.code)) from None
+            raise error from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             # The watchdog's hard close surfaces here; report the stall, not a generic failure.
             self._maybe_stalled(cancel)
@@ -710,6 +730,11 @@ class ChatProvider:
                 self._note_progress()
                 if cancel.wait(self.LOADING_RETRY_S):
                     raise Cancelled("Stopped.") from None
+
+    def _http_error(self, exc) -> ProviderError:
+        """The ProviderError for an HTTP failure. Only the status survives, plus the one phrase a
+        local server's overflow body is matched for; HostedChatProvider reads Relay's own body."""
+        return ProviderError(self._local_http_reason(exc) or self.http_message(exc.code))
 
     def _local_http_reason(self, exc) -> str | None:
         """A sentence for a local server's 4xx, or None. Only a *recognised* phrase survives: the
@@ -937,3 +962,103 @@ class ChatProvider:
         if self.config.local:
             message = self._tidy_local(message, tools, finish_reason)
         return self._normalize(message)
+
+
+# ----- Relay's own hosted service (the relay-free preset) --------------------------------------
+
+class HostedChatProvider(ChatProvider):
+    """ChatProvider against Relay's gateway: a bearer token from ``hosted.Session`` instead of a key.
+
+    Everything about the request and the stream is the parent's. What differs: the token is taken
+    (and made, on first use) just before each call; a 401 is retried once after a forced refresh,
+    because the gateway may have rotated it; the ``X-Relay-Quota-*`` reply headers become one
+    ``hosted_quota`` event; and a refusal's JSON body, which is Relay's own, picks the wording and
+    the ``code`` the pane branches on. A provider's body is never shown; this one's ``message`` is,
+    only for a code with no sentence of its own, and truncated (``hosted.describe_error``).
+    """
+
+    def __init__(self, config: ProviderConfig, stall_timeout: float = DEFAULT_STALL_TIMEOUT,
+                 session=None):
+        super().__init__(config, stall_timeout)
+        from . import hosted
+        # RELAY_HOSTED_URL (tests, a local gateway) applies here, the one place every hosted call
+        # passes through, so the pane's model, each tier and the key test all follow it.
+        endpoint = hosted.endpoint_for(config.base_url)
+        if endpoint != config.base_url:
+            config.base_url = endpoint
+            config.validate()
+        self._session = session
+        self._quota_headers = None      # the headers of the response just opened, read after it closes
+
+    @property
+    def session(self):
+        if self._session is None:
+            from . import hosted
+            self._session = hosted.session()
+        return self._session
+
+    def complete(self, messages: list[dict], tools: list[dict],
+                 emit: Callable[[dict], None], cancel: threading.Event) -> dict:
+        from . import hosted
+        try:
+            self.config.api_key = self.session.token()
+        except hosted.HostedUnavailable as exc:
+            raise ProviderError(str(exc), exc.code, exc.resets_at) from None
+        try:
+            return self._call(messages, tools, emit, cancel)
+        except ProviderError as exc:
+            if exc.code != "token_expired" or cancel.is_set():
+                raise
+        # Once: the token the clock thought was good was refused, so take a fresh one and try
+        # again. A second refusal is reported as it is; retrying further would loop on a gateway
+        # that has stopped accepting this installation.
+        try:
+            self.config.api_key = self.session.token(force=True)
+        except hosted.HostedUnavailable as exc:
+            raise ProviderError(str(exc), exc.code, exc.resets_at) from None
+        return self._call(messages, tools, emit, cancel)
+
+    def _call(self, messages, tools, emit, cancel) -> dict:
+        self._quota_headers = None      # a call that never opens must not report the last one's quota
+        try:
+            result = super().complete(messages, tools, emit, cancel)
+        except ProviderError:
+            self._emit_quota(emit)
+            raise
+        self._emit_quota(emit)
+        return result
+
+    def _emit_quota(self, emit) -> None:
+        """One ``hosted_quota`` event from the headers of the response just closed, when it had them."""
+        headers = self._quota_headers
+        self._quota_headers = None
+        quota = self.session.note_quota(headers)
+        if quota is not None:
+            emit({"event": "hosted_quota", **quota})
+
+    def _open(self, opener, request, emit, cancel: threading.Event, started: float):
+        response = super()._open(opener, request, emit, cancel, started)
+        self._quota_headers = response.headers
+        return response
+
+    def _http_error(self, exc) -> ProviderError:
+        from . import hosted
+        # A refusal carries the quota headers too, and a 429 is exactly when the chip must update.
+        self._quota_headers = getattr(exc, "headers", None)
+        try:
+            body = exc.read(hosted.MAX_BODY) if getattr(exc, "fp", None) is not None else b""
+        except (OSError, ValueError, AttributeError):
+            body = b""
+        text, code, resets_at = hosted.describe_error(exc.code, body)
+        return ProviderError(text, code, resets_at)
+
+
+def make_provider(config: ProviderConfig, stall_timeout: float = DEFAULT_STALL_TIMEOUT) -> ChatProvider:
+    """The transport for a config: Relay's hosted one for a ``hosted`` config, the plain one otherwise.
+
+    Every place that builds a provider for a turn goes through here (agent.py, keytest.py), so a
+    hosted config can never be sent with an empty Authorization header by a caller that forgot.
+    """
+    if config.hosted:
+        return HostedChatProvider(config, stall_timeout)
+    return ChatProvider(config, stall_timeout)

@@ -46,7 +46,9 @@ set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "Linux terminal with a rich prompt and brin
  OpenAI-compatible providers. No accounts, no telemetry.")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 # CPack appends the dpkg-shlibdeps result to this list.
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "python3 (>= 3.10), bash")
+# python3-cryptography: remote access (remote/noise.py) and Relay Free's installation key
+# (backend/relay_core/hosted.py) both need X25519; BYOK providers run without it.
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "python3 (>= 3.10), python3-cryptography, bash")
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "libsecret-tools, xdg-utils")
 set(CPACK_DEBIAN_PACKAGE_SUGGESTS "gnome-keyring | kwalletmanager")
 

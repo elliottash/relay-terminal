@@ -1,0 +1,40 @@
+# relay-gateway: the hosted inference service behind Relay Free (gateway/README.md).
+#
+# Install:  cp gateway/relay-gateway.service /etc/systemd/system/
+#           systemctl daemon-reload && systemctl enable --now relay-gateway
+# The keys live in /etc/relay-gateway/env (mode 0600, owner root), never in gateway.json.
+
+[Unit]
+Description=Relay Free gateway (api.relay-terminal.ai)
+Documentation=https://github.com/elliottash/relay-terminal/blob/main/gateway/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=relay-gateway
+Group=relay-gateway
+WorkingDirectory=/opt/relay
+EnvironmentFile=/etc/relay-gateway/env
+ExecStart=/usr/bin/python3 -m gateway.server \
+    --config /etc/relay-gateway/gateway.json \
+    --db /var/lib/relay-gateway/gateway.db \
+    --host 127.0.0.1 --port 8790
+Restart=on-failure
+RestartSec=3
+
+# The process needs its database directory and nothing else of the filesystem.
+StateDirectory=relay-gateway
+StateDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

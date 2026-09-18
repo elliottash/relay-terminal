@@ -2131,6 +2131,14 @@ private:
         m_ctxLabel->setTextFormat(Qt::PlainText);
         m_ctxLabel->hide();
         row->addWidget(m_ctxLabel);
+        // Relay Free's allowance (protocol 13.9): "Free · 73% left", the same chip idiom as the
+        // context bar beside it, shown only while this pane's main preset is the hosted one.
+        m_quotaLabel = new QLabel;
+        m_quotaLabel->setObjectName(QStringLiteral("stripChipLabel"));
+        m_quotaLabel->setAccessibleName(QStringLiteral("Relay Free allowance"));
+        m_quotaLabel->setTextFormat(Qt::PlainText);
+        m_quotaLabel->hide();
+        row->addWidget(m_quotaLabel);
         m_effortBox = new QComboBox;
         for (const QString &level : efforts()) m_effortBox->addItem(level, level);
         m_effortBox->setAccessibleName(QStringLiteral("Reasoning effort"));
@@ -2151,11 +2159,123 @@ private:
 
     void refreshSessionControls() {
         if (m_modelBox) m_modelBox->setToolTip(modelTooltip());
+        updateQuotaLabel();
         if (!m_effortBox) return;
         const QSignalBlocker block(m_effortBox);
         m_effortBox->setCurrentIndex(std::max(0, m_effortBox->findData(m_effort)));
         m_planChip->setVisible(m_agentMode == QStringLiteral("plan"));
         updateContextLabel();
+    }
+
+    // ----- Relay Free (protocol 13.8/13.9) ------------------------------------------------------
+    // Whether this pane's main preset is the hosted one. Its Flash and Lite tiers are the gateway's
+    // other roles, so a pane on the Flash agent is still on Relay Free.
+    bool onHostedPreset() const { return presetById(m_currentPreset).value(QStringLiteral("hosted")).toBool(); }
+
+    // Every stored row that is not Relay Free: what the exhausted line offers instead. A local
+    // endpoint counts — it answers without a key — but only a real key counts as "a key stored",
+    // which is what decides whether the dialog offering to add one appears.
+    QStringList ownProviderLabels() const {
+        QStringList labels;
+        for (const auto &entry : std::as_const(m_stored))
+            if (!presetById(entry.first).value(QStringLiteral("hosted")).toBool()) labels << entry.second;
+        return labels;
+    }
+    bool anyOwnKeyStored() const {
+        for (const auto &item : m_presets)
+            if (item.toObject().value(QStringLiteral("has_stored_key")).toBool()) return true;
+        return false;
+    }
+
+    static QString localClock(qint64 unixSeconds) {
+        return QDateTime::fromSecsSinceEpoch(unixSeconds).toLocalTime().toString(QStringLiteral("HH:mm"));
+    }
+
+    // The last allowance seen: from the `presets` row before the first call, then from every
+    // `hosted_quota` event. The chip and the keys modal both read it.
+    void setHostedQuota(const QJsonObject &quota) {
+        m_quotaLimit = quota.value(QStringLiteral("limit")).toVariant().toLongLong();
+        m_quotaUsed = quota.value(QStringLiteral("used")).toVariant().toLongLong();
+        m_quotaResets = quota.value(QStringLiteral("resets_at")).toVariant().toLongLong();
+        // A fresh allowance retires the offer to add a key: the next exhaustion may make it again.
+        if (m_quotaLimit > 0 && m_quotaUsed < m_quotaLimit) m_hostedOfferShown = false;
+        updateQuotaLabel();
+    }
+
+    void updateQuotaLabel() {
+        if (!m_quotaLabel) return;
+        if (!onHostedPreset()) { m_quotaLabel->hide(); return; }
+        if (m_quotaLimit <= 0) {
+            // No figure yet: the first request through the gateway brings one.
+            m_quotaLabel->setText(QStringLiteral("Free"));
+            m_quotaLabel->setProperty("warn", false);
+            m_quotaLabel->setToolTip(QStringLiteral("Relay Free: an included daily allowance. Usage shows after the first request."));
+        } else {
+            // Rounded down: an allowance with one call spent must not read as untouched.
+            const double left = std::max(0.0, 100.0 * double(m_quotaLimit - m_quotaUsed) / double(m_quotaLimit));
+            m_quotaLabel->setText(QStringLiteral("Free · %1% left").arg(left > 0 && left < 10 ? QString::number(std::floor(left * 10) / 10, 'f', 1)
+                                                                                           : QString::number(std::floor(left), 'f', 0)));
+            m_quotaLabel->setProperty("warn", left <= 10.0);
+            m_quotaLabel->setToolTip(QStringLiteral("%1 of %2 tokens today%3")
+                .arg(QLocale().toString(std::min(m_quotaUsed, m_quotaLimit)), QLocale().toString(m_quotaLimit),
+                     m_quotaResets > 0 ? QStringLiteral(" · resets at %1").arg(localClock(m_quotaResets)) : QString()));
+        }
+        m_quotaLabel->style()->unpolish(m_quotaLabel); m_quotaLabel->style()->polish(m_quotaLabel);
+        m_quotaLabel->show();
+    }
+
+    // The first time any pane runs on Relay Free: one line in the transcript saying where the
+    // prompts go, once per installation (QSettings hosted/disclosed). Not a modal — the target flow
+    // is "open → ask → it works"; the keys modal and Options › Privacy carry the full text.
+    void discloseHosted() {
+        if (!onHostedPreset()) return;
+        QSettings settings;
+        if (settings.value(QStringLiteral("hosted/disclosed"), false).toBool()) return;
+        settings.setValue(QStringLiteral("hosted/disclosed"), true);
+        ensureLineStart();
+        printInline(QStringLiteral("Relay Free: this pane's prompts and tool context go to Relay's hosted service and on to "
+                                   "the model provider; Relay keeps request metadata only. Add your own key under "
+                                   "Options › Models to keep it between you and your provider.\n"), Ink::Note);
+        if (!m_agentBusy && !moreTurnsPending()) closeInline();
+    }
+
+    // A turn refused by the gateway for the day (`code` quota_exhausted / free_unavailable, protocol
+    // 13.9): the line names what to do instead, and when nothing of the user's own is stored, a
+    // dialog in the offerVoiceKey shape offers the two ways to add a key — once per exhaustion.
+    void onHostedRefusal(const QString &code, const QJsonObject &event) {
+        const qint64 resets = event.value(QStringLiteral("resets_at")).toVariant().toLongLong();
+        if (resets > 0) m_quotaResets = resets;
+        if (code == QStringLiteral("quota_exhausted") && m_quotaLimit > 0) { m_quotaUsed = m_quotaLimit; updateQuotaLabel(); }
+        const QString what = code == QStringLiteral("quota_exhausted")
+            ? QStringLiteral("Relay Free allowance used for today%1.")
+                  .arg(resets > 0 ? QStringLiteral("; resets at %1").arg(localClock(resets)) : QString())
+            : QStringLiteral("Relay Free is temporarily unavailable.");
+        const QStringList own = ownProviderLabels();
+        const QString instead = own.isEmpty()
+            ? QStringLiteral("Add a key under Options › Models › API keys… to keep going.")
+            : QStringLiteral("Use one of your providers: %1 (/model), or add a key under Options › Models › API keys…")
+                  .arg(own.join(QStringLiteral(", ")));
+        ensureLineStart(); printInline(QStringLiteral("✗ %1 %2\n").arg(what, instead), Ink::Error);
+        if (anyOwnKeyStored() || m_hostedOfferShown) return;
+        m_hostedOfferShown = true;
+        auto *box = new QMessageBox(window());
+        box->setAttribute(Qt::WA_DeleteOnClose);
+        box->setIcon(QMessageBox::Information);
+        box->setWindowTitle(QStringLiteral("Relay Free"));
+        box->setText(what);
+        box->setInformativeText(QStringLiteral(
+            "Relay Free is an included daily allowance. To keep working now, add a key of your own for any "
+            "provider: it goes into the desktop keyring and requests on it never touch Relay's server."));
+        QPushButton *keys = box->addButton(QStringLiteral("API keys…"), QMessageBox::AcceptRole);
+        QPushButton *warp = box->addButton(QStringLiteral("Import from Warp"), QMessageBox::ActionRole);
+        box->addButton(QMessageBox::Cancel);
+        QPointer<Pane> self(this);
+        connect(box, &QMessageBox::finished, this, [self, box, keys, warp] {
+            if (!self) return;
+            if (box->clickedButton() == keys) self->openKeysDialog();
+            else if (box->clickedButton() == warp) self->send({{"type", "import_warp"}});
+        });
+        box->open();
     }
 
     static QString compactTokens(qint64 tokens) {
@@ -4026,7 +4146,7 @@ private:
             const QString warning = event.value(QStringLiteral("warning")).toString();
             if (!warning.isEmpty()) { ensureLineStart(); printInline(warning + '\n', Ink::Note); closeInline(); }
             // A role switch keeps the pane's main preset: only a set_model changes it.
-            if (!preset.isEmpty() && role.isEmpty()) { m_currentPreset = preset; rememberPreset(preset); }
+            if (!preset.isEmpty() && role.isEmpty()) { m_currentPreset = preset; rememberPreset(preset); discloseHosted(); }
             // Mid-turn (issue 3ES1) the chip moves now; the model still answering keeps its window as
             // m_ctxWindow until `model_applied`, and the bar shows the new one from the `context`
             // event's `next`, which follows this event.
@@ -4116,6 +4236,13 @@ private:
             const QString effort = event.value(QStringLiteral("effort")).toString();
             if (efforts().contains(effort)) m_effort = effort;
             changed();
+            return true;
+        }
+        if (type == QStringLiteral("hosted_quota")) {
+            // Relay Free's allowance (protocol 13.9): after every gateway call, and in reply to a
+            // hosted_quota request. The chip follows it; so does the keys modal's row when open.
+            setHostedQuota(event);
+            if (m_keysDialog) m_keysDialog->handleEvent(event);
             return true;
         }
         if (type == QStringLiteral("context")) {
@@ -6283,6 +6410,7 @@ private:
             if (m_rolesDialog) m_rolesDialog->setResolved(m_tierSummary, m_roleSummary);
             m_agentRole = event.value(QStringLiteral("agent_role")).toString(QStringLiteral("main"));
             onSessionConfigured(event);
+            discloseHosted();   // Relay Free: where the prompts go, said once per installation
             runBoardTask();   // a card handed over by the Switchboard's Execute, if any (#XS6Q)
             // No "Agent ready · <model>" here: the composer's own chips carry the model and the
             // agent role, so announcing it again only filled the window with a permanent line.
@@ -6294,20 +6422,30 @@ private:
             m_tierCatalog = event.value(QStringLiteral("tier_defaults")).toObject();
             m_roleActions = event.value(QStringLiteral("role_actions")).toArray();
             m_stored.clear();
+            bool hostedUnavailable = false;
             for (const auto &item : m_presets) {
                 const auto preset = item.toObject();
                 // A model server on this machine (card #24XJ) needs no key, so `local` makes a row
                 // selectable just as a stored key does. The worker appends those rows after the
-                // keyed presets, so they stay last in this list.
+                // keyed presets, so they stay last in this list. Relay Free (`hosted`, protocol
+                // 13.8) needs none either, while the worker reports it `available`.
+                const bool hosted = preset.value(QStringLiteral("hosted")).toBool();
+                if (hosted && !preset.value(QStringLiteral("available")).toBool()) hostedUnavailable = true;
                 if (preset.value(QStringLiteral("has_stored_key")).toBool()
-                    || preset.value(QStringLiteral("local")).toBool())
+                    || preset.value(QStringLiteral("local")).toBool()
+                    || (hosted && preset.value(QStringLiteral("available")).toBool()))
                     m_stored.append({preset.value(QStringLiteral("id")).toString(), preset.value(QStringLiteral("label")).toString()});
+                // The allowance the worker last saw, so the chip has a figure before the first call.
+                if (hosted && preset.value(QStringLiteral("quota")).isObject()) setHostedQuota(preset.value(QStringLiteral("quota")).toObject());
             }
             if (m_keysDialog) m_keysDialog->setPresets(m_presets);
             if (m_rolesDialog) m_rolesDialog->setPresets(m_presets, m_tierCatalog, m_roleActions);
             changed();
             if (m_stored.isEmpty()) {
-                status(QStringLiteral("No stored provider keys. Open Options › Models › API keys… to add one or import from Warp."));
+                status(hostedUnavailable
+                           ? QStringLiteral("No stored provider keys, and Relay Free needs python3-cryptography. "
+                                            "Open Options › Models › API keys… to add a key or import from Warp.")
+                           : QStringLiteral("No stored provider keys. Open Options › Models › API keys… to add one or import from Warp."));
                 return;
             }
             if (!m_configured && !m_configuring) {
@@ -6315,18 +6453,28 @@ private:
                     return std::any_of(m_stored.cbegin(), m_stored.cend(), [&](const auto &entry) { return entry.first == id; });
                 };
                 // A restored pane keeps the model it had; otherwise the saved choice, then Warp's
-                // default agent model, then the first stored key. A local endpoint is selectable
-                // but never wins that last step over a key (card #24XJ): it is picked on its own
-                // only when it is the restored/saved preset, or when nothing has a key at all.
+                // default agent model, then the first stored key, then Relay Free, then a local
+                // endpoint. A key of the user's own always wins over the included allowance, so a
+                // user with any BYOK key is untouched and a fresh install lands on Relay Free and
+                // configures at once. A local endpoint never wins over either (card #24XJ): it is
+                // picked on its own only when it is the restored/saved preset, or when nothing else
+                // is usable at all.
                 QString choice = m_restorePreset;
                 m_restorePreset.clear();
                 if (!usable(choice)) choice = QSettings().value(QStringLiteral("provider/preset")).toString();
                 if (!usable(choice)) choice = event.value(QStringLiteral("warp_default")).toString();
                 if (!usable(choice)) {
-                    const auto keyed = std::find_if(m_stored.cbegin(), m_stored.cend(), [this](const auto &entry) {
-                        return !presetById(entry.first).value(QStringLiteral("local")).toBool();
+                    auto firstWhere = [this](auto predicate) {
+                        const auto found = std::find_if(m_stored.cbegin(), m_stored.cend(), [&](const auto &entry) {
+                            return predicate(presetById(entry.first));
+                        });
+                        return found == m_stored.cend() ? QString() : found->first;
+                    };
+                    choice = firstWhere([](const QJsonObject &preset) {
+                        return !preset.value(QStringLiteral("local")).toBool() && !preset.value(QStringLiteral("hosted")).toBool();
                     });
-                    choice = (keyed == m_stored.cend() ? m_stored.first() : *keyed).first;
+                    if (choice.isEmpty()) choice = firstWhere([](const QJsonObject &preset) { return preset.value(QStringLiteral("hosted")).toBool(); });
+                    if (choice.isEmpty()) choice = m_stored.first().first;
                 }
                 configurePreset(choice, false);
             }
@@ -6614,7 +6762,11 @@ private:
             m_configuring = false;
             status(text);
             if (wasBusy && !m_agentBusy) {
-                ensureLineStart(); printInline(QStringLiteral("✗ ") + text + '\n', Ink::Error);
+                // Relay Free's refusals (protocol 13.9) get their own wording: what to use instead.
+                // rate_limited and token_expired keep the worker's sentence, like any provider error.
+                const QString code = event.value(QStringLiteral("code")).toString();
+                if (code == QStringLiteral("quota_exhausted") || code == QStringLiteral("free_unavailable")) onHostedRefusal(code, event);
+                else { ensureLineStart(); printInline(QStringLiteral("✗ ") + text + '\n', Ink::Error); }
                 printTurnEndRequests(type, event);   // request ledger UI
                 if (!moreTurnsPending()) closeInline();
                 finishFixTurn(false);
@@ -7417,6 +7569,9 @@ private:
             // (card #24XJ): no key stands behind it and it answers from this machine.
             const QString mark = preset.value(QStringLiteral("local")).toBool()
                                      ? QStringLiteral(" · local") : QString();
+            // Relay Free's model ids are the gateway's roles (relay-main…), which name nothing a
+            // person recognises: the row reads as the service.
+            if (preset.value(QStringLiteral("hosted")).toBool()) return label;
             const QString model = preset.value(QStringLiteral("model")).toString();
             if (!model.isEmpty()) return model.section('/', -1).toLower() + mark;
         }
@@ -10410,6 +10565,7 @@ private:
         static const PresetRow presets[] = {
             // Mirrors backend/relay_core/presets.py; tests/test_presets.py fails if the two drift.
             {"custom", "Custom / current settings", "", "", ""},
+            {"relay-free", "Relay Free", "https://api.relay-terminal.ai/v1", "relay-main", "{}"},
             {"kimi", "Kimi · K3", "https://api.moonshot.ai/v1", "kimi-k3", "{\"reasoning_effort\":\"high\"}"},
             {"kimi-code", "Kimi Code · K3", "https://api.kimi.ai/coding/v1", "k3", "{\"reasoning_effort\":\"high\"}"},
             {"glm", "Z.AI · GLM-5.3 · standard API", "https://api.z.ai/api/paas/v4", "glm-5.3",
@@ -10742,6 +10898,11 @@ private:
     bool m_seenShell = false, m_refocus = true, m_configured = false, m_agentBusy = false;
     // agent sessions UI
     QLabel *m_planChip = nullptr, *m_ctxLabel = nullptr;
+    // Relay Free (protocol 13.8/13.9): the allowance chip and the last quota the worker reported.
+    // m_hostedOfferShown: the add-a-key dialog went up for the current exhaustion (once per pane).
+    QLabel *m_quotaLabel = nullptr;
+    qint64 m_quotaLimit = 0, m_quotaUsed = 0, m_quotaResets = 0;
+    bool m_hostedOfferShown = false;
     QToolButton *m_interruptButton = nullptr;
     int m_menuFileLine = 0;   // the line the right-clicked path pointed at, for "Open file"
     // voice transcription (issue NY7Z): the chip, the recorder, and the clip in flight

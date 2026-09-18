@@ -14,8 +14,8 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
 - **Protocol:** GUI ↔ worker messages are specified in `docs/AGENT-SESSIONS-PROTOCOL.md`;
   update it when adding messages or events.
 - **Decisions already made:** no Konsole fork (and KonsolePart itself retired 2026-09-18);
-  no per-action tool approvals; BYOK only; no
-  telemetry. See `docs/ROADMAP.md`.
+  no per-action tool approvals; BYOK first (Relay Free is an included, quota-limited hosted
+  provider since 2026-09-18, `docs/RELAY-FREE.md`); no telemetry. See `docs/ROADMAP.md`.
 
 ## Shortcut hints (standing rule)
 

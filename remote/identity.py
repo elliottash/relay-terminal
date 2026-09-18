@@ -44,7 +44,23 @@ def state_dir() -> Path:
 
 
 class Identity:
-    """The desktop's static X25519 key."""
+    """The desktop's static X25519 key.
+
+    The storage is parameterised by three class attributes so another long-term key can reuse it
+    without copying it: ``attribute`` is the keyring entry (a distinct namespace per key, so one
+    can be regenerated without touching the other), ``filename`` the file it falls back to and
+    ``label`` what the keyring shows. ``default_dir`` is where that file lives. Relay Free's
+    installation key (``backend/relay_core/hosted.py``) subclasses this with its own values; the
+    defaults here are the remote identity's, unchanged.
+    """
+
+    attribute = ATTRIBUTE
+    filename = "identity.key"
+    label = "Relay remote identity"
+
+    @staticmethod
+    def default_dir() -> Path:
+        return state_dir()
 
     def __init__(self, private: bytes):
         self.private = private
@@ -72,7 +88,7 @@ class Identity:
         if not tool or os.environ.get("RELAY_KEYRING") == "off":
             return None
         try:
-            done = subprocess.run([tool, "lookup", "service", SERVICE, "key", ATTRIBUTE],
+            done = subprocess.run([tool, "lookup", "service", SERVICE, "key", cls.attribute],
                                   capture_output=True, timeout=TIMEOUT)
         except (OSError, subprocess.TimeoutExpired):
             return None
@@ -87,7 +103,7 @@ class Identity:
             return False
         try:
             done = subprocess.run(
-                [tool, "store", "--label=Relay remote identity", "service", SERVICE, "key", ATTRIBUTE],
+                [tool, "store", "--label=" + cls.label, "service", SERVICE, "key", cls.attribute],
                 input=pairing.b64(private).encode(), capture_output=True, timeout=TIMEOUT)
         except (OSError, subprocess.TimeoutExpired):
             return False
@@ -99,7 +115,7 @@ class Identity:
         private = cls._from_keyring()
         if private and len(private) == 32:
             return cls(private)
-        path = (directory or state_dir()) / "identity.key"
+        path = (directory or cls.default_dir()) / cls.filename
         if path.is_file():
             raw = path.read_text().strip()
             if raw:
@@ -113,7 +129,7 @@ class Identity:
         """Make a new identity. Only ever called when the user turns remote access on."""
         private, _ = noise.generate_keypair()
         if not cls._to_keyring(private):
-            path = (directory or state_dir()) / "identity.key"
+            path = (directory or cls.default_dir()) / cls.filename
             path.write_text(pairing.b64(private))
             path.chmod(0o600)
         return cls(private)

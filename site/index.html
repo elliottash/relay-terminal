@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Relay Terminal — one prompt for your shell and your coding agent</title>
-  <meta name="description" content="A Linux terminal for agentic coding on your own API keys. One prompt box: commands run in your shell, everything else goes to the agent. No account, no cloud, no telemetry.">
+  <meta name="description" content="A Linux terminal for agentic coding. One prompt box: commands run in your shell, everything else goes to the agent. Works the moment it opens on an included allowance, or on your own API keys. No account, no telemetry.">
   <!-- The two panels the page can be in: IBM Beige and Dark Copper, the app's own themes. -->
   <meta name="theme-color" content="#f4efe4" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0e0f12" media="(prefers-color-scheme: dark)">
   <meta property="og:title" content="Relay Terminal — one prompt for your shell and your coding agent">
-  <meta property="og:description" content="A Linux terminal for agentic coding on your own API keys.">
+  <meta property="og:description" content="A Linux terminal for agentic coding: an included allowance to start, your own API keys when you want them.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="assets/agent-inline.png">
   <link rel="icon" href="assets/relay.svg" type="image/svg+xml">
@@ -50,9 +50,9 @@
       <div class="wrap hero-grid">
         <div class="hero-copy">
           <h1 id="hero-title">One prompt for your shell and your coding agent</h1>
-          <p class="lede">A Linux terminal for agentic coding that runs on your own API keys. Commands go to
-            your shell, everything else goes to the agent, and Relay shows you which before you press Enter.
-            No account, no cloud, no telemetry.</p>
+          <p class="lede">A Linux terminal for agentic coding. Commands go to your shell, everything else goes to
+            the agent, and Relay shows you which before you press Enter. It works the moment it opens on an
+            included allowance, and runs on your own API keys when you want them. No account, no telemetry.</p>
           <div class="cta">
             <a class="button primary" href="#install">Build from source</a>
             <a class="button" href="https://github.com/elliottash/relay-terminal">Source on GitHub</a>
@@ -217,8 +217,9 @@
           </li>
           <li class="plain">
             <h3>No telemetry, no account</h3>
-            <p>No analytics, no crash reporting, no sign-in and no Relay server. The only network traffic is to
-              the provider whose key you entered. GPL-3.0-or-later.</p>
+            <p>No analytics, no crash reporting and no sign-in. On your own key the only network traffic is to
+              the provider whose key you entered; on the included <a href="free.html">Relay Free</a> allowance
+              it is to Relay's gateway, which keeps request metadata and never content. GPL-3.0-or-later.</p>
           </li>
         </ul>
 
@@ -302,8 +303,9 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
             <h3>What stays with you</h3>
             <ul class="checks">
               <li>No telemetry, no analytics, no crash reporting.</li>
-              <li>No Relay account and no Relay server. Relay connects to the network only to reach the
-                provider you configure, when you use the agent.</li>
+              <li>No Relay account. On your own key, Relay connects to the network only to reach the provider
+                you configure, when you use the agent. On <a href="free.html">Relay Free</a> it reaches
+                Relay's gateway instead, and nothing else.</li>
               <li>API keys live in your desktop keyring (GNOME Keyring or KWallet, through
                 <code>secret-tool</code>) or in an environment variable. They are passed on stdin, never on a
                 command line, in a settings file or in a log.</li>
@@ -320,6 +322,9 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
                 file contents it reads) go to the provider you configured: GLM, Kimi, MiniMax, OpenRouter,
                 OpenAI, Anthropic, Gemini or any other OpenAI-compatible endpoint. Their privacy policy
                 applies.</li>
+              <li>On <a href="free.html">Relay Free</a>, the same things go to Relay's gateway and on to the
+                provider serving that role. The gateway logs one line of metadata per request and never the
+                text. Pick any other provider and it is out of the path.</li>
               <li><strong>Agent tools run without asking for approval.</strong> The agent can run commands and
                 write files in your workspace as your user. Shell commands are not sandboxed; file tools stay
                 inside the workspace. Every action prints in the terminal and you can stop the agent at any

@@ -1,0 +1,70 @@
+{
+  "roles": {
+    "relay-main": {
+      "upstreams": [
+        {"provider": "openrouter", "model": "z-ai/glm-5.3-flash"}
+      ],
+      "effort": "medium",
+      "max_effort": "medium",
+      "max_output_tokens": 16000,
+      "max_input_chars": 1500000
+    },
+    "relay-flash": {
+      "upstreams": [
+        {"provider": "openrouter", "model": "deepseek/deepseek-v4.1-flash"}
+      ],
+      "effort": "low",
+      "max_effort": "medium",
+      "max_output_tokens": 12000,
+      "max_input_chars": 1500000
+    },
+    "relay-lite": {
+      "upstreams": [
+        {"provider": "openrouter", "model": "google/gemini-3.5-flash-lite", "extra": {"temperature": 0}}
+      ],
+      "effort": "minimal",
+      "max_effort": "medium",
+      "max_output_tokens": 512,
+      "max_input_chars": 200000
+    }
+  },
+  "providers": {
+    "openrouter": {
+      "base_url": "https://openrouter.ai/api/v1",
+      "key_env": "GATEWAY_OPENROUTER_KEY",
+      "effort_style": "reasoning",
+      "price_per_mtok": {
+        "z-ai/glm-5.3-flash": [0.06, 0.40],
+        "deepseek/deepseek-v4.1-flash": [0.14, 0.28],
+        "google/gemini-3.5-flash-lite": [0.10, 0.40]
+      }
+    },
+    "deepseek": {
+      "base_url": "https://api.deepseek.com/v1",
+      "key_env": "GATEWAY_DEEPSEEK_KEY",
+      "effort_style": "reasoning_effort",
+      "price_per_mtok": {}
+    },
+    "google": {
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "key_env": "GATEWAY_GEMINI_KEY",
+      "effort_style": "reasoning_effort",
+      "price_per_mtok": {}
+    }
+  },
+  "quota": {
+    "tokens_per_day": 250000,
+    "requests_per_minute": 30,
+    "concurrency_per_install": 2
+  },
+  "limits": {
+    "global_concurrency": 64,
+    "spend_per_day_usd": 20,
+    "spend_per_month_usd": 300,
+    "per_provider_per_day_usd": {"openrouter": 20},
+    "registrations_per_ip_per_hour": 10,
+    "challenges_per_ip_per_hour": 30
+  },
+  "token_ttl_seconds": 3600,
+  "client_ip_header": "CF-Connecting-IP"
+}

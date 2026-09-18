@@ -2,10 +2,12 @@
 #pragma once
 // Provider and model configuration: the two modals. (The Settings pane is src/SettingsPane.h.)
 //
-//  * KeysDialog    — "API keys…": one row per provider, grouped Subscriptions / Aggregator /
-//                    Pay-as-you-go, with Add/Replace, Remove, Test and a link to the provider's key
-//                    page. Keys are typed here and handed straight to the worker's keyring commands;
-//                    nothing is echoed back and no key is ever stored in QSettings.
+//  * KeysDialog    — "API keys…": one row per provider, grouped Included / Subscriptions /
+//                    Aggregator / Pay-as-you-go, with Add/Replace, Remove, Test and a link to the
+//                    provider's key page. Keys are typed here and handed straight to the worker's
+//                    keyring commands; nothing is echoed back and no key is ever stored in QSettings.
+//                    The Included row is Relay Free (presets.py `hosted`): no key to add or remove,
+//                    its status column carries today's allowance, and Test does one real call.
 //  * RolesDialog   — "Model roles…": default provider, the three Main/Flash/Lite rows, and an
 //                    Advanced disclosure with one row per job (protocol 13.7).
 //
@@ -46,8 +48,11 @@ private:
     void test(const QString &id);
     QTreeWidgetItem *rowFor(const QString &id) const;
     QString presetLabelFor(const QString &id) const;
+    QString hostedStatus(const QJsonObject &preset) const;
+    void updateButtons();
 
     QJsonArray m_presets;
+    QJsonObject m_hostedQuota;   // the last hosted_quota seen: {limit, used, resets_at}
     QTreeWidget *m_list = nullptr;
     QLabel *m_status = nullptr;
     QPushButton *m_add = nullptr, *m_remove = nullptr, *m_test = nullptr, *m_where = nullptr;

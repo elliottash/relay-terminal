@@ -21,6 +21,9 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include <algorithm>
+#include <cmath>
+
 namespace relay {
 
 namespace {
@@ -46,10 +49,26 @@ QString str(const QJsonObject &object, const char *key) {
 
 // A model server on this machine (presets.py `local`, card #24XJ) serves without an API key, so it
 // counts as usable wherever a stored key does. It never reaches the keys modal: its group is
-// "local", which KeysDialog::rebuild() does not list.
+// "local", which KeysDialog::rebuild() does not list. Relay Free (presets.py `hosted`) needs no key
+// either, but only while the worker can reach it (`available`: python3-cryptography is installed).
 bool usable(const QJsonObject &preset) {
     return preset.value(QStringLiteral("has_stored_key")).toBool()
-           || preset.value(QStringLiteral("local")).toBool();
+           || preset.value(QStringLiteral("local")).toBool()
+           || (preset.value(QStringLiteral("hosted")).toBool()
+               && preset.value(QStringLiteral("available")).toBool());
+}
+
+bool hosted(const QJsonObject &preset) { return preset.value(QStringLiteral("hosted")).toBool(); }
+
+// "73% left today" from {limit, used}; empty when the allowance is unknown or nonsensical.
+QString allowanceLeft(const QJsonObject &quota) {
+    const double limit = quota.value(QStringLiteral("limit")).toDouble();
+    const double used = quota.value(QStringLiteral("used")).toDouble();
+    if (limit <= 0) return QString();
+    // Rounded down, so one call spent never reads as "100% left".
+    const double left = std::max(0.0, 100.0 * (limit - used) / limit);
+    return QStringLiteral("%1% left today").arg(left > 0 && left < 10 ? QString::number(std::floor(left * 10) / 10, 'f', 1)
+                                                                     : QString::number(std::floor(left), 'f', 0));
 }
 
 }  // namespace
@@ -60,6 +79,7 @@ namespace {
 enum KeyColumn { KeyProvider, KeyStatus, KeyWhere };
 const int PresetRole = Qt::UserRole + 1;
 const int KeyUrlRole = Qt::UserRole + 2;
+const int HostedRole = Qt::UserRole + 4;   // true on the Relay Free row (Qt::UserRole + 3 is key_source)
 }  // namespace
 
 KeysDialog::KeysDialog(QWidget *parent) : QDialog(parent) {
@@ -71,7 +91,9 @@ KeysDialog::KeysDialog(QWidget *parent) : QDialog(parent) {
         "Relay is bring-your-own-key. A key you add here goes straight into the desktop keyring "
         "(secret-tool, service org.relayterminal.Relay) and is sent to that provider and nowhere else. "
         "Keys are never written to Relay's settings files, never shown again and never logged. "
-        "A RELAY_<PROVIDER>_API_KEY environment variable wins over the keyring.")));
+        "A RELAY_<PROVIDER>_API_KEY environment variable wins over the keyring. "
+        "Relay Free needs no key: its prompts go through Relay's hosted service to the model provider, "
+        "and Relay keeps request metadata only.")));
     m_list = new QTreeWidget;
     m_list->setObjectName(QStringLiteral("keysList"));
     m_list->setHeaderLabels({QStringLiteral("Provider"), QStringLiteral("Key"), QStringLiteral("Where to get one")});
@@ -127,16 +149,36 @@ KeysDialog::KeysDialog(QWidget *parent) : QDialog(parent) {
     });
     connect(m_list, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
         const QString id = item ? item->data(0, PresetRole).toString() : QString();
-        if (!id.isEmpty()) addOrReplace(id, item->text(KeyProvider));
+        // Relay Free has no key to type: a double click on its row is not a request for one.
+        if (!id.isEmpty() && !item->data(0, HostedRole).toBool()) addOrReplace(id, item->text(KeyProvider));
     });
-    connect(m_list, &QTreeWidget::currentItemChanged, this, [this, selected] {
-        QTreeWidgetItem *item = selected();
-        const bool env = item && item->data(0, Qt::UserRole + 3).toString() == QStringLiteral("env");
-        for (QPushButton *button : {m_add, m_test, m_where}) button->setEnabled(item != nullptr);
-        // A key from the environment is not ours to delete.
-        m_remove->setEnabled(item != nullptr && !env
-                             && !item->text(KeyStatus).startsWith(QStringLiteral("Not set")));
-    });
+    connect(m_list, &QTreeWidget::currentItemChanged, this, [this] { updateButtons(); });
+}
+
+// Which of the four buttons the selected row can use. Relay Free (`hosted`) holds no key, so Add and
+// Remove have nothing to do on it, its link is the page about the service rather than a key page,
+// and Test stays: the worker makes one real call through the gateway.
+void KeysDialog::updateButtons() {
+    QTreeWidgetItem *item = m_list->currentItem();
+    if (item && item->data(0, PresetRole).toString().isEmpty()) item = nullptr;
+    const bool env = item && item->data(0, Qt::UserRole + 3).toString() == QStringLiteral("env");
+    const bool included = item && item->data(0, HostedRole).toBool();
+    m_add->setEnabled(item != nullptr && !included);
+    m_test->setEnabled(item != nullptr);
+    m_where->setEnabled(item != nullptr);
+    m_where->setText(included ? QStringLiteral("About Relay Free…") : QStringLiteral("Get a key…"));
+    // A key from the environment is not ours to delete.
+    m_remove->setEnabled(item != nullptr && !env && !included
+                         && !item->text(KeyStatus).startsWith(QStringLiteral("Not set")));
+}
+
+// The status column of the Relay Free row: what stands in for "Stored in keyring" there.
+QString KeysDialog::hostedStatus(const QJsonObject &preset) const {
+    if (!preset.value(QStringLiteral("available")).toBool()) return QStringLiteral("Needs python3-cryptography");
+    const QJsonObject quota = m_hostedQuota.isEmpty() ? preset.value(QStringLiteral("quota")).toObject()
+                                                      : m_hostedQuota;
+    const QString left = allowanceLeft(quota);
+    return QStringLiteral("Included · ") + (left.isEmpty() ? QStringLiteral("no key needed") : left);
 }
 
 void KeysDialog::setPresets(const QJsonArray &presets) {
@@ -156,7 +198,9 @@ QTreeWidgetItem *KeysDialog::rowFor(const QString &id) const {
 void KeysDialog::rebuild() {
     const QString keep = m_list->currentItem() ? m_list->currentItem()->data(0, PresetRole).toString() : QString();
     m_list->clear();
+    // The same order as presets.py GROUPS: what comes with Relay first, then what you pay for.
     const QList<QPair<QString, QString>> groups{
+        {QStringLiteral("included"), QStringLiteral("Included")},
         {QStringLiteral("subscription"), QStringLiteral("Subscriptions")},
         {QStringLiteral("aggregator"), QStringLiteral("Aggregator")},
         {QStringLiteral("payg"), QStringLiteral("Pay-as-you-go")}};
@@ -171,7 +215,8 @@ void KeysDialog::rebuild() {
             const QJsonObject preset = value.toObject();
             if (str(preset, "group") != group.first) continue;
             const QString source = str(preset, "key_source");
-            const QString status = source == QStringLiteral("env")
+            const QString status = hosted(preset) ? hostedStatus(preset)
+                : source == QStringLiteral("env")
                 ? QStringLiteral("From RELAY_%1_API_KEY").arg(str(preset, "id").toUpper().replace('-', '_'))
                 : source == QStringLiteral("keyring") ? QStringLiteral("Stored in keyring")
                                                       : QStringLiteral("Not set");
@@ -179,6 +224,7 @@ void KeysDialog::rebuild() {
             item->setData(0, PresetRole, str(preset, "id"));
             item->setData(0, KeyUrlRole, str(preset, "key_url"));
             item->setData(0, Qt::UserRole + 3, source);
+            item->setData(0, HostedRole, hosted(preset));
             item->setToolTip(KeyProvider, str(preset, "note") + QStringLiteral("\n") + str(preset, "base_url"));
             item->setToolTip(KeyWhere, str(preset, "key_url"));
         }
@@ -188,6 +234,7 @@ void KeysDialog::rebuild() {
     if (QTreeWidgetItem *item = rowFor(keep)) m_list->setCurrentItem(item);
     else if (m_list->topLevelItemCount() > 0 && m_list->topLevelItem(0)->childCount() > 0)
         m_list->setCurrentItem(m_list->topLevelItem(0)->child(0));
+    updateButtons();   // the current row may be the same item as before, which emits no change
 }
 
 void KeysDialog::addOrReplace(const QString &id, const QString &label) {
@@ -223,6 +270,18 @@ void KeysDialog::handleEvent(const QJsonObject &event) {
     const QString type = event.value(QStringLiteral("event")).toString();
     if (type == QStringLiteral("presets")) {
         setPresets(event.value(QStringLiteral("presets")).toArray());
+    } else if (type == QStringLiteral("hosted_quota")) {
+        // Protocol 13.9: after every gateway call, and in reply to a `hosted_quota` request. The
+        // Relay Free row's status column follows it live; the `presets` row's `quota` is the
+        // fallback before the first one arrives.
+        m_hostedQuota = QJsonObject{{QStringLiteral("limit"), event.value(QStringLiteral("limit"))},
+                                    {QStringLiteral("used"), event.value(QStringLiteral("used"))},
+                                    {QStringLiteral("resets_at"), event.value(QStringLiteral("resets_at"))}};
+        for (const auto &value : std::as_const(m_presets)) {
+            const QJsonObject preset = value.toObject();
+            if (!hosted(preset)) continue;
+            if (QTreeWidgetItem *item = rowFor(str(preset, "id"))) item->setText(KeyStatus, hostedStatus(preset));
+        }
     } else if (type == QStringLiteral("key_stored")) {
         m_status->setText(QStringLiteral("Key saved to the keyring."));
         if (send) send({{"type", "presets"}});
@@ -238,7 +297,12 @@ void KeysDialog::handleEvent(const QJsonObject &event) {
         const QString id = event.value(QStringLiteral("preset")).toString();
         const int ms = event.value(QStringLiteral("elapsed_ms")).toInt();
         const bool truncated = event.value(QStringLiteral("truncated")).toBool();
-        m_status->setText(ok ? QStringLiteral("%1: key works — %2 answered in %3 ms%4")
+        // Relay Free holds no key: what a passing test proves there is that the service answers.
+        bool included = false;
+        for (const auto &value : std::as_const(m_presets))
+            if (str(value.toObject(), "id") == id) included = hosted(value.toObject());
+        m_status->setText(ok ? (included ? QStringLiteral("%1 works — %2 answered in %3 ms%4")
+                                         : QStringLiteral("%1: key works — %2 answered in %3 ms%4"))
                                    .arg(presetLabelFor(id), event.value(QStringLiteral("model")).toString())
                                    .arg(ms)
                                    .arg(truncated ? QStringLiteral(" (it spent the test budget thinking, "

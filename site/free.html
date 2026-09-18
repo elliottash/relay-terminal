@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relay Free — the agent works the moment Relay opens</title>
+  <meta name="description" content="Relay Free is the included daily allowance a fresh Relay install runs on: no API key, no account. What it sends, what the gateway keeps, and how to switch to your own key.">
+  <meta name="theme-color" content="#f4efe4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e0f12" media="(prefers-color-scheme: dark)">
+  <meta property="og:title" content="Relay Free — the agent works the moment Relay opens">
+  <meta property="og:description" content="An included allowance for a fresh install. No key, no account, metadata-only logs.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/relay.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // Before first paint, so a pinned panel never flashes the other one.
+    try {
+      var pinned = localStorage.getItem("relay-panel");
+      if (pinned === "copper" || pinned === "beige") document.documentElement.dataset.theme = pinned;
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="top">
+    <div class="wrap top-inner">
+      <a class="brand" href="index.html" aria-label="Relay home">
+        <img src="assets/relay-mark.svg" alt="" width="28" height="28">
+        <span>RELAY</span>
+      </a>
+      <div class="top-right">
+        <nav aria-label="Sections">
+          <ul>
+            <li><a href="index.html#features">Features</a></li>
+            <li><a href="index.html#install">Install</a></li>
+            <li><a href="index.html#privacy">Privacy</a></li>
+            <li><a href="https://github.com/elliottash/relay-terminal">GitHub</a></li>
+          </ul>
+        </nav>
+        <div class="panel-switch" role="radiogroup" aria-label="Colour theme" hidden></div>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="free" aria-labelledby="free-title">
+      <div class="wrap">
+        <h2 id="free-title">Relay Free</h2>
+        <p class="lede">Open Relay, ask the agent something, and it answers. No API key, no account. Relay Free
+          is a modest daily allowance included with Relay; when you want more, or want your prompts to go
+          straight to a provider of your choice, add your own key and Relay Free steps out of the way.</p>
+
+        <div class="grid two">
+          <div>
+            <h3>What you get</h3>
+            <ul class="checks">
+              <li>The three model tiers Relay uses everywhere: <strong>Main</strong> for the agent and its
+                planning, <strong>Flash</strong> for terminal work and quick turns, <strong>Lite</strong> for
+                titles, labels and routing. Today they are GLM-5.3-Flash, DeepSeek V4.1 Flash and Gemini 3.5
+                Flash-Lite, served through OpenRouter; the mapping lives on the server and can change without
+                a new Relay.</li>
+              <li>A daily token allowance that resets every day. The pane shows how much is left, and when it
+                is used up the terminal keeps working; only the agent waits for the reset or for a key of
+                your own.</li>
+              <li>No sign-up. Relay makes a keypair on first use, keeps the private half in your desktop
+                keyring, and proves it holds the key to get a token that lasts an hour.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>What leaves your machine</h3>
+            <ul class="checks warn">
+              <li>On Relay Free your agent prompts, the conversation and the results of the agent's tools
+                (command output, file contents it reads) go to Relay's gateway at
+                <code>api.relay-terminal.ai</code> and on to the provider serving that tier. Their privacy
+                policy applies to what they receive.</li>
+              <li>The gateway logs one line of metadata per request: time, a hash of the installation id, the
+                tier, the provider, the status, timings and token counts. Never the text, never file
+                contents, never terminal output. Metadata is kept for seven days.</li>
+              <li>Relay itself still has no telemetry: no analytics, no crash reporting. Shell commands you
+                run, and terminal output, are never sent on their own.</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Your key, whenever you want it</h3>
+        <p>Options › Models › <strong>API keys…</strong> takes a key for GLM, Kimi, MiniMax, OpenRouter, OpenAI,
+          Anthropic, Gemini or any OpenAI-compatible endpoint. Once one is stored, new panes use it, requests
+          go directly to that provider, and nothing passes through Relay's gateway. Relay Free stays in the
+          model list as one more choice, or you can remove it.</p>
+
+        <h3>Limits, plainly</h3>
+        <p>The allowance is a resource quota, not a crippled product: the same models, the same streaming, the
+          same tools. Limits are enforced on the server, so a modified Relay cannot raise them, and a global
+          spending cap means Relay Free can be "temporarily unavailable" rather than surprising anyone with
+          a bill. Heavy use is what your own key is for.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap footer-inner">
+      <p><img src="assets/relay-mark.svg" alt="" width="20" height="20"> Relay · GPL-3.0-or-later</p>
+      <ul>
+        <li><a href="https://github.com/elliottash/relay-terminal">Source</a></li>
+        <li><a href="https://github.com/elliottash/relay-terminal/releases">Releases</a></li>
+        <li><a href="https://github.com/elliottash/relay-terminal/issues">Issues</a></li>
+        <li><a href="https://github.com/elliottash/relay-terminal/blob/main/LICENSE">License</a></li>
+      </ul>
+    </div>
+  </footer>
+</body>
+</html>

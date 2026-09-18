@@ -35,6 +35,10 @@ EFFORT_MAP: dict[str, dict[str, str]] = {
     "openai": {"low": "low", "medium": "medium", "high": "high", "max": "xhigh"},
     "gemini": {"low": "low", "medium": "medium", "high": "high", "max": "high"},
     "none": {level: "" for level in EFFORTS},
+    # Relay Free (owner, 2026-09-18): medium reasoning and below. The gateway clamps whatever it is
+    # sent to each role's ceiling, and this table is the same rule on the client, so the effort
+    # picker offers Low and Medium and nothing that would be silently lowered.
+    "relay": {"low": "low", "medium": "medium", "high": "medium", "max": "medium"},
 }
 
 # Context windows in tokens (verified 2026-09-17; see docs/INTAKE-CLARIFICATION-RESEARCH.md section 4).
@@ -82,9 +86,10 @@ def model_supports_vision(model) -> bool:
     return bool(name) and any(name.startswith(prefix) for prefix in VISION_MODELS)
 
 
-# Keys-modal grouping (GUI only; the backend never treats groups differently).
-GROUPS = ("subscription", "aggregator", "payg", "local")
-GROUP_LABELS = {"subscription": "Subscriptions", "aggregator": "Aggregator",
+# Keys-modal grouping (GUI only; the backend never treats groups differently). "included" is first
+# because Relay Free is what a fresh install runs on before any key is stored.
+GROUPS = ("included", "subscription", "aggregator", "payg", "local")
+GROUP_LABELS = {"included": "Included", "subscription": "Subscriptions", "aggregator": "Aggregator",
                 "payg": "Pay-as-you-go", "local": "On this machine"}
 
 
@@ -111,6 +116,10 @@ class Preset:
     # Output tokens one call may ask this model for; see DEFAULT_MAX_OUTPUT above. Last in the field
     # list because every entry below is built positionally up to `server`.
     max_output: int = DEFAULT_MAX_OUTPUT
+    # Relay's own hosted service (hosted.py): no key either, but for the opposite reason to
+    # `local`. The worker proves an installation identity and gets a short-lived bearer token, so
+    # the row is usable with nothing stored and its requests leave the machine through Relay.
+    hosted: bool = False
 
     @property
     def vision(self) -> bool:
@@ -124,7 +133,7 @@ class Preset:
                 "efforts": distinct_efforts(self.effort_style), "group": self.group,
                 "key_url": self.key_url, "note": self.note, "vision": self.vision,
                 "provider": self.provider or self.label.split(" · ")[0], "plan": self.plan,
-                "local": self.local, "server": self.server}
+                "local": self.local, "server": self.server, "hosted": self.hosted}
 
 
 GLM_EXTRA = {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
@@ -134,6 +143,18 @@ GLM_EXTRA = {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
 GLM_FAST_EXTRA = {"thinking": {"type": "enabled"}, "reasoning_effort": "low"}
 
 PRESETS: dict[str, Preset] = {p.id: p for p in [
+    # Relay Free (owner decision 2026-09-18): a modest included allowance so a fresh install's first
+    # ask works with no key. The gateway (gateway/) speaks the OpenAI shape, names its models after
+    # the tiers, and caps reasoning at medium per role (EFFORT_MAP["relay"] mirrors the cap, so the
+    # picker offers Low and Medium). The context window is the gateway's input cap, not a model's.
+    Preset("relay-free", "Relay Free", "https://api.relay-terminal.ai/v1", "relay-main",
+           {"reasoning_effort": "medium"},
+           1_000_000, "relay", "included", "https://relay-terminal.ai/free.html",
+           "Included with Relay, no API key. Prompts go to Relay's hosted service, then to the model provider.",
+           provider="Relay", plan="Included", hosted=True,
+           # The gateway rebuilds the upstream request and owns the output cap per role
+           # (docs/RELAY-FREE.md); the desktop asks for no more than the conservative fallback.
+           max_output=DEFAULT_MAX_OUTPUT),
     Preset("kimi", "Kimi · K3", "https://api.moonshot.ai/v1", "kimi-k3", {"reasoning_effort": "high"},
            1_048_576, "kimi", "payg", "https://platform.kimi.ai/console/api-keys",
            "Moonshot platform, pay-as-you-go.",
@@ -221,6 +242,11 @@ TIER_HINTS = {"main": "the pane's agent and subagents",
 _LITE_VIA_OPENROUTER = ("openrouter", "google/gemini-3.8-flash", {})
 
 TIER_DEFAULTS: dict[str, dict[str, tuple[str, str, dict]]] = {
+    # Relay Free's three tiers are the gateway's three roles; nothing steps out to another provider,
+    # because that would need a key the row exists to do without.
+    "relay-free": {"main": ("relay-free", "relay-main", {"reasoning_effort": "medium"}),
+                   "flash": ("relay-free", "relay-flash", {"reasoning_effort": "low"}),
+                   "lite": ("relay-free", "relay-lite", {})},   # the gateway's Lite default: minimal
     "glm": {"main": ("glm", "glm-5.3", GLM_EXTRA),
             "flash": ("glm", "glm-5.3-flash", GLM_FAST_EXTRA),
             "lite": _LITE_VIA_OPENROUTER},
@@ -395,6 +421,12 @@ def infer_effort(style: str, extra: dict | None) -> str | None:
     value = (extra.get("reasoning") or {}).get("effort") if style == "openrouter" else extra.get("reasoning_effort")
     if not isinstance(value, str):
         return None
+    # Levels that send the same value are one group; report the level named after the value it
+    # sends ("high" for Kimi's high, which medium also sends; "medium" for Relay Free's medium,
+    # which high and max also send), and only then the first level that sends it.
+    for level in ("low", "high", "max", "medium"):
+        if level == value and EFFORT_MAP[style][level] == value:
+            return level
     for level in ("low", "high", "max", "medium"):
         if EFFORT_MAP[style][level] == value:
             return level

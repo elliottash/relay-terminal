@@ -48,6 +48,8 @@ class ConfigureProviderTests(unittest.TestCase):
         for preset_id in PRESETS:
             board = {"type": "configure", "agent_role": "switchboard", "use_stored_key": True,
                      "api_key": "", "preset": preset_id, "max_tokens": 32768}
+            if PRESETS[preset_id].hosted:
+                continue                         # Relay Free has no key to pair: see the tests below
             if not KEYS.get(preset_id):
                 with self.assertRaises(ValueError):
                     S.provider_config(board)
@@ -55,6 +57,23 @@ class ConfigureProviderTests(unittest.TestCase):
             config = S.provider_config(board)
             self.assertEqual(config.base_url, PRESETS[preset_id].base_url)
             self.assertEqual(config.api_key, KEYS[preset_id])
+
+    # ----- Relay Free needs no key (protocol 13.9) -------------------------------------------
+    def test_relay_free_configures_with_no_key_stored_and_looks_none_up(self):
+        config = S.provider_config({"preset": "relay-free", "use_stored_key": True})
+        self.assertTrue(config.hosted)
+        self.assertEqual(config.api_key, "")
+        self.assertEqual((config.base_url, config.model), (PRESETS["relay-free"].base_url, "relay-main"))
+        self.assertEqual(self.looked_up, [])
+        # The other way round too: a key the request carries is dropped, the transport takes a token.
+        self.assertEqual(S.provider_config({"preset": "relay-free", "api_key": "typed"}).api_key, "")
+
+    def test_relay_free_pointed_at_another_endpoint_is_a_custom_provider_that_needs_a_key(self):
+        # The hosted transport authenticates with Relay's gateway only; anything else named under
+        # the relay-free preset is a custom endpoint and keeps the rule every other one has.
+        with self.assertRaises(ValueError):
+            S.provider_config({"preset": "relay-free", "use_stored_key": True,
+                               "base_url": "https://proxy.example/v1"})
 
     def test_the_old_board_configure_is_what_produced_the_401(self):
         """The shape the board used to send, kept as the description of the bug.

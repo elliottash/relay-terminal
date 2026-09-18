@@ -32,7 +32,8 @@ from .presets import (apply_effort, context_window_for, effort_style, infer_effo
 from .program_input import DEFAULT_MAX_WRITES, clip_screen, validate_grant
 from .terminal_handoff import validate_ceiling
 from .provider import (DEFAULT_STALL_TIMEOUT, Cancelled, ChatProvider, ProviderConfig, ProviderError,
-                       ProviderStalled, ProviderTruncated, message_images, validate_stall_timeout)
+                       ProviderStalled, ProviderTruncated, make_provider, message_images,
+                       validate_stall_timeout)
 from .requests import OPEN as REQUEST_OPEN
 from .requests import AUDIT_MAX_TOKENS, RequestLedger, run_audit
 from .sessions import STATE_VERSION, SessionStore, validate_messages
@@ -66,6 +67,12 @@ MAX_STALL_RETRIES = 1
 MAX_TRUNCATION_RETRIES = 1
 
 _log = logs.get("agent")
+
+
+def _provider_for(config: ProviderConfig, stall_timeout: float):
+    """The transport for a config. A hosted config (Relay Free) always gets the hosted one; every
+    other goes through this module's ``ChatProvider`` name, which tests stand in for."""
+    return make_provider(config, stall_timeout) if config.hosted else ChatProvider(config, stall_timeout)
 
 
 def _error_text(event: dict) -> str | None:
@@ -301,7 +308,7 @@ class Agent:
         # Idle deadline for a streamed model call, in seconds (protocol 15).
         self.stall_timeout_s = validate_stall_timeout(stall_timeout_s)
         self._injected_provider = provider is not None
-        self.provider = provider or ChatProvider(config, self.stall_timeout_s)
+        self.provider = provider or _provider_for(config, self.stall_timeout_s)
         self._apply_stall_timeout()
         self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings, skills)
         # Switchboard tools (relay_core.board_tools.BoardTools) or None when the workspace has no
@@ -549,7 +556,7 @@ class Agent:
         if provider is not None:
             self.provider, self._injected_provider = provider, True
         elif not self._injected_provider:
-            self.provider = ChatProvider(config, self.stall_timeout_s)
+            self.provider = _provider_for(config, self.stall_timeout_s)
         self._apply_stall_timeout()
         if self.effort is not None:
             self.set_effort(self.effort)
@@ -778,7 +785,7 @@ class Agent:
         no roles are configured, or the role follows the main agent, the main model is used."""
         if self._injected_provider:
             return self.provider
-        make = lambda cfg: ChatProvider(cfg, self.stall_timeout_s)   # noqa: E731 - side calls share the deadline
+        make = lambda cfg: _provider_for(cfg, self.stall_timeout_s)   # noqa: E731 - side calls share the deadline
         resolved = self.roles.resolve(role) if role is not None and self.roles is not None else None
         if resolved is not None and not resolved.is_main:
             # A role's model was picked for this job: its own params (and its effort, already applied
@@ -1239,8 +1246,15 @@ class Agent:
             self._keep_unfinished_turn(f"failed ({text[:300]})")
             if self.track_requests:
                 self.requests.finish_turn(turn_id, False, self.todos.items)
-            self._end_turn(record, {"event": "error", "turn_id": turn_id, "text": text,
-                                    "open_items": self._open_items(ctx, final=True)})
+            failed = {"event": "error", "turn_id": turn_id, "text": text,
+                      "open_items": self._open_items(ctx, final=True)}
+            if isinstance(exc, ProviderError) and exc.code:
+                # Relay Free's refusals carry a code (quota_exhausted, free_unavailable, rate_limited)
+                # and when the allowance returns, so the pane can word it and offer a key of the
+                # user's own (protocol 13.9).
+                failed["code"] = exc.code
+                failed["resets_at"] = exc.resets_at
+            self._end_turn(record, failed)
         finally:
             # Backstop: _end_turn already did both for every normal end state (issue EM1E).
             self._end_vision_turn()
@@ -1288,7 +1302,7 @@ class Agent:
                 "model": target.config.model}
         self._vision = swap
         if not self._injected_provider:
-            self.provider = ChatProvider(target.config, self.stall_timeout_s)
+            self.provider = _provider_for(target.config, self.stall_timeout_s)
         logs.event(_log, "vision_route", session=self.session_id, turn=turn_id,
                    from_model=self.config.model, to_model=target.config.model,
                    host=_host(target.config.base_url), images=len(pictures), source=target.source)

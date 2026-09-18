@@ -14,7 +14,7 @@ import time
 
 from . import localmodels
 from .presets import PRESETS, apply_effort
-from .provider import ChatProvider, ProviderConfig, ProviderError, ProviderTruncated
+from .provider import ChatProvider, ProviderConfig, ProviderError, ProviderTruncated, make_provider
 
 SYSTEM = "Reply with the single word: ok"
 USER = "ping"
@@ -48,7 +48,9 @@ def _provider(preset_id: str, key: str) -> ChatProvider:
                                            localmodels.clamp_max_tokens(MAX_TOKENS, fields), **fields))
     # Ask for the least thinking this provider allows: the test is about reachability, not quality.
     extra, _ = apply_effort(dict(preset.extra), preset.effort_style, "low")
-    return ChatProvider(ProviderConfig(preset.base_url, preset.model, key, extra, MAX_TOKENS))
+    # Relay Free: one real call through the gateway, with a token rather than a key (protocol 13.9).
+    return make_provider(ProviderConfig(preset.base_url, preset.model, key, extra, MAX_TOKENS,
+                                        hosted=preset.hosted))
 
 
 def check(preset_id: str, key: str, factory=_provider) -> dict:
@@ -84,8 +86,9 @@ def run(preset_id: str, emit, request_id=None, lookup=None, factory=_provider) -
     preset = _preset(preset_id) if isinstance(preset_id, str) else None
     if preset is None:
         raise ValueError("Unknown provider preset.")
-    key = "" if preset.local else (lookup or keystore.lookup)(preset_id)
-    if not key and not preset.local:
+    keyless = preset.local or preset.hosted
+    key = "" if keyless else (lookup or keystore.lookup)(preset_id)
+    if not key and not keyless:
         emit({"event": "key_tested", "id": request_id, "preset": preset_id, "ok": False,
               "model": PRESETS[preset_id].model, "elapsed_ms": 0,
               "error": "No key is stored for this provider."})

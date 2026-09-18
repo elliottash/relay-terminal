@@ -18,7 +18,7 @@ import logging
 import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import AsyncIterator, Awaitable, Callable
 
 from . import ws
 
@@ -50,6 +50,11 @@ class Response:
     body: bytes = b""
     content_type: str = "application/json"
     headers: dict[str, str] | None = None
+    # A streamed body: an async iterator of byte chunks written with ``Transfer-Encoding: chunked``
+    # as they arrive, so a server-sent-events reply reaches the client while its upstream is still
+    # talking. ``body`` is ignored when this is set. The iterator is always closed, so a generator's
+    # ``finally`` runs whether the client read to the end or went away half way.
+    chunks: AsyncIterator[bytes] | None = None
 
     @classmethod
     def json(cls, payload, status: int = 200) -> "Response":
@@ -59,6 +64,11 @@ class Response:
     def error(cls, status: int, message: str) -> "Response":
         return cls.json({"error": message}, status=status)
 
+    @classmethod
+    def stream(cls, chunks: AsyncIterator[bytes], content_type: str = "text/event-stream",
+               status: int = 200, headers: dict[str, str] | None = None) -> "Response":
+        return cls(status=status, content_type=content_type, headers=headers, chunks=chunks)
+
 
 HttpHandler = Callable[[ws.Request, bytes], Awaitable[Response]]
 SocketHandler = Callable[[ws.WebSocket], Awaitable[None]]
@@ -67,11 +77,15 @@ SocketHandler = Callable[[ws.WebSocket], Awaitable[None]]
 class Server:
     """Routes are exact paths. ``static_root`` serves everything else."""
 
-    def __init__(self, *, static_root: Path | None = None, index: str = "index.html"):
+    def __init__(self, *, static_root: Path | None = None, index: str = "index.html",
+                 max_body: int = MAX_BODY):
         self.routes: dict[tuple[str, str], HttpHandler] = {}
         self.sockets: dict[str, SocketHandler] = {}
         self.static_root = Path(static_root).resolve() if static_root else None
         self.index = index
+        # The largest request body a route may receive. The default suits JSON control routes; a
+        # server that proxies whole conversations raises it.
+        self.max_body = max_body
         self._server: asyncio.AbstractServer | None = None
         self._listeners: list[asyncio.AbstractServer] = []
 
@@ -168,7 +182,7 @@ class Server:
             except ValueError:
                 await self._write(writer, request, Response.error(400, "bad Content-Length."))
                 return False
-            if count > MAX_BODY:
+            if count > self.max_body:
                 await self._write(writer, request, Response.error(413, "body too large."))
                 return False
             body = await reader.readexactly(count)
@@ -207,6 +221,8 @@ class Server:
                         headers={"Cache-Control": "no-store"})
 
     async def _write(self, writer, request: ws.Request, response: Response) -> bool:
+        if response.chunks is not None:
+            return await self._write_stream(writer, request, response)
         headers = {"Content-Type": response.content_type,
                    "Content-Length": str(len(response.body)),
                    **SECURITY_HEADERS, **(response.headers or {})}
@@ -221,6 +237,46 @@ class Server:
         except (ConnectionResetError, BrokenPipeError):
             return False
         return keep_alive
+
+    async def _write_stream(self, writer, request: ws.Request, response: Response) -> bool:
+        """Write a streamed response as HTTP/1.1 chunks, one per item the iterator yields.
+
+        The head goes out before the first chunk exists, so a client sees the status and headers
+        (and a proxy in front sees a live response) as soon as the route has decided. A client that
+        disconnects part way is noticed at the next write; the iterator is closed either way.
+        """
+        headers = {"Content-Type": response.content_type, "Transfer-Encoding": "chunked",
+                   "Cache-Control": "no-store", **SECURITY_HEADERS, **(response.headers or {})}
+        keep_alive = "close" not in request.header("connection").lower()
+        headers["Connection"] = "keep-alive" if keep_alive else "close"
+        text = STATUS_TEXT.get(response.status, "OK")
+        head = f"HTTP/1.1 {response.status} {text}\r\n"
+        head += "".join(f"{name}: {value}\r\n" for name, value in headers.items())
+        writer.write(head.encode() + b"\r\n")
+        chunks = response.chunks
+        assert chunks is not None
+        try:
+            if request.method == "HEAD":
+                return keep_alive
+            try:
+                await writer.drain()
+                async for chunk in chunks:
+                    if not chunk:
+                        continue                   # a zero-length chunk would end the body early
+                    writer.write(f"{len(chunk):x}\r\n".encode() + chunk + b"\r\n")
+                    await writer.drain()
+                writer.write(b"0\r\n\r\n")
+                await writer.drain()
+            except (ConnectionResetError, BrokenPipeError):
+                return False
+            return keep_alive
+        finally:
+            close = getattr(chunks, "aclose", None)
+            if close is not None:
+                try:
+                    await close()
+                except Exception:
+                    log.exception("closing a streamed response for %s failed", request.peer)
 
 
 def json_body(body: bytes) -> dict:

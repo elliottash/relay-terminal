@@ -87,7 +87,11 @@ def provider_config(request: dict) -> ProviderConfig:
     # Plain HTTP to a loopback host is a local model server: no key exists, none is looked up and
     # none is sent, whatever the request carried. Anything else keeps the rule below.
     local = localmodels.provider_fields(preset.id if preset else None, base_url, model)
-    if local:
+    # Relay Free (protocol 13.9) has no key either: the transport takes a token before each call.
+    # Only the preset's own endpoint is hosted; a request that names it and points elsewhere is a
+    # custom endpoint that needs a key like any other.
+    is_hosted = bool(preset is not None and preset.hosted and base_url == preset.base_url)
+    if local or is_hosted:
         api_key = ""
     elif not api_key and request.get("use_stored_key"):
         # The key never crosses the frontend pipe in this path.
@@ -101,7 +105,9 @@ def provider_config(request: dict) -> ProviderConfig:
             raise ValueError(f"No stored key for {provider_name(preset_id, base_url)}. "
                              "Import from Warp or enter a key.")
     config = ProviderConfig(base_url, model, api_key, extra,
-                            localmodels.clamp_max_tokens(request.get("max_tokens", AUTOMATIC_OUTPUT_TOKENS), local), **local)
+                            localmodels.clamp_max_tokens(
+                                request.get("max_tokens", AUTOMATIC_OUTPUT_TOKENS), local),
+                            hosted=is_hosted, **local)
     config.validate()
     return config
 

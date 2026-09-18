@@ -19,7 +19,13 @@ from .presets import (PRESETS, TIER_LABELS, TIERS, apply_effort, effort_style, m
                       provider_tier_model, tier_default, tier_fallbacks, validate_effort,
                       validate_tier)
 from .provider import ProviderConfig
-from . import localmodels
+from . import hosted, localmodels
+
+
+def _hosted(preset_id) -> bool:
+    """Whether a preset id names Relay's own hosted service (the relay-free preset)."""
+    preset = PRESETS.get(preset_id) if isinstance(preset_id, str) else None
+    return bool(preset is not None and preset.hosted)
 
 
 def _preset(preset_id):
@@ -97,6 +103,12 @@ VISION_DEFAULTS: dict[str, tuple[str, str, dict]] = {
 # Route assist keeps its fixed fast model whatever the tiers say: the routing budget is under a second
 # and Gemini 3.5 Flash-Lite measured 0.5-0.6 s against 2.3-4.9 s for 3.8 Flash. See route_assist.py.
 ROUTE_ASSIST_DEFAULT = ("openrouter", "google/gemini-3.5-flash-lite", {})
+# Where routing goes when that OpenRouter key is not stored, per main preset. A pane on Relay Free
+# has no key at all, and routing on the main model would spend the day's allowance on a job the
+# gateway's Lite role exists for; with an OpenRouter key present the default above still wins.
+ROUTE_ASSIST_DEFAULTS: dict[str, tuple[str, str, dict]] = {
+    "relay-free": ("relay-free", "relay-lite", {}),
+}
 
 
 def tier_catalog() -> dict:
@@ -318,13 +330,19 @@ class RoleResolver:
                         tier, note)
 
     def _key_for(self, preset_id: str | None) -> str:
+        if localmodels.is_local_id(preset_id) or _hosted(preset_id):
+            # A `local:` id is not a keyring name, and keystore refuses it; Relay Free has no key
+            # to look up, its transport takes a token (hosted.py) and leaves it in the main
+            # config's api_key, which is not a key to hand on.
+            return ""
         if preset_id and preset_id == self.main_preset_id and self.main_config.api_key:
             return self.main_config.api_key
-        if localmodels.is_local_id(preset_id):
-            return ""           # a `local:` id is not a keyring name, and keystore refuses it
         return self.key_lookup(preset_id) if preset_id else ""
 
     def has_key(self, preset_id: str) -> bool:
+        """Whether a tier on this preset can run: a stored key, or Relay Free where it works."""
+        if _hosted(preset_id):
+            return hosted.available()
         return bool(self._key_for(preset_id))
 
     def _build(self, role: str, preset_id: str | None, base_url: str, model: str, extra: dict,
@@ -333,7 +351,10 @@ class RoleResolver:
         # A model server on this machine has no key and needs none. The test is the URL (plain HTTP
         # to a loopback host), never the missing key: an https endpoint without one still falls back.
         local = localmodels.provider_fields(preset_id, base_url, model)
-        if not key and not local:
+        # Relay Free has none either: its transport takes a token. It is usable only where the
+        # token can be made (cryptography imports), and otherwise falls back like a missing key.
+        is_hosted = _hosted(preset_id) and hosted.available()
+        if not key and not local and not is_hosted:
             where = preset_id or base_url
             return self._main(role, "fallback",
                               f"{LABELS[role]}: no stored key for {where}; using the main agent.")
@@ -342,7 +363,8 @@ class RoleResolver:
         if effort is not None:
             extra, _ = apply_effort(extra, effort_style(preset, extra, base_url), effort)
         config = ProviderConfig(base_url, model, "" if local else key, extra,
-                                localmodels.clamp_max_tokens(self.main_config.max_tokens, local), **local)
+                                localmodels.clamp_max_tokens(self.main_config.max_tokens, local),
+                                hosted=is_hosted, **local)
         config.validate()
         return Resolved(role, config, preset_id, effort, source, tier=tier)
 
@@ -424,17 +446,24 @@ class RoleResolver:
         tier = ROLE_TIERS.get(role)
         if tier is not None:
             return self._main(role, tier="main") if tier == "main" else self._tier(role, tier, "default")
-        entry = VISION_DEFAULTS.get(self.main_preset_id or "") if role == "vision" \
-            else ROUTE_ASSIST_DEFAULT if role == "route_assist" else None
-        if entry is None:
-            return self._main(role)
-        preset_id, model, extra = entry
-        preset = PRESETS[preset_id]
-        resolved = self._build(role, preset_id, preset.base_url, model, dict(extra), None, "default")
-        if resolved.source == "fallback":
-            # Built-in defaults are implicit: a missing key quietly means "use the main agent".
-            return self._main(role)
-        return resolved
+        if role == "vision":
+            candidates = [VISION_DEFAULTS.get(self.main_preset_id or "")]
+        elif role == "route_assist":
+            # The fixed fast model first, then the main preset's own routing model (Relay Free's
+            # Lite role); a pane on Relay Free with an OpenRouter key stored still routes there.
+            candidates = [ROUTE_ASSIST_DEFAULT, ROUTE_ASSIST_DEFAULTS.get(self.main_preset_id or "")]
+        else:
+            candidates = []
+        for entry in candidates:
+            if entry is None:
+                continue
+            preset_id, model, extra = entry
+            preset = PRESETS[preset_id]
+            resolved = self._build(role, preset_id, preset.base_url, model, dict(extra), None, "default")
+            if resolved.source != "fallback":
+                return resolved
+        # Built-in defaults are implicit: a missing key quietly means "use the main agent".
+        return self._main(role)
 
     # ----- api --------------------------------------------------------------------------
     def resolve(self, role: str) -> Resolved:

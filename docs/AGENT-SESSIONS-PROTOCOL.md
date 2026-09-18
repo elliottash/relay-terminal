@@ -1138,6 +1138,62 @@ keeps a second copy of the backend's tables. The keys modal lists a preset per p
 ("Kimi · K3"); the roles modal chooses a *provider* and uses `provider`, adding `· <plan>` only when two
 presets of the same company are both offered.
 
+Since v2.9 (2026-09-18) every row also carries `hosted` (`true` only for Relay Free, 13.9). The Relay
+Free row differs from the others in four fields: `has_stored_key` is always `false` and `key_source`
+is `"included"` (nothing is stored and nothing can be; Add and Remove do not apply), `available`
+says whether this worker can use it at all (`python3-cryptography` imports), and `quota` is the
+last `{limit, used, resets_at}` the worker saw, or `null` before the first exchange. `group` is
+`"included"`, which the modal lists first. `test_key {preset: "relay-free"}` works: it makes one
+real call through the gateway with a token, and no key is looked up.
+
+### 13.9 Relay Free: the hosted provider (v2.9, 2026-09-18)
+
+Relay Free is the `relay-free` preset (owner decision 2026-09-18): an included, quota-limited
+allowance through Relay's own gateway at `https://api.relay-terminal.ai/v1`, so a fresh install's
+first ask works before any key is stored. The gateway speaks the same OpenAI shape as every other
+provider and names its models after the tiers (`relay-main`, `relay-flash`, `relay-lite`), so
+`configure {preset: "relay-free", use_stored_key: true}` is all the GUI sends: no key is looked up
+and none is required (`ProviderConfig.hosted`). The tiers stay on Relay Free (13.7), and `route_assist`
+resolves to `relay-lite` when the main preset is Relay Free and no OpenRouter key is stored. Reasoning
+is medium and below (owner, 2026-09-18): the row's `efforts` are `["low", "medium"]` (effort style
+`relay`), Main defaults to medium and Flash to low, and the gateway clamps any higher request to
+medium rather than refusing it.
+
+**How the worker authenticates.** An X25519 installation key of its own (keyring attribute
+`relay-free-identity`, else `$XDG_DATA_HOME/relay/hosted/identity.key`, mode 0600; separate from
+the remote identity, so regenerating either never breaks the other) proves itself to the gateway
+(`POST /v1/challenge` → HMAC-SHA256 over the challenge keyed by the X25519 shared secret →
+`POST /v1/register`) and receives a short-lived bearer token. The token lives in the worker's
+memory only, is refreshed when missing or within five minutes of expiry, and is retried exactly once
+after an HTTP 401. It never crosses this pipe and is never logged. `RELAY_HOSTED_URL` overrides the
+gateway address (tests point it at a loopback HTTP server).
+
+| Message | Reply | Meaning |
+|---|---|---|
+| `hosted_quota {id?}` | `hosted_quota {id, limit, used, resets_at}` or `error {id, text, code?, resets_at?}` | `GET /v1/quota` on a background thread: the live allowance for the keys modal and the pane's chip |
+
+`hosted_quota` is also emitted **without an `id`** after every model call that went through the
+gateway (the pane's turns, the tiers' side calls, the key test), read from the reply's
+`X-Relay-Quota-Limit`, `-Used` and `-Resets-At` headers, including on a refusal. `limit` and `used`
+are tokens for the day; `resets_at` is unix seconds.
+
+**Refusals.** A gateway error body is Relay's own JSON, `{"error": {"code, message, resets_at"}}`,
+and is the one provider body the worker reads: `code` picks the sentence the user sees, `message`
+is shown only for a code with no sentence of its own, truncated, and nothing else of it is echoed.
+The turn's `error` event then carries `code` and `resets_at` in addition to `text`:
+
+| `code` | HTTP | Meaning |
+|---|---|---|
+| `quota_exhausted` | 429 | the day's allowance is used; `resets_at` says when it returns |
+| `rate_limited` | 429 | too many requests in a short time |
+| `free_unavailable` | 503 | the gateway is closed (spend ceiling, upstream outage) |
+| `token_expired` | 401 | the token was refused; the worker has already registered again and retried once |
+| `bad_request` | 400 | the gateway refused the request's shape |
+
+`error` events from every other provider carry neither field. Without `python3-cryptography` the
+row is `available: false`, a turn on it fails with "Relay Free needs python3-cryptography", and no
+other provider is affected.
+
 ### 13.10 The output token limit is per model (v2.9, 2026-09-18)
 
 `max_tokens` on `configure` and `set_model` is **0, or 256–131072**. `0` is the default and means

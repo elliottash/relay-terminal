@@ -2,12 +2,13 @@
      edit the card files and regenerate. -->
 # Board
 
-162 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+180 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (100)
+## Features (107)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
+| `#87HB` | [The parts of tmux worth having in Relay itself](features/2026-09-18-tmux-like-features-in-relay.md) | inbox |  |  |  |
 | `#8E4Q` | [How far the switchboard aesthetic goes inside the app](features/2026-09-17-switchboard-aesthetic.md) | discussing |  | 0/7 |  |
 | `#KKYC` | [Clicking a folder: open the explorer or navigate there?](features/2026-09-18-clicking-a-folder-opens-or-navigates.md) | discussing | owner |  |  |
 | `#GDQN` | [Two-way sync between the Switchboard and GitHub Issues](features/2026-09-17-github-issues-sync.md) | ready |  |  |  |
@@ -21,7 +22,8 @@
 | `#4TNY` | [Text editing for text files: word wrap, syntax highlighting, find](features/2026-09-18-text-editing-for-text-files.md) | ready | agent |  |  |
 | `#WQFS` | [In-app PDF rendering](features/2026-09-18-in-app-pdf-rendering.md) | ready | agent |  |  |
 | `#W5N2` | [Remote access from a phone and multiplayer shared terminals](features/2026-09-17-remote-phone-and-multiplayer.md) | in-progress | agent |  | [1](threads/W5N2.md) |
-| `#TK9C` | [Concise tool-call lines, with the detail one click away](features/2026-09-18-concise-tool-call-lines.md) | in-progress | agent | 3/4 |  |
+| `#0VT4` | [One pane model, two views: the phone draws the desktop's pane](features/2026-09-18-remote-pane-state.md) | in-progress | agent | 10/11 |  |
+| `#HG7K` | [Relay Free: the agent works on a fresh install, with no API key](features/2026-09-18-relay-free-hosted-inference.md) | in-progress |  | 0/6 |  |
 | `#803C` | [One "new pane" button: a pane on the right, placed by dragging](features/needs_qa_llm/2026-09-18-one-new-pane-button.md) | needs-qa-llm | agent |  |  |
 | `#KDK9` | [The Switchboard cleans itself up: `board_cleanup`, its three tools and its changelog](features/needs_qa_llm/2026-09-18-switchboard-cleanup-button.md) | needs-qa-llm | agent |  |  |
 | `#C1HH` | [Agent drives interactive programs in the visible pane, with take-over](features/needs_qa_llm/2026-09-17-agent-delegate-and-take-over.md) | needs-qa-llm | agent |  |  |
@@ -31,6 +33,7 @@
 | `#GWXM` | [Keyboard shortcut to step through files, folders and links in output](features/needs_qa_llm/2026-09-17-keyboard-jump-to-output-links.md) | needs-qa-llm | agent |  |  |
 | `#YR21` | [Detect programs waiting for input from the screen text (new engine)](features/needs_qa_llm/2026-09-17-screen-text-input-detection.md) | needs-qa-llm | agent |  |  |
 | `#NY7Z` | [Voice transcription mode (microphone button, hold Right Alt)](features/needs_qa_llm/2026-09-17-voice-transcription.md) | needs-qa-llm | agent |  |  |
+| `#E01Z` | [The title-bar buttons are lit while their pane is open, and close it on a second click](features/needs_qa_llm/2026-09-18-lit-title-bar-buttons.md) | needs-qa-llm | agent |  |  |
 | `#R8QM` | [Alt+R shows and hides the reasoning, and an F-key scheme is proposed](features/needs_qa_llm/2026-09-18-reasoning-panel-shortcut.md) | needs-qa-llm | agent |  |  |
 | `#JKW4` | [Skills run as `/name` in the prompt box](features/needs_qa_llm/2026-09-18-skills-as-slash-commands.md) | needs-qa-llm | agent |  |  |
 | `#BPK3` | [Show agent output live while a program owns the terminal](features/needs_qa_llm/2026-09-17-agent-output-while-program-runs.md) | needs-qa-llm | agent |  |  |
@@ -81,6 +84,7 @@
 | `#23XM` | [Switchboard phase 0: card format, tasks, threads and `relay-board` tooling](features/needs_qa_llm/2026-09-17-switchboard-phase0.md) | needs-qa-llm | agent |  |  |
 | `#QVVA` | [Thinking stream, "✦ thought for N s", "✦ N tool calls" links and the relay:// handler](features/needs_qa_llm/2026-09-17-thinking-and-tool-call-summaries.md) | needs-qa-llm | agent |  |  |
 | `#80FZ` | [Windows, tabs and panes with Chrome-style shortcuts](features/needs_qa_llm/2026-09-17-windows-tabs-panes.md) | needs-qa-llm | agent |  |  |
+| `#TK9C` | [Concise tool-call lines, with the detail one click away](features/needs_qa_llm/2026-09-18-concise-tool-call-lines.md) | needs-qa-llm | agent | 4/4 |  |
 | `#0JA7` | [Colour themes](features/needs_qa_llm/2026-09-17-color-themes.md) | needs-qa-llm | agent |  |  |
 | `#D60R` | [File explorer: right-click menu, navigate here, and a toggle shortcut](features/needs_qa_llm/2026-09-17-explorer-right-click-and-toggle.md) | needs-qa-llm | agent |  |  |
 | `#K13B` | [Update the website for the new engine and features](features/needs_qa_llm/2026-09-17-website-update-engine-features.md) | needs-qa-llm | agent |  |  |
@@ -103,13 +107,16 @@
 | `#SPBN` | [Distinct headers or colors for each pane type](features/needs_qa_llm/2026-09-18-distinct-headers-or-colors-for-each-pane-type.md) | needs-qa-llm | agent |  | [1](threads/SPBN.md) |
 | `#WD83` | [Subagents in one tabbed pane, a tab per subagent](features/needs_qa_llm/2026-09-18-subagents-in-one-tabbed-pane-a-tab-per-subagent.md) | needs-qa-llm | agent |  | [1](threads/WD83.md) |
 | `#D8J3` | [The agent hands a command to the user's terminal: run it, or put it in the prompt box](features/needs_qa_llm/2026-09-18-agent-hands-commands-to-the-terminal.md) | needs-qa-llm | agent | 8/9 |  |
-| `#S5SH` | [SSH and mosh sessions: the prompt box, the agent and the reply work on the remote host](features/needs_qa_llm/2026-09-18-ssh-and-mosh-sessions.md) | needs-qa-llm | agent | 12/12 |  |
+| `#S5SH` | [SSH and mosh sessions: the prompt box, the agent and the reply work on the remote host](features/needs_qa_llm/2026-09-18-ssh-and-mosh-sessions.md) | needs-qa-llm | agent | 14/14 |  |
+| `#C0PY` | [Copy on highlight works in the info pane and every other read-only pane, not only the terminal](features/needs_qa_llm/2026-09-18-copy-on-highlight-in-panes.md) | needs-qa-llm | agent | 6/6 |  |
 | `#QHR1` | [Tasks mappable to subagents](features/needs_qa_llm/2026-09-18-tasks-mappable-to-subagents.md) | needs-qa-llm | agent |  |  |
+| `#KP4M` | ["waiting for N jobs . . ." in the prompt box](features/needs_qa_llm/2026-09-18-waiting-for-jobs.md) | needs-qa-llm | agent | 5/5 |  |
+| `#V7QD` | ["waiting for N subagents . . ." in the prompt box](features/needs_qa_llm/2026-09-18-waiting-for-subagents.md) | needs-qa-llm | agent | 4/4 |  |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | agent |  |  |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 
-## Bugs (60)
+## Bugs (71)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -124,7 +131,9 @@
 | `#P7QK` | [Model roles names providers, offers only the ones you hold a key for, and gives a tier that provider's tier model](changes/needs_qa_llm/2026-09-18-model-roles-provider-names.md) | needs-qa-llm | agent |  |  |
 | `#K7RY` | [Actions, Options and Resume each get one Ctrl+Shift key](changes/needs_qa_llm/2026-09-18-actions-and-options-keys.md) | needs-qa-llm | agent |  |  |
 | `#V4NA` | [The Actions pane and the Options pane](changes/needs_qa_llm/2026-09-18-actions-pane-and-options-pane.md) | needs-qa-llm | agent |  |  |
+| `#SRM2` | [Actions is red-orange, its own hue](changes/needs_qa_llm/2026-09-18-actions-red-orange.md) | needs-qa-llm | agent |  |  |
 | `#TW84` | [Agent replies wrap between words, not mid-word](changes/needs_qa_llm/2026-09-18-agent-replies-wrap-between-words.md) | needs-qa-llm | agent |  |  |
+| `#CSMK` | [Alt+I opens the ⓘ view, and a session row says when it was closed](changes/needs_qa_llm/2026-09-18-alt-i-and-closed-rows.md) | needs-qa-llm | agent |  |  |
 | `#N3WD` | [The thinking and queue bubbles move the terminal up instead of covering it](changes/needs_qa_llm/2026-09-18-bubbles-take-the-column.md) | needs-qa-llm | agent |  |  |
 | `#P43F` | [Button labels painted past the button's edge](changes/needs_qa_llm/2026-09-18-button-labels-clipped.md) | needs-qa-llm | agent |  |  |
 | `#T4JV` | [The "command not found" note has to prove a command was meant](changes/needs_qa_llm/2026-09-18-command-not-found-under-a-request.md) | needs-qa-llm | agent |  |  |
@@ -133,8 +142,12 @@
 | `#C6YX` | [Four model commands in the composer, and the Flash role stops calling itself "fast"](changes/needs_qa_llm/2026-09-18-model-tier-commands-and-flash-naming.md) | needs-qa-llm | agent |  |  |
 | `#X2PC` | [Two close buttons on top of each other in the Settings pane](changes/needs_qa_llm/2026-09-18-one-close-button-per-pane.md) | needs-qa-llm | agent |  |  |
 | `#C4M8` | [The queue strip is one list: steers are rows like the rest](changes/needs_qa_llm/2026-09-18-one-queue-list.md) | needs-qa-llm | agent |  |  |
+| `#P2WD` | [Options and Actions are two panes, open at the same time](changes/needs_qa_llm/2026-09-18-options-and-actions-side-by-side.md) | needs-qa-llm | agent |  |  |
 | `#H7KP` | [Pane buttons that are always there, and a header you can drag](changes/needs_qa_llm/2026-09-18-pane-buttons-and-header-drag.md) | needs-qa-llm | agent |  |  |
+| `#H8UP` | [The prompt box remembers across a restart, and every pane shares one history](changes/needs_qa_llm/2026-09-18-prompt-history-persists.md) | needs-qa-llm | agent |  |  |
 | `#B2XF` | [Every skill reaches the prompt by name, and ~/.claude's nesting is indexed](changes/needs_qa_llm/2026-09-18-skills-every-name-in-the-prompt.md) | needs-qa-llm | agent |  |  |
+| `#HECG` | [Solarized Dark is removed](changes/needs_qa_llm/2026-09-18-solarized-dark-removed.md) | needs-qa-llm | agent |  |  |
+| `#TN4P` | [The agent waited to be asked before using the user's terminal](changes/needs_qa_llm/2026-09-18-the-agent-waits-to-be-asked-in-the-terminal.md) | needs-qa-llm | agent |  |  |
 | `#WFJM` | [The Switchboard asks on the pane's provider, not on a settings file half a model behind](changes/needs_qa_llm/2026-09-18-the-board-asks-on-the-panes-provider.md) | needs-qa-llm | agent |  |  |
 | `#Y4GE` | [Copy from the reasoning bubble; withdraw a steer that is still waiting](changes/needs_qa_llm/2026-09-18-thinking-copy-and-steer-withdraw.md) | needs-qa-llm | agent |  |  |
 | `#HEFA` | [The turn clock gets a place of its own; toasts queue; a hint counts when it is seen](changes/needs_qa_llm/2026-09-18-toasts-and-turn-clock.md) | needs-qa-llm | agent |  |  |
@@ -142,12 +155,14 @@
 | `#9JYK` | [A signal is a quit: SIGTERM saves, and a quit cleans up after its panes](changes/needs_qa_llm/2026-09-18-a-signal-is-a-quit.md) | needs-qa-llm | agent |  |  |
 | `#9YB2` | [A card's title and issue text are edited on the card, and Request is now Issue](changes/needs_qa_llm/2026-09-18-edit-card-title-and-issue.md) | needs-qa-llm | agent |  |  |
 | `#JH5M` | [Idle panes cost less: a quiet background tab polls slower, and a tick no longer opens /proc](changes/needs_qa_llm/2026-09-18-idle-panes-cost-less.md) | needs-qa-llm | agent |  |  |
+| `#K7VJ` | [The light themes' terminal and agent colours are colours, not greys](changes/needs_qa_llm/2026-09-18-light-themes-destination-colours.md) | needs-qa-llm | agent |  |  |
 | `#K9SR` | [New panes keep the Main agent](changes/needs_qa_llm/2026-09-18-new-panes-keep-the-main-agent.md) | needs-qa-llm | agent |  |  |
 | `#D5MC` | [One icon everywhere: the window header and the web client wear the app's mark](changes/needs_qa_llm/2026-09-18-one-icon-everywhere.md) | needs-qa-llm | agent |  |  |
 | `#27YQ` | [The output token limit defaults to 32K](changes/needs_qa_llm/2026-09-18-output-token-limit-defaults-to-32k.md) | needs-qa-llm | agent |  |  |
 | `#J314` | [A pane that is not being typed in never takes the keyboard](changes/needs_qa_llm/2026-09-18-panes-keep-their-own-keyboard.md) | needs-qa-llm | agent |  |  |
 | `#9V1F` | [Queued items are edited in the prompt box, and the highlighted top item holds the queue](changes/needs_qa_llm/2026-09-18-queue-items-edit-in-the-prompt-box.md) | needs-qa-llm | agent |  |  |
 | `#SB7K` | [Scrollback survives a quit and restart](changes/needs_qa_llm/2026-09-18-scrollback-survives-restart.md) | needs-qa-llm | agent |  |  |
+| `#WU4U` | [Relay compiles and runs against Qt 6, and the Ubuntu 26.04 `.deb` builds](changes/needs_qa_llm/2026-09-18-relay-builds-against-qt6.md) | needs-qa-llm | agent |  |  |
 | `#XXP5` | [Retire KonsolePart: Relay's own engine is the only terminal](changes/needs_qa_llm/2026-09-18-retire-konsolepart.md) | needs-qa-llm | agent |  |  |
 | `#SP4N` | [Settings as a full pane, with sub-tabs and one search over settings and actions](changes/needs_qa_llm/2026-09-18-settings-as-a-full-pane.md) | needs-qa-llm | agent |  |  |
 | `#90JF` | [Check that a terminal command will run before it is sent](changes/needs_qa_llm/2026-09-17-pre-submit-run-check.md) | needs-qa-llm |  |  |  |
@@ -165,6 +180,8 @@
 | `#GDWE` | [@ file completion runs synchronous git on the GUI thread (multi-second block)](changes/needs_qa_llm/2026-09-17-file-completion-runs-synchronous-git-on-the-gui.md) | needs-qa-llm |  |  | [2](threads/GDWE.md) |
 | `#0C7V` | [Single click opens folders in the explorer pane (Dolphin style)](changes/needs_qa_llm/2026-09-17-single-click-folders.md) | needs-qa-llm | agent |  |  |
 | `#SQAM` | [Provider stalls have no visible progress, no retry and no log](changes/needs_qa_llm/2026-09-17-provider-stalls-and-no-logs.md) | needs-qa-llm | agent |  |  |
+| `#G5MK` | [A step cut off at the output limit threw the whole turn away](changes/needs_qa_llm/2026-09-18-a-step-cut-off-at-the-output-limit.md) | needs-qa-llm | agent |  |  |
+| `#Z79Y` | [The output token limit is 128K where 128K is allowed, and each model's own number everywhere else](changes/needs_qa_llm/2026-09-18-output-token-limit-is-per-model.md) | needs-qa-llm | agent |  |  |
 | `#FW3Z` | [Cleanup quick wins: dead-code removal, logging for silent failures, stale build dirs, docs index, deploy.sh](changes/needs_qa_llm/2026-09-17-cleanup-quick-wins-dead-code-removal-logging-for.md) | needs-qa-llm |  |  | [3](threads/FW3Z.md) |
 | `#VXTF` | [A Markdown preview should label its views "source (MD)" and "rendered (MD)"](changes/needs_qa_llm/2026-09-18-markdown-view-labels-say-md.md) | needs-qa-llm | agent |  |  |
 | `#S1JP` | [A link clicked inside a file preview replaces the file with no way back](changes/needs_qa_llm/2026-09-18-preview-link-has-no-way-back.md) | needs-qa-llm | agent |  |  |

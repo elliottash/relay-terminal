@@ -67,9 +67,10 @@ class PresetTableTests(unittest.TestCase):
         gemini, glm = P.PRESETS["gemini"], P.PRESETS["glm-coding"]
         self.assertGreater(gemini.context_window, glm.context_window)
         self.assertLessEqual(gemini.max_output * 2, glm.max_output)
-        # An aggregator picks the endpoint and the caps differ across them, so it claims no number
-        # Relay cannot check.
+        # An aggregator picks the endpoint and the caps differ across them; so does a gateway that
+        # rebuilds the request. Neither claims a number Relay cannot check.
         self.assertEqual(P.PRESETS["openrouter"].max_output, P.DEFAULT_MAX_OUTPUT)
+        self.assertEqual(P.PRESETS["relay-free"].max_output, P.DEFAULT_MAX_OUTPUT)
 
     def test_automatic_means_the_models_own_cap_and_a_pinned_number_never_exceeds_it(self):
         gemini = P.PRESETS["gemini"]
@@ -92,12 +93,50 @@ class PresetTableTests(unittest.TestCase):
         self.assertEqual(sorted(by_group["subscription"]), ["glm-coding", "kimi-code", "minimax"])
         self.assertEqual(by_group["aggregator"], ["openrouter"])
         self.assertEqual(sorted(by_group["payg"]), ["anthropic", "gemini", "glm", "kimi", "openai"])
+        self.assertEqual(by_group["included"], ["relay-free"])
+
+    # ----- Relay Free (owner decision 2026-09-18) --------------------------------------------
+    def test_relay_free_is_the_one_hosted_preset_and_is_listed_first(self):
+        free = P.PRESETS["relay-free"]
+        self.assertTrue(free.hosted)
+        self.assertEqual([p.id for p in P.PRESETS.values() if p.hosted], ["relay-free"])
+        # The keys modal groups by GROUPS in order; "Included" leads, because a fresh install runs
+        # on it before any key is stored.
+        self.assertEqual(P.GROUPS[0], "included")
+        self.assertEqual(P.GROUP_LABELS["included"], "Included")
+        self.assertEqual((free.group, free.provider, free.plan), ("included", "Relay", "Included"))
+        self.assertEqual(free.base_url, "https://api.relay-terminal.ai/v1")
+        self.assertEqual(free.key_url, "https://relay-terminal.ai/free.html")
+        # Medium reasoning and below (owner, 2026-09-18): the picker offers Low and Medium, the
+        # default is Medium, and a higher level maps onto medium exactly as the gateway clamps it.
+        self.assertEqual(free.effort_style, "relay")
+        self.assertEqual(free.to_dict()["efforts"], ["low", "medium"])
+        self.assertEqual(free.extra, {"reasoning_effort": "medium"})
+        for level in ("high", "max"):
+            self.assertEqual(P.apply_effort({}, "relay", level)[0], {"reasoning_effort": "medium"})
+        self.assertEqual(P.apply_effort({}, "relay", "low")[0], {"reasoning_effort": "low"})
+        self.assertEqual(P.infer_effort("relay", {"reasoning_effort": "medium"}), "medium")
+        self.assertEqual(P.infer_effort("relay", {"reasoning_effort": "low"}), "low")
+        self.assertEqual(P.TIER_DEFAULTS["relay-free"]["flash"][2], {"reasoning_effort": "low"})
+        # It is neither a local server nor a plain BYOK row; to_dict says which it is.
+        self.assertFalse(free.local)
+        self.assertTrue(free.to_dict()["hosted"])
+        self.assertFalse(P.PRESETS["kimi"].to_dict()["hosted"])
+
+    def test_relay_free_tiers_are_the_gateways_three_roles(self):
+        table = P.TIER_DEFAULTS["relay-free"]
+        self.assertEqual({tier: entry[:2] for tier, entry in table.items()},
+                         {"main": ("relay-free", "relay-main"), "flash": ("relay-free", "relay-flash"),
+                          "lite": ("relay-free", "relay-lite")})
+        # Nothing steps out to another provider: that would need the key the row exists to do without.
+        for tier in P.PROVIDER_TIERS:
+            self.assertEqual(P.provider_tier_model("relay-free", tier)[0], f"relay-{tier}")
 
     def test_every_preset_names_its_company_and_its_plan(self):
         # The roles modal picks a provider, so it shows the company, never the preset's model name.
-        expected = {"kimi": "Kimi", "kimi-code": "Kimi", "glm": "Z.AI (GLM)", "glm-coding": "Z.AI (GLM)",
-                    "minimax": "MiniMax", "openrouter": "OpenRouter", "openai": "OpenAI (ChatGPT)",
-                    "anthropic": "Anthropic (Claude)", "gemini": "Google (Gemini)"}
+        expected = {"relay-free": "Relay", "kimi": "Kimi", "kimi-code": "Kimi", "glm": "Z.AI (GLM)",
+                    "glm-coding": "Z.AI (GLM)", "minimax": "MiniMax", "openrouter": "OpenRouter",
+                    "openai": "OpenAI (ChatGPT)", "anthropic": "Anthropic (Claude)", "gemini": "Google (Gemini)"}
         self.assertEqual({p.id: p.to_dict()["provider"] for p in P.PRESETS.values()}, expected)
         # Two presets of one company are told apart by their plan, so neither can be nameless.
         shared = {name for name in expected.values() if list(expected.values()).count(name) > 1}

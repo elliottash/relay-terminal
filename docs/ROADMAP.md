@@ -27,7 +27,8 @@ milestone; four of six items depend on its integration.
 1. A terminal where one prompt runs shell commands or asks an agent, and the agent's work
    shows up in the terminal itself.
 2. The real terminal stays intact: vim, less, ssh, password prompts and TUIs get normal keys.
-3. Bring your own key, any OpenAI-compatible provider, no Relay account or server.
+3. Bring your own key, any OpenAI-compatible provider, no Relay account. An included allowance
+   (Relay Free) covers the first ask on a fresh install; it never replaces BYOK.
 4. Keyboard first, with shortcuts users can change (and ask the agent to change).
 5. Linux first, then macOS and Windows on a Relay-owned terminal engine.
 
@@ -40,8 +41,8 @@ milestone; four of six items depend on its integration.
 |---|---|---|
 | **No Konsole fork**, and since 2026-09-18 no Konsole at all: Relay's own engine is the terminal. | Screen text, click signals and alternate-screen state are Relay's to provide; KDE Frameworks is no longer a runtime dependency | [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section A; [ENGINE.md](ENGINE.md) |
 | **No per-action approvals.** Agent tools run immediately; every action is previewed inline and Stop is always available. | Safety relies on previews, guards, limits and clear warnings. opencode-style permission rules are not planned. | commit `1ad28fa`; [OPENCODE-NOTES.md](OPENCODE-NOTES.md) status header |
-| **BYOK only.** Keys come from environment variables or the desktop keyring. | No hosted models, no billing, no Relay account. A model server on this machine needs no key, and Relay neither hosts nor bills one (`#24XJ`, [LOCAL-MODELS.md](LOCAL-MODELS.md)) | `backend/relay_core/keystore.py` |
-| **No telemetry.** No analytics, crash reporting or Relay server. | Any update check must be opt-in | `site/index.html` privacy section; [DISTRIBUTION-RESEARCH.md](DISTRIBUTION-RESEARCH.md) section 1 |
+| **BYOK first, Relay Free included** (owner, 2026-09-18; before that, BYOK only). Keys come from environment variables or the desktop keyring. A fresh install with no key lands on Relay Free, a quota-limited hosted provider whose gateway holds the upstream keys. | A BYOK request never touches Relay's server; Relay Free is one provider row, off the moment another provider is chosen. No billing, no account: an installation keypair is the only identity (`#HG7K`, [RELAY-FREE.md](RELAY-FREE.md)). A model server on this machine needs no key either (`#24XJ`, [LOCAL-MODELS.md](LOCAL-MODELS.md)) | `backend/relay_core/keystore.py`, `backend/relay_core/hosted.py`, `gateway/` |
+| **No telemetry.** No analytics or crash reporting. The Relay-operated services (the remote rendezvous, the Relay Free gateway) keep request metadata only, never content, and only see traffic from the feature that uses them. | Any update check must be opt-in | `site/index.html` privacy section; [DISTRIBUTION-RESEARCH.md](DISTRIBUTION-RESEARCH.md) section 1 |
 | The agent drives the user's **visible** pane, not a hidden one. | Delegate/take-over needs screen reading in the visible terminal | `issues/features/2026-09-17-agent-delegate-and-take-over.md` |
 | File panes are plain Qt, not KDE parts. | They already work on the future macOS/Windows path | `issues/features/needs_qa_llm/2026-09-17-file-explorer-and-preview-panes.md` |
 | Vertical tabs deferred; top tabs for now. | | `issues/features/2026-09-17-tab-placement-vertical-tabs.md` |
@@ -88,7 +89,8 @@ output open the desktop app; agent tools run without approval and are not sandbo
 
 - Forking or patching Konsole.
 - Per-action approval prompts for agent tools.
-- A Relay account, hosted models or a Relay server.
+- A Relay account or billing. Relay Free ([RELAY-FREE.md](RELAY-FREE.md)) is a hosted allowance
+  without either, and BYOK never routes through it.
 - Telemetry, analytics or crash reporting.
 - A browser-based terminal of its own. The browser shows a *desktop pane* as a remote
   control that acts and feels like the terminal (`REMOTE-PROTOCOL.md` section 16); it never
