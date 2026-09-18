@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "FilePanes.h"
+#include "RemoteFiles.h"
 #include "Theme.h"
 #include <QTextBlock>
 #include <QTextCursor>
@@ -592,7 +593,19 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     m_mode->setObjectName(QStringLiteral("filePreviewMode"));
     m_reload = headerButton(QStringLiteral("⟳"), QStringLiteral("Reload"));
     m_external = headerButton(QStringLiteral("↗"), QStringLiteral("Open with the default application"));
+    // A file on another machine (#S5SH). The chip is next to the title, before every button, so
+    // "this is not your disk" is read before anything is done to the file — and it stays there
+    // while the file is edited, which is the whole point of it.
+    m_hostChip = new QLabel;
+    m_hostChip->setObjectName(QStringLiteral("filePreviewHost"));
+    m_hostChip->setTextFormat(Qt::PlainText);
+    m_hostChip->hide();
+    m_save = headerButton(QStringLiteral("Save"), QStringLiteral("Save to the host (Ctrl+S)"));
+    m_save->setObjectName(QStringLiteral("filePreviewSave"));
+    m_save->hide();
     header->addWidget(m_title, 1);
+    header->addWidget(m_hostChip);
+    header->addWidget(m_save);
     header->addWidget(m_mode);
     header->addWidget(m_reload);
     header->addWidget(m_external);
@@ -677,7 +690,17 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
 
     connect(m_reload, &QToolButton::clicked, this, [this] { reload(); });
     connect(m_external, &QToolButton::clicked, this, [this] {
-        if (!m_path.isEmpty()) QDesktopServices::openUrl(QUrl::fromLocalFile(m_path));
+        if (!m_path.isEmpty() && !isRemote()) QDesktopServices::openUrl(QUrl::fromLocalFile(m_path));
+    });
+    // Editing a remote file follows the editable pane this project already has (PlanEditor): the
+    // Save button, Ctrl+S, and a ● in front of the title while there are unsaved edits.
+    connect(m_save, &QToolButton::clicked, this, [this] { save(); });
+    auto *saveShortcut = new QShortcut(QKeySequence::Save, this);
+    saveShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(saveShortcut, &QShortcut::activated, this, [this] { save(); });
+    connect(m_textView->document(), &QTextDocument::modificationChanged, this, [this](bool) {
+        updateTitleText();
+        if (onTitleChanged) onTitleChanged(title());   // the ● reaches the tab as well as the header
     });
     connect(m_mode, &QToolButton::clicked, this, [this] {
         if (m_kind == Kind::Markdown) {
@@ -709,7 +732,17 @@ FilePreview::~FilePreview() {
 }
 
 QString FilePreview::title() const {
-    return m_path.isEmpty() ? QStringLiteral("Preview") : QFileInfo(m_path).fileName();
+    // A remote file is named by its host and its whole path: "filly:/etc/nginx/nginx.conf". A bare
+    // "nginx.conf" in a tab would be indistinguishable from this machine's, which is the one thing
+    // this pane must never be (#S5SH).
+    const QString name = isRemote() ? relay::remote::displayName(m_remoteHost, m_remotePath)
+                       : m_path.isEmpty() ? QStringLiteral("Preview")
+                                          : QFileInfo(m_path).fileName();
+    return (isDirty() ? QStringLiteral("● ") : QString()) + name;
+}
+
+bool FilePreview::isDirty() const {
+    return m_editable && m_textView->document()->isModified();
 }
 
 QString FilePreview::text() const {
@@ -717,8 +750,17 @@ QString FilePreview::text() const {
 }
 
 bool FilePreview::open(const QString &path) {
+    if (relay::remote::isFileUrl(path)) return openRemote(path);
     const QFileInfo info(path);
     if (path.isEmpty() || !info.exists() || !info.isFile() || !info.isReadable()) return false;
+    setEditable(false);
+    m_remoteHost.clear();
+    m_remotePath.clear();
+    m_hostChip->hide();
+    m_pendingLine = 0;
+    if (m_remote) m_remote->cancel();
+    if (m_reconnect) m_reconnect->stop();
+    if (auto *button = findChild<QPushButton *>(QStringLiteral("filePreviewOpenExternal"))) button->show();
     const QString absolute = info.absoluteFilePath();
     const bool samePath = absolute == m_path;
     const int scroll = samePath ? m_textView->verticalScrollBar()->value() : 0;
@@ -757,6 +799,179 @@ bool FilePreview::open(const QString &path) {
     m_external->setEnabled(true);
     updateModeButton();
     if (onTitleChanged) onTitleChanged(title());
+    return true;
+}
+
+// ----- files on the host a terminal pane is logged into (#S5SH) --------------------------------
+
+bool FilePreview::openRemote(const QString &url) {
+    const relay::remote::FileRef ref = relay::remote::parseFileUrl(url);
+    if (!ref.ok) return false;
+    const QString name = relay::remote::displayName(ref.host, ref.path);
+    // Reloading is the one thing here that can lose an edit, so it asks first — the ⟳ button and
+    // a second click on the same path in the terminal both come through here.
+    if (isDirty()
+        && QMessageBox::warning(this, QStringLiteral("Reload"),
+                                QStringLiteral("Throw away your unsaved edits to %1?").arg(name),
+                                QMessageBox::Cancel | QMessageBox::Discard, QMessageBox::Cancel) != QMessageBox::Discard)
+        return false;
+
+    m_path = url;
+    m_remoteHost = ref.host;
+    m_remotePath = ref.path;
+    m_kind = Kind::None;
+    m_markdownSource = false;
+    setEditable(false);
+    m_pendingLine = 0;
+#ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
+    delete d->highlighter;
+    d->highlighter = nullptr;
+#endif
+    m_textView->clear();
+    m_textView->document()->setModified(false);
+    m_stack->setCurrentWidget(m_textView);
+    m_hostChip->setText(ref.host);
+    m_hostChip->setToolTip(QStringLiteral("This file is on %1 · Relay reads and writes it over the ssh connection this pane already has").arg(ref.host));
+    m_hostChip->show();
+    // The info page's "Open externally" would hand a remote path to this machine's applications.
+    if (auto *button = findChild<QPushButton *>(QStringLiteral("filePreviewOpenExternal"))) button->hide();
+    setNotice(QStringLiteral("Reading %1 from %2…").arg(QFileInfo(ref.path).fileName(), ref.host));
+    m_title->setToolTip(name);
+    updateTitleText();
+    m_reload->setEnabled(true);
+    m_external->setEnabled(false);   // the desktop cannot open a file that is not on this machine
+    updateModeButton();
+    if (onTitleChanged) onTitleChanged(title());
+
+    if (!m_remote) {
+        m_remote = new relay::remote::RemoteFile(this);
+        m_remote->onFetched = [this](const QByteArray &content, const relay::remote::FileStat &) { showRemoteText(content); };
+        m_remote->onFailed = [this](const QString &message, relay::remote::Conflict conflict, const relay::remote::FileStat &) {
+            remoteFailed(message, int(conflict));
+        };
+        m_remote->onSaved = [this](const relay::remote::FileStat &) {
+            m_textView->document()->setModified(false);
+            setNotice(QStringLiteral("Saved to %1 · %2").arg(m_remoteHost, QLocale().toString(QTime::currentTime(), QLocale::ShortFormat)));
+            updateTitleText();
+            if (onTitleChanged) onTitleChanged(title());
+            const QString said = m_notice;
+            QTimer::singleShot(4000, this, [this, said] { if (m_notice == said) setNotice(QString()); });
+        };
+    }
+    m_remote->setHost(ref.host, relay::remote::loginControlPath(ref.host));
+    m_remote->fetch(ref.path);
+    return true;
+}
+
+void FilePreview::showRemoteText(const QByteArray &content) {
+    m_textView->setPlainText(QString::fromUtf8(content));
+    m_textView->document()->setModified(false);
+#ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
+    delete d->highlighter;
+    d->highlighter = nullptr;
+    const KSyntaxHighlighting::Definition definition = d->repository.definitionForFileName(m_remotePath);
+    if (definition.isValid()) {
+        d->highlighter = new KSyntaxHighlighting::SyntaxHighlighter(m_textView->document());
+        KSyntaxHighlighting::Theme theme = d->repository.theme(QStringLiteral("Breeze Dark"));
+        if (!theme.isValid()) theme = d->repository.defaultTheme(KSyntaxHighlighting::Repository::DarkTheme);
+        d->highlighter->setTheme(theme);
+        d->highlighter->setDefinition(definition);
+    }
+#endif
+    // Always the text viewer, never the Markdown render: this pane is the editor for the file on
+    // the host, and a rendered document has nowhere to type.
+    m_kind = Kind::Text;
+    m_stack->setCurrentWidget(m_textView);
+    setEditable(true);
+    setNotice(QString());
+    if (m_pendingLine > 0) {
+        const int line = m_pendingLine;
+        m_pendingLine = 0;
+        goToLine(line);
+    }
+    updateTitleText();
+    if (onTitleChanged) onTitleChanged(title());
+}
+
+void FilePreview::remoteFailed(const QString &message, int conflict) {
+    if (conflict == int(relay::remote::Conflict::Changed) || conflict == int(relay::remote::Conflict::Vanished)) {
+        // The host's copy moved on between the fetch and the save, and nothing was written. The
+        // choice is the user's: their text over the top, or the host's file back in the pane.
+        QMessageBox box(QMessageBox::Warning, QStringLiteral("Save"), message, QMessageBox::NoButton, this);
+        box.setInformativeText(QStringLiteral("Your edits are still in the pane either way."));
+        QPushButton *overwrite = box.addButton(QStringLiteral("Overwrite anyway"), QMessageBox::DestructiveRole);
+        QPushButton *reload = box.addButton(QStringLiteral("Reload from %1").arg(m_remoteHost), QMessageBox::ResetRole);
+        box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(QMessageBox::Cancel);
+        box.exec();
+        if (box.clickedButton() == overwrite && m_remote) {
+            setNotice(QStringLiteral("Saving to %1…").arg(m_remoteHost));
+            m_remote->save(m_textView->toPlainText().toUtf8(), true);
+        } else if (box.clickedButton() == reload) {
+            m_textView->document()->setModified(false);   // the user asked for the host's copy
+            openRemote(m_path);
+        } else {
+            setNotice(message);
+        }
+        return;
+    }
+    if (m_editable) {
+        // A save that could not happen: the buffer stays exactly as it is, and the pane says why.
+        setNotice(message);
+        watchForReconnect();
+        return;
+    }
+    // A fetch that could not happen: there is nothing to show but the reason.
+    m_info->setText(QStringLiteral("%1\n\n%2").arg(relay::remote::displayName(m_remoteHost, m_remotePath), message));
+    m_kind = Kind::Info;
+    m_stack->setCurrentWidget(m_infoPage);
+    setNotice(message);
+}
+
+void FilePreview::setEditable(bool on) {
+    m_editable = on;
+    m_textView->setReadOnly(!on);
+    m_save->setVisible(on);
+    // The pane opens ready to type in, and Ctrl+S (a WidgetWithChildren shortcut) has a focused
+    // widget to fire from: the host's focusInput() sets the focus on this widget, and the proxy
+    // passes it to the editor. A read-only preview keeps the focus itself, as it always did.
+    setFocusProxy(on ? m_textView : nullptr);
+}
+
+void FilePreview::watchForReconnect() {
+    if (!isRemote() || (m_remote && m_remote->live())) return;
+    if (!m_reconnect) {
+        m_reconnect = new QTimer(this);
+        m_reconnect->setInterval(2000);
+        // The login can come back — the same host, a new control socket. When it does, the pane
+        // says so rather than leaving the user to guess whether Ctrl+S would work now.
+        connect(m_reconnect, &QTimer::timeout, this, [this] {
+            if (!isRemote() || !m_remote) { m_reconnect->stop(); return; }
+            if (!m_remote->live()) return;
+            m_reconnect->stop();
+            if (isDirty())
+                setNotice(QStringLiteral("%1 is reachable again · %2 saves your edits.")
+                              .arg(m_remoteHost, QKeySequence(QKeySequence::Save).toString(QKeySequence::NativeText)));
+            else
+                setNotice(QString());
+        });
+    }
+    m_reconnect->start();
+}
+
+bool FilePreview::save() {
+    if (!m_editable || !isRemote() || !m_remote) return false;
+    if (!m_textView->document()->isModified()) return true;
+    if (m_remote->busy()) { setNotice(QStringLiteral("Still saving to %1…").arg(m_remoteHost)); return false; }
+    if (!m_remote->live()) {
+        setNotice(QStringLiteral("The connection to %1 has ended · your edits are safe in this pane. Log in to %1 again "
+                                 "in the terminal pane and press %2, or copy the text out.")
+                      .arg(m_remoteHost, QKeySequence(QKeySequence::Save).toString(QKeySequence::NativeText)));
+        watchForReconnect();
+        return false;
+    }
+    setNotice(QStringLiteral("Saving to %1…").arg(m_remoteHost));
+    m_remote->save(m_textView->toPlainText().toUtf8());
     return true;
 }
 
@@ -962,6 +1177,15 @@ bool FilePreview::showMenu(const QPoint &globalPos, QWidget *source) {
 
 void FilePreview::runMenuAction(const QString &id) {
     if (m_path.isEmpty()) return;
+    if (isRemote()) {
+        // Nothing on this machine can open a file that is on another one; what is useful is the
+        // path itself, as the host spells it, to paste into the terminal pane next door.
+        if (id == QLatin1String("openInternal")) openRemote(m_path);
+        else if (id == QLatin1String("copyPath")) QApplication::clipboard()->setText(m_remotePath);
+        else setNotice(QStringLiteral("%1 is on %2 · this machine's applications cannot open it.")
+                           .arg(QFileInfo(m_remotePath).fileName(), m_remoteHost));
+        return;
+    }
     if (id == QLatin1String("openInternal")) open(m_path);
     else if (id == QLatin1String("openExternal")) QDesktopServices::openUrl(QUrl::fromLocalFile(m_path));
     else if (id == QLatin1String("openFolder")) openContainingFolder(m_path);
@@ -985,6 +1209,9 @@ void FilePreview::resizeEvent(QResizeEvent *event) {
 }
 
 void FilePreview::goToLine(int line) {
+    // A remote file is still on its way when the click that carried the line number arrives
+    // (#S5SH): the line waits for the bytes.
+    if (line > 0 && isRemote() && m_kind != Kind::Text) { m_pendingLine = line; return; }
     if (line <= 0 || (m_kind != Kind::Text && m_kind != Kind::Markdown)) return;
     // A line number counts lines in the source, so a Markdown preview has to leave the rendered
     // view to point at one. It used to do that without recording the switch, which left the button

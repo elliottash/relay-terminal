@@ -134,6 +134,15 @@ public:
     // engine on its own — card references stay plain text.
     void setCardLookup(relay::links::CardLookup lookup);
 
+    // Which paths in the output exist, and where a relative one is relative to (card #S5SH).
+    // Without one the view asks this machine (`links::systemProbe()`); a pane logged into
+    // another host answers from what it has asked that host. `directory` overrides the pane's
+    // own working directory when it returns something, which is how a remote `./build.log`
+    // resolves against the remote folder. Neither may block: this is called from a mouse-move.
+    void setLinkProbe(relay::links::Probe probe, std::function<QString()> directory = {});
+    // The answers the host gave have changed (a batch came back): re-read the output.
+    void linkProbeUpdated();
+
     // The link under a point in the widget, if any (the context menu and the host use it).
     Link linkAtPoint(const QPoint &pos);
     // A plain left click opens a link; Ctrl+click always does. Hosts that use the first
@@ -425,6 +434,8 @@ private:
     std::vector<WalkLink> m_linkWalk;
     relay::links::Cursor m_linkCursor;
     relay::links::CardLookup m_cardLookup;
+    relay::links::Probe m_linkProbe;                  // #S5SH: the host's filesystem, not this one
+    std::function<QString()> m_linkDirectory;
 
     QString m_preedit;
     bool m_flash = false;

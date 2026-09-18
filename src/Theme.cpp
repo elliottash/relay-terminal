@@ -556,6 +556,9 @@ QTabWidget > QTabBar::tab:selected, QTabBar#settingsTabs::tab:selected { color: 
 QWidget#fileExplorer, QWidget#filePreview { background: @bg; }
 QLabel#fileExplorerPath, QLabel#filePreviewTitle { color: @text; font-weight: 600; padding: 2px 4px; }
 QLabel#filePreviewNotice { color: @muted; background: @surface; border: 1px solid @border; border-radius: 6px; padding: 4px 8px; }
+/* The host chip on a file that lives on another machine (#S5SH): accent on accentSoft, the pair
+   already used for a pressed toolbar button, so it reads as "not this machine" at a glance. */
+QLabel#filePreviewHost { color: @accent; background: @accentSoft; border: 1px solid @accentBorder; border-radius: 4px; padding: 1px 6px; font-weight: 700; font-size: 9pt; }
 QTreeView#fileExplorerView { background: @bg; color: @text; border: 1px solid @border; border-radius: 6px; outline: none; }
 QTreeView#fileExplorerView::item { padding: 3px 2px; }
 QTreeView#fileExplorerView::item:selected { background: @raised; color: @text; }

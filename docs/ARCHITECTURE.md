@@ -975,6 +975,15 @@ KDE requirement.
   source, images (fit or 100%), PDF when Qt PDF is built in, otherwise a file-info panel with
   Open externally. Text is capped at 2 MiB with a notice; images over 64 MiB are refused.
   `goToLine` scrolls and highlights.
+- The same `open()` takes `ssh://<host>/<path>` — a file on the host a terminal pane is logged
+  into (card #S5SH, `docs/SSH-AND-MOSH.md` section 9). It is fetched over that pane's own ssh
+  connection by `relay::remote::RemoteFile` (`src/RemoteFiles.{h,cpp}`, library
+  `relay-remotefiles`), titled `host:/path` in the pane and in the tab, marked with a chip
+  naming the host, and — unlike a local preview — **editable**: Ctrl+S or the Save button writes
+  it back over ssh, a `●` marks unsaved edits, and a save whose file changed on the host offers
+  Overwrite / Reload. A remote file always uses the text viewer (there is nowhere to type in a
+  rendered document), is refused over 8 MiB or if it is binary, and nothing here can be handed
+  to this machine's applications, so ↗ and "Open externally" are off.
 
 Optional dependencies are detected at configure time (`RELAY_HAVE_SYNTAX_HIGHLIGHTING`,
 `RELAY_HAVE_QTPDF`). The Qt6 `.deb` and AUR builds leave PDF off
@@ -994,6 +1003,7 @@ Ways to open a path:
 | Click or Ctrl+click a path in an engine pane's output | `relay::links` (`src/OutputLinks.*`) → `TerminalView::linkActivated` → `Pane::openOutputTarget` |
 | `Ctrl+Shift+L` then Enter (engine panes) | the keyboard walk over the same links |
 | Click a `#K7Q2` in an engine pane's output | the same path, with `relay://card/<id>` as the target → `RelayWindow::openBoardCard` |
+| Click a path printed by a host a pane is logged into | `Pane::openRemoteOutputPath` → `ssh://host/path` → the same preview pane, fetched over ssh (#S5SH) |
 
 ### Clickable paths in terminal output
 
@@ -1005,7 +1015,13 @@ scheme (left as URLs), Python traceback frames (`File "x.py", line 12`), `file(l
 gcc/clang/grep/cargo, pytest node ids, stack frames inside brackets, backslash-escaped spaces).
 `resolve()` expands `~`, resolves a relative path against the pane's directory (OSC 7 when the
 shell integration is on, else `/proc/<pid>/cwd`) and asks the probe: **a path that does not
-exist is not a link**. `--flags`, bare numbers, version strings and `FOO=bar` are rejected
+exist is not a link**. Which machine "exist" means is the host's to say: `TerminalBackend::
+setLinkProbe(probe, directory)` (`TerminalView::setLinkProbe`) replaces both the probe and that
+directory, and a pane logged into another machine answers from `relay::remote::PathProbe` — a
+cache filled by one batched `test -e` per two dozen candidates over the same ssh connection, at
+most one batch in flight, dropped when the login ends. A probe is called from a mouse-move, so
+an answer that has not come back yet reads as "nothing there"; when the batch lands the backend
+is told (`linkProbeAnswered()`) and the view re-reads the cell the pointer is on. `--flags`, bare numbers, version strings and `FOO=bar` are rejected
 before the probe.
 
 `candidates()` also finds `#K7Q2` card references (Switchboard design section 5): four

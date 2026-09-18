@@ -44,6 +44,7 @@
 #include "RemoteShare.h"
 #include "PaneStatus.h"
 #include "RemoteSession.h"
+#include "RemoteFiles.h"     // the host's files: the link probe's cache and `ssh://host/path` (#S5SH)
 #include "backend/VTermBackend.h"
 #include "Voice.h"
 #include "Images.h"
@@ -5958,11 +5959,16 @@ private:
             // machine's, and the same path here is a different file (card #S5SH). URLs still open.
             const QUrl url(target);
             if (m_login.active && (url.scheme().isEmpty() || url.isLocalFile())) {
-                toast(QStringLiteral("That path is on %1, not this machine · ask the agent to open it there").arg(loginHost()));
+                openRemoteOutputPath(target, line);
                 return;
             }
             openOutputTarget(target, line, true);
         };
+        // Which paths in the output are real, and where a relative one is relative to (#S5SH):
+        // this machine, until the pane is logged into another one — then the host's own answer,
+        // from the batched cache in remoteLinkProbe(). Set once; the login is checked per call.
+        m_backend->setLinkProbe([this](const QString &path) { return remoteLinkProbe(path); },
+                                [this] { return m_login.active ? m_login.cwd : QString(); });
         // `#K7Q2` in the output is a card link when this pane's Switchboard index knows the id
         // (design section 5); the engine asks, the pane answers from the rows it has seen.
         m_backend->setCardLookup([this](const QString &id, QString *title) { return lookupOutputCard(id, title); });
@@ -9025,6 +9031,7 @@ private:
     void endLogin() {
         if (!m_login.active) return;
         relay::log::info(QStringLiteral("login_end pane=%1").arg(paneLogId()));
+        forgetLoginFiles();
         if (m_login.offered) hideBanner();
         if (m_backend && !m_capturing) m_backend->setOutputCallbackEnabled(false);
         m_login = RemoteLogin();
@@ -9148,6 +9155,88 @@ private:
         if (!idle) toast(QStringLiteral("Typed into %1 · it was busy, so the line waits for it").arg(loginHost()));
         QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
     }
+
+    // ----- files on the host (#S5SH, docs/SSH-AND-MOSH.md section 9) -------------------------
+    //
+    // A path printed by the host names one of the host's files. Clicking it opens that file, over
+    // the connection the user already has, in the same preview pane a local file opens in — and
+    // the pane can edit it and save it back (owner, 2026-09-18: "editing allowed so it's equal to
+    // local text editing"). The pane's part is three things: telling the file layer which socket
+    // this login uses, answering the engine's link probe from the host's filesystem rather than
+    // this one's, and turning a clicked path into `ssh://host/path`.
+
+    // Keep relay::remote's record of this login in step with m_login, so a preview pane can reach
+    // the host without holding a pointer into this pane — and so that a save after the login ends
+    // fails with "the connection is gone" instead of writing somewhere unexpected.
+    void announceLoginFiles() {
+        if (!m_login.active || !m_login.resolved) return;
+        const QString host = loginHost(), socket = m_login.where.controlPath;
+        if (host.isEmpty() || socket.isEmpty()) return;
+        if (host == m_remoteFilesHost && socket == m_remoteFilesSocket) return;
+        m_remoteFilesHost = host;
+        m_remoteFilesSocket = socket;
+        relay::remote::announceLogin(host, socket);
+        m_remoteProbe.setHost(host, socket);
+        m_remoteProbe.onAnswers = [this] { if (m_backend) m_backend->linkProbeAnswered(); };
+    }
+
+    // The login is over: the socket is dead, the host's answers are worthless, and a preview pane
+    // holding one of its files must not be told the connection is still there.
+    void forgetLoginFiles() {
+        m_remoteProbe.setHost(QString());
+        if (m_remoteFilesHost.isEmpty()) return;
+        relay::remote::forgetLogin(m_remoteFilesHost);
+        m_remoteFilesHost.clear();
+        m_remoteFilesSocket.clear();
+    }
+
+    // Does this path exist, and is it a folder? The engine asks for every path-shaped span it
+    // paints, from a mouse-move, so nothing here may block: outside a login it is this machine's
+    // filesystem, and inside one it is whatever the host has already answered. A path the host
+    // has not been asked about yet reads as "nothing there" and is queued; the answer arrives a
+    // moment later and the view reads the output again (PathProbe::onAnswers above).
+    int remoteLinkProbe(const QString &path) {
+        if (!m_login.active || !loginReachable()) {
+            static const relay::links::Probe local = relay::links::systemProbe();
+            return int(local(path));
+        }
+        announceLoginFiles();
+        const relay::remote::Entry entry = m_remoteProbe.lookup(path);
+        // "Not answered yet" has to read as "no link": anything else would underline every
+        // path-shaped word in the output until the host disagreed.
+        return int(entry == relay::remote::Entry::Unknown ? relay::links::Entry::Missing
+                                                          : relay::links::Entry(int(entry)));
+    }
+
+    // A clicked path, while a login owns the terminal. The engine only offered it as a link
+    // because the host said it exists (remoteLinkProbe), so it is the host's file: it opens in a
+    // preview pane as `ssh://host/path`, titled with the host and fetched over this login.
+    void openRemoteOutputPath(const QString &target, int line) {
+        const QString host = loginHost();
+        if (host.isEmpty() || !target.startsWith(QLatin1Char('/'))) {
+            toast(QStringLiteral("That path is on the host, not this machine."));
+            return;
+        }
+        if (!loginReachable()) {
+            // No shared connection: an unwrapped ssh, or `ssh/enhance` off. Nothing can be read
+            // from the host without asking for a second login, which Relay does not do.
+            toast(QStringLiteral("%1 is on %2 · Relay cannot open it: this login is not sharing its connection")
+                      .arg(target, host));
+            return;
+        }
+        announceLoginFiles();
+        if (m_remoteProbe.lookup(target) == relay::remote::Entry::Directory) {
+            toast(QStringLiteral("%1 is a folder on %2 · Relay opens the host's files, not its folders").arg(target, host));
+            return;
+        }
+        const QString url = relay::remote::fileUrl(host, target);
+        if (url.isEmpty() || !onOpenPath) return;
+        relay::log::info(QStringLiteral("remote_file_open pane=%1 host=%2").arg(paneLogId(), host));
+        onOpenPath(url, line > 0 ? line : 0);
+    }
+
+    relay::remote::PathProbe m_remoteProbe;   // which of the host's paths exist (#S5SH)
+    QString m_remoteFilesHost, m_remoteFilesSocket;
 
     // Remote sessions never switch screens, so a short list stands in for detection.
     static bool remoteSessionProgram(const QString &name) {

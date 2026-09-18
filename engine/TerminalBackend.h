@@ -200,6 +200,24 @@ public:
     {
         Q_UNUSED(lookup);
     }
+    // Which paths in the output exist, and where a relative one is relative to (card #S5SH).
+    // By default the engine asks this machine's filesystem, which is right until a pane is
+    // logged into another one: under `ssh filly` the output names filly's files, and a path of
+    // the same name here is a link for the wrong reason. A host that knows better answers
+    // instead — `probe` returns -1 for nothing there, 0 for a file, 1 for a folder (the values
+    // of `relay::links::Entry`, spelt out so this header stays QtCore-only), and `directory`
+    // gives the folder relative paths resolve against, or an empty string for the pane's own.
+    // Both are called from a mouse-move, so neither may block; an answer that is not known yet
+    // is simply "nothing there", and the underline appears when the next scan finds it.
+    virtual void setLinkProbe(std::function<int(const QString &absolutePath)> probe,
+                              std::function<QString()> directory = {})
+    {
+        Q_UNUSED(probe);
+        Q_UNUSED(directory);
+    }
+    // A batch of answers came back from the host: what is underlined was worked out with the
+    // old ones, so the view reads its output again.
+    virtual void linkProbeAnswered() {}
 
     // ---- folds (#TK9C); needs the Folds capability
     //

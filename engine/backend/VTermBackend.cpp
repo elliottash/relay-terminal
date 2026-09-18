@@ -223,6 +223,23 @@ void VTermBackend::setCardLookup(std::function<bool(const QString &id, QString *
         m_view->setCardLookup(std::move(lookup));
 }
 
+void VTermBackend::setLinkProbe(std::function<int(const QString &absolutePath)> probe,
+                                std::function<QString()> directory)
+{
+    if (!m_view)
+        return;
+    relay::links::Probe wrapped;
+    if (probe)
+        wrapped = [probe](const QString &path) { return relay::links::Entry(probe(path)); };
+    m_view->setLinkProbe(std::move(wrapped), std::move(directory));
+}
+
+void VTermBackend::linkProbeAnswered()
+{
+    if (m_view)
+        m_view->linkProbeUpdated();
+}
+
 QString VTermBackend::screenText() const { return m_session->screenText(); }
 QPoint VTermBackend::cursorPosition() const { return m_session->cursorPosition(); }
 QStringList VTermBackend::scrollbackText(int maxLines) const { return m_session->scrollbackText(maxLines); }

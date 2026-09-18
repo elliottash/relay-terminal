@@ -414,7 +414,9 @@ public:
     relay::PlanEditor *plan() const { return m_plan; }
     relay::SubagentTabsView *subagent() const { return m_subagent; }
     QString path() const { return (m_subagent || m_turn || m_diff || m_board || m_settingsView || m_hosted) ? QString() : m_explorer ? m_explorer->root() : m_plan ? m_plan->path() : m_preview->path(); }
-    QString cwd() const { return (m_subagent || m_turn || m_diff || m_board || m_settingsView || m_hosted) ? m_subagentCwd : m_explorer ? m_explorer->root() : QFileInfo(path()).absolutePath(); }
+    // A preview of a file on another machine (#S5SH) has no folder here: its path is an
+    // `ssh://host/path`, and the directory part of it names nothing on this disk.
+    QString cwd() const { return (m_subagent || m_turn || m_diff || m_board || m_settingsView || m_hosted) ? m_subagentCwd : m_explorer ? m_explorer->root() : (m_preview && m_preview->isRemote()) ? QString() : QFileInfo(path()).absolutePath(); }
     QString title() const {
         if (m_settingsView) return m_settingsView->mode() == relay::SettingsPane::Mode::Actions ? QStringLiteral("Actions") : QStringLiteral("Options");
         if (m_board) return m_board->title();
@@ -423,6 +425,9 @@ public:
         if (m_turn) return m_turn->title();
         if (m_diff) return m_diff->title();
         if (m_plan) return (m_plan->isDirty() ? QStringLiteral("● ") : QString()) + m_plan->title();
+        // "nginx.conf" in a tab would be indistinguishable from this machine's: a file on a host
+        // is named by its host and its whole path, with the ● of an unsaved edit (#S5SH).
+        if (m_preview && m_preview->isRemote()) return m_preview->title();
         const QString name = QFileInfo(path()).fileName();
         return name.isEmpty() ? path() : name;
     }

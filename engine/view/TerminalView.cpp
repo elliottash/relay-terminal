@@ -1443,6 +1443,13 @@ void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
 
 QString TerminalView::currentDirectory() const
 {
+    // A pane logged into another machine resolves the output's relative paths against the folder
+    // the remote shell is in, not the one this process happens to be in (#S5SH).
+    if (m_linkDirectory) {
+        const QString remote = m_linkDirectory();
+        if (!remote.isEmpty())
+            return remote;
+    }
     QString dir = m_session->currentDirectory();
     if (!dir.isEmpty() && QFileInfo(dir).isDir())
         return dir;
@@ -1471,6 +1478,27 @@ void TerminalView::setCardLookup(links::CardLookup lookup)
     // the board, so a pane that has just learnt its cards re-reads them on the next move.
     m_hoverCellRow = m_hoverCellCol = -2;
     endLinkWalk();
+}
+
+void TerminalView::setLinkProbe(links::Probe probe, std::function<QString()> directory)
+{
+    m_linkProbe = std::move(probe);
+    m_linkDirectory = std::move(directory);
+    linkProbeUpdated();
+}
+
+void TerminalView::linkProbeUpdated()
+{
+    // What is underlined was worked out with the old answers: drop the per-cell hover cache and
+    // the walk's list so the next move or scan asks again. A walk the user is in the middle of
+    // keeps its place — answers arrive while they are stepping through it.
+    m_hoverCellRow = m_hoverCellCol = -2;
+    if (!m_linkCursor.active())
+        endLinkWalk();
+    // And read the cell the pointer is already on again, so a path the host has just vouched for
+    // underlines itself under a motionless pointer rather than waiting for the next wobble.
+    if (underMouse())
+        updateHover(mapFromGlobal(QCursor::pos()), QApplication::keyboardModifiers());
 }
 
 // The logical line the cell belongs to: soft-wrapped rows of the viewport joined into one
@@ -1565,7 +1593,7 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
     if (idx < 0 || idx >= logical.text.size())
         return false;
     for (const links::Found &found : links::scan(logical.text, currentDirectory(), QDir::homePath(),
-                                                 links::systemProbe(), m_cardLookup)) {
+                                                 m_linkProbe ? m_linkProbe : links::systemProbe(), m_cardLookup)) {
         const int s = found.candidate.start;
         const int e = s + found.candidate.length - 1;
         if (idx < s || idx > e || e >= int(logical.cellOf.size()))
@@ -1618,7 +1646,7 @@ void TerminalView::collectLinks()
     const int firstRow = std::max(0, historyRows - int(rows.size()));
     const QString cwd = currentDirectory();
     const QString home = QDir::homePath();
-    const links::Probe probe = links::systemProbe();
+    const links::Probe probe = m_linkProbe ? m_linkProbe : links::systemProbe();
     const links::CardLookup cardLookup = m_cardLookup;
     for (int i = 0; i < rows.size() && int(m_linkWalk.size()) < kWalkMaxLinks;) {
         // Rows the emulator filled to the last column continue on the next row: a path

@@ -49,6 +49,9 @@ Owner, 2026-09-18, asked in the session:
 - [x] Connect to host (palette, from `~/.ssh/config`), split on the same host
 - [x] Options › Terminal › SSH sessions: auto / ask / off
 - [x] Clickable paths in a remote pane do not open local files (a toast names the host; URLs still open)
+- [x] A clicked path opens the host's file, editable, and Ctrl+S saves it back over the same
+      connection; the engine's link probe answers from the host (`src/RemoteFiles.{h,cpp}`,
+      `tests/remotefiles_test.cpp`, `TerminalBackend::setLinkProbe`, docs/SSH-AND-MOSH.md § 9)
 - [x] The file tools take `host` too: read, list, write and edit files on the host over the same connection, content on ssh's stdin, temp+`mv`, mode preserved, inside the remote home or the shell's directory (`backend/relay_core/remote_files.py`, `tools.py`; protocol section 24.4; `tests/test_ssh_remote.py`)
 
 Design: [`docs/SSH-AND-MOSH.md`](../../docs/SSH-AND-MOSH.md).
@@ -73,8 +76,8 @@ main, Options › Terminal › SSH sessions on "Enhance automatically" unless a 
 6. On the host: `read -rsp "Password: " pw; echo ${#pw}` (or a real `sudo` with a password). The prompt
    box becomes the masked "password for ssh" field; the text reaches the host and is in no model
    request or log.
-7. `cd /etc` on the host: the pane's local folder chip does not change. A path printed by the host that
-   also exists locally, when clicked, gives the "That path is on <host>" toast and opens nothing.
+7. `cd /etc` on the host: the pane's local folder chip does not change. A path printed by the host
+   that also exists locally opens the **host's** file when clicked (step 12), not this machine's.
 8. Options on "Ask for each host": the Enhance banner appears; without it, steps 2–3 still work
    (prompt found from the screen, printed back after the reply). "Off": plain ssh, no banner, the
    agent says it cannot share the connection.
@@ -87,3 +90,16 @@ main, Options › Terminal › SSH sessions on "Enhance automatically" unless a 
     \<host\>", the fold shows a real diff of the remote file, the file on the host changes and keeps
     its mode, and no `.relay-new.*` file is left beside it. Ask it for `/etc/hosts` and for
     `~/.ssh/config`: both are refused in words the model can act on, and nothing is read.
+12. Files on the host (§ 9). On the host, make a file of your own (`printf 'one\ntwo\n' >/tmp/t.conf;
+    chmod 640 /tmp/t.conf`) and `ls /tmp/t.conf`. Hover the path it printed: it underlines about a
+    fifth of a second later (it is a link because the host said so — a path that exists only here is
+    not one, and one that exists only there is). Click it: a preview pane opens titled
+    `<host>:/tmp/t.conf`, with a chip naming the host, and ↗ is off. Type a line: a ● appears in the
+    pane header and the tab. Ctrl+S: "Saved to <host>", the ● goes, and `cat /tmp/t.conf` on the host
+    shows the new bytes with the mode still 640 and no `.relay-save.*` left beside it. Change the file
+    on the host behind Relay's back (`echo x >>/tmp/t.conf`), edit the pane again and Ctrl+S: it
+    refuses with what changed and offers Overwrite anyway / Reload; both keep your text. Then end the
+    connection (`exit`, and stop the master with `ssh -O exit <host>`) and Ctrl+S once more: the pane
+    keeps the buffer and says the connection has ended. Click a *folder* the host printed: a toast
+    says folders on the host are not opened. Evidence:
+    `docs/qa_evidence/2026-09-18-ssh-and-mosh-sessions/implementer-remote-file-*`.

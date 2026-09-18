@@ -17,11 +17,16 @@ class QLineEdit;
 class QPlainTextEdit;
 class QScrollArea;
 class QStackedWidget;
+class QShortcut;
 class QTextBrowser;
 class QToolButton;
 class QTreeView;
 
 namespace relay {
+
+namespace remote {
+class RemoteFile;
+}
 
 // ----- right-click menus (issues #D60R, V9V1) ---------------------------------------------------
 //
@@ -128,9 +133,17 @@ private:
     QToolButton *m_up = nullptr, *m_hidden = nullptr;
 };
 
-// A read-only preview of one file. The viewer is chosen by MIME type: text and code (with syntax
+// A preview of one file. The viewer is chosen by MIME type: text and code (with syntax
 // highlighting when KSyntaxHighlighting is built in), Markdown (rendered or source), images
-// (fit or 100%), PDF (when Qt PDF is built in), otherwise a file-info panel.
+// (fit or 100%), PDF (when Qt PDF is built in), otherwise a file-info panel. A local file is
+// read only here (the editable panes are PlanEditor and the composer).
+//
+// A file on the host a terminal pane is logged into (card #S5SH) opens in this same pane, fetched
+// over that pane's own ssh connection, and — owner, 2026-09-18, "editing allowed so it's equal to
+// local text editing" — it is editable: Ctrl+S, a ● in the title while it is unsaved, and the save
+// goes back over ssh. It is addressed as `ssh://<host>/<path>` (relay::remote::fileUrl), which is
+// what open(), the pane title, the saved window layout and reload() all carry, so a remote file
+// travels every route a local one does.
 class FilePreview : public QWidget {
 public:
     enum class Kind { None, Text, Markdown, Image, Pdf, Info };
@@ -138,9 +151,21 @@ public:
     explicit FilePreview(QWidget *parent = nullptr);
     ~FilePreview() override;
 
-    // Returns false (and shows nothing) when the path is not a readable regular file.
+    // A local absolute path, or `ssh://host/path` for a file on a host a pane is logged into.
+    // Returns false (and shows nothing) when a local path is not a readable regular file; a
+    // remote file is fetched asynchronously, so true only means the fetch started.
     bool open(const QString &path);
     bool reload() { return open(m_path); }
+
+    // ----- files on a remote host (#S5SH) ---------------------------------------------------
+    bool isRemote() const { return !m_remoteHost.isEmpty(); }
+    QString remoteHost() const { return m_remoteHost; }
+    QString remotePath() const { return m_remotePath; }
+    // Unsaved edits. Only a remote file is editable, so this is false for every local one.
+    bool isDirty() const;
+    // Write the buffer back to the host (Ctrl+S and the Save button). Returns false when there is
+    // nothing to save or no connection to save over; the save itself lands later.
+    bool save();
     // Scroll a text preview to a 1-based line and highlight it (no-op for other kinds).
     void goToLine(int line);
     QString path() const { return m_path; }
@@ -175,6 +200,11 @@ protected:
     bool eventFilter(QObject *object, QEvent *event) override;
 
 private:
+    bool openRemote(const QString &url);
+    void showRemoteText(const QByteArray &content);
+    void remoteFailed(const QString &message, int conflict);
+    void setEditable(bool on);
+    void watchForReconnect();
     void followLink(const QUrl &url);
     bool showMenu(const QPoint &globalPos, QWidget *source);
     void runMenuAction(const QString &id);
@@ -192,9 +222,16 @@ private:
     QString m_path, m_notice;
     Kind m_kind = Kind::None;
     bool m_markdownSource = false, m_imageActualSize = false;
+    // #S5SH: the host and the path on it, empty for a local file; the fetch/save worker; and the
+    // line a click asked for, which a remote file cannot go to until its bytes arrive.
+    QString m_remoteHost, m_remotePath;
+    bool m_editable = false;
+    int m_pendingLine = 0;
+    relay::remote::RemoteFile *m_remote = nullptr;
+    QTimer *m_reconnect = nullptr;
     QHBoxLayout *m_header = nullptr;
-    QLabel *m_title = nullptr, *m_noticeLabel = nullptr, *m_info = nullptr, *m_image = nullptr;
-    QToolButton *m_mode = nullptr, *m_reload = nullptr, *m_external = nullptr;
+    QLabel *m_title = nullptr, *m_noticeLabel = nullptr, *m_info = nullptr, *m_image = nullptr, *m_hostChip = nullptr;
+    QToolButton *m_mode = nullptr, *m_reload = nullptr, *m_external = nullptr, *m_save = nullptr;
     QStackedWidget *m_stack = nullptr;
     QPlainTextEdit *m_textView = nullptr;
     QTextBrowser *m_markdownView = nullptr;

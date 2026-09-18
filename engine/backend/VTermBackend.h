@@ -75,6 +75,9 @@ public:
     bool linkWalkActive() const override;
     void setPlainClickOpensLinks(bool on) override;
     void setCardLookup(std::function<bool(const QString &id, QString *title)> lookup) override;
+    void setLinkProbe(std::function<int(const QString &absolutePath)> probe,
+                      std::function<QString()> directory = {}) override;
+    void linkProbeAnswered() override;
 
     void setFoldPrefix(const QString &uriPrefix) override;
     void setFoldContent(const QString &uri, const QVector<FoldLine> &lines) override;

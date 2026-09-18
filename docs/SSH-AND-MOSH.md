@@ -274,15 +274,81 @@ clicking it folds the detail open rather than opening a local file of the same n
 - **Options › Terminal › SSH sessions**: `auto` / `ask` / `off`, and the never-enhance host list.
 - The pane chrome's remote chip and hatched backdrop (card #SPBN) already mark a remote pane.
 
-### 9. Not done, on purpose
+### 9. The host's files: clicking one opens it, editing it saves it back
+
+Owner, 2026-09-18: "editing allowed so it's equal to local text editing."
+
+A path printed by the host names one of the host's files. Clicking it opens that file in the same
+preview pane a local file opens in, fetched over the connection the user already has, and the pane
+can edit it and write it back. `src/RemoteFiles.{h,cpp}` (library `relay-remotefiles`,
+`tests/remotefiles_test.cpp`) is the whole of it; `src/FilePanes.cpp` is the pane.
+
+**Which paths are the host's.** The engine only offered a path as a link when it existed *here*
+(`links::scan` with `links::systemProbe()`), which under a login is the wrong machine twice over:
+most of the host's paths were not links at all, and one that happened to exist here was a link to
+the wrong file. `TerminalBackend::setLinkProbe(probe, directory)` lets the pane answer instead.
+While a login is reachable, `Pane::remoteLinkProbe` answers from `relay::remote::PathProbe`: a
+cache the host fills, one `for p in …; do test -d/-e; done` per two dozen candidates over the same
+socket, at most one batch in flight and 150 ms between batches (sshd counts sessions — Warp's
+#1957), at most 200 queued and 4000 remembered, all of it dropped when the login ends. The
+directory relative paths resolve against becomes the remote cwd (OSC 7), not this process's.
+
+A probe is called from a mouse-move, so it can never wait: a path the host has not answered for
+yet is "nothing there", and the underline appears when the batch lands (`linkProbeAnswered()` →
+the view re-reads the cell under the pointer). The first Ctrl+Shift+L over brand new remote output
+can therefore come up empty; the second press has the answers.
+
+**Opening.** `Pane::openRemoteOutputPath` turns the clicked path into `ssh://<host>/<path>` and
+hands it to `onOpenPath` like any other file. `RelayWindow::openPath` treats it as a file (never a
+folder — folders on the host are not browsable yet, and a click on one says so), and
+`FilePreview::open()` recognises the URL. The pane is titled `filly:/etc/nginx/nginx.conf`, in the
+pane header and in the tab, with a chip naming the host next to the title; ↗ and "Open externally"
+are off, because nothing on this machine can open a file that is not on it. The clicked line is
+kept until the bytes arrive and the pane then goes to it.
+
+Because the link was only a link at all when the host vouched for the path, a click during a login
+is unambiguously the host's file. Files opened before the login keep their panes and stay local.
+
+**Fetching.** One `sh -c` script over
+`ssh -S <control path> -o ControlMaster=no -o BatchMode=yes -o ConnectTimeout=10 -T <host>`:
+refuse a folder, refuse what cannot be read, `stat -c %s:%Y:%a` (with the BSD `stat -f %z:%m:%Lp`
+as a fallback), print that line, refuse anything over 8 MB by its size, then `cat`. Everything
+after the first newline is the file. A NUL in the first kilobyte means binary, and Relay says so
+rather than opening it as text. Every path is quoted as one POSIX word
+(`relay::remote::shellQuote`, tested against spaces, quotes, `$`, backticks, newlines and unicode
+— and against a real `sh`).
+
+**Saving.** Ctrl+S or Save, the same as the editable Markdown pane: a `●` marks unsaved edits in
+the header and the tab, the header says "Saving to filly…" and then "Saved to filly · 17:47". The
+bytes go over ssh's **stdin**, never in an argument where the host's process table would show
+them. The script compares the file's current `stat` with the one the fetch saw *on the host*,
+between the check and the write, and refuses with `exit 20` if anything else has touched it —
+size, mtime or mode. The pane then offers Overwrite anyway / Reload from the host / Cancel, and
+the edits survive all three. A save writes `mktemp` beside the file, `chmod --reference`s it and
+`mv`s it into place, so the file keeps its mode and is never seen half-written; a folder that
+cannot hold the temporary file, a read-only filesystem, a full disk and a permission denied each
+come back as the host's own words in the pane.
+
+**When the login ends.** The record of a live login is `relay::remote::announceLogin` /
+`forgetLogin`, and the control socket is checked as well as the record. A save with no connection
+keeps the buffer and says so: "The connection to filly has ended · your edits are safe in this
+pane. Log in to filly again in the terminal pane and press Ctrl+S, or copy the text out." The pane
+then watches for the host to come back and says when it has. Nothing is written anywhere else and
+nothing is thrown away. (`exit` on its own does not end the connection: `ControlPersist` keeps the
+master for ten minutes and a save still works over it.)
+
+The agent reaches the host's files through its own tools; this is the GUI's path and shares no
+code with it.
+
+### 10. Not done, on purpose
 
 - No `tmux -CC` control-mode integration and no remote helper binary (Warp's SSH extension, VS Code
   server): heavy, per-architecture, and Warp's own tmux experiment was removed after it broke users'
   tmux. A plain remote tmux or screen is served by the DCS wrapping of section 3 instead, which
   installs nothing and asks the user for one line of tmux configuration.
 - No OSC passthrough under mosh: mosh drops unknown sequences upstream.
-- Remote file clicks open nothing (rather than the wrong local file); fetching them over the shared
-  connection (kitty's `remote_file`) is a follow-up.
+- No folder on the host in an explorer pane, and no remote image or PDF: a file on the host opens
+  as text or not at all (section 9).
 
 ## Research notes
 
