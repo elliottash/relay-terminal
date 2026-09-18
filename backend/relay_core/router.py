@@ -441,9 +441,10 @@ def assist_signals(text: str, cwd: str | None = None) -> tuple[int, list[str], s
     # English-word command followed straight away by a preposition or an article is a sentence,
     # not an invocation — no command takes one of these as its first operand (owner report,
     # 2026-09-17: "look for cleanup opportunities" ran in the shell).
-    LEAD_IN = {"for", "at", "in", "into", "on", "through", "about", "over", "under", "across",
-               "the", "a", "an", "my", "our", "this", "that", "these", "those", "all", "any",
-               "up", "out", "around", "why", "how", "what", "whether", "if"}
+    # Only words no command takes as an operand. "all", "up", "out", "in" and "on" are left out:
+    # `make all`, `look up`, `git in` and friends are real.
+    LEAD_IN = {"for", "at", "into", "through", "about", "the", "a", "an", "my", "our",
+               "these", "those", "whether", "why", "how", "what"}
     if args and args[0].strip("?.,!:").lower() in LEAD_IN and "lead-in" not in reasons:
         score += 2
         reasons.append("lead-in")
