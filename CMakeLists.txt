@@ -329,7 +329,6 @@ if(RELAY_BUILD_APP)
     # main.cpp was split into one header per unit on 2026-09-18 (scripts/split-main.py); it is
     # still one translation unit -- main.cpp includes them -- and they are listed so AUTOMOC and
     # IDEs see them.
-    target_link_libraries(relay PRIVATE relay-closedlist)
     add_executable(relay src/main.cpp
         src/AppPaths.h src/Keymap.h src/Isolation.h src/Pane.h src/PaneChrome.h
         src/WindowChrome.h src/RelayWindow.h src/WindowManagerImpl.h
@@ -337,6 +336,7 @@ if(RELAY_BUILD_APP)
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
+    target_link_libraries(relay PRIVATE relay-closedlist)
     target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-remotesession relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
