@@ -20,6 +20,9 @@ Lifecycle and rules:
   until the user's next turn.
   A main turn the user cancelled never triggers a wake-up; its results wait for the next turn.
 * Every result handed to the main agent is labelled as untrusted model output.
+* Every subagent is a *thread* with a durable id, saved beside the session that started it (its owner
+  session) when it starts and each time a run ends: ``<session>.threads/<thread-id>.json``
+  (relay_core.sessions). The conversation index and the session info view read those files.
 """
 from __future__ import annotations
 
@@ -35,6 +38,7 @@ from .agents_defs import DEFAULT_ALIASES, EFFORTS, MAX_STEPS, AgentCatalog, Agen
 from .presets import PRESETS, apply_effort, match_preset
 from .provider import Cancelled, ProviderConfig
 from .roles import ROLES, canonical_role
+from . import sessions as session_files
 from .tools import ToolExecutor, spec
 
 MAX_CONCURRENT = 4
@@ -202,6 +206,17 @@ class Subagent:
     run_start_index: int = 1
     pending_model: tuple | None = None  # (config, preset_id) a running subagent switches to at its next step
     done: threading.Event = field(default_factory=threading.Event)
+    # The durable thread (card #Y63Z): its id, the session that started it and where it is saved.
+    thread_id: str = ""
+    owner_session: str | None = None
+    parent_thread: str | None = None
+    spawn_turn: int | None = None
+    spawn_call: str | None = None
+    store: object = None                # SessionStore of the owner session, or None (not saved)
+    workspace: str = ""
+    started_at: float = 0.0             # wall clock, for the thread file
+    runs: int = 0
+    task: str = ""
 
     @property
     def tokens(self) -> int:
@@ -278,6 +293,7 @@ class SubagentManager:
         self._generation = 0
         self._closed = False
         self.main_inbox = _MainInbox(self)
+        self._main = None                     # the main agent, whose session owns new threads
 
     # ----- configuration ------------------------------------------------------------
     def configure(self, catalog: AgentCatalog, factory) -> None:
@@ -289,6 +305,8 @@ class SubagentManager:
         """Give a main agent the subagent tools and the background-result inbox."""
         agent.subagents = self
         agent.inbox = self.main_inbox
+        with self._lock:
+            self._main = agent
 
     def set_options(self, max_auto_turns=None) -> dict:
         with self._lock:
@@ -356,7 +374,7 @@ class SubagentManager:
                 continue
             try:
                 args = json.loads(func.get("arguments") or "{}")
-                batch[call.get("id")] = self.spawn(args)
+                batch[call.get("id")] = self.spawn(args, call_id=call.get("id"))
             except (ValueError, TypeError, OSError) as exc:
                 batch[call.get("id")] = exc
         return batch
@@ -372,7 +390,7 @@ class SubagentManager:
         if name == "agent":
             entry = (batch or {}).get(call_id)
             if entry is None:
-                entry = self.spawn(args)
+                entry = self.spawn(args, call_id=call_id)
             if isinstance(entry, Exception):
                 raise ValueError(str(entry))
             if entry.background:
@@ -391,7 +409,7 @@ class SubagentManager:
         raise ValueError("Unknown tool or unexpected argument.")
 
     # ----- lifecycle --------------------------------------------------------------------
-    def spawn(self, args: dict) -> Subagent:
+    def spawn(self, args: dict, *, call_id=None, parent_thread: str | None = None) -> Subagent:
         if not isinstance(args, dict):
             raise ValueError("Tool arguments must be an object.")
         if set(args) - {"description", "prompt", "subagent_type", "background", "model", "effort"}:
@@ -428,14 +446,72 @@ class SubagentManager:
                                                         lambda event, s=sub: self._on_event(s, event), agent_id)
             agent.inbox = _SubInbox(self, sub)
             sub.agent, sub.model = agent, model_label
+            self._bind_thread(sub, prompt, call_id, parent_thread)
             self._agents[agent_id] = sub
             event = {"event": "subagent_started", "id": agent_id, "type": sub.type, "description": sub.description,
-                     "background": sub.background, "model": model_label, "effort": effort}
+                     "background": sub.background, "model": model_label, "effort": effort,
+                     "thread_id": sub.thread_id}
             if warnings:
                 event["warnings"] = warnings
             self._emit(event)
             self._start_thread(sub, prompt)
             return sub
+
+    # ----- durable threads (card #Y63Z) ----------------------------------------------------------
+    def _bind_thread(self, sub: Subagent, prompt: str, call_id, parent_thread) -> None:
+        """Give a new subagent its thread id and owner, and save the thread file."""
+        sub.thread_id = session_files.new_id()
+        sub.task = prompt[:8000]
+        sub.started_at = time.time()
+        sub.spawn_call = call_id if isinstance(call_id, str) else None
+        sub.parent_thread = parent_thread if isinstance(parent_thread, str) else None
+        main = self._main
+        if main is not None:
+            try:
+                owner = getattr(main, "session_id", None)
+                sub.owner_session = owner if isinstance(owner, str) else None
+                sub.store = getattr(main, "store", None)
+                items = list(main.checkpoints.items)
+                turn = items[-1].get("turn") if items and isinstance(items[-1], dict) else None
+                sub.spawn_turn = turn if type(turn) is int else None
+                sub.workspace = str(main.executor.workspace.root)
+            except (AttributeError, TypeError, IndexError):
+                pass
+        self._save_thread(sub)
+
+    def thread_data(self, sub: Subagent) -> dict:
+        agent = sub.agent
+        messages = [m for m in list(getattr(agent, "messages", []) or [])[1:] if isinstance(m, dict)]
+        return {"version": 1, "kind": session_files.THREAD_KIND, "id": sub.thread_id, "agent_id": sub.id,
+                "type": sub.type, "description": sub.description, "title": sub.description,
+                "status": sub.status, "owner_session": sub.owner_session, "parent_thread": sub.parent_thread,
+                "spawn_turn": sub.spawn_turn, "spawn_call": sub.spawn_call, "background": sub.background,
+                "workspace": sub.workspace, "model": sub.model,
+                "models": session_files.models_with(getattr(agent, "models_used", []), sub.model),
+                "usage": dict(getattr(agent, "usage_totals", None) or session_files.empty_usage()),
+                "created": sub.started_at, "updated": time.time(), "runs": sub.runs, "task": sub.task,
+                "effort": sub.effort, "result_preview": (sub.result or "")[:SUMMARY_CHARS],
+                "tools": sub.tools, "messages": messages}
+
+    def _save_thread(self, sub: Subagent) -> None:
+        """Save the thread beside its owner session. A failure here never touches the subagent."""
+        store = sub.store
+        if store is None or not sub.owner_session or not sub.thread_id:
+            return
+        try:
+            store.save_thread(self.thread_data(sub))
+        except (OSError, ValueError, TypeError):
+            pass
+
+    def live_thread(self, thread_id: str) -> dict | None:
+        """The current state of a thread this worker is running (or ran), or None."""
+        with self._lock:
+            for sub in self._agents.values():
+                if sub.thread_id == thread_id:
+                    data = self.thread_data(sub)
+                    data["live"] = sub.live
+                    return data
+        return None
 
     def _start_thread(self, sub: Subagent, text: str) -> None:
         threading.Thread(target=self._run, args=(sub, text), name=f"relay-subagent-{sub.id}", daemon=True).start()
@@ -454,6 +530,7 @@ class SubagentManager:
                 self._finish_locked(sub, "stopped")
                 return
             self._active += 1
+            sub.runs += 1
             sub.status = "running"
             sub.last_activity = "starting"
             sub.agent.cancel_event.clear()
@@ -494,6 +571,7 @@ class SubagentManager:
         sub.status = outcome
         sub.finished = self.clock()
         sub.last_activity = outcome
+        self._save_thread(sub)
         self._progress_locked(sub, force=True)
         try:
             handoff = "returned"
@@ -732,6 +810,7 @@ class SubagentManager:
     def list(self) -> list[dict]:
         with self._lock:
             return [{"id": s.id, "type": s.type, "description": s.description, "background": s.background,
+                     "thread_id": s.thread_id,
                      "model": s.model, "status": s.status, "tools": s.tools, "tokens": s.tokens,
                      "elapsed_ms": self._elapsed(s), "last_activity": s.last_activity} for s in self._agents.values()]
 

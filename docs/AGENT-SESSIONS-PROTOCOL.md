@@ -643,13 +643,19 @@ All additive: a worker that never receives these messages behaves exactly as bef
 
 An SQLite FTS5 database at `$XDG_DATA_HOME/relay/index.db` (0600, in the 0700 `relay/`
 directory that already holds the sessions). It is a **cache**: every agent row can be rebuilt
-from the session JSON, so a database that is corrupt, unreadable or written by another
-`SCHEMA_VERSION` is deleted and recreated rather than migrated. `meta.schema_version` records
-the version; `journal_mode=WAL` and `busy_timeout=10000` let one worker per pane write to it.
+from the session JSON, so a database that is corrupt or unreadable is deleted and recreated.
+`meta.schema_version` records the version; `journal_mode=WAL` and `busy_timeout=10000` let one
+worker per pane write to it. **Version 2** (2026-09-18, section 25) adds subagent threads; a v1
+database is migrated in place (columns added, user titles and pins copied into the session meta
+files), because terminal-history rows have no file to be rebuilt from. Any other mismatch wipes
+it. The first conversation command a worker handles runs `reconcile()`: sessions and threads
+missing from the index or newer on disk are indexed, rows whose file is gone are dropped (one
+`stat` and one small meta read per session, a few ms when nothing changed). Before this,
+sessions saved before the index existed or with it off were never found.
 
 | Table | Holds |
 |---|---|
-| `conversations` | one row per conversation: `session_id`, `source` (`agent`/`terminal`), `workspace`, `project`, `title`, `custom_title` (rename), `model`, `preset`, `created`, `updated`, `turns`, `open_requests`, `session_dir`, `pinned` |
+| `conversations` | one row per conversation: `session_id`, `source` (`agent`/`terminal`/`subagent`), `workspace`, `project`, `title`, `custom_title` (rename), `model`, `preset`, `created`, `updated`, `turns`, `open_requests`, `session_dir`, `pinned`; v2: `owner_session`, `parent_thread`, `agent_id`, `agent_type`, `spawn_turn`, `status`, `models` (JSON list), `tokens`, `cost`, `file_mtime` |
 | `entries` | one row per indexed piece of text: `session_id`, `turn`, `seq`, `kind`, `time`, `status`, `text` |
 | `entries_fts` | FTS5 (`unicode61 remove_diacritics 2`) over `entries.text`, external content, kept in step by triggers |
 
@@ -666,29 +672,48 @@ conversation without a separate crawl. Only sessions under `$XDG_DATA_HOME/relay
 indexed: a pane pointed at some other `session_dir` (tests, throwaway directories) stays out of
 it, and `RELAY_INDEX=off` disables indexing and the commands below entirely.
 
+The workspace is spelled one way everywhere (`conv_index.normalize_workspace`: `~` expanded,
+symlinks resolved): the session directory digest, the `workspace` column, the "this project"
+filter and the terminal-history id all use it, so a symlinked workspace finds its own sessions.
+
 ### 14.2 Queries
 
 A query is words and `"quoted phrases"`. Every word is escaped and turned into an FTS5 prefix
 term (`"word"*`), a quoted run into a phrase; nothing the user types can reach FTS5 as an
-operator. Several words are an **AND inside one message or command**, the way grep matches a
-line, not an AND across a conversation.
+operator. Several words are an **AND over the whole conversation** (since v2): a conversation
+matches when every word or phrase occurs somewhere in it, and the matches shown are the entries
+that hold any of them. (Until 2026-09-18 the AND was inside one message.)
 
 ### 14.3 `conversations`
 
 `conversations {query?, scope: "project"|"all", workspace?, model?, has_open_tasks?, since?,
-until?, sources?: ["agent"|"terminal"], limit? (1–200, default 50), id?}`
+until?, sources?: ["agent"|"terminal"|"subagent"], include_threads?: bool, sort?:
+"recent"|"oldest"|"longest"|"relevance", offset?, matches_per_item? (1–20, default 5),
+limit? (1–200, default 50), id?}`
+
+Subagent threads (`source: "subagent"`) are left out unless `include_threads` is true or
+`sources` names `subagent`; `sources` absent means agent sessions and terminal history. `sort`
+(pinned first in every order): newest `updated` first (default), oldest first, most turns, or
+most matching entries. `offset` pages: the event carries `next_offset` when there is more.
 
 `scope` defaults to `project`, which uses `workspace` (the pane's own workspace when the field is
 absent). `since`/`until` are epoch seconds against `updated`. An empty `query` lists conversations
 instead of searching. No agent has to be configured.
 
-→ `conversations {id?, scope, workspace, query, total, elapsed_ms, items: [...]}`
+→ `conversations {id?, scope, workspace, query, sort, offset, next_offset?, total, elapsed_ms,
+items: [...]}`
 
 Each item:
 
 `{session_id, source, title, generated_title, workspace, project, model, preset, created, updated,
 turns, open_requests, session_dir, pinned, snippet, match_count, matches: [{turn, kind, line,
-ranges: [[start, length], …], time}]}`
+ranges: [[start, length], …], time}], owner_session, parent_thread, agent_id, agent_type,
+spawn_turn, status, models, tokens, cost, owner_title?, parent_title?}`
+
+A thread row's `owner_session` is the session that was in the pane when it was started, and
+`owner_title` that session's title (so a list can say whose thread it is even when the owner is
+not among the results); `parent_thread`/`parent_title` name the thread that started it, if one did.
+For a thread, `turns` counts its runs and `session_dir` is its owner's directory.
 
 `title` is the user's rename when there is one, else the generated title. `matches` holds at most
 five turns per conversation, with the matching line and the character ranges to highlight;
@@ -716,8 +741,14 @@ how Ctrl+F counts matches in the pane's own conversation.
   fresh one (`reset`). For a `term-…` id only the index rows go: the shell's own history file is
   never touched.
 - `conversation_rename {session_id, title}` → `conversation_renamed {session_id, title}`. An empty
-  title restores the generated one. The rename is index-only and survives re-indexing.
-- `conversation_pin {session_id, pinned: bool}` → `conversation_pinned {session_id, pinned}`.
+  title restores the generated one. Since v2 the rename is kept in the session's own
+  `<id>.meta.json` (`custom_title`), or in the thread file for a thread, and the index mirrors it:
+  a wiped or rebuilt index keeps it, and an autosave from the pane never drops it. Terminal history
+  has no file, so its rename stays in the index.
+- `conversation_pin {session_id, pinned: bool}` → `conversation_pinned {session_id, pinned}`. Kept
+  the same way (`pinned` in the meta file or thread file).
+- Deleting a session also deletes its `<id>.threads/` folder and its threads' rows; deleting a
+  thread (`source: "subagent"`) removes its file and rows and leaves the owner alone.
 
 ### 14.6 `terminal_history`
 
@@ -733,19 +764,19 @@ indexed.
 
 ### 14.7 `index_rebuild`
 
-`index_rebuild {id?}` drops every agent conversation and rebuilds it from the session JSON files
-under `$XDG_DATA_HOME/relay/sessions`, on a background thread. Terminal history has no file to
-rebuild from and is kept. → `index_rebuilt {sessions, entries, ms, conversations, bytes,
-schema_version, path}`.
+`index_rebuild {id?}` drops every agent conversation and subagent thread and rebuilds them from the
+session JSON files and `<id>.threads/*.json` under `$XDG_DATA_HOME/relay/sessions`, on a background
+thread. Terminal history has no file to rebuild from and is kept. → `index_rebuilt {sessions,
+threads, entries, ms, conversations, bytes, schema_version, path}`.
 
 ### 14.8 Notes and deviations
 
 - The index holds message text. It lives in the same 0700 directory as the sessions, is never
   synced, and holds nothing the session files do not already hold. There is no telemetry.
-- Search matches inside one message or command (14.2); a query whose words are spread over
-  several turns finds nothing. Phrase search covers that case.
-- `conversations` returns at most five matching turns per conversation; `conversation_get` has the
-  rest.
+- Since v2 the words of a query may sit in different turns (14.2); a quoted phrase still has to
+  be in one entry.
+- `conversations` returns at most `matches_per_item` (default five, at most 20) matching turns per
+  conversation; `conversation_get` has the rest.
 - Measured on 300 conversations × 30 turns (36 000 entries, 36 MiB of session JSON): index 44.7
   MiB, full rebuild 1.2 s, autosave update 3.4 ms, worst-case search (a word in every entry) 56–64
   ms median. On a real 248-session set: index 388 KiB, rebuild 61 ms, search 0.03–1.2 ms.
@@ -2260,3 +2291,98 @@ The property is in the tool schema only for a turn whose context has `remote_ses
   client; a remote process that ignores its closed output may outlive it.
 - `jobs` entries for such a job carry `host`. Labels (section 23) say "ran ls -la on filly",
   "running … on filly", "started job: … on filly"; the fold's `detail` gains a `host` section.
+
+## 25. Session info (ⓘ) and subagent threads (v2.7, 2026-09-18)
+
+Cards `#Y63Z` (the ⓘ button, `/status`) and `#R6J0` (the session manager pane). Backend:
+`backend/relay_core/{sessions,conv_index,subagents,session_protocol,agent}.py`, `backend/worker.py`;
+GUI: `src/SessionInfo.{h,cpp}` (the ⓘ view and its painted button), `src/Conversations.{h,cpp}`
+(the session manager), `src/Pane.h`, `src/RelayWindow.h`; tests: `tests/test_session_threads.py`,
+`tests/conversations_test.cpp`. All additive.
+
+### 25.1 Subagent threads are saved
+
+Every subagent is a **thread** with a durable id (32 hex, like a session id). It is written when it
+starts and each time one of its runs ends, beside the session that was in the pane when it was
+started — its **owner session**:
+
+    <session_dir>/<owner-id>.threads/<thread-id>.json      0600
+
+`{version: 1, kind: "relay_subagent_thread", id, agent_id ("a1"), type, description, title,
+status, owner_session, parent_thread, spawn_turn, spawn_call, background, workspace, model, models,
+usage, created, updated, runs, task, effort, result_preview, tools, messages, custom_title?,
+pinned?}`
+
+`spawn_turn` is the owner's turn during which the `agent` call ran, `spawn_call` that call's id.
+`parent_thread` names the thread that started it; subagents cannot start subagents today (depth
+1), so it is `null` for every thread Relay writes now, but the index, `session_info` and the GUI
+all place a thread under its parent when one is set. Deleting the owner deletes the folder. A
+thread with no saved owner (`session_dir` unset) is not written. The index rows are section 14's
+with `source: "subagent"`.
+
+`subagent_started` and `agents_status` items gain `thread_id`.
+
+### 25.2 Usage and models in the session file
+
+The session file (and `<id>.meta.json`) gains `models` (every model the conversation ran on, in
+first-use order), `usage` (`{prompt_tokens, completion_tokens, total_tokens, requests, cost?}`, the
+sums of the provider's own `usage` reports; `cost` only once a provider reports one, e.g.
+OpenRouter's `usage.cost`, so its absence means "not reported", never zero) and `instructions`
+(the instruction files loaded). Thread files carry the same `usage` and `models` for the
+subagent. Nothing is estimated.
+
+### 25.3 `session_info`
+
+`session_info {id?, session_id?, session_dir?, thread_id?, owner_session?}`
+
+- No ids: this pane's session, live.
+- `session_id` (+ `session_dir`, default this pane's): a saved session; the pane's own session
+  asked for by id is answered live.
+- `thread_id` (+ `session_dir`, and `owner_session` when known, else the directory's `*.threads/`
+  folders are searched): one thread. A thread this worker is still holding is answered from memory.
+
+→ `session_info` for a session:
+
+`{id, kind: "session", live, session_id, session_dir, file, file_exists, title, workspace,
+git_branch, created, updated, turns, model, models, preset, provider, effort, mode, usage,
+context: {used_tokens, window, limit_tokens, percent, estimated} | null, instructions,
+instructions_bytes?, forked_from?, open_requests, thread_count, history: [{turn, prompt, time,
+ended, files, threads: [link]}], unplaced_threads: [link]}`
+
+`history` is the turns in order (from the checkpoints, prompt cut to 400 characters, `files` the
+number of files the turn changed) with each thread the session started placed at its
+`spawn_turn`. Threads whose turn is no longer listed (rewound) are in `unplaced_threads`. A
+`link` is `{id, agent_id, type, title, description, status, model, spawn_turn, spawn_call,
+parent_thread, owner_session, created, updated, usage, file, runs, children: [link], live?}`;
+`children` are the threads it started, `live` means this worker still holds it (its transcript
+can be opened in the pane's subagent pane). `context` is `null` for a saved session.
+
+→ `session_info` for a thread:
+
+`{id, kind: "thread", thread_id, agent_id, type, description, title, status, owner_session,
+owner_title, owner_exists, parent_thread, parent_title, spawn_turn, spawn_call, background,
+workspace, model, models, usage, created, updated, runs, task, effort, tools, message_count,
+session_dir, file, live, history: [{role: "user"|"assistant"|"tool"|"threads", text,
+tool_calls?: [{id, name, arguments}], threads?: [link]}]}`
+
+`history` is the thread's own messages (text cut to 4000 characters, arguments to 200), with each
+thread it started placed right after the message whose tool call started it. Errors (no such
+thread, a bad id) are ordinary `error` events carrying the request `id`.
+
+### 25.4 GUI (no protocol)
+
+- The ⓘ button — painted, first in an agent pane's header row — and `/status` (also `/info`) open
+  the info view as a pane beside the pane (`paneType` `info`), one per pane. Thread links open that
+  thread's history in the same view, with "↑ owner session" and, for a nested thread, "↑ parent
+  thread" links; "open in the subagents pane" goes to `RelayWindow::openSubagentTab`. Alt+Left
+  goes back, F5 refreshes, Esc closes. A click on the button shows the "Next time: /status" hint.
+- `/resume [words]`, `/conversations [words]`, Ctrl+Shift+Y (`agent.resume`), `conversations.open`
+  and the palette's Resume and Conversations rows all open the session manager pane (`paneType`
+  `sessions`), which replaced the resume picker (a modal over the `sessions` list of section 5,
+  which is still answered for other clients) and the conversation dialog. Its "Subagent threads"
+  box is unticked at first; ticked, it sends `include_threads` and hangs each thread under its
+  owner session (a muted owner row when the owner is not among the results) and a nested thread
+  under its parent. Enter resumes a session here (Shift+Enter in a new pane) — or, when another
+  pane already has that session open, focuses that pane instead, so two workers never autosave one
+  file; on a thread, Enter opens its history in the ⓘ pane.
+- `reset` now carries the new conversation's `session_id`.

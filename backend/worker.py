@@ -91,7 +91,7 @@ def main():
 
     sessions = session_protocol.SessionCommands(
         turns, emit, on_model_changed=model_changed,
-        on_conversation_replaced=lambda: subagents.stop_all(reset=True))
+        on_conversation_replaced=lambda: subagents.stop_all(reset=True), subagents=subagents)
 
     observe = observe_protocol.ObserveCommands(turns, emit)  # protocol 11
 
@@ -272,7 +272,8 @@ def main():
             elif kind == "reset":
                 turns.reset()
                 subagents.stop_all(reset=True)
-                emit({"event": "reset"})
+                # The new conversation's id: the pane's ⓘ and "already open" checks go by it.
+                emit({"event": "reset", "session_id": turns.agent.session_id if turns.agent else None})
             # --- subagents (protocol sections 7 and 8) ---
             elif kind == "agents_list":
                 catalog = subagents.catalog

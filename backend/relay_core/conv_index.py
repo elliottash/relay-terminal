@@ -5,14 +5,21 @@ An SQLite FTS5 database beside the session files:
 
     $XDG_DATA_HOME/relay/index.db      0600, in the 0700 relay/ directory
 
-It is a **cache**, never the source of truth: every row can be rebuilt from the session JSON
-under `relay/sessions/<workspace-digest>/`, so a corrupt or outdated database is deleted and
-recreated instead of migrated. `SCHEMA_VERSION` is stored in `meta`; a mismatch wipes the tables.
+It is a **cache**, never the source of truth: every agent row can be rebuilt from the session JSON
+under `relay/sessions/<workspace-digest>/`, so a corrupt database is deleted and recreated.
+`SCHEMA_VERSION` is stored in `meta`. Version 1 is migrated in place (columns added), because the
+terminal-history rows have no file to be rebuilt from; any other mismatch wipes the tables.
+User-set titles and pins of saved sessions live in `<id>.meta.json` (since v2); the index only
+mirrors them. `reconcile()` brings the rows back in line with the files on disk.
 
-Two kinds of conversation live in the same tables, told apart by `conversations.source`:
+Three kinds of conversation live in the same tables, told apart by `conversations.source`:
 
 * `agent`   — one row per saved session; entries are user prompts, assistant replies, tool calls
               and capped tool output, with the turn number they belong to.
+* `subagent`— one row per subagent thread (`<session>.threads/<id>.json`), with `owner_session`
+              (the session that started it), `parent_thread` (the thread that started it, when a
+              thread did), `spawn_turn`, `agent_id`, `agent_type` and `status`. Searches leave
+              these rows out unless they are asked for (`include_threads`), since v2 (card #R6J0).
 * `terminal`— one synthetic row per workspace (`term-<digest>`), holding the commands Relay itself
               ran in that workspace, their exit status and, where the engine captured it, their
               output. Commands typed straight into the terminal in native mode never reach Relay,
@@ -28,13 +35,15 @@ import json
 import os
 import re
 import sqlite3
+import tempfile
 import time
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+# v2 (2026-09-18, cards #Y63Z/#R6J0): subagent threads, owner/parent links, models and usage totals.
+SCHEMA_VERSION = 2
 MAX_TEXT = 4000              # per-entry cap for replies and tool output
 MAX_PROMPT = 8000            # per-entry cap for user prompts
-MAX_MATCHES_PER_ITEM = 5     # matching turns returned per conversation
+MAX_MATCHES_PER_ITEM = 5     # matching turns returned per conversation (default; up to 20)
 MAX_LIMIT = 200
 MAX_ENTRIES_PER_SESSION = 20000
 MAX_COMMANDS = 500           # terminal commands accepted in one `terminal_history` message
@@ -59,8 +68,19 @@ CREATE TABLE IF NOT EXISTS conversations(
     turns        INTEGER NOT NULL DEFAULT 0,
     open_requests INTEGER NOT NULL DEFAULT 0,
     session_dir  TEXT NOT NULL DEFAULT '',
-    pinned       INTEGER NOT NULL DEFAULT 0
+    pinned       INTEGER NOT NULL DEFAULT 0,
+    owner_session TEXT,
+    parent_thread TEXT,
+    agent_id     TEXT NOT NULL DEFAULT '',
+    agent_type   TEXT NOT NULL DEFAULT '',
+    spawn_turn   INTEGER,
+    status       TEXT NOT NULL DEFAULT '',
+    models       TEXT NOT NULL DEFAULT '[]',
+    tokens       INTEGER NOT NULL DEFAULT 0,
+    cost         REAL,
+    file_mtime   REAL
 );
+CREATE INDEX IF NOT EXISTS conversations_by_owner ON conversations(owner_session);
 CREATE TABLE IF NOT EXISTS entries(
     id         INTEGER PRIMARY KEY,
     session_id TEXT NOT NULL,
@@ -87,6 +107,15 @@ END;
 """
 
 KINDS = ("prompt", "reply", "tool_call", "tool_output", "command", "command_output")
+SOURCES = ("agent", "terminal", "subagent")
+SORTS = ("recent", "oldest", "longest", "relevance")
+# Columns added by v2; a v1 database gets them with ALTER TABLE instead of being wiped.
+V2_COLUMNS = (("owner_session", "TEXT"), ("parent_thread", "TEXT"), ("agent_id", "TEXT NOT NULL DEFAULT ''"),
+              ("agent_type", "TEXT NOT NULL DEFAULT ''"), ("spawn_turn", "INTEGER"),
+              ("status", "TEXT NOT NULL DEFAULT ''"), ("models", "TEXT NOT NULL DEFAULT '[]'"),
+              ("tokens", "INTEGER NOT NULL DEFAULT 0"), ("cost", "REAL"), ("file_mtime", "REAL"))
+MAX_MATCHES_LIMIT = 20
+THREAD_KIND = "relay_subagent_thread"
 
 
 # ----- paths ---------------------------------------------------------------------------------
@@ -104,8 +133,20 @@ def sessions_root() -> Path:
     return relay_data_dir() / "sessions"
 
 
+def normalize_workspace(workspace: str | Path | None) -> str:
+    """The one spelling of a workspace path: the session directory digest, the index's `workspace`
+    column and its "this project" filter all use it, so a symlinked or `~` workspace still finds
+    its own conversations."""
+    if not workspace:
+        return ""
+    try:
+        return str(Path(workspace).expanduser().resolve())
+    except (OSError, RuntimeError):
+        return str(Path(workspace).expanduser())
+
+
 def workspace_digest(workspace: str | Path) -> str:
-    return hashlib.sha256(str(Path(workspace).expanduser()).encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(normalize_workspace(workspace).encode("utf-8")).hexdigest()[:16]
 
 
 def terminal_id(workspace: str | Path) -> str:
@@ -141,11 +182,8 @@ def query_terms(query: str) -> list[str]:
     return out
 
 
-def fts_query(query: str) -> str:
-    """An FTS5 MATCH expression: quoted phrases stay phrases, bare words become prefix matches.
-
-    Everything the user types is escaped, so no input can reach FTS5 as an operator.
-    """
+def fts_parts(query: str) -> list[str]:
+    """The FTS5 expressions of a query, one per word (prefix) or quoted phrase, all escaped."""
     parts: list[str] = []
     for quoted, bare in re.findall(r'"([^"]*)"|(\S+)', query or ""):
         if quoted:
@@ -155,7 +193,15 @@ def fts_query(query: str) -> str:
         else:
             for word in _WORD.findall(bare):
                 parts.append('"' + word + '"*')
-    return " AND ".join(parts)
+    return parts
+
+
+def fts_query(query: str) -> str:
+    """An FTS5 MATCH expression: quoted phrases stay phrases, bare words become prefix matches.
+
+    Everything the user types is escaped, so no input can reach FTS5 as an operator.
+    """
+    return " AND ".join(fts_parts(query))
 
 
 def match_line(text: str, terms: list[str]) -> tuple[str, list[list[int]]]:
@@ -282,6 +328,57 @@ def session_entries(data: dict) -> list[dict]:
     return rows
 
 
+def thread_entries(data: dict) -> list[dict]:
+    """Index rows for one subagent thread. Its "turns" are its runs: the task, then each message
+    that resumed it, so a row's turn says which run of the thread it belongs to."""
+    rows: list[dict] = []
+    turn = 0
+    updated = data.get("updated")
+    for message in data.get("messages") or []:
+        if not isinstance(message, dict) or len(rows) >= MAX_ENTRIES_PER_SESSION:
+            continue
+        role, content = message.get("role"), str(message.get("content") or "").strip()
+        if role == "user":
+            if content.startswith(RELAY_CONTEXT):
+                continue
+            turn += 1
+            kind = "prompt"
+        elif role == "assistant":
+            kind = "reply"
+        elif role == "tool":
+            kind = "tool_output"
+        else:
+            continue
+        if content:
+            rows.append({"turn": max(turn, 1), "seq": len(rows) + 1, "kind": kind, "time": updated,
+                         "text": content[:MAX_PROMPT if kind == "prompt" else MAX_TEXT]})
+        for call in message.get("tool_calls") or [] if role == "assistant" else []:
+            if not isinstance(call, dict):
+                continue
+            function = call.get("function") or {}
+            arguments = function.get("arguments")
+            if not isinstance(arguments, str):
+                arguments = json.dumps(arguments, ensure_ascii=False) if arguments else ""
+            rows.append({"turn": max(turn, 1), "seq": len(rows) + 1, "kind": "tool_call", "time": updated,
+                         "text": f"{function.get('name') or 'tool'} {arguments}"[:MAX_TEXT]})
+    return rows
+
+
+def _usage_tokens(data: dict) -> tuple[int, float | None]:
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    tokens = usage.get("total_tokens")
+    cost = usage.get("cost")
+    return (tokens if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0 else 0,
+            float(cost) if isinstance(cost, (int, float)) and not isinstance(cost, bool) else None)
+
+
+def _models(data: dict) -> str:
+    models = [m for m in (data.get("models") or []) if isinstance(m, str)][:50]
+    if not models and data.get("model"):
+        models = [str(data.get("model"))]
+    return json.dumps(models)
+
+
 def _clean(text: str, cap: int) -> str:
     """Printable text for the index: control characters out, length capped."""
     text = "".join(ch for ch in (text or "") if ch == "\n" or ch == "\t" or ch >= " ")
@@ -328,6 +425,14 @@ class ConversationIndex:
             version = int(row[0]) if row else None
         except sqlite3.DatabaseError:
             version = None
+        self.migrated_from = None
+        if version == 1 and SCHEMA_VERSION == 2:
+            try:
+                self._migrate_v1(db)
+                version = SCHEMA_VERSION
+                self.migrated_from = 1
+            except sqlite3.DatabaseError:
+                pass
         if version is not None and version != SCHEMA_VERSION:
             db.close()
             self._discard()
@@ -345,6 +450,23 @@ class ConversationIndex:
         except OSError:
             pass
         self._db = db
+
+    @staticmethod
+    def _migrate_v1(db) -> None:
+        """v1 -> v2 in place: add the thread columns and move user titles and pins to the session
+        files, where they are safe from a cache wipe. Terminal-history rows are kept as they are."""
+        columns = {row[1] for row in db.execute("PRAGMA table_info(conversations)").fetchall()}
+        for name, kind in V2_COLUMNS:
+            if name not in columns:
+                db.execute(f"ALTER TABLE conversations ADD COLUMN {name} {kind}")
+        rows = db.execute("SELECT session_id, session_dir, custom_title, pinned FROM conversations"
+                          " WHERE source='agent' AND (custom_title IS NOT NULL OR pinned != 0)").fetchall()
+        for row in rows:
+            if row["session_dir"]:
+                write_user_fields(Path(row["session_dir"]), row["session_id"],
+                                  custom_title=row["custom_title"], pinned=bool(row["pinned"]))
+        db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)", (str(SCHEMA_VERSION),))
+        db.commit()
 
     def _discard(self) -> None:
         self.recovered = True
@@ -388,7 +510,7 @@ class ConversationIndex:
         session_id = str(data.get("id") or "")
         if not session_id:
             raise ValueError("Session has no id.")
-        workspace = str(data.get("workspace") or "")
+        workspace = normalize_workspace(str(data.get("workspace") or ""))
         rows = session_entries(data)
         title = str(data.get("title") or "")
         if not title:
@@ -397,23 +519,79 @@ class ConversationIndex:
 
         def work(db):
             keep = db.execute("SELECT custom_title, pinned FROM conversations WHERE session_id=?", (session_id,)).fetchone()
+            # The session files hold user titles and pins (since v2); an older caller that does not
+            # pass them keeps what the row had.
+            if "custom_title" in data or "pinned" in data:
+                keep = {"custom_title": data.get("custom_title") or None, "pinned": 1 if data.get("pinned") else 0}
             db.execute("DELETE FROM entries WHERE session_id=?", (session_id,))
+            tokens, cost = _usage_tokens(data)
             db.execute(
                 "INSERT OR REPLACE INTO conversations(session_id, source, workspace, project, title, custom_title,"
-                " model, preset, created, updated, turns, open_requests, session_dir, pinned)"
-                " VALUES(?,'agent',?,?,?,?,?,?,?,?,?,?,?,?)",
+                " model, preset, created, updated, turns, open_requests, session_dir, pinned, models, tokens, cost)"
+                " VALUES(?,'agent',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (session_id, workspace, project_name(workspace), title,
                  keep["custom_title"] if keep else None,
                  str(data.get("model") or ""), str(data.get("preset") or ""),
                  data.get("created"), data.get("updated") or time.time(),
                  int(data.get("turns") or 0), int(data.get("open_requests") or 0),
-                 str(session_dir or ""), int(keep["pinned"]) if keep else 0))
+                 str(session_dir or ""), int(keep["pinned"]) if keep else 0, _models(data), tokens, cost))
             db.executemany(
                 "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
                 [(session_id, row["turn"], row["seq"], row["kind"], row["time"], row["text"]) for row in rows])
             db.commit()
             return len(rows)
         return self._run(work)
+
+    def update_thread(self, data: dict, session_dir: str | Path | None = None, file_mtime: float | None = None) -> int:
+        """Index (or re-index) one subagent thread. Returns the number of entries written."""
+        thread_id = str(data.get("id") or "")
+        owner = str(data.get("owner_session") or "")
+        if not thread_id or not owner:
+            raise ValueError("A thread needs an id and an owner session.")
+        workspace = normalize_workspace(str(data.get("workspace") or ""))
+        rows = thread_entries(data)
+        title = " ".join(str(data.get("description") or data.get("title") or "").split())[:200] or "Subagent"
+        parent = data.get("parent_thread") if isinstance(data.get("parent_thread"), str) else None
+        spawn_turn = data.get("spawn_turn") if type(data.get("spawn_turn")) is int else None
+        tokens, cost = _usage_tokens(data)
+        runs = data.get("runs") if type(data.get("runs")) is int else 1
+
+        def work(db):
+            keep = db.execute("SELECT custom_title, pinned FROM conversations WHERE session_id=?", (thread_id,)).fetchone()
+            if "custom_title" in data or "pinned" in data:
+                keep = {"custom_title": data.get("custom_title") or None, "pinned": 1 if data.get("pinned") else 0}
+            db.execute("DELETE FROM entries WHERE session_id=?", (thread_id,))
+            db.execute(
+                "INSERT OR REPLACE INTO conversations(session_id, source, workspace, project, title, custom_title,"
+                " model, preset, created, updated, turns, open_requests, session_dir, pinned, owner_session,"
+                " parent_thread, agent_id, agent_type, spawn_turn, status, models, tokens, cost, file_mtime)"
+                " VALUES(?,'subagent',?,?,?,?,?,'',?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (thread_id, workspace, project_name(workspace), title, keep["custom_title"] if keep else None,
+                 str(data.get("model") or ""), data.get("created"), data.get("updated") or time.time(),
+                 max(1, runs), str(session_dir or ""), int(keep["pinned"]) if keep else 0, owner, parent,
+                 str(data.get("agent_id") or ""), str(data.get("type") or ""), spawn_turn,
+                 str(data.get("status") or ""), _models(data), tokens, cost, file_mtime))
+            db.executemany(
+                "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
+                [(thread_id, row["turn"], row["seq"], row["kind"], row["time"], row["text"]) for row in rows])
+            db.commit()
+            return len(rows)
+        return self._run(work)
+
+    def index_thread_file(self, path: str | Path) -> bool:
+        path = Path(path)
+        try:
+            with open(path, encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            return False
+        if not isinstance(data, dict) or data.get("kind") != THREAD_KIND or not data.get("id"):
+            return False
+        mtime = path.stat().st_mtime
+        data.setdefault("updated", mtime)
+        # The folder is <owner>.threads inside the session directory.
+        self.update_thread(data, path.parent.parent, mtime)
+        return True
 
     def index_session_file(self, path: str | Path) -> bool:
         path = Path(path)
@@ -424,8 +602,64 @@ class ConversationIndex:
             return False
         if not isinstance(data, dict) or data.get("kind") != "relay_session" or not data.get("id"):
             return False
-        self.update_session(data, path.parent)
+        self.update_session({**data, **read_user_fields(path.parent, str(data["id"]))}, path.parent)
         return True
+
+    def reconcile(self, root: str | Path | None = None) -> dict:
+        """Bring the rows in line with the files: index sessions and threads that are missing or
+        newer on disk than in the index, and drop rows whose file is gone. Cheap when nothing
+        changed (one stat per file and one small meta read per session), so it runs whenever a
+        worker first opens the index; `rebuild()` is still there for a full refresh."""
+        started = time.time()
+        directory = Path(root) if root else sessions_root()
+        known = self._run(lambda db: {row["session_id"]: (row["source"], row["updated"] or 0, row["session_dir"],
+                                                          row["file_mtime"])
+                                      for row in db.execute("SELECT session_id, source, updated, session_dir, file_mtime"
+                                                            " FROM conversations WHERE source IN"
+                                                            " ('agent', 'subagent')").fetchall()})
+        seen: set[str] = set()
+        added = refreshed = 0
+        if directory.is_dir():
+            for path in directory.glob("*/*.json"):
+                name = path.name
+                if name.endswith(".meta.json") or name.startswith("."):
+                    continue
+                session_id = name[:-5]
+                seen.add(session_id)
+                row = known.get(session_id)
+                stamp = _meta_updated(path)
+                if row is not None and stamp is not None and stamp <= float(row[1]) + 1e-6 \
+                        and row[2] == str(path.parent):
+                    continue
+                if self.index_session_file(path):
+                    added += row is None
+                    refreshed += row is not None
+            for path in directory.glob("*/*.threads/*.json"):
+                thread_id = path.name[:-5]
+                seen.add(thread_id)
+                row = known.get(thread_id)
+                try:
+                    mtime = path.stat().st_mtime
+                except OSError:
+                    continue
+                if row is not None and row[3] is not None and abs(mtime - float(row[3])) < 1e-6:
+                    continue
+                if self.index_thread_file(path):
+                    added += row is None
+                    refreshed += row is not None
+        gone = [sid for sid, (_source, _updated, folder, _mtime) in known.items()
+                if sid not in seen and (not folder or Path(folder).parent == directory or
+                                        Path(folder).parent.parent == directory)]
+
+        def drop(db):
+            for sid in gone:
+                db.execute("DELETE FROM entries WHERE session_id=?", (sid,))
+                db.execute("DELETE FROM conversations WHERE session_id=?", (sid,))
+            db.commit()
+        if gone:
+            self._run(drop)
+        return {"added": added, "refreshed": refreshed, "removed": len(gone),
+                "ms": int((time.time() - started) * 1000)}
 
     def rebuild(self, root: str | Path | None = None) -> dict:
         """Drop every agent conversation and rebuild it from the session JSON files.
@@ -436,21 +670,26 @@ class ConversationIndex:
         directory = Path(root) if root else sessions_root()
 
         def clear(db):
-            db.execute("DELETE FROM entries WHERE session_id IN (SELECT session_id FROM conversations WHERE source='agent')")
-            db.execute("DELETE FROM conversations WHERE source='agent'")
+            db.execute("DELETE FROM entries WHERE session_id IN"
+                       " (SELECT session_id FROM conversations WHERE source IN ('agent', 'subagent'))")
+            db.execute("DELETE FROM conversations WHERE source IN ('agent', 'subagent')")
             db.commit()
         self._run(clear)
-        sessions = entries = 0
+        sessions = entries = threads = 0
         if directory.is_dir():
             for path in sorted(directory.glob("*/*.json")):
                 if path.name.endswith(".meta.json"):
                     continue
                 if self.index_session_file(path):
                     sessions += 1
+            for path in sorted(directory.glob("*/*.threads/*.json")):
+                if self.index_thread_file(path):
+                    threads += 1
         entries = self._run(lambda db: db.execute("SELECT count(*) FROM entries").fetchone()[0])
         self._run(lambda db: (db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('rebuilt', ?)",
                                          (str(time.time()),)), db.commit())[0])
-        return {"sessions": sessions, "entries": entries, "ms": int((time.time() - started) * 1000)}
+        return {"sessions": sessions, "threads": threads, "entries": entries,
+                "ms": int((time.time() - started) * 1000)}
 
     def record_commands(self, workspace: str, items: list[dict]) -> int:
         """Append Relay-run terminal commands for a workspace. Returns the number of rows added."""
@@ -458,7 +697,7 @@ class ConversationIndex:
             raise ValueError("terminal_history items must be a list.")
         if len(items) > MAX_COMMANDS:
             raise ValueError(f"At most {MAX_COMMANDS} commands per message.")
-        workspace = str(workspace or "")
+        workspace = normalize_workspace(str(workspace or ""))
         session_id = terminal_id(workspace)
         rows: list[tuple] = []
         newest = 0.0
@@ -511,6 +750,10 @@ class ConversationIndex:
             row = db.execute("SELECT source, session_dir FROM conversations WHERE session_id=?", (session_id,)).fetchone()
             db.execute("DELETE FROM entries WHERE session_id=?", (session_id,))
             db.execute("DELETE FROM conversations WHERE session_id=?", (session_id,))
+            # A session's subagent threads go with it (their files sit in its .threads folder).
+            db.execute("DELETE FROM entries WHERE session_id IN"
+                       " (SELECT session_id FROM conversations WHERE owner_session=?)", (session_id,))
+            db.execute("DELETE FROM conversations WHERE owner_session=?", (session_id,))
             db.commit()
             return dict(row) if row else None
         row = self._run(work)
@@ -524,18 +767,18 @@ class ConversationIndex:
                 removed["files"] += 1
             except OSError:
                 pass
-        blobs = directory / f"{session_id}.blobs"
-        if blobs.is_dir():
-            for child in blobs.iterdir():
+        for folder in (directory / f"{session_id}.blobs", directory / f"{session_id}.threads"):
+            if folder.is_dir():
+                for child in folder.iterdir():
+                    try:
+                        child.unlink()
+                    except OSError:
+                        pass
                 try:
-                    child.unlink()
+                    folder.rmdir()
+                    removed["files"] += 1
                 except OSError:
                     pass
-            try:
-                blobs.rmdir()
-                removed["files"] += 1
-            except OSError:
-                pass
         return removed
 
     def rename(self, session_id: str, title: str) -> None:
@@ -558,7 +801,7 @@ class ConversationIndex:
         where, params = [], []
         if scope == "project":
             where.append("c.workspace = ?")
-            params.append(str(workspace or ""))
+            params.append(normalize_workspace(str(workspace or "")))
         if model:
             where.append("c.model = ?")
             params.append(model)
@@ -577,40 +820,64 @@ class ConversationIndex:
 
     def search(self, query: str = "", *, scope: str = "project", workspace: str | None = None,
                model: str | None = None, has_open: bool = False, since=None, until=None,
-               sources=None, limit: int = 50) -> dict:
-        """Conversations matching `query`, newest first, each with its matching turns."""
+               sources=None, limit: int = 50, include_threads: bool = False, sort: str = "recent",
+               offset: int = 0, matches_per_item: int = MAX_MATCHES_PER_ITEM) -> dict:
+        """Conversations matching `query`, each with its matching turns.
+
+        Words are an AND over the whole conversation, not over one message: a conversation matches
+        when every word or phrase occurs somewhere in it. `sort` is "recent" (default), "oldest",
+        "longest" (most turns) or "relevance" (most matching entries); pinned rows come first in
+        every order. `offset` pages through the list; `next_offset` is set when there is more.
+        Subagent threads are rows too, but only with `include_threads` (or "subagent" named in
+        `sources`): the list is about sessions, and threads are what the checkbox adds."""
         if scope not in ("project", "all"):
             raise ValueError('scope must be "project" or "all".')
+        if sort not in SORTS:
+            raise ValueError("sort must be one of " + ", ".join(SORTS) + ".")
         limit = max(1, min(int(limit or 50), MAX_LIMIT))
+        offset = max(0, int(offset or 0))
+        per_item = max(1, min(int(matches_per_item or MAX_MATCHES_PER_ITEM), MAX_MATCHES_LIMIT))
         query = str(query or "")
         if len(query) > 500:
             raise ValueError("Search query is too long.")
-        kinds = [s for s in (sources or []) if s in ("agent", "terminal")]
+        kinds = [s for s in (sources or []) if s in SOURCES]
+        if not kinds:
+            kinds = ["agent", "terminal"]
+        if include_threads and "subagent" not in kinds:
+            kinds.append("subagent")
         clause, params = self._filters(scope, workspace, model, has_open, since, until, kinds)
         started = time.time()
-        match = fts_query(query)
+        parts = fts_parts(query)
         terms = query_terms(query)
+        order = {"recent": "COALESCE(c.updated, 0) DESC", "oldest": "COALESCE(c.updated, 0) ASC",
+                 "longest": "c.turns DESC, COALESCE(c.updated, 0) DESC",
+                 "relevance": "hits DESC, COALESCE(c.updated, 0) DESC"}[sort]
 
         def work(db):
-            if match:
-                # Two steps: count the matches per conversation in SQLite (no Python per row), then
-                # fetch only the few best-ranked lines of the conversations that made the page.
+            if parts:
+                any_part = " OR ".join(parts)
+                # Every part somewhere in the conversation: one set of conversations per part,
+                # intersected. Then count the entries that match any part, in SQLite.
+                every = " INTERSECT ".join(
+                    "SELECT e.session_id FROM entries_fts JOIN entries e ON e.id = entries_fts.rowid"
+                    " WHERE entries_fts MATCH ?" for _ in parts)
                 sql = ("SELECT e.session_id AS sid, count(*) AS hits, c.* FROM entries_fts"
                        " JOIN entries e ON e.id = entries_fts.rowid"
                        " JOIN conversations c ON c.session_id = e.session_id"
-                       " WHERE entries_fts MATCH ?")
-                args: list = [match]
+                       f" WHERE entries_fts MATCH ? AND e.session_id IN ({every})")
+                args: list = [any_part, *parts]
                 if clause:
                     sql += " AND " + clause
                     args += params
-                sql += " GROUP BY e.session_id ORDER BY c.pinned DESC, COALESCE(c.updated, 0) DESC LIMIT ?"
-                args.append(limit)
+                sql += f" GROUP BY e.session_id ORDER BY c.pinned DESC, {order} LIMIT ? OFFSET ?"
+                args += [limit + 1, offset]
                 try:
                     rows = db.execute(sql, args).fetchall()
                 except sqlite3.OperationalError as exc:
                     raise ValueError(f"Search query is not valid ({exc}).") from exc
+                more = len(rows) > limit
                 out = []
-                for row in rows:
+                for row in rows[:limit]:
                     item = _item(row)
                     item["match_count"] = row["hits"]
                     out.append(item)
@@ -622,23 +889,38 @@ class ConversationIndex:
                         " JOIN entries e ON e.id = entries_fts.rowid"
                         f" WHERE entries_fts MATCH ? AND e.session_id IN ({placeholders})"
                         " ORDER BY bm25(entries_fts) LIMIT ?",
-                        [match, *by_id, len(by_id) * MAX_MATCHES_PER_ITEM * 4]).fetchall()
+                        [any_part, *by_id, len(by_id) * per_item * 4]).fetchall()
                     for line_row in lines:
                         item = by_id[line_row["session_id"]]
-                        if len(item["matches"]) >= MAX_MATCHES_PER_ITEM:
+                        if len(item["matches"]) >= per_item:
                             continue
                         line, ranges = match_line(line_row["text"], terms)
                         item["matches"].append({"turn": line_row["turn"], "kind": line_row["kind"],
                                                 "line": line, "ranges": ranges, "time": line_row["time"]})
             else:
-                sql = "SELECT c.* FROM conversations c"
+                sql = "SELECT c.*, 0 AS hits FROM conversations c"
                 args = []
                 if clause:
                     sql += " WHERE " + clause
                     args += params
-                sql += " ORDER BY c.pinned DESC, COALESCE(c.updated, 0) DESC LIMIT ?"
-                args.append(limit)
-                out = [_item(row) for row in db.execute(sql, args).fetchall()]
+                sql += f" ORDER BY c.pinned DESC, {order} LIMIT ? OFFSET ?"
+                args += [limit + 1, offset]
+                rows = db.execute(sql, args).fetchall()
+                more = len(rows) > limit
+                out = [_item(row) for row in rows[:limit]]
+            owners = {item["owner_session"] for item in out if item.get("owner_session")}
+            parents = {item["parent_thread"] for item in out if item.get("parent_thread")}
+            if owners or parents:
+                wanted = list(owners | parents)
+                titles = {row["session_id"]: (row["custom_title"] or row["title"] or "Untitled")
+                          for row in db.execute(
+                              "SELECT session_id, title, custom_title FROM conversations WHERE session_id IN (%s)"
+                              % ",".join("?" * len(wanted)), wanted).fetchall()}
+                for item in out:
+                    if item.get("owner_session"):
+                        item["owner_title"] = titles.get(item["owner_session"], "")
+                    if item.get("parent_thread"):
+                        item["parent_title"] = titles.get(item["parent_thread"], "")
             for item in out:
                 if not item["snippet"]:
                     first = db.execute(
@@ -647,10 +929,13 @@ class ConversationIndex:
                 item["matches"].sort(key=lambda m: m["turn"])
             total = db.execute("SELECT count(*) FROM conversations" + (" c WHERE " + clause if clause else ""),
                                params).fetchone()[0]
-            return out, total
-        items, total = self._run(work)
-        return {"items": items, "total": total, "query": query,
-                "elapsed_ms": int((time.time() - started) * 1000)}
+            return out, total, more
+        items, total, more = self._run(work)
+        result = {"items": items, "total": total, "query": query, "sort": sort, "offset": offset,
+                  "elapsed_ms": int((time.time() - started) * 1000)}
+        if more:
+            result["next_offset"] = offset + len(items)
+        return result
 
     def conversation(self, session_id: str, turn: int | None = None, query: str = "",
                      limit: int = 400) -> dict:
@@ -684,6 +969,10 @@ class ConversationIndex:
                 entries.append(item)
             header = _item(row)
             header.pop("matches", None)
+            if header.get("owner_session"):
+                owner = db.execute("SELECT title, custom_title FROM conversations WHERE session_id=?",
+                                   (header["owner_session"],)).fetchone()
+                header["owner_title"] = (owner["custom_title"] or owner["title"]) if owner else ""
             header["items"] = entries
             header["match_count"] = sum(1 for e in entries if e.get("ranges"))
             return header
@@ -713,4 +1002,87 @@ def _item(row) -> dict:
             "created": row["created"], "updated": row["updated"],
             "turns": row["turns"], "open_requests": row["open_requests"],
             "session_dir": row["session_dir"], "pinned": int(row["pinned"] or 0),
+            "owner_session": row["owner_session"], "parent_thread": row["parent_thread"],
+            "agent_id": row["agent_id"], "agent_type": row["agent_type"], "spawn_turn": row["spawn_turn"],
+            "status": row["status"], "models": _json_list(row["models"]), "tokens": row["tokens"] or 0,
+            "cost": row["cost"],
             "snippet": "", "matches": [], "match_count": 0}
+
+
+def _json_list(text) -> list:
+    try:
+        value = json.loads(text or "[]")
+    except ValueError:
+        return []
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
+# ----- user fields in the session files (since v2) --------------------------------------------
+
+def _meta_path(directory: Path, session_id: str) -> Path:
+    return Path(directory) / f"{session_id}.meta.json"
+
+
+def read_user_fields(directory: str | Path, session_id: str) -> dict:
+    """{custom_title, pinned} from `<id>.meta.json`; empty when the file has neither."""
+    try:
+        with open(_meta_path(Path(directory), session_id), encoding="utf-8") as handle:
+            meta = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(meta, dict):
+        return {}
+    out = {}
+    if isinstance(meta.get("custom_title"), str) and meta["custom_title"].strip():
+        out["custom_title"] = meta["custom_title"]
+    if meta.get("pinned"):
+        out["pinned"] = True
+    if out:
+        out.setdefault("custom_title", None)
+        out.setdefault("pinned", False)
+    return out
+
+
+def write_user_fields(directory: Path, session_id: str, **fields) -> bool:
+    """Merge custom_title / pinned into `<id>.meta.json` (0600, atomic). False when there is no
+    meta file to hold them (the session is gone)."""
+    path = _meta_path(Path(directory), session_id)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            meta = json.load(handle)
+    except (OSError, ValueError):
+        return False
+    if not isinstance(meta, dict):
+        return False
+    if "custom_title" in fields:
+        title = " ".join(str(fields["custom_title"] or "").split())[:200]
+        if title:
+            meta["custom_title"] = title
+        else:
+            meta.pop("custom_title", None)
+    if "pinned" in fields:
+        if fields["pinned"]:
+            meta["pinned"] = True
+        else:
+            meta.pop("pinned", None)
+    fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".session-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            os.fchmod(out.fileno(), 0o600)
+            json.dump(meta, out, ensure_ascii=False)
+        os.replace(temp, path)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+    return True
+
+
+def _meta_updated(path: Path) -> float | None:
+    """`updated` of a session from its small meta file (cheaper than the session JSON)."""
+    try:
+        with open(path.with_name(path.name[:-5] + ".meta.json"), encoding="utf-8") as handle:
+            meta = json.load(handle)
+        value = meta.get("updated") if isinstance(meta, dict) else None
+        return float(value) if isinstance(value, (int, float)) else None
+    except (OSError, ValueError):
+        return None

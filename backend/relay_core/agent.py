@@ -37,6 +37,7 @@ from .requests import AUDIT_MAX_TOKENS, RequestLedger, run_audit
 from .sessions import STATE_VERSION, SessionStore, validate_messages
 from .sessions import check_id as check_session_id
 from .sessions import new_id as new_session_id
+from . import sessions as sessions_usage
 from . import remote_session
 from .tools import Prepared, ToolExecutor, Workspace
 
@@ -314,6 +315,10 @@ class Agent:
         self.requests = RequestLedger(on_change=self._requests_changed)
         self.todos = todo_tool.TodoList()
         self.plan_path = None
+        # Session info (card #Y63Z): every model this conversation ran on, and the provider-reported
+        # token totals (and cost, where the provider reports one). Kept in the session file.
+        self.usage_totals = sessions_usage.empty_usage()
+        self.models_used: list[str] = []
         self.messages = [{"role": "system", "content": self.system_prompt()}]
         self.context_invalidate()
 
@@ -700,6 +705,8 @@ class Agent:
         kind = event.get("event")
         if kind == "usage" and isinstance(event.get("usage"), dict):
             self._last_usage = event["usage"]
+            sessions_usage.add_usage(self.usage_totals, event["usage"])
+            sessions_usage.note_model(self.models_used, self.config.model)
         record = self._turn_record
         if record is not None and kind in ("thinking_delta", "thinking_done"):
             event = {**event, "turn_id": record["turn_id"]}
@@ -1715,6 +1722,8 @@ class Agent:
         self.title_turn = title_turn if type(title_turn) is int and title_turn >= 0 else (self.turns if self.title else 0)
         if keep_id and isinstance(data.get("created"), (int, float)):
             self.created = data["created"]
+        self.usage_totals = sessions_usage.load_usage(data.get("usage"))
+        self.models_used = [m for m in data.get("models") or [] if isinstance(m, str)][:50]
         self.epoch = epoch
         system = {"role": "system", "content": self.system_prompt()}
         self.snapshots = {k: [system] + v for k, v in snapshots.items()}
@@ -1734,7 +1743,11 @@ class Agent:
                 "snapshots": {k: v[1:] for k, v in self.snapshots.items()},
                 "checkpoints": self.checkpoints.to_json(),
                 "requests": self.requests.to_json(), "todos": self.todos.to_json(), "plan_path": self.plan_path,
-                "open_requests": self.requests.open_count()}
+                "open_requests": self.requests.open_count(),
+                # Session info (card #Y63Z): models used and provider-reported usage.
+                "models": sessions_usage.models_with(self.models_used, self.config.model),
+                "usage": dict(self.usage_totals),
+                "instructions": list(self.instructions.loaded) if self.instructions else []}
 
     def autosave(self) -> None:
         if self.store is None or (self.turns == 0 and not self.store.path(self.session_id).exists()):

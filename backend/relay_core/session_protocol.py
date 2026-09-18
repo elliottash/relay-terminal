@@ -10,6 +10,7 @@ their own threads with a separate provider, so the protocol loop never blocks on
 from __future__ import annotations
 
 import os
+import sqlite3
 import threading
 import uuid
 from urllib.parse import urlsplit
@@ -21,6 +22,7 @@ from .requests import check_ledger_id
 from .context import validate_threshold, validate_window
 from .presets import PRESETS, match_preset, resolve_preset, validate_effort
 from .provider import ProviderConfig, ProviderError
+from . import sessions as session_files
 from .sessions import SessionStore, check_id, default_session_dir
 
 _log = logs.get("aliases")
@@ -37,7 +39,9 @@ TYPES = {"set_model", "set_effort", "context", "compact", "checkpoints", "rewind
          "requests", "request_get", "request_set", "request_reask", "todos",
          # conversation list and full-text search (protocol section 14)
          "conversations", "conversation_get", "conversation_delete", "conversation_rename",
-         "conversation_pin", "terminal_history", "index_rebuild"}
+         "conversation_pin", "terminal_history", "index_rebuild",
+         # session info and the thread history (protocol section 25)
+         "session_info"}
 
 
 def provider_name(preset_id: str, base_url: str = "") -> str:
@@ -163,9 +167,11 @@ def open_request_items(agent) -> list[dict]:
 
 
 class SessionCommands:
-    def __init__(self, turns, emit, *, on_model_changed=None, on_conversation_replaced=None):
+    def __init__(self, turns, emit, *, on_model_changed=None, on_conversation_replaced=None, subagents=None):
         self.turns = turns
         self.emit = emit
+        # The worker's SubagentManager, for the live state of a thread that is still running.
+        self.subagents = subagents
         # Worker hooks (subagents): follow a model switch; drop background work of a replaced conversation.
         self.on_model_changed = on_model_changed or (lambda agent: None)
         self.on_conversation_replaced = on_conversation_replaced or (lambda: None)
@@ -453,6 +459,12 @@ class SessionCommands:
             if not conv_index.enabled():
                 raise ValueError("The conversation index is disabled (RELAY_INDEX=off).")
             self._index = conv_index.ConversationIndex(rebuild_on_reset=True)
+            # Sessions saved before the index existed, with it off, or by another build: pick them
+            # up (and drop rows whose files are gone) once per worker, before the first answer.
+            try:
+                self._index.reconcile()
+            except (OSError, ValueError, sqlite3.Error):
+                pass
         return self._index
 
     def _workspace(self, request) -> str:
@@ -475,12 +487,22 @@ class SessionCommands:
                 raise ValueError(f"{name} must be text.")
         sources = request.get("sources")
         if sources is not None and (not isinstance(sources, list) or not all(isinstance(s, str) for s in sources)):
-            raise ValueError("sources must be a list of \"agent\" and/or \"terminal\".")
+            raise ValueError("sources must be a list of \"agent\", \"terminal\" and/or \"subagent\".")
+        for name in ("offset", "matches_per_item", "limit"):
+            value = request.get(name)
+            if value is not None and type(value) is not int:
+                raise ValueError(f"{name} must be an integer.")
+        include_threads = request.get("include_threads", False)
+        if type(include_threads) is not bool:
+            raise ValueError("include_threads must be true or false.")
         result = self.index().search(
             request.get("query", "") or "", scope=request.get("scope", "project") or "project",
             workspace=self._workspace(request), model=request.get("model") or None,
             has_open=bool(request.get("has_open_tasks")), since=request.get("since"),
-            until=request.get("until"), sources=sources, limit=request.get("limit", 50))
+            until=request.get("until"), sources=sources, limit=request.get("limit", 50),
+            include_threads=include_threads, sort=request.get("sort") or "recent",
+            offset=request.get("offset") or 0,
+            matches_per_item=request.get("matches_per_item") or conv_index.MAX_MATCHES_PER_ITEM)
         self.emit({"event": "conversations", "id": request.get("id"),
                    "scope": request.get("scope", "project") or "project",
                    "workspace": self._workspace(request), **result})
@@ -499,6 +521,16 @@ class SessionCommands:
         index = self.index()
         removed = {"session_id": session_id, "files": 0}
         if session_id.startswith("term-"):
+            index.delete_session(session_id, remove_files=False)
+        elif self._indexed(session_id).get("source") == "subagent":
+            row = self._indexed(session_id)
+            try:
+                store = SessionStore(row.get("session_dir") or "/nonexistent", index=index)
+                path = store.thread_path(row.get("owner_session"), session_id)
+                path.unlink()
+                removed["files"] = 1
+            except (OSError, ValueError):
+                pass
             index.delete_session(session_id, remove_files=False)
         else:
             directory = ""
@@ -520,16 +552,44 @@ class SessionCommands:
             if agent is not None and agent.session_id == session_id and not self.turns.busy:
                 self.turns.reset()
                 self.on_conversation_replaced()
-                self.emit({"event": "reset"})
+                self.emit({"event": "reset", "session_id": agent.session_id})
         self.emit({"event": "conversation_deleted", "id": request.get("id"),
                    "session_id": session_id, **{k: v for k, v in removed.items() if k != "session_id"}})
+
+    def _set_user_fields(self, session_id: str, **fields) -> None:
+        """A rename or pin goes to the session's own files (meta, or the thread file), which the
+        index mirrors; terminal history has no file, so only its index row holds them."""
+        index = self.index()
+        if session_id.startswith("term-"):
+            if "custom_title" in fields:
+                index.rename(session_id, fields["custom_title"])
+            if "pinned" in fields:
+                index.set_pinned(session_id, fields["pinned"])
+            return
+        row = self._indexed(session_id)
+        directory = row.get("session_dir") or ""
+        if not directory and self.turns.agent is not None and self.turns.agent.store is not None:
+            directory = str(self.turns.agent.store.directory)
+        if not directory:
+            raise ValueError("That conversation is not in the index.")
+        store = SessionStore(directory, index=index)
+        if row.get("source") == "subagent":
+            store.set_thread_fields(session_id, **fields)
+        else:
+            store.set_user_fields(session_id, **fields)
+
+    def _indexed(self, session_id: str) -> dict:
+        try:
+            return self.index().conversation(session_id, limit=1)
+        except ValueError:
+            return {}
 
     def _conversation_rename(self, request):
         session_id = self._conversation_id(request.get("session_id"))
         title = request.get("title")
         if title is not None and not isinstance(title, str):
             raise ValueError("title must be text.")
-        self.index().rename(session_id, title or "")
+        self._set_user_fields(session_id, custom_title=title or "")
         self.emit({"event": "conversation_renamed", "id": request.get("id"), "session_id": session_id,
                    "title": " ".join((title or "").split())[:200]})
 
@@ -538,7 +598,7 @@ class SessionCommands:
         pinned = request.get("pinned", True)
         if type(pinned) is not bool:
             raise ValueError("pinned must be a boolean.")
-        self.index().set_pinned(session_id, pinned)
+        self._set_user_fields(session_id, pinned=pinned)
         self.emit({"event": "conversation_pinned", "id": request.get("id"), "session_id": session_id,
                    "pinned": pinned})
 
@@ -559,6 +619,114 @@ class SessionCommands:
         self._background("index_rebuild", request_id,
                          lambda: {"event": "index_rebuilt", **index.rebuild(), **index.stats()})
 
+    # ----- session info and thread history (protocol section 25) -------------------------------
+    def _session_info(self, request):
+        """What the ⓘ view shows. No ids: this pane's session, live (model, context, usage).
+        `session_id` (+ `session_dir`): a saved session. `thread_id` (+ `session_dir`, and
+        `owner_session` when known): one subagent thread and its own history."""
+        thread_id = request.get("thread_id")
+        session_id = request.get("session_id")
+        directory = _abs_dir(request.get("session_dir"), "session_dir")
+        agent = self.turns.agent
+        if directory is None:
+            if agent is None or agent.store is None:
+                raise ValueError("This pane has no saved sessions.")
+            directory = str(agent.store.directory)
+        store = SessionStore(directory, index=False)
+        if thread_id is not None:
+            event = self._thread_info(store, check_id(thread_id), request.get("owner_session"))
+        elif session_id is None or (agent is not None and session_id == agent.session_id
+                                    and agent.store is not None and store.directory == agent.store.directory):
+            if agent is None:
+                raise ValueError("Configure a provider and workspace first.")
+            event = self._live_session_info(agent)
+        else:
+            data = store.load(check_id(session_id))
+            event = self._saved_session_info(store, data)
+        event["id"] = request.get("id")
+        self.emit(event)
+
+    def _session_fields(self, store: SessionStore, data: dict) -> dict:
+        session_id = data["id"]
+        threads = store.threads(session_id)
+        turns, unplaced = session_files.session_history(data, threads)
+        user = conv_index.read_user_fields(store.directory, session_id)
+        usage = session_files.load_usage(data.get("usage"))
+        return {"event": "session_info", "kind": "session", "session_id": session_id, "session_dir": str(store.directory),
+                "file": str(store.path(session_id)), "file_exists": store.path(session_id).is_file(),
+                "title": user.get("custom_title") or data.get("title") or "",
+                "workspace": data.get("workspace") or "", "created": data.get("created"),
+                "updated": data.get("updated"), "turns": data.get("turns") or len(turns),
+                "model": data.get("model") or "", "models": data.get("models") or ([data["model"]] if data.get("model") else []),
+                "preset": data.get("preset") or "", "effort": data.get("effort"), "mode": data.get("mode"),
+                "usage": usage, "instructions": data.get("instructions") or [],
+                "forked_from": data.get("forked_from"), "history": turns, "unplaced_threads": unplaced,
+                "thread_count": len(threads), "open_requests": data.get("open_requests") or 0}
+
+    def _live_session_info(self, agent) -> dict:
+        data = agent.session_data()
+        # Threads this worker is still running are saved at start and at each run's end; the live
+        # rows here keep their status current without writing the files again.
+        event = self._session_fields(agent.store, data)
+        live = {row.get("thread_id"): row for row in (self.subagents.list() if self.subagents else [])}
+        for turn in event["history"]:
+            for thread in turn["threads"]:
+                if thread.get("id") in live:
+                    thread["status"] = live[thread["id"]].get("status")
+                    thread["live"] = True
+        preset = agent.preset
+        context = agent.context_event()
+        event.update({"live": True, "provider": provider_name(preset.id if preset else "", agent.config.base_url),
+                      "base_url_host": urlsplit(agent.config.base_url).hostname or "",
+                      "context": {k: context.get(k) for k in ("used_tokens", "window", "limit_tokens", "percent",
+                                                               "estimated") if k in context},
+                      "instructions_bytes": len(agent.instructions.section.encode("utf-8")) if agent.instructions else 0,
+                      "git_branch": session_files.git_branch(event["workspace"]) if event["workspace"] else ""})
+        return event
+
+    def _saved_session_info(self, store: SessionStore, data: dict) -> dict:
+        event = self._session_fields(store, data)
+        preset = data.get("preset") or ""
+        event.update({"live": False, "provider": provider_name(preset) if preset else "",
+                      "context": None,
+                      "git_branch": session_files.git_branch(event["workspace"]) if event["workspace"] else ""})
+        return event
+
+    def _thread_info(self, store: SessionStore, thread_id: str, owner) -> dict:
+        live = self.subagents.live_thread(thread_id) if self.subagents is not None else None
+        if live is not None:
+            data, path = live, None
+            try:
+                path = str(store.thread_path(live["owner_session"], thread_id))
+            except ValueError:
+                path = None
+        else:
+            data = store.load_thread(thread_id, owner if isinstance(owner, str) and owner else None)
+            path = data.pop("_path", None)
+        owner_id = data.get("owner_session")
+        siblings = store.threads(owner_id) if owner_id else []
+        children = [t for t in siblings if t.get("parent_thread") == thread_id]
+        owner_title, parent_title = "", ""
+        if owner_id:
+            try:
+                owner_data = store.load(owner_id)
+                owner_title = (conv_index.read_user_fields(store.directory, owner_id).get("custom_title")
+                               or owner_data.get("title") or "")
+            except ValueError:
+                owner_title = ""
+        if data.get("parent_thread"):
+            parent = next((t for t in siblings if t.get("id") == data["parent_thread"]), None)
+            parent_title = parent.get("title") if parent else ""
+        summary = session_files.thread_summary(data)
+        return {"event": "session_info", "kind": "thread", "thread_id": thread_id, **{k: v for k, v in summary.items() if k != "id"},
+                "session_dir": str(store.directory), "file": path, "owner_title": owner_title,
+                "owner_exists": bool(owner_id) and store.path(owner_id).is_file(),
+                "parent_title": parent_title, "task": str(data.get("task") or "")[:4000],
+                "effort": data.get("effort"), "tools": data.get("tools"),
+                # Still known to this worker: the pane's subagents pane can show it.
+                "live": live is not None,
+                "history": session_files.thread_history(data, children)}
+
     def _set_mode(self, request):
         agent = self._agent()
         agent.set_mode(planning.validate_mode(request.get("mode")))
@@ -578,7 +746,7 @@ class SessionCommands:
         if fresh:
             self.turns.reset()
             self.on_conversation_replaced()
-            self.emit({"event": "reset"})
+            self.emit({"event": "reset", "session_id": agent.session_id})
         agent.set_mode("build")
         self.emit({"event": "mode_changed", "mode": "build"})
         self.turns.submit(prompt, request.get("when", "now"), request.get("id"))

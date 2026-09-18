@@ -128,9 +128,10 @@ class IndexTests(unittest.TestCase):
         self.assertEqual(len(self.index.search("pelic", scope="all")["items"]), 1)      # prefix
         self.assertEqual(len(self.index.search('"pelican finder"', scope="all")["items"]), 1)
         self.assertEqual(len(self.index.search('"finder pelican"', scope="all")["items"]), 0)
-        # Several words are an AND *within one message or command*, like grep over a turn.
+        # Several words are an AND over the whole conversation (since v2, card #R6J0): "pelican" is
+        # in a reply and "scrollback" in the prompt, and the conversation still matches.
         self.assertEqual(len(self.index.search("pelican finder", scope="all")["items"]), 1)
-        self.assertEqual(len(self.index.search("pelican scrollback", scope="all")["items"]), 0)
+        self.assertEqual(len(self.index.search("pelican scrollback", scope="all")["items"]), 1)
         self.assertEqual(len(self.index.search("pelican zebra", scope="all")["items"]), 0)
 
     def test_highlight_ranges_point_at_the_match(self):
