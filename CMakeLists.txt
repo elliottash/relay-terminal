@@ -162,6 +162,15 @@ target_include_directories(relay-outputlinks PUBLIC src)
 target_link_libraries(relay-outputlinks PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-outputlinks PRIVATE -Wall -Wextra -Wpedantic)
 
+# Aliases: saved commands and prompts (issue G8DK): turning an alias's template into composer
+# fields, walking them with Tab, and deciding whether a typed line names an alias. Plain QtCore so
+# every rule is testable without a window; the worker owns the files and the shell-safe parameter
+# substitution (protocol 19).
+add_library(relay-aliases STATIC src/Aliases.cpp src/Aliases.h)
+target_include_directories(relay-aliases PUBLIC src)
+target_link_libraries(relay-aliases PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-aliases PRIVATE -Wall -Wextra -Wpedantic)
+
 # Voice transcription (issue NY7Z): which capture tool to run, which key event is the hold key,
 # where the transcript lands in the composer, and WAV repair. Plain QtCore so every rule can be
 # tested without a microphone or a window; the worker does the transcribing (protocol 16).
@@ -200,7 +209,7 @@ if(RELAY_BUILD_APP)
         src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-outputlinks relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-board ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-outputlinks relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-board relay-aliases ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -284,6 +293,9 @@ if(BUILD_TESTING)
     target_link_libraries(relay-voice-tests PRIVATE relay-voice ${RELAY_QT}::Test)
     add_test(NAME voice COMMAND relay-voice-tests)
     set_tests_properties(voice PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-aliases-tests tests/aliases_test.cpp)
+    target_link_libraries(relay-aliases-tests PRIVATE relay-aliases ${RELAY_QT}::Test)
+    add_test(NAME aliases COMMAND relay-aliases-tests)
     add_executable(relay-images-tests tests/images_test.cpp)
     target_link_libraries(relay-images-tests PRIVATE relay-images ${RELAY_QT}::Test)
     add_test(NAME images COMMAND relay-images-tests)

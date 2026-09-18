@@ -74,7 +74,7 @@ echo "pairing url: ${url:0:60}${url:+...}"
 
 # Pair a headless browser and type into the real pane. Pairing needs the person at the desktop to
 # allow the device, so the browser runs in the background while the script answers the dialog.
-( cd "$root" && python3 browser_pair.py "$url" >"$out/pair.log" 2>&1 ) &
+( cd "$root" && python3 "$out/browser_pair.py" "$url" >"$out/pair.log" 2>&1 ) &
 pair_pid=$!
 
 for i in $(seq 1 40); do
@@ -93,6 +93,8 @@ sleep 2
 [[ -n $dlg ]] && import -window "$dlg" "$out/implementer-06-paired.png"
 
 wait $pair_pid
+# Move the dialog out of the way so the last shot is the pane itself.
+[[ -n $dlg ]] && xdotool windowmove "$dlg" 2000 2000
 sleep 2
 shot 07-pane-after-phone-typed
 echo "--- what the browser saw ---"

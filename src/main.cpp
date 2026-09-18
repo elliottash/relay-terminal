@@ -29,6 +29,7 @@
 #include "backend/VTermBackend.h"  // engine panes can hand over a frame; KonsolePart cannot
 #include "Voice.h"          // voice transcription: capture, the hold key, the transcript
 #include "Images.h"         // image context: paste, drop, `@path` and "Screenshot this pane"
+#include "Aliases.h"        // aliases: saved commands and prompts, their fields and invocations
 #include <iterator>
 #include <QAbstractItemView>
 #include <QAction>
@@ -2506,6 +2507,338 @@ public:
         m_skillsDialog->refresh();
     }
 
+    // ----- aliases: saved commands and prompts (issue G8DK, protocol 19) ----------------------
+    // An alias runs three ways — the actions palette, `/name`, and the name typed in terminal mode.
+    // All three end here: the template's `{{parameters}}` become fields in the prompt box, Tab moves
+    // between them, and submitting sends the values to the worker, which does the substitution and
+    // hands back the exact line. Relay never runs an alias without it passing through the prompt
+    // box first, and the quoting that keeps a value *data* rather than shell syntax lives in one
+    // place (relay_core/aliases.py), not here.
+public:
+    const QList<relay::aliases::Alias> &aliases() const { return m_aliasList; }
+
+    void refreshAliases() {
+        if (m_workerReady) send({{"type", "aliases"}, {"workspace", m_workspace}});
+    }
+
+    // From the palette (`fromPalette`), from `/name`, or from the name typed in terminal mode.
+    void runAlias(const QString &name, const QString &args, bool fromPalette) {
+        const relay::aliases::Alias *alias = nullptr;
+        for (const auto &candidate : std::as_const(m_aliasList)) {
+            if (candidate.name == name && !candidate.shadowed) { alias = &candidate; break; }
+        }
+        if (!alias) { status(QStringLiteral("No alias named “%1”.").arg(name)); return; }
+        clearAliasFields();
+        relay::aliases::Rendered rendered = relay::aliases::render(*alias);
+        if (!args.isEmpty()) {
+            // `squash 3 wip` fills the fields in order, the way Warp's workflows do.
+            QStringList parts = QProcess::splitCommand(args);
+            if (parts.isEmpty()) parts = args.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+            for (int i = 0; i < parts.size() && i < rendered.fields.size(); ++i)
+                relay::aliases::setField(rendered, i, parts.at(i));
+        }
+        const QString kind = alias->kind;
+        const QString title = alias->title.isEmpty() ? name : alias->title;
+        if (relay::aliases::unfilled(*alias, rendered).isEmpty()) {
+            sendAliasRun(name, relay::aliases::values(rendered), kind, fromPalette);
+            return;
+        }
+        // Something still has to be typed: show the line in the prompt box with its fields.
+        m_aliasName = name;
+        m_aliasKind = kind;
+        m_aliasFields = rendered;
+        m_aliasFromPalette = fromPalette;
+        setMode(kind == QStringLiteral("prompt") ? QStringLiteral("agent") : QStringLiteral("shell"));
+        m_editor->setPlainText(rendered.text);
+        m_editor->setFocus();
+        const int first = relay::aliases::nextField(m_aliasFields.fields, -1);
+        if (first >= 0) selectAliasField(first);
+        status(QStringLiteral("%1 · Tab for the next field, Enter to run.").arg(title));
+    }
+
+    void sendAliasRun(const QString &name, const QList<QPair<QString, QString>> &values,
+                      const QString &kind, bool fromPalette) {
+        if (!m_workerReady) { status(QStringLiteral("The worker is not ready yet.")); return; }
+        QJsonObject collected;
+        for (const auto &pair : values) collected.insert(pair.first, pair.second);
+        m_aliasRunId = QStringLiteral("alias-") + QString::number(++m_requestId);
+        m_aliasRunKind = kind;
+        m_aliasRunFromPalette = fromPalette;
+        m_aliasRunName = name;
+        send({{"type", "alias_run"}, {"id", m_aliasRunId}, {"name", name},
+              {"workspace", m_workspace}, {"values", collected}});
+    }
+
+    void clearAliasFields() {
+        m_aliasName.clear();
+        m_aliasKind.clear();
+        m_aliasFromPalette = false;
+        m_aliasFields = relay::aliases::Rendered();
+    }
+
+    bool aliasFieldsActive() const { return !m_aliasName.isEmpty() && !m_aliasFields.fields.isEmpty(); }
+
+    // Tab (and Shift+Tab) move between the fields while a template is in the prompt box; the field
+    // is selected, so typing replaces it.
+    bool moveAliasField(bool forward) {
+        if (!aliasFieldsActive() || !m_editor) return false;
+        if (!relay::aliases::reparse(m_aliasFields, m_editor->toPlainText())) { clearAliasFields(); return false; }
+        const QTextCursor cursor = m_editor->textCursor();
+        const int caret = forward ? cursor.selectionEnd() : cursor.selectionStart();
+        const int index = relay::aliases::nextField(m_aliasFields.fields, forward ? caret - 1 : caret, forward);
+        if (index < 0) return false;
+        selectAliasField(index);
+        return true;
+    }
+
+    void selectAliasField(int index) {
+        if (index < 0 || index >= m_aliasFields.fields.size() || !m_editor) return;
+        const auto &field = m_aliasFields.fields.at(index);
+        QTextCursor cursor = m_editor->textCursor();
+        cursor.setPosition(field.start);
+        cursor.setPosition(field.start + field.length, QTextCursor::KeepAnchor);
+        m_editor->setTextCursor(cursor);
+    }
+
+    // Called from requestRoute before anything is routed: a template in the prompt box submits as
+    // an alias, so the worker quotes the values. A line the user has rewritten past recognition
+    // stops being an alias and goes to the router as itself.
+    bool submitAliasFields() {
+        if (!aliasFieldsActive()) return false;
+        if (!relay::aliases::reparse(m_aliasFields, m_editor->toPlainText())) { clearAliasFields(); return false; }
+        const QString name = m_aliasName, kind = m_aliasKind;
+        const bool fromPalette = m_aliasFromPalette;
+        const auto collected = relay::aliases::values(m_aliasFields);
+        m_editor->remember(m_editor->toPlainText());
+        m_editor->clear();
+        clearAliasFields();
+        sendAliasRun(name, collected, kind, fromPalette);
+        return true;
+    }
+
+    // `/name …` typed in the composer, when `name` is an alias and not a built-in command.
+    bool tryRunAliasSlash(const QString &text) {
+        QStringList reserved;
+        for (const auto &command : slashCommands()) reserved << command.name;
+        const auto match = relay::aliases::matchSlash(text.trimmed(), relay::aliases::names(m_aliasList), reserved);
+        if (!match.matched) return false;
+        m_editor->remember(text.trimmed());
+        m_editor->clear();
+        hideSlashPopup();
+        runAlias(match.name, match.args, false);
+        return true;
+    }
+
+    // The alias name typed on its own in terminal mode. Only in terminal mode: in agent mode the
+    // same word is prose, and in auto mode the router decides what a bare word means.
+    bool tryRunAliasTyped(const QString &text, const QString &mode) {
+        if (mode != QStringLiteral("shell")) return false;
+        const auto match = relay::aliases::matchTyped(text, relay::aliases::names(m_aliasList));
+        if (!match.matched) return false;
+        m_editor->remember(text.trimmed());
+        m_editor->clear();
+        runAlias(match.name, match.args, false);
+        return true;
+    }
+
+    bool handleAliasEvent(const QString &type, const QJsonObject &event) {
+        if (type == QStringLiteral("aliases")) {
+            m_aliasList.clear();
+            const QJsonArray items = event.value(QStringLiteral("items")).toArray();
+            for (const auto &value : items) {
+                const QJsonObject object = value.toObject();
+                relay::aliases::Alias alias;
+                alias.name = object.value(QStringLiteral("name")).toString();
+                alias.kind = object.value(QStringLiteral("kind")).toString(QStringLiteral("command"));
+                alias.title = object.value(QStringLiteral("title")).toString();
+                alias.description = object.value(QStringLiteral("description")).toString();
+                alias.text = object.value(QStringLiteral("text")).toString();
+                alias.scope = object.value(QStringLiteral("scope")).toString(QStringLiteral("local"));
+                alias.shadowed = object.value(QStringLiteral("shadowed")).toBool();
+                for (const auto &label : object.value(QStringLiteral("labels")).toArray())
+                    alias.labels << label.toString();
+                for (const auto &raw : object.value(QStringLiteral("params")).toArray()) {
+                    const QJsonObject parameter = raw.toObject();
+                    relay::aliases::Param param;
+                    param.name = parameter.value(QStringLiteral("name")).toString();
+                    param.hasDefault = !parameter.value(QStringLiteral("default")).isNull();
+                    param.value = parameter.value(QStringLiteral("default")).toString();
+                    param.description = parameter.value(QStringLiteral("description")).toString();
+                    alias.params << param;
+                }
+                if (!alias.name.isEmpty()) m_aliasList << alias;
+            }
+            return true;
+        }
+        if (type == QStringLiteral("alias_expanded")) {
+            if (event.value(QStringLiteral("id")).toString() != m_aliasRunId) return true;
+            m_aliasRunId.clear();
+            const QString text = event.value(QStringLiteral("text")).toString();
+            const bool prompt = event.value(QStringLiteral("kind")).toString() == QStringLiteral("prompt");
+            m_editor->setPlainText(text);
+            m_editor->moveCursor(QTextCursor::End);
+            // The palette is the slow way in; teach `/name` and the typed name.
+            if (m_aliasRunFromPalette) {
+                for (const auto &alias : std::as_const(m_aliasList)) {
+                    if (alias.name != m_aliasRunName) continue;
+                    hint(QStringLiteral("alias.run.") + alias.name, relay::aliases::fastPathHint(alias));
+                    break;
+                }
+            }
+            requestRoute(true, prompt ? QStringLiteral("agent") : QStringLiteral("shell"));
+            return true;
+        }
+        if (type == QStringLiteral("alias_saved")) {
+            status(QStringLiteral("Saved alias “%1” (%2). Run it with /%1.")
+                       .arg(event.value(QStringLiteral("name")).toString(),
+                            event.value(QStringLiteral("scope")).toString()));
+            return true;
+        }
+        if (type == QStringLiteral("alias_deleted")) {
+            status(QStringLiteral("Removed alias “%1”.").arg(event.value(QStringLiteral("name")).toString()));
+            return true;
+        }
+        if (type == QStringLiteral("alias_import_preview")) { showAliasImportPreview(event); return true; }
+        if (type == QStringLiteral("alias_imported")) {
+            const int written = event.value(QStringLiteral("written")).toArray().size();
+            const int failed = event.value(QStringLiteral("failed")).toArray().size();
+            status(failed ? QStringLiteral("Imported %1 alias(es); %2 failed.").arg(written).arg(failed)
+                          : QStringLiteral("Imported %1 alias(es).").arg(written));
+            if (m_aliasImport) m_aliasImport->close();
+            return true;
+        }
+        return false;
+    }
+
+    // Save the prompt box as an alias. The only way the GUI creates one, so what is stored is
+    // always something the user had in front of them.
+    void saveComposerAsAlias() {
+        const QString text = m_editor ? m_editor->toPlainText().trimmed() : QString();
+        if (text.isEmpty()) { status(QStringLiteral("Type the command or prompt first, then save it as an alias.")); return; }
+        const bool prompt = m_modeValue == QStringLiteral("agent");
+        bool ok = false;
+        const QString suggested = relay::aliases::slug(text.left(60), relay::aliases::names(m_aliasList));
+        const QString name = QInputDialog::getText(
+            window(), QStringLiteral("Save as alias"),
+            QStringLiteral("Name for this %1 — run it later with /name%2.\n\n%3")
+                .arg(prompt ? QStringLiteral("prompt") : QStringLiteral("command"),
+                     prompt ? QString() : QStringLiteral(", or by typing the name in terminal mode"),
+                     text.left(400)),
+            QLineEdit::Normal, suggested, &ok).trimmed().toLower();
+        if (!ok || name.isEmpty()) return;
+        if (!relay::aliases::validName(name)) {
+            status(QStringLiteral("An alias name is 1–32 characters of a–z, 0–9, - or _."));
+            return;
+        }
+        relay::aliases::Alias draft;
+        draft.name = name;
+        draft.kind = prompt ? QStringLiteral("prompt") : QStringLiteral("command");
+        draft.text = text;
+        QJsonArray params;
+        QStringList seen;
+        for (const auto &field : relay::aliases::render(draft).fields) {
+            if (seen.contains(field.name)) continue;
+            seen << field.name;
+            params.append(QJsonObject{{"name", field.name}});
+        }
+        send({{"type", "alias_save"}, {"id", QStringLiteral("alias-save-") + QString::number(++m_requestId)},
+              {"workspace", m_workspace}, {"scope", QStringLiteral("local")}, {"name", name},
+              {"kind", draft.kind}, {"title", text.left(80)}, {"text", text}, {"params", params}});
+    }
+
+    // Import Warp workflows and shell aliases. The worker reads them and sends back what *would*
+    // be written; nothing is stored until a row is ticked here and Import is pressed.
+    void openAliasImport() {
+        if (!m_workerReady) { status(QStringLiteral("The worker is not ready yet.")); return; }
+        status(QStringLiteral("Reading Warp workflows and shell aliases…"));
+        send({{"type", "alias_import_preview"},
+              {"id", QStringLiteral("alias-import-") + QString::number(++m_requestId)},
+              {"workspace", m_workspace}});
+    }
+
+    void showAliasImportPreview(const QJsonObject &event) {
+        const QJsonArray items = event.value(QStringLiteral("items")).toArray();
+        const QJsonArray skipped = event.value(QStringLiteral("skipped")).toArray();
+        const QString token = event.value(QStringLiteral("preview_id")).toString();
+        if (items.isEmpty()) {
+            status(QStringLiteral("Nothing to import: no Warp workflows and no shell aliases were found."));
+            return;
+        }
+        auto *dialog = new QDialog(window());
+        m_aliasImport = dialog;
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->setWindowTitle(QStringLiteral("Import workflows and shell aliases"));
+        dialog->resize(900, 560);
+        auto *layout = new QVBoxLayout(dialog);
+        auto *caption = new QLabel(QStringLiteral(
+            "Nothing here has been run, and nothing is saved until you press Import. "
+            "This is exactly the text that would be stored."), dialog);
+        caption->setWordWrap(true);
+        layout->addWidget(caption);
+        auto *tree = new QTreeWidget(dialog);
+        tree->setColumnCount(4);
+        tree->setHeaderLabels({QStringLiteral("Name"), QStringLiteral("Kind"),
+                               QStringLiteral("What would run"), QStringLiteral("From / warnings")});
+        tree->setRootIsDecorated(false);
+        tree->setAlternatingRowColors(true);
+        for (const auto &value : items) {
+            const QJsonObject item = value.toObject();
+            QStringList warnings;
+            for (const auto &warning : item.value(QStringLiteral("warnings")).toArray())
+                warnings << warning.toString();
+            auto *row = new QTreeWidgetItem(tree, {item.value(QStringLiteral("name")).toString(),
+                                                   item.value(QStringLiteral("kind")).toString(),
+                                                   item.value(QStringLiteral("text")).toString().simplified(),
+                                                   warnings.isEmpty() ? item.value(QStringLiteral("origin")).toString()
+                                                                      : warnings.join(QStringLiteral(" · "))});
+            // A row Relay has something to say about starts unticked, so a warning has to be read.
+            row->setCheckState(0, warnings.isEmpty() ? Qt::Checked : Qt::Unchecked);
+            row->setData(0, Qt::UserRole, item.value(QStringLiteral("name")).toString());
+            row->setToolTip(2, item.value(QStringLiteral("text")).toString());
+        }
+        for (int i = 0; i < 4; ++i) tree->resizeColumnToContents(i);
+        layout->addWidget(tree, 1);
+        if (!skipped.isEmpty()) {
+            QStringList reasons;
+            for (const auto &value : skipped) reasons << value.toObject().value(QStringLiteral("reason")).toString();
+            auto *note = new QLabel(QStringLiteral("Skipped %1: %2").arg(skipped.size())
+                                        .arg(reasons.mid(0, 4).join(QStringLiteral("; "))), dialog);
+            note->setWordWrap(true);
+            layout->addWidget(note);
+        }
+        auto *scopeRow = new QHBoxLayout;
+        auto *scope = new QComboBox(dialog);
+        scope->addItem(QStringLiteral("Save globally (every project)"), QStringLiteral("global"));
+        scope->addItem(QStringLiteral("Save in this project"), QStringLiteral("local"));
+        scopeRow->addWidget(scope);
+        scopeRow->addStretch(1);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, dialog);
+        auto *import = buttons->addButton(QStringLiteral("Import"), QDialogButtonBox::AcceptRole);
+        scopeRow->addWidget(buttons);
+        layout->addLayout(scopeRow);
+        connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+        connect(import, &QPushButton::clicked, dialog, [this, tree, scope, token] {
+            QJsonArray names;
+            for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+                auto *row = tree->topLevelItem(i);
+                if (row->checkState(0) == Qt::Checked) names.append(row->data(0, Qt::UserRole).toString());
+            }
+            if (names.isEmpty()) { status(QStringLiteral("Tick at least one alias to import.")); return; }
+            send({{"type", "alias_import_apply"},
+                  {"id", QStringLiteral("alias-apply-") + QString::number(++m_requestId)},
+                  {"workspace", m_workspace}, {"preview_id", token}, {"names", names},
+                  {"scope", scope->currentData().toString()}});
+        });
+        dialog->show();
+    }
+
+private:
+    QList<relay::aliases::Alias> m_aliasList;
+    relay::aliases::Rendered m_aliasFields;
+    QString m_aliasName, m_aliasKind, m_aliasRunId, m_aliasRunKind, m_aliasRunName;
+    bool m_aliasFromPalette = false, m_aliasRunFromPalette = false;
+    QPointer<QDialog> m_aliasImport;
+
     // ----- voice transcription (issue NY7Z, protocol 16) -------------------------------------
     // Hold the voice key (Right Alt by default, Warp's binding) or click the microphone chip, speak,
     // and the transcript is inserted at the cursor in the prompt box — never submitted, so a
@@ -3462,7 +3795,16 @@ private:
         const QString query = text.mid(1).toLower();
         struct Ranked { int score; int index; };
         QList<Ranked> ranked;
-        const auto &commands = slashCommands();
+        // The built-ins, then the aliases (issue G8DK), so `/name` is discoverable and a built-in
+        // is never hidden behind an alias of the same name.
+        QList<SlashCommand> commands = slashCommands();
+        QStringList builtins;
+        for (const auto &command : std::as_const(commands)) builtins << command.name;
+        for (const auto &alias : std::as_const(m_aliasList)) {
+            if (alias.shadowed || builtins.contains(alias.name)) continue;
+            commands.append({alias.name, alias.params.isEmpty() ? QString() : QStringLiteral("[args]"),
+                             relay::aliases::paletteDetail(alias)});
+        }
         for (int i = 0; i < commands.size(); ++i) {
             // Name prefix first, then names containing the query; descriptions do not match.
             const QString &name = commands[i].name;
@@ -3527,6 +3869,12 @@ private:
             return;
         }
         m_editor->clear();
+        // An alias name that reached the popup is not a built-in (issue G8DK).
+        if (std::none_of(slashCommands().cbegin(), slashCommands().cend(),
+                         [&](const auto &c) { return c.name == name; })) {
+            runAlias(name, QString(), false);
+            return;
+        }
         runSlashCommand(name, QString());
     }
 
@@ -4163,7 +4511,12 @@ private:
                 }
             }
             if (m_atList && m_atList->isVisible()) hideAtPopup();
+            // Aliases (issue G8DK), in the order they can appear: a template already in the box
+            // submits as itself so the worker quotes the values, then `/name`, and finally — once
+            // the mode is known, below — the name typed on its own in terminal mode.
+            if (submitAliasFields()) return;
             if (tryRunSlashCommand(m_editor->toPlainText())) return;
+            if (tryRunAliasSlash(m_editor->toPlainText())) return;
             clearAiGhost();
         } else if (const SlashCommand *command = slashCommandFor(m_editor->toPlainText())) {
             setRouteText(QStringLiteral("COMMAND · /%1 · %2").arg(command->name, command->description));
@@ -4182,6 +4535,12 @@ private:
         // instead of queueing a command (issue decision 5). Agent submissions still go to the
         // agent, so Ctrl+Enter and `*` keep working while a program waits.
         if (submit && sendLineToProgram(mode)) {
+            if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
+            return;
+        }
+        // The alias name typed on its own. It needs the resolved mode, so it sits after the mode
+        // is worked out and after a waiting program has had its line (issue G8DK).
+        if (submit && tryRunAliasTyped(m_editor->toPlainText(), mode)) {
             if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
             return;
         }
@@ -4237,9 +4596,11 @@ private:
         if (handleRequestsEvent(type, event)) return;   // request ledger UI
         if (handleObservabilityEvent(type, event)) return;
         if (handleSessionEvent(type, event)) return;
+        if (handleAliasEvent(type, event)) return;   // aliases (issue G8DK)
         if (type == QStringLiteral("ready")) {
             m_workerReady = true; requestRoute(false, QStringLiteral("auto"));
             send({{"type", "presets"}});
+            refreshAliases();   // the palette and `/name` need the list before anything is typed
         } else if (type == QStringLiteral("route")) {
             const QString id = event.value(QStringLiteral("id")).toString();
             const QString route = event.value(QStringLiteral("route")).toString();
@@ -5644,6 +6005,14 @@ private:
             if (k == Qt::Key_Escape) { hideTabPopup(); return true; }
             hideTabPopup();   // any other key edits the line again
         }
+        // An alias's parameters are filled in the prompt box, and Tab moves between them (issue
+        // G8DK). It claims Tab before path completion, and Shift+Tab before `agent.planToggle`,
+        // for as long as a template is in the box; the moment the line stops matching the
+        // template both go back to what they were.
+        if (!m_native && aliasFieldsActive() && (k == Qt::Key_Tab || k == Qt::Key_Backtab)
+            && (mods == Qt::NoModifier || mods == Qt::ShiftModifier)
+            && moveAliasField(mods == Qt::NoModifier && k == Qt::Key_Tab))
+            return true;
         // Tab completes the path or command being typed. Relay sends whole lines, so Readline
         // never sees the half-typed word.
         if (mods == Qt::NoModifier && k == Qt::Key_Tab && !m_native && !m_editor->toPlainText().isEmpty()
@@ -9332,6 +9701,27 @@ private:
                 skills.run = [guard = QPointer<Pane>(pane)] { if (guard) guard->openSkills(); };
                 items << skills;
             }
+            // Aliases (issue G8DK): saved commands and prompts. The submenu is the slow way to run
+            // one, so running from here teaches `/name` and the name typed in terminal mode.
+            {
+                const int count = relay::aliases::names(pane->aliases()).size();
+                items << submenu(QStringLiteral("menu:aliases"), agent, QStringLiteral("Aliases…"),
+                                 count ? QStringLiteral("%1 saved command%2 and prompt%3 · /name to run one")
+                                             .arg(count).arg(count == 1 ? QString() : QStringLiteral("s"))
+                                             .arg(count == 1 ? QString() : QStringLiteral("s"))
+                                       : QStringLiteral("Saved commands and prompts — none yet"),
+                                 [this] { return aliasMenuItems(); });
+                PaletteItem save; save.key = QStringLiteral("alias:save"); save.section = agent;
+                save.label = QStringLiteral("Save the prompt box as an alias…");
+                save.detail = QStringLiteral("Keep this command or prompt and run it later by name");
+                save.run = [guard = QPointer<Pane>(pane)] { if (guard) guard->saveComposerAsAlias(); };
+                items << save;
+                PaletteItem import; import.key = QStringLiteral("alias:import"); import.section = agent;
+                import.label = QStringLiteral("Import Warp workflows and shell aliases…");
+                import.detail = QStringLiteral("Preview what would be saved; nothing runs and nothing is written until you confirm");
+                import.run = [guard = QPointer<Pane>(pane)] { if (guard) guard->openAliasImport(); };
+                items << import;
+            }
             items << actionItem(agent, pane->agentMode() == QStringLiteral("plan") ? QStringLiteral("Leave plan mode") : QStringLiteral("Plan mode"),
                                 QStringLiteral("Investigate and write a plan before changing anything"), QStringLiteral("agent.planToggle"),
                                 pane->agentMode() == QStringLiteral("plan"));
@@ -9617,6 +10007,7 @@ private:
             {QStringLiteral("automatic turns"), QStringLiteral("wakeups subagents background auto turns handoff")},
             {QStringLiteral("instruction"), QStringLiteral("rules claude.md agents.md warp.md gemini memory relay.md onboarding")},
             {QStringLiteral("skill"), QStringLiteral("abilities tools refine import skills library")},
+            {QStringLiteral("alias"), QStringLiteral("workflow workflows macro snippet saved command saved prompt template shortcut warp")},
             {QStringLiteral("copy on select"), QStringLiteral("clipboard selection highlight copy")},
             {QStringLiteral("shortcut preset"), QStringLiteral("keymap keybindings hotkeys warp vscode konsole preset")},
             {QStringLiteral("inside programs"), QStringLiteral("vim nano less passthrough program keys")},
@@ -9844,6 +10235,36 @@ private:
     }
 
     // ----- subagents UI: palette submenu and transcript panes ---------------------------------
+    // Aliases (issue G8DK): one row per saved command or prompt, plus the two ways to get more.
+    QList<PaletteItem> aliasMenuItems() {
+        QList<PaletteItem> items;
+        Pane *pane = m_active;
+        if (!pane) return items;
+        const QString section = QStringLiteral("Aliases");
+        for (const auto &alias : pane->aliases()) {
+            if (alias.shadowed) continue;
+            PaletteItem item;
+            item.key = QStringLiteral("alias:") + alias.name;
+            item.section = section;
+            item.label = alias.title.isEmpty() ? alias.name : alias.title;
+            item.detail = relay::aliases::paletteDetail(alias);
+            item.aliases = alias.name + QLatin1Char(' ') + alias.labels.join(QLatin1Char(' '))
+                           + QLatin1Char(' ') + alias.text;
+            item.run = [guard = QPointer<Pane>(pane), name = alias.name] {
+                if (guard) guard->runAlias(name, QString(), true);
+            };
+            items << item;
+        }
+        {
+            PaletteItem import; import.key = QStringLiteral("alias:import"); import.section = section;
+            import.label = QStringLiteral("Import Warp workflows and shell aliases…");
+            import.detail = QStringLiteral("Preview first; nothing runs and nothing is written until you confirm");
+            import.run = [guard = QPointer<Pane>(pane)] { if (guard) guard->openAliasImport(); };
+            items << import;
+        }
+        return items;
+    }
+
     QList<PaletteItem> agentsMenuItems() {
         QList<PaletteItem> children;
         Pane *pane = m_active;
