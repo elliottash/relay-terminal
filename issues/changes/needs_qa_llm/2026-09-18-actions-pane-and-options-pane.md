@@ -49,6 +49,9 @@ Instructions, Skills, keybindings.json).
   set" and "Reload keyboard shortcuts" were in both and are now actions only.
 - The Options tab "Actions" is **Keyboard**: Shortcut preset, Shortcuts inside programs, Edit
   keyboard shortcuts…, and the note on what the mouse does.
+- Once the session manager pane (#R6J0, 6e52179) made `/resume` and `/conversations` the same pane,
+  "Resume session…" and "Conversations…" became one row, **Sessions…** (`agent.resume`, Ctrl+Shift+Y),
+  which the old rows' words still find; and **Conversation info** (`agent.info`, #Y63Z) joined the list.
 - Ctrl+? opens the Actions pane.
 - Options › Appearance has **Pane colours** (by type, by group, off; `appearance/pane_colours`), the
   control for the header tints of #SPBN, asked for by session relay-terminal-93; it calls

@@ -1671,10 +1671,23 @@ private:
         items << actionItem(agent, QStringLiteral("Rewind chat…"), QStringLiteral("Conversation back to an earlier turn; files unchanged · Esc Esc"), QStringLiteral("agent.rewind"));
         items << actionItem(agent, QStringLiteral("Rewind code…"), QStringLiteral("Restore files the agent changed since a turn · /rewind-code"), QStringLiteral("agent.rewindCode"));
         items << actionItem(agent, QStringLiteral("Fork conversation"), QStringLiteral("Continue this conversation in a new pane"), QStringLiteral("agent.fork"));
-        items << actionItem(agent, QStringLiteral("Resume session…"), QStringLiteral("Open a saved agent session in this pane"), QStringLiteral("agent.resume"));
-        items << actionItem(agent, QStringLiteral("Conversations…"),
-                            QStringLiteral("Search every conversation and Relay's terminal history · /conversations"),
-                            QStringLiteral("conversations.open"));
+        {
+            // One row for the session manager pane (#R6J0). /resume and /conversations both open it
+            // now, so the old "Conversations…" row would be the same row twice; its words find this one.
+            PaletteItem sessions = actionItem(agent, QStringLiteral("Sessions…"),
+                                              QStringLiteral("Find and resume a session: every conversation and Relay's terminal "
+                                                             "history, searchable, with subagent threads · /resume"),
+                                              QStringLiteral("agent.resume"));
+            sessions.aliases = QStringLiteral("resume session reopen continue conversations search find chats threads history "
+                                              "full text past old grep manager");
+            items << sessions;
+            PaletteItem info = actionItem(agent, QStringLiteral("Conversation info"),
+                                          QStringLiteral("This conversation's model, tokens, file and history, with its subagent "
+                                                         "threads · /status"),
+                                          QStringLiteral("agent.info"));
+            info.aliases = QStringLiteral("status info details usage cost context about session");
+            items << info;
+        }
         items << actionItem(agent, QStringLiteral("Find in this pane…"),
                             QStringLiteral("Search this conversation and the terminal scrollback"),
                             QStringLiteral("find.inView"));

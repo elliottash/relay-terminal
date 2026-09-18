@@ -172,8 +172,8 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   (switch provider), `/help` (the card `?` shows). A `/command` Relay does not have is answered by
   Relay, not by the shell: it names the closest real commands and points at `/` and `/help`. Coming back to the window after 3 minutes, with a finished
   turn and an empty prompt, prints a short recap (Options › General turns it off).
-- **Conversations: list and full-text search.** `/conversations` (also Actions › Conversations…;
-  Ctrl+Shift+Y is `/resume`, this workspace's saved sessions) opens every saved conversation, grouped by project and newest first, with a
+- **Sessions: list and full-text search.** Ctrl+Shift+Y (also `/resume`, `/conversations`, Actions ›
+  Sessions… and the list button in the title bar) opens every saved conversation, grouped by project and newest first, with a
   search field that filters as you type. The search covers **both** agent threads (your prompts,
   the agent's replies, its tool calls and their output) and **Relay's terminal history** (the
   commands Relay ran, their exit status and, on the Relay engine, their output); every hit says
