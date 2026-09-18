@@ -136,6 +136,9 @@ answer text only.
 `tool_output_get {turn_id, call_id}` → `tool_output {turn_id, call_id, name, preview, result}`
 (the worker keeps results for the last 50 turns). `turn_transcript_get {turn_id}` →
 `turn_transcript {turn_id, items: [...]}` in the same shape as `subagent_transcript`.
+Since v2.4 all three carry the concise tool-call `label`, and `tool_output` also carries `detail`
+and a write's `diff` (section 23), which is what a surface should display; `preview` stays for the
+ones not updated yet.
 
 **Commands as jobs (2026-09-18, `backend/relay_core/jobs.py`).** `run_command {command, cwd?,
 timeout_seconds?, background?}` waits up to `timeout_seconds` (default 30, clamped to 1–1800; numeric
@@ -1869,3 +1872,234 @@ what the agent put in the terminal. Only the desktop pane answers it.
   seen one fix request reused the fence in ordinary replies, where it does nothing.
 - **Same staging path as everything else**: `Pane::runInTerminal`, so a handed-over command is in
   shell history, the command log and the conversation index like one the user typed.
+
+## 23. Tool-call labels: one concise line per call (v2.4, 2026-09-18)
+
+Implements `issues/features/2026-09-18-concise-tool-call-lines.md` (#TK9C). Owner, 2026-09-18:
+"agent tool calls are too detailed. rather than seeing a mini python script, i would rather see
+something like 'executed python' … you can then click on them to uncollapse the full details.
+similarly with 'wrote x.py' or 'edited x.py' … concise and informative and allow easy access of
+relevant information." The verb is **"ran"**, not "executed" ("keep it concise").
+
+Backend: `backend/relay_core/tool_labels.py` (pure functions, no I/O), wired into
+`relay_core/agent.py`; tests `tests/test_tool_labels.py` and `tests/test_agent.py`
+(`ToolLabelEventTests`). What a surface draws from it:
+
+```text
+▸ ran python script · 14 lines · exit 0 · 1.2 s
+▸ ran git status · 6 lines
+▸ ran grep +2 · 37 lines
+▸ ran pytest ✗ exit 1 · 212 lines · 8 s
+▸ read 6 files · 4,100 lines            (a merged run of reads)
+▸ listed src/ · 40 entries
+▸ wrote x.py · new · 48 lines
+▸ edited x.py · +3 −1                   (its diff printed beneath, no click)
+▸ edited Pane.h · +212 −87              (click → the diff pane)
+▸ started job: npm run dev
+▸ started subagent “fix tests”
+▸ updated todos · 3 open
+▸ moved card #K7Q2 → done
+✗ edit x.py · old_string was not found in the file
+```
+
+The line is `title` plus `stats` joined with ` · `. The ▸ / ✗ marker, the fold arrow and every
+colour belong to the surface; the backend never sends decoration.
+
+### 23.1 Where the label rides
+
+Additive on three existing messages. **Every field they already carried is unchanged and still
+sent**, so a surface that knows nothing of this section behaves exactly as v2.3 did.
+
+| Message | Gains |
+|---|---|
+| `tool_started` | `label` — `kind`, `running`, `title` (as far as it is known before the call runs), `path?`, `merge?` |
+| `tool_result` | `label` (the full label below), `ms` (int, how long the call took), `diff?` (the unified diff of a `write_file`/`edit_file`) |
+| `turn_summary.tools[]` | `label` on each item, beside the existing `call_id`, `name`, `preview`, `ok`, `exit_code?` |
+| `tool_output` (the reply to `tool_output_get`) | `label`, `detail` (§23.5), `diff?` |
+
+`subagent_event {id, payload}` wraps a subagent's own `tool_started` / `tool_result`, so those
+payloads carry the same labels with no extra work on the wire.
+
+**`preview` is legacy for display.** It stays on `tool_started`, `turn_summary.tools[]` and
+`tool_output` for surfaces that have not been updated, and the phone still receives it. Nothing new
+should parse it: everything it was parsed for — the `RUN COMMAND` / `WRITE FILE` / `EDIT FILE`
+title line, the last line of the block, the diff — is now a field.
+
+### 23.2 The label
+
+```json
+{
+  "kind": "run",
+  "running": "running pytest",
+  "title": "ran pytest",
+  "stats": ["212 lines", "exit 1", "8 s"],
+  "ok": false,
+  "error": "Command working directory must be a directory.",
+  "path": "backend/relay_core/agent.py",
+  "inline_diff": true,
+  "open": {"type": "fold"},
+  "merge": {"key": "read", "singular": "file", "plural": "files", "lines": 412}
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `kind` | string | one of the kinds in §23.3. Always present |
+| `running` | string | present tense, for while the call runs: "running pytest", "reading agent.py", "editing x.py". Always present |
+| `title` | string | past tense, once it is done: "ran pytest", "wrote x.py". Always present. On `tool_started` it is the title as far as it is known then (see `existed` below) |
+| `stats` | string[] | short pieces in display order, §23.4. Absent when there are none |
+| `ok` | bool | on `tool_result` only. Same verdict the turn record keeps: no `error`, no `ok: false`, not timed out, exit code 0 or none |
+| `error` | string | only when the call **did not happen**: first line of the error, at most 120 characters. A command that ran and exited 1 is `ok: false` with **no** `error` — `stats` already says `exit 1`, and `title` stays "ran pytest" |
+| `path` | string | workspace-relative path, for the file kinds (`read_file`, `list_directory`, `write_file`, `edit_file`), so the surface can open the file. Skill files have no workspace path and send none |
+| `inline_diff` | bool | present for a successful write or edit: `true` when the diff is at most **12** changed lines (added + removed) and the surface prints it under the line with no click; `false` when it is bigger |
+| `open` | object | what a click does, §23.6. Always present on `tool_result` |
+| `merge` | object | present only when consecutive calls may be merged into one line, §23.7 |
+
+`title` shortens a path longer than 40 characters to its base name (`src/components/Widget.tsx` →
+"edited Widget.tsx"); `path` is always the whole workspace-relative path.
+
+**A write's verb depends on whether the file was already there.** `write_file` says "wrote x.py"
+for a new file and "edited x.py" when it replaced one; `edit_file` always says "edited x.py". On
+`tool_result` this comes from the result's `created`. On `tool_started` the backend knows it from
+the prepared call, so the started title is already right; a surface that has no started label may
+show the result one instead.
+
+### 23.3 `kind`
+
+| `kind` | Tools |
+|---|---|
+| `run` | `run_command` (foreground), `run_in_terminal` |
+| `job` | `run_command` with `background: true`, a `run_command` handed back as a job (`still_running`), `command_output`, `stop_command` |
+| `read` | `read_file` |
+| `list` | `list_directory` |
+| `edit` | `write_file`, `edit_file` |
+| `agent` | `agent`, `agent_message`, `agent_wait` |
+| `plan` | `write_plan`, `update_todos` |
+| `skill` | `load_skill`, `read_skill_file` |
+| `board` | every `board_*` Switchboard tool, including the cleanup-only three |
+| `config` | `set_keybinding` |
+| `input` | `type_into_program` |
+| `view`, `web`, `external` | **reserved.** `view` for a future screenshot or preview tool, `web` for a fetch or a search, `external` for an out-of-process tool; today only an MCP-shaped name (one containing `__`) is labelled `external` |
+| `other` | any tool this module has not been taught |
+
+An unknown tool never shows raw JSON: its label is the humanised tool name plus its first short
+string argument — `do_the_thing {target: "the widget"}` → `title: "do the thing the widget"`,
+`running: "running do the thing"`. An argument is used only when it is a single line of at most 60
+characters and does not read like a credential.
+
+### 23.4 `stats`
+
+Short pieces, already formatted, in this order:
+
+1. **content** — `"14 lines"` (output of a command, content of a file; thousands separated:
+   `"4,100 lines"`), `"40 entries"`, `"new"`, `"+3 −1"` (a real minus sign, U+2212, from the
+   result's `added`/`removed`), `"no change"`, `"4 replacements"` (only above one), `"3 open"`
+   (todos), `"2 cards"` (`board_list`), `"1 file"` (a skill's supporting files).
+2. **status** — `"still running as job-2"`, `"stopped"`, `"exit N"` (always when nonzero; for a
+   zero exit only on `run`/`job` kinds), `"timed out"`, `"truncated"`, `"prefilled instead"`.
+3. **duration** — `"1.2 s"`, `"8 s"`, `"61 s"`. Only from one second up: one decimal below ten
+   seconds, whole seconds above. Taken from the result's `duration_seconds` when it has one, and
+   from the call's measured `ms` otherwise.
+
+### 23.5 `detail` — the fold, without parsing anything
+
+`tool_output_get {turn_id, call_id}` answers with everything it answered with before plus
+`detail`: ordered sections the fold renders directly.
+
+```json
+"detail": [
+  {"heading": "command", "style": "code", "text": "grep -rn needle backend/"},
+  {"heading": "output", "style": "output", "text": "…", "truncated": true}
+]
+```
+
+`style` is one of `code`, `output`, `diff`, `args`, `error`, `text`. `truncated: true` is present
+when the section was cut; the caps are the ones the backend already stored under (32 KiB of command
+output, 128 KiB of file text or a diff). What the sections are, per kind:
+
+| Kind | Sections |
+|---|---|
+| `run`, `job` | `command` (code), `working directory` (text, only when it is not `.`), `intent` (text, `run_in_terminal`), `output` (output) |
+| `edit` | `diff` (diff) — from the event's `diff`, or from the stored `preview` for a call recorded before this section existed |
+| `read`, `read_skill_file` | `contents` (output) |
+| `list` | `entries` (output), one per line, a directory marked with a trailing `/` |
+| `load_skill` | `skill` (output) |
+| `write_plan` | `plan` (text) |
+| `update_todos` | `todos` (args), one `[status] text` per line |
+| `agent` | `task` (text), `report` (text) |
+| `type_into_program` | `intent` (text), `keystroke` (code), `screen` (output) |
+| everything else | `arguments` (args), one `key: value` per line, and `changes` (args) when the result has them |
+
+A failed call appends `{"heading": "error", "style": "error", "text": …}` with the whole message,
+not the capped first line.
+
+### 23.6 `open` — what a click does
+
+| `open` | When |
+|---|---|
+| `{"type": "fold"}` | the default everywhere: the detail folds open in place, in the terminal |
+| `{"type": "file", "path": "x.py"}` | a `read_file`, and a `write_file` that created the file |
+| `{"type": "diff"}` | a write or an edit whose diff is more than 12 changed lines (the small ones are printed inline instead) |
+| `{"type": "subagent", "id": "a1"}` | `agent`, `agent_message`, `agent_wait` with an id |
+| `{"type": "card", "id": "K7Q2"}` | a `board_*` call about one card (the id carries no `#`) |
+| `{"type": "plan"}` | `write_plan` |
+| `{"type": "todos"}` | `update_todos` |
+
+A failed call always opens the fold, whatever it would have opened.
+
+### 23.7 `merge` — consecutive calls become one line
+
+```json
+"merge": {"key": "read", "singular": "file", "plural": "files", "lines": 412}
+```
+
+A renderer may fold a **run of consecutive calls with the same `key`** into one line: "read 6 files
+· 4,100 lines" (sum the `lines`), "listed 3 folders · 92 entries" (sum the `entries`). Only two
+keys exist — `read` (`read_file`, `read_skill_file`) and `list` (`list_directory`). Commands,
+writes, edits, subagents, board writes and everything else never carry `merge` and are never
+merged. A **failed call carries no `merge`**, so it stands on its own line with its error, and it
+also breaks the run either side of it.
+
+### 23.8 The `run_command` classifier
+
+What comes after "ran ".
+
+- A **single-line command of at most 40 characters** is shown whole: "ran ls -la src", "ran git
+  status", "ran npm run dev".
+- Otherwise the **program's name**, after skipping a leading `cd X &&` / `cd X;`, environment
+  assignments (`FOO=1 cmd`) and wrappers (`sudo`, `doas`, `time`, `timeout 30`, `nice`, `ionice`,
+  `env`, `xvfb-run …`, `flock file`, `stdbuf`, `nohup`, `setsid`, `command`, `exec`), and taking
+  the base name of a path: `./scripts/test.sh` → "test.sh", `/usr/bin/python3` → "python3".
+- A **multi-command CLI keeps its verbs** — `git`, `npm`, `pnpm`, `yarn`, `cargo`, `docker`,
+  `kubectl`, `go`, `pip`, `uv`, `apt`, `apt-get`, `systemctl`, `gh`, `make` and the like: "ran git
+  commit", "ran gh pr create", "ran systemctl restart". At most two verbs, and only plain words —
+  a path, a package or a URL is an argument, so `pnpm --filter @relay/web run build` is "ran pnpm
+  run build".
+- A **heredoc or an inline script** for an interpreter (`python -c`, `bash -c`, `node -e`,
+  `python3 - <<'PY'`) is "ran python3 script". `python x.py` is "ran python x.py" while that stays
+  short, and "ran python" otherwise; `python -m pytest` keeps the module.
+- A **pipeline or an `&&` chain** names the first real command and counts the rest: `grep … | head
+  | sort` → "ran grep +2". A leading `cd` is not counted.
+- **Nothing that reads like a credential** is ever shown: a command carrying `API_KEY=…`,
+  `--password=…` or an `Authorization:` header falls back to the program name however short it is.
+- The classifier **never raises**. Unbalanced quotes, an empty string, something that is not a
+  string at all, or 200 characters of one word all come back as a label (the first word, or
+  "command"), capped at 40 characters.
+
+`run_command` with `background: true` is "started job: npm run dev" (kind `job`); one handed back
+as a job keeps "ran …" and gains "still running as job-2".
+
+### 23.9 Notes and deviations
+
+- **Nothing here changes what the model sees.** Labels are display only; the tool results sent back
+  to the model are byte for byte what they were.
+- **The line is built twice**, once before the call from its arguments and once after from its
+  result, and both are sent. A surface that only listens to `tool_result` loses nothing.
+- **`type_into_program` never says more than its preview already showed**: the typed text is capped
+  at 40 characters in the label, a named key is shown as `<escape>`, and a refusal shows the
+  refusal, not the keystroke. A masked prompt is refused in the worker before anything is typed.
+- **The turn record keeps the arguments** of a call in memory (capped), which is what `detail`
+  renders. It is not written to the session file, and the log still records only the tool's name,
+  outcome and duration.
+- **`tool_labels.py` has no I/O**, so it can say "wrote" or "edited" only from what the caller
+  knows: the prepared call before execution, the result's `created` after it.

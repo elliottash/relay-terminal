@@ -248,3 +248,103 @@ class ContextTests(unittest.TestCase):
                               text=True, capture_output=True, timeout=10, cwd=ROOT)
         events = [json.loads(line) for line in proc.stdout.splitlines()]
         self.assertTrue(any(e['event'] == 'error' and 'Context' in e.get('text', '') for e in events))
+
+
+class ToolLabelEventTests(unittest.TestCase):
+    """Card #TK9C, protocol 23: the concise line rides on the tool events, and nothing that was
+    already on them moved or changed."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.root = Path(self.temp.name)
+    def tearDown(self): self.temp.cleanup()
+
+    def run_tool(self, name, arguments):
+        events = []
+        fake = FakeProvider(tool(name, arguments))
+        agent = Agent(CONFIG, self.temp.name, events.append, provider=fake)
+        agent.ask('do it')
+        return agent, events
+
+    def of(self, events, kind):
+        return [e for e in events if e['event'] == kind]
+
+    def test_run_command_events_carry_the_label(self):
+        agent, events = self.run_tool('run_command', {'command': 'printf "one\\ntwo\\n"'})
+        started = self.of(events, 'tool_started')[0]
+        self.assertEqual(started['label']['kind'], 'run')
+        self.assertEqual(started['label']['running'], 'running printf "one\\ntwo\\n"')
+        self.assertEqual(started['label']['title'], 'ran printf "one\\ntwo\\n"')
+        # Every field the older surfaces read is exactly where it was.
+        self.assertEqual(started['tool'], 'run_command')
+        self.assertIn('RUN COMMAND', started['preview'])
+        self.assertIn('call_id', started)
+        self.assertIn('turn_id', started)
+        result = self.of(events, 'tool_result')[0]
+        self.assertEqual(result['label']['title'], 'ran printf "one\\ntwo\\n"')
+        self.assertEqual(result['label']['stats'][0], '2 lines')
+        self.assertIn('exit 0', result['label']['stats'])
+        self.assertTrue(result['label']['ok'])
+        self.assertIsInstance(result['ms'], int)
+        self.assertEqual(result['tool'], 'run_command')
+        self.assertEqual(result['result']['exit_code'], 0)
+        self.assertNotIn('diff', result)
+
+    def test_a_write_carries_its_diff_and_the_summary_carries_the_label(self):
+        agent, events = self.run_tool('write_file', {'path': 'note.txt', 'content': 'hello\n'})
+        result = self.of(events, 'tool_result')[0]
+        self.assertEqual(result['label']['title'], 'wrote note.txt')
+        self.assertEqual(result['label']['stats'], ['new', '1 line'])
+        self.assertEqual(result['label']['open'], {'type': 'file', 'path': 'note.txt'})
+        self.assertTrue(result['label']['inline_diff'])
+        self.assertIn('+hello', result['diff'])
+        self.assertNotIn('Old bytes', result['diff'])
+        summary = self.of(events, 'turn_summary')[0]
+        self.assertEqual(summary['tools'][0]['label']['title'], 'wrote note.txt')
+        # The legacy summary fields are untouched.
+        self.assertEqual(summary['tools'][0]['name'], 'write_file')
+        self.assertTrue(summary['tools'][0]['ok'])
+        self.assertIn('preview', summary['tools'][0])
+
+    def test_an_edit_says_what_changed(self):
+        (self.root / 'note.txt').write_text('one\ntwo\n')
+        agent, events = self.run_tool('edit_file', {'path': 'note.txt', 'old_string': 'two',
+                                                    'new_string': 'three'})
+        label = self.of(events, 'tool_result')[0]['label']
+        self.assertEqual(label['title'], 'edited note.txt')
+        self.assertEqual(label['stats'], ['+1 −1'])
+        self.assertTrue(label['inline_diff'])
+        self.assertEqual(label['path'], 'note.txt')
+
+    def test_a_failed_call_says_why(self):
+        (self.root / 'note.txt').write_text('one\n')
+        agent, events = self.run_tool('edit_file', {'path': 'note.txt', 'old_string': 'nope',
+                                                    'new_string': 'x'})
+        self.assertEqual(self.of(events, 'tool_started'), [])
+        label = self.of(events, 'tool_result')[0]['label']
+        self.assertFalse(label['ok'])
+        self.assertEqual(label['title'], 'edit note.txt')
+        self.assertTrue(label['error'].startswith('old_string was not found'))
+
+    def test_the_stored_output_gains_a_detail_and_keeps_everything_else(self):
+        agent, events = self.run_tool('run_command', {'command': 'printf hello'})
+        turn_id = self.of(events, 'tool_result')[0]['turn_id']
+        stored = agent.tool_output(turn_id, 'call-1')
+        self.assertEqual(stored['event'], 'tool_output')
+        self.assertTrue(stored['stored'])
+        self.assertEqual(stored['name'], 'run_command')
+        self.assertIn('RUN COMMAND', stored['preview'])
+        self.assertEqual(stored['result']['output'], 'hello')
+        self.assertTrue(stored['ok'])
+        self.assertEqual(stored['exit_code'], 0)
+        self.assertEqual(stored['label']['title'], 'ran printf hello')
+        self.assertEqual([s['heading'] for s in stored['detail']], ['command', 'output'])
+        self.assertEqual(stored['detail'][0]['text'], 'printf hello')
+        self.assertEqual(stored['detail'][1]['text'], 'hello')
+
+    def test_the_stored_detail_of_a_write_is_its_diff(self):
+        agent, events = self.run_tool('write_file', {'path': 'a.txt', 'content': 'x\n'})
+        turn_id = self.of(events, 'tool_result')[0]['turn_id']
+        stored = agent.tool_output(turn_id, 'call-1')
+        self.assertEqual(stored['detail'][0]['style'], 'diff')
+        self.assertIn('+x', stored['detail'][0]['text'])
+        self.assertIn('+x', stored['diff'])

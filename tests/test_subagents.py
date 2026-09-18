@@ -358,6 +358,15 @@ class StopAndMessageTests(Base):
             self.assertIn(kind, wrapped)
         # Subagent terminal events never leak as top-level main-agent events.
         self.assertEqual(self.rec.of('done'), [])
+        # Card #TK9C: the wrapped events carry the concise line too, so a watcher of a subagent
+        # renders exactly what the pane's own agent renders.
+        started = [e['payload'] for e in self.rec.of('subagent_event', id='a1')
+                   if e['payload']['event'] == 'tool_started']
+        self.assertEqual(started[0]['label']['kind'], 'list')
+        self.assertTrue(started[0]['label']['running'].startswith('listing'))
+        finished = [e['payload'] for e in self.rec.of('subagent_event', id='a1')
+                    if e['payload']['event'] == 'tool_result']
+        self.assertTrue(finished[0]['label']['title'].startswith('listed'))
         count = len(self.rec.of('subagent_event'))
         self.manager.subscribe('a1', False)
         self.manager.send_message('a1', 'again', origin='user')

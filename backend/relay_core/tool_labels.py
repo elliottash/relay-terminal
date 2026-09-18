@@ -81,10 +81,11 @@ def _command_label(command) -> str:
     if not isinstance(command, str) or not command.strip():
         return "command"
     text = command.strip()
-    if "\n" not in text and len(text) <= SHORT_COMMAND and not _looks_secret(text):
+    if ("\n" not in text and len(text) <= SHORT_COMMAND and re.search(r"\w", text)
+            and not _looks_secret(text)):
         return text
     head, heredoc = _before_heredoc(text)
-    segments = [s for s in (seg.strip() for seg in _split_segments(head)) if s]
+    segments = [s for s in (seg.strip() for seg in _split_segments(head)) if s.strip()]
     if not segments:
         return _first_word(text)
     # "cd build && make" is one command, not two: leading cd segments are scaffolding.
@@ -92,7 +93,7 @@ def _command_label(command) -> str:
         segments.pop(0)
     name = _segment_label(segments[0], heredoc)
     extra = len(segments) - 1
-    return f"{name} +{extra}" if extra > 0 else name
+    return _short(f"{name} +{extra}" if extra > 0 else name, SHORT_COMMAND)
 
 
 def _segment_label(segment: str, heredoc: bool) -> str:
@@ -113,8 +114,12 @@ def _segment_label(segment: str, heredoc: bool) -> str:
             return _shorter(f"{base} {_basename(token)}", base)
         return base
     if base in _SUBCOMMAND_CLIS:
-        sub = _subcommand(rest)
-        return _shorter(f"{base} {sub}", base) if sub else base
+        words = _subcommands(rest)
+        # "gh pr create" while it fits, then "systemctl restart", then the bare program.
+        for depth in range(len(words), 0, -1):
+            candidate = " ".join([base] + words[:depth])
+            if len(candidate) <= SHORT_COMMAND and not _looks_secret(candidate):
+                return candidate
     return base
 
 
@@ -125,22 +130,37 @@ def _shorter(candidate: str, fallback: str) -> str:
     return candidate
 
 
-def _subcommand(tokens: list[str]) -> str:
-    skip = 0
-    for index, token in enumerate(tokens):
+#: A subcommand is a plain word: `git commit`, `gh pr create`. A path, a package name or a URL is
+#: an argument, so `pnpm --filter @relay/web run build` is "pnpm run", not "pnpm @relay/web".
+_SUBCOMMAND_WORD = re.compile(r"^[A-Za-z][A-Za-z0-9][A-Za-z0-9._-]*$")
+#: At most two of them, which is as deep as a CLI ever nests its verbs.
+MAX_SUBCOMMAND_WORDS = 2
+
+
+def _subcommands(tokens: list[str]) -> list[str]:
+    words, skip = [], 0
+    for token in tokens:
         if skip:
             skip -= 1
             continue
         if token == "--":
             continue
         if token.startswith("-"):
+            if words:
+                break  # the verbs come first; a flag ends them
             if token in _FLAG_WITH_VALUE and "=" not in token:
                 skip = 1
             continue
         if _ASSIGNMENT.match(token):
             continue
-        return token if not _looks_secret(token) else ""
-    return ""
+        if not _SUBCOMMAND_WORD.match(token) or _looks_secret(token):
+            if words:
+                break
+            continue
+        words.append(token)
+        if len(words) >= MAX_SUBCOMMAND_WORDS:
+            break
+    return words
 
 
 def _program_of(segment: str) -> tuple[str, list[str]]:
@@ -189,16 +209,16 @@ def _tokens(segment: str) -> list[str]:
 
 
 def _basename(token: str) -> str:
-    name = token.strip().strip("'\"").rstrip("/")
+    name = token.strip().strip("'\"()").rstrip("/")
     name = name.rpartition("/")[2] or name
     return name
 
 
 def _first_word(text: str) -> str:
-    for word in text.split():
+    for word in str(text).split():
         cleaned = _basename(word)
-        if cleaned and not _ASSIGNMENT.match(cleaned):
-            return cleaned[:SHORT_COMMAND]
+        if cleaned and re.search(r"\w", cleaned) and not _ASSIGNMENT.match(cleaned):
+            return _short(cleaned, SHORT_COMMAND)
     return "command"
 
 
