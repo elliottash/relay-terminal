@@ -1,0 +1,16 @@
+guest: knocking at https://192.168.1.192:38713 (room biGlbbsz…)
+guest: my code is 78303
+guest: admitted as editor on ['e7ec73f9-3dd1-4038-9c3e-2600eaf2412b']
+guest: <- panes
+guest: <- control owner
+guest: <- share_state
+guest: <- participants
+guest: asked for the keyboard
+guest: <- control_pending
+guest: <- control participant:f092f2a336f875b9
+guest: <- participants
+guest: sent a prompt ('run the tests and tell me what broke')
+guest: <- panes
+guest: <- prompt_pending bc2c37cc37141346
+guest: <- prompt_decided bc2c37cc37141346
+guest: <- control owner

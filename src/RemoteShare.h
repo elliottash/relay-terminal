@@ -26,6 +26,7 @@
 
 class QComboBox;
 class QLabel;
+class QLineEdit;
 class QListWidget;
 class QProcess;
 class QPushButton;
@@ -233,7 +234,7 @@ private:
     QSpinBox *m_inviteUses = nullptr;
     QLabel *m_inviteNote = nullptr;
     QLabel *m_inviteQr = nullptr;
-    QLabel *m_inviteUrl = nullptr;
+    QLineEdit *m_inviteUrl = nullptr;
     QPushButton *m_inviteCopy = nullptr;
     QString m_inviteLink;
 };

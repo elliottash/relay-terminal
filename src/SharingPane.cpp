@@ -21,6 +21,18 @@ namespace relay::sharing {
 
 namespace {
 
+// The epoch after which nothing is treated as "seconds from now" any more. Anything past it is a
+// unix timestamp; 2001-09-09 is far enough in the past that no plausible countdown reaches it and
+// far enough in the future that no plausible timestamp falls short of it.
+constexpr double kEpochThreshold = 1'000'000'000.0;
+
+qint64 secondsLeft(double value)
+{
+    if (value <= 0) return 0;
+    if (value < kEpochThreshold) return qint64(value);
+    return qMax<qint64>(0, qint64(value - double(QDateTime::currentSecsSinceEpoch())));
+}
+
 QString roleWord(const QString &role)
 {
     return role == QLatin1String("editor") ? QStringLiteral("editor") : QStringLiteral("viewer");
@@ -140,7 +152,10 @@ void Model::setParticipants(const QJsonArray &items, const QJsonArray &invites)
         person.role = roleWord(item.value(QStringLiteral("role")).toString());
         person.fingerprint = item.value(QStringLiteral("fingerprint")).toString();
         person.invite = item.value(QStringLiteral("invite")).toString();
-        person.expires = qint64(item.value(QStringLiteral("expires")).toDouble());
+        // A participant's `expires` is an absolute epoch (remote/guests.py) while an invite's is
+        // already the seconds left (`Invite.seconds_left()`). Both arrive as one field name, so
+        // the big one is read as a clock time and turned into what the row actually shows.
+        person.expires = secondsLeft(item.value(QStringLiteral("expires")).toDouble());
         // `online` is false for a record whose channel is not up: a guest whose phone went to
         // sleep is still admitted, and saying "gone" would be wrong.
         person.online = !item.contains(QStringLiteral("online"))
@@ -158,7 +173,7 @@ void Model::setParticipants(const QJsonArray &items, const QJsonArray &invites)
         invite.id = item.value(QStringLiteral("id")).toString();
         invite.role = roleWord(item.value(QStringLiteral("role")).toString());
         invite.uses = item.value(QStringLiteral("uses")).toInt();
-        invite.expires = qint64(item.value(QStringLiteral("expires")).toDouble());
+        invite.expires = secondsLeft(item.value(QStringLiteral("expires")).toDouble());
         for (const QJsonValue &pane : item.value(QStringLiteral("panes")).toArray())
             invite.panes << pane.toString();
         m_invites.append(invite);
@@ -446,15 +461,13 @@ SharingView::SharingView(QWidget *parent) : QWidget(parent)
     column->setContentsMargins(10, 8, 10, 8);
     column->setSpacing(6);
 
-    auto *headerRow = new QHBoxLayout;
-    headerRow->setContentsMargins(0, 0, 0, 0);
-    m_title = plain(QStringLiteral("Sharing"), "settingsRowLabel");
-    m_title->setWordWrap(false);
-    headerRow->addWidget(m_title, 1);
+    // No title row: the pane's own type band already says "Sharing" above this, and the tab says
+    // how many questions are waiting. A second "Sharing" line under the first only took height.
+    // The inset is still kept, because the pane chrome's buttons ask for room on the first row
+    // whenever the band is not drawn.
     m_inset = new QWidget;
-    m_inset->setFixedWidth(0);
-    headerRow->addWidget(m_inset);
-    column->addLayout(headerRow);
+    m_inset->setFixedHeight(0);
+    column->addWidget(m_inset);
 
     m_scroll = new QScrollArea;
     m_scroll->setObjectName(QStringLiteral("settingsPage"));
@@ -489,7 +502,9 @@ void SharingView::focusView()
 
 void SharingView::setHeaderRightInset(int pixels)
 {
-    m_inset->setFixedWidth(qMax(0, pixels));
+    // With the type band drawn the chrome's buttons sit in the band and this is 0; without one
+    // they cover the top right of the pane, so the first row gives way by that much height.
+    m_inset->setFixedHeight(pixels > 0 ? 20 : 0);
 }
 
 void SharingView::focusPane(const QString &pane)
@@ -701,10 +716,13 @@ QWidget *SharingView::inviteRow(const Invite &invite)
     QFrame *frame = card();
     frame->setProperty("current", false);
     auto *column = qobject_cast<QVBoxLayout *>(frame->layout());
-    column->addWidget(plain(QStringLiteral("%1 link — %2, expires in %3")
+    // The first characters of the invite's own id: two links made a minute apart are otherwise
+    // the same sentence twice, and Revoke has to be aimed at one of them.
+    column->addWidget(plain(QStringLiteral("%1 link %2 — %3, expires in %4")
                                 .arg(invite.role == QLatin1String("editor") ? QStringLiteral("Editor")
                                                                             : QStringLiteral("Viewer"),
-                                     usesText(invite.uses), expiryText(invite.expires)),
+                                     invite.id.left(6), usesText(invite.uses),
+                                     expiryText(invite.expires)),
                             "settingsRowLabel"));
     column->addWidget(note(roleSentence(invite.role)));
     auto *buttons = new FlowRow;
@@ -803,7 +821,7 @@ void SharingView::build()
             "you can send to somebody else. Whoever is here, whoever is knocking and whatever is "
             "waiting for you shows up on this pane.")));
         m_column->addStretch(1);
-        m_title->setText(paneTitle());
+        if (onTitleChanged) onTitleChanged();
         return;
     }
 
@@ -836,7 +854,6 @@ void SharingView::build()
         m_column->addWidget(shareControls(pane.id));
     }
     m_column->addStretch(1);
-    m_title->setText(paneTitle());
     for (QWidget *child : m_body->findChildren<QWidget *>()) {
         child->style()->unpolish(child);
         child->style()->polish(child);

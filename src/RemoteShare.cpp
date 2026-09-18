@@ -19,6 +19,7 @@
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPainter>
 #include <QPixmap>
@@ -734,17 +735,25 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     column->addWidget(m_inviteNote);
     updateRoleNote();
 
+    // The link, its QR and a Copy button. Smaller than the pairing QR on purpose: this one is
+    // read by somebody else's camera across a desk if at all, and the usual way it travels is the
+    // Copy button — while the pairing QR above is the one being held up to a phone right now.
+    auto *linkRow = new QHBoxLayout;
     m_inviteQr = new QLabel;
     m_inviteQr->setAlignment(Qt::AlignCenter);
     m_inviteQr->hide();
-    column->addWidget(m_inviteQr, 0, Qt::AlignHCenter);
-    m_inviteUrl = new QLabel;
-    m_inviteUrl->setWordWrap(true);
-    m_inviteUrl->setTextFormat(Qt::PlainText);
-    m_inviteUrl->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_inviteUrl->setObjectName(QStringLiteral("settingsRowDetail"));
+    linkRow->addWidget(m_inviteQr, 0, Qt::AlignTop);
+    auto *linkColumn = new QVBoxLayout;
+    // A read-only field rather than a label: a link is one long unbreakable word, so a label
+    // either stretches the window to its full length or silently cuts the end off — and the end
+    // is the secret. A field scrolls, selects, and answers Ctrl+A and Ctrl+C.
+    m_inviteUrl = new QLineEdit;
+    m_inviteUrl->setReadOnly(true);
+    m_inviteUrl->setCursorPosition(0);
+    m_inviteUrl->setToolTip(QStringLiteral("The whole link. Copy it and send it to one person; "
+                                           "anyone who has it can knock."));
     m_inviteUrl->hide();
-    column->addWidget(m_inviteUrl);
+    linkColumn->addWidget(m_inviteUrl);
     m_inviteCopy = new QPushButton(QStringLiteral("Copy link"));
     m_inviteCopy->setAutoDefault(false);
     m_inviteCopy->hide();
@@ -752,7 +761,10 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
         QGuiApplication::clipboard()->setText(m_inviteLink);
         m_inviteCopy->setText(QStringLiteral("Copied"));
     });
-    column->addWidget(m_inviteCopy, 0, Qt::AlignLeft);
+    linkColumn->addWidget(m_inviteCopy, 0, Qt::AlignLeft);
+    linkColumn->addStretch(1);
+    linkRow->addLayout(linkColumn, 1);
+    column->addLayout(linkRow);
 
     m_devices = new QListWidget;
     m_devices->setMaximumHeight(90);
@@ -870,6 +882,13 @@ void RemoteShareDialog::answer(bool allow, const QString &capability)
 void RemoteShareDialog::updateRoleNote()
 {
     m_inviteNote->setText(sharing::roleSentence(m_inviteRole->currentData().toString()));
+    // Changing the role after a link exists would make the link on screen say the wrong thing, so
+    // the old one is put away and the row asks for another.
+    if (m_inviteQr) m_inviteQr->hide();
+    if (m_inviteUrl) m_inviteUrl->hide();
+    if (m_inviteCopy) m_inviteCopy->hide();
+    m_inviteLink.clear();
+    fit();
 }
 
 void RemoteShareDialog::createInvite()
@@ -877,14 +896,14 @@ void RemoteShareDialog::createInvite()
     RemoteShare::instance().createInvite(m_paneId, m_inviteRole->currentData().toString(),
                                          m_inviteExpiry->currentData().toInt(),
                                          m_inviteUses->value());
-    m_status->setText(QStringLiteral("Making a link…"));
+    m_inviteNote->setText(QStringLiteral("Making a link…"));
 }
 
 void RemoteShareDialog::showInvite(const QString &url, const QrMatrix &qr, const QString &role,
                                    int uses, int expires)
 {
     m_inviteLink = url;
-    const QPixmap code = qrPixmap(qr, 220);
+    const QPixmap code = qrPixmap(qr, 130);
     if (!code.isNull()) {
         m_inviteQr->setFixedSize(code.size());
         m_inviteQr->setPixmap(code);
@@ -893,14 +912,17 @@ void RemoteShareDialog::showInvite(const QString &url, const QrMatrix &qr, const
     // The whole link, secret and all: unlike the pairing QR this one is meant to be copied and
     // sent to somebody, so it has to be on screen where it can be selected.
     m_inviteUrl->setText(url);
+    m_inviteUrl->setCursorPosition(0);
     m_inviteUrl->show();
     m_inviteCopy->setText(QStringLiteral("Copy link"));
     m_inviteCopy->show();
-    m_status->setText(QStringLiteral("Send this link to the person you want on this pane. It lets "
-                                     "in %1 and stops working in %2.\n%3")
-                          .arg(uses == 1 ? QStringLiteral("one person")
-                                         : QStringLiteral("%1 people").arg(uses),
-                               sharing::expiryText(expires), sharing::roleSentence(role)));
+    // In the invite section, not in the status line at the top: that line is about the pairing QR
+    // still on screen above, and two different things were claiming it.
+    m_inviteNote->setText(QStringLiteral("Send this to the person you want on this pane. It lets in "
+                                         "%1 and stops working in %2. %3")
+                              .arg(uses == 1 ? QStringLiteral("one person")
+                                             : QStringLiteral("%1 people").arg(uses),
+                                   sharing::expiryText(expires), sharing::roleSentence(role)));
     fit();
 }
 

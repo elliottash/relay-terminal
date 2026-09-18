@@ -229,7 +229,6 @@ private:
     QWidget *note(const QString &text);
 
     Model *m_model = nullptr;
-    QLabel *m_title = nullptr;
     QWidget *m_inset = nullptr;
     QScrollArea *m_scroll = nullptr;
     QWidget *m_body = nullptr;

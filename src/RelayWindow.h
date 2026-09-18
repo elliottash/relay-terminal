@@ -2758,6 +2758,11 @@ public:
         if (!owner) return nullptr;
         QWidget *page = pageOf(owner);
         if (!page) return nullptr;
+        // Whatever has the keyboard right now, if this pane is arriving on its own. Showing a new
+        // pane full of buttons does take the focus, and the next keystroke would then land on
+        // Admit; it is put back below, and again after the layout has run, because the splitter
+        // moves the focus a second time on the next turn of the event loop.
+        QPointer<QWidget> held(focus ? nullptr : QApplication::focusWidget());
         ToolPane *tool = sharingPaneIn(page);
         auto *view = tool ? dynamic_cast<relay::sharing::SharingView *>(tool->hosted()) : nullptr;
         if (!tool) {
@@ -2809,9 +2814,12 @@ public:
             view->refresh();
         }
         if (focus) {
-            if (QWidget *held = pageOf(tool)) m_tabs->setCurrentWidget(held);
+            if (QWidget *shown = pageOf(tool)) m_tabs->setCurrentWidget(shown);
             setActiveLeaf(tool);
             focusLeaf(tool);
+        } else if (held) {
+            held->setFocus(Qt::OtherFocusReason);
+            QTimer::singleShot(0, this, [held] { if (held) held->setFocus(Qt::OtherFocusReason); });
         }
         updateTitles();
         return tool;

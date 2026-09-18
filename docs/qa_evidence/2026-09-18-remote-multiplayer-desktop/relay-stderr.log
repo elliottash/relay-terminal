@@ -1,0 +1,37 @@
+relay: could not save this pane's scrollback: No such file or directory
+ERROR asyncio Task exception was never retrieved
+future: <Task finished name='Task-18' coro=<Host._run_channel() done, defined at /home/elliott/repos/relay-terminal/remote/host.py:648> exception=FileNotFoundError(2, 'No such file or directory')>
+Traceback (most recent call last):
+  File "/home/elliott/repos/relay-terminal/remote/host.py", line 658, in _run_channel
+    await self._participant_left(channel)
+  File "/home/elliott/repos/relay-terminal/remote/host.py", line 1188, in _participant_left
+    self.audit.record("leave", participant=channel.participant_id)
+  File "/home/elliott/repos/relay-terminal/remote/audit.py", line 56, in record
+    with open(path, "a", encoding="utf-8") as handle:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/tmp/tmp.Ts8HgQ7pW6/relay/remote/audit-2026-09.jsonl'
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/elliott/repos/relay-terminal/remote/gui_host.py", line 814, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/elliott/repos/relay-terminal/remote/gui_host.py", line 808, in main
+    return asyncio.run(main_async())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/elliott/repos/relay-terminal/remote/gui_host.py", line 800, in main_async
+    await sidecar.stop()
+  File "/home/elliott/repos/relay-terminal/remote/gui_host.py", line 780, in stop
+    self.emit({"t": "stopped"})
+  File "/home/elliott/repos/relay-terminal/remote/gui_host.py", line 448, in emit
+    sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
+BrokenPipeError: [Errno 32] Broken pipe

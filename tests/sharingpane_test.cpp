@@ -5,6 +5,7 @@
 // a display.
 #include "SharingPane.h"
 
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -44,6 +45,7 @@ private slots:
     void theParticipantsLineCarriesPresenceAndControl();
     void pausedSaysWhy();
     void aPlanArrivesAsAPrompt();
+    void expiryIsReadInWhicheverUnitArrived();
     void sentences();
 };
 
@@ -316,6 +318,31 @@ void SharingTest::aPlanArrivesAsAPrompt()
     const Request prompt = model.requests().first();
     QCOMPARE(prompt.plan, QStringLiteral("plan-7"));
     QCOMPARE(prompt.seconds, kPromptSeconds);
+}
+
+// A participant's `expires` is an absolute epoch and an invite's is already the seconds left
+// (remote/guests.py). Both arrive under one field name, and reading a clock time as a countdown is
+// how "access ends in 20716 days" happened.
+void SharingTest::expiryIsReadInWhicheverUnitArrived()
+{
+    Model model;
+    model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")}});
+    const qint64 nowSecs = QDateTime::currentSecsSinceEpoch();
+    const QByteArray items_json = QByteArray(R"([{"id":"a1","name":"alice","role":"editor",
+        "panes":["p1"],"expires":)") + QByteArray::number(nowSecs + 7200) + QByteArray("}]");
+    model.setParticipants(QJsonDocument::fromJson(items_json).array(),
+                          items(R"([{"id":"i1","panes":["p1"],"role":"editor","uses":1,
+                                     "expires":3600}])"));
+    const qint64 left = model.participantsOn(QStringLiteral("p1")).first().expires;
+    QVERIFY2(left > 7000 && left <= 7200, qPrintable(QString::number(left)));
+    QCOMPARE(expiryText(left), QStringLiteral("2 h"));
+    // The invite's 3600 is already a countdown and must not be treated as a date.
+    QCOMPARE(model.invitesOn(QStringLiteral("p1")).first().expires, 3600);
+    // An expiry in the past reads as expired, not as a huge negative.
+    model.setParticipants(QJsonDocument::fromJson(
+        QByteArray(R"([{"id":"a1","name":"alice","role":"editor","panes":["p1"],"expires":)")
+        + QByteArray::number(nowSecs - 10) + QByteArray("}]")).array(), {});
+    QCOMPARE(model.participantsOn(QStringLiteral("p1")).first().expires, 0);
 }
 
 void SharingTest::sentences()
