@@ -244,7 +244,9 @@ class WorkerTests(unittest.TestCase):
                                   {'type': 'ask', 'text': 'second', 'when': 'queue'}],
                                  until=lambda ev: sum(e['event'] == 'agent_finished' for e in ev) >= 2)
         self.assertTrue(any(e['event'] == 'keybindings_updated' for e in events))
-        last = Handler.requests[-1]
+        # The pane title (protocol 17) is a no-tools side call that may land after the turn's own
+        # request, so pick the last request that carried tools.
+        last = [r for r in Handler.requests if r.get('tools')][-1]
         self.assertIn('first', [m.get('content') for m in last['messages']])
         spec = [t for t in last['tools'] if t['function']['name'] == 'set_keybinding'][0]
         self.assertIn('pane.close: Close pane, tab, or window [Ctrl+Q]', spec['function']['description'])

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Worker protocol handlers for sessions, model/effort, context, checkpoints, plan mode,
-instructions, recaps and suggestions (docs/AGENT-SESSIONS-PROTOCOL.md sections 1-7, 9, 10).
+instructions, recaps, suggestions and pane titles (docs/AGENT-SESSIONS-PROTOCOL.md sections 1-7,
+9, 10, 17).
 
 Conversation rewrites (compact) run through TurnSupervisor.run_exclusive so they never overlap a
 turn. Calls that only read a copy of the conversation (recaps, suggestions, synthesis) run on
@@ -12,7 +13,7 @@ import os
 import threading
 import uuid
 
-from . import attachments, conv_index, instructions, keystore, planning, suggestions
+from . import attachments, conv_index, instructions, keystore, planning, suggestions, titles
 from .agent import validate_turn_options
 from .requests import check_ledger_id
 from .context import validate_threshold, validate_window
@@ -23,6 +24,8 @@ from .sessions import SessionStore, check_id, default_session_dir
 TYPES = {"set_model", "set_effort", "context", "compact", "checkpoints", "rewind", "fork", "load_state",
          "sessions", "resume", "recap_request", "set_mode", "plan_execute", "scan_instructions",
          "synthesize_instructions", "suggest",
+         # pane title and tab label (protocol section 17)
+         "set_session_title", "tab_label",
          # request ledger and todos (protocol section 12)
          "requests", "request_get", "request_set", "request_reask", "todos",
          # conversation list and full-text search (protocol section 14)
@@ -257,6 +260,72 @@ class SessionCommands:
         self._background("recap", request_id, work,
                          lambda text: {"event": "recap", "id": request_id, "skipped": "failed", "error": text,
                                        "reason": reason, "turns_covered": turns, "open_items": open_items})
+
+    # ----- pane title and tab label (protocol section 17) -----------------------------------
+    def _set_session_title(self, request):
+        """Name this pane by hand. An empty title hands the name back to the model, which writes a
+        fresh one straight away rather than at the next cadence point."""
+        title = request.get("title")
+        if title is not None and not isinstance(title, str):
+            raise ValueError("title must be text.")
+        agent = self._agent()
+        event = agent.set_title(title or "", "user")
+        self.emit({**event, "id": request.get("id")})
+        if event["source"] != "user":
+            self.maybe_title()
+
+    def observe(self, event: dict) -> None:
+        """Worker emit hook for main-turn events: a finished turn may be owed a fresh pane title."""
+        if event.get("event") in ("done", "error", "cancelled"):
+            self.maybe_title()
+
+    def maybe_title(self) -> None:
+        """Write the pane title on a cheap chores-role side call, when the cadence says one is owed.
+
+        Off the protocol thread with its own provider, like recaps: the GUI never waits for it, and
+        stopping the turn never cancels it. A failure is not an error - the first-prompt title in
+        `session_title` still names the pane.
+        """
+        agent = self.turns.agent
+        if agent is None:
+            return
+        claim = agent.claim_title()
+        if claim is None:
+            return
+        try:
+            provider = agent.side_provider(cheap=True, role="chores", max_tokens=titles.MAX_TOKENS)
+        except Exception:
+            provider = None
+
+        def work():
+            text = ""
+            try:
+                if provider is not None:
+                    text = titles.generate(provider, claim["messages"], threading.Event())
+            except Exception:
+                text = ""
+            return agent.release_title(text, claim)
+        self._background("session_title", None, work, lambda _text: agent.release_title("", claim) or agent.title_event())
+
+    def _tab_label(self, request):
+        """One label for a tab from the titles its panes already have: no extra title call, just a
+        cheap "same work or not" judgement on the chores role. Never an error: a failed call falls
+        back to the plain-text comparison, which is what the GUI shows in the meantime."""
+        items = request.get("titles")
+        if not isinstance(items, list) or len(items) > 32 or not all(isinstance(t, str) for t in items):
+            raise ValueError("titles must be a list of at most 32 strings.")
+        items = [t[:400] for t in items]
+        request_id = request.get("id")
+        agent = self.turns.agent
+        provider = agent.side_provider(cheap=True, role="chores", max_tokens=titles.MAX_TOKENS) if agent else None
+        offline = {"event": "tab_label", "id": request_id, **titles.label(None, items)}
+
+        def work():
+            try:
+                return {"event": "tab_label", "id": request_id, **titles.label(provider, items)}
+            except Exception:
+                return offline
+        self._background("tab_label", request_id, work, lambda text: offline)
 
     # ----- request ledger and todos (protocol section 12) ------------------------------------
     def _tracking_agent(self):
