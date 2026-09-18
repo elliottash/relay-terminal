@@ -85,6 +85,10 @@ Verify against provider docs before shipping; keep the table in `backend/relay_c
 
 - `suggest {kind: "next_command", command, exit_status, cwd, output_tail?}` → `suggestion {kind, id, text, reason}` (AI-suggested next shell command; opt-in setting, off by default in the GUI).
 - `suggest {kind: "next_prompt"}` after an agent turn → `suggestion {kind: "next_prompt", text}` (Claude-style prompt suggestion).
+- A suggestion whose side call fails answers with the same `suggestion` event carrying an empty
+  `text` plus `error` (the provider message) and `model` (the model the `suggestions` role ran
+  on), never a bare `error` event: the GUI shows which side call failed, and a background
+  failure is never mistaken for the agent turn failing.
 - Ghost-text history autosuggestions are GUI-only (no worker call).
 
 ## 10. Attachments

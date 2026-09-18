@@ -15,7 +15,7 @@ from unittest import mock
 
 from relay_core import instructions, presets
 from relay_core.agent import Agent
-from relay_core.provider import ChatProvider, ProviderConfig
+from relay_core.provider import ChatProvider, ProviderConfig, ProviderError
 from relay_core.queue import TurnSupervisor
 from relay_core.session_protocol import SessionCommands
 
@@ -289,6 +289,27 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertEqual(self.rec.wait(lambda e: e.get('id') == 's2')['reason'], 'plan_mode')
         with self.assertRaises(ValueError):
             self.cmds.handle('suggest', {'kind': 'weather'})
+
+    def test_a_failed_suggestion_is_reported_as_a_suggestion(self):
+        # #308N: a suggestion that fails used to arrive as a bare {"event": "error"}. The GUI has no
+        # way to tell that apart from an agent-turn failure, so it showed a naked provider line and
+        # no ghost text, and the pane's busy state was cleared along the way. The failure has to be
+        # a suggestion event carrying the error and the model it ran on.
+        class Failing(ScriptedProvider):
+            def complete(self, messages, tools, emit, cancel):
+                if not tools:
+                    raise ProviderError('Provider HTTP 401. Check endpoint, model access, key, quota, and parameters.')
+                return super().complete(messages, tools, emit, cancel)
+
+        self.make_agent(Failing())
+        self.cmds.handle('suggest', {'kind': 'next_command', 'command': 'make', 'exit_status': 0, 'id': 's9'})
+        event = self.rec.wait(lambda e: e.get('id') == 's9')
+        self.assertEqual(event['event'], 'suggestion')
+        self.assertEqual((event['kind'], event['text']), ('next_command', ''))
+        self.assertIn('401', event['error'])
+        self.assertTrue(event['model'])
+        # No bare error event for the same request: that is what the GUI mistook for a turn failure.
+        self.assertEqual([e for e in self.rec.events if e.get('event') == 'error' and e.get('id') == 's9'], [])
 
 
 class WorkerSubprocessTests(unittest.TestCase):

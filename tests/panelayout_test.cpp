@@ -179,6 +179,54 @@ private Q_SLOTS:
     void dropEdgeSurvivesAZeroSizedPane() {
         QCOMPARE(dropEdge(QPoint(0, 0), QSize(0, 0)), Direction::Left);
     }
+
+    // ----- pane sizes across a prompt-box that comes and goes (#G152) --------------------------
+
+    void enclosingSplittersAreListedInnermostFirst() {
+        auto *outer = new QSplitter(Qt::Vertical);
+        auto *inner = new QSplitter(Qt::Horizontal);
+        auto *pane = new QLabel(QStringLiteral("A"));
+        inner->addWidget(pane);
+        outer->addWidget(inner);
+        std::unique_ptr<QSplitter> owner(outer);
+        const auto splitters = enclosingSplitters(pane);
+        QCOMPARE(splitters.size(), 2);
+        QCOMPARE(splitters.at(0).data(), inner);
+        QCOMPARE(splitters.at(1).data(), outer);
+        QCOMPARE(enclosingSplitters(nullptr).size(), 0);
+        QCOMPARE(enclosingSplitters(outer).size(), 0);
+    }
+
+    // Taking control of the terminal hides the prompt box, which changes that pane's minimum size.
+    // The splitter redistributes every pane when that happens; these are the sizes that go back.
+    void restoreSizesPutsThePanesBackAfterAMinimumChanges() {
+        std::unique_ptr<QSplitter> splitter(splitterOf(Qt::Horizontal, {QStringLiteral("A"), QStringLiteral("B"), QStringLiteral("C")}));
+        splitter->resize(900, 400);
+        splitter->setSizes({300, 300, 300});
+        const auto splitters = enclosingSplitters(paneNamed(splitter.get(), QStringLiteral("C")));
+        QCOMPARE(splitters.size(), 1);
+        const QList<QList<int>> before{splitter->sizes()};
+        // Something inside one pane goes away and the splitter moves the dividers.
+        splitter->setSizes({500, 300, 100});
+        QVERIFY(splitter->sizes() != before.first());
+        restoreSizes(splitters, before);
+        QCOMPARE(splitter->sizes(), before.first());
+    }
+
+    void restoreSizesSkipsASplitterThatChanged() {
+        std::unique_ptr<QSplitter> splitter(splitterOf(Qt::Horizontal, {QStringLiteral("A"), QStringLiteral("B")}));
+        splitter->resize(600, 400);
+        const QList<QPointer<QSplitter>> splitters{splitter.get()};
+        // Sizes recorded for two panes must not be forced onto a splitter that now has three.
+        const QList<QList<int>> stale{{300, 300}};
+        splitter->addWidget(new QLabel(QStringLiteral("C")));
+        const QList<int> current = splitter->sizes();
+        restoreSizes(splitters, stale);
+        QCOMPARE(splitter->sizes(), current);
+        // A splitter that has gone away is skipped rather than crashing.
+        const QList<QPointer<QSplitter>> gone{QPointer<QSplitter>()};
+        restoreSizes(gone, stale);
+    }
 };
 
 QTEST_MAIN(PaneLayoutTests)

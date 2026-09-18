@@ -10,6 +10,7 @@
 
 #include <QList>
 #include <QPoint>
+#include <QPointer>
 #include <QRect>
 #include <QSize>
 
@@ -45,5 +46,15 @@ void swapInSplitter(QSplitter *splitter, QWidget *current, QWidget *neighbor);
 // nearest edge wins. Dropping just past the divider between two panes therefore names the edge
 // they already share, and the dragged pane keeps its place.
 Direction dropEdge(const QPoint &local, const QSize &size);
+
+// Every splitter above `pane`, innermost first. Showing or hiding something inside a pane changes
+// that pane's minimum size, and a splitter that cannot satisfy every minimum redistributes all of
+// its children as soon as one of those minimums moves: that is how taking control of the terminal
+// (Ctrl+H, which hides the prompt box) shrank a pane in a three-pane row to almost nothing.
+QList<QPointer<QSplitter>> enclosingSplitters(QWidget *pane);
+
+// Put sizes recorded from enclosingSplitters() back. A splitter that has gone away, or whose
+// children changed in between so the sizes no longer describe it, is skipped.
+void restoreSizes(const QList<QPointer<QSplitter>> &splitters, const QList<QList<int>> &sizes);
 
 }  // namespace relay::panes

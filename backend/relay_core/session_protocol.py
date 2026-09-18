@@ -475,4 +475,10 @@ class SessionCommands:
             work = lambda: {**suggestions.next_prompt(provider, messages, turns), "id": suggestion_id}  # noqa: E731
         else:
             raise ValueError('suggest kind must be "next_command" or "next_prompt".')
-        self._background("suggest", suggestion_id, work)
+        # A failed suggestion is reported as a suggestion, not as a bare protocol error: the GUI can
+        # then say which side call failed and on which model, and a background failure never looks
+        # like the agent turn erroring out (#308N).
+        model = agent.role_model("suggestions")
+        self._background("suggest", suggestion_id, work,
+                         lambda text: {"event": "suggestion", "kind": kind, "id": suggestion_id,
+                                       "text": "", "error": text, "model": model})
