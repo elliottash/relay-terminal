@@ -510,6 +510,59 @@ command finished after more than 30 s, turn failed, plan ready, subagent finishe
 **Presence rule:** the desktop **must not** send a push while that desktop's window is active and
 focused — the user is already looking at it.
 
+### 9.1 Subscribing
+
+A subscription is made on the phone and travels to the **desktop**, never to the rendezvous (§8).
+Any paired device may subscribe: the capability floor is `view`.
+
+```
+→ push_subscribe {endpoint, p256dh, auth, key}      client → desktop
+← push_state {subscribed: true}                     desktop → client (carries the request's id)
+→ push_unsubscribe {}
+← push_state {subscribed: false}
+```
+
+| Field | What | Checked |
+|---|---|---|
+| `endpoint` | The URL the push service gave the browser | `https://`, ≤ 2048 characters, no whitespace |
+| `p256dh` | The subscription's public key, base64url | 65 bytes, uncompressed P-256 (`0x04` first) |
+| `auth` | The subscription's auth secret, base64url | 16 bytes |
+| `key` | The per-device **seal key**, base64url | 32 bytes, AES-256 |
+
+The desktop keeps all four on the device record (`remote/identity.py`) and nowhere else. A `410`
+or `404` from the push service drops the subscription; so does revoking the device.
+
+### 9.2 What a push is made of
+
+Two layers, and the outer one is the standard:
+
+1. the hub builds a body and **seals** it: `nonce (12) || AES-256-GCM(key, body, "relay-push-v1")`,
+   where the body is the JSON below and `key` is that device's seal key;
+2. the sealed bytes are the plaintext of an ordinary RFC 8291 `aes128gcm` payload, encrypted to
+   `p256dh` and `auth`, padded per RFC 8188 (`0x02` delimiter on the last record);
+3. the payload goes to `/v1/push/send` with the endpoint. The rendezvous signs it with VAPID and
+   posts bytes it cannot read.
+
+The body:
+
+```json
+{"v": 1, "kind": "agent_finished", "pane": "<pane id>", "title": "The agent finished",
+ "body": "Pane 2 · 1m 31s"}
+```
+
+`kind` is one of `agent_finished`, `waiting_input`, `password`, `failed`, `plan`; the service
+worker uses it as the notification `tag`, so a second one of a kind replaces the first.
+
+**(security)** A service worker **must** discard any push it cannot open with the seal key
+(`app/sw.js` does). That is what makes a forged "password prompt" from a compromised rendezvous
+impossible rather than merely unlikely: the rendezvous has the VAPID key, which authenticates the
+sender to the push service and opens nothing.
+
+### 9.3 The rules the hub applies
+
+`remote/notify.py`, in this order: the presence rule, then a **per-pane cooldown of 60 s**, then
+the body. A pane is named by an ordinal this desktop assigned ("Pane 2") and never by its title.
+
 **(security)** The hub **constructs** push bodies; it never forwards a `NotificationCenter` body,
 which already interpolates the pane's `cwd`. Bodies carry no command text, no output, no prompt
 text, **no `cwd`, no program name and no OSC-derived pane title** — a terminal title is set by
@@ -524,6 +577,20 @@ names the foreground program, the phone's secure field displays it, the desktop 
 it entirely for a program the agent spawned rather than one the user's own shell line started, and a
 per-pane cooldown stops a loop spamming prompts. The secure field is never opened by the push
 payload alone; the client re-queries the pane's live status over the Noise session first.
+
+**Implemented (2026-09-18).** Five triggers, being the ones with an event to hang on: an agent turn
+that finished more than 30 s after its `agent_started`, a pane whose status became `waiting_input`,
+a pane whose status became `password`, a turn that failed (the worker's `error`), and
+`plan_written`. A command that outlasted you and a subagent finishing are not wired: the first has
+no event and the second would need a second cooldown of its own. The presence signal is a
+`window_active {active}` line from `src/RemoteShare.cpp` to the sidecar, driven by
+`QGuiApplication::applicationStateChanged`; a hub nobody tells — `python3 -m remote.cli share`, the
+tests — has no window to be looking at and pushes. The password trigger is suppressed when the pane
+reports that the agent, not the person, has the keyboard.
+
+What is **not** built is the "off-by-default-configurable" part of the first paragraph: there is no
+per-trigger switch anywhere, so a device that has subscribed gets all five. That wants a row in the
+sharing dialog beside the password-entry switch, which is a surface decision.
 
 ## 10. Multiplayer additions (P4)
 
@@ -690,7 +757,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | Screen stream (P2) | `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `app/screen.js` | A real PTY parsed by Relay's own emulator, streamed as styled rows, painted as a cell grid on the phone |
 | Take-over (P3) | `remote/host.py`, `app/app.js` | `keys`, `paste`, `line`, `control_request`/`control_release`, an extra-keys row and a line box, refused at a password prompt |
 | Password entry (§6.7) | `remote/host.py`, `src/Pane.h` (`submitRemoteSecret`), `app/app.js` | A desktop-minted single-use nonce bound to the prompt, a per-device switch that is off by default, a fresh termios check in the hub and again at the write, a password field in the client. Tested; not yet tried on a real phone |
-| Push crypto | `remote/push.py`, `app/sw.js` | RFC 8291 encryption, the inner seal, VAPID signing; the service worker opens the seal and discards what it cannot open. **Not connected yet**: the client does not subscribe and the hub sends nothing |
+| Notifications (§9) | `remote/push.py`, `remote/notify.py`, `remote/host.py`, `app/app.js`, `app/sw.js`, `src/RemoteShare.cpp` | Connected end to end. `push_subscribe`/`push_unsubscribe` inside the Noise session, five triggers, the presence rule over `window_active`, a per-pane cooldown, constructed bodies, a 410 or a revoke dropping the subscription, and a "Notify me" row that asks permission from a tap. RFC 8291 is checked against the RFC's own Appendix A vector, `app/sw.js` opens a Python seal under Node, and a local push service takes a real delivery (`tests/test_remote_push.py`). **Not yet tried on a real phone**: that needs the hosted rendezvous reachable from the push service |
 | Audit log | `remote/audit.py` | Local, 0600, split by month and size. Records pairing, revoke, prompt detection and password use so far |
 | `transport_switch` (§2) | `remote/host.py`, `remote/client.py` | The handshake, tested. There is no second transport yet |
 | Local attach | `remote/attach.py` | The desktop's own terminal joins the same shell, so both ends drive it |
@@ -701,7 +768,7 @@ Every Relay pane is an engine pane, so every pane can be shared.
 
 Not implemented, and refused explicitly rather than silently: `history_get` (the bridge can page
 plain text, but scrollback is to be styled, which needs a const `VtCore::historyLines` in both
-cores); and all of section 10. Notifications are half-wired, as the table says.
+cores); and all of section 10.
 
 `voice` from a GUI pane now works: the sidecar sends the clip to the GUI as a `voice` line with an
 id it minted, the pane writes it to a 0600 temp file whose name and extension it chooses itself and
