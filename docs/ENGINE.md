@@ -237,6 +237,9 @@ GUI scenario (`engine/scripts/gui/scenarios.sh`).
 
 ## Integration into `src/main.cpp` (done 2026-09-17, steps 1-3)
 
+(Written when the pane lived in `src/main.cpp`; since the 2026-09-18 split it is `Pane` in
+`src/Pane.h`. KonsolePart, named below, was retired the same day.)
+
 1. **Adapter, no behaviour change.** Add `src/KonsoleBackend.{h,cpp}` implementing
    `relay::TerminalBackend` with today's calls: `TerminalInterface::sendInput`,
    `foregroundProcessId`, `onReceiveBlock` over the Session D-Bus object for `writeToDisplay`, the

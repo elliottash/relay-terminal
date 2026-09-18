@@ -1,6 +1,8 @@
 # The switchboard aesthetic inside Relay (proposal, 2026-09-17)
 
 Card `#8E4Q`. **Design only — nothing here is implemented, no source file was touched.**
+Source references updated 2026-09-18, when `src/main.cpp` was split into one header per unit: they
+now name the function and its file, because the original line numbers had already drifted.
 Companions: `docs/SWITCHBOARD-DESIGN.md` (the tracker), `site/index.html` + `site/style.css` (the
 hero patch panel, shipped), `issues/features/2026-09-17-color-themes.md` (`#0JA7`, themes),
 `issues/features/2026-09-17-remote-phone-and-multiplayer.md` (`#W5N2`, phone pairing).
@@ -8,7 +10,7 @@ hero patch panel, shipped), `issues/features/2026-09-17-color-themes.md` (`#0JA7
 ## 1. The claim
 
 The metaphor is not a coat of paint we are considering. It is already the product's data model:
-`relay::input::LineTarget` is a destination, `applyDestinationColor()` (`src/main.cpp:4297`) paints
+`relay::input::LineTarget` is a destination, `applyDestinationColor()` (`src/Pane.h`) paints
 the caret cyan or violet by where the line is patched, and the tracker is called the Switchboard.
 The website now says this literally — a bakelite face, brass jacks, a cord that re-patches
 (`site/style.css:230-275`).
@@ -41,14 +43,14 @@ Three tests. A candidate has to pass all three.
 
 | Surface | Why it qualifies |
 |---|---|
-| Pane header line (`src/main.cpp:1327`, today a bare `m_cwdLabel`) | Seen constantly but *read* rarely; it is the one place that states this pane's destination |
+| Pane header line (`src/Pane.h`, today a bare `m_cwdLabel`) | Seen constantly but *read* rarely; it is the one place that states this pane's destination |
 | The Switchboard pane's column headers and empty state (`BoardPane::buildColumn`, `rebuild`) | A board, opened deliberately, closed again |
 | Remote pairing and connect/disconnect (`#W5N2`) | A phone pairing with a desktop **is** a call being patched through. Rare, ceremonial, currently unbuilt |
 | First-run / onboarding | Seen once |
 | The app icon and the `.desktop` entry (`data/icons/org.relayterminal.Relay.svg`) | Seen at 32px, outside the app |
 | An About box (there is none today — `relay --version` is the only version surface) | Seen once, by choice |
 | Sound | Opt-in only, default off |
-| The bell / notification centre (`src/main.cpp:6684`) | Rare, and already a telecom noun |
+| The bell / notification centre (`NotificationsPopup`, `src/WindowChrome.h`) | Rare, and already a telecom noun |
 
 ### 2.2 Surfaces that must stay plain — a hard list
 
@@ -153,7 +155,7 @@ Each: what, where, Qt cost, wear risk, verdict.
 
 ### 1. The pane's line indicator — a lit jack in the pane header · **DO**
 
-The pane header is `m_cwdLabel` (`src/main.cpp:1327`), a bare path label. Replace it with a strip
+The pane header is `m_cwdLabel` (`src/Pane.h`), a bare path label. Replace it with a strip
 that states what this pane's line is patched to.
 
 ```
@@ -169,17 +171,17 @@ Left ring = your line (always brass). Right ring = the destination, brass with a
 halo; the cord between them is one cubic curve. The word `AGENT` / `TERMINAL` is in enamel type
 beside it, so the colour is never the only channel. **Cost:** one custom `QWidget` of ~80 lines
 (`paintEvent` with two `drawEllipse` and one `QPainterPath`) plus a QSS block; the state already
-exists — `m_modeChip`'s `dest` property is set at `src/main.cpp:4311`. **Wear risk: low.** It
+exists — `m_modeChip`'s `dest` property is set in `src/Pane.h`. **Wear risk: low.** It
 replaces a label with a label that says more; there is no motion and it is in peripheral vision.
 **Passes the hairline test** — grey rings and a grey line still read.
 
 ### 2. The busy lamp · **DO**
 
 A 10px brass-bezelled lamp on that same strip, lit amber while a turn runs, dark otherwise. The
-plumbing exists: `m_turnClock` already ticks once a second at `src/main.cpp:4373-4389`, and
+plumbing exists: `m_turnClock` already ticks once a second (`src/Pane.h`), and
 `#requestsChip[state=…]` already encodes running/done/attention (`src/Theme.cpp:167-171`). Today
 "the agent is thinking" is inferred from a floating `#thinkingOverlay` that covers the bottom of
-the terminal and counts seconds in its header (`src/main.cpp:4397`); a lamp says the same thing
+the terminal and counts seconds in its header (`m_thinking`, `src/Pane.h`); a lamp says the same thing
 from the pane header without covering output. **Cost:** ~25 lines inside the same widget. **Wear risk:
 low if it does not blink** — a steady fill, or at most a 1 Hz opacity breath, and *nothing* under
 reduced motion (§6). **Verdict: do, immediately after #1 — they are one widget.**
@@ -210,7 +212,7 @@ the `board.*` theme group of section 3.4. See `docs/SWITCHBOARD-DESIGN.md` secti
 operator confirms, the call is connected. `docs/REMOTE-AND-MULTIPLAYER-DESIGN.md:210` already
 describes the QR + five-digit confirm, and `:259` asks for a persistent "2 remote devices
 connected" indicator. Give that indicator a jack strip in the window chrome (beside the bell,
-`src/main.cpp:8964`): one brass ring per connected device, lit; a connect draws the cord in over
+`windowChromeRight` in `src/RelayWindow.h`): one brass ring per connected device, lit; a connect draws the cord in over
 180ms, a disconnect drops it. **Cost:** a small painted widget plus a QSS block; the pairing screen
 itself is new work regardless. **Wear risk: low** — a pairing happens a handful of times a year.
 **Do**, with the hard constraint that the confirm dialog stays a plain dialog: the five-digit code
@@ -221,7 +223,7 @@ is a security decision and must not be decorated.
 `BoardPane::rebuild` (`src/BoardPane.cpp:785-789`) currently shows one centred sentence,
 "No cards yet. Press n to add one." An empty state is seen twice, is not read all day, and is the
 cheapest place in any app to have a point of view. Relay has almost none — the notification popup
-(`src/main.cpp:6717`) and the Tasks panel (`src/RequestsPanel.cpp:190`) are the only two written
+(`NotificationsPopup`, `src/WindowChrome.h`) and the Tasks panel (`src/RequestsPanel.cpp:190`) are the only two written
 with any care, and a brand-new pane has no welcome at all.
 
 ```
@@ -243,7 +245,7 @@ which reads as a generic terminal. A brass jack ring with a cyan cord entering i
 distinctive at 32px and would tie the icon to the site. Against: the chevron already matches the
 `›` prompt mark used throughout the product and on the site's feature list, and icon changes are
 expensive to unwind (three SVGs, eight rasterised PNG sizes, `.desktop`, metainfo, packaging, and
-`setWindowIcon` at `src/main.cpp:9897`, which the window chrome reads back to draw the header mark).
+`setWindowIcon` in `main()`, `src/main.cpp`, which the window chrome reads back to draw the header mark).
 **Verdict: maybe** — worth a
 side-by-side at 24/32/48px, not worth a decision today. The small variant
 (`org.relayterminal.Relay-small.svg`) is the real test: at 16px a jack ring becomes a dot.
@@ -273,7 +275,7 @@ existing for its own reasons.**
 
 ### 10. Notifications as an annunciator drop · **NO**
 
-`#notificationsPopup` / `#notificationRow` (`src/main.cpp:6684`, `:6755`, styled at
+`#notificationsPopup` / `#notificationRow` (`NotificationsPopup` in `src/WindowChrome.h`, styled at
 `src/Theme.cpp:236-250`) already work and already carry coloured `#notificationDot` kinds. An
 annunciator — the little flag that drops on an old board when a subscriber calls — is the single
 most tempting idea here and the single worst fit: notifications arrive when you are busy with
@@ -298,14 +300,14 @@ Listed so the answer is on record.
 ## 5. The first thing, and the refused thing
 
 **Build first: the pane header line indicator with its lamp (#1 + #2).** It is one widget. Every
-piece of state it needs already exists (`dest` at `src/main.cpp:4311`, the turn clock at `:4373`).
+piece of state it needs already exists (`dest` and the turn clock, both in `src/Pane.h`).
 It replaces the least considered surface in the app — a bare path label — with the only piece of
 chrome that *is* the product's central idea, visible in every screenshot, and it makes the app and
 the website recognisably the same thing. If nothing else here ships, this should.
 
 **Refuse even if asked: an animated cord that swings between the two jacks on every mode change.**
 Three reasons, in order of how fatal they are. (a) `refreshDestinationColor()`
-(`src/main.cpp:4319-4328`) re-evaluates the destination on *every router verdict as you type* — an
+(`src/Pane.h`) re-evaluates the destination on *every router verdict as you type* — an
 auto-mode line can flip shell→agent→shell inside one sentence, so an animation is not an animation,
 it is a strobe under the user's hands. (b) Destination feedback is the one signal in Relay that
 must be instantaneous and pre-attentive; a 180ms transition makes a lie out of a fact that is
@@ -351,11 +353,11 @@ on the next paint.
 | Jack-strip, lamp, board QSS | `src/Theme.cpp:318` (append before the raw-string close) |
 | Theme token group `board.*`, `board.material` | `src/Theme.cpp:325-334` (the token table) |
 | Light/plain variants | new, alongside whatever `#0JA7` lands |
-| Pane header → jack strip | `src/main.cpp:1327-1333` (`m_cwdLabel`), new `LineStrip` widget |
-| Destination feeds the strip | `src/main.cpp:4297-4315` (`applyDestinationColor`) |
-| Lamp on/off | `src/main.cpp:4373-4389` (turn clock start/stop) |
+| Pane header → jack strip | `src/Pane.h` (`m_cwdLabel`), new `LineStrip` widget |
+| Destination feeds the strip | `src/Pane.h` (`applyDestinationColor`) |
+| Lamp on/off | `src/Pane.h` (`m_turnClock` start/stop) |
 | Switchboard column/card styling | `src/BoardPane.cpp:732` header, `:155-191` detail (QSS only) |
 | Empty Switchboard | `src/BoardPane.cpp:452-454`, `:785-789` |
-| Remote device jacks | `src/main.cpp:8964` (`windowChromeRight`), plus `#W5N2` work |
+| Remote device jacks | `src/RelayWindow.h` (`windowChromeRight`), plus `#W5N2` work |
 | Icon (if #6 wins) | `data/icons/org.relayterminal.Relay*.svg`, `packaging/`, `.desktop` |
 | **Not touched, by rule** | `engine/view/TerminalView.cpp`, `src/ShellHighlighter.cpp`, `#composerEditor`, `QTabBar` |

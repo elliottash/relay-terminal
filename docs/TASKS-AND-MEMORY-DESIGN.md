@@ -187,7 +187,7 @@ Expanded (at most 6 rows, then "+3 more"):
   ○ T3 Handle device permission errors       #K7Q2.c1   waits on T2
   ⤼ T4 Update README                          continues on #K7Q2.f4
 ```
-- **Toggle `agent.tasks` = Ctrl+Shift+K.** Relay's Ctrl+T is New tab (`src/main.cpp:280`), so Claude Code's key is not
+- **Toggle `agent.tasks` = Ctrl+Shift+K.** Relay's Ctrl+T is New tab (`src/Keymap.h`), so Claude Code's key is not
   free. Ctrl+Shift+K is unbound in Relay defaults; preset conflicts are *unverified* (check KEYBINDING-PRESETS.md).
   The expanded state persists per pane, like Claude Code's.
 - **Down** from the composer's last line focuses the strip, then the agents list, as in Design C. On a row: Enter opens

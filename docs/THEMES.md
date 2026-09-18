@@ -374,14 +374,20 @@ line typed into the focused composer, and the status strip. Sheets: `contact-all
 
 In both light themes, **the agent's answer is effectively invisible**: 1.13:1 on IBM Beige and
 1.22:1 on Relay Light. The agent-turn lines are painted with 24-bit colours fixed for a dark ground
-(`src/main.cpp:5693-5704`, `Ink::Agent` = `38;2;226;229;235`, and the `MarkdownAnsi` instance at
-`:7588`); the prompt echo (Relay Dark's violet, 2.30:1 on beige), the model name (cyan, 1.80:1)
+(then `src/main.cpp`, now `src/Pane.h`: `Ink::Agent` = `38;2;226;229;235`, and the `MarkdownAnsi`
+instance); the prompt echo (Relay Dark's violet, 2.30:1 on beige), the model name (cyan, 1.80:1)
 and the tool lines likewise do not follow the theme. It affects Relay Light exactly as much as IBM
 Beige, so it does not decide the light head-to-head — but **no light theme can be the preferred
 theme until it is fixed.** Cheapest fix: emit palette-indexed SGR (`\e[37m`, `\e[35m`, …) instead
 of truecolor, so every theme's ANSI palette colours the agent turn; or build the `Ink` strings from
 the live `Text`/`Shell`/`Agent`/`Warning`/`Success`/`Error`/`TextMuted` tokens on `themeChanged()`.
 Out of scope here (`src/main.cpp`), not changed.
+
+**Since fixed (2026-09-18):** `369725a` builds `MarkdownAnsi`'s eight colours from the live theme
+tokens instead of a fixed dark palette, and `b0af7b3` writes the agent's Markdown in the terminal's
+own colours, so every theme's palette now colours the agent turn. No hard-coded `38;2;226;229;235`
+remains. Lines printed before a theme switch keep their colours: a terminal cannot recolour its
+scrollback.
 
 ### 10.2 Dark Copper vs Relay Dark
 

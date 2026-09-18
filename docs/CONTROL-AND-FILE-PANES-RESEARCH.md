@@ -96,7 +96,7 @@ Checked on this machine (kernel 7.0.0, Python `pty.fork` + `bash -i`):
 
 | Signal | How to read it | Works for Relay? |
 |---|---|---|
-| Foreground pgrp differs from the shell | `/proc/<shell>/stat` field 8 `tpgid` ([proc_pid_stat(5)](https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html)) | Yes (Relay does this in `src/main.cpp`) |
+| Foreground pgrp differs from the shell | `/proc/<shell>/stat` field 8 `tpgid` ([proc_pid_stat(5)](https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html)) | Yes (Relay did this in `src/main.cpp`; since 2026-09-18 it asks the pty master first, with this as the fallback, in `src/Pane.h`) |
 | Same, via `tcgetpgrp` on the slave (`/proc/<pid>/fd/0`) | `TIOCGPGRP` | **No: ENOTTY.** The kernel rejects it on a non-master tty unless it is the caller's controlling tty ([tty_jobctrl.c `tiocgpgrp`](https://raw.githubusercontent.com/torvalds/linux/master/drivers/tty/tty_jobctrl.c)). This is a long-standing rule, not new. |
 | Same, via `tcgetpgrp` on the **master** fd | `TIOCGPGRP` | Yes, but KonsolePart owns the master (Konsole's `Pty::foregroundProcessGroup` uses it, [API](https://api.kde.org/4.14-api/applications-apidocs/konsole/html/classKonsole_1_1Pty.html)); Relay gets `foregroundProcessId()` through TerminalInterface instead |
 | Noncanonical / raw mode | `tcgetattr` on `/proc/<pid>/fd/0` (`!ICANON`) | Yes. Note that the **idle readline prompt is also `!ECHO && !ICANON`** |

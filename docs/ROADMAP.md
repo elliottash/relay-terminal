@@ -81,7 +81,7 @@ output open the desktop app; agent tools run without approval and are not sandbo
 | Work | Notes | Issue or doc |
 |---|---|---|
 | **Terminal-only Relay** (`relay-tui`) that runs inside any terminal, including over SSH | Reuses `backend/worker.py` and `relay_core` over the same JSON protocol. Options: a Bash/Zsh prompt wrapper (1–2 weeks) or a Textual app with a shell pane (4–6 weeks). Needs an owner decision on scope. | `issues/features/2026-09-17-terminal-only-tui-relay.md`, [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section C |
-| Keep UI logic out of `src/main.cpp` and document the worker protocol as stable | What makes a second frontend cheap | [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section C |
+| Keep UI logic out of the window layer (`src/Pane.h`, `src/RelayWindow.h`; one `src/main.cpp` until the 2026-09-18 split) and document the worker protocol as stable | What makes a second frontend cheap | [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section C |
 | Out-of-process pane rendering | Now possible in principle: the engine is Relay's own code | [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section B, option 5 |
 
 ## Non-goals
