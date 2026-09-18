@@ -53,6 +53,16 @@ Implementer's reading (Claude Opus 5, 2026-09-18), to be confirmed or overruled 
 - **After a restart** no subagent of the saved session runs, so a task one was still running loads
   as pending with a note, its link kept. A rewind keeps the links of subagents still running.
 
+Owner, 2026-09-18 (via the coordinating session):
+
+"remove the \"only one task in progress\" rule; the agent can assign itself and subagents multiple tasks"
+
+- Done: `update_todos` accepts any number of `in_progress` todos, the main agent's own as well as
+  those subagents run. The tool description and the system prompt now tell the model to mark every
+  todo it is working on in_progress, several at once, and that it can hand several to subagents. The
+  implementer's "relaxes for tasks a subagent is running" reading above is superseded. What stays:
+  while a subagent runs a todo, that todo's status is the subagent's (update_todos cannot change it).
+
 ## Change
 
 - Backend: `backend/relay_core/todos.py` (the `subagent` field, `TodoList.delegated`, the list's
@@ -88,8 +98,10 @@ run `drive.sh` without it.
 - [ ] A model that calls `agent` with `todo_id` gets `todo_id` back; the todo shows `subagent`, is
       in_progress, and goes to completed / blocked (with the error) / pending (with a note) when the
       subagent finishes / fails / is stopped.
-- [ ] With one todo delegated, `update_todos` may put another in_progress; resending the delegated
-      one with another status does not change it.
+- [ ] `update_todos` with several todos in_progress (with or without subagents) is accepted; the
+      tool description and system prompt no longer say "exactly one"; resending a delegated todo
+      with another status does not change it.
+- [ ] The task list and chip show several in-progress tasks as ◐ and count each as active.
 - [ ] A turn whose only open todo is delegated ends without a completion-check nag; the Tasks chip
       and panel count that todo as active, not unfinished; the request becomes done when the
       subagent completes it.

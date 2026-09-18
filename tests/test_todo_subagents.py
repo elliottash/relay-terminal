@@ -27,7 +27,7 @@ class ValidateTests(unittest.TestCase):
                      'subagent': 'a1'},
                     {'id': 'T2', 'text': 'b', 'status': 'pending', 'request_ids': ['R1'], 'note': None,
                      'subagent': None}]
-        # The model resends T1 as pending (and echoes the read-only field); T2 becomes its one in_progress.
+        # The model resends T1 as pending (and echoes the read-only field): T1 keeps its subagent's status.
         items, _ = todo_mod.validate({'items': [
             {'id': 'T1', 'text': 'a', 'status': 'pending', 'subagent': 'a9'},
             {'id': 'T2', 'text': 'b', 'status': 'in_progress'}]}, {'R1'}, existing, 3, delegated=frozenset({'T1'}))
@@ -35,11 +35,11 @@ class ValidateTests(unittest.TestCase):
         self.assertEqual(items[0]['subagent'], 'a1')
         self.assertEqual(items[1]['status'], 'in_progress')
         self.assertIsNone(items[1]['subagent'])
-        # Without the delegation two in_progress todos are still refused.
-        with self.assertRaises(ValueError):
-            todo_mod.validate({'items': [{'id': 'T1', 'text': 'a', 'status': 'in_progress'},
-                                         {'id': 'T2', 'text': 'b', 'status': 'in_progress'}]},
-                              {'R1'}, existing, 3)
+        # Without a delegation several in_progress todos are fine too (no one-in_progress rule).
+        items, _ = todo_mod.validate({'items': [{'id': 'T1', 'text': 'a', 'status': 'in_progress'},
+                                                {'id': 'T2', 'text': 'b', 'status': 'in_progress'}]},
+                                     {'R1'}, existing, 3)
+        self.assertEqual([t['status'] for t in items], ['in_progress', 'in_progress'])
 
     def test_finish_outcomes(self):
         for outcome, status, note in (('done', 'completed', None), ('failed', 'blocked', 'Subagent a1 failed: boom'),
@@ -105,7 +105,7 @@ class ModelLinkTests(Base):
             todos({'text': 'write docs', 'status': 'pending'}, {'text': 'fix bug', 'status': 'pending'}),
             calls(call('agent', {'description': 'docs', 'prompt': 'D gate:g1', 'subagent_type': 'general',
                                  'background': True, 'todo_id': 'T1'}, 'c1')),
-            # T1 is delegated, so T2 may be the one in_progress while T1 runs.
+            # T2 in_progress beside T1, which a subagent runs.
             todos({'id': 'T1', 'text': 'write docs', 'status': 'in_progress'},
                   {'id': 'T2', 'text': 'fix bug', 'status': 'in_progress'}),
             todos({'id': 'T1', 'text': 'write docs', 'status': 'pending'},

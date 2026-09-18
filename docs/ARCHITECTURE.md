@@ -1309,7 +1309,9 @@ background `general` subagent on the todo and the verbatim requests it serves; t
 follows the subagent (in_progress, then completed / blocked / pending; while it runs the task counts
 as active, not unfinished, after the main turn ends) and the subagent's strip row,
 tab and ✦ lines read "T3 · …" (`SubagentRow::todoId`). The mouse paths show the hints
-`tasks.subagent.open.mouse` (→ Enter) and `tasks.subagent.run.mouse` (→ S). `request_set`, `request_get` and `request_reask`
+`tasks.subagent.open.mouse` (→ Enter) and `tasks.subagent.run.mouse` (→ S). Any number of tasks
+may be in progress at once, the agent's own and its subagents' (owner, 2026-09-18: no "only one task
+in progress" rule); the panel and chip count each as active. `request_set`, `request_get` and `request_reask`
 remain in the protocol and in the worker, unused by the GUI. Toggle: `agent.requests` (Ctrl+Shift+K
 in the Relay preset; unbound in the Warp, VS Code and Konsole presets, where the key clears blocks,
 deletes a line, or clears scrollback), `/tasks`, `/requests`, `/todos`, the chip. `openItemsLine()`

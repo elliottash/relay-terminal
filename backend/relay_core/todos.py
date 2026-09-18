@@ -10,8 +10,11 @@ Todos and subagents (card #QHR1): a todo can be handed to a subagent, by the mod
 `todo_id`) or by the user (the `todo_subagent` command). The todo then records the subagent's id in
 `subagent` and takes its status from it while it runs: in_progress while it runs, completed when it
 finishes, blocked (with the error) when it fails, pending again (with a note) when it is stopped. A todo
-a subagent is running is *delegated*: it does not count against the one-in_progress rule, the model's
-update_todos cannot change its status, and the completion check does not hold the main turn open for it.
+a subagent is running is *delegated*: the model's update_todos cannot change its status, and the
+completion check does not hold the main turn open for it.
+
+Any number of todos may be in_progress at once (owner, 2026-09-18: "remove the \"only one task in
+progress\" rule; the agent can assign itself and subagents multiple tasks").
 """
 from __future__ import annotations
 
@@ -35,10 +38,10 @@ SPEC = {"type": "function", "function": {
     "name": "update_todos",
     "description": ("Replace your todo list for this conversation (send the complete list every time). Use it when a "
                     "message contains more than one ask or a message arrives while you work. Link each todo to the "
-                    "request ids (R<n>) it serves. Exactly one item in_progress while working; a todo a subagent is working "
-                    "on (it shows a subagent id) does not count and keeps the status Relay gives it until that subagent "
-                    "ends. Mark completed only after the work is actually done; cancelled, deferred and blocked need a "
-                    "note with the reason."),
+                    "request ids (R<n>) it serves. Mark every todo you are working on in_progress: several may be in "
+                    "progress at once, yours and those you hand to subagents. A todo a subagent is working on (it shows a "
+                    "subagent id) keeps the status Relay gives it until that subagent ends. Mark completed only after the "
+                    "work is actually done; cancelled, deferred and blocked need a note with the reason."),
     "parameters": {"type": "object", "properties": {
         "items": {"type": "array", "maxItems": MAX_ITEMS, "items": {"type": "object", "properties": {
             "id": {"type": "string", "description": "Existing todo id (T<n>) to keep; omit for a new todo."},
@@ -52,7 +55,7 @@ SPEC = {"type": "function", "function": {
 
 RULES = """
 
-Requests and todos: Relay records every message the user sends as a request with an id (R<n>). Messages that arrive while you work are labelled with their id. When a message contains more than one ask, or a new message arrives while you are working, call update_todos before continuing: one todo per ask, with the ask quoted, linked with request_ids (todos you add without request_ids are linked to the message that started the current turn; the tool result shows the links). When a message changes, narrows or corrects an ask you already have a todo for, add its request id to that todo's request_ids instead of adding a todo; add a todo only for work that is genuinely new. Keep exactly one todo in_progress, mark each completed as soon as it is actually done, and keep going until every todo of the current turn's requests is completed, or cancelled, deferred or blocked with a reason. Do not end your turn with pending todos for those requests. Todos of an earlier request whose turn was stopped may stay pending until the user asks to continue it; do not cancel them on your own. To hand a todo to a subagent, start it with agent(todo_id="T<n>"): Relay then keeps that todo's status in step with the subagent (in_progress while it runs, completed or blocked when it ends), it does not count as your one in_progress todo, and you do not need to finish it yourself before ending your turn. Skip the list for a single simple ask."""
+Requests and todos: Relay records every message the user sends as a request with an id (R<n>). Messages that arrive while you work are labelled with their id. When a message contains more than one ask, or a new message arrives while you are working, call update_todos before continuing: one todo per ask, with the ask quoted, linked with request_ids (todos you add without request_ids are linked to the message that started the current turn; the tool result shows the links). When a message changes, narrows or corrects an ask you already have a todo for, add its request id to that todo's request_ids instead of adding a todo; add a todo only for work that is genuinely new. Mark the todos you are working on in_progress (several may be in progress at once), mark each completed as soon as it is actually done, and keep going until every todo of the current turn's requests is completed, or cancelled, deferred or blocked with a reason. Do not end your turn with pending todos for those requests. Todos of an earlier request whose turn was stopped may stay pending until the user asks to continue it; do not cancel them on your own. You can hand todos to subagents, several at once, each with agent(todo_id="T<n>"): Relay then keeps that todo's status in step with its subagent (in_progress while it runs, completed or blocked when it ends), and you do not need to finish it yourself before ending your turn. Skip the list for a single simple ask."""
 
 
 def validate(raw, known_request_ids, existing: list[dict], next_id: int,
@@ -60,14 +63,14 @@ def validate(raw, known_request_ids, existing: list[dict], next_id: int,
     """Validated replacement list and the next free id number. Raises ValueError with a model-readable message.
 
     `delegated`: ids of todos a subagent is running. A resent delegated todo keeps its status (and note);
-    every resent todo keeps its subagent link. Neither counts towards the one-in_progress rule."""
+    every resent todo keeps its subagent link. Any number of todos may be in_progress."""
     if not isinstance(raw, dict) or set(raw) - {"items"} or not isinstance(raw.get("items"), list):
         raise ValueError("update_todos takes {items: [...]}.")
     items = raw["items"]
     if len(items) > MAX_ITEMS:
         raise ValueError(f"At most {MAX_ITEMS} todos.")
     existing_ids = {t["id"] for t in existing}
-    out, seen, in_progress = [], set(), 0
+    out, seen = [], set()
     for index, item in enumerate(items, 1):
         where = f"Todo {index}"
         if not isinstance(item, dict) or set(item) - {"id", "text", "status", "request_ids", "note", "subagent"}:
@@ -105,11 +108,8 @@ def validate(raw, known_request_ids, existing: list[dict], next_id: int,
             todo_id = f"T{next_id}"
             next_id += 1
         seen.add(todo_id)
-        in_progress += status == "in_progress" and todo_id not in delegated
         out.append({"id": todo_id, "text": text.strip(), "status": status,
                     "request_ids": list(dict.fromkeys(links)), "note": note, "subagent": subagent})
-    if in_progress > 1:
-        raise ValueError("Only one todo may be in_progress at a time.")
     return out, next_id
 
 

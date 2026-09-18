@@ -390,7 +390,8 @@ were never delivered are not part of a fork.
 
 Model tool (build and plan mode, main agent only, when `todo_tool` is on):
 `update_todos {items: [{id?, text (≤500), status: pending|in_progress|completed|cancelled|deferred|blocked, request_ids?: ["R3"], note? (≤500), subagent? (read-only, ignored)}]}`
-Each call replaces the whole list (≤50 items). At most one `in_progress`; `cancelled`/`deferred`/`blocked` need a
+Each call replaces the whole list (≤50 items). Any number may be `in_progress` (owner, 2026-09-18, card #QHR1: the
+"only one task in progress" rule is gone); `cancelled`/`deferred`/`blocked` need a
 `note`; unknown request ids are refused. Ids are `T<n>`: a known id is kept, anything else gets a new id. A new todo
 without `request_ids` is linked to the request that opened the current turn; a resent todo without them keeps its
 links. Invalid calls return `{error}` to the model and change nothing. The tool result is
@@ -404,8 +405,7 @@ The update_todos tool result carries the same items.
 `todo_id`, section 8) or by the user (`todo_subagent`). `subagent` is then that subagent's id (`"a2"`, kept after it
 ends as a record of who did it) and `subagent_running` says whether it runs now. While it runs the todo is
 *delegated*: its status is `in_progress`; `update_todos` keeps a delegated todo's status and note whatever the model
-sends; it does not count towards the one-`in_progress` rule (so a main agent can work one todo while subagents work
-others); and the completion check and the stale reminder skip it, so the main turn may end while it runs. When the
+sends; and the completion check and the stale reminder skip it, so the main turn may end while it runs. When the
 run ends the todo takes the outcome: `done` → `completed`, `failed` → `blocked` with note "Subagent a2 failed: <error>",
 `stopped` → `pending` with note "Subagent a2 was stopped before it finished." Linked requests follow as usual
 (`apply_todos`). The background result handed to the main agent adds "It worked on todo T3; Relay has marked that
@@ -417,7 +417,8 @@ rewind keeps the links of subagents still running.
 
 The system prompt gains the todo rules (one todo per ask when a message has several asks or a message arrives
 mid-turn; a message that changes, narrows or corrects an ask already covered by a todo adds its request id to that
-todo instead of adding one; keep going until each is completed or cancelled/deferred/blocked with a reason; no list
+todo instead of adding one; mark the todos being worked on `in_progress`, several at once if need be, including
+several handed to subagents; keep going until each is completed or cancelled/deferred/blocked with a reason; no list
 for a single simple ask).
 
 **No-list nudge (card `D8VN`, 2026-09-17):** when a turn has made `NO_LIST_TOOL_CALLS` (4) tool calls and

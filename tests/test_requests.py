@@ -166,10 +166,19 @@ class LedgerUnitTests(unittest.TestCase):
 
 
 class TodoUnitTests(unittest.TestCase):
+    def test_several_todos_may_be_in_progress(self):
+        # Owner, 2026-09-18 (#QHR1): no "only one task in progress" rule.
+        items, _ = todo_mod.validate({'items': [{'text': 'a', 'status': 'in_progress'},
+                                                {'text': 'b', 'status': 'in_progress'},
+                                                {'text': 'c', 'status': 'in_progress'}]}, {'R1'}, [], 1)
+        self.assertEqual([t['status'] for t in items], ['in_progress'] * 3)
+        self.assertNotIn('Exactly one', todo_mod.SPEC['function']['description'])
+        self.assertNotIn('exactly one todo', todo_mod.RULES)
+        self.assertIn('several may be in progress at once', todo_mod.RULES)
+
     def test_validation(self):
         known = {'R1', 'R2'}
         cases = [
-            {'items': [{'text': 'a', 'status': 'in_progress'}, {'text': 'b', 'status': 'in_progress'}]},
             {'items': [{'text': 'a', 'status': 'cancelled'}]},
             {'items': [{'text': 'a', 'status': 'pending', 'request_ids': ['R9']}]},
             {'items': [{'text': '', 'status': 'pending'}]},

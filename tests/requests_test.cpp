@@ -441,6 +441,28 @@ private slots:
         QVERIFY(model.todos().at(2).delegable());
     }
 
+    // Several tasks in progress at once (owner, #QHR1): all active, all drawn in progress, the
+    // panel starts on the first.
+    void severalTasksInProgress() {
+        RequestLedgerModel model;
+        model.handle(json("{'event':'requests','total':1,'open':1,'items':[{'id':'R1','text_preview':'three things','status':'in_progress','delivered':true,'turn_id':'q1','requires_completion':true}]}"));
+        model.handle(json(R"({'event':'todos','turn_id':'q1','open':3,'items':[
+            {'id':'T1','text':'one','status':'in_progress','request_ids':['R1'],'note':null},
+            {'id':'T2','text':'two','status':'in_progress','request_ids':['R1'],'note':null,'subagent':'a1','subagent_running':true},
+            {'id':'T3','text':'three','status':'in_progress','request_ids':['R1'],'note':null}]})"));
+        const relay::TaskSummary sum = model.summary();
+        QCOMPARE(sum.total, 3);
+        QCOMPARE(sum.active, 3);
+        QCOMPARE(model.chipText(), QStringLiteral("Tasks 0/3"));
+        RequestsPanel panel(&model);
+        panel.resize(500, 400);
+        panel.show();
+        panel.enter();
+        auto *tree = panel.findChild<QTreeWidget *>(QStringLiteral("requestsList"));
+        for (int i = 0; i < 3; ++i) QVERIFY(tree->topLevelItem(i)->text(0).startsWith(QStringLiteral("◐")));
+        QCOMPARE(panel.selectedId(), QStringLiteral("T1"));
+    }
+
     // With no todos the panel says so instead of listing what the user typed.
     void panelWithoutATaskList() {
         RequestLedgerModel model;
