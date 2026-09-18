@@ -196,8 +196,9 @@ target_link_libraries(relay-outputlinks PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-outputlinks PRIVATE -Wall -Wextra -Wpedantic)
 
 # Agent replies in the terminal: streaming Markdown to ANSI (headings, emphasis, code, lists,
-# quotes, links, tables). Plain QtCore so chunk boundaries can be tested without a terminal.
-add_library(relay-markdown STATIC src/MarkdownAnsi.cpp src/MarkdownAnsi.h)
+# quotes, links, tables), word-wrapped to the pane's width. Plain QtCore so chunk boundaries can
+# be tested without a terminal.
+add_library(relay-markdown STATIC src/MarkdownAnsi.cpp src/MarkdownAnsi.h src/WordWrap.cpp src/WordWrap.h)
 target_include_directories(relay-markdown PUBLIC src)
 target_link_libraries(relay-markdown PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-markdown PRIVATE -Wall -Wextra -Wpedantic)
@@ -341,6 +342,9 @@ if(BUILD_TESTING)
     add_executable(relay-markdown-tests tests/markdownansi_test.cpp)
     target_link_libraries(relay-markdown-tests PRIVATE relay-markdown ${RELAY_QT}::Test)
     add_test(NAME markdown COMMAND relay-markdown-tests)
+    add_executable(relay-wordwrap-tests tests/wordwrap_test.cpp)
+    target_link_libraries(relay-wordwrap-tests PRIVATE relay-markdown ${RELAY_QT}::Test)
+    add_test(NAME wordwrap COMMAND relay-wordwrap-tests)
     add_executable(relay-backends-tests tests/backends_test.cpp)
     target_link_libraries(relay-backends-tests PRIVATE relay-backends ${RELAY_QT}::Test)
     add_test(NAME backends COMMAND relay-backends-tests)

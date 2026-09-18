@@ -33,6 +33,7 @@
 #include "Images.h"         // image context: paste, drop, `@path` and "Screenshot this pane"
 #include "Aliases.h"        // aliases: saved commands and prompts, their fields and invocations
 #include "MarkdownAnsi.h"   // agent replies in the terminal: Markdown rendered as it streams
+#include "WordWrap.h"       // ...and broken between words at the pane's width
 #include "OutputLinks.h"    // what a link in the output is; `relay://card/<id>` for a `#K7Q2`
 #include "SlashCommands.h"  // an unknown `/command` is Relay's to answer, not the shell's
 #include <iterator>
@@ -2874,7 +2875,7 @@ private:
         if (!shellIdleAtPrompt()) { printInline(label + QStringLiteral("  (Actions › Open last agent turn)\n"), Ink::Note); m_lastTurnId = turnId; return; }
         m_lastTurnId = turnId;
         const QByteArray url = QStringLiteral("relay://turn/%1/%2").arg(m_token, QString::fromUtf8(QUrl::toPercentEncoding(turnId))).toUtf8();
-        QByteArray out;
+        QByteArray out = takeWrapped();
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; }
         if (!m_atLineStart) out += "\r\n";
         out += "\x1b]8;;" + url + "\x1b\\" + inkCode(Ink::Note) + sanitize(label).toUtf8() + "\x1b[0m" + "\x1b]8;;\x1b\\";
@@ -4958,7 +4959,7 @@ private:
         const QString fast = keys.isEmpty() ? QStringLiteral("/continue") : keys + QStringLiteral(" or /continue");
         if (!shellIdleAtPrompt()) { printInline(QStringLiteral("▸ Continue: %1 (Actions › Continue agent turn)\n").arg(fast), Ink::Note); return; }
         const QByteArray url = QStringLiteral("relay://continue/%1").arg(m_token).toUtf8();
-        QByteArray out;
+        QByteArray out = takeWrapped();
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; }
         if (!m_atLineStart) out += "\r\n";
         out += "\x1b]8;;" + url + "\x1b\\" + inkCode(Ink::Agent) + QByteArray("▸ Continue") + "\x1b[0m" + "\x1b]8;;\x1b\\";
@@ -6475,22 +6476,39 @@ private:
             // Erase the idle prompt line; closeInline() asks Readline to redraw it afterwards.
             out += "\r\x1b[2K";
             m_inlineOpen = true; m_atLineStart = true;
+            m_wrap.reset();
         }
         // Agent prose is Markdown, rendered as it streams (MarkdownAnsi holds back only what it
         // cannot decide yet). Any other ink ends the Markdown run first, so held text lands before it.
+        // Everything then goes through the word wrapper, so a line breaks between words at the
+        // pane's width rather than wherever the terminal runs out of columns (src/WordWrap.h).
         if (ink == Ink::Agent) {
-            out += terminalLines(m_markdown.feed(clean));
+            out += wrapped(m_markdown.feed(clean));
             m_atLineStart = clean.endsWith('\n');
             writeTerminal(out);
             return;
         }
-        out += terminalLines(m_markdown.finish());
-        const QByteArray body = clean.toUtf8();
-        out += inkCode(ink);
-        for (const char ch : body) { if (ch == '\n') out += "\x1b[0m\r\n" + inkCode(ink); else out += ch; }
-        out += "\x1b[0m";
+        out += wrapped(m_markdown.finish());
+        const QString code = QString::fromUtf8(inkCode(ink));
+        QString body = code;
+        for (const QChar ch : clean) { if (ch == '\n') body += QStringLiteral("\x1b[0m\n") + code; else body += ch; }
+        body += QStringLiteral("\x1b[0m");
+        out += wrapped(body) + terminalLines(m_wrap.flush());
         m_atLineStart = clean.endsWith('\n');
         writeTerminal(out);
+    }
+
+    QByteArray wrapped(const QString &rendered) {
+        m_wrap.setColumns(m_backend ? m_backend->columns() : 0);
+        return terminalLines(m_wrap.feed(rendered));
+    }
+
+    // Something written around the wrapper (a hyperlink line): the held word goes first, and the
+    // write ends in "\r\n", so the wrapper starts over at column 0 after it.
+    QByteArray takeWrapped() {
+        QByteArray out = terminalLines(m_wrap.flush());
+        m_wrap.reset();
+        return out;
     }
 
     static QByteArray terminalLines(const QString &rendered) {
@@ -6503,7 +6521,8 @@ private:
 
     void closeInline() {
         if (!m_inlineOpen) return;
-        if (m_markdown.holding()) writeTerminal(terminalLines(m_markdown.finish()));
+        if (m_markdown.holding()) writeTerminal(wrapped(m_markdown.finish()));
+        writeTerminal(takeWrapped());
         if (!m_atLineStart) writeTerminal("\r\n");
         m_inlineOpen = false; m_atLineStart = true;
         // Ctrl+X Ctrl+P is bound to a no-op shell function; Readline redraws the prompt after it.
@@ -8468,6 +8487,7 @@ private:
     // transcript including the scrollback (src/MarkdownAnsi.h). Filling it with absolute RGB from
     // the live tokens, as this did until 2026-09-18, burnt one theme's colours into the history.
     relay::MarkdownAnsi m_markdown;
+    relay::WordWrap m_wrap;   // between m_markdown (and the other inks) and the terminal
     QList<QPair<QString, QString>> m_stored;
     QComboBox *m_modelBox = nullptr;
     QToolButton *m_cwdChip = nullptr, *m_modeChip = nullptr;
