@@ -516,10 +516,10 @@ A subscription is made on the phone and travels to the **desktop**, never to the
 Any paired device may subscribe: the capability floor is `view`.
 
 ```
-→ push_subscribe {endpoint, p256dh, auth, key}      client → desktop
-← push_state {subscribed: true}                     desktop → client (carries the request's id)
+→ push_subscribe {endpoint, p256dh, auth, key, kinds}   client → desktop
+← push_state {subscribed: true, kinds: [...]}           desktop → client (with the request's id)
 → push_unsubscribe {}
-← push_state {subscribed: false}
+← push_state {subscribed: false, kinds: []}
 ```
 
 | Field | What | Checked |
@@ -528,9 +528,19 @@ Any paired device may subscribe: the capability floor is `view`.
 | `p256dh` | The subscription's public key, base64url | 65 bytes, uncompressed P-256 (`0x04` first) |
 | `auth` | The subscription's auth secret, base64url | 16 bytes |
 | `key` | The per-device **seal key**, base64url | 32 bytes, AES-256 |
+| `kinds` | Which notifications this device wants | a list of the kinds in §9.2; an unknown one is refused with `unknown_type` and the stored list stands |
 
-The desktop keeps all four on the device record (`remote/identity.py`) and nowhere else. A `410`
+The desktop keeps all five on the device record (`remote/identity.py`) and nowhere else. A `410`
 or `404` from the push service drops the subscription; so does revoking the device.
+
+**The choice of kinds is per device and is made on the device.** Which of these is worth
+interrupting you is not something a desktop can decide for a phone — it depends on whose phone it
+is and what the day looks like — so the desktop stores the list and does not own it. Sending
+`push_subscribe` again **replaces** the list, which is how a phone changes its mind without the
+browser asking for permission a second time; absent or empty `kinds` means all of them, so an
+older client is notified rather than silenced, and a device that wants none unsubscribes. The
+reply carries what is now stored, so a client that reloads reads its own settings back rather than
+guessing them.
 
 ### 9.2 What a push is made of
 
@@ -550,8 +560,9 @@ The body:
  "body": "Pane 2 · 1m 31s"}
 ```
 
-`kind` is one of `agent_finished`, `waiting_input`, `password`, `failed`, `plan`; the service
-worker uses it as the notification `tag`, so a second one of a kind replaces the first.
+`kind` is one of `agent_finished`, `waiting_input`, `password`, `failed`, `plan` — the same five a
+device may ask for in §9.1. The service worker uses it as the notification `tag`, so a second one
+of a kind replaces the first.
 
 **(security)** A service worker **must** discard any push it cannot open with the seal key
 (`app/sw.js` does). That is what makes a forged "password prompt" from a compromised rendezvous
@@ -560,8 +571,9 @@ sender to the push service and opens nothing.
 
 ### 9.3 The rules the hub applies
 
-`remote/notify.py`, in this order: the presence rule, then a **per-pane cooldown of 60 s**, then
-the body. A pane is named by an ordinal this desktop assigned ("Pane 2") and never by its title.
+`remote/notify.py`, in this order: the presence rule, then whether any subscribed device asked for
+this kind (a kind nobody wants does not spend the cooldown), then a **per-pane cooldown of 60 s**,
+then the body, which is sent only to the devices that asked for that kind. A pane is named by an ordinal this desktop assigned ("Pane 2") and never by its title.
 
 **(security)** The hub **constructs** push bodies; it never forwards a `NotificationCenter` body,
 which already interpolates the pane's `cwd`. Bodies carry no command text, no output, no prompt
@@ -588,9 +600,10 @@ no event and the second would need a second cooldown of its own. The presence si
 tests — has no window to be looking at and pushes. The password trigger is suppressed when the pane
 reports that the agent, not the person, has the keyboard.
 
-What is **not** built is the "off-by-default-configurable" part of the first paragraph: there is no
-per-trigger switch anywhere, so a device that has subscribed gets all five. That wants a row in the
-sharing dialog beside the password-entry switch, which is a surface decision.
+The "configurable" part of the first paragraph is §9.1's `kinds`: a checkbox per kind under the
+"Notify me on this phone" row in the app, remembered across reloads. They start on rather than off,
+because a notification you have never seen is not one you can decide about, and turning one off is
+a tap.
 
 ## 10. Multiplayer additions (P4)
 
@@ -757,7 +770,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | Screen stream (P2) | `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `app/screen.js` | A real PTY parsed by Relay's own emulator, streamed as styled rows, painted as a cell grid on the phone |
 | Take-over (P3) | `remote/host.py`, `app/app.js` | `keys`, `paste`, `line`, `control_request`/`control_release`, an extra-keys row and a line box, refused at a password prompt |
 | Password entry (§6.7) | `remote/host.py`, `src/Pane.h` (`submitRemoteSecret`), `app/app.js` | A desktop-minted single-use nonce bound to the prompt, a per-device switch that is off by default, a fresh termios check in the hub and again at the write, a password field in the client. Tested; not yet tried on a real phone |
-| Notifications (§9) | `remote/push.py`, `remote/notify.py`, `remote/host.py`, `app/app.js`, `app/sw.js`, `src/RemoteShare.cpp` | Connected end to end. `push_subscribe`/`push_unsubscribe` inside the Noise session, five triggers, the presence rule over `window_active`, a per-pane cooldown, constructed bodies, a 410 or a revoke dropping the subscription, and a "Notify me" row that asks permission from a tap. RFC 8291 is checked against the RFC's own Appendix A vector, `app/sw.js` opens a Python seal under Node, and a local push service takes a real delivery (`tests/test_remote_push.py`). **Not yet tried on a real phone**: that needs the hosted rendezvous reachable from the push service |
+| Notifications (§9) | `remote/push.py`, `remote/notify.py`, `remote/host.py`, `app/app.js`, `app/sw.js`, `src/RemoteShare.cpp` | Connected end to end. `push_subscribe`/`push_unsubscribe` inside the Noise session, five triggers with a checkbox each on the phone, the presence rule over `window_active`, a per-pane cooldown, constructed bodies, a 410 or a revoke dropping the subscription, and a "Notify me" row that asks permission from a tap. RFC 8291 is checked against the RFC's own Appendix A vector, `app/sw.js` opens a Python seal under Node, and a local push service takes a real delivery (`tests/test_remote_push.py`). **Not yet tried on a real phone**: that needs the hosted rendezvous reachable from the push service |
 | Audit log | `remote/audit.py` | Local, 0600, split by month and size. Records pairing, revoke, prompt detection and password use so far |
 | `transport_switch` (§2) | `remote/host.py`, `remote/client.py` | The handshake, tested. There is no second transport yet |
 | Local attach | `remote/attach.py` | The desktop's own terminal joins the same shell, so both ends drive it |

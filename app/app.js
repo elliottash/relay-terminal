@@ -5,8 +5,8 @@
 // terminal title comes from OSC sequences — so every string from the wire goes in through
 // textContent. There is no innerHTML in this file, and the CSP forbids inline script anyway.
 
-import { Rrp, loadDevice, forgetDevice, fingerprint, b64, un64, storeValue, dropValue }
-  from './rrp.js';
+import { Rrp, loadDevice, forgetDevice, fingerprint, b64, un64, storedValue, storeValue,
+  dropValue } from './rrp.js';
 import { ScreenView, KEYS, controlByte, keyEventBytes } from './screen.js';
 
 const rrp = new Rrp();
@@ -187,6 +187,73 @@ async function currentSubscription() {
   return registration ? registration.pushManager.getSubscription() : null;
 }
 
+// Which notifications this phone wants. The desktop cannot know — it depends on whose phone this
+// is and what today looks like — so the choice is made here, kept on this device's record on the
+// desktop, and changed by sending `push_subscribe` again, which never re-prompts for permission.
+const NOTIFY_KINDS = [
+  ['waiting_input', 'Waiting for input'],
+  ['password', 'Password prompt'],
+  ['failed', 'A turn failed'],
+  ['plan', 'A plan is ready'],
+  ['agent_finished', 'The agent finished (after 30 seconds)'],
+];
+let notifyKinds = null;                    // what the desktop last told us it has stored
+
+function renderNotifyKinds(on) {
+  const list = $('notify-kinds');
+  list.replaceChildren();
+  list.hidden = !on;
+  if (!on) return;
+  const wanted = notifyKinds || NOTIFY_KINDS.map(([kind]) => kind);
+  for (const [kind, label] of NOTIFY_KINDS) {
+    const row = el('div', 'notify-kind');       // a div, so each sits on its own line
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.id = `notify-kind-${kind}`;
+    box.checked = wanted.includes(kind);
+    box.addEventListener('change', chooseNotifyKinds);
+    const text = el('label', 'muted small', ` ${label}`);
+    text.htmlFor = box.id;
+    row.append(box, text);
+    list.append(row);
+  }
+}
+
+async function chooseNotifyKinds() {
+  const chosen = NOTIFY_KINDS.map(([kind]) => kind)
+    .filter((kind) => $(`notify-kind-${kind}`)?.checked);
+  if (!chosen.length) {
+    // Wanting none of them is unsubscribing, and says so rather than silently keeping the last set.
+    await toggleNotifications();
+    return;
+  }
+  try {
+    await sendSubscription(await currentSubscription(), chosen);
+  } catch (error) {
+    $('notify-note').textContent = error.message || 'That did not work.';
+  }
+  renderNotifyKinds(true);
+}
+
+// One `push_subscribe`, from whatever this device currently holds. Used both to subscribe and to
+// change the list afterwards, so there is one place that decides what the desktop is told.
+async function sendSubscription(subscription, kinds) {
+  const key = await storedValue('push-key');
+  if (!subscription || !key) throw new Error('this phone is not subscribed.');
+  await rrp.send({
+    t: 'push_subscribe',
+    endpoint: subscription.endpoint,
+    p256dh: b64(new Uint8Array(subscription.getKey('p256dh'))),
+    auth: b64(new Uint8Array(subscription.getKey('auth'))),
+    key: b64(new Uint8Array(await crypto.subtle.exportKey('raw', key))),
+    kinds,
+  });
+  const state = await rrp.once('push_state', 15000);
+  notifyKinds = state.kinds || kinds;
+  await storeValue('push-kinds', notifyKinds);     // so a reload draws the boxes before it asks
+  return state;
+}
+
 async function updateNotifyRow() {
   const button = $('notify');
   const note = $('notify-note');
@@ -204,6 +271,8 @@ async function updateNotifyRow() {
   button.hidden = false;
   const on = Boolean(await currentSubscription());
   button.textContent = on ? 'Stop notifying this phone' : 'Notify me on this phone';
+  if (on && !notifyKinds) notifyKinds = await storedValue('push-kinds');
+  renderNotifyKinds(on);
   if (on) {
     note.textContent = 'Your desktop decides what is worth telling you, and a notification never '
       + 'carries what is on the screen.';
@@ -234,20 +303,18 @@ async function enableNotifications() {
   const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true,
     ['encrypt', 'decrypt']);
   await storeValue('push-key', key);
-  await rrp.send({
-    t: 'push_subscribe',
-    endpoint: subscription.endpoint,
-    p256dh: b64(new Uint8Array(subscription.getKey('p256dh'))),
-    auth: b64(new Uint8Array(subscription.getKey('auth'))),
-    key: b64(new Uint8Array(await crypto.subtle.exportKey('raw', key))),
-  });
-  await rrp.once('push_state', 15000);
+  // Everything on to begin with: one tap turns off what you did not want, and a notification you
+  // never saw is not something you can decide about.
+  await sendSubscription(subscription, (await storedValue('push-kinds'))
+    || NOTIFY_KINDS.map(([kind]) => kind));
 }
 
 async function disableNotifications() {
   const subscription = await currentSubscription();
   if (subscription) await subscription.unsubscribe();
   await dropValue('push-key');
+  await dropValue('push-kinds');
+  notifyKinds = null;
   await rrp.send({ t: 'push_unsubscribe' });
   await rrp.once('push_state', 15000);
 }

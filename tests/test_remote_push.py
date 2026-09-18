@@ -255,10 +255,14 @@ class Devices:
         self.device = self.store.pair(public, "Pixel 9", "Chrome", wire.AGENT)
         self.ua_private, self.p256dh, self.auth = subscription_keypair()
         self.seal_key = bytes(range(32, 64))
+        self.wants(*notify.KINDS)
+
+    def wants(self, *kinds: str) -> None:
+        """What this phone asked to be told about (`push_subscribe`'s `kinds`)."""
         self.store.set_push(self.device.device_id, {
             "endpoint": "https://push.example.com/v1/subscription/abc",
             "p256dh": push.b64url(self.p256dh), "auth": push.b64url(self.auth),
-            "key": push.b64url(self.seal_key)})
+            "key": push.b64url(self.seal_key), "kinds": list(kinds)})
 
     def opened(self, payload: bytes) -> dict:
         """What the phone would show: through RFC 8291, then through the seal."""
@@ -447,6 +451,54 @@ class PresenceAndCooldownTests(unittest.TestCase):
         run(main())
 
 
+class ChosenKindsTests(unittest.TestCase):
+    """Which notifications a phone gets is the phone's choice, kept on its device record."""
+
+    def test_a_kind_this_device_switched_off_is_never_pushed(self):
+        async def main():
+            harness = NotifierHarness()
+            try:
+                harness.devices.wants("password")          # only the prompt is wanted
+                harness.notifier.on_panes([pane("running")])
+                harness.notifier.on_panes([pane("waiting_input")])
+                harness.notifier.on_agent("p1", {"event": "plan_written"})
+                await harness.settle()
+                self.assertEqual(harness.sent, [], "this phone asked for prompts only")
+
+                harness.notifier.on_panes([pane("running", program="sudo")])
+                harness.notifier.on_panes([pane("password", program="sudo")])
+                await harness.settle()
+                self.assertEqual([body["kind"] for body in harness.bodies()], ["password"])
+            finally:
+                harness.devices.close()
+        run(main())
+
+    def test_a_kind_nobody_wants_does_not_spend_the_cooldown(self):
+        """Otherwise one device's switched-off kind would silence the next real one for a minute."""
+        async def main():
+            harness = NotifierHarness()
+            try:
+                harness.devices.wants("failed")
+                harness.notifier.on_panes([pane("running")])
+                harness.notifier.on_panes([pane("waiting_input")])   # wanted by nobody
+                harness.notifier.on_panes([pane("failed")])          # must still arrive
+                await harness.settle()
+                self.assertEqual([body["kind"] for body in harness.bodies()], ["failed"])
+            finally:
+                harness.devices.close()
+        run(main())
+
+    def test_a_record_written_before_kinds_existed_gets_all_of_them(self):
+        devices = Devices()
+        try:
+            stored = dict(devices.store.devices[devices.device.device_id].push)
+            stored.pop("kinds")
+            devices.store.set_push(devices.device.device_id, stored)
+            self.assertEqual(notify.kinds_of(stored), list(notify.KINDS))
+        finally:
+            devices.close()
+
+
 class BodyTests(unittest.TestCase):
     """What a notification may say. The pane is called `ssh prod-db` and sits in a private path."""
 
@@ -559,7 +611,7 @@ class SubscriptionValidationTests(unittest.TestCase):
 
     def test_a_good_subscription_is_stored_as_base64url(self):
         stored = notify.clean_subscription(self.good())
-        self.assertEqual(set(stored), {"endpoint", "p256dh", "auth", "key"})
+        self.assertEqual(set(stored), {"endpoint", "p256dh", "auth", "key", "kinds"})
         self.assertEqual(len(un64(stored["p256dh"])), 65)
         self.assertEqual(len(un64(stored["auth"])), 16)
         self.assertEqual(len(un64(stored["key"])), 32)
@@ -579,6 +631,25 @@ class SubscriptionValidationTests(unittest.TestCase):
                              ("key", push.b64url(bytes(33)))):
             with self.assertRaises(wire.WireError, msg=f"{field}={value}"):
                 notify.clean_subscription(self.good(**{field: value}))
+
+    def test_the_kinds_default_to_all_five(self):
+        for value in (None, []):
+            stored = notify.clean_subscription(self.good(kinds=value))
+            self.assertEqual(stored["kinds"], list(notify.KINDS), value)
+        # A client that predates `kinds` sends none at all, and must still be notified.
+        message = self.good()
+        message.pop("kinds", None)
+        self.assertEqual(notify.clean_subscription(message)["kinds"], list(notify.KINDS))
+
+    def test_the_kinds_are_stored_in_one_order_and_without_repeats(self):
+        stored = notify.clean_subscription(self.good(kinds=["plan", "password", "plan"]))
+        self.assertEqual(stored["kinds"], ["password", "plan"])
+
+    def test_a_kind_nobody_implemented_is_refused(self):
+        for kinds in (["agent_finished", "command_finished"], ["subagent_finished"], ["PASSWORD"],
+                      [""], [7], "password", {"password": True}, list(notify.KINDS) + ["plan2"]):
+            with self.assertRaises(wire.WireError, msg=kinds):
+                notify.clean_subscription(self.good(kinds=kinds))
 
     def test_rubbish_is_refused(self):
         for field in ("p256dh", "auth", "key"):
@@ -657,6 +728,43 @@ class SubscribeOverTheWireTests(unittest.TestCase):
                 state = await client.expect("push_state")
                 self.assertFalse(state["subscribed"])
                 self.assertIsNone(harness.devices.get(paired.device_id).push)
+                await client.close()
+        run(main())
+
+    def test_push_state_says_which_kinds_are_stored(self):
+        async def main():
+            async with Harness() as harness:
+                client, paired = await harness.pair()
+                await client.send({**self.subscription(), "kinds": ["password", "failed"]})
+                state = await client.expect("push_state")
+                self.assertEqual(state["kinds"], ["password", "failed"])
+                self.assertEqual(harness.devices.get(paired.device_id).push["kinds"],
+                                 ["password", "failed"])
+
+                # Sending it again replaces the list; the browser is never re-prompted.
+                await client.send({**self.subscription(), "kinds": ["plan"]})
+                state = await client.expect("push_state")
+                self.assertEqual(state["kinds"], ["plan"])
+                self.assertEqual(harness.devices.get(paired.device_id).push["kinds"], ["plan"])
+
+                # And with no kinds at all it is all five again.
+                await client.send(self.subscription())
+                state = await client.expect("push_state")
+                self.assertEqual(state["kinds"], list(notify.KINDS))
+                await client.close()
+        run(main())
+
+    def test_a_kind_nobody_implemented_is_refused_and_the_old_list_stands(self):
+        async def main():
+            async with Harness() as harness:
+                client, paired = await harness.pair()
+                await client.send({**self.subscription(), "kinds": ["plan"]})
+                await client.expect("push_state")
+                await client.send({**self.subscription(), "kinds": ["plan", "command_finished"]})
+                error = await client.expect("error")
+                self.assertEqual(error["code"], "unknown_type")
+                self.assertIn("command_finished", error["message"])
+                self.assertEqual(harness.devices.get(paired.device_id).push["kinds"], ["plan"])
                 await client.close()
         run(main())
 
@@ -859,12 +967,84 @@ class NotifyRowTests(unittest.TestCase):
                         self.assertEqual(state["permission"], "default")
                         self.assertFalse(state["hidden"])
                         self.assertEqual(state["text"], "Notify me on this phone")
+                        # Nothing to choose between until there is something to be notified about.
+                        self.assertTrue(await browser.evaluate(
+                            "document.getElementById('notify-kinds').hidden"))
                     else:
                         self.assertTrue(state["hidden"])
                         self.assertIn("notification", state["note"].lower())
                 finally:
                     await browser.stop()
         run(main(), timeout=120)
+
+    def test_the_checkboxes_are_this_phones_choice_and_survive_a_reload(self):
+        """The whole loop in a browser: subscribe, uncheck one, reload, and it is still unchecked.
+
+        Skipped where the machine cannot reach a push service, because `pushManager.subscribe`
+        really does talk to one — and takes its time about it, which is why the waits here are
+        measured in tens of seconds rather than the usual two.
+        """
+        async def main():
+            async with Harness() as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                try:
+                    # Permission is a browser gesture we cannot make; granting it up front is the
+                    # only part of this the test fakes.
+                    await browser.call("Browser.grantPermissions",
+                                       {"origin": harness.base, "permissions": ["notifications"]})
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    device = harness.devices.live()[0]
+
+                    await browser.evaluate("document.getElementById('notify').click()")
+                    for _ in range(400):                 # FCM registration takes ~35 s here
+                        await asyncio.sleep(0.2)
+                        if device.push:
+                            break
+                    if not device.push:
+                        note = await browser.evaluate(
+                            "document.getElementById('notify-note').textContent")
+                        raise unittest.SkipTest(f"no push service reachable here ({note!r})")
+
+                    # Everything on to begin with, and the boxes say so.
+                    self.assertEqual(device.push["kinds"], list(notify.KINDS))
+                    checked = await browser.wait_for("""
+                        (() => {
+                          const boxes = [...document.querySelectorAll('#notify-kinds input')];
+                          return boxes.length ? boxes.map(b => [b.id, b.checked]) : null;
+                        })()
+                    """, timeout=20)
+                    self.assertEqual(len(checked), len(notify.KINDS))
+                    self.assertTrue(all(state for _, state in checked))
+
+                    # Uncheck one: the desktop's record loses exactly that kind.
+                    await browser.evaluate(
+                        "document.getElementById('notify-kind-agent_finished').click()")
+                    for _ in range(150):
+                        await asyncio.sleep(0.2)
+                        if "agent_finished" not in device.push["kinds"]:
+                            break
+                    self.assertEqual(device.push["kinds"],
+                                     [kind for kind in notify.KINDS if kind != "agent_finished"])
+
+                    # Reload: the boxes are drawn from what was stored, not from the defaults.
+                    await browser.navigate(harness.base)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    again = await browser.wait_for("""
+                        (() => {
+                          const box = document.getElementById('notify-kind-agent_finished');
+                          return box ? { off: !box.checked,
+                                         on: document.getElementById('notify-kind-password').checked }
+                                     : null;
+                        })()
+                    """, timeout=20)
+                    self.assertTrue(again["off"], "the unchecked box came back checked")
+                    self.assertTrue(again["on"])
+                finally:
+                    await browser.stop()
+        run(main(), timeout=240)
 
 
 class VapidKeyRouteTests(unittest.TestCase):

@@ -907,20 +907,27 @@ class Host:
         is the per-device seal key the service worker keeps in IndexedDB. Together they are enough
         to construct a notification this phone will show, which is exactly why the rendezvous is
         told none of it (docs/REMOTE-PROTOCOL.md section 8).
+
+        ``kinds`` is which notifications this device wants. Sending this message again replaces
+        the whole list, which is how the checkboxes on the phone change their minds without the
+        browser asking for permission a second time. The reply carries what is now stored, so a
+        client that reloads learns its own settings from the desktop rather than guessing.
         """
         if channel.device_id is None:
             raise wire.WireError("not_permitted", "pair first.")
         subscription = notify_mod.clean_subscription(message)
         self.devices.set_push(channel.device_id, subscription)
         self.audit.record("push_subscribe", device=channel.device_id)
-        await channel.send({"t": "push_state", "subscribed": True, "id": message.get("id")})
+        await channel.send({"t": "push_state", "subscribed": True,
+                            "kinds": subscription["kinds"], "id": message.get("id")})
 
     async def _on_push_unsubscribe(self, channel: Channel, message: dict) -> None:
         if channel.device_id is None:
             raise wire.WireError("not_permitted", "pair first.")
         self.devices.set_push(channel.device_id, None)
         self.audit.record("push_unsubscribe", device=channel.device_id)
-        await channel.send({"t": "push_state", "subscribed": False, "id": message.get("id")})
+        await channel.send({"t": "push_state", "subscribed": False, "kinds": [],
+                            "id": message.get("id")})
 
     async def push_send(self, endpoint: str, payload: bytes) -> dict:
         """Post one encrypted payload through the rendezvous, which cannot read it."""

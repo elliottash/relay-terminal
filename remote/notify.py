@@ -19,6 +19,9 @@ Three rules, each of which exists because the obvious implementation gets it wro
 * **A per-pane cooldown.** A loop that re-prints a password prompt would otherwise ring the phone
   as fast as the loop runs.
 
+Which kinds are worth a buzz is the fourth rule and the only one the desktop does not decide: the
+device says so in ``push_subscribe`` and may say so again at any time.
+
 The subscription — the endpoint, the RFC 8291 content keys and the per-device seal key — arrives
 inside the Noise session and is kept on the device record. The rendezvous is never told it; it is
 handed an opaque endpoint and ciphertext, and a 404 or 410 from the push service comes back as
@@ -40,6 +43,14 @@ MAX_ENDPOINT = 2048
 P256DH_BYTES = 65
 AUTH_BYTES = 16
 SEAL_KEY_BYTES = 32
+
+# What a device may ask to be told about, and what it gets if it does not say. Which of these is
+# worth a buzz is not a product decision the desktop can make for you — it depends on the phone in
+# your pocket and what you are doing today — so the choice is per device and is made **on** the
+# device: `push_subscribe` carries `kinds`, and sending it again changes them without the browser
+# asking for permission a second time.
+KINDS = ("agent_finished", "waiting_input", "password", "failed", "plan")
+DEFAULT_KINDS = KINDS            # all five on: a notification you did not want is one tap to turn off
 
 
 def clean_subscription(message: dict) -> dict:
@@ -63,7 +74,34 @@ def clean_subscription(message: dict) -> dict:
     if len(key) != SEAL_KEY_BYTES:
         raise wire.WireError("unknown_type", "the seal key must be 32 bytes.")
     return {"endpoint": endpoint, "p256dh": push.b64url(p256dh), "auth": push.b64url(auth),
-            "key": push.b64url(key)}
+            "key": push.b64url(key), "kinds": clean_kinds(message.get("kinds"))}
+
+
+def clean_kinds(value) -> list[str]:
+    """The kinds a device asked for, in this module's order; an unknown one is refused.
+
+    Absent or empty means the default rather than "nothing": a phone that sends an old client's
+    ``push_subscribe`` gets notifications, and a phone that wants none unsubscribes.
+    """
+    if value is None:
+        return list(DEFAULT_KINDS)
+    if not isinstance(value, list) or len(value) > len(KINDS):
+        raise wire.WireError("unknown_type", "kinds must be a list of notification kinds.")
+    wanted = set()
+    for kind in value:
+        if not isinstance(kind, str) or kind not in KINDS:
+            raise wire.WireError("unknown_type",
+                                 f"{kind!r} is not a notification kind; "
+                                 f"they are {', '.join(KINDS)}.")
+        wanted.add(kind)
+    return [kind for kind in KINDS if kind in wanted] or list(DEFAULT_KINDS)
+
+
+def kinds_of(subscription: dict) -> list[str]:
+    """What a stored subscription asked for. A record written before `kinds` existed gets all."""
+    kinds = subscription.get("kinds")
+    return [kind for kind in KINDS if kind in kinds] if isinstance(kinds, list) \
+        else list(DEFAULT_KINDS)
 
 
 def elapsed_text(seconds: float) -> str:
@@ -165,8 +203,10 @@ class Notifier:
         now = time.monotonic()
         if now - self._last_push.get(pane, -PANE_COOLDOWN) < PANE_COOLDOWN:
             return
-        subscribed = [device for device in self.devices.live() if device.push]
-        if not subscribed:
+        # The cooldown is only spent if somebody is actually going to hear this one: a device that
+        # switched this kind off must not stop another device hearing the next thing.
+        if not any(isinstance(device.push, dict) and kind in kinds_of(device.push)
+                   for device in self.devices.live()):
             return
         self._last_push[pane] = now
         self.spawn(self.deliver(self.body(kind, pane, **detail)))
@@ -196,6 +236,8 @@ class Notifier:
             subscription = device.push
             if not isinstance(subscription, dict):
                 continue
+            if body.get("kind") not in kinds_of(subscription):
+                continue                             # this device switched this one off
             try:
                 blob = push.seal(push.unb64url(subscription["key"]), body)
                 payload = push.rfc8291_encrypt(push.unb64url(subscription["p256dh"]),

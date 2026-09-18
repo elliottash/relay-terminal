@@ -52,6 +52,9 @@
          from a gesture, so it is asked for here and never on load. -->
     <div class="pad" id="notify-row">
       <button type="button" id="notify" class="quiet-button">Notify me on this phone</button>
+      <!-- Which notifications this phone wants. The choice belongs to whoever is holding it, so
+           it is made here and stored on this device's record on the desktop. -->
+      <div id="notify-kinds" hidden></div>
       <p id="notify-note" class="muted small"></p>
     </div>
     <div class="pad"><button type="button" id="forget" class="quiet-button">Unpair this device</button></div>
