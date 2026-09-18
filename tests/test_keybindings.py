@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from relay_core.agent import Agent
-from relay_core.keybindings import MAX_KEYS, KeybindingCatalog, KeybindingError, normalize_key
+from relay_core.keybindings import ACTION_ID, MAX_ACTIONS, MAX_KEYS, KeybindingCatalog, KeybindingError, normalize_key
 from relay_core.provider import ProviderConfig
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -287,6 +287,17 @@ class GuiDefaultsTests(unittest.TestCase):
                 continue
             for key in re.findall(r'QStringLiteral\("([^"]+)"\)', block):
                 self.assertNotIn(key, claimed, f'{action} collides with help.shortcuts on {key}')
+
+    def test_every_registered_action_id_is_one_the_worker_accepts(self):
+        # The GUI sends the whole registry with `configure`; one id the worker refuses fails the
+        # configure, and then no agent runs in any pane (2026-09-18: `ssh.split_same_host`, #S5SH).
+        source = (ROOT / 'src/Keymap.h').read_text(encoding='utf-8')
+        ids = re.findall(r'^\s*add\("([^"]+)"', source, re.M)
+        self.assertGreater(len(ids), 50)
+        self.assertLessEqual(len(ids), MAX_ACTIONS, 'the worker refuses a registry longer than MAX_ACTIONS')
+        for action in ids:
+            self.assertRegex(action, ACTION_ID, f'{action} is not an id the worker accepts; use camelCase after the dot')
+        self.assertEqual(len(ids), len(set(ids)), 'duplicate action ids')
 
 
 if __name__ == '__main__':
