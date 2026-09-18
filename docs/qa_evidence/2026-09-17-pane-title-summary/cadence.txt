@@ -1,0 +1,8 @@
+title calls after the first turn: 1
+title calls after five turns (must still be 1): 1
+title calls with two panes: 2
+title calls at the end: 2
+--- every side call ---
+      3 tab_label
+      2 title
+      7 turn

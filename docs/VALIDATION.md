@@ -79,13 +79,17 @@ Claude session. They show the feature worked once; they are not independent QA.
 | Agent queue strip, remove, interrupt, pause/resume | [`qa_evidence/2026-09-17-queue-interrupt-gui/`](qa_evidence/2026-09-17-queue-interrupt-gui/) |
 | libvterm engine spike (vim, less, htop, tmux, throughput) | [`qa_evidence/2026-09-17-engine-spike/`](qa_evidence/2026-09-17-engine-spike/), report in [ENGINE-SPIKE.md](ENGINE-SPIKE.md) |
 | Terminal-first fallback (superseded behavior) | [`qa_evidence/2026-09-17-terminal-first-fallback/`](qa_evidence/2026-09-17-terminal-first-fallback/) |
+| Model-written pane titles, tab labels, `/rename`, `/rename-tab` (loopback stub and, separately, a real model) | [`qa_evidence/2026-09-17-pane-title-summary/`](qa_evidence/2026-09-17-pane-title-summary/) |
 
 Live provider smoke test, 2026-09-16, through the real `Agent` loop with keys imported from
 Warp: Kimi K3 (`kimi`), GLM-5.3 Coding Plan (`glm-coding`) and DeepSeek V4.1 Flash via
 OpenRouter (`openrouter`) each returned a plain reply and completed one `list_directory` tool
 round trip, with the reasoning field retained. Per-action approval still existed at the time;
 the tool was auto-approved for the test. The `glm` standard endpoint was not tested.
-Several GUI checks above also used Kimi K3 as the live provider.
+Several GUI checks above also used Kimi K3 as the live provider. The pane-title run
+(2026-09-17) added GLM-5.3 Coding Plan as the pane's model with the chores role falling through
+to the Lite tier on OpenRouter, and confirmed that the header and the tab label fill with text a
+real model wrote.
 
 Bugs found only by running the real app:
 
@@ -142,6 +146,7 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-model-roles-and-fast-agent.md`
 - `2026-09-17-model-roles.md`
 - `2026-09-17-pane-process-isolation.md`
+- `2026-09-17-pane-title-summary.md`
 - `2026-09-17-program-control-policy.md`
 - `2026-09-17-queue-or-interrupt-agent-prompts.md`
 - `2026-09-17-request-ledger-todos-completion.md`
