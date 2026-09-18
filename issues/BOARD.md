@@ -2,9 +2,9 @@
      edit the card files and regenerate. -->
 # Board
 
-86 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+87 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (72)
+## Features (73)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -78,6 +78,7 @@
 | `#QVVA` | [Thinking stream, "✦ thought for N s", "✦ N tool calls" links and the relay:// handler](features/needs_qa_llm/2026-09-17-thinking-and-tool-call-summaries.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17 |  |  |
 | `#80FZ` | [Windows, tabs and panes with Chrome-style shortcuts](features/needs_qa_llm/2026-09-17-windows-tabs-panes.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
 | `#5FY5` | [Ctrl+Shift alternates for the core shortcuts](features/needs_qa_llm/2026-09-17-in-app-shortcut-alternates.md) | needs-qa-llm |  |  |  |
+| `#1AXN` | [Switchboard phase 1: agent tools and policy, the protocol, the pane, `#` references](features/needs_qa_llm/2026-09-17-switchboard-phase1.md) | needs-qa-llm | Claude Opus 5 (1M context), 2026-09-17 |  |  |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | Claude Opus 5 research subagent, 2026-09-16 |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | implemented by Claude Opus 5 (Claude Code session), 2026-09-16 |  |  |
 

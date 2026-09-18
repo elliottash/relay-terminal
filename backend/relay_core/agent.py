@@ -15,6 +15,7 @@ from typing import Callable
 from . import context as compaction
 from . import logs
 from . import route_assist
+from . import board_tools
 from . import todos as todo_tool
 from .attachments import format_block as format_attachments
 from .checkpoints import CheckpointStore
@@ -141,7 +142,7 @@ class Agent:
                  session_dir: str | None = None, plans_dir: str | None = None, instructions=None,
                  max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS, track_requests: bool = True,
                  todo_tool: bool = True, completion_check: bool = True, audit_requests: bool = False,
-                 stall_timeout_s: float = DEFAULT_STALL_TIMEOUT, roles=None):
+                 stall_timeout_s: float = DEFAULT_STALL_TIMEOUT, roles=None, board=None):
         self.emit = emit
         self.cancel_event = threading.Event()
         self.config = config
@@ -154,6 +155,9 @@ class Agent:
         self.provider = provider or ChatProvider(config, self.stall_timeout_s)
         self._apply_stall_timeout()
         self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings, skills)
+        # Switchboard tools (relay_core.board_tools.BoardTools) or None when the workspace has no
+        # issues/board.yaml or its autonomy is off. Protocol 17.
+        self.board = board
         self.max_steps = max_steps
         self.max_tool_calls = max_tool_calls
         # Request ledger, todos, completion check and audit (research section 6 items 2-8). Off for subagents.
@@ -261,8 +265,9 @@ class Agent:
         instructions = self.instructions.section if self.instructions is not None else ""
         plan = PLAN_MODE_NOTE if self.mode == "plan" else ""
         todo_rules = todo_tool.RULES if getattr(self, "track_requests", False) and getattr(self, "todo_tool", False) else ""
+        board_rules = board_tools.prompt_section(getattr(self, "board", None))
         return (SYSTEM + "\nChosen workspace: " + str(self.executor.workspace.root) + skills_note + instructions
-                + todo_rules + plan)
+                + todo_rules + board_rules + plan)
 
     def refresh_system_prompt(self) -> None:
         self.messages[0] = {"role": "system", "content": self.system_prompt()}
@@ -278,6 +283,9 @@ class Agent:
     def tools(self) -> list[dict]:
         tools = self.executor.tools()
         extra = [todo_tool.SPEC] if self._todos_enabled() else []
+        if self.board is not None:
+            # Plan mode keeps the Switchboard reads but not its writes (see PLAN_BLOCKED_TOOLS).
+            extra = extra + self.board.tool_specs()
         if self.mode == "plan":
             # Subagents may write files, so plan mode does not offer them either.
             return [t for t in tools if t["function"]["name"] not in PLAN_BLOCKED_TOOLS] + [WRITE_PLAN_SPEC] + extra
@@ -533,6 +541,11 @@ class Agent:
         ctx = {"turn_id": turn_id, "requests": [], "opening": [], "todos_touched": False, "since_todos": 0,
                "no_list_note": False}
         self._turn_ctx = ctx
+        if self.board is not None:
+            # Switchboard write budgets are per turn (design 6.3).
+            self.board.context.model = self.config.model
+            self.board.context.session_id = self.session_id
+            self.board.begin_turn(turn_id)
         # Identifiers, sizes and settings only: the prompt itself is logged solely at "verbose".
         logs.event(_log, "turn_start", session=self.session_id, turn=turn_id, model=self.config.model,
                    host=_host(self.config.base_url), mode=self.mode, effort=self.effort,
@@ -913,6 +926,12 @@ class Agent:
         return turn["locations"].get(str(self.epoch), len(self.messages))
 
     def _prepare(self, name: str, args) -> Prepared:
+        if self.board is not None and self.board.handles(name):
+            if not isinstance(args, dict):
+                raise ValueError("Tool arguments must be an object.")
+            if self.mode == "plan" and name in board_tools.WRITE_TOOLS:
+                raise ValueError(f"{name} is not available in plan mode. Investigate, then call write_plan.")
+            return Prepared(name, args, self.board.preview(name, args))
         if name == "update_todos" and self._todos_enabled():
             if not isinstance(args, dict):
                 raise ValueError("Tool arguments must be an object.")
@@ -929,6 +948,8 @@ class Agent:
         return self.executor.prepare(name, args)
 
     def _execute(self, prepared: Prepared, turn: dict) -> dict:
+        if self.board is not None and self.board.handles(prepared.name):
+            return self.board.run(prepared.name, prepared.arguments)
         if prepared.name == "update_todos":
             ctx = self._turn_ctx or {"turn_id": None, "opening": [], "requests": []}
             items = self.todos.replace(prepared.arguments, self.requests.ids(), ctx["turn_id"], ctx["opening"])

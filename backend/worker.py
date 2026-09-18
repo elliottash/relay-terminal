@@ -9,8 +9,8 @@ import sys
 import threading
 import urllib.parse
 
-from relay_core import (__version__, keystore, keytest, logs, observe_protocol, roles as model_roles,
-                        session_protocol, skills, voice)
+from relay_core import (__version__, board_protocol, keystore, keytest, logs, observe_protocol,
+                        roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import agents_defs
 from relay_core.subagents import SubagentFactory, SubagentManager
@@ -63,12 +63,18 @@ def main():
     # default to the fast agent.
     state = {"agent_role": "main"}
 
+    # Switchboard (protocol 17). `board` also tags board_ask turn events with their card_id and
+    # appends the agent's answer to the card thread, so it is created before the supervisor.
+    board = board_protocol.BoardCommands(None, emit)
+
     def turn_emit(obj: dict):
+        obj = board.observe(obj)
         emit(obj)
         subagents.observe(obj)
 
     turns = TurnSupervisor(turn_emit)
     subagents.turns = turns
+    board.turns = turns
 
     def model_changed(agent):
         # Subagents that inherit the main model follow a set_model switch.
@@ -123,6 +129,8 @@ def main():
                 tier_table = model_roles.validate_tiers(request.get("tiers"))
                 agent_role = model_roles.validate_role(request.get("agent_role") or "main")
                 options = session_protocol.agent_options(request, workspace)
+                board_summary = board.configure(workspace, request)
+                options["board"] = board.agent_tools(workspace, request)
                 resolver = model_roles.RoleResolver(config, options.get("preset_id"), role_table,
                                                     key_lookup=keystore.lookup, main_effort=options.get("effort"),
                                                     tiers=tier_table)
@@ -155,6 +163,8 @@ def main():
                          "tiers": resolver.tier_summary(),
                          **session_protocol.configured_fields(agent)}
                 event["agents"] = len(agent_catalog.definitions)  # subagents
+                if board_summary is not None:
+                    event["board"] = board_summary   # Switchboard (protocol 17)
                 if skill_index is not None and skill_index.skipped:
                     event["skills_skipped"] = skill_index.skipped[:50]
                 emit(event)
@@ -207,8 +217,18 @@ def main():
                       "imported": [item.to_dict() for item in imported], "skipped": skipped})
             elif kind == "ask":
                 subagents.user_activity()
+                loaded = session_protocol.load_attachments(request, turns)
+                if request.get("cards"):
+                    # `#K7Q2` in the composer: the card, its open tasks and its thread tail travel
+                    # with the prompt (protocol 17.8).
+                    agent = turns.agent
+                    if agent is None:
+                        raise ValueError("Configure a provider and workspace first.")
+                    loaded = (loaded or []) + board_protocol.card_attachments(
+                        str(agent.executor.workspace.root), request["cards"],
+                        board.tools.board if board.tools is not None else None)
                 turns.submit(request.get("text", ""), request.get("when", "now"), request.get("id"),
-                             request.get("context"), session_protocol.load_attachments(request, turns),
+                             request.get("context"), loaded or None,
                              requeue=request.get("requeue", True))
             elif kind == "queue_steer":
                 turns.steer(request.get("item"))
@@ -285,6 +305,9 @@ def main():
                 sessions.handle(kind, request)
             elif observe.handles(kind):
                 observe.handle(kind, request)
+            # --- Switchboard (protocol section 17) ---
+            elif board.handles(kind):
+                board.dispatch(request)
             elif kind == "shutdown":
                 break
             else:

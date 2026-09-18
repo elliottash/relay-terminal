@@ -76,14 +76,20 @@ void RichEditor::resizeEvent(QResizeEvent *event) {
 }
 
 // Longest hint that fits on one line; a narrow pane loses the help note first, then words.
+void RichEditor::setPlaceholders(const QStringList &candidates) {
+    m_placeholders = candidates;
+    updatePlaceholder();
+}
+
 void RichEditor::updatePlaceholder() {
-    static const QStringList candidates{
+    static const QStringList composer{
         QStringLiteral("Shell commands or agent prompts…      ?  for help"),
         QStringLiteral("Shell commands or agent prompts…"),
         QStringLiteral("Commands or prompts…"),
         QStringLiteral("Commands…"),
         QStringLiteral("…"),
     };
+    const QStringList &candidates = m_placeholders.isEmpty() ? composer : m_placeholders;
     const QFontMetrics metrics(font());
     const int available = viewport()->width() - int(document()->documentMargin()) * 2 - 8;
     for (const QString &text : candidates) {

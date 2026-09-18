@@ -609,6 +609,43 @@ editor command, so those clicks do not reach Relay
 (`issues/features/2026-09-17-clickable-paths.md`). `relay-open` falls back to `xdg-open` when
 Relay is not reachable.
 
+## 10a. The Switchboard pane
+
+The Switchboard **is** the repository's `issues/` tree shown as a board: one card per issue, plan
+or memory, a thread per card, and an agent that writes to it. It appears only when the workspace
+has an `issues/board.yaml`. Design: `docs/SWITCHBOARD-DESIGN.md`; bytes:
+`docs/SWITCHBOARD-FORMAT.md`; protocol: `docs/AGENT-SESSIONS-PROTOCOL.md` section 17.
+
+- **`src/BoardModel.{h,cpp}`** (`relay-board`): the pure logic — the rows the worker sends, the tab
+  and column a card falls into, the filter language (`label:`, `status:`, `@assignee`,
+  `waiting:me`, `#ID`, free text) and the fuzzy ranking the `#` picker uses. No widgets, so
+  `tests/boardmodel_test.cpp` drives it directly.
+- **`src/BoardPane.{h,cpp}`**: `relay::BoardView`, a `ToolPane` leaf (`ToolPane::Kind::Board`).
+  A tab bar with counts, a filter field, horizontally scrolling columns of cards with drag and
+  drop between them, quick add, and a card detail view on the right: the rendered body, the
+  `## Tasks` checklist, the links, the thread and a reply box (`RichEditor`) that either asks the
+  Switchboard agent or appends a plain comment. A `QFileSystemWatcher` on `issues/` turns any
+  write — this window, a pane agent, an editor, a `git pull` — into one debounced `board_refresh`.
+- **`src/BoardWorker.{h,cpp}`**: one `backend/worker.py` per **window**, configured with
+  `agent_role: "switchboard"`, so card threads never enter a pane's conversation. It is started
+  lazily on the first open and answers every `board_*` message of protocol 17.
+
+Opening: **Ctrl+Shift+S** (`board.open`) splits it in beside the anchor pane, focuses the one the
+tab already has, or, pressed on it, returns to the last terminal pane. Also the palette
+("Switchboard") and `/switchboard`. `/card <text>` adds a card to the Inbox verbatim without
+opening anything. The layout node is `{"board": {"workspace", "tab"}}`.
+
+Inside the pane: arrows select, Enter opens a card, Esc closes it, `n` adds one, `m` moves it,
+`/` filters, `c` replies, `y` copies `#ID`, `t` sends `#ID` to the composer, `o` opens the card
+file, Ctrl+PgUp/PgDn switch tabs, and Alt+Shift+arrows move a card between columns or within one.
+
+From the terminal: `#` after a space opens a card picker in agent or auto mode (in terminal mode
+`#` stays a Bash comment), a resolved `#K7Q2` travels with the prompt as `ask {cards: […]}`, and
+every agent card write prints one line in the pane that caused it.
+
+Plans and memories are card types, not work cards: the Plans tab has its own statuses
+(draft → approved → executing → done) and the Memory tab is one list per topic.
+
 ## 11. Agent backend
 
 ### Worker protocol
@@ -1091,6 +1128,7 @@ Other limits:
 | `src/main.cpp` | `Keymap`, `isolation`, `Pane`, `ToolPane`, `WindowManager`, `RelayWindow`, palette, `main()` |
 | `src/RichEditor.*` | composer editor |
 | `src/FilePanes.*` | explorer and preview widgets |
+| `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Switchboard: card rows, tabs, columns, filters; the pane and card detail; the per-window Switchboard worker |
 | `src/Theme.*` | palette, stylesheet, Konsole profile exposure |
 | `src/Hints.*` | shortcut hint limits and idle tips |
 | `src/Notifications.*` | notification centre behind the header bell |
@@ -1103,7 +1141,7 @@ Other limits:
 | `src/Voice.*` | voice transcription: capture tool and arguments, the hold key, the transcript's place in the composer, WAV repair |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
-| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search), `logs` (rotating `worker.log`) |
+| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Switchboard messages) |
 | `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `voice` (transcription) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `src/KonsoleBackend.*`, `src/EngineBackend.*` | the two `TerminalBackend` implementations |
@@ -1113,4 +1151,4 @@ Other limits:
 | `data/` | theme, Konsole profile, icons |
 | `packaging/`, `.github/workflows/`, `site/` | packages, CI, release, website |
 | `tests/` | Python backend and PTY tests, Qt editor and file pane tests |
-| `issues/` | file-based tracker |
+| `issues/` | file-based tracker, and the Switchboard's storage (`board.yaml`, cards, `threads/`) |

@@ -21,6 +21,9 @@ public:
     void setAutoHeight(int minLines, int maxLines);
     // The placeholder shrinks with the pane instead of wrapping onto a second line.
     void updatePlaceholder();
+    // Other users of the editor (the Switchboard's reply box) hint at their own job. Longest
+    // first; updatePlaceholder() picks the longest that fits.
+    void setPlaceholders(const QStringList &candidates);
     // Relay paints the caret itself: Qt draws the built-in one in the stylesheet's text colour,
     // which cannot follow the destination (terminal, agent) per keystroke.
     void setCaretColor(const QColor &color);
@@ -36,6 +39,7 @@ protected:
     void insertFromMimeData(const QMimeData *source) override;
 private:
     QStringList m_history;
+    QStringList m_placeholders;
     QString m_draft;
     int m_historyIndex = 0;
     bool m_preedit = false;

@@ -279,6 +279,31 @@ nothing there needs the mouse.
 
 Relay is not a Konsole fork and does not change your Konsole settings or dotfiles.
 
+### Switchboard (Ctrl+Shift+S)
+
+The repository's `issues/` tracker as a board: one Markdown card per issue, plan or memory, in
+git, readable on GitHub and usable without Relay. Tabs are categories (Features, Bugs, Design,
+Marketing, Plans, Memory, Deferred, Done), columns are status, and dragging a card between them
+moves the file and records the move. Each card has a thread: the discussion and the audit trail,
+append-only, one entry per write.
+
+- **Ctrl+Shift+S** opens it beside the pane you were in; `n` adds a card, `/` filters
+  (`label:voice`, `status:ready`, `@agent`, `waiting:me`), Enter opens one, `m` moves it,
+  `t` sends `#ID` to the composer.
+- **In the terminal**: `#` and a few characters picks a card, `/card <text>` captures one without
+  leaving the prompt, `/switchboard` opens the pane. A `#K7Q2` in a prompt hands the agent the
+  card, its open tasks and its recent thread.
+- **The agent keeps it** (`board.yaml`'s `agent.autonomy`): every request you make that it does
+  not finish becomes a card or updates one, questions go on the card with a recommendation,
+  decisions quote you, and landed work moves to a QA lane with its evidence. There is no delete
+  tool, every write is recorded in the thread with the model and turn that made it, rewrites of
+  your own text keep the old text, and each write can be undone for 30 seconds.
+- **Card threads run on their own agent** (the `switchboard` model role, defaulting to your main
+  model), so talking about a card never disturbs a pane's conversation.
+
+Cards are plain files: `python3 scripts/relay-board.py check` verifies the format and `index`
+regenerates `issues/BOARD.md`. A repository without `issues/board.yaml` never sees any of this.
+
 ## Privacy and your keys
 
 - **BYOK.** Subscriptions (GLM Coding Plan, Kimi Code, MiniMax Coding/Token Plan), the OpenRouter

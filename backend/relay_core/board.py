@@ -24,7 +24,7 @@ import stat
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -771,6 +771,28 @@ def new_entry_id(when: datetime | None = None, taken: Iterable[str] = ()) -> str
     raise BoardError("could not allocate a thread entry id")  # pragma: no cover
 
 
+#: Entry-id suffixes are read back as base 36; the alphabet sorts ASCII-wise, like the ids.
+BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def next_entry_id(after: str | None, when: datetime | None = None) -> str:
+    """A fresh entry id that sorts strictly after `after`.
+
+    Entry ids are second-resolution, so two appends in the same second would otherwise land in
+    random order and `check` would report the file as unsorted.  Within a second the two-character
+    suffix is incremented in base 36; when it runs out the timestamp moves on by a second.
+    """
+    candidate = new_entry_id(when)
+    if not after or candidate > after:
+        return candidate
+    stamp, _, suffix = after.partition("-")
+    value = int(suffix, 36) + 1 if ENTRY_ID_RE.match(after) else 36 * 36
+    if value < 36 * 36:
+        return f"{stamp}-{BASE36[value // 36]}{BASE36[value % 36]}"
+    later = datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc) + timedelta(seconds=1)
+    return new_entry_id(later)
+
+
 def parse_thread(text: str) -> list[ThreadEntry]:
     entries: list[ThreadEntry] = []
     current: ThreadEntry | None = None
@@ -952,18 +974,23 @@ class Board:
             raise BoardError(f"unknown thread entry kind {kind!r}")
         path = self.thread_path(card_id, private)
         path.parent.mkdir(parents=True, exist_ok=True)
-        entry = ThreadEntry(new_entry_id(when), {"author": author, "kind": kind,
-                                                 **{k: str(v) for k, v in attrs.items() if v is not None}}, text)
+        attributes = {"author": author, "kind": kind,
+                      **{k: str(v) for k, v in attrs.items() if v is not None}}
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
             size = os.lseek(fd, 0, os.SEEK_END)
             prefix = ""
+            last = None
             if size:
                 with open(path, "rb") as check:
-                    check.seek(max(0, size - 2))
-                    tail = check.read()
+                    body = check.read()
+                ids = [e.entry_id for e in parse_thread(body.decode("utf-8", "replace"))]
+                last = max(ids) if ids else None
+                tail = body[-2:]
                 prefix = "\n\n" if not tail.endswith(b"\n") else ("\n" if not tail.endswith(b"\n\n") else "")
+            # Under the lock, so the id is chosen against what is actually on disk.
+            entry = ThreadEntry(next_entry_id(last, when), attributes, text)
             os.write(fd, (prefix + entry.render()).encode("utf-8"))
             os.fsync(fd)
         finally:
