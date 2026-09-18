@@ -2,6 +2,8 @@
 #include "RemoteShare.h"
 
 #include "Theme.h"
+#include "core/VtCore.h"
+#include "session/TerminalSession.h"
 #include "tools/ScreenJson.h"
 #include "view/TerminalView.h"
 
@@ -12,6 +14,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFontDatabase>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QLabel>
@@ -26,6 +29,10 @@
 namespace relay {
 
 namespace {
+
+// The most scrollback rows one `history` line may ask for, matching the protocol's page cap
+// (docs/REMOTE-PROTOCOL.md section 6.5). A phone pages; it does not download the buffer.
+constexpr int kHistoryPage = 200;
 
 // The sidecar lives beside the backend: <data>/remote in an install, the source tree otherwise.
 QString sidecarRoot()
@@ -75,6 +82,12 @@ RemoteShare::RemoteShare()
     m_poll = new QTimer(this);
     m_poll->setInterval(700);
     connect(m_poll, &QTimer::timeout, this, &RemoteShare::poll);
+    // The presence rule for notifications (docs/REMOTE-PROTOCOL.md section 9): the hub must not
+    // push to a phone while this window is the active, focused one, because the person is already
+    // looking at it. Only the GUI knows that, so it says so.
+    connect(qApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState s) {
+        send({{"t", "window_active"}, {"active", s == Qt::ApplicationActive}});
+    });
 }
 
 RemoteShare::~RemoteShare() = default;
@@ -116,6 +129,8 @@ bool RemoteShare::ensureSidecar(QString *error)
     }
     QJsonObject start{{"t", "start"}, {"tls", true}, {"name", QStringLiteral("this desktop")}};
     send(start);
+    send({{"t", "window_active"},
+          {"active", QGuiApplication::applicationState() == Qt::ApplicationActive}});
     return true;
 }
 
@@ -202,6 +217,23 @@ void RemoteShare::handle(const QJsonObject &message)
             it->hooks.secret(QByteArray::fromBase64(
                 message.value(QStringLiteral("bytes")).toString().toLatin1()));
         }
+    } else if (kind == QLatin1String("voice")) {
+        // A clip recorded on a phone. It is handed to the pane's own worker, which holds the
+        // key; this process decodes the base64 and nothing more.
+        const QString paneId = message.value(QStringLiteral("pane")).toString();
+        const QString requestId = message.value(QStringLiteral("id")).toString();
+        auto it = m_panes.find(paneId);
+        if (it == m_panes.end() || !it->hooks.transcribe) {
+            voiceResult(paneId, requestId, false, QString(),
+                        QStringLiteral("That pane is no longer shared."));
+        } else {
+            it->hooks.transcribe(requestId,
+                                 QByteArray::fromBase64(
+                                     message.value(QStringLiteral("data")).toString().toLatin1()),
+                                 message.value(QStringLiteral("format")).toString());
+        }
+    } else if (kind == QLatin1String("history")) {
+        sendHistoryPage(message);
     } else if (kind == QLatin1String("agent_stop")) {
         const QString paneId = message.value(QStringLiteral("pane")).toString();
         auto it = m_panes.find(paneId);
@@ -216,6 +248,16 @@ void RemoteShare::handle(const QJsonObject &message)
         m_running = false;
         emit startedChanged();
     }
+}
+
+void RemoteShare::voiceResult(const QString &paneId, const QString &requestId, bool ok,
+                              const QString &text, const QString &error)
+{
+    QJsonObject reply{{"t", QStringLiteral("transcribed")}, {"pane", paneId},
+                      {"id", requestId}, {"ok", ok}};
+    if (ok) reply.insert(QStringLiteral("text"), text);
+    else reply.insert(QStringLiteral("error"), error);
+    send(reply);
 }
 
 bool RemoteShare::sharePane(const QString &paneId, const PaneHooks &hooks, QString *error)
@@ -287,6 +329,46 @@ void RemoteShare::sendFrame(const QString &paneId, bool full)
     message["pane"] = paneId;
     message["full"] = everything || message.value(QStringLiteral("rows")).isDouble();
     send(message);
+}
+
+// A page of scrollback for a phone (docs/REMOTE-PROTOCOL.md section 6.5). `before_row` is the
+// absolute row the page ends just below; a negative one asks for the newest page. The rows go out
+// through screenjson::rowOf(), the same serializer sendFrame() uses, so a history row and a live
+// row cannot end up different shapes.
+void RemoteShare::sendHistoryPage(const QJsonObject &request)
+{
+    const QString paneId = request.value(QStringLiteral("pane")).toString();
+    const QString requestId = request.value(QStringLiteral("id")).toString();
+    QJsonObject reply{{"t", QStringLiteral("history_page")}, {"pane", paneId}, {"id", requestId}};
+
+    auto it = m_panes.find(paneId);
+    if (it == m_panes.end() || !it->hooks.view || !it->hooks.view->session()) {
+        reply.insert(QStringLiteral("ok"), false);
+        reply.insert(QStringLiteral("error"), QStringLiteral("That pane is no longer shared."));
+        send(reply);
+        return;
+    }
+
+    const int count = qBound(1, request.value(QStringLiteral("count")).toInt(60), kHistoryPage);
+    const int endRow = request.value(QStringLiteral("before_row")).toInt(-1);
+    int total = 0, from = 0;
+    std::vector<Line> lines;
+    it->hooks.view->session()->withCore([&](VtCore &core) {
+        total = core.historyRows();
+        const int end = qBound(0, endRow >= 0 ? endRow : total, total);
+        const int want = qMin(count, end);
+        from = core.historyLines(end - want, want, &lines);
+    });
+
+    QJsonArray rows;
+    for (int index = 0; index < int(lines.size()); ++index)
+        rows.append(screenjson::rowOf(lines[size_t(index)], from + index));
+    reply.insert(QStringLiteral("ok"), true);
+    reply.insert(QStringLiteral("from_row"), from);
+    reply.insert(QStringLiteral("total"), total);
+    reply.insert(QStringLiteral("more"), from > 0);
+    reply.insert(QStringLiteral("lines"), rows);
+    send(reply);
 }
 
 void RemoteShare::paneEvent(const QString &paneId, const QJsonObject &event)

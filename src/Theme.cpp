@@ -620,6 +620,11 @@ QLabel#boardCardError { color: @error; }
 QFrame#boardReply { background: @surface; border: 1px solid @border; border-radius: 8px; }
 QPlainTextEdit#boardReplyEditor { background: transparent; border: none; padding: 2px; }
 QPushButton#boardReplyButton, QFrame#boardReply QPushButton#primary { padding: 4px 12px; }
+/* Execute hands the card to a terminal pane's agent (#XS6Q): the agent's colour, outlined, so
+   it reads as the step that leaves the board rather than a third way of asking. */
+QPushButton#boardExecute { padding: 4px 12px; color: @agent; border-color: @agent; }
+QPushButton#boardExecute:hover { background: @surface; }
+QPushButton#boardExecute:disabled { color: @disabled; border-color: @surface; }
 )");
     const QColor selection = spec.uiColor(QStringLiteral("selection"), Accent.darker(200));
     const QColor caution = blend(Warning, Error, 0.7);
