@@ -79,7 +79,7 @@ Verify against provider docs before shipping; keep the table in `backend/relay_c
 ## 6. Plan mode (Warp-style)
 
 - `set_mode {mode: "build"|"plan"}` → `mode_changed {mode}`.
-- Plan mode: run_command, read_file, list_directory, load_skill, read_skill_file stay available for investigation; write_file, edit_file and set_keybinding are removed from the tool list; the system prompt says to investigate without changing anything and to finish by calling `write_plan`.
+- Plan mode: run_command (with command_output and stop_command), read_file, list_directory, load_skill, read_skill_file stay available for investigation; write_file, edit_file and set_keybinding are removed from the tool list; the system prompt says to investigate without changing anything and to finish by calling `write_plan`.
 - Tool `write_plan {title, content}` (plan mode only) writes `plans_dir/<YYYY-MM-DD-HHMM>-<slug>.md` and emits `plan_written {path, title}`. The GUI opens it in an editable pane.
 - The GUI executes a plan by sending `set_mode build` then `ask` with text referencing the plan path; "execute in fresh context" sends `reset` first.
 
@@ -136,6 +136,21 @@ answer text only.
 `tool_output_get {turn_id, call_id}` → `tool_output {turn_id, call_id, name, preview, result}`
 (the worker keeps results for the last 50 turns). `turn_transcript_get {turn_id}` →
 `turn_transcript {turn_id, items: [...]}` in the same shape as `subagent_transcript`.
+
+**Commands as jobs (2026-09-18, `backend/relay_core/jobs.py`).** `run_command {command, cwd?,
+timeout_seconds?, background?}` waits up to `timeout_seconds` (default 30, clamped to 1–1800; numeric
+text is accepted, a bad value falls back to the default — never an error) and then hands a command
+that is still running back instead of killing it. Its `tool_result` is then
+`{still_running: true, job_id, output, truncated, omitted_bytes, duration_seconds, note}` with no
+`exit_code`; a finished command has `exit_code` and no `still_running`. `background: true` returns
+after 2 s. Two tools go with run_command (subagents that have it get them too):
+`command_output {job_id, wait_seconds?}` returns the output not yet read (the newest 32 KiB when
+there is more, `omitted_bytes` counting the rest) and waits up to `wait_seconds` (0–1800) for the
+job to end; `stop_command {job_id}` stops the job's process group and returns `stopped: true`.
+`tool_output {text}` streams only while a call is waiting on the job. Stop ends the job being
+waited on; jobs handed back earlier keep running. At most 8 run at once. Every job of a
+conversation is stopped on a new conversation, when a subagent's run ends, and when the worker
+exits. The pane prints `▸ still running as job-N` / `■ stopped job-N` for these results.
 
 **File writes and their previews (`edit_file`, v2.3, 2026-09-18).** Two tools change files.
 `write_file {path, content}` creates a file or replaces one in full; `edit_file {path, old_string,

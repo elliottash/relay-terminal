@@ -5619,6 +5619,12 @@ private:
                 : QString();
             m_toolLines = 0; m_toolPartialLine = false;
             if (result.contains(QStringLiteral("error"))) printInline(QStringLiteral("✗ ") + result.value(QStringLiteral("error")).toString() + '\n', Ink::Error);
+            // A command past its wait keeps running as a job the agent reads or stops later
+            // (backend/relay_core/jobs.py); a stopped one is not a failure the pane paints red.
+            else if (result.value(QStringLiteral("still_running")).toBool())
+                printInline(QStringLiteral("▸ still running as %1%2\n").arg(result.value(QStringLiteral("job_id")).toString(), size), Ink::Note);
+            else if (result.value(QStringLiteral("stopped")).toBool())
+                printInline(QStringLiteral("■ stopped %1%2\n").arg(result.value(QStringLiteral("job_id")).toString(), size), Ink::Note);
             else if (result.contains(QStringLiteral("exit_code"))) {
                 const int code = result.value(QStringLiteral("exit_code")).toInt();
                 printInline(QStringLiteral("exit %1%2%3%4\n").arg(code)

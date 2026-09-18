@@ -36,15 +36,20 @@ class ToolTests(unittest.TestCase):
         self.assertNotIn('ZAI_API_KEY', result['output'])
         self.assertNotIn('RELAY_SESSION_TOKEN', result['output'])
 
+    # At its timeout a command is handed back as a job, not killed (relay_core/jobs.py).
     def test_timeout(self):
         started = time.monotonic()
         result = self.tools.execute(self.tools.prepare('run_command', {'command': 'sleep 20', 'timeout_seconds': 1}))
-        self.assertTrue(result['timed_out'])
+        self.assertTrue(result['still_running'])
+        self.assertNotIn('exit_code', result)
         self.assertLess(time.monotonic() - started, 3)
+        stopped = self.tools.execute(self.tools.prepare('stop_command', {'job_id': result['job_id']}))
+        self.assertTrue(stopped['stopped'])
 
     def test_timeout_after_stdout_closed(self):
         result = self.tools.execute(self.tools.prepare('run_command', {'command': 'exec 1>&- 2>&-; sleep 20', 'timeout_seconds': 1}))
-        self.assertTrue(result['timed_out'])
+        self.assertTrue(result['still_running'])
+        self.tools.execute(self.tools.prepare('stop_command', {'job_id': result['job_id']}))
 
     def test_output_cap(self):
         result = self.tools.execute(self.tools.prepare('run_command', {'command': 'head -c 100000 /dev/zero | tr "\\0" x'}))

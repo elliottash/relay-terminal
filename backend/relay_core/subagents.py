@@ -67,7 +67,9 @@ class RestrictedExecutor(ToolExecutor):
 
     def __init__(self, root, emit, cancel, skills, allowed):
         super().__init__(root, emit, cancel, None, skills)
-        self.allowed = frozenset(allowed)
+        # A command can outlive its call as a job; reading and stopping it come with run_command.
+        extra = {"command_output", "stop_command"} if "run_command" in allowed else set()
+        self.allowed = frozenset(allowed) | extra
 
     def tools(self) -> list[dict]:
         return [tool for tool in super().tools() if tool["function"]["name"] in self.allowed]
@@ -506,6 +508,9 @@ class SubagentManager:
                 self._emit({"event": "subagent_handoff", "id": sub.id, "handoff": "pending",
                             "wakeups": self._wakeups, "max_auto_turns": self.max_auto_turns})
         finally:
+            # The run is over: nothing can read or stop its commands any more. Off the lock:
+            # stopping a command can take a moment.
+            threading.Thread(target=sub.agent.executor.shutdown, daemon=True).start()
             sub.done.set()
 
     @staticmethod

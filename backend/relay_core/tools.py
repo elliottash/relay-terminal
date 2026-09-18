@@ -25,9 +25,15 @@ from .keybindings import KeybindingCatalog
 from .program_input import ProgramControl
 from .skills import TOOL_SPECS as SKILL_TOOLS, SkillIndex
 from .provider import Cancelled
+from .jobs import JobTable
 
 MAX_FILE = 131072
 MAX_OUTPUT = 32768
+# run_command's timeout is how long the call waits before handing a still-running command back as
+# a job (relay_core/jobs.py), no longer when the command is killed. A request outside the range is
+# clamped, never refused: refusing cost a turn and printed an error for a harmless mistake.
+DEFAULT_WAIT = 30
+MAX_WAIT = 1800
 SECRET_NAME = re.compile(r"(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|COOKIE)", re.I)
 
 
@@ -37,9 +43,16 @@ def spec(name: str, description: str, properties: dict, required: list[str]) -> 
                            "additionalProperties": False}}}
 
 TOOLS = [
-    spec("run_command", "Run a non-interactive Bash command in the chosen workspace. NOT an OS sandbox. Does not share interactive shell variables or aliases.",
+    spec("run_command", "Run a non-interactive Bash command in the chosen workspace. NOT an OS sandbox. Does not share interactive shell variables or aliases. "
+         "Waits up to timeout_seconds (default 30, at most 1800) for the command to finish. A command still running then is NOT killed: "
+         "the result has still_running: true, a job_id and the output so far; read more with command_output (it can wait) and end it with stop_command. "
+         "Ask for the time a long build or test suite needs. For a server or watcher that should keep running, set background: true and stop it when done. "
+         "Stdin is closed, so a command that prompts fails instead of waiting.",
          {"command": {"type": "string"}, "cwd": {"type": "string", "description": "Workspace-relative directory; default '.'"},
-          "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120}}, ["command"]),
+          "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": MAX_WAIT,
+                              "description": "Seconds to wait before handing a still-running command back as a job; default 30."},
+          "background": {"type": "boolean", "description": "Start it and return after a moment with its job_id and first output, for servers and watchers."}},
+         ["command"]),
     spec("read_file", "Read a UTF-8 text file inside the workspace.",
          {"path": {"type": "string"}}, ["path"]),
     spec("list_directory", "List at most 200 entries in a workspace directory.",
@@ -130,7 +143,9 @@ class ToolExecutor:
         self.program = ProgramControl(emit, cancel)
         # Where run_command runs when the model gives no cwd: the directory the user's terminal is in.
         self.default_cwd = "."
-        self._process: subprocess.Popen | None = None
+        # Every command is a job; the one a tool call is waiting on is what Stop ends.
+        self.jobs = JobTable()
+        self._waiting = None
         self._lock = threading.Lock()
 
     def set_default_cwd(self, path: str | None) -> None:
@@ -150,13 +165,15 @@ class ToolExecutor:
         self.default_cwd = candidate
 
     def stop_process(self):
+        """Stop: end the command this turn is waiting on. Jobs it handed back keep running."""
         with self._lock:
-            process = self._process
-        if process is not None:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+            job = self._waiting
+        if job is not None:
+            self.jobs.stop(job)
+
+    def shutdown(self) -> None:
+        """The conversation is over (new conversation, subagent done): no turn can name its jobs."""
+        self.jobs.stop_all()
 
     @staticmethod
     def _text(args: dict, key: str, *, maximum: int = MAX_FILE) -> str:
@@ -168,6 +185,7 @@ class ToolExecutor:
     def tools(self) -> list[dict]:
         catalog = self.keybindings
         tools = TOOLS + [catalog.tool_spec()] if catalog is not None else list(TOOLS)
+        tools += JOB_TOOLS
         if self.skills is not None:
             tools += SKILL_TOOLS
         # Read at every model call, so a take-over removes the tool from the next one.
@@ -197,7 +215,16 @@ class ToolExecutor:
                 raise ValueError("Unknown tool or unexpected argument.")
             normalized, preview = catalog.prepare(args)
             return Prepared(name, normalized, preview, catalog.path)
-        allowed = {"run_command": {"command", "cwd", "timeout_seconds"},
+        if name in ("command_output", "stop_command"):
+            if set(args) - ({"job_id", "wait_seconds"} if name == "command_output" else {"job_id"}):
+                raise ValueError("Unknown tool or unexpected argument.")
+            job = self.jobs.get(args.get("job_id"))
+            if name == "stop_command":
+                return Prepared(name, {"job_id": job.id}, f"STOP COMMAND\n\n{job.id}: {job.command}")
+            wait = clamp_seconds(args.get("wait_seconds", 0), 0, 0, MAX_WAIT)
+            return Prepared(name, {"job_id": job.id, "wait_seconds": wait},
+                            f"COMMAND OUTPUT\n\n{job.id}: {job.command}\nWait: up to {wait}s")
+        allowed = {"run_command": {"command", "cwd", "timeout_seconds", "background"},
                    "read_file": {"path"}, "list_directory": {"path"}, "write_file": {"path", "content"},
                    "edit_file": {"path", "old_string", "new_string", "replace_all"}}
         if name not in allowed or set(args) - allowed[name]:
@@ -210,11 +237,14 @@ class ToolExecutor:
             cwd = self.workspace.resolve(args["cwd"])
             if not cwd.is_dir():
                 raise ValueError("Command working directory must be a directory.")
-            timeout = args.get("timeout_seconds", 30)
-            if type(timeout) is not int or not 1 <= timeout <= 120:
-                raise ValueError("Timeout must be an integer from 1 to 120 seconds.")
+            background = args.get("background", False)
+            if not isinstance(background, bool):
+                raise ValueError("background must be true or false.")
+            args["background"] = background
+            timeout = clamp_seconds(args.get("timeout_seconds", DEFAULT_WAIT), DEFAULT_WAIT, 1, MAX_WAIT)
             args["timeout_seconds"] = timeout
-            return Prepared(name, args, f"RUN COMMAND\n\nWorking directory: {cwd}\nTimeout: {timeout}s\n\n{command}", cwd)
+            wait = "Background" if background else f"Waits: {timeout}s, then continues as a job"
+            return Prepared(name, args, f"RUN COMMAND\n\nWorking directory: {cwd}\n{wait}\n\n{command}", cwd)
         path = self.workspace.resolve(self._text(args, "path", maximum=4096),
                                       allow_missing=name in ("write_file", "edit_file"))
         if name == "read_file":
@@ -287,7 +317,14 @@ class ToolExecutor:
         if name == "run_command":
             # Recheck paths at execution time.
             cwd = self.workspace.resolve(args.get("cwd", "."))
-            return self._run(args["command"], cwd, args["timeout_seconds"])
+            return self._run(args["command"], cwd, args["timeout_seconds"], args.get("background", False))
+        if name == "command_output":
+            job = self.jobs.get(args["job_id"])
+            return self._await(job, args["wait_seconds"])
+        if name == "stop_command":
+            job = self.jobs.get(args["job_id"])
+            self.jobs.stop(job)
+            return self._job_result(job)
         path = self.workspace.resolve(args["path"], allow_missing=name in ("write_file", "edit_file"))
         if name == "read_file":
             data = self.workspace.read_bytes(path)
@@ -331,68 +368,75 @@ class ToolExecutor:
             result["created"] = not prepared.existed
         return result
 
-    def _run(self, command: str, cwd: Path, timeout: int) -> dict:
+    def _run(self, command: str, cwd: Path, timeout: int, background: bool = False) -> dict:
         env = {key: value for key, value in os.environ.items()
                if not SECRET_NAME.search(key) and not key.startswith("RELAY_")
                and key not in {"BASH_ENV", "ENV", "PYTHONPATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "SSH_AUTH_SOCK"}
                and not key.startswith("BASH_FUNC_")}
         env.update({"TERM": "dumb", "PAGER": "cat", "GIT_TERMINAL_PROMPT": "0"})
-        process = subprocess.Popen(["/bin/bash", "--noprofile", "--norc", "-c", command],
-                                   cwd=cwd, env=env, stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                   start_new_session=True, bufsize=0)
+        job = self.jobs.start(command, cwd, env)
+        # A background job still gets a moment: a server that fails at once says so in this result.
+        return self._await(job, BACKGROUND_GLANCE if background else timeout)
+
+    def _await(self, job, seconds: float) -> dict:
+        """Wait on a job with the live output stream on; Stop during the wait ends the job."""
+        streamed = 0
+
+        def live(text: str) -> None:
+            nonlocal streamed
+            if streamed < MAX_OUTPUT:
+                piece = text[:MAX_OUTPUT - streamed]
+                streamed += len(piece)
+                self.emit({"event": "tool_output", "text": piece})
+
         with self._lock:
-            self._process = process
-        selector = selectors.DefaultSelector()
-        selector.register(process.stdout, selectors.EVENT_READ)
-        started = time.monotonic()
-        output = bytearray()
-        total = 0
-        timed_out = False
+            self._waiting = job
         try:
-            while selector.get_map():
-                if self.cancel.is_set() or time.monotonic() - started > timeout:
-                    timed_out = not self.cancel.is_set()
-                    break
-                for key, _ in selector.select(0.1):
-                    chunk = os.read(key.fileobj.fileno(), 8192)
-                    if not chunk:
-                        selector.unregister(key.fileobj)
-                        continue
-                    total += len(chunk)
-                    remaining = MAX_OUTPUT - len(output)
-                    if remaining > 0:
-                        shown = chunk[:remaining]
-                        output.extend(shown)
-                        self.emit({"event": "tool_output", "text": shown.decode("utf-8", "replace")})
-            # A command can close stdout and continue running. Enforce timeout then, too.
-            while process.poll() is None and not timed_out and not self.cancel.is_set():
-                if time.monotonic() - started > timeout:
-                    timed_out = True
-                    break
-                time.sleep(0.03)
+            self.jobs.wait(job, seconds, self.cancel, live)
         finally:
-            # Always clean up the process group, including children left by background jobs.
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                process.wait(timeout=0.3)
-            except subprocess.TimeoutExpired:
-                pass
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait()
-            selector.close()
-            if process.stdout:
-                process.stdout.close()
             with self._lock:
-                self._process = None
+                self._waiting = None
         if self.cancel.is_set():
+            self.jobs.stop(job)
             raise Cancelled("Stopped.")
-        return {"exit_code": process.returncode, "output": output.decode("utf-8", "replace"),
-                "truncated": total > MAX_OUTPUT, "timed_out": timed_out,
-                "duration_seconds": round(time.monotonic() - started, 3)}
+        return self._job_result(job)
+
+    def _job_result(self, job) -> dict:
+        result = self.jobs.take_output(job, MAX_OUTPUT)
+        result["job_id"] = job.id
+        result["duration_seconds"] = round((job.finished or time.monotonic()) - job.started, 3)
+        if job.running:
+            result["still_running"] = True
+            result["note"] = (f"Still running as {job.id}. Read more with command_output "
+                              f"(wait_seconds up to {MAX_WAIT}), or end it with stop_command.")
+        else:
+            result["exit_code"] = job.exit_code
+            if job.stopped:
+                result["stopped"] = True
+        return result
+
+
+def clamp_seconds(value, default: int, low: int, high: int) -> int:
+    """A wait the model asked for, made valid: numbers (and numeric text) are rounded into
+    [low, high]; anything else is the default. true/false are not numbers here."""
+    if isinstance(value, bool):
+        raise ValueError("A number of seconds is required, not true/false.")
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())
+        except ValueError:
+            return default
+    if not isinstance(value, (int, float)) or value != value:
+        return default
+    return int(min(high, max(low, round(value))))
+
+
+BACKGROUND_GLANCE = 2
+JOB_TOOLS = [
+    spec("command_output", "Read the output a run_command job has printed since you last read it, and whether it is still running. "
+         "wait_seconds (default 0, at most 1800) waits for the job to finish first; it returns early when it does.",
+         {"job_id": {"type": "string"}, "wait_seconds": {"type": "integer", "minimum": 0, "maximum": MAX_WAIT}}, ["job_id"]),
+    spec("stop_command", "Stop a run_command job and its child processes, and return its last output. "
+         "Stop servers and watchers you started once you no longer need them.",
+         {"job_id": {"type": "string"}}, ["job_id"]),
+]
