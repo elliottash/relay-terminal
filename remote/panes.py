@@ -86,17 +86,92 @@ class DemoPaneSource(PaneSource):
     bridge exists, and the phone client cannot tell the difference at the protocol level.
     """
 
+    # The tool events carry the `label` of AGENT-SESSIONS-PROTOCOL.md section 23, shaped exactly as
+    # ``relay_core.tool_labels`` builds it (this package never imports the backend). The phone draws
+    # one concise line per call from it, so the demo has to show what the real thing shows: a run of
+    # consecutive reads folding into one line, a command that failed, and an edit whose diff is
+    # short enough to print under the line without a tap.
     SCRIPT = [
         (0.35, {"event": "agent_started"}),
         (0.45, {"event": "thinking_delta", "text": "Looking at the failing test first"}),
         (0.50, {"event": "thinking_done", "elapsed": 0.9}),
-        (0.40, {"event": "tool_started", "tool": "read_file", "preview": "tests/test_router.py"}),
-        (0.60, {"event": "tool_result", "tool": "read_file", "ok": True, "summary": "168 lines"}),
+        (0.40, {"event": "tool_started", "tool": "read_file", "call_id": "c1",
+                "preview": "READ FILE\n\ntests/test_router.py",
+                "label": {"kind": "read", "running": "reading test_router.py",
+                          "title": "read test_router.py", "path": "tests/test_router.py",
+                          "merge": {"key": "read", "singular": "file", "plural": "files"}}}),
+        (0.45, {"event": "tool_result", "tool": "read_file", "call_id": "c1", "ms": 40,
+                "result": {"path": "tests/test_router.py"},
+                "label": {"kind": "read", "running": "reading test_router.py",
+                          "title": "read test_router.py", "stats": ["168 lines"], "ok": True,
+                          "path": "tests/test_router.py",
+                          "open": {"type": "file", "path": "tests/test_router.py"},
+                          "merge": {"key": "read", "singular": "file", "plural": "files",
+                                    "lines": 168}}}),
+        (0.30, {"event": "tool_started", "tool": "read_file", "call_id": "c2",
+                "preview": "READ FILE\n\nbackend/relay_core/router.py",
+                "label": {"kind": "read", "running": "reading router.py", "title": "read router.py",
+                          "path": "backend/relay_core/router.py",
+                          "merge": {"key": "read", "singular": "file", "plural": "files"}}}),
+        (0.45, {"event": "tool_result", "tool": "read_file", "call_id": "c2", "ms": 35,
+                "result": {"path": "backend/relay_core/router.py"},
+                "label": {"kind": "read", "running": "reading router.py", "title": "read router.py",
+                          "stats": ["244 lines"], "ok": True, "path": "backend/relay_core/router.py",
+                          "open": {"type": "file", "path": "backend/relay_core/router.py"},
+                          "merge": {"key": "read", "singular": "file", "plural": "files",
+                                    "lines": 244}}}),
+        (0.35, {"event": "tool_started", "tool": "run_command", "call_id": "c3",
+                "preview": "RUN COMMAND\n\npytest -q tests/test_router.py",
+                "label": {"kind": "run", "running": "running pytest", "title": "ran pytest"}}),
+        (0.80, {"event": "tool_result", "tool": "run_command", "call_id": "c3", "ms": 2100,
+                "result": {"exit_code": 1, "stdout": "1 failed, 12 passed"},
+                "label": {"kind": "run", "running": "running pytest", "title": "ran pytest",
+                          "stats": ["12 lines", "exit 1", "2.1 s"], "ok": False,
+                          "open": {"type": "fold"}}}),
         (0.35, {"event": "delta", "text": "The router treats "}),
         (0.30, {"event": "delta", "text": "a bare word with a slash as a path, "}),
         (0.30, {"event": "delta", "text": "so `git status` routes to the shell and "}),
         (0.30, {"event": "delta", "text": "`why is this failing?` routes to the agent."}),
-        (0.40, {"event": "turn_summary", "tools": 1, "elapsed": 3.4}),
+        (0.35, {"event": "tool_started", "tool": "edit_file", "call_id": "c4",
+                "preview": "EDIT FILE\n\nbackend/relay_core/router.py",
+                "label": {"kind": "edit", "running": "editing router.py", "title": "edited router.py",
+                          "path": "backend/relay_core/router.py"}}),
+        (0.50, {"event": "tool_result", "tool": "edit_file", "call_id": "c4", "ms": 60,
+                "result": {"path": "backend/relay_core/router.py", "added": 2, "removed": 1,
+                           "replacements": 1},
+                "diff": ("--- a/backend/relay_core/router.py\n"
+                         "+++ b/backend/relay_core/router.py\n"
+                         "@@ -41,3 +41,4 @@\n"
+                         " def classify(text):\n"
+                         "-    if \"/\" in text:\n"
+                         "+    if text.startswith(\"/\") or \"/\" in text.split()[0]:\n"
+                         "+        # a bare word with a slash is a path, not a question\n"),
+                "label": {"kind": "edit", "running": "editing router.py", "title": "edited router.py",
+                          "stats": ["+2 −1"], "ok": True, "path": "backend/relay_core/router.py",
+                          "inline_diff": True, "open": {"type": "fold"}}}),
+        (0.40, {"event": "turn_summary", "turn_id": "t1", "elapsed_ms": 6400, "thinking_ms": 900,
+                "tools": [
+                    {"call_id": "c1", "name": "read_file", "ok": True, "ms": 40,
+                     "preview": "READ FILE\n\ntests/test_router.py",
+                     "label": {"kind": "read", "running": "reading test_router.py",
+                               "title": "read test_router.py", "stats": ["168 lines"],
+                               "merge": {"key": "read", "singular": "file", "plural": "files",
+                                         "lines": 168}}},
+                    {"call_id": "c2", "name": "read_file", "ok": True, "ms": 35,
+                     "preview": "READ FILE\n\nbackend/relay_core/router.py",
+                     "label": {"kind": "read", "running": "reading router.py",
+                               "title": "read router.py", "stats": ["244 lines"],
+                               "merge": {"key": "read", "singular": "file", "plural": "files",
+                                         "lines": 244}}},
+                    {"call_id": "c3", "name": "run_command", "ok": False, "ms": 2100,
+                     "exit_code": 1, "preview": "RUN COMMAND\n\npytest -q tests/test_router.py",
+                     "label": {"kind": "run", "running": "running pytest", "title": "ran pytest",
+                               "stats": ["12 lines", "exit 1", "2.1 s"]}},
+                    {"call_id": "c4", "name": "edit_file", "ok": True, "ms": 60,
+                     "preview": "EDIT FILE\n\nbackend/relay_core/router.py",
+                     "label": {"kind": "edit", "running": "editing router.py",
+                               "title": "edited router.py", "stats": ["+2 −1"]}},
+                ]}),
         (0.20, {"event": "agent_finished", "turn_id": "t1"}),
     ]
 

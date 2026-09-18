@@ -129,9 +129,28 @@ class BrowserClientTests(unittest.TestCase):
                     answer = await browser.wait_for(
                         "document.querySelector('.answer')?.textContent || ''", timeout=40)
                     self.assertIn("router", answer)
-                    tools = await browser.evaluate(
-                        "[...document.querySelectorAll('.tool-name')].map(n => n.textContent)")
-                    self.assertIn("read_file", tools)
+                    # One concise line per tool call (protocol section 23), not the tool's name and
+                    # a slab of its arguments: the two reads fold into one line, the command that
+                    # exited 1 is marked, and the short diff prints under its line without a tap.
+                    tools = await browser.wait_for(
+                        "(() => { const lines = [...document.querySelectorAll('.tool-line')]"
+                        ".map(n => n.textContent);"
+                        " return lines.some(l => l.startsWith('edited')) ? lines : null; })()",
+                        timeout=40)
+                    self.assertIn("read 2 files · 412 lines", tools)
+                    self.assertIn("✗ ran pytest · 12 lines · exit 1 · 2.1 s", tools)
+                    self.assertIn("edited router.py · +2 −1", tools)
+                    self.assertNotIn("read_file", "".join(tools))
+                    diff = await browser.evaluate(
+                        "[...document.querySelectorAll('.tool-diff .diff-line')]"
+                        ".map(n => n.className + ':' + n.textContent)")
+                    self.assertTrue(any(line.startswith("diff-line add:+") for line in diff), diff)
+                    self.assertTrue(any(line.startswith("diff-line del:-") for line in diff), diff)
+                    # The detail is behind the disclosure, not printed into the transcript.
+                    self.assertTrue(await browser.evaluate(
+                        "[...document.querySelectorAll('details.tool')].every(d => !d.open)"))
+                    self.assertIn("pytest -q tests/test_router.py", await browser.evaluate(
+                        "[...document.querySelectorAll('.tool-detail')].map(n => n.textContent).join('\\n')"))
                     prompt = await browser.evaluate(
                         "document.querySelector('.prompt-text')?.textContent || ''")
                     self.assertIn("router", prompt)

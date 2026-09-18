@@ -429,6 +429,183 @@ function renderModel() {
                                                       : info.model;
 }
 
+// ---- tool-call lines (docs/AGENT-SESSIONS-PROTOCOL.md § 23) -----------------------------------
+// One concise line per call — "ran pytest · 212 lines · exit 1 · 8 s" — rewritten in place when
+// the call lands, with the full detail behind the disclosure triangle. `preview` is legacy: it is
+// read only when the worker sent no `label` at all, and is otherwise just what the fold shows.
+
+// The headings an old preview led with, and the kind and the two tenses they stand for.
+const LEGACY_PREVIEWS = {
+  'RUN COMMAND': ['run', 'ran', 'running'],
+  'READ FILE': ['read', 'read', 'reading'],
+  'LIST DIRECTORY': ['list', 'listed', 'listing'],
+  'WRITE FILE': ['edit', 'wrote', 'writing'],
+  'EDIT FILE': ['edit', 'edited', 'editing'],
+};
+const PREVIEW_NOTE = /^(Working directory|Timeout|Old bytes|New bytes): /;
+
+const shortPath = (path) => (path.length <= 40 ? path : path.slice(path.lastIndexOf('/') + 1));
+const thousands = (value) => String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+// One event's label, or one built from its legacy preview when it carries none.
+function toolLabel(event) {
+  const label = event.label;
+  if (label && typeof label === 'object') {
+    return {
+      kind: label.kind || '', title: label.title || '', running: label.running || '',
+      stats: Array.isArray(label.stats) ? label.stats.filter((piece) => typeof piece === 'string') : [],
+      error: typeof label.error === 'string' ? label.error : '', path: label.path || '',
+      failed: label.ok === false || !!label.error,
+      inlineDiff: label.inline_diff === true,
+      open: (label.open && label.open.type) || '',
+      merge: label.merge && label.merge.key ? label.merge : null,
+      fallback: false,
+    };
+  }
+  const lines = String(event.preview || '').split('\n');
+  const verbs = LEGACY_PREVIEWS[(lines[0] || '').trim()];
+  let subject = '';
+  let loose = '';
+  for (let at = 0; at < lines.length; at += 1) {
+    const line = lines[at].trim();
+    if (!line || PREVIEW_NOTE.test(lines[at])) continue;
+    if (!loose) loose = line;
+    if (at > 0) { subject = line; break; }
+  }
+  let kind = 'other';
+  let title = '';
+  let running = '';
+  let path = '';
+  if (verbs) {
+    [kind] = verbs;
+    const what = kind === 'run' ? subject.slice(0, 40) : shortPath(subject);
+    if (kind !== 'run') path = subject;
+    title = what ? `${verbs[1]} ${what}` : verbs[1];
+    running = what ? `${verbs[2]} ${what}` : verbs[2];
+  } else {
+    const name = String(event.tool || 'tool').replace(/_/g, ' ');
+    title = loose && loose.length <= 60 ? `${name} ${loose}` : name;
+    running = `running ${name}`;
+  }
+  const result = event.result && typeof event.result === 'object' ? event.result : {};
+  const exit = typeof event.exit_code === 'number' ? event.exit_code : result.exit_code;
+  const error = typeof result.error === 'string' ? result.error.split('\n')[0].slice(0, 120) : '';
+  return {
+    kind, title, running, path, error,
+    stats: typeof exit === 'number' ? [`exit ${exit}`] : [],
+    failed: !!error || (typeof exit === 'number' && exit !== 0),
+    inlineDiff: false, open: '', merge: null, fallback: true,
+  };
+}
+
+// The line itself: title, the stats, and the reason when the call never happened.
+const labelLine = (label) =>
+  [label.title, ...label.stats, ...(label.error ? [label.error] : [])].filter(Boolean).join(' · ');
+
+// "read 6 files · 4,100 lines" (§ 23.7).
+function mergeLine(run) {
+  const verb = { read: 'read', list: 'listed' }[run.key] || run.key;
+  const noun = run.count === 1 ? run.singular || run.key : run.plural || run.key;
+  if (!run.unit) return `${verb} ${run.count} ${noun}`;
+  const unit = run.total === 1 ? (run.unit === 'entries' ? 'entry' : 'line') : run.unit;
+  return `${verb} ${run.count} ${noun} · ${thousands(run.total)} ${unit}`;
+}
+
+// The rows of the turn being transcribed, so a result rewrites the row its start drew.
+let toolCalls = new Map();
+let toolRun = null;      // the run of consecutive reads or listings in progress
+let lastCall = null;
+
+function resetToolCalls() {
+  toolCalls = new Map();
+  toolRun = null;
+  lastCall = null;
+}
+
+function drawToolRow(call) {
+  const text = call.done ? labelLine(call.label) : call.label.running || call.label.title;
+  call.summary.textContent = call.done && call.label.failed ? `✗ ${text}` : text;
+  call.box.classList.toggle('failed', !!(call.done && call.label.failed));
+  call.box.classList.toggle('ok', !!(call.done && !call.label.failed));
+}
+
+function addToolDetail(call, text) {
+  if (!text) return;
+  call.detail.textContent += (call.detail.textContent ? '\n' : '') + text;
+}
+
+// A short diff prints under the line with no tap at all, added green and removed red (§ 23.6).
+function renderDiff(box, diff) {
+  box.textContent = '';
+  for (const line of String(diff).split('\n')) {
+    if (!line || line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')) continue;
+    const kind = line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : 'keep';
+    box.append(el('div', `diff-line ${kind}`, line));
+  }
+}
+
+function startToolRow(body, event) {
+  const row = el('div', 'tool-row');
+  const box = el('details', 'tool');
+  const summary = el('summary', 'tool-line');
+  const detail = el('pre', 'tool-detail', event.preview || '');
+  box.append(summary, detail);
+  const diffBox = el('div', 'tool-diff');
+  row.append(box, diffBox);
+  body.append(row);
+  const call = {
+    id: event.call_id || '', row, box, summary, detail, diffBox,
+    label: toolLabel(event), done: false,
+  };
+  drawToolRow(call);
+  toolCalls.set(call.id || `anon-${toolCalls.size}`, call);
+  lastCall = call;
+  return call;
+}
+
+function finishToolRow(body, event) {
+  let call = event.call_id ? toolCalls.get(event.call_id) : null;
+  if (!call && !event.call_id && lastCall && !lastCall.done) call = lastCall;
+  if (!call) call = startToolRow(body, { tool: event.tool, call_id: event.call_id });
+  const landed = toolLabel(event);
+  if (landed.fallback && call.label.title) {
+    // An old worker's result carries no preview either: keep the title its start gave us.
+    call.label = { ...call.label, stats: landed.stats, failed: landed.failed, error: landed.error };
+  } else {
+    call.label = landed;
+  }
+  call.done = true;
+  const result = event.result && typeof event.result === 'object' ? event.result : {};
+  if (typeof result.error === 'string') addToolDetail(call, result.error);
+  if (typeof event.diff === 'string' && event.diff) {
+    call.diff = event.diff;
+    addToolDetail(call, event.diff);
+  }
+
+  const merge = call.label.merge;
+  if (merge && !call.label.failed && toolRun && toolRun.key === merge.key
+      && toolRun.head !== call && call === lastCall) {
+    // This call joins the run above it: its own row goes, and the run's line counts it (§ 23.7).
+    toolRun.count += 1;
+    toolRun.total += Number(merge.lines ?? merge.entries ?? 0);
+    toolRun.unit = toolRun.unit || (merge.lines !== undefined ? 'lines' : merge.entries !== undefined ? 'entries' : '');
+    addToolDetail(toolRun.head, call.detail.textContent);
+    call.row.remove();
+    toolCalls.delete(call.id || '');
+    lastCall = toolRun.head;
+    toolRun.head.label = { ...toolRun.head.label, title: mergeLine(toolRun), stats: [], error: '' };
+    drawToolRow(toolRun.head);
+    return;
+  }
+  drawToolRow(call);
+  toolRun = merge && !call.label.failed
+    ? { key: merge.key, head: call, count: 1, total: Number(merge.lines ?? merge.entries ?? 0),
+        unit: merge.lines !== undefined ? 'lines' : merge.entries !== undefined ? 'entries' : '',
+        singular: merge.singular, plural: merge.plural }
+    : null;
+  if (call.label.inlineDiff && call.diff) renderDiff(call.diffBox, call.diff);
+}
+
 // The fallback transcript: prompt, tool lines and the answer, for a desktop that cannot send a
 // screen. Everything here is program or model output, so it goes in through textContent.
 function transcribe(event) {
@@ -440,15 +617,23 @@ function transcribe(event) {
       bubble.append(el('div', 'prompt-text', event.text || ''));
       if (event.origin) bubble.append(el('div', 'prompt-origin', event.origin));
       body.append(bubble);
+      resetToolCalls();
       answerNode = null;
       break;
     }
     case 'tool_started': {
-      const row = el('div', 'tool');
-      row.append(el('span', 'tool-name', event.tool || 'tool'));
-      row.append(el('span', 'tool-preview', event.preview || ''));
-      body.append(row);
+      startToolRow(body, event);
       answerNode = null;
+      break;
+    }
+    case 'tool_result': {
+      finishToolRow(body, event);
+      answerNode = null;
+      break;
+    }
+    case 'tool_output': {
+      // Output belongs behind the running call's line, not between the lines.
+      if (lastCall && !lastCall.done) addToolDetail(lastCall, event.text || '');
       break;
     }
     case 'delta': {
@@ -491,6 +676,8 @@ function transcribe(event) {
     case 'agent_finished':
     case 'agent_stopped':
     case 'cancelled':
+      // A new turn never continues the last one's run of reads.
+      resetToolCalls();
       answerNode = null;
       break;
     default:

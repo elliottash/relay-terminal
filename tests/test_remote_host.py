@@ -314,6 +314,40 @@ class StreamTests(unittest.TestCase):
                 await client.close()
         run(main())
 
+    def test_a_tool_result_reaches_the_phone_with_its_label_and_diff(self):
+        # Protocol section 23 rides on two events a phone already sees, and the hub forwards a
+        # worker event verbatim: `label`, `ms` and `diff` therefore need no new allow-list entry,
+        # and none is added. Nothing about the shape of what a phone may see changes either - a
+        # write's diff is the same file text `tool_started.preview` has carried all along.
+        label = {"kind": "edit", "running": "editing x.py", "title": "edited x.py",
+                 "stats": ["+1 −1"], "ok": True, "path": "src/x.py", "inline_diff": True,
+                 "open": {"type": "fold"}}
+
+        async def main():
+            async with Harness() as harness:
+                client, paired, _, _ = await harness.pair()
+                await client.close()
+                client = client_mod.Client(harness.base)
+                await client.connect(paired)
+                await client.expect("panes")
+                await client.send({"t": "pane_focus", "pane": "pane-1"})
+                await asyncio.sleep(0.1)
+                harness.source._emit("pane-1", {
+                    "event": "tool_result", "tool": "edit_file", "call_id": "c1", "ms": 60,
+                    "result": {"path": "src/x.py", "added": 1, "removed": 1},
+                    "diff": "--- a/src/x.py\n+++ b/src/x.py\n-old = 1\n+new = 1\n",
+                    "label": label})
+                while True:
+                    message = await asyncio.wait_for(client.inbox.get(), 10)
+                    if message["t"] == "agent" and message["event"]["event"] == "tool_result":
+                        break
+                event = message["event"]
+                self.assertEqual(event["label"], label)
+                self.assertEqual(event["ms"], 60)
+                self.assertIn("+new = 1", event["diff"])
+                await client.close()
+        run(main())
+
     def test_resume_replays_what_was_missed(self):
         async def main():
             async with Harness() as harness:

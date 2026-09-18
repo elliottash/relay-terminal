@@ -102,6 +102,27 @@ p { margin: 0 0 12px; }
 .tool-preview, .tool-summary { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool.ok .tool-name { color: var(--ok); }
 .tool.failed .tool-name { color: var(--bad); }
+
+/* One line per tool call, the detail behind the disclosure triangle (protocol § 23). */
+.tool-row { margin-bottom: 4px; }
+details.tool { display: block; padding: 6px 10px; }
+details.tool > summary {
+  cursor: pointer; list-style-position: outside; color: var(--text);
+  font-family: ui-monospace, Menlo, monospace; overflow-wrap: anywhere;
+}
+details.tool.failed > summary { color: var(--bad); }
+details.tool > summary::marker { color: var(--muted); }
+.tool-detail {
+  margin: 6px 0 0; padding: 6px 0 0; border-top: 1px solid var(--line);
+  white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; color: var(--muted);
+  max-height: 50vh; overflow: auto;
+}
+.tool-diff { font-family: ui-monospace, Menlo, monospace; font-size: 12px; padding: 0 10px; }
+.tool-diff:empty { display: none; }
+.diff-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff-line.add { color: var(--ok); }
+.diff-line.del { color: var(--bad); }
+.diff-line.keep { color: var(--muted); }
 .answer { white-space: pre-wrap; overflow-wrap: anywhere; }
 .turn-foot { color: var(--muted); font-size: 12px; margin-top: 6px; }
 
