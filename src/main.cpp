@@ -1307,16 +1307,21 @@ private:
         // click the title to name the pane by hand (/rename does the same without the mouse).
         auto *header = new QWidget;
         auto *headerRow = new QHBoxLayout(header);
+        m_headerLayout = headerRow;
         headerRow->setContentsMargins(0, 0, 0, 0);
         headerRow->setSpacing(8);
         m_titleLabel = new QLabel; m_titleLabel->setTextFormat(Qt::PlainText);
         m_titleLabel->setObjectName(QStringLiteral("paneTitle"));
         m_titleLabel->setCursor(Qt::IBeamCursor);
-        m_titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        // The text is elided in updateHeader(), so the label asks for exactly what it shows.
+        m_titleLabel->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
         m_titleLabel->installEventFilter(this);
         m_titleEdit = new QLineEdit;
         m_titleEdit->setObjectName(QStringLiteral("paneTitleEdit"));
         m_titleEdit->setVisible(false);
+        m_titleEdit->setMaxLength(relay::titles::kMaxUserTitle);
+        m_titleEdit->setPlaceholderText(QStringLiteral("Name this pane — empty goes back to the model's name"));
+        m_titleEdit->setMinimumWidth(220);
         m_titleEdit->installEventFilter(this);
         connect(m_titleEdit, &QLineEdit::returnPressed, this, [this] { commitRename(); });
         m_titleAuto = new QLabel(QStringLiteral("auto"));
@@ -1330,11 +1335,12 @@ private:
         m_cwdLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         m_cwdLabel->installEventFilter(this);
         m_cwdLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        headerRow->addWidget(m_titleLabel, 1);
+        headerRow->addWidget(m_titleLabel, 0);
         headerRow->addWidget(m_titleEdit, 1);
         headerRow->addWidget(m_titleAuto, 0);
-        headerRow->addStretch(0);
+        headerRow->addStretch(1);
         headerRow->addWidget(m_cwdLabel, 0);
+        m_headerWidget = header;
         layout->addWidget(header);
         m_terminalHost = new QWidget;
         auto *terminalLayout = new QVBoxLayout(m_terminalHost); terminalLayout->setContentsMargins(0, 0, 0, 0);
@@ -5794,11 +5800,23 @@ public:
                + QStringLiteral("\n\nDouble click to rename · /rename");
     }
 
+    // The pane button row floats over the top right of the leaf, exactly where the directory sits.
+    // PaneChrome pushes the header clear of itself while it is shown.
+    void setHeaderRightInset(int pixels) {
+        if (!m_headerLayout || m_headerLayout->contentsMargins().right() == pixels) return;
+        m_headerLayout->setContentsMargins(0, 0, pixels, 0);
+        updateHeader();
+    }
+
     void updateHeader() {
         if (!m_titleLabel) return;
         const QString shown = m_title.isEmpty() ? QFileInfo(m_cwd).fileName() : m_title;
         const QFontMetrics metrics(m_titleLabel->font());
-        const int room = std::max(80, m_titleLabel->width());
+        // The title takes what the directory, the badge and the hover button row leave.
+        const int taken = (m_cwdLabel ? m_cwdLabel->sizeHint().width() : 0)
+                          + (m_titleAuto && m_titleAuto->isVisible() ? m_titleAuto->sizeHint().width() : 0)
+                          + (m_headerLayout ? m_headerLayout->contentsMargins().right() : 0) + 32;
+        const int room = std::max(80, (m_headerWidget ? m_headerWidget->width() : width()) - taken);
         m_titleLabel->setText(metrics.elidedText(shown, Qt::ElideRight, room));
         m_titleLabel->setToolTip(headerTooltip());
         if (m_cwdLabel) m_cwdLabel->setToolTip(headerTooltip());
@@ -5967,6 +5985,8 @@ private:
     // Pane title (issue JRWQ): the header line, its in-place editor and the "auto" badge.
     QLabel *m_titleLabel = nullptr, *m_titleAuto = nullptr;
     QLineEdit *m_titleEdit = nullptr;
+    QHBoxLayout *m_headerLayout = nullptr;
+    QWidget *m_headerWidget = nullptr;
     QString m_title;
     bool m_titleUser = false;
     bool m_native = false, m_workerReady = false, m_shellReady = false, m_loading = false;
@@ -6239,8 +6259,21 @@ public:
         adjustSize();
         move(leaf->width() - width() - 6, 4);
         raise();
+        syncHeaderInset();
     }
 
+    // Pane title (issue JRWQ): the header's right-hand directory must not end up under these
+    // buttons, so the header gives up exactly the room they take while they are on screen.
+    void syncHeaderInset() {
+        if (auto *pane = dynamic_cast<Pane *>(parentWidget()))
+            pane->setHeaderRightInset(isVisible() ? width() + 10 : 0);
+    }
+
+protected:
+    void showEvent(QShowEvent *event) override { QFrame::showEvent(event); syncHeaderInset(); }
+    void hideEvent(QHideEvent *event) override { QFrame::hideEvent(event); syncHeaderInset(); }
+
+public:
     void refreshTooltips() {
         for (auto *b : findChildren<QToolButton *>()) {
             const QString keys = Keymap::instance().shortcutText(b->property("action").toString());

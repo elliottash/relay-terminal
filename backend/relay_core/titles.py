@@ -25,8 +25,9 @@ MAX_WORDS = 6
 MAX_USER_TITLE = 200
 # Turns between two automatic refreshes. Turn 1 always gets a title; after that the work has to move on.
 REFRESH_TURNS = 5
-# A title is a handful of words: a tiny output budget keeps the call cheap and fast.
-MAX_TOKENS = 64
+# A title is a handful of words, but the budget also has to cover a reasoning model's hidden
+# tokens: too tight and the reply comes back truncated, which providers report as an error.
+MAX_TOKENS = 1024
 MAX_LABEL = 80
 
 TITLE_SYSTEM = (

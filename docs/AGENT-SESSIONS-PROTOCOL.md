@@ -899,8 +899,10 @@ waits for it:
 
 The call sends a capped plain-text rendering of the conversation (`sidecall.render_transcript`,
 12 000 characters) and asks for `{"title": "..."}`; the reply is stripped of quotes, a `Title:`
-preamble and a trailing period, cut to six words and 60 characters. At most one title call per
-pane is ever in flight. **Fallback:** with no model configured, or when the call fails, the title
+preamble and a trailing period, cut to six words and 60 characters. The output budget is 1024
+tokens, not the few a title needs: a reasoning model spends tokens before it answers, and a reply
+cut short comes back from the provider as an error. At most one title call per pane is ever in
+flight. **Fallback:** with no model configured, or when the call fails, the title
 stays the first prompt (80 characters) and `session_title` carries that text with
 `source: "model"`; the cadence still moves on, so a dead provider is not asked again every turn.
 
