@@ -40,7 +40,7 @@ k() { xdotool key --delay 40 "$@"; }
 
 # The pairing URL holds a one-time secret, so Relay writes it out only when asked to.
 export RELAY_REMOTE_PAIR_FILE="$work/pair-url.txt"
-"$build/relay" --engine=relay --workspace "$work" >"$out/relay-stderr.log" 2>&1 &
+"$build/relay" --workspace "$work" >"$out/relay-stderr.log" 2>&1 &
 relay_pid=$!
 sleep 7
 win=$(for w in $(xdotool search --onlyvisible --pid "$relay_pid" --name "^Relay"); do
@@ -87,7 +87,8 @@ if [[ -n $dlg ]]; then
   import -window "$dlg" "$out/implementer-05-confirm-code.png"
   xdotool windowfocus "$dlg"; sleep 1
   # Allowing is deliberate: Refuse holds the focus, so Return would turn the phone away. The
-  # buttons are Refuse, Allow viewing, Allow typing — this run wants the last one.
+  # buttons are Refuse, Allow viewing, Allow typing — this run wants the last one, because the
+  # one prompt box routes, and routing to the shell is what "typing" grants.
   k Tab Tab space
 fi
 sleep 2

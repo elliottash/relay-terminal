@@ -200,24 +200,29 @@ class BrowserTerminalTests(unittest.TestCase):
                     await browser.wait_for(
                         "document.querySelectorAll('.screen-row').length > 1", timeout=30)
 
-                    # One screen, and the terminal tab shows only its own controls: not the
-                    # agent composer, and not the typing controls until you take over.
+                    # One screen, one prompt box. The box is always there — it routes what you
+                    # type — but the program's own keys wait until you take over.
                     self.assertEqual(await browser.evaluate(SCREENS_SHOWN), 1)
-                    self.assertFalse(await browser.evaluate(shown('composer')))
+                    self.assertTrue(await browser.evaluate(shown('composer')))
                     self.assertFalse(await browser.evaluate(shown('term-keys')))
+                    self.assertEqual(
+                        await browser.evaluate(
+                            "document.getElementById('composer-text').placeholder"),
+                        "Ask or run…")
 
-                    # Read only until you take over.
-                    self.assertFalse(await browser.evaluate(
-                        shown('term-composer')))
                     await browser.evaluate("document.getElementById('term-take').click()")
-                    await browser.wait_for(
-                        shown('term-composer'), timeout=20)
+                    await browser.wait_for(shown('term-keys'), timeout=20)
+                    # Taking over turns the same box into the program's line.
+                    self.assertEqual(
+                        await browser.evaluate(
+                            "document.getElementById('composer-text').placeholder"),
+                        "Type a line for the program…")
 
                     await browser.evaluate("""
                         (() => {
-                          const box = document.getElementById('term-line');
+                          const box = document.getElementById('composer-text');
                           box.value = 'echo browser-typed-9876';
-                          document.getElementById('term-send').click();
+                          document.getElementById('composer-send').click();
                           return true;
                         })()
                     """)
@@ -266,7 +271,7 @@ class ViewOnlyTests(unittest.TestCase):
 
                     # Typing is never offered, and the reason is on screen.
                     self.assertFalse(await browser.evaluate(shown('term-take')))
-                    self.assertFalse(await browser.evaluate(shown('term-composer')))
+                    self.assertFalse(await browser.evaluate(shown('composer')))
                     self.assertFalse(await browser.evaluate(shown('term-keys')))
                     note = await browser.evaluate(
                         "document.getElementById('term-note').textContent")
@@ -300,11 +305,11 @@ class DirectTypingTests(unittest.TestCase):
                     await browser.wait_for("document.querySelectorAll('.screen-row').length > 1",
                                            timeout=30)
                     await browser.evaluate("document.getElementById('term-take').click()")
-                    await browser.wait_for(shown('term-composer'), timeout=20)
+                    await browser.wait_for(shown('composer'), timeout=20)
 
                     # Turn on direct typing: the line box goes, the keyboard target arrives.
                     await browser.evaluate("document.getElementById('term-direct').click()")
-                    await browser.wait_for("!" + shown('term-composer'), timeout=10)
+                    await browser.wait_for("!" + shown('composer'), timeout=10)
                     self.assertEqual(
                         await browser.evaluate("document.activeElement.id"), "term-capture")
 

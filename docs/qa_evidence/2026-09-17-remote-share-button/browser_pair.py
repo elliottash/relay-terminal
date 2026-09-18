@@ -32,13 +32,22 @@ async def main(url: str) -> None:
         text = await browser.evaluate("document.querySelector('.screen-grid').textContent")
         print("phone sees:", " ".join(text.split())[:200], flush=True)
 
-        await browser.evaluate("document.getElementById('term-take').click()")
-        await browser.wait_for(shown('term-composer'), timeout=20)
+        # One box, no take-over needed: a command routes to the shell.
         await browser.evaluate(
-            "(() => { const box = document.getElementById('term-line');"
+            "(() => { const box = document.getElementById('composer-text');"
             " box.value = 'printf \"typed from the phone\\\\n\"';"
-            " document.getElementById('term-send').click(); return true; })()")
-        await asyncio.sleep(4)
+            " document.getElementById('composer-send').click(); return true; })()")
+        await asyncio.sleep(5)
+        after = await browser.evaluate("document.querySelector('.screen-grid').textContent")
+        print("after a shell command:", " ".join(after.split())[:240], flush=True)
+
+        # And a prompt that is not a command goes to the agent, whose reply prints in the
+        # same terminal. Without a provider configured this still proves the routing.
+        await browser.evaluate(
+            "(() => { const box = document.getElementById('composer-text');"
+            " box.value = 'why is this build slow?';"
+            " document.getElementById('composer-send').click(); return true; })()")
+        await asyncio.sleep(6)
         after = await browser.evaluate("document.querySelector('.screen-grid').textContent")
         print("phone sees after typing:", " ".join(after.split())[:240], flush=True)
         problems = [line for line in browser.console if "EXCEPTION" in line]

@@ -11,7 +11,6 @@ import { ScreenView, KEYS, controlByte, keyEventBytes } from './screen.js';
 const rrp = new Rrp();
 let panes = [];
 let current = null;
-let pending = null;          // the turn being rendered
 let reconnectTimer = null;
 let capability = 'view';
 let features = [];
@@ -20,6 +19,7 @@ let tab = 'agent';
 let driving = false;
 let sticky = { ctrl: false, alt: false };
 let directKeys = false;
+let answerNode = null;      // the answer being streamed, without a terminal to print into
 
 const $ = (id) => document.getElementById(id);
 const show = (name) => {
@@ -163,11 +163,10 @@ function openPane(paneId) {
   $('thread-title').textContent = pane?.title || paneId;
   $('thread-cwd').textContent = pane?.cwd || '';
   $('thread-body').replaceChildren();
-  pending = null;
+  answerNode = null;
   driving = false;
-  const hasScreen = features.includes('screen');
-  $('thread-tabs').hidden = !hasScreen;
-  setTab(hasScreen ? 'terminal' : 'agent');
+  directKeys = false;
+  openTerminal();
   show('thread');
   rrp.send({ t: 'pane_focus', pane: paneId }).catch(() => {});
 }
@@ -184,20 +183,15 @@ function closePane() {
 
 // ---- terminal -----------------------------------------------------------------------------
 
-function setTab(which) {
-  tab = which;
-  const terminal = which === 'terminal';
-  $('tab-agent').classList.toggle('is-on', !terminal);
-  $('tab-terminal').classList.toggle('is-on', terminal);
-  $('thread-body').hidden = terminal;
-  $('composer').hidden = terminal;
-  $('terminal-pane').hidden = !terminal;
-  if (terminal) {
-    if (!screenView) screenView = new ScreenView($('screen-wrap'));
-    screenView.fit();
-    updateDriveUi();
-    rrp.send({ t: 'screen_get', pane: current }).catch(() => {});
-  }
+function openTerminal() {
+  const hasScreen = features.includes('screen');
+  $('terminal-pane').hidden = !hasScreen;
+  $('thread-body').hidden = hasScreen;
+  if (!hasScreen) return;
+  if (!screenView) screenView = new ScreenView($('screen-wrap'));
+  screenView.fit();
+  updateDriveUi();
+  rrp.send({ t: 'screen_get', pane: current }).catch(() => {});
 }
 
 function onScreen(message) {
@@ -214,14 +208,17 @@ function updateDriveUi() {
   $('term-release').hidden = !driving;
   $('term-direct').hidden = !driving;
   $('term-keys').hidden = !driving;
-  // With direct typing on, the line box would only be in the way.
-  $('term-composer').hidden = !driving || directKeys;
   $('term-capture').hidden = !driving || !directKeys;
   $('term-direct').classList.toggle('is-on', directKeys);
   $('term-mode').textContent = driving
     ? (directKeys ? 'Typing directly' : 'You have the keyboard')
     : 'Watching';
   $('term-mode').className = `chip ${driving ? 'ok' : ''}`;
+  // A `view` device may not compose at all, so it gets no box rather than one that only ever
+  // reports "not permitted". With direct typing on, the keys go straight through instead.
+  const canCompose = capability === 'agent' || capability === 'full';
+  $('composer').hidden = !canCompose || (driving && directKeys);
+  $('composer-text').placeholder = driving ? 'Type a line for the program…' : 'Ask or run…';
   if (!allowed) {
     $('term-note').textContent = 'This device is paired for viewing only.';
   } else if (!driving) {
@@ -232,7 +229,7 @@ function updateDriveUi() {
 }
 
 // Direct typing: every key goes straight to the program, so a tablet with a keyboard behaves
-// like a terminal. The line box stays the default on a phone, where soft keyboards mangle
+// like a terminal. The prompt box stays the default on a phone, where soft keyboards mangle
 // per-key input; this is the opt-in for when there are real keys.
 function setDirectKeys(on) {
   directKeys = on;
@@ -295,123 +292,78 @@ function toggleSticky(name) {
   }
 }
 
-// A whole line at a time is what avoids Android keyboards mangling per-key input; sticky Ctrl
-// turns the next line into a control byte instead.
-function sendLine() {
-  const box = $('term-line');
-  const text = box.value;
-  if (!current || !driving) return;
-  if (sticky.ctrl && text.length === 1) {
-    const byte = controlByte(text);
-    sticky.ctrl = false;
-    toggleSticky('ctrl');
-    toggleSticky('ctrl');
-    if (byte) sendKeys(byte);
-    box.value = '';
-    return;
-  }
-  let payload = text;
-  if (sticky.alt) { payload = `\x1b${payload}`; sticky.alt = false; }
-  rrp.send({ t: 'line', pane: current, text: payload })
-    .catch((error) => { $('term-note').textContent = error.message; });
-  box.value = '';
-}
+// ---- agent state ------------------------------------------------------------------------------
 
-function threadBody() {
-  return $('thread-body');
-}
-
-function atBottom() {
-  const body = threadBody();
-  return body.scrollHeight - body.scrollTop - body.clientHeight < 80;
-}
-
-function append(node) {
-  const stick = atBottom();
-  threadBody().append(node);
-  if (stick) threadBody().scrollTop = threadBody().scrollHeight;
-}
-
-function turnCard() {
-  if (pending) return pending;
-  const card = el('div', 'turn');
-  const answer = el('div', 'answer');
-  const tools = el('div', 'tools');
-  const think = el('div', 'thinking');
-  think.hidden = true;
-  card.append(think, tools, answer);
-  pending = { card, answer, tools, think, text: '' };
-  append(card);
-  return pending;
-}
-
+// The agent's *output* arrives through the screen stream, because Relay prints it into the pane's
+// terminal (ARCHITECTURE section 8). So there is no transcript to render here — only the state a
+// prompt box needs: whether a turn is running, and anything it wants to say.
 function onAgent(message) {
   if (message.pane !== current) return;
   const event = message.event || {};
+  const note = (text) => { $('term-note').textContent = text; };
+  // A desktop with no screen stream — the agent companion — has no terminal to print into, so
+  // the reply is rendered here instead. With a terminal, this is silent: the same text is
+  // already arriving as screen state.
+  if (!features.includes('screen')) transcribe(event);
+  switch (event.event) {
+    case 'agent_started':
+      $('composer-stop').hidden = false;
+      note('Agent running…');
+      break;
+    case 'queued':
+      note(event.origin ? `Queued · ${event.origin}` : 'Queued');
+      break;
+    case 'agent_finished':
+    case 'agent_stopped':
+    case 'cancelled':
+      $('composer-stop').hidden = true;
+      note(event.event === 'agent_finished' ? '' : 'Stopped.');
+      break;
+    case 'plan_written':
+      note('A plan is ready on the desktop.');
+      break;
+    case 'status':
+      if (event.text) note(event.text);
+      break;
+    case 'error':
+      $('composer-stop').hidden = true;
+      note(event.message || 'The agent reported an error.');
+      break;
+    default:
+      break;
+  }
+}
+
+// The fallback transcript: prompt, tool lines and the answer, for a desktop that cannot send a
+// screen. Everything here is program or model output, so it goes in through textContent.
+function transcribe(event) {
+  const body = $('thread-body');
+  const stick = body.scrollHeight - body.scrollTop - body.clientHeight < 80;
   switch (event.event) {
     case 'queued': {
       const bubble = el('div', 'prompt');
       bubble.append(el('div', 'prompt-text', event.text || ''));
       if (event.origin) bubble.append(el('div', 'prompt-origin', event.origin));
-      append(bubble);
-      if (event.started) pending = null;
-      break;
-    }
-    case 'agent_started':
-      turnCard();
-      $('composer-stop').hidden = false;
-      break;
-    case 'thinking_delta': {
-      const turn = turnCard();
-      turn.think.hidden = false;
-      turn.think.textContent = event.text || '';
-      break;
-    }
-    case 'thinking_done': {
-      const turn = turnCard();
-      turn.think.classList.add('done');
+      body.append(bubble);
+      answerNode = null;
       break;
     }
     case 'tool_started': {
-      const turn = turnCard();
       const row = el('div', 'tool');
-      row.dataset.tool = event.tool || '';
       row.append(el('span', 'tool-name', event.tool || 'tool'));
       row.append(el('span', 'tool-preview', event.preview || ''));
-      turn.tools.append(row);
-      break;
-    }
-    case 'tool_result': {
-      const turn = turnCard();
-      const row = [...turn.tools.children].reverse()
-        .find((item) => item.dataset.tool === (event.tool || ''));
-      if (row) {
-        row.classList.add(event.ok === false ? 'failed' : 'ok');
-        row.append(el('span', 'tool-summary', event.summary || ''));
-      }
+      body.append(row);
+      answerNode = null;
       break;
     }
     case 'delta': {
-      const turn = turnCard();
-      turn.text += event.text || '';
-      turn.answer.textContent = turn.text;
-      if (atBottom()) threadBody().scrollTop = threadBody().scrollHeight;
+      if (!answerNode) {
+        answerNode = el('div', 'answer');
+        body.append(answerNode);
+      }
+      answerNode.textContent += event.text || '';
       break;
     }
-    case 'turn_summary': {
-      const turn = turnCard();
-      const foot = el('div', 'turn-foot',
-        `${event.tools ?? 0} tool${event.tools === 1 ? '' : 's'} · ${(event.elapsed ?? 0).toFixed(1)}s`);
-      turn.card.append(foot);
-      break;
-    }
-    case 'agent_finished':
-    case 'agent_stopped':
-    case 'cancelled':
-      $('composer-stop').hidden = true;
-      if (event.event !== 'agent_finished') append(el('div', 'note', 'Stopped.'));
-      pending = null;
-      break;
     case 'plan_written': {
       const card = el('div', 'plan');
       card.append(el('div', 'plan-title', event.title || 'Plan'));
@@ -420,43 +372,55 @@ function onAgent(message) {
       run.type = 'button';
       run.addEventListener('click', () => {
         run.disabled = true;
+        // By id, never by path: the desktop minted it and resolves it against its own table.
         rrp.send({ t: 'plan_execute', pane: current, plan_id: event.plan_id }).catch(() => {});
       });
       card.append(run);
-      append(card);
+      body.append(card);
+      answerNode = null;
       break;
     }
     case 'recap':
-      // `span_text` is the stretch of work the recap covers, already formatted in the desktop's
-      // local time by the worker (it is the clock the work was done on, not the phone's).
-      if (event.span_text) append(el('div', 'note', event.span_text));
-      append(el('div', 'note', event.text || ''));
+      body.append(el('div', 'note', event.text || ''));
+      answerNode = null;
       break;
-    case 'status':
-      $('thread-note').textContent = event.text || '';
-      break;
-    case 'error':
-      append(el('div', 'note error', event.message || 'Something failed.'));
-      $('composer-stop').hidden = true;
+    case 'agent_finished':
+    case 'agent_stopped':
+    case 'cancelled':
+      answerNode = null;
       break;
     default:
       break;
   }
+  if (stick) body.scrollTop = body.scrollHeight;
 }
 
-// ---- composer ---------------------------------------------------------------------------------
+// ---- the one prompt box ---------------------------------------------------------------------
 
+// What you type is routed the way Relay's own prompt box routes it: a command runs in the shell,
+// anything else goes to the agent, and the agent's answer prints into this same terminal. Once you
+// have taken over, the line belongs to the running program instead.
 function sendPrompt() {
   const box = $('composer-text');
   const text = box.value.trim();
   if (!text || !current) return;
+  const fail = (error) => { $('term-note').textContent = error.message; };
+  const clear = () => { box.value = ''; box.style.height = 'auto'; };
+
+  if (driving) {
+    rrp.send({ t: 'line', pane: current, text }).catch(fail);
+    clear();
+    return;
+  }
   const running = panes.find((pane) => pane.id === current)?.status === 'running';
   rrp.send({
     t: 'compose', pane: current, text, when: running ? 'queue' : 'now',
+    // `agent: false` asks the desktop to route it, which only a device trusted with typing may
+    // do. Anything else reaches the agent and nothing more.
+    ...(capability === 'full' ? { agent: false } : {}),
     msg_id: b64(crypto.getRandomValues(new Uint8Array(9))),
-  }).catch((error) => append(el('div', 'note error', error.message)));
-  box.value = '';
-  box.style.height = 'auto';
+  }).catch(fail);
+  clear();
 }
 
 // ---- wiring -----------------------------------------------------------------------------------
@@ -536,13 +500,30 @@ window.addEventListener('DOMContentLoaded', () => {
   $('composer-stop').addEventListener('click', () => {
     rrp.send({ t: 'agent_stop', pane: current }).catch(() => {});
   });
+  // Sticky Ctrl/Alt from the extra-keys row apply to the next line typed in the box.
+  $('composer-text').addEventListener('keydown', (event) => {
+    if (!driving || event.key !== 'Enter' || event.shiftKey) return;
+    if (!sticky.ctrl && !sticky.alt) return;
+    event.preventDefault();
+    const text = $('composer-text').value;
+    if (sticky.ctrl && text.length === 1) {
+      const byte = controlByte(text);
+      if (byte) sendKeys(byte);
+    } else {
+      sendKeys(sticky.alt ? `\x1b${text}` : text);
+    }
+    sticky.ctrl = false;
+    sticky.alt = false;
+    for (const button of $('term-keys').querySelectorAll('[data-sticky]')) {
+      button.classList.remove('sticky-on');
+    }
+    $('composer-text').value = '';
+  }, true);
   $('thread-back').addEventListener('click', closePane);
-  $('tab-agent').addEventListener('click', () => setTab('agent'));
-  $('tab-terminal').addEventListener('click', () => setTab('terminal'));
   buildKeyRow();
   $('term-take').addEventListener('click', () => {
     rrp.send({ t: 'control_request', pane: current })
-      .then(() => { driving = true; updateDriveUi(); $('term-line').focus(); })
+      .then(() => { driving = true; updateDriveUi(); $('composer-text').focus(); })
       .catch((error) => { $('term-note').textContent = error.message; });
   });
   $('term-release').addEventListener('click', () => {
@@ -551,7 +532,6 @@ window.addEventListener('DOMContentLoaded', () => {
     directKeys = false;
     updateDriveUi();
   });
-  $('term-send').addEventListener('click', sendLine);
   $('term-direct').addEventListener('click', () => setDirectKeys(!directKeys));
   $('term-capture').addEventListener('keydown', onDirectKey);
   // Never let the field accumulate text: it is a focus target, not an input.
@@ -564,9 +544,6 @@ window.addEventListener('DOMContentLoaded', () => {
   // Tapping the screen while typing directly puts the keyboard back where it belongs.
   $('screen-wrap').addEventListener('click', () => {
     if (driving && directKeys) $('term-capture').focus();
-  });
-  $('term-line').addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') { event.preventDefault(); sendLine(); }
   });
   $('pair-retry').addEventListener('click', () => location.reload());
   $('forget').addEventListener('click', async () => {

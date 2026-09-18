@@ -9,6 +9,7 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"start","tls":true,"address":"...","port":0}       bring the service up
     {"t":"pane","id":"p1","title":"...","cwd":"...","rows":R,"cols":C,"status":"idle"}
     {"t":"frame","pane":"p1","full":bool,"cursor":{...},"lines":[...],"rows":R,"cols":C,"alt":b}
+    {"t":"agent","pane":"p1","event":{...}}                  one worker event, verbatim
     {"t":"unpane","id":"p1"}                                 pane closed or stopped sharing
     {"t":"pair"}                                             open a pairing room, get a QR
     {"t":"answer","id":N,"allow":true,"capability":"full"}   the user answered the dialog
@@ -23,6 +24,7 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"paired","device":"...","name":"...","capability":"..."}
     {"t":"devices","items":[...]}     {"t":"connected","count":N}
     {"t":"input","pane":"p1","bytes":"<base64>"}             keys from a phone
+    {"t":"compose","pane":"p1","text":"...","route":bool,"origin":"remote:<id>"}   a prompt
     {"t":"error","message":"..."}
 
 Input arrives here as RRP messages and leaves as `input`: the GUI writes the bytes into the pane's
@@ -184,10 +186,22 @@ class GuiPaneSource(panes_mod.PaneSource):
     # ---- the agent half belongs to the GUI's own composer --------------------------------------
 
     async def compose(self, pane: str, text: str, *, to_agent: bool, when: str, origin: str) -> None:
-        if to_agent:
-            self.send({"t": "compose", "pane": pane, "text": text, "when": when, "origin": origin})
+        """A prompt from a client. `route` asks the desktop to decide shell or agent, the way its
+        own composer does; without it the text can only reach the agent.
+
+        The host has already applied the rule that routing needs a `full` device: an `agent`
+        device's compose always arrives with to_agent set, so it cannot reach the shell.
+        """
+        self._pane(pane)
+        self.send({"t": "compose", "pane": pane, "text": text, "when": when, "origin": origin,
+                   "route": not to_agent})
+
+    def agent_event(self, pane: str, event: dict) -> None:
+        """A worker event the GUI forwarded. The allow-list in the hub decides what leaves."""
+        if pane not in self.panes:
             return
-        await self.send_line(pane, text, device=origin.removeprefix("remote:"))
+        for callback in list(self._agent_callbacks):
+            callback(pane, event)
 
     async def agent_stop(self, pane: str) -> None:
         self.send({"t": "agent_stop", "pane": pane})
@@ -258,6 +272,8 @@ class Sidecar:
             self.source.drop_pane(message.get("id", ""))
         elif kind == "frame":
             self.source.set_frame(message)
+        elif kind == "agent":
+            self.source.agent_event(message.get("pane", ""), message.get("event") or {})
         elif kind == "pair":
             await self.pair()
         elif kind == "address":

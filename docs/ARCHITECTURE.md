@@ -1074,6 +1074,23 @@ bottom of the terminal: running prompt, numbered queued prompts with ×, Clear, 
 "PAUSED · Resume". The palette offers Clear agent queue and Resume agent queue when relevant.
 Full protocol: [QUEUE-INTERRUPT.md](QUEUE-INTERRUPT.md).
 
+**Editing a queued item.** Up on an empty prompt box selects the item queued last and puts its text
+in the prompt box, where it is edited in place; `Pane::selectQueueEntry` / `saveQueueEdit` /
+`leaveQueueSelection` own that, and `src/QueueNav.{h,cpp}` (`relay::queuenav::decide`) holds the key
+rules so they can be tested without a widget — chiefly when Up and Down move between items and when
+they belong to a multi-line item's own text (only the first and last line reach past it, as in any
+shell history). Enter saves, Esc drops the edit, Ctrl+Up/Down reorder, Shift+Delete removes
+(plain Delete and Backspace are the text's now). The highlighted row keeps the stored text until the
+edit is saved, so the row and the box differ only while an edit is in flight.
+
+While the **top** item is highlighted the queue holds: `queueHeldBySelection()` is derived from the
+selection rather than stored, so leaving the selection releases the queue with no second piece of
+state to keep in step, and it covers an item drifting to the front while it is being edited.
+`pumpQueue` and `moreTurnsPending` go through `queueBlocked()` (a real pause, or this hold).
+Anything that changes the queue under a selection — the head starting, a removal, a drag — passes
+the selected item's id through `keepSelectionOn`, which follows that item to its new index or, if it
+has gone, gives the prompt box back empty.
+
 ### Image context
 
 `src/Images.{h,cpp}` and protocol section 17 (issue EM1E). Four inputs, one path: pasting or dropping
@@ -1411,8 +1428,20 @@ The protocol, the cryptography and the phone's web client live in a Python sidec
 
 | Direction | What crosses |
 |---|---|
-| GUI → sidecar | the pane's title, cwd and status; a screen frame whenever the view pulls one; the answer to a pairing question |
-| sidecar → GUI | the pairing URL and its QR matrix; a pairing request to put to the person; the keystrokes a phone sent |
+| GUI → sidecar | the pane's title, cwd and status; a screen frame whenever the view pulls one; each worker event; the answer to a pairing question |
+| sidecar → GUI | the pairing URL and its QR matrix; a pairing request to put to the person; the keystrokes a phone sent; a prompt a phone submitted |
+
+**One prompt box.** A client has a single box, like Relay's own. What is typed arrives as
+`compose`, and `Pane::submitRemote` routes it through the worker's router exactly as the composer
+does — a command runs in the shell, anything else goes to the agent. The agent's reply needs no
+channel of its own: Relay prints it into the pane's terminal (section 8), so it reaches the phone
+through the screen stream that is already running. A client whose desktop sends no screen — the
+agent companion — renders the reply itself instead. A remote prompt never touches the desktop's
+composer, because the person at the keyboard may be mid-draft.
+
+**(security)** Routing can reach the shell, so a client may only ask for it when its device was
+allowed to type. A device paired for the agent gets `submitAgent` and nothing else; a device paired
+for viewing cannot compose at all.
 
 Two rules decide the shape:
 
@@ -1420,9 +1449,9 @@ Two rules decide the shape:
   `frameChanged()`). `VtCore::updateFrame` consumes the dirty state, so a second caller would stop
   the pane repainting. Only a pane with a frame can be shared, which since the engine became the
   only terminal is every pane.
-- **Approving a device is a deliberate click.** The dialog shows a five-digit code derived from the
-  Noise handshake on both ends, and *Refuse* holds the focus, because allowing hands a phone the
-  keyboard of a live shell.
+- **Approving a device is a deliberate click**, and viewing and typing are separate grants. The
+  dialog shows a five-digit code derived from the Noise handshake on both ends, and *Refuse* holds
+  the focus, because allowing typing hands a phone the keyboard of a live shell.
 
 Everything else — pairing, capabilities, the password-prompt refusal, revocation — is the protocol's
 job and is described in [REMOTE-PROTOCOL.md](REMOTE-PROTOCOL.md).

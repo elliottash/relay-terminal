@@ -1,5 +1,6 @@
-phone shows code 46183
+phone shows code 31782
 paired
-phone sees: elliott@spark-dcc9:/tmp/tmp.sc2bYq0abN$ printf "shared from the desktop\\n" shared from the desktop elliott@spark-dcc9:/tmp/tmp.sc2bYq0abN$
-phone sees after typing: elliott@spark-dcc9:/tmp/tmp.sc2bYq0abN$ printf "shared from the desktop\\n" shared from the desktop elliott@spark-dcc9:/tmp/tmp.sc2bYq0abN$ printf "typed from the phone\n" typed from the phone elliott@spark-dcc9:/tmp/tmp.sc2bYq0abN$
+phone sees: elliott@spark-dcc9:/tmp/tmp.QSYZGp537Z$ printf "shared from the desktop\\n" shared from the desktop elliott@spark-dcc9:/tmp/tmp.QSYZGp537Z$
+after a shell command: elliott@spark-dcc9:/tmp/tmp.QSYZGp537Z$ printf "shared from the desktop\\n" shared from the desktop elliott@spark-dcc9:/tmp/tmp.QSYZGp537Z$ printf "typed from the phone\n" typed from the phone elliott@spark-dcc9:/tmp/tmp.QSYZGp537Z$
+phone sees after typing: elliott@spark-dcc9:/tmp/tmp.QSYZGp537Z$ printf "shared from the desktop\\n" shared from the desktop elliott@spark-dcc9:/tmp/tmp.QSYZGp537Z$ printf "typed from the phone\n" typed from the phone elliott@spark-dcc9:/tmp/tmp.QSYZGp537Z$ ✦ why i
 console problems: []

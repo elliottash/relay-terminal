@@ -25,8 +25,7 @@
       <p>This phone is not paired with a desktop yet.</p>
       <p class="muted">On your desktop, click the <strong>share icon</strong> beside the
         microphone under the prompt box, then scan the QR code with this device's camera.</p>
-      <p class="muted">Both devices have to be on the same network, and the pane has to be one of
-        Relay's own engine panes.</p>
+      <p class="muted">Both devices have to be on the same network.</p>
       <p id="welcome-note" class="note"></p>
     </div>
   </section>
@@ -61,12 +60,7 @@
       </div>
     </div>
 
-    <div id="thread-tabs" hidden>
-      <button type="button" id="tab-agent" class="tab is-on">Agent</button>
-      <button type="button" id="tab-terminal" class="tab">Terminal</button>
-    </div>
-
-    <div id="thread-body"></div>
+    <div id="thread-body" hidden></div>
 
     <div id="terminal-pane" hidden>
       <div id="screen-wrap"></div>
@@ -82,16 +76,14 @@
       <input id="term-capture" type="text" autocapitalize="off" autocomplete="off"
              autocorrect="off" spellcheck="false" aria-label="Terminal keyboard" hidden>
       <div id="term-keys" hidden></div>
-      <div id="term-composer" hidden>
-        <input id="term-line" type="text" placeholder="Type a line, Enter to run"
-               autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">
-        <button type="button" id="term-send">Run</button>
-      </div>
     </div>
 
     <div id="thread-note" class="muted small pad"></div>
+    <!-- One box, like Relay's own: what you type is routed — a command runs, anything else goes
+         to the agent, whose answer prints into the same terminal. After Take over it types
+         straight into the running program instead. -->
     <div id="composer">
-      <textarea id="composer-text" rows="1" placeholder="Ask the agent…"
+      <textarea id="composer-text" rows="1" placeholder="Ask or run…"
                 autocapitalize="sentences" autocomplete="off"></textarea>
       <button type="button" id="composer-stop" hidden>Stop</button>
       <button type="button" id="composer-send">Send</button>
