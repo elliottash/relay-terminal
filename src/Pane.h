@@ -9377,14 +9377,49 @@ private:
         notice->setWordWrap(true); layout->addWidget(notice);
         auto *consent = new QCheckBox(QStringLiteral("Send my submitted agent prompts and tool results to this provider."));
         layout->addWidget(consent);
+        // The consent is about data leaving the machine. Plain HTTP to a loopback host is a model
+        // server on this machine (the same rule as relay_core.provider.loopback_http): nothing
+        // leaves, there is no key, and asking to "share data with this provider" only confuses
+        // (owner, 2026-09-18, with http://127.0.0.1:8080/v1 in the box).
+        auto *localNote = new QLabel(QStringLiteral("This is a model server on this machine: prompts and tool results stay here, and no API key is needed."));
+        localNote->setWordWrap(true); layout->addWidget(localNote);
+        const auto isLocalServer = [base] {
+            const QUrl url(base->text().trimmed());
+            const QString host = url.host().toLower();
+            return url.scheme().toLower() == QStringLiteral("http")
+                && (host == QStringLiteral("localhost") || host == QStringLiteral("127.0.0.1") || host == QStringLiteral("::1"));
+        };
+        const auto showForServer = [=] {
+            const bool local = isLocalServer();
+            consent->setVisible(!local); localNote->setVisible(local);
+            key->setEnabled(!local); saveKey->setEnabled(!local);
+            key->setPlaceholderText(local ? QStringLiteral("Not needed for a model server on this machine")
+                                          : QStringLiteral("Leave empty to use the keyring key for this preset"));
+        };
+        connect(base, &QLineEdit::textChanged, &dialog, showForServer);
+        showForServer();
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel); layout->addWidget(buttons);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
             QJsonParseError error;
             const auto doc = QJsonDocument::fromJson(extra->toPlainText().toUtf8(), &error);
-            if (error.error != QJsonParseError::NoError || !doc.isObject() || !QFileInfo(workspace->text()).isDir() || !consent->isChecked()) {
-                QMessageBox::warning(&dialog, QStringLiteral("Check settings"), QStringLiteral("Choose an existing workspace, enter valid JSON, and confirm provider data sharing.")); return;
+            // One sentence about the thing that is actually wrong, with the keyboard put on it. The
+            // old message listed all three conditions whichever one had failed.
+            const auto refuse = [&dialog](QWidget *field, const QString &text) {
+                QMessageBox::warning(&dialog, QStringLiteral("Check settings"), text);
+                field->setFocus();
+            };
+            if (error.error != QJsonParseError::NoError || !doc.isObject()) {
+                refuse(extra, QStringLiteral("Extra request JSON must be a JSON object, for example {} or {\"temperature\": 0.7}.")); return;
             }
+            if (!QFileInfo(workspace->text()).isDir()) {
+                refuse(workspace, QStringLiteral("The agent workspace is not an existing folder. Choose one with “Choose…”.")); return;
+            }
+            if (!isLocalServer() && !consent->isChecked()) {
+                refuse(consent, QStringLiteral("Tick “Send my submitted agent prompts and tool results to this provider.” to continue. "
+                                               "The agent cannot work without sending them.")); return;
+            }
+            if (isLocalServer()) key->clear();      // never send a key to a model server on this machine
             const QString presetId = preset->currentData().toString();
             m_apiKey = key->text().trimmed(); m_workspace = QFileInfo(workspace->text()).canonicalFilePath();
             m_configured = false;
