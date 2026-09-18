@@ -179,6 +179,8 @@ int KonsoleBackend::capabilities() const
     int caps = AltScreenState | DisplayInjection | ScrollControl;
     if (m_session && m_session->metaObject()->indexOfMethod("getDisplayedText()") >= 0)
         caps |= ScreenText; // KF6 Konsole only
+    if (displayHasSlot("increaseFontSize()") && displayHasSlot("decreaseFontSize()"))
+        caps |= FontZoom;
     return caps;
 }
 
@@ -247,6 +249,23 @@ void KonsoleBackend::invokeOnDisplay(const char *slot)
 {
     if (QObject *view = display())
         QMetaObject::invokeMethod(view, slot, Qt::DirectConnection);
+}
+
+bool KonsoleBackend::displayHasSlot(const char *signature) const
+{
+    const QObject *view = display();
+    return view && view->metaObject()->indexOfMethod(signature) >= 0;
+}
+
+bool KonsoleBackend::zoom(int step)
+{
+    // resetFontSize() is newer than the two steps; without it, "Reset zoom" is not offered.
+    const char *slot = step > 0 ? "increaseFontSize" : step < 0 ? "decreaseFontSize" : "resetFontSize";
+    const QByteArray signature = QByteArray(slot) + "()";
+    if (!displayHasSlot(signature.constData()))
+        return false;
+    invokeOnDisplay(slot);
+    return true;
 }
 
 // Konsole exposes no "has selection" query and its copy does nothing without one;

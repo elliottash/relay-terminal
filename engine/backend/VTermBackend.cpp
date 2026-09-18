@@ -122,7 +122,7 @@ void VTermBackend::redrawPrompt()
 int VTermBackend::capabilities() const
 {
     return ScreenText | Scrollback | AltScreenState | LinkClicks | Osc8Links | PromptMarks | CwdTracking | DisplayInjection
-        | Search | ScrollControl;
+        | Search | ScrollControl | FontZoom;
 }
 
 QString VTermBackend::screenText() const { return m_session->screenText(); }
@@ -232,6 +232,31 @@ bool VTermBackend::scrollToPrompt(int direction)
 int VTermBackend::find(const QString &text, bool backwards)
 {
     return m_view ? m_view->find(text, backwards) : 0;
+}
+
+// widget() is the container that also holds the scroll bar, so the point is mapped onto the view.
+QString VTermBackend::linkAt(const QPoint &pos, int *line, int *column)
+{
+    if (line)
+        *line = -1;
+    if (column)
+        *column = -1;
+    if (!m_view || !m_container)
+        return {};
+    return m_view->linkAtPoint(m_view->mapFrom(m_container, pos), line, column);
+}
+
+bool VTermBackend::zoom(int step)
+{
+    if (!m_view)
+        return false;
+    if (step > 0)
+        m_view->zoomIn();
+    else if (step < 0)
+        m_view->zoomOut();
+    else
+        m_view->resetZoom();
+    return true;
 }
 
 void VTermBackend::setOutputCallbackEnabled(bool enabled) { m_session->setOutputSignalEnabled(enabled); }

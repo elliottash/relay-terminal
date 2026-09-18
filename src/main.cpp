@@ -23,9 +23,11 @@
 #include "WindowState.h"   // saved window layout ("reopen where I left off")
 #include "Voice.h"          // voice transcription: capture, the hold key, the transcript
 #include <iterator>
+#include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
+#include <QFileSystemModel>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -304,8 +306,15 @@ private:
         add("tab.previous", "tab", "Previous tab", {QStringLiteral("Ctrl+Shift+Tab")});
         // Ctrl+E, not Ctrl+P: one-handed (owner, 2026-09-17). Ctrl+D is left alone because it is
         // end-of-input for a running program. Ctrl+Shift+E is the twin that programs cannot swallow.
-        add("pane.splitRight", "pane", "New pane to the right", {QStringLiteral("Ctrl+E"), QStringLiteral("Ctrl+Shift+E")});
-        add("pane.splitDown", "pane", "New pane below", {QStringLiteral("Ctrl+Alt+E")});
+        // One key is now the whole of "new pane": it makes one on the right, and Left, Up or Down
+        // within two seconds re-docks it there instead (issue #78BN). The other three directions
+        // keep actions of their own so they can be bound or run from the palette, but the separate
+        // "new pane below" key (Ctrl+Alt+E) is dropped.
+        add("pane.splitRight", "pane", "New pane to the right (then ← ↑ ↓ places it)",
+            {QStringLiteral("Ctrl+E"), QStringLiteral("Ctrl+Shift+E")});
+        add("pane.splitDown", "pane", "New pane below", {});
+        add("pane.splitLeft", "pane", "New pane to the left", {});
+        add("pane.splitUp", "pane", "New pane above", {});
         add("pane.focusLeft", "pane", "Focus pane to the left", {QStringLiteral("Alt+Left")});
         add("pane.focusRight", "pane", "Focus pane to the right", {QStringLiteral("Alt+Right")});
         add("pane.focusUp", "pane", "Focus pane above", {QStringLiteral("Alt+Up")});
@@ -320,7 +329,10 @@ private:
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+Z")});
         add("windows.fresh", "window", "Start a fresh window set (forget the saved window layout)", {});
         add("palette.open", "palette", "Open the Relay actions palette", {QStringLiteral("Ctrl+Shift+A")});
-        add("files.explorer", "pane", "Open this pane's folder in an explorer pane", {});
+        // One key opens and closes the explorer (issue #D60R). Ctrl+B is VS Code's sidebar key and
+        // is free in all four Relay presets; Ctrl+Shift+B is the twin a program cannot swallow.
+        add("files.explorer", "pane", "Open or close this pane's folder in an explorer pane",
+            {QStringLiteral("Ctrl+B"), QStringLiteral("Ctrl+Shift+B")});
         add("files.open", "pane", "Open a file in a preview pane", {});
         add("control.human", "terminal", "Take control of the terminal (the only way keys reach it; works from the prompt box)", {QStringLiteral("Ctrl+H")});
         add("control.prompt", "terminal", "Back to the Relay prompt (the agent is in control)", {QStringLiteral("Ctrl+Shift+H")});
@@ -430,7 +442,7 @@ private:
 
     // Filled from docs/KEYBINDING-PRESETS.md research. Missing actions fall back to Relay defaults.
     static QByteArray presetJson() {
-        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"app.settings":[],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":["Ctrl+Shift+E"],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.moveLeft":[],"pane.moveRight":[],"pane.moveUp":[],"pane.moveDown":[],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+Shift+Y"],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":["Ctrl+Shift+I"],"input.modeAgent":[],"input.toggle":["Ctrl+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"vscode":{"app.settings":[],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":["Ctrl+Shift+|"],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+N"],"agent.stop":["Ctrl+Esc"],"agent.provider":["Ctrl+Alt+."],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"konsole":{"app.settings":[],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":["Ctrl+Shift+)","Ctrl+)"],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[],"agent.requests":[]}})PRESETS");
+        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"app.settings":[],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.moveLeft":[],"pane.moveRight":[],"pane.moveUp":[],"pane.moveDown":[],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+Shift+Y"],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":["Ctrl+Shift+I"],"input.modeAgent":[],"input.toggle":["Ctrl+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"vscode":{"app.settings":[],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+N"],"agent.stop":["Ctrl+Esc"],"agent.provider":["Ctrl+Alt+."],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"konsole":{"app.settings":[],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[],"agent.requests":[]}})PRESETS");
     }
     QFileSystemWatcher m_watcher;
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_listeners;
@@ -631,7 +643,10 @@ public:
     std::function<void()> onStateChanged;   // cwd, model list, native mode or busy state changed
     std::function<void()> onShellExited;
     std::function<void(const QString &)> onOpenPath;   // open a folder or file in a Relay pane
+    std::function<void(const QString &)> onToggleExplorer;   // open the explorer, or close it again
     std::function<void(const QString &turnId)> onOpenTurn;   // "✦ N tool calls" link or palette
+    // Right-click menu entries the window owns: new pane, close pane, tasks (issue #X2F1).
+    std::function<void(const QString &action)> onWindowAction;
 
     QString cwd() const { return m_cwd; }
     QString sessionToken() const { return m_token; }
@@ -970,6 +985,133 @@ public:
     void sendKeybindings() { if (m_configured) send(QJsonObject{{"type", "keybindings"}, {"path", Keymap::instance().path()}, {"actions", Keymap::instance().catalog().value(QStringLiteral("actions"))}}); }
     void importWarpKeys() { send({{"type", "import_warp"}}); }
 
+    // "Navigate here" in the explorer's right-click menu: change this pane's shell into `path`.
+    // A quoted cd is run like any other Relay command, so the shell (and its prompt) follow.
+    bool changeDirectory(const QString &path) {
+        if (!QFileInfo(path).isDir()) return false;
+        return runCommand(QStringLiteral("cd '") + QString(path).replace('\'', QStringLiteral("'\\''")) + '\'');
+    }
+
+    // "Set as agent workspace" in the explorer's right-click menu. The agent's file tools are
+    // restricted to this folder; re-configuring starts a new conversation, so the caller asks first.
+    void setAgentWorkspace(const QString &path) {
+        const QFileInfo info(path);
+        if (!info.isDir()) return;
+        m_workspace = info.canonicalFilePath().isEmpty() ? info.absoluteFilePath() : info.canonicalFilePath();
+        status(QStringLiteral("Agent workspace: ") + m_workspace);
+        if (!m_currentPreset.isEmpty()) configurePreset(m_currentPreset, false);
+        updatePaths();
+        changed();
+    }
+
+    // ----- the terminal pane's right-click menu (issue #X2F1) -------------------------------------
+    //
+    // One menu for both engines, built from relay::terminalContextMenu(): Relay's own entries, the
+    // Konsole items worth keeping, and the pane actions. `global` is where the click landed, used
+    // to find a link or a path under the pointer.
+    void showTerminalMenu(const QPoint &global) {
+        relay::TerminalMenuState state;
+        state.hasTurn = !m_lastTurnId.isEmpty();
+        state.canTakeControl = m_backend != nullptr;
+        state.canSearch = m_backend != nullptr;   // Relay's find bar searches the pane either way
+        state.canReadOutput = terminalCan(relay::TerminalBackend::ScreenText) || terminalCan(relay::TerminalBackend::Scrollback);
+        state.canInject = terminalCan(relay::TerminalBackend::DisplayInjection);
+        state.canZoom = terminalCan(relay::TerminalBackend::FontZoom);
+        if (m_backend) {
+            // Only engines that can answer "is anything selected?" grey Copy out; KonsolePart
+            // has no such query, so its Copy stays live and simply does nothing without one.
+            state.selectionKnown = m_engine == relay::EngineKind::Relay;
+            state.hasSelection = !m_backend->selectedText().isEmpty();
+            int line = -1, column = -1;
+            // The click arrives in whichever child widget the engine put under the pointer; the
+            // backend wants it in widget()'s own coordinates, so it is mapped through the screen.
+            const QPoint at = m_terminal ? m_terminal->mapFromGlobal(global) : QPoint();
+            const QString target = m_terminal ? m_backend->linkAt(at, &line, &column) : QString();
+            if (target.startsWith(QStringLiteral("http://")) || target.startsWith(QStringLiteral("https://"))
+                || target.startsWith(QStringLiteral("mailto:")) || target.startsWith(QStringLiteral("file://")))
+                state.link = target;
+            else if (!target.isEmpty() && QFileInfo::exists(target))
+                state.filePath = target;
+            Q_UNUSED(line);
+            Q_UNUSED(column);
+        }
+        auto *menu = new QMenu(this);
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        for (const relay::TerminalMenuItem &item : relay::terminalContextMenu(state)) {
+            if (item.isSeparator()) { menu->addSeparator(); continue; }
+            QAction *action = menu->addAction(item.label);
+            action->setEnabled(item.enabled);
+            if (const QString keys = terminalMenuShortcut(item.id); !keys.isEmpty())
+                action->setShortcut(QKeySequence(keys));
+            const QString id = item.id;
+            const QString link = state.link, file = state.filePath;
+            connect(action, &QAction::triggered, this, [this, id, link, file] { runTerminalMenuAction(id, link, file); });
+        }
+        menu->popup(global);
+    }
+
+    static QString terminalMenuShortcut(const QString &id) {
+        static const QHash<QString, QString> actions{
+            {QStringLiteral("turn"), QString()},
+            {QStringLiteral("takeControl"), QStringLiteral("control.human")},
+            {QStringLiteral("tasks"), QStringLiteral("agent.requests")},
+            {QStringLiteral("find"), QStringLiteral("find.inView")},
+            {QStringLiteral("splitRight"), QStringLiteral("pane.splitRight")},
+            {QStringLiteral("splitDown"), QStringLiteral("pane.splitDown")},
+            {QStringLiteral("close"), QStringLiteral("pane.close")},
+        };
+        const QString action = actions.value(id);
+        return action.isEmpty() ? QString() : Keymap::instance().keysFor(action).value(0);
+    }
+
+    void runTerminalMenuAction(const QString &id, const QString &link, const QString &file) {
+        if (id == QStringLiteral("turn")) { if (onOpenTurn) onOpenTurn(m_lastTurnId); return; }
+        if (id == QStringLiteral("takeControl")) { takeControl(); return; }
+        if (id == QStringLiteral("tasks")) { toggleRequests(); return; }
+        if (id == QStringLiteral("find")) { openFindInView(); return; }
+        if (id == QStringLiteral("openLink")) { QDesktopServices::openUrl(QUrl(link)); return; }
+        if (id == QStringLiteral("copyLink")) { QApplication::clipboard()->setText(link); return; }
+        if (id == QStringLiteral("openFile")) { if (onOpenPath) onOpenPath(file); return; }
+        if (!m_backend) return;
+        if (id == QStringLiteral("copy")) { if (!copySelection()) status(QStringLiteral("Nothing is selected.")); return; }
+        if (id == QStringLiteral("paste")) { m_backend->paste(); return; }
+        if (id == QStringLiteral("selectAll")) { m_backend->selectAll(); return; }
+        if (id == QStringLiteral("clearScrollback")) { m_backend->clearScrollback(); return; }
+        if (id == QStringLiteral("reset")) {
+            // Clear the history, then reset the emulator itself (RIS) and redraw the prompt.
+            closeInline();
+            m_backend->clearScrollback();
+            m_backend->writeToDisplay(QByteArrayLiteral("\x1b""c"));
+            if (shellIdleAtPrompt()) m_backend->redrawPrompt();
+            return;
+        }
+        if (id == QStringLiteral("saveOutput")) { saveTerminalOutput(); return; }
+        if (id.startsWith(QStringLiteral("zoom"))) {
+            const int step = id == QStringLiteral("zoomIn") ? 1 : id == QStringLiteral("zoomOut") ? -1 : 0;
+            if (!m_backend->zoom(step)) status(QStringLiteral("This engine cannot change its font size."));
+            return;
+        }
+        if (onWindowAction) onWindowAction(id);   // splitRight, splitDown, close
+    }
+
+    // "Save output as…": the scrollback and the visible screen as plain text.
+    void saveTerminalOutput() {
+        if (!m_backend) return;
+        const QString suggestion = QDir(m_cwd).filePath(QStringLiteral("relay-output-")
+            + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss")) + QStringLiteral(".txt"));
+        const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Save output as"), suggestion,
+                                                          QStringLiteral("Text files (*.txt);;All files (*)"));
+        if (path.isEmpty()) return;
+        QStringList lines = terminalCan(relay::TerminalBackend::Scrollback) ? m_backend->scrollbackText(200000) : QStringList();
+        if (terminalCan(relay::TerminalBackend::ScreenText)) lines += m_backend->screenText().split('\n');
+        QSaveFile out(path);
+        if (!out.open(QIODevice::WriteOnly) || out.write(lines.join('\n').toUtf8() + '\n') < 0 || !out.commit()) {
+            status(QStringLiteral("Could not write ") + path);
+            return;
+        }
+        status(QStringLiteral("Saved ") + path);
+    }
+
     // ===== agent sessions UI: model/effort, context, plan mode, rewind, fork, resume, recaps, =====
     // ===== instructions, suggestions and steering (docs/AGENT-SESSIONS-PROTOCOL.md)          =====
     std::function<void(const QString &path, Pane *owner)> onPlanWritten;   // open the plan in an editable pane
@@ -1188,11 +1330,35 @@ protected:
     bool eventFilter(QObject *object, QEvent *event) override {
         if ((event->type() == QEvent::WindowActivate || event->type() == QEvent::WindowDeactivate) && object == window())
             noteWindowActivation(event->type() == QEvent::WindowActivate);
+        // The folder line opens the explorer, and closes it again when it is already showing this
+        // folder (issue #D60R).
         if (object == m_cwdLabel && event->type() == QEvent::MouseButtonRelease
             && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && !m_cwdLabel->hasSelectedText()) {
-            if (onOpenPath) onOpenPath(m_cwd);
-            hint(QStringLiteral("files.at"), QStringLiteral("Tip: type @ and a file name in the prompt box to open files"));
+            if (onToggleExplorer) onToggleExplorer(m_cwd);
+            else if (onOpenPath) onOpenPath(m_cwd);
+            hint(QStringLiteral("files.explorer.mouse"),
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("files.explorer")),
+                                                QStringLiteral("the file explorer")));
             return false;
+        }
+        // Right-click anywhere in this pane's terminal: Relay's menu, not the engine's (issue
+        // #X2F1). Real widgets inside the terminal, such as the engine's Find bar, keep theirs.
+        //
+        // Relay's engine sends a proper context-menu event, and withholds it while a program is
+        // reading the mouse, so that is the event to take. KonsolePart never sends one: its
+        // display pops its menu straight out of the mouse press, so for Konsole panes the press
+        // itself is taken instead (which does mean a program reading the mouse does not see a
+        // right-click in a Konsole pane).
+        if (event->type() == QEvent::ContextMenu || (event->type() == QEvent::MouseButtonPress
+                && m_engine == relay::EngineKind::Konsole
+                && static_cast<QMouseEvent *>(event)->button() == Qt::RightButton)) {
+            auto *widget = qobject_cast<QWidget *>(object);
+            if (ownsTerminalWidget(widget) && !acceptsTypedInput(widget)) {
+                showTerminalMenu(event->type() == QEvent::ContextMenu
+                                     ? static_cast<QContextMenuEvent *>(event)->globalPos()
+                                     : static_cast<QMouseEvent *>(event)->globalPos());
+                return true;
+            }
         }
         // Copy on select (off by default): after a left-button release that finishes a selection
         // in this pane's terminal, copy it to the clipboard.
@@ -6579,6 +6745,10 @@ public:
         }
         const QRect available = screen() ? screen()->availableGeometry() : QRect(0, 0, 1280, 860);
         resize(std::min(1320, available.width() * 9 / 10), std::min(860, available.height() * 9 / 10));
+        // "New pane, then ← ↑ ↓ places it" (issue #78BN): one timer closes the window and takes
+        // the hint away, whether or not an arrow arrived.
+        m_placementTimer.setSingleShot(true);
+        connect(&m_placementTimer, &QTimer::timeout, this, [this] { endPlacement(); });
         // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+A).
         Keymap::instance().listen(this, [this] { syncToolbar(); syncChromeTooltips(); });
         m_tabs = new QTabWidget;
@@ -6749,6 +6919,102 @@ public:
         updateTitles();
     }
 
+    // "Open items with a single click" (issue #0C7V) reaches every explorer pane that is already
+    // open, in every window, not just the next one.
+    static void applySingleClickSetting() {
+        const bool on = relay::FileExplorer::singleClickDefault();
+        const auto tops = QApplication::topLevelWidgets();
+        for (QWidget *top : tops)
+            for (relay::FileExplorer *explorer : top->findChildren<relay::FileExplorer *>())
+                explorer->setSingleClick(on);
+    }
+
+    // The terminal pane an explorer's right-click menu acts on: the one that was last active in
+    // the same tab, else the first terminal pane there, else any pane in the window.
+    Pane *terminalNear(QWidget *leaf) {
+        QWidget *page = pageOf(leaf);
+        if (page) {
+            if (auto *last = dynamic_cast<Pane *>(m_lastActive.value(page).data())) return last;
+            const auto panes = panesIn(page);
+            if (!panes.isEmpty()) return panes.first();
+        }
+        const auto panes = allPanes();
+        return panes.isEmpty() ? nullptr : panes.first();
+    }
+
+    // "Navigate here" (issue #D60R): move that terminal's shell into the folder.
+    void navigateTerminalTo(const QString &directory, QWidget *from) {
+        Pane *pane = terminalNear(from);
+        if (!pane) { statusBar()->showMessage(QStringLiteral("There is no terminal pane in this tab."), 4000); return; }
+        if (!pane->changeDirectory(directory)) {
+            statusBar()->showMessage(QStringLiteral("Could not change directory; the shell may be busy."), 4000);
+            return;
+        }
+        statusBar()->showMessage(QStringLiteral("cd ") + directory, 4000);
+    }
+
+    // "Set as agent workspace" (issue #D60R). It restarts the conversation, so it asks first.
+    void setAgentWorkspace(const QString &directory, QWidget *from) {
+        Pane *pane = terminalNear(from);
+        if (!pane) { statusBar()->showMessage(QStringLiteral("There is no agent pane in this tab."), 4000); return; }
+        const auto answer = QMessageBox::question(this, QStringLiteral("Set as agent workspace"),
+            QStringLiteral("Restrict the agent's file tools to\n\n%1\n\nThis starts a new conversation in that pane.").arg(directory),
+            QMessageBox::Cancel | QMessageBox::Ok, QMessageBox::Ok);
+        if (answer != QMessageBox::Ok) return;
+        pane->setAgentWorkspace(directory);
+    }
+
+    // One path opens and closes the explorer (issue #D60R): the Ctrl+Shift+E action, the folder
+    // line in a terminal pane's header, and the folder line in the explorer's own header all come
+    // here. An explorer already showing this folder is closed; one showing another folder moves to
+    // it; otherwise a new explorer pane opens.
+    void toggleExplorer(const QString &path, QWidget *anchor) {
+        const QFileInfo info(path);
+        if (!info.isDir()) { openPath(path, 0, anchor); return; }
+        const QString folder = info.canonicalFilePath().isEmpty() ? info.absoluteFilePath() : info.canonicalFilePath();
+        if (!anchor || !isLeaf(anchor) || anchor->window() != this) anchor = m_activeLeaf;
+        QWidget *page = pageOf(anchor ? anchor : m_activeLeaf.data());
+        if (!page) { openPath(folder, 0, anchor); return; }
+        for (QWidget *leaf : leavesIn(page)) {
+            auto *tool = dynamic_cast<ToolPane *>(leaf);
+            if (!tool || tool->kind() != ToolPane::Kind::Explorer) continue;
+            if (tool->explorer()->root() == folder) closePane(tool, true);
+            else { m_tabs->setCurrentWidget(page); tool->explorer()->setRoot(folder); setActiveLeaf(tool); focusLeaf(tool); }
+            updateTitles();
+            return;
+        }
+        openPath(folder, 0, anchor);
+    }
+
+    // The preview file picker. It follows the "Open items with a single click" setting (#0C7V),
+    // which Qt's own dialog has no option for: with it on, a click walks into a folder or picks a
+    // file at once. Returns an empty string when nothing was chosen.
+    QString pickFileForPreview() {
+        // QFileDialog redeclares accept() and done() as protected, so finishing it from a click
+        // handler needs this one line.
+        struct PreviewDialog : QFileDialog {
+            using QFileDialog::QFileDialog;
+            void finish() { done(QDialog::Accepted); }
+        };
+        PreviewDialog dialog(this, QStringLiteral("Open file in a preview pane"), activeCwd());
+        dialog.setFileMode(QFileDialog::ExistingFile);
+        if (!relay::FileExplorer::singleClickDefault()) return dialog.exec() == QDialog::Accepted ? dialog.selectedFiles().value(0) : QString();
+        dialog.setOption(QFileDialog::DontUseNativeDialog);
+        QString picked;
+        const auto views = dialog.findChildren<QAbstractItemView *>();
+        for (QAbstractItemView *view : views) {
+            connect(view, &QAbstractItemView::clicked, &dialog, [&dialog, &picked](const QModelIndex &index) {
+                if (QApplication::keyboardModifiers() & (Qt::ControlModifier | Qt::ShiftModifier)) return;
+                const QString path = index.data(QFileSystemModel::FilePathRole).toString();
+                if (path.isEmpty()) return;
+                if (QFileInfo(path).isDir()) dialog.setDirectory(path);
+                else { picked = path; dialog.finish(); }
+            });
+        }
+        if (dialog.exec() != QDialog::Accepted) return QString();
+        return picked.isEmpty() ? dialog.selectedFiles().value(0) : picked;
+    }
+
     // Agent plans and documents such as relay.md open in an editable pane beside the agent pane; a pane
     // already showing the same file is reused. Plan panes drive their owner: Execute sends plan_execute.
     void openDocument(const QString &path, Pane *owner, bool planActions) {
@@ -6792,6 +7058,27 @@ public:
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override {
+        // "New pane, then ← ↑ ↓ places it" (issue #78BN). The window closes on the first key or
+        // click; only a bare arrow acts, and everything else is passed on untouched. Which widget
+        // has the keyboard does not matter: with no focus at all the key reaches the window itself,
+        // and the arrow still places the pane (see #4PW5).
+        if (m_placement.armed(m_placementClock.elapsed())
+            && (event->type() == QEvent::KeyPress || event->type() == QEvent::MouseButtonPress)
+            && [&] { auto *w = qobject_cast<QWidget *>(object); return !w || w->window() == this; }()) {
+            using Placement = relay::panes::PlacementWindow;
+            const auto *key = event->type() == QEvent::KeyPress ? static_cast<QKeyEvent *>(event) : nullptr;
+            const Placement::Response response =
+                key ? m_placement.keyPress(key->key(), key->modifiers(), m_placementClock.elapsed())
+                    : m_placement.mousePress(m_placementClock.elapsed());
+            if (response.action == Placement::Action::Place) {
+                const auto direction = response.direction;
+                // Move once the key event has been dealt with: re-parenting panes underneath a
+                // delivery in progress is what made the drag path crash before.
+                QTimer::singleShot(0, this, [this, direction] { placeNewPane(direction); });
+                return true;
+            }
+            if (response.action == Placement::Action::Dismiss) endPlacement();
+        }
         if (headerDrag(object, event)) return true;
         if (event->type() == QEvent::Resize && object == centralWidget()) placeSidebar();
         if (event->type() == QEvent::Resize && isLeaf(qobject_cast<QWidget *>(object)))
@@ -6987,6 +7274,15 @@ private:
         if (m_active) m_active->toast(text, 5000); else statusBar()->showMessage(text, 6000);
     }
 
+    // The explicit "new pane below / left / above" actions still exist, but the one key plus an
+    // arrow is faster; say so the first few times one of them is used (issue #78BN).
+    void hintPlacement(const QString &arrow) {
+        const QString keys = Keymap::instance().shortcutText(QStringLiteral("pane.splitRight"));
+        if (keys.isEmpty()) return;
+        hint(QStringLiteral("pane.place.arrow"),
+             QStringLiteral("Next time: %1 then %2 puts the new pane there").arg(keys, arrow));
+    }
+
     // Saved window layout: forget it and stop saving for the rest of this session, so the next
     // start opens one new window. The windows on screen are left alone.
     void startFreshWindowSet() {
@@ -7008,8 +7304,11 @@ private:
         else if (id == QStringLiteral("tab.new")) addTab(paneNode(activeCwd()), m_tabs->currentIndex() + 1);
         else if (id == QStringLiteral("tab.next")) cycleTab(1);
         else if (id == QStringLiteral("tab.previous")) cycleTab(-1);
-        else if (id == QStringLiteral("pane.splitRight")) split(Qt::Horizontal);
-        else if (id == QStringLiteral("pane.splitDown")) split(Qt::Vertical);
+        // One key, one new pane on the right, then ← ↑ ↓ within two seconds to place it (#78BN).
+        else if (id == QStringLiteral("pane.splitRight")) splitToward(relay::panes::Direction::Right, QString(), true);
+        else if (id == QStringLiteral("pane.splitDown")) { splitToward(relay::panes::Direction::Down); hintPlacement(QStringLiteral("↓")); }
+        else if (id == QStringLiteral("pane.splitLeft")) { splitToward(relay::panes::Direction::Left); hintPlacement(QStringLiteral("←")); }
+        else if (id == QStringLiteral("pane.splitUp")) { splitToward(relay::panes::Direction::Up); hintPlacement(QStringLiteral("↑")); }
         else if (id == QStringLiteral("pane.focusLeft")) navigate(relay::panes::Direction::Left);
         else if (id == QStringLiteral("pane.focusRight")) navigate(relay::panes::Direction::Right);
         else if (id == QStringLiteral("pane.focusUp")) navigate(relay::panes::Direction::Up);
@@ -7022,9 +7321,9 @@ private:
         else if (id == QStringLiteral("pane.moveToNewTab")) { if (m_activeLeaf) moveLeafToNewTab(m_activeLeaf); }
         else if (id == QStringLiteral("tab.moveToNewWindow")) moveTabToNewWindow(m_tabs->currentIndex());
         else if (id == QStringLiteral("closed.restore")) m_manager->restore(this);
-        else if (id == QStringLiteral("files.explorer")) openPath(activeCwd(), 0, m_activeLeaf);
+        else if (id == QStringLiteral("files.explorer")) toggleExplorer(activeCwd(), m_activeLeaf);
         else if (id == QStringLiteral("files.open")) {
-            const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("Open file in a preview pane"), activeCwd());
+            const QString file = pickFileForPreview();
             if (!file.isEmpty()) openPath(file, 0, m_activeLeaf);
         }
         else if (id == QStringLiteral("palette.open")) togglePalette();
@@ -7288,6 +7587,15 @@ private:
         });
         general.rows << toggleRow(QStringLiteral("recap/away"), QStringLiteral("Recap when you come back"),
                                   QStringLiteral("After 3+ minutes away while the agent worked"), true);
+        {
+            // Dolphin-style opening in the explorer pane and the preview file picker (issue #0C7V).
+            relay::SettingRow single = toggleRow(QStringLiteral("files/single_click"),
+                                                 QStringLiteral("Open items with a single click"),
+                                                 QStringLiteral("In the file explorer and the file picker; Ctrl+click and Shift+click still select"),
+                                                 true, [this](bool) { applySingleClickSetting(); });
+            single.aliases = QStringLiteral("dolphin explorer double click files folders");
+            general.rows << single;
+        }
         {
             // Saved window layout. The toggle only decides whether the layout is kept; restoring the
             // last closed pane works either way.
@@ -7851,7 +8159,7 @@ private:
             }
         }
 
-        items << actionItem(panes, QStringLiteral("Open folder in explorer"), QStringLiteral("This pane's directory"), QStringLiteral("files.explorer"));
+        items << actionItem(panes, QStringLiteral("File explorer"), QStringLiteral("Open this pane's directory, or close the explorer again"), QStringLiteral("files.explorer"));
         items << actionItem(panes, QStringLiteral("Open file…"), QStringLiteral("Preview a file in a pane"), QStringLiteral("files.open"));
         {
             // Per-pane terminal engine (docs/ENGINE.md). Both can run side by side in one window.
@@ -7873,8 +8181,13 @@ private:
             konsolePane.run = [this] { split(Qt::Horizontal, QStringLiteral("konsole")); };
             items << konsolePane;
         }
-        items << actionItem(panes, QStringLiteral("Split right"), QString(), QStringLiteral("pane.splitRight"));
-        items << actionItem(panes, QStringLiteral("Split down"), QString(), QStringLiteral("pane.splitDown"));
+        // The one key makes a pane on the right; all four directions keep an action of their own
+        // so they can be run from here or bound (issue #78BN).
+        items << actionItem(panes, QStringLiteral("New pane to the right"),
+                            QStringLiteral("Then ← ↑ ↓ within two seconds places it on that side"), QStringLiteral("pane.splitRight"));
+        items << actionItem(panes, QStringLiteral("New pane below"), QString(), QStringLiteral("pane.splitDown"));
+        items << actionItem(panes, QStringLiteral("New pane to the left"), QString(), QStringLiteral("pane.splitLeft"));
+        items << actionItem(panes, QStringLiteral("New pane above"), QString(), QStringLiteral("pane.splitUp"));
         items << actionItem(panes, QStringLiteral("New tab"), QString(), QStringLiteral("tab.new"));
         items << actionItem(panes, QStringLiteral("New window"), QString(), QStringLiteral("window.new"));
         items << actionItem(panes, QStringLiteral("Close pane"), QStringLiteral("Then the tab, then the window"), QStringLiteral("pane.close"));
@@ -8334,8 +8647,14 @@ private:
         auto *tool = new ToolPane(kind, path, planActions);
         QPointer<ToolPane> guard(tool);
         if (tool->explorer()) {
-            tool->explorer()->onOpenFile = [guard](const QString &file) { if (auto *w = windowOf(guard)) w->openPath(file, 0, guard); };
-            tool->explorer()->onDirectoryChanged = [guard](const QString &) { if (auto *w = windowOf(guard)) w->updateTitles(); };
+            relay::FileExplorer *explorer = tool->explorer();
+            explorer->onOpenFile = [guard](const QString &file) { if (auto *w = windowOf(guard)) w->openPath(file, 0, guard); };
+            explorer->onDirectoryChanged = [guard](const QString &) { if (auto *w = windowOf(guard)) w->updateTitles(); };
+            // Right-click menu entries the window owns (issue #D60R).
+            explorer->onOpenInPreview = [guard](const QString &file) { if (auto *w = windowOf(guard)) w->openPath(file, 0, guard); };
+            explorer->onNavigateHere = [guard](const QString &dir) { if (auto *w = windowOf(guard)) w->navigateTerminalTo(dir, guard); };
+            explorer->onSetWorkspace = [guard](const QString &dir) { if (auto *w = windowOf(guard)) w->setAgentWorkspace(dir, guard); };
+            explorer->onCloseRequested = [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, true); };
         } else if (tool->preview()) {
             tool->preview()->onTitleChanged = [guard](const QString &) { if (auto *w = windowOf(guard)) w->updateTitles(); };
         } else {
@@ -8401,6 +8720,16 @@ private:
         };
         pane->onShellExited = [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, false); };
         pane->onOpenPath = [guard](const QString &path) { if (auto *w = windowOf(guard)) w->openPath(path, 0, guard); };
+        pane->onToggleExplorer = [guard](const QString &path) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->toggleExplorer(path, guard); } };
+        // Right-click menu entries the window owns (issue #X2F1).
+        pane->onWindowAction = [guard](const QString &action) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            w->setActiveLeaf(guard);
+            if (action == QStringLiteral("splitRight")) w->runAction(QStringLiteral("pane.splitRight"));
+            else if (action == QStringLiteral("splitDown")) w->runAction(QStringLiteral("pane.splitDown"));
+            else if (action == QStringLiteral("close")) w->closePane(guard, true);
+        };
         pane->onPlanWritten = [guard](const QString &path, Pane *) { if (auto *w = windowOf(guard)) w->openDocument(path, guard, true); };
         pane->onOpenDocument = [guard](const QString &path) { if (auto *w = windowOf(guard)) w->openDocument(path, guard, false); };
         pane->onForkState = [guard](const QJsonObject &state, const QString &title) { if (auto *w = windowOf(guard)) w->openFork(guard, state, title); };
@@ -8576,6 +8905,12 @@ private:
     }
 
     void split(Qt::Orientation orientation, const QString &engine = QString()) {
+        splitToward(orientation == Qt::Horizontal ? relay::panes::Direction::Right : relay::panes::Direction::Down, engine);
+    }
+
+    // A new pane on `direction`'s side of the focused one. `offerPlacement` opens the short window
+    // in which Left, Up or Down re-dock it (issue #78BN); only the one-key "new pane" uses it.
+    void splitToward(relay::panes::Direction direction, const QString &engine = QString(), bool offerPlacement = false) {
         QWidget *anchor = m_activeLeaf;
         if (!anchor) return;
         Pane *pane = nullptr;
@@ -8584,9 +8919,77 @@ private:
         if (!engine.isEmpty()) spec.insert(QStringLiteral("engine"), engine);
         try { pane = createPane(spec); }
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
-        insertBeside(anchor, pane, orientation, false);
+        insertBeside(anchor, pane, relay::panes::orientationFor(direction), relay::panes::towardStart(direction));
         setActive(pane);
         QTimer::singleShot(0, pane, [pane] { pane->focusInput(); });
+        if (offerPlacement) armPlacement(pane, anchor);
+    }
+
+    // ----- "new pane, then an arrow places it" (issue #78BN) --------------------------------------
+    //
+    // The new pane already exists and is running; an arrow only moves it, through the same code
+    // Ctrl+Alt+arrow uses, so its shell, agent and scrollback are never restarted.
+    void armPlacement(QWidget *pane, QWidget *anchor) {
+        // Re-installing moves this filter to the front of the application's list, so the arrow is
+        // seen here before the new pane's prompt box can treat it as cursor movement.
+        qApp->installEventFilter(this);
+        m_placementClock.start();
+        m_placement.arm(0);
+        m_placementPane = pane;
+        m_placementAnchor = anchor;
+        showPlacementHint(pane);
+        // One timer, restarted on every arming, so the hint can never outlive its window.
+        m_placementTimer.start(int(relay::panes::PlacementWindow::kTimeoutMs) + 20);
+    }
+
+    void endPlacement() {
+        m_placementTimer.stop();
+        m_placement.cancel();
+        m_placementPane = nullptr;
+        m_placementAnchor = nullptr;
+        delete m_placementHint.data();   // a passive label: nothing is in the middle of an event on it
+        m_placementHint = nullptr;
+    }
+
+    void showPlacementHint(QWidget *pane) {
+        delete m_placementHint.data();
+        m_placementHint = new QLabel(QStringLiteral("← ↑ ↓ to place"), this);
+        m_placementHint->setObjectName(QStringLiteral("toast"));
+        m_placementHint->setAttribute(Qt::WA_TransparentForMouseEvents);
+        m_placementHint->ensurePolished();
+        m_placementHint->adjustSize();
+        placePlacementHint(pane);
+        m_placementHint->show();
+        m_placementHint->raise();
+        // The new pane has no geometry until the layout has run, so place it again once it does.
+        QPointer<QWidget> guard(pane);
+        QTimer::singleShot(0, this, [this, guard] { if (guard) placePlacementHint(guard); });
+    }
+
+    void placePlacementHint(QWidget *pane) {
+        if (!m_placementHint || !pane || !isAncestorOf(pane)) return;
+        const QRect area(pane->mapTo(this, QPoint(0, 0)), pane->size());
+        // Low in the pane, but clear of the prompt box and its strip, and never off the window.
+        const QSize size = m_placementHint->size();
+        m_placementHint->move(std::clamp(area.center().x() - size.width() / 2, 0, std::max(0, width() - size.width())),
+                              std::clamp(area.bottom() - size.height() - 120, area.top() + 8,
+                                         std::max(0, height() - size.height())));
+    }
+
+    // The arrow: re-dock the new pane on that side of the pane it was split from. takeLeaf +
+    // insertBeside is the same pair Ctrl+Alt+arrow uses when the two panes do not already share a
+    // splitter, so the moved pane keeps its shell, its agent and its scrollback.
+    void placeNewPane(relay::panes::Direction direction) {
+        QPointer<QWidget> pane(m_placementPane), anchor(m_placementAnchor);
+        endPlacement();
+        if (!pane || !anchor || !pageOf(pane) || pageOf(pane) != pageOf(anchor)) return;
+        if (direction != relay::panes::Direction::Right) {   // Right is where it already is
+            if (!takeLeaf(pane) || !anchor || !pane) return;
+            insertBeside(anchor, pane, relay::panes::orientationFor(direction), relay::panes::towardStart(direction));
+        }
+        showChromeFor(nullptr);
+        setActiveLeaf(pane); focusLeaf(pane);
+        updateTitles();
     }
 
     void navigate(relay::panes::Direction direction) {
@@ -8858,7 +9261,9 @@ private:
 
             // Relay's own close cross. Qt's closable tabs take "window-close" from the icon
             // theme, which lands as a red disc next to the flat header glyphs.
-            auto *close = qobject_cast<ChromeButton *>(bar->tabButton(i, QTabBar::RightSide));
+            // dynamic_cast, not qobject_cast: ChromeButton has no Q_OBJECT of its own, and Qt5's
+            // qobject_cast refuses that at compile time.
+            auto *close = dynamic_cast<ChromeButton *>(bar->tabButton(i, QTabBar::RightSide));
             if (!close) {
                 close = new ChromeButton(ChromeButton::Glyph::TabClose, bar, 18);
                 connect(close, &QToolButton::clicked, this, [this, close] {
@@ -9274,6 +9679,13 @@ private:
     QPointer<QWidget> m_activeLeaf;
     QPointer<QWidget> m_hoverLeaf, m_wantedHoverLeaf;   // shown now, and what showChromeFor was last asked for
     bool m_updatingChrome = false;
+    // "New pane, then ← ↑ ↓ places it" (issue #78BN): the open window, the pane it made, the pane
+    // it was split from, and the transient hint over the new pane.
+    relay::panes::PlacementWindow m_placement;
+    QElapsedTimer m_placementClock;
+    QTimer m_placementTimer;
+    QPointer<QWidget> m_placementPane, m_placementAnchor;
+    QPointer<QLabel> m_placementHint;
     QPointer<QToolButton> m_newTabButton;
     // Window header (see buildWindowChrome). m_nativeFrame: this window kept the system title bar.
     static constexpr int kFrameMargin = 5;

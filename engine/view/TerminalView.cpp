@@ -1094,6 +1094,25 @@ void TerminalView::wheelEvent(QWheelEvent *e)
     scrollLines(-3 * steps);
 }
 
+QString TerminalView::linkAtPoint(const QPoint &pos, int *line, int *column)
+{
+    QString target;
+    int row = -1, col = -1, start = -1, end = -1;
+    if (line)
+        *line = -1;
+    if (column)
+        *column = -1;
+    if (!rect().contains(pos))
+        return {};
+    if (!linkAt(cellAt(pos), &target, &row, &col, &start, &end))
+        return {};
+    if (line)
+        *line = row;
+    if (column)
+        *column = col;
+    return target;
+}
+
 void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers mods)
 {
     int newRow = -1, newStart = -1, newEnd = -1;

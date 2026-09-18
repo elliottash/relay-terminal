@@ -2,7 +2,9 @@
 #pragma once
 // Plain-Qt folder explorer and file preview widgets. No KDE dependencies are required, so these
 // are the portable path for macOS and Windows later. KSyntaxHighlighting and Qt PDF are optional.
+#include <QList>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 #include <QWidget>
 #include <functional>
@@ -19,8 +21,37 @@ class QTreeView;
 
 namespace relay {
 
-// A directory browser rooted at one folder. Enter or double-click opens: a folder navigates into
-// it, a file calls onOpenFile. Backspace or Alt+Up goes to the parent folder.
+// ----- explorer right-click menu (issue #D60R) --------------------------------------------------
+//
+// The menu is described as data so the list — which entries appear for a folder, for a file and
+// for the empty space below the rows, and which of them are greyed out — can be checked without a
+// window (tests/filepanes_test.cpp). FileExplorer turns it into a QMenu.
+
+enum class FileMenuTarget { None, File, Folder };
+
+struct FileMenuItem {
+    QString id;               // "navigate", "open", "preview", "copyPath", …; "-" is a separator
+    QString label;
+    bool enabled = true;
+    bool isSeparator() const { return id == QLatin1String("-"); }
+};
+
+// What the host can do with the clicked row. `writable` is the parent folder's permission, which
+// decides whether new file / new folder / rename / delete are offered at all.
+struct FileMenuHost {
+    bool canNavigateTerminal = false;  // "Navigate here" is wired up
+    bool canPreview = false;           // "Open in a preview pane" is wired up
+    bool canSetWorkspace = false;      // "Set as agent workspace" is wired up
+    bool writable = true;
+};
+
+// The entries for one right-click, in order, with separators as items whose id is "-". Never
+// starts or ends with a separator and never has two in a row.
+QList<FileMenuItem> explorerMenu(FileMenuTarget target, const FileMenuHost &host);
+
+// A directory browser rooted at one folder. Enter, or a click (double by default, single when
+// "Open items with a single click" is on), opens: a folder navigates into it, a file calls
+// onOpenFile. Backspace or Alt+Up goes to the parent folder. Right-click offers explorerMenu().
 class FileExplorer : public QWidget {
 public:
     explicit FileExplorer(const QString &root, QWidget *parent = nullptr);
@@ -39,8 +70,22 @@ public:
     QTreeView *view() const { return m_view; }
     QLineEdit *filterEdit() const { return m_filter; }
 
+    // Dolphin-style opening (issue #0C7V). On by default; Ctrl+click and Shift+click never open,
+    // they extend the selection, and a drag never opens either.
+    void setSingleClick(bool on) { m_singleClick = on; }
+    bool singleClick() const { return m_singleClick; }
+    static bool singleClickDefault();   // the "files/single_click" setting, true when unset
+
+    // The entries a right-click on `path` offers, with "" meaning the empty space below the rows.
+    // What showMenu() builds its QMenu from, and what a test checks.
+    QList<FileMenuItem> menuFor(const QString &path) const;
+
     std::function<void(const QString &)> onOpenFile;          // a file was opened
     std::function<void(const QString &)> onDirectoryChanged;  // the root folder changed
+    std::function<void(const QString &)> onNavigateHere;      // move the terminal to this folder
+    std::function<void(const QString &)> onOpenInPreview;     // open this file in a preview pane
+    std::function<void(const QString &)> onSetWorkspace;      // make this folder the agent workspace
+    std::function<void()> onCloseRequested;                   // the header folder was clicked again
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;
@@ -50,9 +95,17 @@ private:
     void activate(const QString &path);
     void updateHeader();
     void hideUnmatchedFolders();
+    void showMenu(const QPoint &viewportPos);
+    void runMenuAction(const QString &id, const QString &path);
+    void createEntry(bool folder);
+    void renameEntry(const QString &path);
+    void deleteEntry(const QString &path);
+    void select(const QString &path);
 
     QString m_root;
     bool m_showHidden = false;
+    bool m_singleClick = true;
+    Qt::KeyboardModifiers m_clickModifiers = Qt::NoModifier;
     QFileSystemModel *m_model = nullptr;
     QTreeView *m_view = nullptr;
     QLabel *m_path = nullptr;

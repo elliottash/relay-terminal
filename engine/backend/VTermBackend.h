@@ -64,6 +64,9 @@ public:
 
     int find(const QString &text, bool backwards) override;
 
+    QString linkAt(const QPoint &pos, int *line = nullptr, int *column = nullptr) override;
+    bool zoom(int step) override;
+
     void setOutputCallbackEnabled(bool enabled) override;
 
 private:
