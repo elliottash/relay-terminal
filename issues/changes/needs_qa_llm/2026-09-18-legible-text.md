@@ -12,7 +12,7 @@ rank: b
 created: '2026-09-18'
 acceptance: 'No UI text under 9pt (stylesheet in pt only, QPainter labels through theme::legible); the application font at least 10pt; every text token 4.5:1 on background, surface and surface_raised in every shipped theme; no italic + muted + monospace in the terminal notes, the subagent transcript, the thinking panel or the turn log; the Options "Log detail" row reads as a line, not a column; theme and buttonfit tests pass'
 source: 'owner, 2026-09-18: "some of the fonts seem hard to read, eg in subagent panes"'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-legible-text/'], related: [SPBN, WD83, TK9C], github: null}
+links: {plans: [], commits: [fac5dac], evidence: ['docs/qa_evidence/2026-09-18-legible-text/'], related: [SPBN, WD83, TK9C], github: null}
 ---
 # Text is legible everywhere: a size floor, 4.5:1 on every surface, no italic muted mono
 
