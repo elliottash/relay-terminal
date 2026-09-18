@@ -8954,6 +8954,10 @@ private:
     // sequences the script sends, so only ssh is enhanced.
     void maybeEnhanceLogin() {
         if (m_login.program != QStringLiteral("ssh") || m_login.bootstrapped || m_login.integration) return;
+        // Something on the host is asking a question (zsh's first-run menu on a host with no
+        // ~/.zshrc, a pager, a wizard): its prompt is not a shell's, and a line typed into it is
+        // an answer, not a command. Wait; the next real prompt enhances the login.
+        if (m_screenPrompt.actionable()) return;
         QSettings settings;
         const QString mode = settings.value(QStringLiteral("ssh/enhance"), QStringLiteral("auto")).toString();
         const QString host = loginHost();
