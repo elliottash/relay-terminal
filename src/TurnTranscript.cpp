@@ -34,7 +34,11 @@ TurnTranscriptView::TurnTranscriptView(const QString &turnId, QWidget *parent) :
     m_tools = new QTreeWidget;
     m_tools->setObjectName(QStringLiteral("turnTools"));
     m_tools->setHeaderHidden(true);
-    m_tools->setColumnCount(1);
+    // Column 0 is the call's concise line; column 1 the exact duration, right of it (§ 23).
+    m_tools->setColumnCount(2);
+    m_tools->header()->setStretchLastSection(false);
+    m_tools->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_tools->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_tools->setUniformRowHeights(false);
     m_tools->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     m_tools->installEventFilter(this);
@@ -53,28 +57,76 @@ QString TurnTranscriptView::title() const {
     return QStringLiteral("Turn · %1 tool call%2").arg(toolCount()).arg(toolCount() == 1 ? QString() : QStringLiteral("s"));
 }
 
-int TurnTranscriptView::toolCount() const { return m_tools->topLevelItemCount(); }
+namespace {
+// The exact time a call took, for the second column: "820 ms", "8.1 s". The label's stats round
+// this to whole or one-decimal seconds and drop anything under a second, which is most calls.
+QString exactDuration(const QJsonObject &tool) {
+    const qint64 ms = tool.value(QStringLiteral("ms")).toVariant().toLongLong();
+    if (ms <= 0) return {};
+    if (ms < 1000) return QStringLiteral("%1 ms").arg(ms);
+    return QStringLiteral("%1 s").arg(ms / 1000.0, 0, 'f', ms < 10000 ? 1 : 0);
+}
+}  // namespace
+
+QTreeWidgetItem *TurnTranscriptView::addRow(QTreeWidgetItem *parent, const QJsonObject &tool,
+                                            const toollabel::Label &label) {
+    const bool ok = !label.failed();
+    const QString line = (ok ? QStringLiteral("✓ ") : QStringLiteral("✗ ")) + label.line();
+    auto *row = parent ? new QTreeWidgetItem(parent, {line, exactDuration(tool)})
+                       : new QTreeWidgetItem(m_tools, {line, exactDuration(tool)});
+    const QString callId = tool.value(QStringLiteral("call_id")).toString();
+    row->setData(0, Qt::UserRole, callId);
+    row->setForeground(0, ok ? relay::theme::Text : relay::theme::SyntaxUnknown);
+    row->setForeground(1, relay::theme::TextMuted);
+    row->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
+    QString tip = QStringLiteral("Enter or double-click opens the full output");
+    if (!label.path.isEmpty()) tip = label.path + QLatin1Char('\n') + tip;
+    row->setToolTip(0, tip);
+    return row;
+}
 
 void TurnTranscriptView::setSummary(const QJsonObject &summary) {
     m_elapsedMs = summary.value(QStringLiteral("elapsed_ms")).toVariant().toLongLong();
     m_thinkingMs = summary.value(QStringLiteral("thinking_ms")).toVariant().toLongLong();
     m_tools->clear();
+    m_toolCount = 0;
+    // A run of consecutive reads or listings is one parent row (§ 23.7); its members stay under it,
+    // each with its own call id, so any one of them can still be opened.
+    toollabel::MergeRun run;
+    QTreeWidgetItem *head = nullptr;
+    QJsonObject headTool;
+    toollabel::Label headLabel;
     for (const auto &value : summary.value(QStringLiteral("tools")).toArray()) {
         const QJsonObject tool = value.toObject();
-        const bool ok = tool.value(QStringLiteral("ok")).toBool(true);
-        QString line = (ok ? QStringLiteral("✓ ") : QStringLiteral("✗ ")) + tool.value(QStringLiteral("name")).toString();
+        const toollabel::Label label = toollabel::fromEvent(tool);
+        ++m_toolCount;
+        if (run.accepts(label) && head) {
+            if (run.count() == 1) {           // the run's first member moves under its own head row
+                head->setText(1, QString());
+                addRow(head, headTool, headLabel);
+            }
+            run.add(label);
+            addRow(head, tool, label);
+            head->setText(0, QStringLiteral("▸ ") + run.line());
+            head->setData(0, Qt::UserRole, QString());   // the run itself has no output to open
+            head->setToolTip(0, QStringLiteral("%1 calls; open one of them for its output").arg(run.count()));
+            continue;
+        }
+        run.clear();
+        head = addRow(nullptr, tool, label);
+        headTool = tool;
+        headLabel = label;
+        if (label.hasMerge && !label.failed()) run.add(label);
+        // Only a worker that sends no label at all still needs the preview spelled out; with a
+        // label the line says everything the preview's first line used to (§ 23.1).
         const QString preview = tool.value(QStringLiteral("preview")).toString();
-        const QString first = preview.section(QLatin1Char('\n'), 0, 0).trimmed();
-        if (!first.isEmpty()) line += QStringLiteral("  ") + first.left(120);
-        if (tool.contains(QStringLiteral("exit_code"))) line += QStringLiteral("  · exit %1").arg(tool.value(QStringLiteral("exit_code")).toInt());
-        auto *row = new QTreeWidgetItem(m_tools, {line});
-        row->setData(0, Qt::UserRole, tool.value(QStringLiteral("call_id")).toString());
-        row->setForeground(0, ok ? relay::theme::Text : relay::theme::SyntaxUnknown);
-        row->setToolTip(0, QStringLiteral("Enter or double-click opens the full output"));
-        if (preview.contains(QLatin1Char('\n')) || preview.size() > 120) {
-            // Expanding a row shows the whole preview (command, path or diff).
-            auto *child = new QTreeWidgetItem(row, {preview.left(4000)});
+        if (label.fallback && (preview.contains(QLatin1Char('\n')) || preview.size() > 120)) {
+            auto *child = new QTreeWidgetItem(head, {preview.left(4000), QString()});
             child->setForeground(0, relay::theme::TextMuted);
+            child->setData(0, Qt::UserRole, tool.value(QStringLiteral("call_id")).toString());
+        } else if (!label.error.isEmpty()) {
+            auto *child = new QTreeWidgetItem(head, {label.error, QString()});
+            child->setForeground(0, relay::theme::SyntaxUnknown);
             child->setData(0, Qt::UserRole, tool.value(QStringLiteral("call_id")).toString());
         }
     }
@@ -114,6 +166,68 @@ void TurnTranscriptView::setTranscript(const QJsonObject &transcript) {
         }
     }
     if (items.isEmpty()) add(QStringLiteral("(Transcript not available from this worker.)\n"), relay::theme::TextMuted, false);
+}
+
+// The reply to tool_output_get: the call's line, then its `detail` sections in order (§ 23.5).
+// Nothing here parses a preview — every section arrives with its heading and its style.
+void TurnTranscriptView::setToolOutput(const QJsonObject &reply) {
+    const toollabel::Label label = toollabel::fromEvent(reply);
+    const QString diff = reply.value(QStringLiteral("diff")).toString();
+    // More than 12 changed lines: the diff belongs in the diff pane, not in this log (§ 23.6).
+    const bool toThePane = label.openType == QStringLiteral("diff") && !diff.isEmpty() && onOpenDiff;
+    if (toThePane) onOpenDiff(label.path.isEmpty() ? label.title : label.path, diff);
+
+    m_log->clear();
+    QTextCursor cursor(m_log->document());
+    auto add = [&cursor](const QString &text, const QColor &color, bool bold = false, bool italic = false) {
+        QTextCharFormat format;
+        format.setForeground(color);
+        if (bold) format.setFontWeight(QFont::Bold);
+        if (italic) format.setFontItalic(true);
+        cursor.movePosition(QTextCursor::End);
+        cursor.insertText(text, format);
+    };
+    if (label.valid) {
+        add((label.failed() ? QStringLiteral("✗ ") : QStringLiteral("✓ ")) + label.line() + QLatin1Char('\n'),
+            label.failed() ? relay::theme::SyntaxUnknown : relay::theme::Text, true);
+    }
+    const QJsonArray sections = reply.value(QStringLiteral("detail")).toArray();
+    for (const auto &value : sections) {
+        const QJsonObject section = value.toObject();
+        const QString style = section.value(QStringLiteral("style")).toString();
+        if (toThePane && style == QStringLiteral("diff")) {
+            add(QStringLiteral("\ndiff\n"), relay::theme::TextMuted, true);
+            add(QStringLiteral("(opened in a diff pane)\n"), relay::theme::TextMuted, false, true);
+            continue;
+        }
+        add(QLatin1Char('\n') + section.value(QStringLiteral("heading")).toString() + QLatin1Char('\n'),
+            relay::theme::TextMuted, true);
+        const QString text = section.value(QStringLiteral("text")).toString();
+        if (style == QStringLiteral("diff")) {
+            for (const QString &line : text.split(QLatin1Char('\n'))) {
+                QColor colour = relay::theme::TextMuted;
+                if (line.startsWith(QLatin1Char('+')) && !line.startsWith(QStringLiteral("+++"))) colour = relay::theme::Success;
+                else if (line.startsWith(QLatin1Char('-')) && !line.startsWith(QStringLiteral("---"))) colour = relay::theme::Error;
+                add(line + QLatin1Char('\n'), colour);
+            }
+        } else {
+            const QColor colour = style == QStringLiteral("error")  ? relay::theme::SyntaxUnknown
+                                : style == QStringLiteral("code")   ? relay::theme::SyntaxCommand
+                                : style == QStringLiteral("text")   ? relay::theme::Text
+                                                                    : relay::theme::TextMuted;
+            add(text + QLatin1Char('\n'), colour);
+        }
+        if (section.value(QStringLiteral("truncated")).toBool())
+            add(QStringLiteral("(truncated)\n"), relay::theme::TextMuted, false, true);
+    }
+    if (sections.isEmpty()) {
+        // A worker from before § 23.5 answers with the text it has and no sections at all.
+        const QString text = reply.contains(QStringLiteral("text")) ? reply.value(QStringLiteral("text")).toString()
+                                                                    : reply.value(QStringLiteral("preview")).toString();
+        add(text.isEmpty() ? QStringLiteral("(No output recorded for this call.)\n") : text + QLatin1Char('\n'),
+            relay::theme::TextMuted);
+    }
+    m_log->moveCursor(QTextCursor::Start);
 }
 
 void TurnTranscriptView::setThinking(const QString &text) {

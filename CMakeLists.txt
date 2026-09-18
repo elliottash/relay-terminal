@@ -458,6 +458,11 @@ if(BUILD_TESTING)
     target_link_libraries(relay-toollabel-tests PRIVATE relay-toollabel ${RELAY_QT}::Test)
     add_test(NAME toollabel COMMAND relay-toollabel-tests)
     set_tests_properties(toollabel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The turn pane is part of the application rather than a library; the test compiles it directly.
+    add_executable(relay-turntranscript-tests tests/turntranscript_test.cpp src/TurnTranscript.cpp)
+    target_link_libraries(relay-turntranscript-tests PRIVATE relay-toollabel relay-highlight ${RELAY_QT}::Test)
+    add_test(NAME turntranscript COMMAND relay-turntranscript-tests)
+    set_tests_properties(turntranscript PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME backend-and-bash COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -v)
     # XDG_DATA_HOME keeps session autosaves and the conversation index out of the real profile.
     set_tests_properties(backend-and-bash PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
