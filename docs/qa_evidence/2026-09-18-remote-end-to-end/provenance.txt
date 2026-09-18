@@ -1,0 +1,16 @@
+HEAD          4a81e1f Two ctest groups only ever passed on a developer's machine: themeswitch needs a platform, the backend suite needs the developer's config kept out
+build/relay   2026-09-18 19:33:06
+dirty files   79
+   M remote/httpd.py
+   M remote/identity.py
+   M src/ModelSettings.cpp
+   M src/ModelSettings.h
+   M src/Pane.h
+   M src/PaneChrome.h
+   M src/PromptHistory.cpp
+   M src/PromptHistory.h
+   M src/RelayWindow.h
+   M src/ScreenPrompt.cpp
+   M src/SettingsPane.cpp
+   M src/SettingsPane.h
+  ?? remote/cloudflare.py

@@ -154,8 +154,13 @@ class Browser:
     async def evaluate(self, expression: str, timeout: float = 30):
         result = await self.call("Runtime.evaluate", {
             "expression": expression, "returnByValue": True, "awaitPromise": True}, timeout)
-        if result.get("exceptionDetails"):
-            raise RuntimeError(result["exceptionDetails"].get("text", "evaluation failed"))
+        details = result.get("exceptionDetails")
+        if details:
+            # `text` is "Uncaught" and nothing else, which names no file, line or cause. The
+            # description under `exception` is the message a person would read in the console, so
+            # a failing drive says what broke rather than that something did.
+            described = details.get("exception", {}).get("description", "")
+            raise RuntimeError(described or details.get("text", "evaluation failed"))
         return result.get("result", {}).get("value")
 
     async def wait_for(self, expression: str, timeout: float = 30, interval: float = 0.2):

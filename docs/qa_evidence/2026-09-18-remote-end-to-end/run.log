@@ -1,0 +1,103 @@
+shot 01-desktop-a-pane-with-output-and-a-local-agent.png
+PASS the pane runs a shell and its agent is the local model (shot 01)
+shot 02-share-the-share-window-offers-the-phone-first.png
+shot 03-phone-the-code-on-the-phone.png
+shot 04-share-the-same-code-on-the-desktop.png
+NOTE the phone and the desktop are both showing 49914 (shots 03 and 04 — compare them)
+shot 05-phone-paired-inbox.png
+PASS the phone paired with Allow typing and reads `full` (shot 05)
+shot 06-phone-the-shared-pane.png
+NOTE exactly one screen is drawn: True; the pane view is mounted: True
+shot 07-phone-a-command-through-the-box-on-top.png
+FAIL a shell command typed into the pane view’s box ran in the shell: output on screen True, and it went to the agent instead: True (“remote:” attribution lines 0 → 1) (shot 07)
+shot 07a-phone-the-command-the-phone-ran.png
+shot 08-desktop-the-phones-command-in-the-real-pane.png
+PASS the phone's command, sent through the client’s own box, ran in the desktop's shell (shots 07a, 08)
+shot 09-phone-the-agent-answering-on-the-phone.png
+shot 10-desktop-the-agent-answering-in-the-pane.png
+PASS an agent prompt from the phone reached the pane's agent (shots 09, 10); the phone's screen ends: …' pwd prints the absolute path of the current working directory — here, /tmp/tmp.pbVOiCC9UV/tmp.u1Pc4djCNZ. ✦ 1 tool call · 11 s (Ctrl+click)'
+NOTE the phone did not reach 60 rows of history in 150 s; what it did reach is checked below and shot 11 is where it got to
+shot 11-phone-the-phone-scrolled-back.png
+FAIL the phone paged 0 rows of history back and the column is one unbroken run: rows [361]..[400], 40 of them, contiguous True (shot 11)
+shot 12-phone-the-phone-took-over.png
+shot 13-desktop-the-line-the-phone-typed.png
+PASS Take over puts the phone on the keyboard ('You have the keyboard') and its line reached the program (shots 12, 13)
+shot 13a-phone-after-the-owner-typed-in-the-pane.png
+shot 13b-desktop-the-owner-typing-while-the-phone-held-the-keyboard.png
+NOTE after the owner's keystroke the phone still says 'You have the keyboard' / '', Hand back is still offered (True), and a line it sends still reaches the program (True). Section 10.3 puts “a `full` device typing” in the one control book; this desktop does not, so the phone and the owner share the keyboard rather than taking turns (shots 13a, 13b)
+shot 14-phone-the-notify-row-before-the-tap.png
+NOTE the Notify row before the tap: {'text': 'Notify me on this phone', 'hidden': False, 'note': '', 'permission': 'default'}
+shot 15-phone-what-the-tap-says-with-no-push-service.png
+NOTE after the tap, with no push service reachable: {'text': 'Notify me on this phone', 'note': 'Notifications are blocked for this site in your browser’s settings.', 'permission': 'denied'} (shot 15)
+shot 16-phone-subscribed-with-a-box-per-kind.png
+PASS `push_subscribe` reached the desktop and came back with a box per kind: ['notify-kind-waiting_input', 'notify-kind-password', 'notify-kind-failed', 'notify-kind-plan', 'notify-kind-agent_finished'] (shot 16)
+PASS the phone's seal key is readable for this test: 32 bytes
+shot 17-phone-the-phone-is-recording.png
+NOTE while recording, the microphone reads {'title': 'Stop recording and transcribe', 'on': 'recording', 'note': 'Listening… tap the microphone again to transcribe.'} (shot 17)
+shot 18-phone-transcribing.png
+NOTE once the clip is sent: {'title': 'Record a voice clip', 'on': '', 'note': 'The desktop has no OpenRouter key for transcription.'} (shot 18)
+shot 19-phone-what-came-back-from-the-clip.png
+NOTE after the clip: note 'The desktop has no OpenRouter key for transcription.', prompt box '' (shots 18, 19). With RELAY_KEYRING=off there is no transcription key on this desktop, so a readable error is the right answer
+shot 26-share-the-share-window-before-the-invite.png
+shot 27-share-an-editor-invite.png
+shot 28-share-the-link-and-its-qr.png
+PASS an editor invite link was made from the share window (shots 26-28)
+shot 29-desktop-typing-before-the-knock.png
+shot 30-guest-the-invitation.png
+shot 31-guest-waiting-to-be-let-in.png
+shot 32-desktop-the-knock-opened-the-sharing-pane.png
+shot 33-desktop-the-keyboard-never-left-the-prompt-box.png
+NOTE the guest's code is 03748 — shots 31 and 32 must agree
+PASS the Sharing pane opened by itself and the typing carried on into the prompt box (shots 29, 32, 33)
+shot 34-desktop-alice-on-the-people-list.png
+shot 35-guest-admitted-as-an-editor.png
+PASS admitted as editor; alice is on the people list with her key (shots 34, 35)
+shot 36-desktop-alice-asks-to-type.png
+shot 37-guest-asked-to-type.png
+shot 38-desktop-alice-is-typing.png
+shot 39-guest-alice-has-the-keyboard.png
+PASS the keyboard was asked for and handed over; the pane header says alice is typing (shots 36-39)
+shot 40-guest-the-command-alice-ran.png
+shot 41-desktop-alices-command-in-the-owners-shell.png
+PASS a line from the guest ran in the owner's shell (shots 40, 41)
+shot 42-desktop-typing-took-the-keyboard-back.png
+shot 43-guest-the-guest-was-told-and-kept-the-half-line.png
+PASS the owner's keystroke took control back; the guest's UI flipped (True) and kept the half-typed line ('rm -r bui') (shots 42, 43)
+shot 44-desktop-a-guest-prompt-waiting-with-its-whole-text.png
+shot 45-guest-waiting-for-the-owner.png
+shot 46-desktop-the-approved-prompt-running-on-the-owners-key.png
+shot 47-guest-approved.png
+PASS the whole text waited on the desktop, Approve once sent it to the agent, and the queue row names its author (shots 44-47)
+shot 48-desktop-a-second-prompt-waiting.png
+shot 49-guest-the-second-prompt-was-refused.png
+PASS a second prompt was refused and the guest was told why: 'and now delete everything in this folderthis desktop declined this' (shots 48, 49)
+shot 50-share-a-second-device-asking.png
+shot 51-viewer-a-viewing-device-cannot-type.png
+PASS the second device is 'view': no prompt box (False), no Take over (False), and it says '' (shot 51)
+NOTE what the viewing device is told about who is driving: 'Watching'
+shot 52-desktop-guests-are-paused.png
+shot 53-guest-the-guest-is-told-why.png
+PASS pause reaches the guest with a reason: 'The owner paused guests, so typing is paused for now.' (shots 52, 53)
+shot 54-desktop-demoted-to-viewer.png
+shot 55-guest-the-guests-typing-ui-is-gone.png
+PASS demoting to viewer takes the typing UI off the guest's page (shots 54, 55)
+shot 56-desktop-nobody-here-now.png
+shot 57-guest-this-invitation-has-ended.png
+PASS removing ends the guest's session and says so: 'This share has ended, or your access expired. If you are sent a new link, open it to knock again.' (shots 56, 57)
+PASS a program the owner started at the desktop is at a password prompt, and the phone can see it
+shot 20-phone-typing-refused-and-no-password-field.png
+FAIL ordinary typing is refused ('') and the password field is absent (drawn: False) (shot 20)
+shot 21-share-the-device-selected-passwords-off.png
+shot 22-share-passwords-on-for-this-device.png
+shot 23-phone-the-password-field-appeared.png
+FAIL turning the device's password switch on puts the field on the phone (shots 21-23)
+NOTE the focus is on 10485792 and Relay's window is 2097162: the desktop is not the window in front
+FAIL no push arrived at the service (endpoint https://127.0.0.1:45927/subscription/one); the pane did reach a password prompt if `prompt_detected` is in audit.txt, so what did not happen is either the presence rule or the delivery
+shot 58-share-the-share-window-before-stopping.png
+shot 59-desktop-the-desktop-after-stopping.png
+shot 60-phone-the-phone-after-the-share-stopped.png
+NOTE phone after Stop sharing: link status 'connected'
+shot 61-viewer-the-viewer-after-the-share-stopped.png
+NOTE viewer after Stop sharing: link status 'connected'
+
+39 notes, 5 failures

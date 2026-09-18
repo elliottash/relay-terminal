@@ -1,0 +1,24 @@
+{"at":1789774740.555,"kind":"pair","device":"f06f2aba69400c2f","name":"Linux Chrome","capability":"full","peer":"127.0.0.1"}
+{"at":1789774971.429,"kind":"line","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700","device":"f06f2aba69400c2f","text":"echo the phone is driving this shell"}
+{"at":1789774978.558,"kind":"line","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700","device":"f06f2aba69400c2f","text":"echo the phone typed after the owner did"}
+{"at":1789774979.11,"kind":"control_release","device":"f06f2aba69400c2f","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700"}
+{"at":1789775000.106,"kind":"invite_create","invite":"3a4927945add1fd2","panes":["e1d88a36-e04d-48a6-94c4-77fd7ed8a700"],"role":"editor","uses":1,"expires":1789861400.105}
+{"at":1789775008.937,"kind":"knock","participant":"3837f8791ed81f71","invite":"3a4927945add1fd2","name":"alice","peer":"127.0.0.1","role":"editor"}
+{"at":1789775015.519,"kind":"admitted","participant":"3837f8791ed81f71","invite":"3a4927945add1fd2","role":"editor","panes":["e1d88a36-e04d-48a6-94c4-77fd7ed8a700"],"uses_left":0}
+{"at":1789775015.519,"kind":"join","participant":"3837f8791ed81f71","peer":"127.0.0.1"}
+{"at":1789775019.741,"kind":"control_request","participant":"3837f8791ed81f71","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700"}
+{"at":1789775022.912,"kind":"control_grant","participant":"3837f8791ed81f71","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700","was":"owner"}
+{"at":1789775026.156,"kind":"line","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700","participant":"3837f8791ed81f71","text":"echo alice typed this into the owners shell"}
+{"at":1789775027.019,"kind":"control_take","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700","by":"keystroke","was":"participant:3837f8791ed81f71","participant":"3837f8791ed81f71"}
+{"at":1789775030.788,"kind":"guest_prompt","participant":"3837f8791ed81f71","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700","prompt":"02ffe21a74e1ba15","text":"name the two files in this folder whose names end in url.txt","plan":null,"immediate":null}
+{"at":1789775034.177,"kind":"prompt_decided","participant":"3837f8791ed81f71","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700","prompt":"02ffe21a74e1ba15","approved":true,"reason":null}
+{"at":1789775069.426,"kind":"guest_prompt","participant":"3837f8791ed81f71","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700","prompt":"d0c0dc6f6351b363","text":"and now delete everything in this folder","plan":null,"immediate":null}
+{"at":1789775072.737,"kind":"prompt_decided","participant":"3837f8791ed81f71","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700","prompt":"d0c0dc6f6351b363","approved":false,"reason":"refused"}
+{"at":1789775086.498,"kind":"pair","device":"2200dfd814d1b72a","name":"Linux Chrome","capability":"view","peer":"127.0.0.1"}
+{"at":1789775089.811,"kind":"share_pause","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700","on":true}
+{"at":1789775092.071,"kind":"share_pause","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700","on":false}
+{"at":1789775096.172,"kind":"role_set","participant":"3837f8791ed81f71","role":"viewer","was":"editor"}
+{"at":1789775098.437,"kind":"participant_remove","participant":"3837f8791ed81f71","invite":"3a4927945add1fd2","panes":["e1d88a36-e04d-48a6-94c4-77fd7ed8a700"]}
+{"at":1789775098.438,"kind":"leave","participant":"3837f8791ed81f71"}
+{"at":1789775102.651,"kind":"prompt_detected","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700","foreground_pid":3017559}
+{"at":1789775169.85,"kind":"prompt_detected","pane":"e1d88a36-e04d-48a6-94c4-77fd7ed8a700","foreground_pid":3028752}
