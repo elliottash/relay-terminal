@@ -121,6 +121,14 @@ target_include_directories(relay-input PUBLIC src)
 target_link_libraries(relay-input PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-input PRIVATE -Wall -Wextra -Wpedantic)
 
+# Slash commands: whether a submitted line is an attempt at a Relay command (and not a path the
+# shell should keep), and what Relay answers when the command does not exist. Pure rules, with an
+# injectable filesystem probe so `/tmp` and `/usr/bin/foo` are testable anywhere.
+add_library(relay-slash STATIC src/SlashCommands.cpp src/SlashCommands.h)
+target_include_directories(relay-slash PUBLIC src)
+target_link_libraries(relay-slash PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-slash PRIVATE -Wall -Wextra -Wpedantic)
+
 # Screen-text input detection: "is the program waiting for a line?" read off the last rows of
 # the screen (issues/features/2026-09-17-screen-text-input-detection.md). Pure text rules.
 add_library(relay-screen STATIC src/ScreenPrompt.cpp src/ScreenPrompt.h)
@@ -141,6 +149,13 @@ add_library(relay-notifications STATIC src/Notifications.cpp src/Notifications.h
 target_include_directories(relay-notifications PUBLIC src)
 target_link_libraries(relay-notifications PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-notifications PRIVATE -Wall -Wextra -Wpedantic)
+
+# Queue navigation: when Up and Down move between queued items and when they belong to the text of
+# the item being edited in the prompt box. Pure rules, no widgets.
+add_library(relay-queuenav STATIC src/QueueNav.cpp src/QueueNav.h)
+target_include_directories(relay-queuenav PUBLIC src)
+target_link_libraries(relay-queuenav PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-queuenav PRIVATE -Wall -Wextra -Wpedantic)
 
 # Pane movement: which pane is the neighbour in a direction, how two panes swap inside their
 # splitter, and which edge a dropped pane lands on. Plain Qt widgets, no terminal.
@@ -234,7 +249,7 @@ if(RELAY_BUILD_APP)
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
-    target_link_libraries(relay PRIVATE relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-slash relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -285,6 +300,9 @@ if(BUILD_TESTING)
     add_executable(relay-windowstate-tests tests/windowstate_test.cpp)
     target_link_libraries(relay-windowstate-tests PRIVATE relay-windowstate ${RELAY_QT}::Test)
     add_test(NAME windowstate COMMAND relay-windowstate-tests)
+    add_executable(relay-slash-tests tests/slashcommands_test.cpp)
+    target_link_libraries(relay-slash-tests PRIVATE relay-slash ${RELAY_QT}::Test)
+    add_test(NAME slash COMMAND relay-slash-tests)
     add_executable(relay-input-tests tests/inputpolicy_test.cpp)
     target_link_libraries(relay-input-tests PRIVATE relay-input ${RELAY_QT}::Test)
     add_test(NAME input COMMAND relay-input-tests)
@@ -300,6 +318,9 @@ if(BUILD_TESTING)
     target_link_libraries(relay-conversations-tests PRIVATE relay-conversations ${RELAY_QT}::Test)
     add_test(NAME conversations COMMAND relay-conversations-tests)
     set_tests_properties(conversations PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-queuenav-tests tests/queuenav_test.cpp)
+    target_link_libraries(relay-queuenav-tests PRIVATE relay-queuenav ${RELAY_QT}::Test)
+    add_test(NAME queuenav COMMAND relay-queuenav-tests)
     add_executable(relay-panes-tests tests/panelayout_test.cpp)
     target_link_libraries(relay-panes-tests PRIVATE relay-panes ${RELAY_QT}::Test)
     add_test(NAME panes COMMAND relay-panes-tests)

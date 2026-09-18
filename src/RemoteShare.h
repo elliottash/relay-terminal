@@ -53,6 +53,10 @@ public:
         std::function<QString()> cwd;
         std::function<QString()> status;
         std::function<void(const QByteArray &)> input;
+        // A prompt from a client. `route` means decide shell or agent the way the composer does;
+        // without it the text may only reach the agent (the hub enforces which devices get it).
+        std::function<void(const QString &text, bool route, const QString &origin)> compose;
+        std::function<void()> stopAgent;
     };
 
     // Start the sidecar if needed and share this pane. Returns false with `error` set when the
@@ -89,6 +93,11 @@ private:
     void onReadable();
     void handle(const QJsonObject &message);
     void sendFrame(const QString &paneId, bool full);
+public:
+    // One worker event from a pane. Forwarded only while that pane is shared; the sidecar's
+    // allow-list decides what a client may actually see.
+    void paneEvent(const QString &paneId, const QJsonObject &event);
+private:
     void sendPane(const QString &paneId);
     void poll();
 
@@ -122,7 +131,7 @@ private:
                  const QString &code, const QString &peer);
     void showDevices(const QJsonArray &items);
     void showAddresses(const QJsonArray &addresses);
-    void answer(bool allow);
+    void answer(bool allow, const QString &capability = QString());
     void fit();
 
     QString m_paneId;

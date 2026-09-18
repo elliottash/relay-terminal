@@ -12,6 +12,7 @@
 #include "InputPolicy.h"           // prompt-box-only input: where a submitted line goes
 #include "ScreenPrompt.h"          // "is the program waiting for input?", read off the screen
 #include "PaneLayout.h"            // pane focus, pane moves and grip drops
+#include "QueueNav.h"              // arrowing through the queue while its items are edited
 #include "PaneTitles.h"            // model-written pane titles and the tab labels made from them
 #include "TurnTranscript.h"
 #include "ModelSettings.h"
@@ -33,6 +34,7 @@
 #include "Aliases.h"        // aliases: saved commands and prompts, their fields and invocations
 #include "MarkdownAnsi.h"   // agent replies in the terminal: Markdown rendered as it streams
 #include "OutputLinks.h"    // what a link in the output is; `relay://card/<id>` for a `#K7Q2`
+#include "SlashCommands.h"  // an unknown `/command` is Relay's to answer, not the shell's
 #include <iterator>
 #include <QAbstractButton>
 #include <QAbstractItemView>
@@ -626,6 +628,9 @@ public:
         if (!m_runtime.isValid()) throw std::runtime_error("Could not create a private shell runtime directory.");
         QFile::setPermissions(m_runtime.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
         m_token = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        // The saved scrollback is filed under the pane's token unless a restore hands it the id
+        // its saved text already has (initRestore).
+        m_scrollbackId = m_token;
         buildUi();
         startWorker();
         startTerminal(cleanShell);
@@ -744,7 +749,32 @@ public:
         const QString input = spec.value(QStringLiteral("input_mode")).toString();
         if (input == QStringLiteral("auto") || input == QStringLiteral("shell") || input == QStringLiteral("agent")) m_modeValue = input;
         m_restoreSession = spec.value(QStringLiteral("session_id")).toString();
+        // The terminal text this pane had when Relay was last quit (src/WindowState.h). The pane
+        // keeps the saved id, so the same file is rewritten instead of one per restart, and the
+        // lines are replayed once the restarted shell reports its first prompt.
+        const QString scrollback = spec.value(QStringLiteral("scrollback")).toString();
+        if (relay::windowstate::isScrollbackId(scrollback)) {
+            m_scrollbackId = scrollback;
+            m_restoredScrollback = relay::windowstate::readScrollback(scrollback);
+        }
         changed();
+    }
+
+    // ----- terminal scrollback across a restart (owner report, 2026-09-18) ---------------------
+    // Saved when the window closes and when Relay quits; replayed into the restarted pane at its
+    // first prompt. Plain text: see the note in src/WindowState.h on why the colours do not come
+    // back with it.
+    QString scrollbackId() const { return m_scrollbackId; }
+    void saveScrollback() const {
+        if (!terminalCan(relay::TerminalBackend::Scrollback)) return;
+        QStringList lines = m_backend->scrollbackText(relay::windowstate::kScrollbackMaxLines);
+        // The visible screen is the newest part of what the user was reading. A full-screen
+        // program (vim, less) owns it instead, and its frame is not output worth keeping.
+        if (terminalCan(relay::TerminalBackend::ScreenText) && !m_backend->altScreen())
+            lines += m_backend->screenText().split(QLatin1Char('\n'));
+        QString error;
+        if (!relay::windowstate::writeScrollback(m_scrollbackId, lines, &error) && !error.isEmpty())
+            fprintf(stderr, "relay: could not save this pane's scrollback: %s\n", qPrintable(error));
     }
     void focusInput() {
         if (m_native) { focusTerminal(); return; }
@@ -783,11 +813,12 @@ public:
     int queuedPrompts() const { return m_entries.size(); }
     bool queuePaused() const { return m_entriesPaused; }
     void clearAgentQueue() {
-        m_entries.clear(); m_entriesPaused = false; m_resubmitAtFront = false; m_selected = -1;
+        m_entries.clear(); m_entriesPaused = false;
+        keepSelectionOn(0);   // nothing left to select: the prompt box gives the item's text back
         rebuildQueueStrip(); changed();
     }
     void resumeAgentQueue() {
-        m_entriesPaused = false; m_resubmitAtFront = false; m_pauseReason.clear();
+        m_entriesPaused = false; m_pauseReason.clear();
         send({{"type", "resume_queue"}});
         rebuildQueueStrip(); changed();
         pumpQueue();
@@ -808,9 +839,10 @@ public:
         status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
     }
     void selectModel(const QString &id) {
-        // "role:" is the pane's own role chip entry, "gear:" the model options modal, and
-        // "vision:" the model this one turn is running on because it carries an image: all three
-        // are labels, not models to switch to.
+        // "role:" is a Main/Flash row, "gear:" the model options modal, and "vision:" the model this
+        // one turn is running on because it carries an image: none of the three is a preset to
+        // switch to. The first two are acted on where the box is built (chooseAgentRole,
+        // openRolesDialog); this is the guard for the other callers — /model and the roles modal.
         if (id.startsWith(QStringLiteral("role:")) || id.startsWith(QStringLiteral("gear:"))
             || id.startsWith(QStringLiteral("vision:"))) return;
         // Picking a model from the chip puts the pane back on the main agent (protocol 13).
@@ -930,6 +962,21 @@ public:
                                                  : QStringLiteral("%1 for this pane%2").arg(roleLabel(role), model.isEmpty() ? QString() : QStringLiteral(" · ") + model));
         }
         changed();
+    }
+    // The model to print beside a role in the model box: the pane's live model when the pane is
+    // running that role, otherwise the model the worker resolved the role to. Empty until the
+    // worker has reported one (no key yet), and then the row is just the role's name.
+    QString roleModelText(const QString &role) const {
+        if (role == m_agentRole && !m_model.isEmpty()) return m_model;
+        return roleModel(role);
+    }
+    // Picked from the model box (owner report, 2026-09-18: "the main use case for that is going to
+    // be swapping between the main and flash models"). setAgentRole is a no-op when the pane is
+    // already on that role and refuses mid-turn, and in both cases the box is left sitting on the
+    // row that was clicked — so the chip is always rebuilt from the pane's actual state afterwards.
+    void chooseAgentRole(const QString &role) {
+        setAgentRole(canonicalRole(role));
+        refreshPickers();
     }
     // Before the first configure: the role a new or restored pane starts with.
     void initAgentRole(const QString &role) { if (!m_configured) m_agentRole = role; }
@@ -1818,7 +1865,7 @@ protected:
             const QModelIndex index = m_queueList->indexAt(pos);
             if (index.isValid() && pos.x() >= m_queueList->viewport()->width() - 26) {
                 removeEntry(index.data(Qt::UserRole).toULongLong());
-                hint(QStringLiteral("queue.remove.mouse"), QStringLiteral("Next time: ↑ selects queued items, Delete removes, Ctrl+↑/↓ reorders"));
+                hint(QStringLiteral("queue.remove.mouse"), QStringLiteral("Next time: ↑ opens a queued item in the prompt box, Shift+Delete removes, Ctrl+↑/↓ reorders"));
                 return true;
             }
         }
@@ -2102,7 +2149,27 @@ private:
         m_modelBox->setSizeAdjustPolicy(QComboBox::AdjustToContents);
         m_modelBox->setFocusPolicy(Qt::TabFocus);
         connect(m_modelBox, qOverload<int>(&QComboBox::activated), this, [this](int index) {
-            selectModel(m_modelBox->itemData(index).toString()); focusInput();
+            const QString data = m_modelBox->itemData(index).toString();
+            // Owner report, 2026-09-18: "selecting model options in the model dropdown didnt do
+            // anything. the main use case for that is going to be swapping between the main and
+            // flash models." Two entries in this list are not models: the gear (the model options
+            // modal, which lost its branch here when the strip was rebuilt) and the Main/Flash rows
+            // (the pane's agent role). Both are handled before selectModel, which only knows presets.
+            if (data == QStringLiteral("gear:modelOptions")) {
+                refreshPickers();   // put the box back on the pane's model: the gear is not a choice
+                openRolesDialog();
+                hint(QStringLiteral("model.options.mouse"),
+                     QStringLiteral("Tip: Actions › Settings › Models opens the same modals"));
+                return;
+            }
+            if (data.startsWith(QStringLiteral("role:"))) {
+                chooseAgentRole(data.mid(5)); focusInput();
+                hint(QStringLiteral("model.role.mouse"),
+                     relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.flashAgent")),
+                                                    QStringLiteral("the Main and Flash agents")));
+                return;
+            }
+            selectModel(data); focusInput();
             hint(QStringLiteral("model.mouse"), QStringLiteral("Tip: /model switches models from the prompt box"));
         });
         routeRow->addWidget(m_modelBox);
@@ -3174,6 +3241,10 @@ public:
             hooks.input = [this](const QByteArray &bytes) {
                 if (m_backend) m_backend->sendText(QString::fromUtf8(bytes), false);
             };
+            hooks.compose = [this](const QString &text, bool route, const QString &origin) {
+                submitRemote(text, route, origin);
+            };
+            hooks.stopAgent = [this] { stopAgent(); };
             QString error;
             if (!share.sharePane(m_token, hooks, &error)) {
                 status(error);
@@ -4050,6 +4121,9 @@ private:
         static const QList<SlashCommand> commands{
             {QStringLiteral("new"), QString(), QStringLiteral("Start a new conversation and clear the terminal")},
             {QStringLiteral("clear"), QString(), QStringLiteral("Start a new conversation and clear the terminal (same as /new)")},
+            // The card `?` shows in an empty prompt box. `/help` is what people type when they do
+            // not know `?` yet, and it is where an unknown command points them (issue #Q4SD).
+            {QStringLiteral("help"), QString(), QStringLiteral("The keys and prefixes Relay answers to (same as ?)")},
             {QStringLiteral("model"), QStringLiteral("[name]"), QStringLiteral("Switch model, keeping the conversation")},
             {QStringLiteral("main"), QString(), QStringLiteral("Run this pane on the Main model")},
             {QStringLiteral("flash"), QString(), QStringLiteral("Run this pane on the Flash model (same as Alt+F)")},
@@ -4086,6 +4160,9 @@ private:
     }
 
     void updateSlashPopup() {
+        // A queued item is in the box, not a command being typed: its leading "/" must not open the
+        // popup, which would take the arrow keys the queue is using.
+        if (m_selected >= 0) { hideSlashPopup(); return; }
         const QString text = m_editor ? m_editor->toPlainText() : QString();
         if (!m_editor || m_native || !text.startsWith('/') || text.contains(QRegularExpression(QStringLiteral("\\s")))) { hideSlashPopup(); return; }
         // The first `/` of a command is the cue to re-read the aliases, for the same reason the
@@ -4189,6 +4266,39 @@ private:
         m_editor->clear();
         hideSlashPopup();
         runSlashCommand(name, match.captured(2).trimmed());
+        return true;
+    }
+
+    // Every name a `/command` can mean in this pane: the built-ins, then this window's aliases,
+    // which `/name` runs the same way (issue G8DK). The order is the order they are suggested in.
+    QStringList slashNames() const {
+        QStringList names;
+        for (const auto &command : slashCommands()) names << command.name;
+        for (const auto &alias : m_aliasList)
+            if (!alias.shadowed && !names.contains(alias.name)) names << alias.name;
+        return names;
+    }
+
+    // A `/command` Relay does not have. It used to fall through to the router, which sent the line
+    // to the agent — and the agent, or terminal mode, handed it to Bash, so the answer came back as
+    // `bash: /nosuchthing: command not found`: the shell answering for a command the shell never
+    // owned (owner report, 2026-09-18). Relay answers it instead, names the closest real commands
+    // and points at the list. Only a name-shaped first word takes this path: `/usr/bin/foo` and
+    // `/tmp` are paths and still run (relay::slash::attemptedName), and `/shell …` and `/agent …`
+    // are the router's own prefixes, so they are found among the names and left alone.
+    bool reportUnknownSlashCommand(const QString &text) {
+        const QString name = relay::slash::attemptedName(text);
+        if (name.isEmpty()) return false;
+        const QStringList names = slashNames();
+        if (names.contains(name)) return false;
+        m_editor->remember(text.trimmed());
+        m_editor->clear();
+        hideSlashPopup();
+        clearAiGhost();
+        ensureLineStart();
+        printInline(QStringLiteral("✗ ") + relay::slash::unknownLine(name, names) + '\n', Ink::Error);
+        closeInline();
+        status(QStringLiteral("Unknown command: /%1").arg(name));
         return true;
     }
 
@@ -4312,6 +4422,11 @@ private:
             else { m_agentsListPending = true; send({{"type", "agents_list"}, {"workspace", m_workspace}}); }
         } else if (name == QStringLiteral("skills")) {
             openSkills();
+        } else if (name == QStringLiteral("help")) {
+            // The same card `?` shows, never a second surface for the same list. Typing the
+            // command while the card is up must leave it up, so this shows rather than toggles.
+            if (!(m_helpCard && m_helpCard->isVisible())) toggleHelpCard();
+            hint(QStringLiteral("help.slash"), QStringLiteral("Next time: press ? in an empty prompt box"));
         }
     }
 
@@ -4975,9 +5090,21 @@ private:
             if (submitAliasFields()) return;
             if (tryRunSlashCommand(m_editor->toPlainText())) return;
             if (tryRunAliasSlash(m_editor->toPlainText())) return;
+            // A `/command` that is not one of the above never reaches the router: Relay says so
+            // itself rather than letting Bash answer with "command not found".
+            if (reportUnknownSlashCommand(m_editor->toPlainText())) return;
             clearAiGhost();
         } else if (const SlashCommand *command = slashCommandFor(m_editor->toPlainText())) {
             setRouteText(QStringLiteral("COMMAND · /%1 · %2").arg(command->name, command->description));
+            return;
+        } else if (const QString name = relay::slash::attemptedName(m_editor->toPlainText());
+                   !name.isEmpty() && !slashNames().contains(name)) {
+            // The preview says it before Enter does: the label of a command Relay does not have.
+            const QStringList close = relay::slash::closest(name, slashNames(), 2);
+            setRouteText(close.isEmpty()
+                             ? QStringLiteral("COMMAND · /%1 · not a Relay command · / for the list").arg(name)
+                             : QStringLiteral("COMMAND · /%1 · not a Relay command · did you mean /%2?")
+                                   .arg(name, close.join(QStringLiteral(" or /"))));
             return;
         }
         if (!m_workerReady) {
@@ -4987,8 +5114,6 @@ private:
         if (submit && (!m_pendingSubmit.isEmpty() || !m_heldDecision.isEmpty() || m_loading)) return;
         const QString id = QString::number(++m_requestId);
         QString mode = overrideMode == QStringLiteral("auto") ? m_modeValue : overrideMode;
-        if (submit && overrideMode == QStringLiteral("auto") && !m_editKind.isEmpty()) mode = m_editKind;
-        if (submit) m_editKind.clear();
         // A program is blocked reading a line from the terminal: the prompt box answers it
         // instead of queueing a command (issue decision 5). Agent submissions still go to the
         // agent, so Ctrl+Enter and `*` keep working while a program waits.
@@ -5040,6 +5165,9 @@ private:
     void handle(const QJsonObject &event) {
         const QString type = event.value(QStringLiteral("event")).toString();
         logEvent(type, event);
+        // A shared pane's agent is watched from elsewhere too. The sidecar's allow-list decides
+        // what actually reaches a device; this only offers it.
+        relay::RemoteShare::instance().paneEvent(m_token, event);
         // --- subagents UI: subagent_* events are consumed; main-agent state is observed first ---
         if (type == QStringLiteral("configured"))
             QTimer::singleShot(0, this, [this] {
@@ -5061,6 +5189,7 @@ private:
             refreshAliases();   // the palette and `/name` need the list before anything is typed
         } else if (type == QStringLiteral("route")) {
             const QString id = event.value(QStringLiteral("id")).toString();
+            if (takeRemoteRoute(id, event)) return;
             const QString route = event.value(QStringLiteral("route")).toString();
             const bool needsAssist = event.value(QStringLiteral("needs_assist")).toBool()
                 && (id == m_pendingSubmit ? m_submitMode : m_modeValue) == QStringLiteral("auto");
@@ -5964,20 +6093,34 @@ private:
         if (m_stored.isEmpty()) m_modelBox->addItem(QStringLiteral("No stored keys"));
         const int index = m_modelBox->findData(m_currentPreset);
         if (index >= 0) m_modelBox->setCurrentIndex(index);
+        // Model roles (protocol 13), as their own group under the presets. Owner report,
+        // 2026-09-18: "the main use case for that is going to be swapping between the main and
+        // flash models" — Alt+F was the only way to do it, so the two roles a pane can run are
+        // rows here, the live one ticked. Picking a preset above still puts the pane back on the
+        // main agent.
+        m_modelBox->insertSeparator(m_modelBox->count());
+        QStringList paneRoles{QStringLiteral("main"), QStringLiteral("flash")};
+        if (!paneRoles.contains(m_agentRole)) paneRoles << m_agentRole;   // a role a session restored
+        for (const QString &role : std::as_const(paneRoles)) {
+            // A pane on another role reads as that role, not as its stored preset: the collapsed
+            // chip is the role's row, which is where it sat before these rows existed. That row is
+            // the box's current item, so it needs no tick; the main row does, because when the pane
+            // is on the main agent the box sits on the preset above.
+            const bool live = role == m_agentRole;
+            const bool selects = live && role != QStringLiteral("main");
+            const QString model = roleModelText(role);
+            m_modelBox->addItem(QStringLiteral("%1 %2%3").arg(live && !selects ? QString(QChar(0x2713)) : QStringLiteral(" "),
+                                                              roleLabel(role),
+                                                              model.isEmpty() ? QString() : QStringLiteral(" · ") + model),
+                                QStringLiteral("role:") + role);
+            if (selects) m_modelBox->setCurrentIndex(m_modelBox->count() - 1);
+        }
         // Last entry: the model options modal (default provider, Main/Flash/Lite, per-job overrides).
         // It stays reachable with no stored key, which is exactly when it is needed most.
         m_modelBox->insertSeparator(m_modelBox->count());
         m_modelBox->addItem(QString(QChar(0x2699)) + QStringLiteral("  Model options…"),
                             QStringLiteral("gear:modelOptions"));
         m_modelBox->setEnabled(true);
-        // Model roles (protocol 13): a pane on another role shows that role and its model, and
-        // picking a preset from the chip puts the pane back on the main agent.
-        if (m_agentRole != QStringLiteral("main")) {
-            const QString model = m_model.isEmpty() ? roleModel(m_agentRole) : m_model;
-            m_modelBox->insertItem(0, QStringLiteral("%1 · %2").arg(roleLabel(m_agentRole), model), QStringLiteral("role:") + m_agentRole);
-            m_modelBox->setCurrentIndex(0);
-            m_modelBox->setEnabled(true);
-        }
         // Image context (protocol 17): while a turn with an image runs on another model, the chip
         // says which one, so an answer never seems to come from the pane's own model.
         if (!m_visionModel.isEmpty()) {
@@ -6265,6 +6408,28 @@ private:
         if (m_backend && shellIdleAtPrompt()) m_backend->redrawPrompt();
     }
 
+    // The pane's text from before the last quit (src/WindowState.h), printed once, at the
+    // restarted shell's first prompt. The prompt line is erased and redrawn the way inline agent
+    // output does it, so the restored lines land above the new prompt in the order they were
+    // written. They print plain — no saved colours, so they take the live theme — between two
+    // muted rules, because the shell underneath them is a new one and nothing on them was re-run.
+    void replayRestoredScrollback() {
+        if (m_restoredScrollback.isEmpty() || m_scrollbackReplayed || !m_backend) return;
+        if (m_inlineOpen || !shellIdleAtPrompt()) return;   // busy: the next prompt tries again
+        m_scrollbackReplayed = true;
+        const QStringList lines = m_restoredScrollback;
+        m_restoredScrollback.clear();
+        QByteArray out = "\r\x1b[2K";
+        out += inkCode(Ink::Note) + QByteArray("— scrollback from before the restart —") + "\x1b[0m\r\n";
+        // Saved output is replayed as text: any escape sequence left in the file is stripped, so
+        // a hand-edited (or truncated) file cannot drive the terminal.
+        for (const QString &line : lines) out += sanitize(line).toUtf8() + "\r\n";
+        out += inkCode(Ink::Note) + QByteArray("— end of restored scrollback; this shell is new —") + "\x1b[0m\r\n";
+        writeTerminal(out);
+        m_backend->redrawPrompt();
+        status(QStringLiteral("Restored %1 line(s) of scrollback from before the restart.").arg(lines.size()));
+    }
+
     void flushInline() {
         if (m_inlinePending.isEmpty() || !shellIdleAtPrompt()) return;
         const auto pending = m_inlinePending;
@@ -6335,15 +6500,49 @@ private:
             printInline(QStringLiteral("Interrupting the current turn; completed actions are not rolled back.\n"), Ink::Note);
             return;
         }
-        if (!m_resubmitAtFront && m_entries.isEmpty() && !m_activeValid && !m_agentBusy) {
+        if (m_entries.isEmpty() && !m_activeValid && !m_agentBusy) {
             startAgentEntry(entry, false);
             return;
         }
         enqueue(entry);
     }
 
+    // A prompt from a paired device. It never touches the composer: the person at the desktop may
+    // be typing, and their draft is theirs. `route` asks the worker's router to decide, exactly as
+    // the composer does; without it the text can only reach the agent, which is what keeps a
+    // view-or-agent device away from the shell.
+    void submitRemote(const QString &text, bool route, const QString &origin) {
+        const QString trimmed = text.trimmed();
+        if (trimmed.isEmpty()) return;
+        status(QStringLiteral("Prompt from %1").arg(origin.isEmpty() ? QStringLiteral("a phone")
+                                                                     : origin));
+        if (!route || !m_workerReady) {
+            submitAgent(trimmed, false, origin);
+            return;
+        }
+        const QString id = QStringLiteral("remote-") + QString::number(++m_requestId);
+        m_remotePrompts.insert(id, {trimmed, origin});
+        send({{"type", "route"}, {"id", id}, {"text", trimmed}, {"mode", QStringLiteral("auto")},
+              {"known_commands", m_knownCommands}, {"path", m_shellPath}, {"cwd", m_cwd}});
+    }
+
+    // The router's verdict for a remote prompt. Returns true when the event was one of ours, so
+    // the composer's own preview and submit state never see it.
+    bool takeRemoteRoute(const QString &id, const QJsonObject &event) {
+        const auto pending = m_remotePrompts.find(id);
+        if (pending == m_remotePrompts.end()) return false;
+        const RemotePrompt prompt = *pending;
+        m_remotePrompts.erase(pending);
+        if (event.value(QStringLiteral("route")).toString() == QStringLiteral("shell")) {
+            submitTerminal(prompt.text, false);
+        } else {
+            submitAgent(prompt.text, false, prompt.origin);
+        }
+        return true;
+    }
+
     void submitTerminal(const QString &text, bool watch, bool natural = false) {
-        if (!m_resubmitAtFront && m_entries.isEmpty() && !m_activeValid && shellIdleForQueue()) {
+        if (m_entries.isEmpty() && !m_activeValid && shellIdleForQueue()) {
             runInTerminal(text, watch, 0, natural);
             return;
         }
@@ -6356,15 +6555,10 @@ private:
     bool shellIdleForQueue() const { return m_backend && m_shellReady && !m_loading && !m_native && !processBusy(); }
 
     void enqueue(QueueEntry entry) {
+        // A queued item is edited where it stands now (selectQueueEntry / saveQueueEdit), so nothing
+        // is ever pulled out and resubmitted at the head: everything queued here joins the back.
         entry.id = ++m_entrySerial;
-        if (m_resubmitAtFront) {
-            // An item pulled from the head for editing goes back to the head and resumes the queue.
-            m_entries.prepend(entry);
-            m_resubmitAtFront = false;
-            m_entriesPaused = false; m_pauseReason.clear();
-        } else {
-            m_entries.append(entry);
-        }
+        m_entries.append(entry);
         m_selected = -1;
         if (entry.agent && m_agentBusy) { m_lastQueuedEntryId = entry.id; m_lastQueuedAt.start(); }
         status(entry.agent ? QStringLiteral("Queued · the agent prompt runs after the items ahead of it · Enter again to send at the next tool call")
@@ -6399,8 +6593,9 @@ private:
 
     // Start the head of the queue when its resource is free and nothing from the queue is running.
     void pumpQueue() {
-        if (m_entriesPaused || m_activeValid || m_entries.isEmpty()) return;
+        if (queueBlocked() || m_activeValid || m_entries.isEmpty()) return;
         const QueueEntry head = m_entries.first();
+        const quint64 selected = selectedEntryId();
         if (head.agent) {
             if (m_agentBusy || !m_configured) return;
             m_entries.removeFirst();
@@ -6409,10 +6604,73 @@ private:
             if (!shellIdleForQueue()) return;
             m_entries.removeFirst();
             m_active = head; m_activeValid = true; m_activeLoaded = false;
-        if (!runInTerminal(head.text, head.watch, 0, head.natural)) { m_entries.prepend(head); m_activeValid = false; return; }
+            if (!runInTerminal(head.text, head.watch, 0, head.natural)) { m_entries.prepend(head); m_activeValid = false; return; }
         }
-        if (m_selected >= m_entries.size()) m_selected = m_entries.size() - 1;
+        keepSelectionOn(selected);   // every index below the head just moved up one
         rebuildQueueStrip(); changed();
+    }
+
+    // ----- editing a queued item in the prompt box ----------------------------------------------
+    // Selecting a queued item puts its text in the prompt box, where it is edited like anything
+    // else; the highlighted row keeps the stored text until the edit is saved, so the two only
+    // differ while an edit is in flight. Owner, 2026-09-18: "selecting items should put the command
+    // in the prompt and make it editable".
+
+    // The top item highlighted holds the queue: the item being edited must not run out from under
+    // the edit (owner: "if the top (first-queued) item is highlighted, the queue is paused and wont
+    // run"). Derived rather than stored, so leaving the selection resumes the queue by itself and
+    // there is no second piece of state to keep in step. It also covers the item drifting to the
+    // front while it is being edited: the moment it becomes the head, the hold applies.
+    bool queueHeldBySelection() const { return m_selected == 0 && !m_entries.isEmpty(); }
+    bool queueBlocked() const { return m_entriesPaused || queueHeldBySelection(); }
+
+    // Show a queued item in the prompt box. The text is the row's, not the user's, so it is not
+    // remembered in prompt history and it must not be treated as a draft.
+    void selectQueueEntry(int index) {
+        if (index < 0 || index >= m_entries.size()) return;
+        m_selected = index;
+        m_editor->setPlainText(m_entries[index].fix ? QString() : m_entries[index].text);
+        m_editor->moveCursor(QTextCursor::End);
+        rebuildQueueStrip(); changed();
+        pumpQueue();   // the selection may have just left the head, which releases the queue
+    }
+
+    // Write what is in the prompt box back into the selected item. An emptied box is "no change"
+    // rather than a blank queued item: removing one is Shift+Delete, deliberately.
+    bool saveQueueEdit() {
+        if (m_selected < 0 || m_selected >= m_entries.size()) return false;
+        const QString text = m_editor->toPlainText();
+        if (text.trimmed().isEmpty() || m_entries[m_selected].fix || text == m_entries[m_selected].text) return false;
+        m_entries[m_selected].text = text;
+        return true;
+    }
+
+    // Step out of the queue. The prompt box goes back to empty, because what was in it belonged to
+    // the queue and not to the user.
+    void leaveQueueSelection() {
+        m_selected = -1;
+        m_editor->clear();
+        rebuildQueueStrip(); changed();
+        pumpQueue();   // nothing is held any more
+    }
+
+    quint64 selectedEntryId() const {
+        return (m_selected >= 0 && m_selected < m_entries.size()) ? m_entries[m_selected].id : 0;
+    }
+    // The queue changed under a selection (an item started running, one was removed, rows were
+    // dragged): keep the selection on the same item by id, and if that item has gone, let the
+    // selection go with it and hand the prompt box back empty — the text in it was the item's.
+    void keepSelectionOn(quint64 id) {
+        if (m_selected < 0) return;
+        m_selected = -1;
+        for (int i = 0; i < m_entries.size(); ++i)
+            if (m_entries[i].id == id) { m_selected = i; break; }
+        if (m_selected < 0) m_editor->clear();
+    }
+
+    void queueEditHint() {
+        hint(QStringLiteral("queue.edit"),
+             QStringLiteral("Editing a queued item · ↑↓ move between items · Enter saves · Esc cancels"));
     }
 
     void pauseQueue(const QString &reason) {
@@ -6422,21 +6680,26 @@ private:
     }
 
     void removeEntry(quint64 id) {
+        const quint64 selected = selectedEntryId();
         for (int i = 0; i < m_entries.size(); ++i)
             if (m_entries[i].id == id) { m_entries.removeAt(i); break; }
-        if (m_selected >= m_entries.size()) m_selected = m_entries.size() - 1;
-        if (m_entries.isEmpty()) { m_entriesPaused = false; m_resubmitAtFront = false; m_pauseReason.clear(); }
+        keepSelectionOn(selected);
+        if (m_entries.isEmpty()) { m_entriesPaused = false; m_pauseReason.clear(); }
         rebuildQueueStrip(); changed();
+        pumpQueue();   // removing the highlighted head releases the queue
     }
 
     void syncEntriesFromList() {
         if (!m_queueList) return;
+        saveQueueEdit();   // m_entries is still in the old order, so the index is still the right one
+        const quint64 selected = selectedEntryId();
         QList<QueueEntry> ordered;
         for (int row = 0; row < m_queueList->count(); ++row) {
             const quint64 id = m_queueList->item(row)->data(Qt::UserRole).toULongLong();
             for (const auto &entry : std::as_const(m_entries)) if (entry.id == id) { ordered.append(entry); break; }
         }
         if (ordered.size() == m_entries.size()) m_entries = ordered;
+        keepSelectionOn(selected);   // a dragged row keeps the highlight, at its new place
         QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); pumpQueue(); });
     }
 
@@ -6553,41 +6816,67 @@ private:
             if (mods == Qt::NoModifier && (enter || k == Qt::Key_Tab)) { acceptAtSelection(); return true; }
             if (k == Qt::Key_Escape) { m_atDismissedAt = m_editor->textCursor().position(); hideAtPopup(); return true; }
         }
-        if (m_selected >= 0 && m_selected < m_entries.size()) {
-            if (mods == Qt::NoModifier && k == Qt::Key_Up) {
-                if (m_selected > 0) { --m_selected; rebuildQueueStrip(); return true; }
-                m_selected = -1; rebuildQueueStrip();
-                return false;   // past the top: prompt history
+        // Arrowing through the queue, with the selected item editable in the prompt box. The rules
+        // (including when Up and Down belong to a multi-line item's text instead) are in
+        // relay::queuenav so they can be tested without a widget.
+        {
+            relay::queuenav::State nav;
+            nav.selected = m_selected;
+            nav.count = int(m_entries.size());
+            nav.promptEmpty = m_editor->toPlainText().isEmpty();
+            nav.cursorLine = m_editor->textCursor().blockNumber();
+            nav.lineCount = m_editor->document()->blockCount();
+            using Action = relay::queuenav::Action;
+            switch (relay::queuenav::decide(nav, k, mods)) {
+            case Action::Enter:
+                // In at the item nearest the prompt box, which is the one queued last.
+                selectQueueEntry(int(m_entries.size()) - 1);
+                queueEditHint();
+                return true;
+            case Action::Up:      saveQueueEdit(); selectQueueEntry(m_selected - 1); return true;
+            case Action::Down:    saveQueueEdit(); selectQueueEntry(m_selected + 1); return true;
+            case Action::LeaveToHistory:
+                // Straight on past the front of the queue into earlier prompts: the editor's own
+                // history takes the key, so the box must be empty before it does.
+                saveQueueEdit();
+                leaveQueueSelection();
+                return false;
+            case Action::LeaveToPrompt:
+                saveQueueEdit();
+                leaveQueueSelection();
+                return true;
+            case Action::Save: {
+                const bool held = queueHeldBySelection();
+                const bool edited = saveQueueEdit();
+                leaveQueueSelection();
+                if (edited) toast(held ? QStringLiteral("Saved · it runs next")
+                                       : QStringLiteral("Saved · it runs in its place in the queue"));
+                else toast(QStringLiteral("Unchanged · the queue runs on"));
+                return true;
             }
-            if (mods == Qt::NoModifier && k == Qt::Key_Down) {
-                m_selected = m_selected + 1 < m_entries.size() ? m_selected + 1 : -1;
-                rebuildQueueStrip(); return true;
+            case Action::Cancel:
+                leaveQueueSelection();          // the edit is dropped: nothing was written back
+                return true;
+            case Action::Remove: {
+                const quint64 id = m_entries[m_selected].id;
+                const int at = m_selected;
+                leaveQueueSelection();
+                removeEntry(id);
+                // Stay in the queue on the item that moved up into the gap, so several can go in a row.
+                if (!m_entries.isEmpty()) selectQueueEntry(std::min(at, int(m_entries.size()) - 1));
+                return true;
             }
-            if (mods == Qt::ControlModifier && (k == Qt::Key_Up || k == Qt::Key_Down)) {
+            case Action::MoveUp:
+            case Action::MoveDown: {
+                saveQueueEdit();
                 const int to = m_selected + (k == Qt::Key_Up ? -1 : 1);
-                if (to >= 0 && to < m_entries.size()) { m_entries.move(m_selected, to); m_selected = to; rebuildQueueStrip(); }
+                m_entries.move(m_selected, to);
+                selectQueueEntry(to);
                 return true;
             }
-            if (mods == Qt::NoModifier && enter) {
-                // Pull the item back into the prompt box; if it was next, hold the queue until it is resubmitted.
-                const QueueEntry entry = m_entries.takeAt(m_selected);
-                const bool wasNext = m_selected == 0;
-                m_selected = -1;
-                if (wasNext && !m_entries.isEmpty()) { m_resubmitAtFront = true; pauseQueue(QStringLiteral("editing the next item")); }
-                else if (wasNext) m_resubmitAtFront = true;
-                // The resubmission keeps the item's kind once, without changing the pane's input mode.
-                m_editKind = entry.agent ? QStringLiteral("agent") : QStringLiteral("shell");
-                m_editor->setPlainText(entry.text);
-                m_editor->moveCursor(QTextCursor::End);
-                rebuildQueueStrip(); changed();
-                toast(entry.agent ? QStringLiteral("Editing a queued agent prompt") : QStringLiteral("Editing a queued command"));
-                return true;
+            case Action::None:
+                break;
             }
-            if (mods == Qt::NoModifier && (k == Qt::Key_Delete || k == Qt::Key_Backspace)) {
-                removeEntry(m_entries[m_selected].id);
-                return true;
-            }
-            if (k == Qt::Key_Escape) { m_selected = -1; rebuildQueueStrip(); return true; }
         }
         // --- subagents UI: Down on the last line (history at the draft) enters the running-agents list.
         // Up stays queue/history; the @ picker and a queue selection above already took their keys.
@@ -6597,12 +6886,6 @@ private:
             return true;
         }
         // --- end subagents UI ---
-        const bool empty = m_editor->toPlainText().isEmpty();
-        if (empty && mods == Qt::NoModifier && k == Qt::Key_Up && !m_entries.isEmpty()) {
-            m_selected = m_entries.size() - 1;
-            rebuildQueueStrip();
-            return true;
-        }
         if (mods == Qt::NoModifier && k == Qt::Key_Escape && m_agentBusy) {
             stopAgent();
             toast(QStringLiteral("Agent interrupted"));
@@ -6622,7 +6905,8 @@ private:
         if (!m_editor->toPlainText().isEmpty()) m_idleTip.stop();
         if (!m_editor->toPlainText().isEmpty()) clearAiGhost();
         updateSlashPopup();
-        if (m_selected >= 0 && !m_editor->toPlainText().isEmpty()) { m_selected = -1; rebuildQueueStrip(); }
+        // Typing while an item is selected edits that item (it is saved on Enter or on moving to
+        // another item), so the selection deliberately survives here.
         updateAtPopup();
         updateCardPopup();
         updateGhost();
@@ -7386,7 +7670,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
 
     // Another turn will start without user action: something is queued and the queue is not paused.
     // Another turn will start without user action: queued items, or a turn that is interrupting this one.
-    bool moreTurnsPending() const { return (!m_entries.isEmpty() && !m_entriesPaused) || m_interruptPending; }
+    bool moreTurnsPending() const { return (!m_entries.isEmpty() && !queueBlocked()) || m_interruptPending; }
 
     QString sendPrompt(QJsonObject request, const PendingPrompt &prompt) {
         const QString requestId = QStringLiteral("ask-%1").arg(++m_askSerial);
@@ -7416,14 +7700,22 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
         if (visible) showBubble(m_queueStrip); else hideBubble(m_queueStrip);
         if (!visible) return;
         auto *header = new QHBoxLayout;
-        auto *title = new QLabel(m_entriesPaused ? QStringLiteral("QUEUE · PAUSED") : QStringLiteral("QUEUE"));
+        const bool held = queueHeldBySelection();
+        auto *title = new QLabel(queueBlocked() ? QStringLiteral("QUEUE · PAUSED") : QStringLiteral("QUEUE"));
         title->setObjectName(QStringLiteral("queueTitle"));
-        title->setToolTip(m_pauseReason);
+        QString why = held ? QStringLiteral("The next item is highlighted and being edited in the prompt box, so the"
+                                            " queue is holding. Enter saves it, Esc drops the edit; either way the"
+                                            " queue runs on.")
+                           : QString();
+        if (!m_pauseReason.isEmpty()) why = why.isEmpty() ? m_pauseReason : why + QStringLiteral("\nAlso paused: ") + m_pauseReason;
+        title->setToolTip(why);
         header->addWidget(title, 1);
-        auto *hint = new QLabel(QStringLiteral("↑ select · Ctrl+↑↓ move · Enter edit · Del remove"));
+        auto *hint = new QLabel(m_selected >= 0
+                                    ? QStringLiteral("↑↓ item · Ctrl+↑↓ move · Enter save · Esc cancel · Shift+Del remove")
+                                    : QStringLiteral("↑ edit an item · Ctrl+↑↓ move · Shift+Del remove"));
         hint->setObjectName(QStringLiteral("queueHint"));
         header->addWidget(hint);
-        if (m_entriesPaused) {
+        if (m_entriesPaused && !held) {
             auto *resume = new QToolButton; resume->setText(QStringLiteral("Resume")); resume->setFocusPolicy(Qt::NoFocus);
             connect(resume, &QToolButton::clicked, this, [this] { resumeAgentQueue(); });
             header->addWidget(resume);
@@ -7636,6 +7928,8 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
             m_shellPath = event.value(QStringLiteral("path")).toString();
             const int status = event.value(QStringLiteral("status")).toInt();
             if (!m_agentBusy) this->status(QStringLiteral("Shell ready · exit %1").arg(status));
+            // A restored pane brings its old text back above this first prompt.
+            replayRestoredScrollback();
             // Fast commands can finish between two polls, so "running" is not a reliable trigger.
             const bool suggestNext = m_commandLoaded;
             m_commandLoaded = false;
@@ -7987,6 +8281,11 @@ private:
     }
 
     QString m_data, m_python, m_workspace, m_cwd, m_token, m_apiKey;
+    // Terminal scrollback across a restart: the file this pane's text is saved in, the lines a
+    // restore handed it, and whether they have been replayed (once per pane, at the first prompt).
+    QString m_scrollbackId;
+    QStringList m_restoredScrollback;
+    bool m_scrollbackReplayed = false;
     QString m_shellSequence, m_shellPath, m_pendingHash, m_pendingCommand, m_pendingSubmit, m_previewId, m_submittedDraft;
     QJsonArray m_knownCommands;
     QTemporaryDir m_runtime{QDir::tempPath() + QStringLiteral("/relay-XXXXXX")};
@@ -8086,7 +8385,7 @@ private:
     bool m_queuePaused = false;
     QList<QueueEntry> m_entries;
     QueueEntry m_active;
-    bool m_activeValid = false, m_activeLoaded = false, m_entriesPaused = false, m_resubmitAtFront = false;
+    bool m_activeValid = false, m_activeLoaded = false, m_entriesPaused = false;
     bool m_interruptPending = false, m_fillingQueueList = false;
     QString m_activeRequest, m_pauseReason;
     quint64 m_entrySerial = 0;
@@ -8098,7 +8397,6 @@ private:
     bool m_cardIndexAsked = false;
     int m_cardDismissedAt = -1;
     int m_atDismissedAt = -1;
-    QString m_editKind;
     QStringList m_fileIndex, m_recentFiles, m_shellHistory;
     QSet<QString> m_changedFiles;
     QString m_fileIndexCwd;
@@ -8152,6 +8450,9 @@ private:
     // voice transcription (issue NY7Z): the chip, the recorder, and the clip in flight
     QToolButton *m_mic = nullptr;
     QToolButton *m_share = nullptr;
+    // Prompts from paired devices waiting on the router, by request id.
+    struct RemotePrompt { QString text; QString origin; };
+    QHash<QString, RemotePrompt> m_remotePrompts;
     relay::voice::Capture *m_voiceCapture = nullptr;
     QString m_voiceRequest, m_voiceClip;
     bool m_voiceHold = false, m_voiceTranscribing = false;
@@ -8487,6 +8788,10 @@ public:
     bool ownsLayout();
     void scheduleSave();
     void saveLayoutNow();
+    // Every open pane's terminal text, saved beside the layout (src/WindowState.h). Only on the
+    // way out — a window closing and the quit itself — because it reads up to a few thousand
+    // lines per pane, which the 1 s layout debounce must not do.
+    void saveScrollbacks();
     void noteWindowClosing();
     int restoreSavedLayout();                 // windows reopened, 0 when there was nothing to reopen
     void forgetSavedLayout(bool suspend);     // palette "Start a fresh window set" / setting turned off
@@ -8929,6 +9234,13 @@ public:
         return tabs;
     }
     int tabCount() const { return m_tabs->count(); }
+
+    // Saved window layout: each pane's terminal text, written beside the layout as the window
+    // closes so the restored pane comes back with its scrollback (src/WindowState.h).
+    void savePaneScrollbacks() const {
+        for (Pane *pane : allPanes())
+            if (pane) pane->saveScrollback();
+    }
 
     // KDE's KAcceleratorManager adds "&" accelerators to tab texts; the saved titles are only read
     // by people and tools, so they are stored the way the tab is shown.
@@ -10970,6 +11282,10 @@ private:
             if (!pane->currentPreset().isEmpty()) leaf.insert(QStringLiteral("preset"), pane->currentPreset());
             if (!pane->model().isEmpty()) leaf.insert(QStringLiteral("model"), pane->model());
             if (!pane->sessionId().isEmpty()) leaf.insert(QStringLiteral("session_id"), pane->sessionId());
+            // Which file holds this pane's terminal text (src/WindowState.h). The id is in every
+            // node, including "restore last closed": a reopened pane finds the text of the pane it
+            // came from, and the ids in the saved layout are what keeps the store pruned.
+            leaf.insert(QStringLiteral("scrollback"), pane->scrollbackId());
             return {{"pane", leaf}};
         }
         if (auto *tool = dynamic_cast<ToolPane *>(widget)) return tool->node();
@@ -12135,15 +12451,32 @@ void WindowManager::writeWindows(const QJsonArray &windows) {
     QString error;
     if (!relay::windowstate::write(m_statePath, relay::windowstate::document(windows), &error))
         fprintf(stderr, "relay: could not save the window layout: %s\n", qPrintable(error));
+    // The saved layout is the list of panes that can still come back, so it is also the list of
+    // scrollback files worth keeping: everything else belonged to a pane that is gone for good.
+    relay::windowstate::pruneScrollback(relay::windowstate::scrollbackIds(windows));
 }
 
 void WindowManager::saveLayoutNow() { writeWindows(captureWindows()); }
+
+// One pass over every live pane. Panes that cannot report their scrollback, and panes whose text
+// is empty, leave no file behind.
+void WindowManager::saveScrollbacks() {
+    if (m_saveSuspended || !restoreEnabled() || m_statePath.isEmpty()) return;
+    if (!ownsLayout() && m_stateLock) return;   // another Relay owns the state directory
+    m_windows.removeAll(nullptr);
+    for (RelayWindow *window : std::as_const(m_windows))
+        if (window) window->savePaneScrollbacks();
+}
 
 void WindowManager::noteWindowClosing() {
     if (m_cascadeActive) return;
     // Taken while the closing window is still in the list: if every window goes (a quit), this is
     // the set that comes back; if others survive, the settled snapshot below wins instead.
     m_cascadeActive = true;
+    // Every window's panes, while their shells and their text are still there: on a quit the
+    // whole set goes at once, and the panes of the windows behind this one are closed (and
+    // emptied) before any later callback could read them.
+    saveScrollbacks();
     m_cascadeSnapshot = captureWindows();
     QTimer::singleShot(0, &m_context, [this] { settleWindowClose(); });
 }
@@ -12207,6 +12540,9 @@ void WindowManager::forgetSavedLayout(bool suspend) {
     m_saveTimer.stop();
     m_saveSuspended = suspend;
     if (!m_statePath.isEmpty()) QFile::remove(m_statePath);
+    // Forgetting the layout forgets the terminal text with it: the saved scrollback is only there
+    // to fill the panes the layout brings back, and it is the more private half of the pair.
+    relay::windowstate::removeAllScrollback();
 }
 
 RelayWindow *WindowManager::newWindow(const QJsonArray &tabs, int current, const QRect &geometry) {
@@ -12425,7 +12761,12 @@ int main(int argc, char **argv) {
         manager.setUpLayoutSaving();
         // Quit without closing the windows (Ctrl+Q, session logout, SIGTERM through Qt) still
         // saves; closing them goes through RelayWindow::closeEvent instead.
-        QObject::connect(&app, &QCoreApplication::aboutToQuit, &app, [&manager] { manager.saveLayoutNow(); });
+        // A quit that never closed a window (a session ending, `relay` told to stop) still saves
+        // both halves: the layout and each pane's terminal text.
+        QObject::connect(&app, &QCoreApplication::aboutToQuit, &app, [&manager] {
+            manager.saveScrollbacks();
+            manager.saveLayoutNow();
+        });
         QTimer::singleShot(1500, &app, [] { registerUrlHandler(); });
         // "Reopen where I left off": on by default, unless --fresh or an explicit --workspace asks
         // for a new window. A fresh profile, an unreadable file or a second Relay opens one window.

@@ -86,9 +86,9 @@ dlg=$(xdotool search --onlyvisible --name "Share this pane" | head -1)
 if [[ -n $dlg ]]; then
   import -window "$dlg" "$out/implementer-05-confirm-code.png"
   xdotool windowfocus "$dlg"; sleep 1
-  # Allowing is deliberate: Refuse holds the focus, so Return would turn the phone away. Tab to
-  # "Allow typing" and press it, which survives the dialog's layout changing.
-  k Tab space
+  # Allowing is deliberate: Refuse holds the focus, so Return would turn the phone away. The
+  # buttons are Refuse, Allow viewing, Allow typing — this run wants the last one.
+  k Tab Tab space
 fi
 sleep 2
 [[ -n $dlg ]] && import -window "$dlg" "$out/implementer-06-paired.png"

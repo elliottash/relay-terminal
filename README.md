@@ -156,7 +156,8 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   asking; "Code and chat" does both), `/fork` (continues in a new pane),
   `/resume` (with a recap), `/conversations`, `/find`, `/plan`, `/recap`, `/tasks`, `/continue`, `/agents`, `/skills`, `/instructions`, `/export`
   (Markdown under `.relay/exports`), `/main` and `/flash` (this pane's model tier), `/glm` and `/kimi`
-  (switch provider). Coming back to the window after 3 minutes, with a finished
+  (switch provider), `/help` (the card `?` shows). A `/command` Relay does not have is answered by
+  Relay, not by the shell: it names the closest real commands and points at `/` and `/help`. Coming back to the window after 3 minutes, with a finished
   turn and an empty prompt, prints a short recap (Settings › General turns it off).
 - **Conversations: list and full-text search.** Ctrl+Shift+O (also `/conversations` and Actions ›
   Conversations…) opens every saved conversation, grouped by project and newest first, with a
@@ -188,8 +189,9 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   A tier whose provider has no key steps down to the next one and says so inline; nothing ever fails
   because a key is missing. Every pane starts on the Main agent unless Settings › Agent › "New panes
   use the Flash agent" is on, and then every pane after a window's first one starts on the Flash agent.
-  **`/flash`**, Alt+F, or Actions › Flash agent for this pane moves a pane to the Flash model and
-  **`/main`** moves it back, both without losing the conversation. **`/glm`** and **`/kimi`** switch
+  **`/flash`**, Alt+F, the **Flash agent** row in the model box, or Actions › Flash agent for this
+  pane moves a pane to the Flash model, and **`/main`** or the **Main agent** row moves it back,
+  both without losing the conversation. **`/glm`** and **`/kimi`** switch
   the pane to that provider's Coding Plan (its pay-as-you-go preset when no Coding Plan key is stored).
 - **Plan mode.** Shift+Tab in the prompt box (or `/plan`) shows a PLAN chip: the agent
   investigates read-only and writes a plan, which opens in an editable pane (Ctrl+S saves) with

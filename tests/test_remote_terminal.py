@@ -240,6 +240,49 @@ class BrowserTerminalTests(unittest.TestCase):
 
 
 @unittest.skipUnless(BRIDGE and find_chrome(), "needs the screen bridge and Chrome")
+class ViewOnlyTests(unittest.TestCase):
+    """Allowed for viewing: the screen arrives, the keyboard is never offered."""
+
+    def test_a_view_device_watches_but_is_not_offered_the_keyboard(self):
+        async def main():
+            async with Harness(capability=wire.VIEW) as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    await browser.evaluate("document.querySelectorAll('.pane-row')[0].click()")
+                    await browser.wait_for(shown('terminal-pane'), timeout=20)
+                    await browser.wait_for("document.querySelectorAll('.screen-row').length > 1",
+                                           timeout=30)
+
+                    # Watching works: what the desktop runs shows up.
+                    await harness.source.send_line(
+                        harness.pane.id, "echo view-only-7788", device="owner")
+                    await browser.wait_for(
+                        "document.querySelector('.screen-grid').textContent"
+                        ".includes('view-only-7788')", timeout=30)
+
+                    # Typing is never offered, and the reason is on screen.
+                    self.assertFalse(await browser.evaluate(shown('term-take')))
+                    self.assertFalse(await browser.evaluate(shown('term-composer')))
+                    self.assertFalse(await browser.evaluate(shown('term-keys')))
+                    note = await browser.evaluate(
+                        "document.getElementById('term-note').textContent")
+                    self.assertIn("viewing only", note.lower())
+                    self.assertEqual(
+                        await browser.evaluate("document.getElementById('capability').textContent"),
+                        "view")
+
+                    problems = [line for line in browser.console if "EXCEPTION" in line]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 240))
+
+
+@unittest.skipUnless(BRIDGE and find_chrome(), "needs the screen bridge and Chrome")
 class DirectTypingTests(unittest.TestCase):
     """The tablet path: a real keyboard, every key straight through to the program."""
 

@@ -9,7 +9,7 @@
 //
 //   node := {"split": "h"|"v", "children": [node, ...], "sizes": [int, ...]}
 //         | {"pane": {cwd, workspace, engine, engine_core, agent_role, preset, model, effort,
-//                     agent_mode, input_mode, session_id}}
+//                     agent_mode, input_mode, session_id, scrollback}}
 //         | {"explorer"|"preview"|"plan": {"path": "..."}}
 //
 // This header holds the parts that do not need a window: reading and writing the file, clamping a
@@ -84,6 +84,54 @@ QRect clampToScreens(const QRect &geometry, const QString &screenName, const QLi
 // A pane's directory after a restart: its own cwd, else its workspace, else $HOME. `home` is used
 // as the last resort and returned even when it does not exist (there is nothing better).
 QString resolveDirectory(const QString &cwd, const QString &workspace, const QString &home);
+
+// ----- the terminal scrollback of a saved pane ------------------------------------------------
+//
+// A restored pane used to come back empty (owner report, 2026-09-18). Its text now travels beside
+// the layout: one file per pane in `$XDG_DATA_HOME/relay/state/scrollback/<id>.txt` (0600), named
+// after the `scrollback` id the pane node carries, written the same atomic way windows.json is.
+//
+// **Text, not cells.** What is saved is what `TerminalBackend::scrollbackText()` reports — the
+// lines, in order, without colour. Two reasons. The engine hands the host text: cells and their
+// SGR would need a new `VtCore` call implemented in both cores, which is a far larger change than
+// the loss is worth. And absolute colour does not survive: a replayed `38;2;R;G;B` is burnt into
+// the new pane's history, and a terminal cannot recolour its scrollback (src/MarkdownAnsi.h), so
+// text saved under one theme would come back in the old theme's colours for good. Plain lines
+// take the live theme's foreground instead, and the block is marked as restored where it is
+// replayed. If styling is ever worth keeping, save the *indexed* SGR only (the palette entries
+// the engine resolves at paint time), never RGB.
+//
+// The file is bounded twice over — at most kScrollbackMaxLines lines and kScrollbackMaxBytes of
+// text, newest kept — so no pane can grow the state directory without limit, and files whose pane
+// is gone are pruned whenever the layout is written.
+constexpr int kScrollbackMaxLines = 5000;
+constexpr qint64 kScrollbackMaxBytes = 512 * 1024;
+
+// `$XDG_DATA_HOME/relay/state/scrollback`. Empty when no data location is available.
+QString scrollbackDirectory();
+// Ids are pane tokens (a UUID without braces). Anything else is refused, so a hand-edited layout
+// cannot point the store at `../` or at a file outside it.
+bool isScrollbackId(const QString &id);
+// `<scrollbackDirectory()>/<id>.txt`; empty for an unusable id or without a data location.
+QString scrollbackPath(const QString &id);
+
+// The tail that is worth keeping: trailing blank lines dropped, then the newest lines within both
+// caps (lines first, then bytes, counting one newline per line). Pure; the file side uses it.
+QStringList clampScrollback(QStringList lines, int maxLines = kScrollbackMaxLines,
+                            qint64 maxBytes = kScrollbackMaxBytes);
+
+// Atomic (temp file + rename) and 0600, like write(). Empty content removes the file rather than
+// leaving a stale one behind. False with *error set when the id or the directory is unusable.
+bool writeScrollback(const QString &id, const QStringList &lines, QString *error = nullptr);
+// The saved lines, oldest first; empty when there is no file. Never reads more than the caps.
+QStringList readScrollback(const QString &id, int maxLines = kScrollbackMaxLines);
+
+// Every `scrollback` id in a saved layout's window records (pane nodes at any depth).
+QStringList scrollbackIds(const QJsonArray &windows);
+// Delete the stored scrollback of every pane that is not in `keep`; returns how many files went.
+int pruneScrollback(const QStringList &keep);
+// Drop the whole store ("Start a fresh window set", or restoring turned off).
+void removeAllScrollback();
 
 }  // namespace windowstate
 }  // namespace relay

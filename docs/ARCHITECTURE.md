@@ -267,7 +267,8 @@ per id, a per-id cooldown (600 s) and a global gap of 20 s, counts in QSettings 
 text from the live Keymap, so rebinding changes the hint and unbound actions get none. Current
 triggers: toolbar and palette activations of actions with shortcuts, pane buttons, the tab "+",
 tab close and ⧉ buttons, clicking into another pane, mouse model/effort/mode pickers, clicking
-the directory line (`@`), the queue ×, `/shell ` and `/agent ` (`!`, `*`), palette rewinds, pane
+the directory line (`@`), the queue ×, `/shell ` and `/agent ` (`!`, `*`), `/help` (→ `?` in an
+empty prompt box), palette rewinds, pane
 drags, the first `relay://` link, the Tasks chip and `/tasks`, `/requests`, `/todos` (→ `agent.requests`, Ctrl+Shift+K), Continue
 from the link or palette (→ `/continue` or `agent.continue`), wrong-mode submissions (section 5,
 "Wrong-mode hints": a request that failed in terminal mode or a failing shell command in agent
@@ -382,6 +383,20 @@ typed there is routed, remembered or previewed.
 and switches the input mode to terminal or agent for one submission (`setPrefixMode`, chip
 `prefixChip`); Backspace on the empty editor restores the previous mode. `/shell ` and `/agent `
 still work and trigger a shortcut hint.
+
+**Slash commands.** A submission is offered to `tryRunSlashCommand` (the built-ins, listed in
+`Pane::slashCommands()`), then to `tryRunAliasSlash` (`/name`, issue G8DK), before the router sees
+anything. A `/command` that is neither is answered by Relay rather than by Bash
+(`reportUnknownSlashCommand`, `src/SlashCommands.*`): one `✗ Unknown command: /foo · did you mean
+/fork? · type / for every command, /help for the keys` line, with the suggestions an optimal
+string alignment away from a real name (a transposition counts as one slip) or a name the user was
+part way through typing. The route label says the same thing before Enter does. What counts as an
+attempt at a command is `relay::slash::attemptedName`: one name-shaped word after the `/`, on one
+line, that is not a path — `/usr/bin/foo`, `/etc/hosts` and an existing single segment such as
+`/tmp` are paths and still run in the shell. `/shell ` and `/agent ` are names in the same list, so
+they keep falling through to the router. `/help` shows the same card `?` shows in an empty prompt
+box (issue #Q4SD, owner report: an unknown command answered with `bash: /nosuchthing: command not
+found`).
 
 **Routing assist (protocol 11).** When a preview `route` has `needs_assist` and the mode is auto,
 the label shows the local guess, then "AUTO · checking…" after 150 ms; 300 ms after typing stops
@@ -876,6 +891,12 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   "New panes use the Flash agent" (off by default; the first pane keeps the Main agent), the pane's model
   chip (role and effective model, all roles in its tooltip), "Flash agent for this pane"
   (`agent.flashAgent`, Alt+F) and the `/main` and `/flash` slash commands.
+- The pane's model box (`Pane::refreshPickers`) is one list of three groups: the stored presets, then
+  a **Main agent** / **Flash agent** row per pane role (`role:<id>`, the live one ticked or selected;
+  `Pane::chooseAgentRole`), then the ⚙ gear (`gear:modelOptions`). Only the first group is a model to
+  switch to — `selectModel` refuses the other two ids, so the box's `activated` handler must act on
+  them before calling it, and rebuild the chip afterwards because Qt has already moved the box to the
+  clicked row.
 - Difficulty-based routing between the Main and Flash agent is deliberately not implemented yet.
 
 ### Provider transport
@@ -1349,6 +1370,7 @@ of the platform and of the engine itself.
 | `src/Theme.*` | live tokens, palette, stylesheet, the theme switch |
 | `src/ThemeFile.*` | the theme file format: reader, token contract, discovery, generated colour scheme |
 | `src/Hints.*` | shortcut hint limits and idle tips |
+| `src/SlashCommands.*` | what counts as an attempt at a `/command`, the closest real names, and the line printed for an unknown one |
 | `src/OutputLinks.*` | which spans of terminal output are files, folders, URLs or `#K7Q2` card references, what they resolve to, and the keyboard cursor over them |
 | `src/Notifications.*` | notification centre behind the header bell |
 | `src/TurnTranscript.*` | turn details pane (tool calls, transcript) |

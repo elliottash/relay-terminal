@@ -184,6 +184,18 @@ void RemoteShare::handle(const QJsonObject &message)
             it->hooks.input(QByteArray::fromBase64(
                 message.value(QStringLiteral("bytes")).toString().toLatin1()));
         }
+    } else if (kind == QLatin1String("compose")) {
+        const QString paneId = message.value(QStringLiteral("pane")).toString();
+        auto it = m_panes.find(paneId);
+        if (it != m_panes.end() && it->hooks.compose) {
+            it->hooks.compose(message.value(QStringLiteral("text")).toString(),
+                              message.value(QStringLiteral("route")).toBool(),
+                              message.value(QStringLiteral("origin")).toString());
+        }
+    } else if (kind == QLatin1String("agent_stop")) {
+        const QString paneId = message.value(QStringLiteral("pane")).toString();
+        auto it = m_panes.find(paneId);
+        if (it != m_panes.end() && it->hooks.stopAgent) it->hooks.stopAgent();
     } else if (kind == QLatin1String("resend")) {
         const QString paneId = message.value(QStringLiteral("pane")).toString();
         auto it = m_panes.find(paneId);
@@ -261,6 +273,12 @@ void RemoteShare::sendFrame(const QString &paneId, bool full)
     message["pane"] = paneId;
     message["full"] = everything || message.value(QStringLiteral("rows")).isDouble();
     send(message);
+}
+
+void RemoteShare::paneEvent(const QString &paneId, const QJsonObject &event)
+{
+    if (!m_panes.contains(paneId)) return;
+    send({{"t", "agent"}, {"pane", paneId}, {"event", event}});
 }
 
 void RemoteShare::poll()
@@ -356,19 +374,29 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     auto *askRow = new QHBoxLayout;
     auto *refuse = new QPushButton(QStringLiteral("Refuse"));
     m_refuse = refuse;
-    auto *allow = new QPushButton(QStringLiteral("Allow typing"));
-    // Refuse is the default and holds the focus. Allowing a device is handing it the keyboard of
-    // a live shell, so it takes a deliberate click — never a stray Return in a window that just
-    // appeared while the person was typing somewhere else.
+    // Watching and typing are separate grants, because they are very different things to hand
+    // out: one shows a device everything on the screen, the other gives it the keyboard of a
+    // live shell. The protocol already enforces the difference on every message.
+    auto *allowView = new QPushButton(QStringLiteral("Allow viewing"));
+    allowView->setToolTip(QStringLiteral(
+        "The device can watch this pane and read its history. It cannot type."));
+    auto *allowType = new QPushButton(QStringLiteral("Allow typing"));
+    allowType->setToolTip(QStringLiteral(
+        "The device can watch and, after taking over, run anything you could."));
+    // Refuse is the default and holds the focus. Allowing is a deliberate click — never a stray
+    // Return in a window that just appeared while the person was typing somewhere else.
     refuse->setDefault(true);
-    allow->setAutoDefault(false);
+    allowView->setAutoDefault(false);
+    allowType->setAutoDefault(false);
     askRow->addWidget(refuse);
-    askRow->addWidget(allow);
+    askRow->addWidget(allowView);
+    askRow->addWidget(allowType);
     askColumn->addLayout(askRow);
     m_askBox->hide();
     column->addWidget(m_askBox);
     connect(refuse, &QPushButton::clicked, this, [this] { answer(false); });
-    connect(allow, &QPushButton::clicked, this, [this] { answer(true); });
+    connect(allowView, &QPushButton::clicked, this, [this] { answer(true, QStringLiteral("view")); });
+    connect(allowType, &QPushButton::clicked, this, [this] { answer(true, QStringLiteral("full")); });
 
     m_devices = new QListWidget;
     m_devices->setMaximumHeight(90);
@@ -437,7 +465,7 @@ void RemoteShareDialog::showAsk(int id, const QString &name, const QString &plat
 {
     m_askId = id;
     m_askText->setText(QStringLiteral("%1 (%2) at %3 wants access.\nKey %4.\n"
-                                      "Allow it only if your phone shows this code:")
+                                      "Allow it only if that device shows this code:")
                            .arg(name, platform, peer, fingerprint));
     m_askCode->setText(code);
     m_askBox->show();
@@ -449,14 +477,20 @@ void RemoteShareDialog::showAsk(int id, const QString &name, const QString &plat
     m_refuse->setFocus(Qt::OtherFocusReason);
 }
 
-void RemoteShareDialog::answer(bool allow)
+void RemoteShareDialog::answer(bool allow, const QString &capability)
 {
     if (m_askId < 0) return;
-    RemoteShare::instance().answer(m_askId, allow, QStringLiteral("full"));
+    const QString granted = capability.isEmpty() ? QStringLiteral("view") : capability;
+    RemoteShare::instance().answer(m_askId, allow, granted);
     m_askId = -1;
     m_askBox->hide();
-    m_status->setText(allow ? QStringLiteral("Paired. Your phone can watch and type.")
-                            : QStringLiteral("Refused."));
+    if (!allow) {
+        m_status->setText(QStringLiteral("Refused."));
+    } else if (granted == QLatin1String("full")) {
+        m_status->setText(QStringLiteral("Paired. That device can watch and type."));
+    } else {
+        m_status->setText(QStringLiteral("Paired for viewing. That device cannot type."));
+    }
 }
 
 // Wrapped labels need more height the narrower they are, and a top-level window's automatic

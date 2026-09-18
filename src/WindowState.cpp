@@ -202,5 +202,127 @@ QString resolveDirectory(const QString &cwd, const QString &workspace, const QSt
     return home;
 }
 
+// ----- the terminal scrollback of a saved pane ------------------------------------------------
+
+QString scrollbackDirectory() {
+    const QString dir = defaultDirectory();
+    return dir.isEmpty() ? QString() : dir + QStringLiteral("/scrollback");
+}
+
+bool isScrollbackId(const QString &id) {
+    if (id.size() < 8 || id.size() > 64) return false;
+    for (const QChar c : id) {
+        const ushort u = c.unicode();
+        const bool ok = (u >= '0' && u <= '9') || (u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z') || u == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+QString scrollbackPath(const QString &id) {
+    const QString dir = scrollbackDirectory();
+    if (dir.isEmpty() || !isScrollbackId(id)) return {};
+    return dir + QLatin1Char('/') + id + QStringLiteral(".txt");
+}
+
+QStringList clampScrollback(QStringList lines, int maxLines, qint64 maxBytes) {
+    // A terminal's bottom rows are usually blank; they are not worth a restart.
+    while (!lines.isEmpty() && lines.constLast().trimmed().isEmpty()) lines.removeLast();
+    if (maxLines <= 0 || maxBytes <= 0) return {};
+    if (lines.size() > maxLines) lines = lines.mid(lines.size() - maxLines);
+    qint64 bytes = 0;
+    int first = lines.size();
+    // Walk back from the newest line and stop at the byte cap: the tail is what the user was
+    // looking at when Relay quit.
+    for (int i = lines.size() - 1; i >= 0; --i) {
+        const qint64 size = qint64(lines.at(i).toUtf8().size()) + 1;
+        if (bytes + size > maxBytes) break;
+        bytes += size;
+        first = i;
+    }
+    return first == 0 ? lines : lines.mid(first);
+}
+
+bool writeScrollback(const QString &id, const QStringList &lines, QString *error) {
+    auto fail = [error](const QString &text) {
+        if (error) *error = text;
+        return false;
+    };
+    if (error) error->clear();
+    const QString path = scrollbackPath(id);
+    if (path.isEmpty()) return fail(QStringLiteral("No writable place for this pane's scrollback."));
+    const QStringList kept = clampScrollback(lines);
+    if (kept.isEmpty()) {
+        // Nothing to bring back: leaving the previous file would restore stale output.
+        QFile::remove(path);
+        return true;
+    }
+    const QString dir = QFileInfo(path).absolutePath();
+    if (!QDir().mkpath(dir)) return fail(QStringLiteral("Could not create %1.").arg(dir));
+    QFile::setPermissions(dir, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) return fail(file.errorString());
+    file.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
+    if (file.write(kept.join(QLatin1Char('\n')).toUtf8() + '\n') < 0) {
+        file.cancelWriting();
+        return fail(file.errorString());
+    }
+    if (!file.commit()) return fail(file.errorString());
+    QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner);
+    return true;
+}
+
+QStringList readScrollback(const QString &id, int maxLines) {
+    const QString path = scrollbackPath(id);
+    if (path.isEmpty()) return {};
+    QFile file(path);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly)) return {};
+    // A file that grew past the cap (an older Relay, or an edit) is read from its tail only.
+    if (file.size() > kScrollbackMaxBytes) file.seek(file.size() - kScrollbackMaxBytes);
+    QStringList lines = QString::fromUtf8(file.read(kScrollbackMaxBytes + 1)).split(QLatin1Char('\n'));
+    if (!lines.isEmpty() && lines.constLast().isEmpty()) lines.removeLast();   // the trailing newline
+    return clampScrollback(lines, std::min(maxLines, kScrollbackMaxLines), kScrollbackMaxBytes);
+}
+
+namespace {
+
+void collectScrollbackIds(const QJsonObject &node, QStringList *ids, int depth) {
+    if (depth > kMaxDepth) return;
+    if (node.contains(QStringLiteral("split"))) {
+        for (const auto &child : node.value(QStringLiteral("children")).toArray())
+            if (child.isObject()) collectScrollbackIds(child.toObject(), ids, depth + 1);
+        return;
+    }
+    const QString id = node.value(QStringLiteral("pane")).toObject().value(QStringLiteral("scrollback")).toString();
+    if (isScrollbackId(id) && !ids->contains(id)) ids->append(id);
+}
+
+}  // namespace
+
+QStringList scrollbackIds(const QJsonArray &windows) {
+    QStringList ids;
+    for (const auto &value : windows) {
+        if (!value.isObject()) continue;
+        for (const auto &tab : tabsOf(value.toObject()))
+            if (tab.isObject()) collectScrollbackIds(tab.toObject(), &ids, 0);
+    }
+    return ids;
+}
+
+int pruneScrollback(const QStringList &keep) {
+    const QString dir = scrollbackDirectory();
+    if (dir.isEmpty()) return 0;
+    int removed = 0;
+    const auto files = QDir(dir).entryInfoList({QStringLiteral("*.txt")}, QDir::Files);
+    for (const QFileInfo &file : files)
+        if (!keep.contains(file.completeBaseName()) && QFile::remove(file.absoluteFilePath())) ++removed;
+    return removed;
+}
+
+void removeAllScrollback() {
+    const QString dir = scrollbackDirectory();
+    if (!dir.isEmpty()) QDir(dir).removeRecursively();
+}
+
 }  // namespace windowstate
 }  // namespace relay
