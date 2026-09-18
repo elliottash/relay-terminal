@@ -8,6 +8,7 @@
 #include "Hints.h"
 #include "Notifications.h"        // window header: the bell and its list
 #include "InputPolicy.h"           // prompt-box-only input: where a submitted line goes
+#include "ScreenPrompt.h"          // "is the program waiting for input?", read off the screen
 #include "PaneLayout.h"            // pane focus, pane moves and grip drops
 #include "TurnTranscript.h"
 #include "ModelSettings.h"
@@ -322,6 +323,8 @@ private:
         add("files.open", "pane", "Open a file in a preview pane", {});
         add("control.human", "terminal", "Take control of the terminal (the only way keys reach it; works from the prompt box)", {QStringLiteral("Ctrl+H")});
         add("control.prompt", "terminal", "Back to the Relay prompt (the agent is in control)", {QStringLiteral("Ctrl+Shift+H")});
+        add("program.delegate", "terminal", "Let the agent drive the program in this pane (with text in the prompt box, ask it now)",
+            {QStringLiteral("Ctrl+Shift+G")});
         add("terminal.native", "terminal", "Toggle native terminal input (keys go straight to the terminal)", {QStringLiteral("F12")});
         add("pane.restartShell", "terminal", "Restart this pane's shell or agent after it stopped", {QStringLiteral("Ctrl+Shift+R")});
         add("terminal.interrupt", "terminal", "Interrupt the running command (Esc)", {});
@@ -910,6 +913,258 @@ public:
         return line.isEmpty() ? QString() : QFileInfo(line.section(' ', 0, 0)).fileName();
     }
 
+    // ===== screen-text input detection and agent-driven programs (cards YR21, C1HH) ==========
+    // Only an engine that can read the screen can show the agent what a program is asking, so
+    // everything below is gated on TerminalBackend::ScreenText. KonsolePart on KF5 reports it
+    // false and the pane keeps the /proc-only behaviour, saying so where the user can see it.
+    bool canShowAgentTheScreen() const {
+        return m_backend && (m_backend->capabilities() & relay::TerminalBackend::ScreenText);
+    }
+    bool agentDriving() const { return m_delegated; }
+
+    // Ctrl+Shift+G, the banner button and the palette. With text in the prompt box it hands the
+    // program over *and* sends that request, so "answer it with y" is one keystroke away.
+    void delegateProgram() {
+        if (m_delegated) { takeOverFromAgent(); return; }
+        const QString typed = m_editor ? m_editor->toPlainText().trimmed() : QString();
+        if (!beginDelegation()) return;
+        if (!typed.isEmpty()) submitAgent(typed, true);
+    }
+
+    // The user takes the program back: the agent stops typing and the keyboard is theirs.
+    void takeOverFromAgent() {
+        endDelegation(QStringLiteral("take_over"));
+        takeControl();
+    }
+
+    // The screen the agent is shown: the bottom of the pane, blank rows trimmed, capped. Empty
+    // on an engine that cannot read the screen — the agent is then told it cannot see it.
+    QString screenSnapshot(int rows = 40) const {
+        if (!canShowAgentTheScreen()) return {};
+        QStringList lines = relay::screen::lastRows(m_backend->screenText(), rows);
+        while (!lines.isEmpty() && lines.constLast().trimmed().isEmpty()) lines.removeLast();
+        QString text = lines.join(QLatin1Char('\n'));
+        if (text.size() > kScreenSnapshotChars) text = QStringLiteral("…\n") + text.right(kScreenSnapshotChars);
+        return text;
+    }
+
+private:
+    // Keystrokes the agent may send into one program in one turn. The worker enforces it too.
+    static constexpr int kMaxProgramWrites = 20;
+    static constexpr int kScreenSnapshotChars = 8000;
+
+    relay::screen::Signals screenSignals() const {
+        relay::screen::Signals sig;
+        sig.mode = terminalMode();
+        sig.programRunning = processBusy();
+        sig.programReading = m_waiting;
+        sig.altScreen = m_altScreen;
+        sig.screenReadable = canShowAgentTheScreen();
+        return sig;
+    }
+
+    // Re-read the last rows and tell the rest of the pane (and the worker) what they say.
+    void updateScreenPrompt() {
+        relay::screen::Detection next;
+        if (m_backend && !m_promptReported && !m_native)
+            next = relay::screen::detect(canShowAgentTheScreen()
+                                             ? relay::screen::lastRows(m_backend->screenText())
+                                             : QStringList(),
+                                         screenSignals());
+        const bool moved = next.kind != m_screenPrompt.kind || next.question != m_screenPrompt.question
+                           || next.masked != m_screenPrompt.masked
+                           || next.actionable() != m_screenPrompt.actionable();
+        m_screenPrompt = next;
+        if (moved) { updateTakeControl(); refreshProgramHint(); }
+        sendProgramState();
+    }
+
+    bool beginDelegation() {
+        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return false; }
+        if (!processBusy()) { status(QStringLiteral("Nothing is running in this pane to hand over.")); return false; }
+        if (!canShowAgentTheScreen()) {
+            status(QStringLiteral("This pane runs on KonsolePart, which does not let Relay read the screen, so the "
+                                  "agent cannot see the program. Open a Relay-engine pane to hand a program over."));
+            return false;
+        }
+        if (m_secretMode || m_screenPrompt.masked) {
+            status(QStringLiteral("Relay never lets the agent type into a password prompt."));
+            return false;
+        }
+        m_delegated = true;
+        m_delegatedProgram = foregroundProgramName();
+        m_delegationEnd.clear();
+        m_agentWrites = 0;
+        const QString who = m_delegatedProgram.isEmpty() ? QStringLiteral("the program") : m_delegatedProgram;
+        const QString back = Keymap::instance().shortcutText(QStringLiteral("control.human"));
+        ensureLineStart();
+        printInline(QStringLiteral("✦ %1 handed to the agent · %2 takes it back\n").arg(who, back), Ink::Note);
+        toast(QStringLiteral("The agent may type into %1 · %2 takes it back").arg(who, back));
+        sendProgramState(); updateTakeControl(); refreshProgramHint(); changed();
+        return true;
+    }
+
+    // Every way a delegation ends: the user took control, a password prompt appeared, or the
+    // program exited. Safe to call when nothing is delegated.
+    void endDelegation(const QString &reason) {
+        if (!m_delegated) return;
+        m_delegated = false;
+        m_delegationEnd = reason;   // the worker tells the agent why, in its own words
+        const QString who = m_delegatedProgram.isEmpty() ? QStringLiteral("the program") : m_delegatedProgram;
+        m_delegatedProgram.clear();
+        ensureLineStart();
+        printInline(reason == QStringLiteral("program_exited")
+                        ? QStringLiteral("✦ %1 exited · the agent no longer drives this pane\n").arg(who)
+                    : reason == QStringLiteral("password")
+                        ? QStringLiteral("✦ %1 is asking for a password · the agent stopped typing\n").arg(who)
+                        : QStringLiteral("✦ you took %1 back from the agent\n").arg(who),
+                    Ink::Note);
+        sendProgramState(); updateTakeControl(); refreshProgramHint(); changed();
+    }
+
+    // What the worker is told about this pane. Sent whenever it changes, so a take-over reaches
+    // a running turn before its next model call (docs/AGENT-SESSIONS-PROTOCOL.md section 17).
+    QJsonObject programStateMessage() const {
+        const bool masked = m_secretMode || m_screenPrompt.masked;
+        return QJsonObject{
+            {QStringLiteral("type"), QStringLiteral("program_state")},
+            {QStringLiteral("granted"), m_delegated && processBusy() && !m_native && !masked},
+            {QStringLiteral("reason"), m_delegated ? QStringLiteral("delegated") : m_delegationEnd},
+            {QStringLiteral("program"), foregroundProgramName()},
+            {QStringLiteral("kind"), QString::fromLatin1(relay::screen::kindName(m_screenPrompt.kind))},
+            {QStringLiteral("question"), m_screenPrompt.question},
+            {QStringLiteral("masked"), masked},
+            {QStringLiteral("alt_screen"), m_altScreen},
+            {QStringLiteral("waiting"), m_screenPrompt.actionable() || m_waiting},
+            {QStringLiteral("max_writes"), kMaxProgramWrites},
+            {QStringLiteral("screen_source"), canShowAgentTheScreen() ? QStringLiteral("engine") : QStringLiteral("none")}};
+    }
+
+    void sendProgramState() {
+        if (!m_configured) return;
+        const QJsonObject message = programStateMessage();
+        if (message == m_lastProgramState) return;
+        m_lastProgramState = message;
+        send(message);
+    }
+
+    // The grant that rides on one prompt. Without it the worker does not offer the tool at all,
+    // and the screen is not sent: nothing of what is on the user's terminal leaves the machine
+    // unless they handed the program over.
+    QJsonObject programGrant() const {
+        if (!m_delegated || !processBusy() || m_native || m_secretMode || m_screenPrompt.masked) return {};
+        QJsonObject grant = programStateMessage();
+        grant.remove(QStringLiteral("type"));
+        grant.insert(QStringLiteral("granted"), true);
+        grant.insert(QStringLiteral("screen"), screenSnapshot());
+        return grant;
+    }
+
+    // Named keys the agent may press; the model never sends a raw escape or control byte.
+    static QByteArray programKeyBytes(const QString &key) {
+        static const QHash<QString, QByteArray> keys{
+            {QStringLiteral("enter"), QByteArrayLiteral("\r")},
+            {QStringLiteral("escape"), QByteArrayLiteral("\x1b")},
+            {QStringLiteral("tab"), QByteArrayLiteral("\t")},
+            {QStringLiteral("backspace"), QByteArrayLiteral("\x7f")},
+            {QStringLiteral("up"), QByteArrayLiteral("\x1b[A")},
+            {QStringLiteral("down"), QByteArrayLiteral("\x1b[B")},
+            {QStringLiteral("right"), QByteArrayLiteral("\x1b[C")},
+            {QStringLiteral("left"), QByteArrayLiteral("\x1b[D")},
+            {QStringLiteral("home"), QByteArrayLiteral("\x1b[H")},
+            {QStringLiteral("end"), QByteArrayLiteral("\x1b[F")},
+            {QStringLiteral("page-up"), QByteArrayLiteral("\x1b[5~")},
+            {QStringLiteral("page-down"), QByteArrayLiteral("\x1b[6~")},
+            {QStringLiteral("ctrl-c"), QByteArrayLiteral("\x03")},
+            {QStringLiteral("ctrl-d"), QByteArrayLiteral("\x04")},
+            {QStringLiteral("ctrl-z"), QByteArrayLiteral("\x1a")}};
+        return keys.value(key);
+    }
+
+    static QString refusalCode(relay::input::TypeRefusal refusal) {
+        switch (refusal) {
+        case relay::input::TypeRefusal::UserInControl: return QStringLiteral("taken_over");
+        case relay::input::TypeRefusal::NotAsked: return QStringLiteral("not_granted");
+        case relay::input::TypeRefusal::NoProgram: return QStringLiteral("no_program");
+        case relay::input::TypeRefusal::Password: return QStringLiteral("password");
+        case relay::input::TypeRefusal::None: break;
+        }
+        return QStringLiteral("failed");
+    }
+
+    bool handleProgramEvent(const QString &type, const QJsonObject &event) {
+        if (type == QStringLiteral("program_input")) { performProgramInput(event); return true; }
+        if (type == QStringLiteral("program_input_refused")) {
+            ensureLineStart();
+            printInline(QStringLiteral("✦ not typed: ") + event.value(QStringLiteral("error")).toString() + '\n', Ink::Error);
+            return true;
+        }
+        if (type == QStringLiteral("program_control")) return true;   // an ack; nothing to show
+        return false;
+    }
+
+    // The agent asked to type something. The rules are checked again here, at the instant of the
+    // write, because only the pane knows whether the user has since taken control or a password
+    // prompt has appeared. Every write is printed in the pane.
+    void performProgramInput(const QJsonObject &event) {
+        const QString id = event.value(QStringLiteral("id")).toString();
+        const QString intent = event.value(QStringLiteral("intent")).toString();
+        const QString program = foregroundProgramName();
+        updateScreenPrompt();
+        const relay::input::TypeRefusal refusal =
+            !m_backend ? relay::input::TypeRefusal::NoProgram
+                       : relay::input::agentTypeRefusal(inputState(), m_delegated);
+        if (refusal != relay::input::TypeRefusal::None) {
+            ensureLineStart();
+            printInline(QStringLiteral("✦ not typed (%1)%2\n")
+                            .arg(refusalCode(refusal), intent.isEmpty() ? QString() : QStringLiteral(" · ") + intent),
+                        Ink::Error);
+            send({{QStringLiteral("type"), QStringLiteral("program_input_result")}, {QStringLiteral("id"), id},
+                  {QStringLiteral("ok"), false}, {QStringLiteral("code"), refusalCode(refusal)},
+                  {QStringLiteral("error"), relay::input::typeRefusalText(refusal, program)}});
+            return;
+        }
+        QString typed;
+        const QString key = event.value(QStringLiteral("key")).toString();
+        if (!key.isEmpty()) {
+            const QByteArray bytes = programKeyBytes(key);
+            if (bytes.isEmpty()) {
+                send({{QStringLiteral("type"), QStringLiteral("program_input_result")}, {QStringLiteral("id"), id},
+                      {QStringLiteral("ok"), false}, {QStringLiteral("code"), QStringLiteral("failed")},
+                      {QStringLiteral("error"), QStringLiteral("Relay does not know the key \"%1\".").arg(key)}});
+                return;
+            }
+            m_backend->sendInput(bytes);
+            typed = QStringLiteral("<%1>").arg(key);
+        } else {
+            const QString text = event.value(QStringLiteral("text")).toString();
+            typed = text + (event.value(QStringLiteral("submit")).toBool(true) ? QStringLiteral("\n") : QString());
+            sendShellInput(typed);
+        }
+        ++m_agentWrites;
+        ensureLineStart();
+        printInline(relay::input::typedLine(typed)
+                        + (intent.isEmpty() ? QString() : QStringLiteral("   · ") + intent) + '\n', Ink::Agent);
+        m_waitTicks = 0;
+        endWaiting(false);
+        updateTakeControl();
+        // Let the program react before answering: the screen it leaves behind is the only honest
+        // evidence of what the keystroke did, and it is what the agent reads next.
+        QTimer::singleShot(400, this, [this, id, typed] {
+            updateScreenPrompt();
+            send({{QStringLiteral("type"), QStringLiteral("program_input_result")}, {QStringLiteral("id"), id},
+                  {QStringLiteral("ok"), true}, {QStringLiteral("typed"), typed},
+                  {QStringLiteral("program"), foregroundProgramName()},
+                  {QStringLiteral("masked"), m_secretMode || m_screenPrompt.masked},
+                  {QStringLiteral("waiting"), m_screenPrompt.actionable() || m_waiting},
+                  {QStringLiteral("question"), m_screenPrompt.question},
+                  {QStringLiteral("screen"), screenSnapshot()}});
+        });
+    }
+
+public:
+    // ===== end screen detection and agent-driven programs ====================================
+
     bool ownsComposerWidget(QWidget *widget) const { return m_composer && widget && (widget == m_composer || m_composer->isAncestorOf(widget)); }
 
     // Whether the keyboard is in this pane. The pane's event filter sits on qApp, so every pane
@@ -1407,16 +1662,46 @@ private:
         m_queueStrip->hide();
         // A full-screen program (vim, htop) or an ssh session owns the screen. Relay no longer
         // switches to native input by itself; this button, or Ctrl+H, hands the keyboard over.
-        m_takeControl = new QPushButton(this);
+        // Both buttons live in one floating banner over the top of the terminal, next to the
+        // line that says what the program is asking ("apt is asking: Do you want to continue?
+        // [Y/n]"), so the question and the two ways to answer it are in one place.
+        m_programBar = new QFrame(this);
+        m_programBar->setObjectName(QStringLiteral("programBanner"));
+        m_programBar->setAttribute(Qt::WA_StyledBackground);
+        auto *bannerRow = new QHBoxLayout(m_programBar);
+        bannerRow->setContentsMargins(10, 4, 6, 4);
+        bannerRow->setSpacing(8);
+        m_programLabel = new QLabel(m_programBar);
+        m_programLabel->setObjectName(QStringLiteral("programBannerLabel"));
+        m_programLabel->setTextFormat(Qt::PlainText);
+        bannerRow->addWidget(m_programLabel, 1);
+        // "Let the agent drive" hands the program over; while it drives, the same button is
+        // "Take over" and gives the keyboard back (card C1HH).
+        m_delegateButton = new QPushButton(m_programBar);
+        m_delegateButton->setObjectName(QStringLiteral("delegateChip"));
+        m_delegateButton->setCursor(Qt::PointingHandCursor);
+        m_delegateButton->setFocusPolicy(Qt::NoFocus);
+        connect(m_delegateButton, &QPushButton::clicked, this, [this] {
+            const bool wasDriving = m_delegated;
+            delegateProgram();
+            const QString action = wasDriving ? QStringLiteral("control.human") : QStringLiteral("program.delegate");
+            hint(QStringLiteral("program.delegate.mouse"),
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(action),
+                                                wasDriving ? QStringLiteral("take the program back")
+                                                           : QStringLiteral("hand the program to the agent")));
+        });
+        bannerRow->addWidget(m_delegateButton);
+        m_takeControl = new QPushButton(m_programBar);
         m_takeControl->setObjectName(QStringLiteral("takeControlChip"));
         m_takeControl->setCursor(Qt::PointingHandCursor);
         m_takeControl->setFocusPolicy(Qt::NoFocus);
-        m_takeControl->hide();
         connect(m_takeControl, &QPushButton::clicked, this, [this] {
             takeControl();
             hint(QStringLiteral("control.human.mouse"),
                  relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("control.human")), QStringLiteral("take control")));
         });
+        bannerRow->addWidget(m_takeControl);
+        m_programBar->hide();
         layout->addWidget(composer);
         setupSubagentsUi(layout);   // subagents UI: running-agents list under the composer
         updatePaths();
@@ -3466,9 +3751,15 @@ private:
         const QString type = event.value(QStringLiteral("event")).toString();
         logEvent(type, event);
         // --- subagents UI: subagent_* events are consumed; main-agent state is observed first ---
-        if (type == QStringLiteral("configured")) QTimer::singleShot(0, this, [this] { refreshAgentDefinitions(); });
+        if (type == QStringLiteral("configured"))
+            QTimer::singleShot(0, this, [this] {
+                refreshAgentDefinitions();
+                m_lastProgramState = QJsonObject();   // a fresh worker knows nothing about the pane
+                sendProgramState();
+            });
         if (m_subagents.handle(event)) return;
         // --- end subagents UI ---
+        if (handleProgramEvent(type, event)) return;    // the agent typing into this pane's program
         if (handleRequestsEvent(type, event)) return;   // request ledger UI
         if (handleObservabilityEvent(type, event)) return;
         if (handleSessionEvent(type, event)) return;
@@ -3965,6 +4256,8 @@ private:
     // ----- masked prompt box (password prompts) -----------------------------------------------
     void enterSecretMode(const QString &program) {
         if (m_secretMode || !m_secretEdit) return;
+        // A password prompt ends any delegation: no model ever types into a masked prompt.
+        endDelegation(QStringLiteral("password"));
         m_secretMode = true;
         m_secretProgram = program;
         hideAtPopup(); hideSlashPopup(); hideTabPopup(); clearAiGhost();
@@ -4646,6 +4939,10 @@ private:
             context.insert(QStringLiteral("foreground_program"), program);
             prompt.program = QFileInfo(program.section(' ', 0, 0)).fileName();
         }
+        // When the user has handed the program over, the same note carries the permission, the
+        // question and the screen (card C1HH). Without it none of that is sent.
+        const QJsonObject grant = programGrant();
+        if (!grant.isEmpty()) context.insert(QStringLiteral("program_control"), grant);
         request.insert(QStringLiteral("context"), context);
         const QString requestId = sendPrompt(request, prompt);
         if (fromQueue) { m_active = entry; m_activeValid = true; m_activeRequest = requestId; }
@@ -5192,11 +5489,16 @@ private:
 
     void pollProgram() {
         if (m_promptReported || !m_backend) {
-            m_programPoll.stop(); endWaiting(true); updateOpaqueProgram(); checkPasswordPrompt(); updateTakeControl();
+            m_programPoll.stop(); endWaiting(true); updateOpaqueProgram(); checkPasswordPrompt();
+            // The program is gone: the screen detection and the agent's permission go with it.
+            endDelegation(QStringLiteral("program_exited"));
+            updateScreenPrompt();
+            updateTakeControl();
             return;
         }
         updateOpaqueProgram();
         checkPasswordPrompt();
+        updateScreenPrompt();
         if (!m_native && !m_altScreen && !m_secretMode && m_runningSince.isValid() && m_runningSince.elapsed() > 300) {
             const QString program = foregroundProgramName();
             if (remoteSessionProgram(program) && !m_remoteHandled) {
@@ -5213,7 +5515,13 @@ private:
                           .arg(program, Keymap::instance().shortcutText(QStringLiteral("control.human"))));
                 return;
             }
-            if (!m_opaqueProgram.isEmpty()) {
+            if (m_screenPrompt.actionable() && !m_screenPrompt.masked) {
+                // The screen says a program is asking for a line. This is the case /proc cannot
+                // see: `sudo` runs apt in its own pseudo-terminal, so nothing Relay may inspect
+                // is blocked in read(). Two ticks (~0.5 s) of agreement before the hint appears,
+                // so a question that scrolls past during a download never raises one (card YR21).
+                if (++m_waitTicks >= 2) startWaiting();
+            } else if (!m_opaqueProgram.isEmpty()) {
                 // sudo & co.: Relay cannot read their syscalls, so it cannot see them waiting.
                 // A password prompt is still visible in the line discipline (checkPasswordPrompt);
                 // anything else queues, and the hint in the composer row says so.
@@ -5221,7 +5529,7 @@ private:
                      QStringLiteral("Tip: type the next command here while %1 runs · it is queued until the terminal is free")
                          .arg(m_opaqueProgram));
             } else if (programWaitingForInput()) {
-                if (++m_waitTicks == 2) startWaiting();
+                if (++m_waitTicks >= 2) startWaiting();
             } else {
                 if (m_waiting) endWaiting(true);
                 m_waitTicks = 0;
@@ -5256,6 +5564,10 @@ private:
         state.altScreen = m_altScreen;
         state.native = m_native;
         state.programReading = state.programRunning && (m_waiting || (live && programWaitingForInput()));
+        // What the screen classifier made of the last rows (src/ScreenPrompt.h). Both stay false
+        // on engines that cannot read the screen, which leaves the /proc-only rules unchanged.
+        state.screenAsking = m_screenPrompt.actionable() && !m_screenPrompt.masked;
+        state.screenMasked = m_screenPrompt.masked && m_screenPrompt.actionable();
         return state;
     }
 
@@ -5337,9 +5649,18 @@ private:
         if (!m_opaqueHint) return;
         QString text;
         if (!m_native && !m_secretMode) {
-            if (m_waiting)
-                text = QStringLiteral("%1 is waiting for input · Enter sends your line to it")
-                           .arg(foregroundProgramName().isEmpty() ? QStringLiteral("The program") : foregroundProgramName());
+            const QString program = foregroundProgramName();
+            const QString who = program.isEmpty() ? QStringLiteral("The program") : program;
+            if (m_delegated) {
+                const QString driven = !m_delegatedProgram.isEmpty() ? m_delegatedProgram
+                                       : program.isEmpty() ? QStringLiteral("the program") : program;
+                text = QStringLiteral("The agent is driving %1 · %2 takes it back")
+                           .arg(driven, Keymap::instance().shortcutText(QStringLiteral("control.human")));
+            } else if (m_screenPrompt.actionable())
+                // Read off the screen, so it names the question: "apt is asking: … [Y/n]".
+                text = relay::screen::waitingLine(program, m_screenPrompt);
+            else if (m_waiting)
+                text = QStringLiteral("%1 is waiting for input · Enter sends your line to it").arg(who);
             else if (!m_opaqueProgram.isEmpty())
                 text = QStringLiteral("%1 is running · prompts queue until it exits · %2 to type into it")
                            .arg(m_opaqueProgram, Keymap::instance().shortcutText(QStringLiteral("control.human")));
@@ -5352,6 +5673,7 @@ private:
     // A program is blocked reading a line (`apt`'s `[Y/n]`). The prompt box keeps the keyboard;
     // what is submitted there answers the program instead of being queued (issue decision 5).
     void startWaiting() {
+        if (m_waiting) return;   // the poll re-checks every tick; the toast is shown once
         m_waiting = true;
         refreshProgramHint();
         toast(QStringLiteral("%1 is waiting for input · Enter here sends your answer to it")
@@ -5480,29 +5802,73 @@ private:
     // The "Take control (Ctrl+H)" button floats over the top-right of the terminal, so it does
     // not take layout space away from the program drawing there.
     void placeTakeControl() {
-        if (!m_takeControl || !m_takeControl->isVisible() || !m_terminalHost) return;
+        if (!m_programBar || !m_programBar->isVisible() || !m_terminalHost) return;
         const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
-        const QSize size = m_takeControl->sizeHint();
-        m_takeControl->setGeometry(host.right() - size.width() - 10, host.top() + 8, size.width(), size.height());
-        m_takeControl->raise();
+        const QSize size = m_programBar->sizeHint();
+        const int width = std::min(size.width(), std::max(240, host.width() - 20));
+        m_programBar->setGeometry(host.right() - width - 10, host.top() + 8, width, size.height());
+        m_programBar->raise();
     }
 
     // Shown while a full-screen program (alternate screen) or a remote session owns the terminal
     // and the prompt box still has the keyboard.
     void updateTakeControl() {
-        if (!m_takeControl) return;
-        const bool show = relay::input::offerTakeControl(inputState(false), m_remoteProgram);
+        if (!m_programBar) return;
+        const relay::input::State state = inputState(false);
+        const QString program = foregroundProgramName();
+        const QString who = program.isEmpty() ? QStringLiteral("the program") : program;
+        const QString question = relay::screen::bannerText(program, m_screenPrompt);
+        const bool offerControl = relay::input::offerTakeControl(state, m_remoteProgram);
+        // The banner appears whenever Relay has something to say about the program in this pane:
+        // a question it read off the screen, a full-screen or remote program the prompt box is
+        // holding the keyboard for, or the agent driving it.
+        const bool show = !m_native && !m_secretMode && processBusy() && (offerControl || m_delegated || !question.isEmpty());
         if (show) {
             const QString keys = Keymap::instance().shortcutText(QStringLiteral("control.human"));
             m_takeControl->setText(keys.isEmpty() ? QStringLiteral("Take control") : QStringLiteral("Take control (%1)").arg(keys));
-            const QString program = foregroundProgramName();
-            m_takeControl->setToolTip(program.isEmpty()
-                ? QStringLiteral("Hide the prompt box and type into the program")
-                : QStringLiteral("Hide the prompt box and type into %1").arg(program));
-            m_takeControl->adjustSize();
+            m_takeControl->setToolTip(QStringLiteral("Hide the prompt box and type into %1").arg(who));
+            // While the agent drives, the delegate button already reads "Take over", which does
+            // the same thing; two buttons with one shortcut would only be noise.
+            m_takeControl->setVisible(offerControl && !m_delegated);
+            QString label = question.isEmpty() ? QStringLiteral("%1 is running").arg(who) : question;
+            if (m_delegated)
+                label = m_agentWrites > 0
+                    ? QStringLiteral("Agent driving %1 · %2 keystroke(s) · %3").arg(who).arg(m_agentWrites).arg(label)
+                    : QStringLiteral("Agent driving %1 · %2").arg(who, label);
+            m_programLabel->setText(m_programLabel->fontMetrics().elidedText(
+                label, Qt::ElideRight, std::max(200, width() - 320)));
+            m_programLabel->setToolTip(label);
+            updateDelegateButton(who);
+            m_programBar->adjustSize();
         }
-        m_takeControl->setVisible(show);
+        m_programBar->setVisible(show);
         placeTakeControl();
+    }
+
+    // "Let the agent drive" / "Take over", and an honest explanation when this pane's engine
+    // cannot show the agent the screen (KonsolePart without getDisplayedText, i.e. KF5).
+    void updateDelegateButton(const QString &who) {
+        if (!m_delegateButton) return;
+        if (m_delegated) {
+            const QString keys = Keymap::instance().shortcutText(QStringLiteral("control.human"));
+            m_delegateButton->setText(keys.isEmpty() ? QStringLiteral("Take over") : QStringLiteral("Take over (%1)").arg(keys));
+            m_delegateButton->setToolTip(QStringLiteral("Stop the agent typing into %1 and take the keyboard").arg(who));
+            m_delegateButton->setEnabled(true);
+            m_delegateButton->show();
+            return;
+        }
+        const bool masked = m_secretMode || m_screenPrompt.masked;
+        const bool possible = canShowAgentTheScreen() && !masked;
+        m_delegateButton->setText(QStringLiteral("Let the agent drive"));
+        m_delegateButton->setEnabled(possible);
+        m_delegateButton->setToolTip(
+            masked ? QStringLiteral("Relay never lets the agent type into a password prompt.")
+            : !canShowAgentTheScreen()
+                ? QStringLiteral("This pane runs on KonsolePart, which does not let Relay read the screen, so the "
+                                 "agent cannot see %1. Open a Relay-engine pane to hand a program over.").arg(who)
+                : QStringLiteral("Let the agent type into %1 · %2 takes it back")
+                      .arg(who, Keymap::instance().shortcutText(QStringLiteral("control.human"))));
+        m_delegateButton->setVisible(!masked);
     }
 
     bool readlineReady() const {
@@ -5589,6 +5955,10 @@ private:
             m_programPoll.stop();
             endWaiting(true);
             updateOpaqueProgram();
+            // The program is gone: the screen has nothing to ask and the agent's permission to
+            // type into it ends with it (cards YR21, C1HH).
+            endDelegation(QStringLiteral("program_exited"));
+            updateScreenPrompt();
             m_remoteHandled = false; m_remoteProgram = false;
             m_secretDeclined = false; m_secretNotified = false;
             leaveSecretMode();
@@ -5652,6 +6022,9 @@ private:
     void setNative(bool enabled, bool cancelLine = true) {
         // Taking control leaves masked input: the password is then typed into the program itself.
         if (enabled && m_secretMode) { m_secretDeclined = true; leaveSecretMode(); }
+        // The one rule the agent cannot argue with: the moment the user has the keyboard, the
+        // agent stops typing. Ctrl+H, the button and F12 all come through here.
+        if (enabled) endDelegation(QStringLiteral("take_over"));
         m_native = enabled;
         changed();
         m_editor->setReadOnly(enabled);
@@ -5956,6 +6329,16 @@ private:
     // sudo & co. in the foreground
     QLabel *m_opaqueHint = nullptr;
     QString m_opaqueProgram;
+    // Screen-text input detection (card YR21) and agent-driven programs (card C1HH).
+    relay::screen::Detection m_screenPrompt;
+    bool m_delegated = false;          // the user handed the foreground program to the agent
+    QString m_delegatedProgram;
+    QString m_delegationEnd;           // why the last delegation ended: take_over, password, program_exited
+    int m_agentWrites = 0;             // keystrokes the agent has sent into it
+    QFrame *m_programBar = nullptr;    // the floating banner over the terminal
+    QLabel *m_programLabel = nullptr;
+    QPushButton *m_delegateButton = nullptr;
+    QJsonObject m_lastProgramState;    // what the worker was last told, to keep the pipe quiet
     quint64 m_requestId = 0, m_loadSerial = 0;
     // subagents UI
     relay::SubagentModel m_subagents;
@@ -7008,6 +7391,7 @@ private:
         else if (id == QStringLiteral("pane.restartShell")) pane->restartStopped();
         else if (id == QStringLiteral("control.human")) pane->takeControl();
         else if (id == QStringLiteral("control.prompt")) pane->showPrompt();
+        else if (id == QStringLiteral("program.delegate")) pane->delegateProgram();
         else if (id == QStringLiteral("input.toggle")) pane->toggleInputMode();
         else if (id == QStringLiteral("agent.fastAgent")) pane->toggleFastAgent();   // model roles
         else if (id == QStringLiteral("agent.planToggle")) pane->togglePlanMode();
@@ -7756,6 +8140,18 @@ private:
                             QStringLiteral("Hide the prompt box and type into the terminal · the only way keys reach it"),
                             QStringLiteral("control.human"), pane && pane->isNative());
         items << actionItem(terminal, QStringLiteral("Show the Relay prompt"), QStringLiteral("Back to the prompt box; it becomes the input again"), QStringLiteral("control.prompt"), pane && !pane->isNative());
+        {
+            // Hand the running program to the agent, or take it back (card C1HH).
+            const bool driving = pane && pane->agentDriving();
+            const QString detail = !pane                     ? QStringLiteral("No pane")
+                : !pane->canShowAgentTheScreen()             ? QStringLiteral("This pane's engine cannot show the agent the screen · open a Relay-engine pane")
+                : !pane->processBusy()                       ? QStringLiteral("Nothing is running in this pane")
+                : driving                                    ? QStringLiteral("The agent may type into %1 · this hands it back").arg(pane->foregroundProgramName())
+                : QStringLiteral("The agent may type into %1 until you take control").arg(pane->foregroundProgramName());
+            items << actionItem(terminal, driving ? QStringLiteral("Take the program back from the agent")
+                                                  : QStringLiteral("Let the agent drive this program"),
+                                detail, QStringLiteral("program.delegate"), driving);
+        }
         {
             const QString program = pane ? pane->foregroundProgramName() : QString();
             if (!program.isEmpty()) {

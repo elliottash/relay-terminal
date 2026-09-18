@@ -102,6 +102,13 @@ target_include_directories(relay-input PUBLIC src)
 target_link_libraries(relay-input PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-input PRIVATE -Wall -Wextra -Wpedantic)
 
+# Screen-text input detection: "is the program waiting for a line?" read off the last rows of
+# the screen (issues/features/2026-09-17-screen-text-input-detection.md). Pure text rules.
+add_library(relay-screen STATIC src/ScreenPrompt.cpp src/ScreenPrompt.h)
+target_include_directories(relay-screen PUBLIC src)
+target_link_libraries(relay-screen PUBLIC relay-input ${RELAY_QT}::Core)
+target_compile_options(relay-screen PRIVATE -Wall -Wextra -Wpedantic)
+
 # Conversation list with full-text search (Ctrl+Shift+O) and the Ctrl+F find bar. The worker does
 # the searching (docs/AGENT-SESSIONS-PROTOCOL.md section 14); this is the dialog and its helpers.
 add_library(relay-conversations STATIC src/Conversations.cpp src/Conversations.h)
@@ -160,7 +167,7 @@ if(RELAY_BUILD_APP)
         src/ModelSettings.cpp src/ModelSettings.h
         src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-screen relay-notifications relay-panes relay-logging relay-voice relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -209,6 +216,11 @@ if(BUILD_TESTING)
     add_executable(relay-input-tests tests/inputpolicy_test.cpp)
     target_link_libraries(relay-input-tests PRIVATE relay-input ${RELAY_QT}::Test)
     add_test(NAME input COMMAND relay-input-tests)
+    add_executable(relay-screen-tests tests/screenprompt_test.cpp)
+    target_link_libraries(relay-screen-tests PRIVATE relay-screen ${RELAY_QT}::Test)
+    target_compile_definitions(relay-screen-tests PRIVATE
+        RELAY_SCREEN_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/screen")
+    add_test(NAME screen COMMAND relay-screen-tests)
     add_executable(relay-logging-tests tests/logging_test.cpp)
     target_link_libraries(relay-logging-tests PRIVATE relay-logging ${RELAY_QT}::Test)
     add_test(NAME logging COMMAND relay-logging-tests)

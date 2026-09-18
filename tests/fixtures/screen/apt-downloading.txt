@@ -1,0 +1,6 @@
+Do you want to continue? [Y/n] y
+Get:1 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 curl amd64 8.5.0 [227 kB]
+Get:2 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 libcurl4 amd64 8.5.0 [341 kB]
+Fetched 1,234 kB in 1s (1,180 kB/s)
+Preparing to unpack .../curl_8.5.0_amd64.deb ...
+Unpacking curl (8.5.0) over (8.4.0) ...

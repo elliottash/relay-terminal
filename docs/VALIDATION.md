@@ -130,6 +130,7 @@ family runs the issue's checklist and records evidence under `docs/qa_evidence/`
 
 Waiting for QA (`issues/features/needs_qa_llm/`):
 
+- `2026-09-17-agent-delegate-and-take-over.md`
 - `2026-09-17-agent-output-while-program-runs.md`
 - `2026-09-17-agent-program-context.md`
 - `2026-09-17-agent-responses-in-terminal.md`
@@ -148,6 +149,7 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-restore-windows-on-start.md`
 - `2026-09-17-router-english-commands.md`
 - `2026-09-17-routing-assist-thinking-skills-backend.md`
+- `2026-09-17-screen-text-input-detection.md`
 - `2026-09-17-voice-transcription.md`
 - `2026-09-17-windows-tabs-panes.md`
 

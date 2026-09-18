@@ -1,0 +1,8 @@
+pick 1a2b3c4 board: fix a rank and regenerate the index
+pick 5d6e7f8 Keys: Ctrl+Shift twins for new window, tab and close
+
+# Rebase 0e5c4fe..fa48101 onto 0e5c4fe (2 commands)
+#
+# Commands:
+#  p, pick <commit> = use commit
+#  r, reword <commit> = use commit, but edit the commit message

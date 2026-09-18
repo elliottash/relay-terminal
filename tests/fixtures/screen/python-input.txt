@@ -1,0 +1,3 @@
+elliott@box:~/repos/relay-terminal$ python3 ask.py
+Loading configuration from ./relay.toml
+Enter your name:
