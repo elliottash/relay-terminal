@@ -9506,13 +9506,14 @@ private:
             return;
         }
         announceLoginFiles();
-        if (m_remoteProbe.lookup(target) == relay::remote::Entry::Directory) {
-            toast(QStringLiteral("%1 is a folder on %2 · Relay opens the host's files, not its folders").arg(target, host));
-            return;
-        }
-        const QString url = relay::remote::fileUrl(host, target);
+        // A folder opens the explorer pane on the host's folder, a file the preview pane. Which
+        // it is, the host already said when it made the path a link: the URL of a folder ends in
+        // `/` and RelayWindow::openPath reads that rather than asking this machine.
+        const bool folder = m_remoteProbe.lookup(target) == relay::remote::Entry::Directory;
+        const QString url = folder ? relay::remote::folderUrl(host, target) : relay::remote::fileUrl(host, target);
         if (url.isEmpty() || !onOpenPath) return;
-        relay::log::info(QStringLiteral("remote_file_open pane=%1 host=%2").arg(paneLogId(), host));
+        relay::log::info(QStringLiteral("remote_%1_open pane=%2 host=%3")
+                             .arg(folder ? QStringLiteral("folder") : QStringLiteral("file"), paneLogId(), host));
         onOpenPath(url, line > 0 ? line : 0);
     }
 

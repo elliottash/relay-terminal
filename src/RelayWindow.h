@@ -498,7 +498,10 @@ public:
         if (!anchor) return;
         QWidget *page = pageOf(anchor);
         m_tabs->setCurrentWidget(page);
-        const auto kind = !remote && info.isDir() ? ToolPane::Kind::Explorer : ToolPane::Kind::Preview;
+        // `ssh://host/etc/nginx/` is the host's folder and `ssh://host/etc/nginx/nginx.conf` its
+        // file: the trailing slash is the whole difference, and it was decided on the host (#S5SH).
+        const bool remoteFolder = remote && relay::remote::parseFileUrl(path).directory;
+        const auto kind = (remote ? remoteFolder : info.isDir()) ? ToolPane::Kind::Explorer : ToolPane::Kind::Preview;
         const QString what = remote ? path : info.absoluteFilePath();   // the URL, or the local path
         ToolPane *target = nullptr;
         for (QWidget *leaf : leavesIn(page)) {

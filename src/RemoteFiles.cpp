@@ -3,6 +3,7 @@
 
 #include <QDateTime>
 #include <QFileInfo>
+#include <algorithm>
 #include <QLocale>
 #include <QProcess>
 #include <QTimer>
@@ -180,6 +181,54 @@ QString probeScript(const QStringList &paths)
         .arg(shellQuote(paths));
 }
 
+QString listScript(const QString &path)
+{
+    // One `stat` for the whole folder rather than one per entry: a folder with a thousand files
+    // in it is a thousand forks on someone else's machine otherwise. An unmatched glob and a
+    // broken symlink each make `stat` complain about that one word on stderr and carry on with
+    // the rest, which is why the output is taken whatever the exit status was.
+    return QStringLiteral(
+               "cd -- %1 2>/dev/null || exit %2\n"
+               "set -- * .[!.]* ..?*\n"
+               "out=$(stat -L -c '%F|%s|%Y|%n' -- \"$@\" 2>/dev/null)\n"
+               "[ -n \"$out\" ] || out=$(stat -L -f '%HT|%z|%m|%N' -- \"$@\" 2>/dev/null)\n"
+               "[ -z \"$out\" ] || printf '%s\\n' \"$out\"\n")
+        .arg(shellQuote(path))
+        .arg(int(MissingStatus));
+}
+
+QVector<DirEntry> parseListing(const QByteArray &output, int maxEntries, bool *truncated)
+{
+    QVector<DirEntry> entries;
+    const QList<QByteArray> lines = output.split('\n');
+    for (const QByteArray &line : lines) {
+        if (line.trimmed().isEmpty()) continue;
+        // type|size|mtime|name — the name is last because it is the one field that may hold a
+        // separator of its own.
+        const QString text = QString::fromUtf8(line);
+        const int first = text.indexOf(QLatin1Char('|'));
+        const int second = first < 0 ? -1 : text.indexOf(QLatin1Char('|'), first + 1);
+        const int third = second < 0 ? -1 : text.indexOf(QLatin1Char('|'), second + 1);
+        if (third < 0) continue;   // a name with a newline in it: skip the pieces, keep the rest
+        DirEntry entry;
+        entry.directory = text.left(first).contains(QStringLiteral("dir"), Qt::CaseInsensitive);
+        entry.size = text.mid(first + 1, second - first - 1).toLongLong();
+        entry.mtime = text.mid(second + 1, third - second - 1).toLongLong();
+        entry.name = text.mid(third + 1);
+        // `stat` prints the name it was given; for a listing that is the bare name already.
+        if (entry.name.isEmpty() || entry.name == QStringLiteral(".") || entry.name == QStringLiteral("..")) continue;
+        entries.append(entry);
+    }
+    std::sort(entries.begin(), entries.end(), [](const DirEntry &a, const DirEntry &b) {
+        if (a.directory != b.directory) return a.directory;   // folders first, as QFileSystemModel does
+        const int by = a.name.compare(b.name, Qt::CaseInsensitive);
+        return by == 0 ? a.name < b.name : by < 0;
+    });
+    if (truncated) *truncated = entries.size() > maxEntries;
+    if (entries.size() > maxEntries) entries.resize(maxEntries);
+    return entries;
+}
+
 QStringList sshArguments(const QString &host, const QString &controlPath)
 {
     return {QStringLiteral("-S"), controlPath,
@@ -229,7 +278,9 @@ QString statusMessage(int exitStatus, const QString &host, const QString &path, 
     case TooLargeStatus:   return QStringLiteral("%1 is larger than %2 · Relay does not open it over ssh.")
                                       .arg(name, humanSize(kMaxFileBytes));
     case NoStatStatus:     return QStringLiteral("%1 could not be examined on %2%3").arg(name, host, tail);
-    case NoTempStatus:     return QStringLiteral("%1 could not be saved: its folder on %2 is not writable%3").arg(name, host, tail);
+    case NoTempStatus:     return QStringLiteral("%1 could not be saved: Relay could not put a temporary file in its folder on %2, "
+                                                 "so the folder is not writable by you%3 · your edits are still in this pane — copy them out, "
+                                                 "or fix the folder on %2 and save again.").arg(name, host, tail);
     case WriteFailedStatus: return QStringLiteral("%1 could not be written on %2 — the disk may be full or read-only%3").arg(name, host, tail);
     case MoveFailedStatus:  return QStringLiteral("%1 could not be replaced on %2 — a read-only file system, or you do not have permission%3")
                                        .arg(name, host, tail);
@@ -251,6 +302,13 @@ QString fileUrl(const QString &host, const QString &path)
     return QStringLiteral("ssh://%1%2").arg(host, QString::fromUtf8(QUrl::toPercentEncoding(path, "/")));
 }
 
+QString folderUrl(const QString &host, const QString &path)
+{
+    const QString url = fileUrl(host, path);
+    if (url.isEmpty() || url.endsWith(QLatin1Char('/'))) return url;
+    return url + QLatin1Char('/');
+}
+
 bool isFileUrl(const QString &target)
 {
     return parseFileUrl(target).ok;
@@ -265,8 +323,23 @@ FileRef parseFileUrl(const QString &target)
     if (slash <= 0) return out;
     out.host = rest.left(slash);
     out.path = QUrl::fromPercentEncoding(rest.mid(slash).toUtf8());
+    out.directory = out.path.endsWith(QLatin1Char('/'));
+    if (out.directory && out.path.size() > 1) out.path.chop(1);
     out.ok = !out.host.isEmpty() && out.path.startsWith(QLatin1Char('/'));
     return out;
+}
+
+QString parentPath(const QString &path)
+{
+    const int slash = path.lastIndexOf(QLatin1Char('/'));
+    if (slash < 0) return {};
+    return slash == 0 ? QStringLiteral("/") : path.left(slash);
+}
+
+QString childPath(const QString &path, const QString &name)
+{
+    if (name.isEmpty()) return path;
+    return path.endsWith(QLatin1Char('/')) ? path + name : path + QLatin1Char('/') + name;
 }
 
 QString displayName(const QString &host, const QString &path)
@@ -422,13 +495,9 @@ void RemoteFile::finish(int code, bool crashed)
         if (onSaved) onSaved(stat);
         return;
     }
+    // The bytes as they are. Whether binary is a problem depends on what asked for them: an
+    // image and a PDF are binary and are meant to be, and only the text viewer refuses one.
     const QByteArray content = newline < 0 ? QByteArray() : out.mid(newline + 1);
-    if (looksBinary(content)) {
-        m_fetched = stat;
-        fail(QStringLiteral("%1 on %2 is binary · Relay does not open it as text.")
-                 .arg(QFileInfo(m_path).fileName(), m_host));
-        return;
-    }
     m_fetched = stat;
     if (onFetched) onFetched(content, stat);
 }
@@ -436,6 +505,95 @@ void RemoteFile::finish(int code, bool crashed)
 void RemoteFile::fail(const QString &message, Conflict conflict, const FileStat &now)
 {
     if (onFailed) onFailed(message, conflict, now);
+}
+
+// ----- RemoteDir ----------------------------------------------------------------------------------
+
+RemoteDir::RemoteDir(QObject *parent) : QObject(parent) {}
+
+RemoteDir::~RemoteDir()
+{
+    cancel();
+}
+
+void RemoteDir::setHost(const QString &host, const QString &controlPath)
+{
+    m_host = host;
+    m_explicitControlPath = controlPath;
+    if (!controlPath.isEmpty()) announceLogin(host, controlPath);
+}
+
+QString RemoteDir::controlPath() const
+{
+    if (!m_explicitControlPath.isEmpty() && QFileInfo::exists(m_explicitControlPath)) return m_explicitControlPath;
+    return loginControlPath(m_host);
+}
+
+void RemoteDir::cancel()
+{
+    if (m_timeout) { m_timeout->stop(); m_timeout->deleteLater(); m_timeout = nullptr; }
+    if (!m_process) return;
+    QProcess *process = m_process;
+    m_process = nullptr;
+    process->disconnect();
+    process->kill();
+    process->deleteLater();
+}
+
+void RemoteDir::list(const QString &path)
+{
+    cancel();
+    m_path = path;
+    const QString socket = controlPath();
+    if (m_host.isEmpty() || socket.isEmpty()) {
+        if (onFailed)
+            onFailed(QStringLiteral("There is no connection to %1 · log in to it in a terminal pane, then reload this pane.").arg(m_host));
+        return;
+    }
+    m_process = new QProcess(this);
+    connect(m_process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+            [this](int code, QProcess::ExitStatus status) { finish(code, status == QProcess::CrashExit); });
+    connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (m_process && error == QProcess::FailedToStart) {
+            const QString host = m_host;
+            cancel();
+            if (onFailed) onFailed(QStringLiteral("ssh could not be started, so %1 cannot be reached.").arg(host));
+        }
+    });
+    m_timeout = new QTimer(this);
+    m_timeout->setSingleShot(true);
+    connect(m_timeout, &QTimer::timeout, this, [this] {
+        const QString host = m_host;
+        cancel();
+        if (onFailed) onFailed(QStringLiteral("%1 did not answer in time.").arg(host));
+    });
+    m_timeout->start(20000);
+    m_process->start(QStringLiteral("ssh"), sshCommand(m_host, socket, listScript(path)));
+    m_process->closeWriteChannel();
+}
+
+void RemoteDir::finish(int code, bool crashed)
+{
+    if (!m_process) return;
+    QProcess *process = m_process;
+    m_process = nullptr;
+    if (m_timeout) { m_timeout->stop(); m_timeout->deleteLater(); m_timeout = nullptr; }
+    const QByteArray out = process->readAllStandardOutput();
+    const QByteArray err = process->readAllStandardError();
+    process->deleteLater();
+    if (crashed) {
+        if (onFailed) onFailed(QStringLiteral("The connection to %1 ended before the folder did.").arg(m_host));
+        return;
+    }
+    if (code != OkStatus) {
+        if (onFailed) onFailed(code == MissingStatus
+                                   ? QStringLiteral("%1 is not a folder you can open on %2.").arg(m_path, m_host)
+                                   : statusMessage(code, m_host, m_path, err));
+        return;
+    }
+    bool truncated = false;
+    const QVector<DirEntry> entries = parseListing(out, kMaxDirEntries, &truncated);
+    if (onListed) onListed(m_path, entries, truncated);
 }
 
 // ----- PathProbe ----------------------------------------------------------------------------------

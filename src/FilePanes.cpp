@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "FilePanes.h"
+#include "Hints.h"
 #include "RemoteFiles.h"
 #include "Theme.h"
+#include <QBuffer>
+#include <QStandardItemModel>
 #include <QTextBlock>
 #include <QTextCursor>
 
@@ -200,6 +203,14 @@ FileExplorer::FileExplorer(const QString &root, QWidget *parent) : QWidget(paren
     m_filter->setClearButtonEnabled(true);
     layout->addWidget(m_filter);
 
+    // Only a remote folder has anything to say here: that it is being read, or why it could not
+    // be (#S5SH). The same line the preview pane uses, so the two panes read alike.
+    m_notice = new QLabel;
+    m_notice->setObjectName(QStringLiteral("filePreviewNotice"));
+    m_notice->setWordWrap(true);
+    m_notice->hide();
+    layout->addWidget(m_notice);
+
     m_model = new QFileSystemModel(this);
     m_model->setReadOnly(true);
     m_model->setNameFilterDisables(false);
@@ -230,7 +241,7 @@ FileExplorer::FileExplorer(const QString &root, QWidget *parent) : QWidget(paren
     connect(m_filter, &QLineEdit::textChanged, this, [this](const QString &text) { setFilter(text); });
     connect(m_view, &QTreeView::doubleClicked, this, [this](const QModelIndex &index) {
         if (m_singleClick) return;   // the single click already opened it
-        if (index.isValid()) activate(m_model->filePath(index));
+        if (index.isValid()) activate(pathAt(index));
     });
     // Dolphin-style single click (issue #0C7V). clicked() only fires when press and release land
     // on the same row without a drag, so dragging still selects; the modifiers are the ones from
@@ -238,7 +249,7 @@ FileExplorer::FileExplorer(const QString &root, QWidget *parent) : QWidget(paren
     connect(m_view, &QTreeView::clicked, this, [this](const QModelIndex &index) {
         if (!m_singleClick || !index.isValid()) return;
         if (m_clickModifiers & (Qt::ControlModifier | Qt::ShiftModifier)) return;
-        activate(m_model->filePath(index));
+        activate(pathAt(index));
     });
     connect(m_view, &QTreeView::customContextMenuRequested, this, [this](const QPoint &at) { showMenu(at); });
     // Keep a selection once the folder finishes loading, so arrows and Enter work at once.
@@ -262,8 +273,19 @@ bool FileExplorer::singleClickDefault() {
 }
 
 void FileExplorer::setRoot(const QString &path) {
+    if (relay::remote::isFileUrl(path)) { setRemoteRoot(path); return; }
     const QFileInfo info(path);
     if (!info.isDir()) return;
+    if (isRemote()) {
+        // Back from a host to this machine: the file model takes the view over again.
+        m_remoteHost.clear();
+        m_remoteDir.clear();
+        if (m_remoteList) m_remoteList->cancel();
+        if (m_remoteModel) m_remoteModel->removeRows(0, m_remoteModel->rowCount());
+        m_view->setModel(m_model);
+        m_view->setSortingEnabled(true);
+        m_notice->hide();
+    }
     const QString canonical = info.canonicalFilePath().isEmpty() ? info.absoluteFilePath() : info.canonicalFilePath();
     const bool changed = canonical != m_root;
     m_root = canonical;
@@ -280,6 +302,12 @@ void FileExplorer::setRoot(const QString &path) {
 }
 
 void FileExplorer::goUp() {
+    if (isRemote()) {
+        const QString parent = relay::remote::parentPath(m_remoteDir);
+        if (parent.isEmpty() || parent == m_remoteDir) return;
+        setRemoteRoot(relay::remote::folderUrl(m_remoteHost, parent));
+        return;
+    }
     QDir dir(m_root);
     if (!dir.cdUp()) return;
     const QString previous = m_root;
@@ -295,6 +323,9 @@ void FileExplorer::setShowHidden(bool show) {
     QDir::Filters filters = QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot | QDir::System;
     if (show) filters |= QDir::Hidden;
     m_model->setFilter(filters);
+    // The host sends every entry once; which of them are shown is decided here, so toggling
+    // hidden files costs no second listing.
+    if (isRemote()) hideUnmatchedFolders();
 }
 
 void FileExplorer::setFilter(const QString &text) {
@@ -305,14 +336,15 @@ void FileExplorer::setFilter(const QString &text) {
     m_model->setNameFilters(needle.isEmpty() ? QStringList() : QStringList{QLatin1Char('*') + needle + QLatin1Char('*')});
     hideUnmatchedFolders();
     const QStringList visible = visiblePaths();
-    if (!visible.isEmpty()) m_view->setCurrentIndex(m_model->index(visible.first()));
+    if (!visible.isEmpty()) m_view->setCurrentIndex(indexOf(visible.first()));
 }
 
 QStringList FileExplorer::visiblePaths() const {
     QStringList paths;
     const QModelIndex rootIndex = m_view->rootIndex();
-    for (int row = 0; row < m_model->rowCount(rootIndex); ++row)
-        if (!m_view->isRowHidden(row, rootIndex)) paths << m_model->filePath(m_model->index(row, 0, rootIndex));
+    QAbstractItemModel *model = activeModel();
+    for (int row = 0; row < model->rowCount(rootIndex); ++row)
+        if (!m_view->isRowHidden(row, rootIndex)) paths << pathAt(model->index(row, 0, rootIndex));
     return paths;
 }
 
@@ -321,22 +353,35 @@ QStringList FileExplorer::visiblePaths() const {
 void FileExplorer::hideUnmatchedFolders() {
     const QString needle = m_filter->text().trimmed();
     const QModelIndex rootIndex = m_view->rootIndex();
-    for (int row = 0; row < m_model->rowCount(rootIndex); ++row) {
-        const QModelIndex index = m_model->index(row, 0, rootIndex);
-        const bool hide = !needle.isEmpty() && m_model->isDir(index)
-                          && !m_model->fileName(index).contains(needle, Qt::CaseInsensitive);
+    QAbstractItemModel *model = activeModel();
+    for (int row = 0; row < model->rowCount(rootIndex); ++row) {
+        const QModelIndex index = model->index(row, 0, rootIndex);
+        const QString name = nameAt(index);
+        // Remote rows are filtered here and nowhere else: the listing carries every entry, dot
+        // files included, and the model does no filtering of its own.
+        bool hide = !needle.isEmpty() && (isRemote() || isDirAt(index)) && !name.contains(needle, Qt::CaseInsensitive);
+        if (isRemote() && !m_showHidden && name.startsWith(QLatin1Char('.'))) hide = true;
         m_view->setRowHidden(row, rootIndex, hide);
     }
 }
 
 bool FileExplorer::activateRow(int row) {
-    const QModelIndex rootIndex = m_view->rootIndex();
-    if (row < 0 || row >= m_model->rowCount(rootIndex)) return false;
-    activate(m_model->filePath(m_model->index(row, 0, rootIndex)));
+    // The rows on screen, not the rows in the model: with a filter on, or with the host's dot
+    // files hidden, the two are not the same list (#S5SH).
+    const QStringList visible = visiblePaths();
+    if (row < 0 || row >= visible.size()) return false;
+    activate(visible.at(row));
     return true;
 }
 
 void FileExplorer::activate(const QString &path) {
+    // A remote row carries its answer in its own URL: a folder ends in `/` (#S5SH). Nothing here
+    // asks the host a second time, and nothing asks this machine about the host's path.
+    if (const relay::remote::FileRef ref = relay::remote::parseFileUrl(path); ref.ok) {
+        if (ref.directory) setRemoteRoot(path);
+        else if (onOpenFile) onOpenFile(path);
+        return;
+    }
     if (QFileInfo(path).isDir()) setRoot(path);
     else if (onOpenFile) onOpenFile(path);
 }
@@ -357,12 +402,30 @@ void FileExplorer::setHeaderRightInset(int pixels) {
 }
 
 void FileExplorer::updateHeader() {
-    m_path->setText(m_path->fontMetrics().elidedText(tildePath(m_root), Qt::ElideLeft, std::max(40, m_path->contentsRect().width() - 8)));
-    m_path->setToolTip(m_root);
-    m_up->setEnabled(!QDir(m_root).isRoot());
+    const QString shown = isRemote() ? title() : tildePath(m_root);
+    m_path->setText(m_path->fontMetrics().elidedText(shown, Qt::ElideLeft, std::max(40, m_path->contentsRect().width() - 8)));
+    m_path->setToolTip(isRemote() ? QStringLiteral("%1 · on %2").arg(m_remoteDir, m_remoteHost) : m_root);
+    m_up->setEnabled(isRemote() ? m_remoteDir != QStringLiteral("/") : !QDir(m_root).isRoot());
+}
+
+QString FileExplorer::title() const {
+    return isRemote() ? relay::remote::displayName(m_remoteHost, m_remoteDir) : m_root;
 }
 
 QList<FileMenuItem> FileExplorer::menuFor(const QString &path) const {
+    if (isRemote()) {
+        // Read only, on purpose: the entries that would act on this machine (open externally,
+        // show the folder, navigate the terminal, make it the agent's workspace) mean nothing
+        // for someone else's disk, and creating or deleting there is not this pane's job yet.
+        QList<FileMenuItem> items;
+        const relay::remote::FileRef ref = relay::remote::parseFileUrl(path);
+        if (ref.ok)
+            items << FileMenuItem{QStringLiteral("openInternal"),
+                                  ref.directory ? QStringLiteral("Open folder here") : QStringLiteral("Open in a Relay pane"), true};
+        items << FileMenuItem{QStringLiteral("copyPath"), QStringLiteral("Copy path on %1").arg(m_remoteHost),
+                              ref.ok || !m_remoteDir.isEmpty()};
+        return items;
+    }
     FileMenuHost host;
     host.canNavigateTerminal = bool(onNavigateHere);
     host.canPreview = bool(onOpenInPreview);
@@ -378,7 +441,7 @@ QList<FileMenuItem> FileExplorer::menuFor(const QString &path) const {
 
 void FileExplorer::showMenu(const QPoint &viewportPos) {
     const QModelIndex index = m_view->indexAt(viewportPos);
-    const QString path = index.isValid() ? m_model->filePath(index) : QString();
+    const QString path = index.isValid() ? pathAt(index) : QString();
     if (index.isValid() && !m_view->selectionModel()->isSelected(index))
         m_view->setCurrentIndex(index);
     auto *menu = new QMenu(this);
@@ -395,6 +458,12 @@ void FileExplorer::showMenu(const QPoint &viewportPos) {
 
 void FileExplorer::runMenuAction(const QString &id, const QString &path) {
     const QString target = path.isEmpty() ? m_root : path;
+    if (isRemote()) {
+        const relay::remote::FileRef ref = relay::remote::parseFileUrl(target);
+        if (id == QLatin1String("openInternal")) activate(target);
+        else if (id == QLatin1String("copyPath")) QApplication::clipboard()->setText(ref.ok ? ref.path : m_remoteDir);
+        return;
+    }
     if (id == QLatin1String("openInternal")) {
         // Relay's own pane: a folder becomes this explorer's root, a file opens in a preview.
         if (QFileInfo(target).isDir()) setRoot(target);
@@ -490,8 +559,125 @@ void FileExplorer::deleteEntry(const QString &path) {
 }
 
 void FileExplorer::select(const QString &path) {
-    const QModelIndex index = m_model->index(path);
+    const QModelIndex index = indexOf(path);
     if (index.isValid()) m_view->setCurrentIndex(index);
+}
+
+// ----- one folder on another machine (#S5SH) ----------------------------------------------------
+
+QAbstractItemModel *FileExplorer::activeModel() const {
+    return isRemote() && m_remoteModel ? static_cast<QAbstractItemModel *>(m_remoteModel)
+                                       : static_cast<QAbstractItemModel *>(m_model);
+}
+
+QString FileExplorer::pathAt(const QModelIndex &index) const {
+    if (!index.isValid()) return {};
+    if (!isRemote()) return m_model->filePath(index);
+    const QModelIndex first = index.sibling(index.row(), 0);
+    const QString name = first.data(Qt::DisplayRole).toString();
+    const QString path = relay::remote::childPath(m_remoteDir, name);
+    return first.data(Qt::UserRole).toBool() ? relay::remote::folderUrl(m_remoteHost, path)
+                                             : relay::remote::fileUrl(m_remoteHost, path);
+}
+
+bool FileExplorer::isDirAt(const QModelIndex &index) const {
+    if (!index.isValid()) return false;
+    if (!isRemote()) return m_model->isDir(index);
+    return index.sibling(index.row(), 0).data(Qt::UserRole).toBool();
+}
+
+QString FileExplorer::nameAt(const QModelIndex &index) const {
+    if (!index.isValid()) return {};
+    if (!isRemote()) return m_model->fileName(index);
+    return index.sibling(index.row(), 0).data(Qt::DisplayRole).toString();
+}
+
+QModelIndex FileExplorer::indexOf(const QString &path) const {
+    if (!isRemote()) return m_model->index(path);
+    const QModelIndex rootIndex = m_view->rootIndex();
+    for (int row = 0; row < m_remoteModel->rowCount(rootIndex); ++row) {
+        const QModelIndex index = m_remoteModel->index(row, 0, rootIndex);
+        if (pathAt(index) == path) return index;
+    }
+    return {};
+}
+
+void FileExplorer::setRemoteRoot(const QString &url) {
+    const relay::remote::FileRef ref = relay::remote::parseFileUrl(url);
+    if (!ref.ok) return;
+    const QString folder = ref.directory ? ref.path : relay::remote::parentPath(ref.path);
+    const QString canonical = relay::remote::folderUrl(ref.host, folder);
+    const bool changed = canonical != m_root;
+    m_remoteHost = ref.host;
+    m_remoteDir = folder;
+    m_root = canonical;
+    if (!m_remoteModel) {
+        m_remoteModel = new QStandardItemModel(this);
+        m_remoteModel->setHorizontalHeaderLabels({QStringLiteral("Name"), QStringLiteral("Size"),
+                                                  QStringLiteral("Type"), QStringLiteral("Date Modified")});
+    }
+    if (m_view->model() != m_remoteModel) {
+        m_view->setModel(m_remoteModel);
+        // The rows arrive sorted (folders first, then names): letting the view re-sort them by
+        // the text of a column would mix folders in among the files.
+        m_view->setSortingEnabled(false);
+        m_view->header()->setStretchLastSection(false);
+        m_view->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+        m_view->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+        m_view->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+        m_view->setColumnHidden(2, true);
+    }
+    m_remoteModel->removeRows(0, m_remoteModel->rowCount());
+    m_view->setCurrentIndex(QModelIndex());
+    if (!m_filter->text().isEmpty()) { const QSignalBlocker block(m_filter); m_filter->clear(); }
+    updateHeader();
+    m_notice->setText(QStringLiteral("Reading %1 from %2…").arg(folder, ref.host));
+    m_notice->show();
+    if (!m_remoteList) {
+        m_remoteList = new relay::remote::RemoteDir(this);
+        m_remoteList->onListed = [this](const QString &path, const QVector<relay::remote::DirEntry> &entries, bool truncated) {
+            if (path != m_remoteDir) return;   // an older listing, overtaken by a newer one
+            fillRemoteRows(entries, truncated);
+        };
+        m_remoteList->onFailed = [this](const QString &message) { remoteFailed(message); };
+    }
+    m_remoteList->setHost(ref.host, relay::remote::loginControlPath(ref.host));
+    m_remoteList->list(folder);
+    if (changed && onDirectoryChanged) onDirectoryChanged(m_root);
+}
+
+void FileExplorer::fillRemoteRows(const QVector<relay::remote::DirEntry> &entries, bool truncated) {
+    m_remoteModel->removeRows(0, m_remoteModel->rowCount());
+    for (const relay::remote::DirEntry &entry : entries) {
+        auto *name = new QStandardItem(entry.name);
+        name->setData(entry.directory, Qt::UserRole);
+        name->setEditable(false);
+        auto *size = new QStandardItem(entry.directory || entry.size < 0 ? QString() : humanSize(entry.size));
+        size->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        size->setEditable(false);
+        auto *type = new QStandardItem(entry.directory ? QStringLiteral("Folder") : QStringLiteral("File"));
+        type->setEditable(false);
+        auto *when = new QStandardItem(entry.mtime > 0
+                                           ? QLocale().toString(QDateTime::fromSecsSinceEpoch(entry.mtime), QLocale::ShortFormat)
+                                           : QString());
+        when->setEditable(false);
+        m_remoteModel->appendRow({name, size, type, when});
+    }
+    hideUnmatchedFolders();
+    const QStringList visible = visiblePaths();
+    if (!visible.isEmpty()) m_view->setCurrentIndex(indexOf(visible.first()));
+    if (truncated)
+        m_notice->setText(QStringLiteral("The first %1 entries of %2 on %3.")
+                              .arg(entries.size()).arg(m_remoteDir, m_remoteHost));
+    else if (entries.isEmpty())
+        m_notice->setText(QStringLiteral("%1 is empty on %2.").arg(m_remoteDir, m_remoteHost));
+    m_notice->setVisible(truncated || entries.isEmpty());
+}
+
+void FileExplorer::remoteFailed(const QString &message) {
+    m_remoteModel->removeRows(0, m_remoteModel->rowCount());
+    m_notice->setText(message);
+    m_notice->show();
 }
 
 bool FileExplorer::eventFilter(QObject *object, QEvent *event) {
@@ -515,7 +701,7 @@ bool FileExplorer::eventFilter(QObject *object, QEvent *event) {
     if (object == m_view) {
         if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) && mods == Qt::NoModifier) {
             const QModelIndex index = m_view->currentIndex();
-            if (index.isValid()) activate(m_model->filePath(index));
+            if (index.isValid()) activate(pathAt(index));
             return true;
         }
         if ((key->key() == Qt::Key_Backspace && mods == Qt::NoModifier) || (key->key() == Qt::Key_Up && mods == Qt::AltModifier)) {
@@ -548,7 +734,7 @@ bool FileExplorer::eventFilter(QObject *object, QEvent *event) {
         }
         if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
             const QModelIndex index = m_view->currentIndex();
-            if (index.isValid()) activate(m_model->filePath(index));
+            if (index.isValid()) activate(pathAt(index));
             return true;
         }
         if (key->key() == Qt::Key_Escape && !m_filter->text().isEmpty()) {
@@ -570,6 +756,10 @@ struct FilePreview::Private {
 #ifdef RELAY_HAVE_QTPDF
     QPdfDocument *pdf = nullptr;
     QPdfView *pdfView = nullptr;
+    // A PDF from a host has no file here to be read from; QPdfDocument reads a QIODevice for as
+    // long as it is open, so the bytes and the buffer over them live as long as the pane (#S5SH).
+    QByteArray pdfBytes;
+    QBuffer *pdfBuffer = nullptr;
 #endif
     QPixmap pixmap;
 };
@@ -694,7 +884,12 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     });
     // Editing a remote file follows the editable pane this project already has (PlanEditor): the
     // Save button, Ctrl+S, and a ● in front of the title while there are unsaved edits.
-    connect(m_save, &QToolButton::clicked, this, [this] { save(); });
+    connect(m_save, &QToolButton::clicked, this, [this] {
+        // The slow path teaches the fast one (WARP.md, "Shortcut hints"). The registry keeps the
+        // count and the cooldown, so it is shown a few times and then never again.
+        m_teachSaveShortcut = relay::ShortcutHints::instance().shouldShow(QStringLiteral("files.remoteSave"));
+        save();
+    });
     auto *saveShortcut = new QShortcut(QKeySequence::Save, this);
     saveShortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(saveShortcut, &QShortcut::activated, this, [this] { save(); });
@@ -705,6 +900,10 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     connect(m_mode, &QToolButton::clicked, this, [this] {
         if (m_kind == Kind::Markdown) {
             m_markdownSource = !m_markdownSource;
+            // Coming back from the source of an editable document, the render is rebuilt from
+            // what is in the editor now — otherwise it would still show the version that was
+            // fetched (#S5SH; a local .md is read only, so nothing changes there).
+            if (!m_markdownSource && m_editable) m_markdownView->setMarkdown(m_textView->toPlainText());
             m_stack->setCurrentWidget(m_markdownSource ? static_cast<QWidget *>(m_textView) : m_markdownView);
         } else if (m_kind == Kind::Image) {
             m_imageActualSize = !m_imageActualSize;
@@ -845,17 +1044,24 @@ bool FilePreview::openRemote(const QString &url) {
 
     if (!m_remote) {
         m_remote = new relay::remote::RemoteFile(this);
-        m_remote->onFetched = [this](const QByteArray &content, const relay::remote::FileStat &) { showRemoteText(content); };
+        m_remote->onFetched = [this](const QByteArray &content, const relay::remote::FileStat &) { showRemoteContent(content); };
         m_remote->onFailed = [this](const QString &message, relay::remote::Conflict conflict, const relay::remote::FileStat &) {
             remoteFailed(message, int(conflict));
         };
         m_remote->onSaved = [this](const relay::remote::FileStat &) {
             m_textView->document()->setModified(false);
-            setNotice(QStringLiteral("Saved to %1 · %2").arg(m_remoteHost, QLocale().toString(QTime::currentTime(), QLocale::ShortFormat)));
+            QString said = QStringLiteral("Saved to %1 · %2").arg(m_remoteHost, QLocale().toString(QTime::currentTime(), QLocale::ShortFormat));
+            if (m_teachSaveShortcut) {
+                m_teachSaveShortcut = false;
+                said += QStringLiteral(" · ") + relay::ShortcutHints::nextTime(
+                            QKeySequence(QKeySequence::Save).toString(QKeySequence::NativeText),
+                            QStringLiteral("save this file on %1").arg(m_remoteHost));
+            }
+            setNotice(said);
             updateTitleText();
             if (onTitleChanged) onTitleChanged(title());
-            const QString said = m_notice;
-            QTimer::singleShot(4000, this, [this, said] { if (m_notice == said) setNotice(QString()); });
+            const QString shown = m_notice;
+            QTimer::singleShot(6000, this, [this, shown] { if (m_notice == shown) setNotice(QString()); });
         };
     }
     m_remote->setHost(ref.host, relay::remote::loginControlPath(ref.host));
@@ -863,8 +1069,50 @@ bool FilePreview::openRemote(const QString &url) {
     return true;
 }
 
-void FilePreview::showRemoteText(const QByteArray &content) {
-    m_textView->setPlainText(QString::fromUtf8(content));
+// The host's bytes, shown the way this pane would show the same file from this disk. The choice
+// is made from the name *and* the bytes (QMimeDatabase::mimeTypeForFileNameAndData), which is more
+// than a local open can do from the name and a peek at the file, and it costs nothing here because
+// the bytes are already in hand.
+void FilePreview::showRemoteContent(const QByteArray &content) {
+    const QMimeDatabase mimes;
+    const QString name = QFileInfo(m_remotePath).fileName();
+    const QMimeType mime = mimes.mimeTypeForFileNameAndData(name, content);
+    const QString suffix = QFileInfo(m_remotePath).suffix().toLower();
+    const QByteArray mimeName = mime.name().toLatin1();
+    setNotice(QString());
+    if (suffix == QStringLiteral("md") || suffix == QStringLiteral("markdown") || mime.inherits(QStringLiteral("text/markdown"))) {
+        showRemoteText(content, true);
+    } else if (mime.inherits(QStringLiteral("application/pdf"))) {
+        if (!showRemotePdf(content)) showRemoteInfo(mime.name(), m_notice);
+    } else if (QImageReader::supportedMimeTypes().contains(mimeName)) {
+        if (!showRemoteImage(content)) showRemoteInfo(mime.name(), m_notice);
+    } else if (mime.inherits(QStringLiteral("text/plain")) || mime.name() == QStringLiteral("application/x-zerosize")) {
+        showRemoteText(content, false);
+    } else {
+        showRemoteInfo(mime.name());
+    }
+    if (m_pendingLine > 0 && (m_kind == Kind::Text || m_kind == Kind::Markdown)) {
+        const int line = m_pendingLine;
+        m_pendingLine = 0;
+        goToLine(line);
+    }
+    m_pendingLine = 0;
+    updateModeButton();
+    updateTitleText();
+    if (onTitleChanged) onTitleChanged(title());
+}
+
+void FilePreview::showRemoteText(const QByteArray &content, bool markdown) {
+    // Binary is the text viewer's problem alone: an image and a PDF are binary and are meant to
+    // be. A file that says it is text and is not gets the same answer a local one does.
+    if (relay::remote::looksBinary(content)) {
+        const QMimeDatabase mimes;
+        showRemoteInfo(mimes.mimeTypeForFileNameAndData(QFileInfo(m_remotePath).fileName(), content).name(),
+                       QStringLiteral("This file contains binary data."));
+        return;
+    }
+    const QString text = QString::fromUtf8(content);
+    m_textView->setPlainText(text);
     m_textView->document()->setModified(false);
 #ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
     delete d->highlighter;
@@ -878,19 +1126,77 @@ void FilePreview::showRemoteText(const QByteArray &content) {
         d->highlighter->setDefinition(definition);
     }
 #endif
-    // Always the text viewer, never the Markdown render: this pane is the editor for the file on
-    // the host, and a rendered document has nowhere to type.
-    m_kind = Kind::Text;
-    m_stack->setCurrentWidget(m_textView);
+    // Markdown opens rendered, as a local .md does, and "Source (MD)" is where it is edited —
+    // the same one button, and the render is rebuilt from the buffer each time it comes back.
+    // Relative links and images cannot be resolved against this disk, so the base URL is left
+    // empty and followLink() turns a relative link into the host's own file (#S5SH).
+    if (markdown) {
+        m_markdownView->setSearchPaths({});
+        m_markdownView->document()->setBaseUrl(QUrl());
+        m_markdownView->setMarkdown(text);
+        m_kind = Kind::Markdown;
+        m_markdownSource = false;
+        m_stack->setCurrentWidget(m_markdownView);
+    } else {
+        m_kind = Kind::Text;
+        m_stack->setCurrentWidget(m_textView);
+    }
     setEditable(true);
     setNotice(QString());
-    if (m_pendingLine > 0) {
-        const int line = m_pendingLine;
-        m_pendingLine = 0;
-        goToLine(line);
+}
+
+bool FilePreview::showRemoteImage(const QByteArray &content) {
+    QImage image;
+    if (!image.loadFromData(content)) {
+        setNotice(QStringLiteral("The image could not be decoded."));
+        return false;
     }
-    updateTitleText();
-    if (onTitleChanged) onTitleChanged(title());
+    d->pixmap = QPixmap::fromImage(image);
+    m_kind = Kind::Image;
+    setEditable(false);
+    m_stack->setCurrentWidget(m_imageArea);
+    updateImage();
+    return true;
+}
+
+bool FilePreview::showRemotePdf(const QByteArray &content) {
+#ifdef RELAY_HAVE_QTPDF
+    // QPdfDocument reads from a QIODevice for as long as the document is open, so the bytes and
+    // the buffer over them are kept in the pane, not on the stack.
+    d->pdf->close();
+    d->pdfBytes = content;
+    delete d->pdfBuffer;
+    d->pdfBuffer = new QBuffer(&d->pdfBytes);
+    d->pdfBuffer->open(QIODevice::ReadOnly);
+    d->pdf->load(d->pdfBuffer);
+    if (d->pdf->status() == QPdfDocument::Status::Ready || d->pdf->pageCount() > 0) {
+        m_kind = Kind::Pdf;
+        setEditable(false);
+        m_stack->setCurrentWidget(m_pdfPage);
+        return true;
+    }
+    setNotice(QStringLiteral("The PDF could not be opened."));
+    return false;
+#else
+    Q_UNUSED(content);
+    setNotice(QStringLiteral("PDF preview is not available in this build."));
+    return false;
+#endif
+}
+
+void FilePreview::showRemoteInfo(const QString &mime, const QString &message) {
+    const relay::remote::FileStat stat = m_remote ? m_remote->fetched() : relay::remote::FileStat();
+    QString text = QFileInfo(m_remotePath).fileName() + QStringLiteral("\n\n");
+    text += QStringLiteral("Type: %1\nSize: %2\nModified: %3\nFolder: %4\nHost: %5")
+                .arg(mime, stat.ok ? humanSize(stat.size) : QStringLiteral("unknown"),
+                     stat.mtime > 0 ? QLocale().toString(QDateTime::fromSecsSinceEpoch(stat.mtime), QLocale::ShortFormat)
+                                    : QStringLiteral("unknown"),
+                     relay::remote::parentPath(m_remotePath), m_remoteHost);
+    m_info->setText(text);
+    if (!message.isEmpty()) setNotice(message);
+    m_kind = Kind::Info;
+    setEditable(false);
+    m_stack->setCurrentWidget(m_infoPage);
 }
 
 void FilePreview::remoteFailed(const QString &message, int conflict) {
@@ -1106,6 +1412,16 @@ void FilePreview::updateModeButton() {
 void FilePreview::followLink(const QUrl &url) {
     if (url.isEmpty()) return;
     if (url.path().isEmpty() && url.hasFragment()) { m_markdownView->scrollToAnchor(url.fragment()); return; }
+    // A relative link in a document that came from a host points at that host's disk, not at this
+    // one (#S5SH): it opens as `ssh://host/path`, in a pane of its own, like any other link here.
+    if (isRemote() && url.isRelative() && !url.path().isEmpty()) {
+        const QString path = url.path().startsWith(QLatin1Char('/'))
+                                 ? url.path()
+                                 : QDir::cleanPath(relay::remote::parentPath(m_remotePath) + QLatin1Char('/') + url.path());
+        if (onOpenLink) onOpenLink(relay::remote::fileUrl(m_remoteHost, path));
+        else setNotice(QStringLiteral("%1 is on %2.").arg(path, m_remoteHost));
+        return;
+    }
     const QUrl resolved = m_markdownView->document()->baseUrl().resolved(url);
     if (resolved.isLocalFile()) {
         const QString target = resolved.toLocalFile();
@@ -1122,6 +1438,12 @@ void FilePreview::followLink(const QUrl &url) {
 
 QList<FileMenuItem> FilePreview::menu() const {
     if (m_path.isEmpty()) return {};
+    if (isRemote()) {
+        // The same two entries the remote explorer offers: reopen it here, or copy the path as
+        // the host spells it. Nothing on this machine can open a file that is not on it (#S5SH).
+        return {FileMenuItem{QStringLiteral("openInternal"), QStringLiteral("Reload from %1").arg(m_remoteHost), true},
+                FileMenuItem{QStringLiteral("copyPath"), QStringLiteral("Copy path on %1").arg(m_remoteHost), true}};
+    }
     FileMenuHost host;
     host.canPreview = true;   // "Open internal" reopens the file here, which always works
     host.writable = false;
@@ -1211,7 +1533,7 @@ void FilePreview::resizeEvent(QResizeEvent *event) {
 void FilePreview::goToLine(int line) {
     // A remote file is still on its way when the click that carried the line number arrives
     // (#S5SH): the line waits for the bytes.
-    if (line > 0 && isRemote() && m_kind != Kind::Text) { m_pendingLine = line; return; }
+    if (line > 0 && isRemote() && m_kind == Kind::None) { m_pendingLine = line; return; }
     if (line <= 0 || (m_kind != Kind::Text && m_kind != Kind::Markdown)) return;
     // A line number counts lines in the source, so a Markdown preview has to leave the rendered
     // view to point at one. It used to do that without recording the switch, which left the button

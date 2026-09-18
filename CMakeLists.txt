@@ -73,7 +73,7 @@ target_compile_options(relay-localmodels PRIVATE -Wall -Wextra -Wpedantic)
 
 add_library(relay-filepanes STATIC src/FilePanes.cpp src/FilePanes.h)
 target_include_directories(relay-filepanes PUBLIC src)
-target_link_libraries(relay-filepanes PUBLIC relay-remotefiles ${RELAY_QT}::Widgets)
+target_link_libraries(relay-filepanes PUBLIC relay-remotefiles relay-hints ${RELAY_QT}::Widgets)
 target_compile_options(relay-filepanes PRIVATE -Wall -Wextra -Wpedantic)
 find_package(${RELAY_KF}SyntaxHighlighting QUIET)
 if(TARGET ${RELAY_KF}::SyntaxHighlighting)
@@ -246,6 +246,14 @@ target_compile_options(relay-remotesession PRIVATE -Wall -Wextra -Wpedantic)
 # quoting and the remote scripts that fetch and save one file over the user's own ssh connection,
 # and the batched `test -e` cache that says which paths in the output are the host's. The quoting,
 # the scripts and the "it changed under us" decision are plain rules; only QProcess touches ssh.
+# The shortcut-hint registry (WARP.md, "Shortcut hints"): how often a hint has been shown, when it
+# may be shown again, and the "Next time: …" wording. Plain QtCore over QSettings — a library
+# rather than a file in the app, so a pane widget can teach its own shortcut too (#S5SH).
+add_library(relay-hints STATIC src/Hints.cpp src/Hints.h)
+target_include_directories(relay-hints PUBLIC src)
+target_link_libraries(relay-hints PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-hints PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-remotefiles STATIC src/RemoteFiles.cpp src/RemoteFiles.h)
 target_include_directories(relay-remotefiles PUBLIC src)
 target_link_libraries(relay-remotefiles PUBLIC ${RELAY_QT}::Core)
@@ -361,12 +369,12 @@ if(RELAY_BUILD_APP)
     add_executable(relay src/main.cpp
         src/AppPaths.h src/Keymap.h src/Isolation.h src/Pane.h src/PaneChrome.h
         src/WindowChrome.h src/RelayWindow.h src/WindowManagerImpl.h
-        src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/Hints.cpp src/Hints.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
+        src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels)
-    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -533,9 +541,8 @@ if(BUILD_TESTING)
     target_link_libraries(relay-images-tests PRIVATE relay-images ${RELAY_QT}::Test)
     add_test(NAME images COMMAND relay-images-tests)
     set_tests_properties(images PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-    add_executable(relay-hints-tests tests/hints_test.cpp src/Hints.cpp)
-    target_include_directories(relay-hints-tests PRIVATE src)
-    target_link_libraries(relay-hints-tests PRIVATE ${RELAY_QT}::Test)
+    add_executable(relay-hints-tests tests/hints_test.cpp)
+    target_link_libraries(relay-hints-tests PRIVATE relay-hints ${RELAY_QT}::Test)
     add_test(NAME hints COMMAND relay-hints-tests)
     set_tests_properties(hints PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-board-tests tests/boardmodel_test.cpp)

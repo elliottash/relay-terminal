@@ -7,9 +7,14 @@
 #include <QStringList>
 #include <QTimer>
 #include <QUrl>
+#include <QModelIndex>
+#include <QVector>
 #include <QWidget>
 #include <functional>
 
+#include "RemoteFiles.h"   // files and folders on the host a pane is logged into (#S5SH)
+
+class QAbstractItemModel;
 class QFileSystemModel;
 class QHBoxLayout;
 class QLabel;
@@ -18,15 +23,12 @@ class QPlainTextEdit;
 class QScrollArea;
 class QStackedWidget;
 class QShortcut;
+class QStandardItemModel;
 class QTextBrowser;
 class QToolButton;
 class QTreeView;
 
 namespace relay {
-
-namespace remote {
-class RemoteFile;
-}
 
 // ----- right-click menus (issues #D60R, V9V1) ---------------------------------------------------
 //
@@ -68,12 +70,24 @@ QList<FileMenuItem> previewMenu(const FileMenuHost &host);
 // A directory browser rooted at one folder. Enter, or a click (double by default, single when
 // "Open items with a single click" is on), opens: a folder navigates into it, a file calls
 // onOpenFile. Backspace or Alt+Up goes to the parent folder. Right-click offers explorerMenu().
+//
+// The folder may be on the host a terminal pane is logged into (card #S5SH): `setRoot()` takes an
+// `ssh://<host>/<path>/` the same way `FilePreview::open()` takes a file's URL, and then the rows
+// come from one `stat` of that folder over the pane's own ssh connection instead of from
+// QFileSystemModel. Everything the pane hands out — `root()`, `visiblePaths()`, `onOpenFile` —
+// stays in that URL form, so the window opens what it is given without knowing which machine it
+// is on. A remote folder is read only: Relay does not rename, delete or create on someone else's
+// machine from here.
 class FileExplorer : public QWidget {
 public:
     explicit FileExplorer(const QString &root, QWidget *parent = nullptr);
 
     void setRoot(const QString &path);
     QString root() const { return m_root; }
+    bool isRemote() const { return !m_remoteHost.isEmpty(); }
+    QString remoteHost() const { return m_remoteHost; }
+    // "filly:/etc" for a remote folder, the folder's own path for a local one: what a tab calls it.
+    QString title() const;
     void goUp();
     void setShowHidden(bool show);
     // Type-to-filter: a case-insensitive substring over names in the current folder.
@@ -114,6 +128,17 @@ private:
     void activate(const QString &path);
     void updateHeader();
     void hideUnmatchedFolders();
+    // ----- one folder on another machine (#S5SH) -------------------------------------------
+    void setRemoteRoot(const QString &url);
+    void fillRemoteRows(const QVector<relay::remote::DirEntry> &entries, bool truncated);
+    void remoteFailed(const QString &message);
+    // The model the view is showing, and what a row in it is: a local row answers through
+    // QFileSystemModel, a remote row through the listing the host sent.
+    QAbstractItemModel *activeModel() const;
+    QString pathAt(const QModelIndex &index) const;   // an absolute path, or an `ssh://` URL
+    bool isDirAt(const QModelIndex &index) const;
+    QString nameAt(const QModelIndex &index) const;
+    QModelIndex indexOf(const QString &path) const;
     void showMenu(const QPoint &viewportPos);
     void runMenuAction(const QString &id, const QString &path);
     void createEntry(bool folder);
@@ -121,14 +146,17 @@ private:
     void deleteEntry(const QString &path);
     void select(const QString &path);
 
-    QString m_root;
+    QString m_root;          // a local path, or `ssh://host/path/` while remote
+    QString m_remoteHost, m_remoteDir;
     bool m_showHidden = false;
     bool m_singleClick = true;
     Qt::KeyboardModifiers m_clickModifiers = Qt::NoModifier;
     QFileSystemModel *m_model = nullptr;
+    QStandardItemModel *m_remoteModel = nullptr;
+    relay::remote::RemoteDir *m_remoteList = nullptr;
     QTreeView *m_view = nullptr;
     QHBoxLayout *m_header = nullptr;
-    QLabel *m_path = nullptr;
+    QLabel *m_path = nullptr, *m_notice = nullptr;
     QLineEdit *m_filter = nullptr;
     QToolButton *m_up = nullptr, *m_hidden = nullptr;
 };
@@ -193,6 +221,9 @@ public:
     // follows it itself (issue S1JP): the host opens a pane for it and this one keeps its file.
     // Without a host, the link is handed to the desktop instead.
     std::function<void(const QString &)> onOpenLink;
+    // "Next time: Ctrl+S" after the Save button is clicked (WARP.md, "Shortcut hints"). The pane
+    // has no toast of its own, so the hint goes in its notice line; the registry decides whether
+    // it may be shown at all.
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -201,7 +232,14 @@ protected:
 
 private:
     bool openRemote(const QString &url);
-    void showRemoteText(const QByteArray &content);
+    // The host's bytes, shown the way the same file would be shown from this disk: Markdown
+    // rendered (and editable as source), images, PDF where Qt PDF is built in, text in the
+    // editor, anything else as a file-info panel.
+    void showRemoteContent(const QByteArray &content);
+    void showRemoteText(const QByteArray &content, bool markdown);
+    bool showRemoteImage(const QByteArray &content);
+    bool showRemotePdf(const QByteArray &content);
+    void showRemoteInfo(const QString &mime, const QString &message = QString());
     void remoteFailed(const QString &message, int conflict);
     void setEditable(bool on);
     void watchForReconnect();
@@ -226,6 +264,7 @@ private:
     // line a click asked for, which a remote file cannot go to until its bytes arrive.
     QString m_remoteHost, m_remotePath;
     bool m_editable = false;
+    bool m_teachSaveShortcut = false;   // the Save button was clicked: teach Ctrl+S when it lands
     int m_pendingLine = 0;
     relay::remote::RemoteFile *m_remote = nullptr;
     QTimer *m_reconnect = nullptr;

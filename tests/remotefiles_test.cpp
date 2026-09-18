@@ -224,6 +224,66 @@ private slots:
         QCOMPARE(parseProbe(out, 3), (QVector<Entry>{Entry::Directory, Entry::File, Entry::Missing}));
     }
 
+    // The folder listing, likewise: a real `sh` over real entries, including a dot file, a
+    // subfolder, a name with a space and a symlink into it.
+    void theListingScriptRunsInARealShell()
+    {
+        const QString dir = QDir(m_dir.path()).filePath(QStringLiteral("listing"));
+        QVERIFY(QDir().mkpath(QDir(dir).filePath(QStringLiteral("sub"))));
+        QVERIFY(writeFile(QDir(dir).filePath(QStringLiteral("two words.txt")), "hello\n"));
+        QVERIFY(writeFile(QDir(dir).filePath(QStringLiteral(".dotfile")), "x"));
+        QVERIFY(QFile::link(QDir(dir).filePath(QStringLiteral("sub")), QDir(dir).filePath(QStringLiteral("link"))));
+
+        QByteArray out;
+        QCOMPARE(runScript(listScript(dir), {}, &out), 0);
+        const QVector<DirEntry> entries = parseListing(out);
+        QStringList names;
+        for (const DirEntry &entry : entries) names << (entry.directory ? QStringLiteral("d ") : QStringLiteral("f ")) + entry.name;
+        // Folders first (the symlink into a folder counts as one, because `stat -L` follows it),
+        // then the files by name; the dot file is there for the pane to hide or show.
+        QCOMPARE(names, (QStringList{QStringLiteral("d link"), QStringLiteral("d sub"),
+                                     QStringLiteral("f .dotfile"), QStringLiteral("f two words.txt")}));
+        for (const DirEntry &entry : entries)
+            if (entry.name == QStringLiteral("two words.txt")) QCOMPARE(entry.size, 6);
+
+        // An empty folder lists nothing rather than the literal `*` of an unmatched glob.
+        const QString empty = QDir(m_dir.path()).filePath(QStringLiteral("empty"));
+        QVERIFY(QDir().mkpath(empty));
+        QCOMPARE(runScript(listScript(empty), {}, &out), 0);
+        QVERIFY(parseListing(out).isEmpty());
+        // And a folder that is not there says so with the same status a missing file uses.
+        QCOMPARE(runScript(listScript(QDir(m_dir.path()).filePath(QStringLiteral("nope"))), {}, &out), int(MissingStatus));
+    }
+
+    void aFolderIsListedOverTheConnection()
+    {
+        installFakeSsh();
+        answerWith("directory|4096|200|sub\nregular file|12|100|readme.md\n", 0);
+        RemoteDir dir;
+        dir.setHost(QStringLiteral("filly"), m_socket);
+        QVector<DirEntry> entries;
+        QString failure, listed;
+        bool truncated = true;
+        dir.onListed = [&](const QString &path, const QVector<DirEntry> &rows, bool cut) {
+            listed = path; entries = rows; truncated = cut;
+        };
+        dir.onFailed = [&](const QString &message) { failure = message; };
+        dir.list(QStringLiteral("/srv/archive"));
+        QTRY_VERIFY_WITH_TIMEOUT(!dir.busy(), 10000);
+        QVERIFY2(failure.isEmpty(), qPrintable(failure));
+        QCOMPARE(listed, QStringLiteral("/srv/archive"));
+        QCOMPARE(entries.size(), 2);
+        QVERIFY(!truncated);
+        QVERIFY(scriptOf(fakeArgv()).contains(QStringLiteral("cd -- '/srv/archive'")));
+
+        // With no connection it says so instead of showing an empty folder.
+        failure.clear();
+        dir.setHost(QStringLiteral("filly"), QDir(m_dir.path()).filePath(QStringLiteral("gone")));
+        forgetLogin(QStringLiteral("filly"));
+        dir.list(QStringLiteral("/srv/archive"));
+        QVERIFY(failure.contains(QStringLiteral("no connection")));
+    }
+
     void sshReusesTheUsersOwnConnection()
     {
         const QStringList argv = sshCommand(QStringLiteral("filly"), QStringLiteral("/run/r/abc"), QStringLiteral("echo hi"));
@@ -260,6 +320,64 @@ private slots:
         QCOMPARE(ref.host, QStringLiteral("Filly"));   // the host keeps the case the user typed
         QCOMPARE(ref.path, QStringLiteral("/srv/two words/a#b"));
         QCOMPARE(displayName(QStringLiteral("filly"), QStringLiteral("/etc/hosts")), QStringLiteral("filly:/etc/hosts"));
+    }
+
+    // A folder's URL ends in `/`, which is how the window knows to open an explorer pane and not
+    // a preview without asking the host a second time.
+    void aFolderSaysSoInItsUrl()
+    {
+        QCOMPARE(folderUrl(QStringLiteral("filly"), QStringLiteral("/etc/nginx")), QStringLiteral("ssh://filly/etc/nginx/"));
+        QCOMPARE(folderUrl(QStringLiteral("filly"), QStringLiteral("/")), QStringLiteral("ssh://filly/"));
+        QVERIFY(parseFileUrl(QStringLiteral("ssh://filly/etc/nginx/")).directory);
+        QCOMPARE(parseFileUrl(QStringLiteral("ssh://filly/etc/nginx/")).path, QStringLiteral("/etc/nginx"));
+        QVERIFY(!parseFileUrl(QStringLiteral("ssh://filly/etc/nginx")).directory);
+        const FileRef root = parseFileUrl(QStringLiteral("ssh://filly/"));
+        QVERIFY(root.ok);
+        QVERIFY(root.directory);
+        QCOMPARE(root.path, QStringLiteral("/"));
+
+        QCOMPARE(parentPath(QStringLiteral("/etc/nginx/nginx.conf")), QStringLiteral("/etc/nginx"));
+        QCOMPARE(parentPath(QStringLiteral("/etc")), QStringLiteral("/"));
+        QCOMPARE(parentPath(QStringLiteral("/")), QStringLiteral("/"));
+        QCOMPARE(childPath(QStringLiteral("/etc"), QStringLiteral("hosts")), QStringLiteral("/etc/hosts"));
+        QCOMPARE(childPath(QStringLiteral("/"), QStringLiteral("etc")), QStringLiteral("/etc"));
+    }
+
+    void aListingIsFoldersFirstThenNames()
+    {
+        const QString script = listScript(QStringLiteral("/srv/two words"));
+        QVERIFY(script.contains(QStringLiteral("cd -- '/srv/two words'")));
+        QVERIFY(script.contains(QStringLiteral("set -- * .[!.]* ..?*")));   // dot files included
+        QVERIFY(script.contains(QStringLiteral("stat -L -c '%F|%s|%Y|%n'")));
+        QVERIFY(script.contains(QStringLiteral("stat -L -f '%HT|%z|%m|%N'")));   // the BSDs
+        QVERIFY(script.contains(QStringLiteral("exit 10")));                     // not a folder
+
+        bool truncated = true;
+        const QVector<DirEntry> entries = parseListing(
+            "regular file|12|100|readme.md\n"
+            "directory|4096|200|sub\n"
+            "regular empty file|0|300|.hidden\n"
+            "symbolic link|9|400|dangling\n", 100, &truncated);
+        QVERIFY(!truncated);
+        QCOMPARE(entries.size(), 4);
+        QCOMPARE(entries.at(0).name, QStringLiteral("sub"));       // folders first
+        QVERIFY(entries.at(0).directory);
+        QCOMPARE(entries.at(1).name, QStringLiteral(".hidden"));   // then by name, case-insensitively
+        QCOMPARE(entries.at(2).name, QStringLiteral("dangling"));
+        QCOMPARE(entries.at(3).name, QStringLiteral("readme.md"));
+        QCOMPARE(entries.at(3).size, 12);
+        QCOMPARE(entries.at(3).mtime, 100);
+        QVERIFY(!entries.at(3).directory);
+        // A name with a `|` in it keeps it: the name is the last field for exactly that reason.
+        QCOMPARE(parseListing("regular file|1|2|a|b.txt\n").at(0).name, QStringLiteral("a|b.txt"));
+        // Junk, `.` and `..` are skipped rather than shown as rows.
+        QVERIFY(parseListing("stat: cannot stat '*'\n").isEmpty());
+        QVERIFY(parseListing("directory|1|2|.\ndirectory|1|2|..\n").isEmpty());
+        // Longer than the cap: cut, and it says so.
+        QByteArray many;
+        for (int i = 0; i < 10; ++i) many += QStringLiteral("regular file|1|2|f%1\n").arg(i).toUtf8();
+        QCOMPARE(parseListing(many, 4, &truncated).size(), 4);
+        QVERIFY(truncated);
     }
 
     void aLoginIsAnnouncedAndForgotten()
@@ -301,20 +419,26 @@ private slots:
         QVERIFY(scriptOf(argv).contains(QStringLiteral("p='/etc/nginx/nginx.conf'")));
     }
 
-    void aBinaryFileIsNotOpenedAsText()
+    // Binary is the text viewer's rule, not the transport's: an image and a PDF are binary and
+    // are meant to be, so the bytes come back and the pane decides (FilePreview does, and
+    // tests/filepanes_test.cpp checks that it refuses a binary file as text).
+    void binaryBytesComeBackWhole()
     {
         installFakeSsh();
-        answerWith(QByteArray("8:1:644\n\x7f" "ELF\0\0\0\0", 17), 0);
+        const QByteArray elf("\x7f" "ELF\0\0\0\0", 8);
+        answerWith(QByteArray("8:1:644\n") + elf, 0);
         RemoteFile file;
         file.setHost(QStringLiteral("filly"), m_socket);
         QString failure;
+        QByteArray got;
         bool fetched = false;
-        file.onFetched = [&](const QByteArray &, const FileStat &) { fetched = true; };
+        file.onFetched = [&](const QByteArray &content, const FileStat &) { got = content; fetched = true; };
         file.onFailed = [&](const QString &message, Conflict, const FileStat &) { failure = message; };
         file.fetch(QStringLiteral("/bin/ls"));
         QTRY_VERIFY_WITH_TIMEOUT(!failure.isEmpty() || fetched, 10000);
-        QVERIFY(!fetched);
-        QVERIFY(failure.contains(QStringLiteral("binary")));
+        QVERIFY2(failure.isEmpty(), qPrintable(failure));
+        QCOMPARE(got, elf);
+        QVERIFY(looksBinary(got));
     }
 
     void aRefusedFileSaysWhy()

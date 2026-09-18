@@ -109,6 +109,8 @@ QString fetchScript(const QString &path, qint64 maxBytes = kMaxFileBytes);
 // host compares it to the file's own stat and refuses with ChangedStatus before writing a byte.
 QString saveScript(const QString &path, const FileStat &expected);
 QString probeScript(const QStringList &paths);
+// One folder: `<type>|<size>|<mtime>|<name>` a line, dot files included, symlinks followed.
+QString listScript(const QString &path);
 
 // The ssh arguments that reuse the user's login, up to and including the destination and `--`.
 QStringList sshArguments(const QString &host, const QString &controlPath);
@@ -118,6 +120,19 @@ QStringList sshCommand(const QString &host, const QString &controlPath, const QS
 // What a probe batch answers, one per path, in the order they were asked.
 enum class Entry { Unknown = -2, Missing = -1, File = 0, Directory = 1 };
 QVector<Entry> parseProbe(const QByteArray &output, int expected);
+
+// One row of a folder listing. `name` is the entry's own name, not a path.
+struct DirEntry {
+    QString name;
+    bool directory = false;
+    qint64 size = -1;
+    qint64 mtime = -1;
+};
+constexpr int kMaxDirEntries = 2000;   // a listing longer than this is cut, and says so
+// Folders first, then files, each by name, case-insensitively — the order QFileSystemModel
+// shows a local folder in. `truncated` is set when the host had more than `maxEntries`.
+QVector<DirEntry> parseListing(const QByteArray &output, int maxEntries = kMaxDirEntries,
+                               bool *truncated = nullptr);
 
 // A failure, as a sentence. `stderr` is the host's own words (`Permission denied`, `No space left
 // on device`), which are usually the whole answer.
@@ -129,15 +144,24 @@ QString statusMessage(int exitStatus, const QString &host, const QString &path, 
 // in it: it is looked up from the live logins, so a URL saved with the layout can never point at
 // a socket that has since belonged to something else.
 QString fileUrl(const QString &host, const QString &path);
+// The same, for a folder: it ends in `/`, the way a URL has always told a collection from a
+// document. That one character is how `RelayWindow::openPath` knows to open an explorer pane
+// rather than a preview without asking the host a second time.
+QString folderUrl(const QString &host, const QString &path);
 bool isFileUrl(const QString &target);
 struct FileRef {
     QString host;
-    QString path;
+    QString path;          // without the trailing `/` of a folder, except for the root itself
+    bool directory = false;
     bool ok = false;
 };
 FileRef parseFileUrl(const QString &target);
 // "filly:/etc/nginx/nginx.conf" — the title of a pane showing it.
 QString displayName(const QString &host, const QString &path);
+// The folder holding `path`, and the path of `name` inside it. Plain string work on the host's
+// spelling: QFileInfo and QDir would answer about this machine's idea of a path.
+QString parentPath(const QString &path);
+QString childPath(const QString &path, const QString &name);
 
 // ----- live logins ----------------------------------------------------------------------------
 // A pane announces its login when it resolves one and forgets it when the login ends. The socket
@@ -164,6 +188,8 @@ public:
     bool busy() const { return m_process != nullptr; }
     const FileStat &fetched() const { return m_fetched; }
 
+    // The bytes, whatever they are: an image and a PDF are binary and are meant to be. Refusing
+    // binary is the *text editor's* rule, not the transport's (`looksBinary`).
     void fetch(const QString &path);
     // `force` is the user's "overwrite anyway" after a Changed refusal.
     void save(const QByteArray &content, bool force = false);
@@ -186,6 +212,33 @@ private:
     QTimer *m_timeout = nullptr;
     bool m_saving = false, m_forced = false;
     QByteArray m_pending;   // the bytes a save is writing, kept until it lands
+};
+
+// ----- one folder on the host -------------------------------------------------------------------
+class RemoteDir final : public QObject {
+public:
+    explicit RemoteDir(QObject *parent = nullptr);
+    ~RemoteDir() override;
+
+    void setHost(const QString &host, const QString &controlPath = QString());
+    QString host() const { return m_host; }
+    QString path() const { return m_path; }
+    QString controlPath() const;
+    bool live() const { return !controlPath().isEmpty(); }
+    bool busy() const { return m_process != nullptr; }
+
+    void list(const QString &path);
+    void cancel();
+
+    std::function<void(const QString &path, const QVector<DirEntry> &entries, bool truncated)> onListed;
+    std::function<void(const QString &message)> onFailed;
+
+private:
+    void finish(int code, bool crashed);
+
+    QString m_host, m_explicitControlPath, m_path;
+    QProcess *m_process = nullptr;
+    QTimer *m_timeout = nullptr;
 };
 
 // ----- do these paths exist on the host? -------------------------------------------------------

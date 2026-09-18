@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "FilePanes.h"
+#include "RemoteFiles.h"
 
+#include <QBuffer>
 #include <QDir>
 #include <QFile>
 #include <QImage>
+#include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTest>
@@ -375,6 +379,180 @@ private slots:
         QVERIFY(!menuIds(explorer.menuFor(temp.filePath(QStringLiteral("sub")))).contains(QStringLiteral("workspace")));
     }
 
+    // ----- files and folders on a host (#S5SH) --------------------------------------------------
+    //
+    // A fake `ssh` on PATH plays the host: it answers with whatever the test put in `reply` and
+    // exits with `code`, and keeps anything it was sent on stdin. Everything else — the fetch,
+    // the viewer that is chosen, the editing, the save and the folder listing — is the real code.
+
+    void aRemoteTextFileOpensEditableAndSaves() {
+        fakeHost("14:1758153600:640\nlisten 8080;\n");
+        FilePreview preview;
+        QVERIFY(preview.open(remoteUrl(QStringLiteral("/srv/service.conf"))));
+        QTRY_COMPARE_WITH_TIMEOUT(preview.kind(), FilePreview::Kind::Text, 10000);
+        QVERIFY(preview.isRemote());
+        QCOMPARE(preview.remoteHost(), m_host);
+        QCOMPARE(preview.remotePath(), QStringLiteral("/srv/service.conf"));
+        QCOMPARE(preview.text(), QStringLiteral("listen 8080;\n"));
+        // The host is in the title, and nothing here is offered to this machine's applications.
+        QCOMPARE(preview.title(), m_host + QStringLiteral(":/srv/service.conf"));
+        QCOMPARE(menuIds(preview.menu()), (QStringList{QStringLiteral("openInternal"), QStringLiteral("copyPath")}));
+
+        QPlainTextEdit *editor = preview.findChild<QPlainTextEdit *>(QStringLiteral("filePreviewText"));
+        QVERIFY(editor);
+        QVERIFY(!editor->isReadOnly());     // a remote file is editable; a local one is not
+        QVERIFY(!preview.isDirty());
+        // Typed, not set: setPlainText() would clear the document's modified flag, which is
+        // exactly the flag the ● and the Save button read.
+        editor->selectAll();
+        editor->textCursor().insertText(QStringLiteral("listen 9090;\n"));
+        QVERIFY(preview.isDirty());
+        QVERIFY(preview.title().startsWith(QStringLiteral("● ")));
+
+        answerWith("14:1758153700:640\n", 0);
+        QVERIFY(preview.save());
+        QTRY_VERIFY_WITH_TIMEOUT(!preview.isDirty(), 10000);
+        QCOMPARE(QString::fromUtf8(readFile(m_fake.filePath(QStringLiteral("stdin")))), QStringLiteral("listen 9090;\n"));
+        QVERIFY(preview.notice().contains(QStringLiteral("Saved to")));
+    }
+
+    // WARP.md's standing rule: the slow path teaches the fast one. Clicking Save says "Next time:
+    // Ctrl+S" — through the same registry every other hint goes through, so it stops after a few
+    // showings and never stacks on top of another hint.
+    void theSaveButtonTeachesTheShortcut() {
+        QSettings settings;
+        settings.remove(QStringLiteral("hints"));
+        fakeHost("14:1758153600:640\nlisten 8080;\n");
+        FilePreview preview;
+        QVERIFY(preview.open(remoteUrl(QStringLiteral("/srv/service.conf"))));
+        QTRY_COMPARE_WITH_TIMEOUT(preview.kind(), FilePreview::Kind::Text, 10000);
+        QPlainTextEdit *editor = preview.findChild<QPlainTextEdit *>(QStringLiteral("filePreviewText"));
+        QToolButton *saveButton = preview.findChild<QToolButton *>(QStringLiteral("filePreviewSave"));
+        QVERIFY(editor && saveButton);
+
+        editor->textCursor().insertText(QStringLiteral("x"));
+        answerWith("15:1758153700:640\n", 0);
+        saveButton->click();
+        QTRY_VERIFY_WITH_TIMEOUT(preview.notice().contains(QStringLiteral("Saved to")), 10000);
+        QVERIFY(preview.notice().contains(QStringLiteral("Next time")));
+        QVERIFY(preview.notice().contains(QKeySequence(QKeySequence::Save).toString(QKeySequence::NativeText)));
+
+        // Ctrl+S is the fast path itself: it never teaches what the user has just done.
+        editor->textCursor().insertText(QStringLiteral("y"));
+        answerWith("16:1758153800:640\n", 0);
+        QVERIFY(preview.save());
+        QTRY_VERIFY_WITH_TIMEOUT(!preview.isDirty(), 10000);
+        QVERIFY(!preview.notice().contains(QStringLiteral("Next time")));
+        settings.remove(QStringLiteral("hints"));
+    }
+
+    void aRemoteMarkdownFileRendersAndIsStillEditable() {
+        fakeHost("30:1758153600:644\n# Title\n\nA [link](notes.md).\n");
+        FilePreview preview;
+        QVERIFY(preview.open(remoteUrl(QStringLiteral("/srv/readme.md"))));
+        QTRY_COMPARE_WITH_TIMEOUT(preview.kind(), FilePreview::Kind::Markdown, 10000);
+        QVERIFY(!preview.showingSource());                       // rendered, as a local .md opens
+        QVERIFY(preview.text().startsWith(QStringLiteral("# Title")));
+        QPlainTextEdit *editor = preview.findChild<QPlainTextEdit *>(QStringLiteral("filePreviewText"));
+        QVERIFY(editor && !editor->isReadOnly());                // and editable, unlike a local one
+        // A line number takes it to the source, exactly as it does locally.
+        preview.goToLine(1);
+        QVERIFY(preview.showingSource());
+    }
+
+    void aRemoteImageIsShownAsAnImage() {
+        QImage image(4, 4, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QByteArray png;
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        QVERIFY(image.save(&buffer, "PNG"));
+        fakeHost(QByteArray::number(png.size()) + ":1758153600:644\n" + png);
+        FilePreview preview;
+        QVERIFY(preview.open(remoteUrl(QStringLiteral("/srv/logo.png"))));
+        QTRY_COMPARE_WITH_TIMEOUT(preview.kind(), FilePreview::Kind::Image, 10000);
+        QVERIFY(preview.notice().isEmpty());
+    }
+
+    void aRemotePdfIsPreviewedOrSaysItCannotBe() {
+        // A minimal but real PDF. With Qt PDF built in it previews; without, the pane says so —
+        // the same answer a local PDF gets in the same build.
+        const QByteArray pdf = "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+                               "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+                               "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 99 99]>>endobj\n"
+                               "trailer<</Root 1 0 R>>\n%%EOF\n";
+        fakeHost(QByteArray::number(pdf.size()) + ":1758153600:644\n" + pdf);
+        FilePreview preview;
+        QVERIFY(preview.open(remoteUrl(QStringLiteral("/srv/report.pdf"))));
+        QTRY_VERIFY_WITH_TIMEOUT(preview.kind() == FilePreview::Kind::Pdf || preview.kind() == FilePreview::Kind::Info, 10000);
+        if (preview.kind() == FilePreview::Kind::Info)
+            QVERIFY(preview.notice().contains(QStringLiteral("not available")));
+    }
+
+    void aRemoteBinaryFileIsNotOpenedAsText() {
+        fakeHost(QByteArray("8:1758153600:755\n\x7f" "ELF\0\0\0\0", 25));
+        FilePreview preview;
+        QVERIFY(preview.open(remoteUrl(QStringLiteral("/srv/tool.txt"))));
+        QTRY_COMPARE_WITH_TIMEOUT(preview.kind(), FilePreview::Kind::Info, 10000);
+        QVERIFY(preview.notice().contains(QStringLiteral("binary")));
+        QPlainTextEdit *editor = preview.findChild<QPlainTextEdit *>(QStringLiteral("filePreviewText"));
+        QVERIFY(editor->isReadOnly());   // nothing to edit, so no Save to offer
+    }
+
+    void aFetchThatFailsSaysWhyAndOffersNothingToEdit() {
+        fakeHost(QByteArray(), 11 /* UnreadableStatus */);
+        FilePreview preview;
+        QVERIFY(preview.open(remoteUrl(QStringLiteral("/etc/shadow"))));
+        QTRY_VERIFY_WITH_TIMEOUT(preview.notice().contains(QStringLiteral("permission")), 10000);
+        QVERIFY(!preview.save());
+    }
+
+    void aRemoteFolderListsNavigatesAndOpensFiles() {
+        fakeHost("directory|4096|1758153600|sub\n"
+                 "regular file|12|1758153600|readme.md\n"
+                 "regular file|3|1758153600|.hidden\n");
+        FileExplorer explorer(remoteFolderUrl(QStringLiteral("/srv")));
+        QVERIFY(explorer.isRemote());
+        QCOMPARE(explorer.remoteHost(), m_host);
+        QTRY_COMPARE_WITH_TIMEOUT(explorer.visiblePaths().size(), 2, 10000);   // the dot file is hidden
+        QCOMPARE(explorer.title(), m_host + QStringLiteral(":/srv"));
+        QCOMPARE(explorer.visiblePaths(),
+                 (QStringList{remoteFolderUrl(QStringLiteral("/srv/sub")), remoteUrl(QStringLiteral("/srv/readme.md"))}));
+        // Hidden files are in the listing already: showing them costs no second round trip.
+        explorer.setShowHidden(true);
+        QCOMPARE(explorer.visiblePaths().size(), 3);
+        explorer.setShowHidden(false);
+
+        // A read-only menu: no rename, no delete, no "open externally" for another machine's file.
+        const QStringList ids = menuIds(explorer.menuFor(remoteUrl(QStringLiteral("/srv/readme.md"))));
+        QCOMPARE(ids, (QStringList{QStringLiteral("openInternal"), QStringLiteral("copyPath")}));
+
+        // A file opens through the host, a folder navigates into it, and ↑ comes back.
+        QString opened;
+        explorer.onOpenFile = [&](const QString &path) { opened = path; };
+        QVERIFY(explorer.activateRow(1));
+        QCOMPARE(opened, remoteUrl(QStringLiteral("/srv/readme.md")));
+        answerWith("regular file|1|1758153600|deeper.txt\n", 0);
+        QVERIFY(explorer.activateRow(0));
+        QCOMPARE(explorer.root(), remoteFolderUrl(QStringLiteral("/srv/sub")));
+        QTRY_COMPARE_WITH_TIMEOUT(explorer.visiblePaths().size(), 1, 10000);
+        QCOMPARE(explorer.visiblePaths().first(), remoteUrl(QStringLiteral("/srv/sub/deeper.txt")));
+        answerWith("directory|4096|1758153600|sub\n", 0);
+        explorer.goUp();
+        QCOMPARE(explorer.root(), remoteFolderUrl(QStringLiteral("/srv")));
+        QTRY_COMPARE_WITH_TIMEOUT(explorer.visiblePaths().size(), 1, 10000);
+    }
+
+    void aFolderWithNoConnectionSaysSoRatherThanLookingEmpty() {
+        relay::remote::forgetLogin(m_host);
+        FileExplorer explorer(remoteFolderUrl(QStringLiteral("/srv")));
+        QVERIFY(explorer.isRemote());
+        QVERIFY(explorer.visiblePaths().isEmpty());
+        QLabel *notice = explorer.findChild<QLabel *>(QStringLiteral("filePreviewNotice"));
+        QVERIFY(notice);
+        QTRY_VERIFY_WITH_TIMEOUT(notice->text().contains(QStringLiteral("no connection")), 5000);
+    }
+
     // ----- single click (issue #0C7V) ----------------------------------------------------------
 
     void singleClickIsOnByDefaultAndFollowsTheSetting() {
@@ -392,6 +570,49 @@ private slots:
         QVERIFY(!other.singleClick());                 // a new explorer starts from the setting
         settings.remove(QStringLiteral("files/single_click"));
     }
+
+private:
+    // ----- the fake host (#S5SH) ----------------------------------------------------------------
+    QByteArray readFile(const QString &path) {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    }
+    QString remoteUrl(const QString &path) const { return relay::remote::fileUrl(m_host, path); }
+    QString remoteFolderUrl(const QString &path) const { return relay::remote::folderUrl(m_host, path); }
+    void answerWith(const QByteArray &reply, int code = 0) {
+        writeFile(m_fake.filePath(QStringLiteral("reply")), reply);
+        writeFile(m_fake.filePath(QStringLiteral("code")), QByteArray::number(code));
+    }
+    // A fake `ssh` first on PATH, a socket file to stand in for the control master, and a login
+    // announced for `m_host` — everything `FilePreview` and `FileExplorer` look for.
+    void fakeHost(const QByteArray &reply, int code = 0) {
+        if (m_savedPath.isNull()) m_savedPath = qgetenv("PATH");
+        const QString bin = m_fake.filePath(QStringLiteral("bin"));
+        QDir().mkpath(bin);
+        const QString script = QDir(bin).filePath(QStringLiteral("ssh"));
+        writeFile(script, (QStringLiteral("#!/bin/sh\n"
+                                          "F=%1\n"
+                                          "cat > \"$F/stdin\"\n"
+                                          "cat \"$F/reply\"\n"
+                                          "exit \"$(cat \"$F/code\")\"\n").arg(m_fake.path())).toUtf8());
+        QFile::setPermissions(script, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        qputenv("PATH", bin.toLocal8Bit() + ':' + m_savedPath);
+        const QString socket = m_fake.filePath(QStringLiteral("socket"));
+        writeFile(socket, QByteArray());
+        relay::remote::announceLogin(m_host, socket);
+        answerWith(reply, code);
+    }
+
+private slots:
+    void cleanup() {
+        if (!m_savedPath.isNull()) { qputenv("PATH", m_savedPath); m_savedPath = QByteArray(); }
+        relay::remote::forgetLogin(m_host);
+    }
+
+private:
+    QTemporaryDir m_fake;
+    QByteArray m_savedPath;
+    const QString m_host = QStringLiteral("testhost");
 };
 
 QTEST_MAIN(FilePanesTests)

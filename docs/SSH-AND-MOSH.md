@@ -306,6 +306,13 @@ yet is "nothing there", and the underline appears when the batch lands (`linkPro
 the view re-reads the cell under the pointer). The first Ctrl+Shift+L over brand new remote output
 can therefore come up empty; the second press has the answers.
 
+**A folder, an image, a PDF.** A remote file opens the way a local one does: Markdown renders,
+an image is shown, a PDF is paged, anything else is text, and a rendered file is still editable —
+the bytes decide, not the machine they came from. A clicked folder opens the explorer pane on the
+host's folder (`ssh://<host>/<path>/`, the trailing slash decided on the host, since this machine
+cannot be asked what a remote path is): it lists, walks into subfolders and opens files from there,
+and it does not rename, delete or create.
+
 **Opening.** `Pane::openRemoteOutputPath` turns the clicked path into `ssh://<host>/<path>` and
 hands it to `onOpenPath` like any other file. `RelayWindow::openPath` treats it as a file (never a
 folder — folders on the host are not browsable yet, and a click on one says so), and
@@ -355,8 +362,8 @@ code with it.
   tmux. A plain remote tmux or screen is served by the DCS wrapping of section 3 instead, which
   installs nothing and asks the user for one line of tmux configuration.
 - No OSC passthrough under mosh: mosh drops unknown sequences upstream.
-- No folder on the host in an explorer pane, and no remote image or PDF: a file on the host opens
-  as text or not at all (section 9).
+- No editing of the host's folders: an explorer pane on a remote folder lists and opens, it does
+  not rename, delete or create (section 9).
 
 ## Research notes
 
