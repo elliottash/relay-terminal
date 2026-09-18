@@ -299,8 +299,11 @@ def default_directories(workspace=None) -> list[Path]:
 
     0. ~/.config/relay/skills (refined copies made by refine_skills win over their originals)
     1. ~/.warp/skills (the user's Warp skills)  2. ~/.claude/skills  3. <workspace>/.claude/skills
-    4. every other folder under ~/.warp (depth <= 6) holding <name>/SKILL.md, e.g. Warp's bundled skills in
-       ~/.warp/remote-server/bundled_resources/bundled/skills.
+    4. every other folder under ~/.warp or ~/.claude (depth <= 6) holding <name>/SKILL.md: Warp's bundled
+       skills in ~/.warp/remote-server/bundled_resources/bundled/skills, and Claude Code's synced ones,
+       which sit a level deeper than the folder above, in ~/.claude/skills/synced/<id>/<name>/SKILL.md
+       (owner report, 2026-09-18: every skill under ~/.claude/skills was being skipped as "no SKILL.md",
+       because the folder there holds more folders of skills rather than skills).
     5. imported skills, ~/.local/share/relay/skill-imports/<repo>@<commit> (newest import first).
     """
     home = Path.home()
@@ -308,7 +311,8 @@ def default_directories(workspace=None) -> list[Path]:
     if workspace is not None:
         directories.append(Path(workspace) / ".claude" / "skills")
     first = {d.resolve() for d in directories if d.is_dir()}
-    directories += [b for b in discover_bases(home / ".warp") if b not in first]
+    for root in (home / ".warp", home / ".claude"):
+        directories += [b for b in discover_bases(root) if b not in first and b not in directories]
     directories += import_directories()
     return directories
 

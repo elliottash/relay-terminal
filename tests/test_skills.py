@@ -5,6 +5,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from relay_core import skills
@@ -195,6 +196,24 @@ class DiscoveryTests(unittest.TestCase):
                 self.assertIn('warpctrl', skills.from_request({'exclude': []}, str(ws)).skills)
                 with self.assertRaises(ValueError):
                     skills.from_request({'exclude': 'warpctrl'}, str(ws))
+
+
+class DefaultDirectoryTests(unittest.TestCase):
+    def test_nested_claude_skills_are_found(self):
+        # Owner report 2026-09-18: nothing under ~/.claude/skills was indexed. Claude Code's synced
+        # skills sit at skills/synced/<id>/<name>/SKILL.md, so the folder the search order names
+        # holds folders of skills rather than skills, and every one of them was skipped as
+        # "no SKILL.md". The same walk that finds Warp's bundled skills now runs over ~/.claude.
+        with tempfile.TemporaryDirectory() as home:
+            root = Path(home)
+            write(root / '.claude' / 'skills' / 'synced' / 'abc123' / 'nested'/ 'SKILL.md',
+                  '---\nname: nested\ndescription: A synced skill one level deeper\n---\n')
+            write(root / '.claude' / 'skills' / 'plain' / 'SKILL.md',
+                  '---\nname: plain\ndescription: A skill in the folder itself\n---\n')
+            with unittest.mock.patch.object(Path, 'home', staticmethod(lambda: root)):
+                index = SkillIndex.load(skills.default_directories(), defaults=True)
+        self.assertIn('nested', index.skills)
+        self.assertIn('plain', index.skills)
 
 
 class RealSkillsTest(unittest.TestCase):
