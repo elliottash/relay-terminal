@@ -33,7 +33,7 @@ from . import wire
 log = logging.getLogger("relay.terminal")
 
 BRIDGE_NAMES = ("relay-screen-bridge",)
-BRIDGE_PATHS = ("build-engine/engine", "build/engine", "build-spike/engine")
+BRIDGE_PATHS = ("build-engine/engine", "build/engine")
 DEFAULT_ROWS, DEFAULT_COLS = 24, 100
 MAX_SCROLLBACK = 5000
 
