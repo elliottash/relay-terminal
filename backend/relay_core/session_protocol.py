@@ -195,17 +195,37 @@ class SessionCommands:
         getattr(self, "_" + kind)(request)
 
     def _set_model(self, request):
-        agent = self._idle_agent("switching model")
+        """Switch the pane's model, keeping the conversation. Accepted while a turn runs (issue 3ES1):
+        the request in flight finishes on the old model and the switch lands before the next one,
+        which `model_applied` announces; idle, it applies at once as it always did."""
+        agent = self._agent()
+        # Resolved now, turn or no turn: a missing key is refused here, not at the next step.
         config = provider_config(request)
         window = request.get("context_window")
-        agent.set_model(config, request.get("preset") if isinstance(request.get("preset"), str) else None,
-                        validate_window(window) if window is not None else None)
-        preset = resolve_preset(request.get("preset"), config.base_url, config.model)
-        self.on_model_changed(agent)
-        self.emit({"event": "model_changed", "id": request.get("id"), "model": config.model,
-                   "preset": preset.id if preset else None, "context_window": agent.context.window,
-                   "effort": agent.effort})
-        self.emit(agent.context_event())
+        window = validate_window(window) if window is not None else None
+        preset_id = request.get("preset") if isinstance(request.get("preset"), str) else None
+        preset = resolve_preset(preset_id, config.base_url, config.model)
+        agent.on_model_applied = self.on_model_changed
+
+        def announce(outcome: dict) -> dict:
+            # Under the agent's model lock, so `model_changed` always precedes the `model_applied`
+            # of the same switch.
+            self.emit({"event": "model_changed", "id": request.get("id"), "model": config.model,
+                       "preset": preset.id if preset else None, "effort": agent.effort, **outcome})
+            return outcome
+
+        def now():
+            with agent._model_lock:
+                agent._pending_model = None
+                agent.set_model(config, preset_id, window)
+                self.on_model_changed(agent)
+                return announce({"applies": "now", "context_window": agent.context.window})
+
+        def later():
+            with agent._model_lock:
+                return announce(agent.defer_model(config, preset_id, window))
+        if self.turns.now_or_later(now, later)["applies"] == "now":
+            self.emit(agent.context_event())
 
     def _set_effort(self, request):
         agent = self._agent()

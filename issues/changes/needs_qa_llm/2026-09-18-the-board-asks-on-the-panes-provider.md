@@ -136,3 +136,14 @@ function; this session was scoped to `startBoardWorker`.
   useful half of the answer ("you are talking to Moonshot") but it is not spelled out as a mismatch.
 - The board still has no way to say "no provider is configured" before the first question; a keyless
   window opens and browses, and only the ask reports it.
+
+## Follow-up: the stale provider settings (2026-09-18, card 3ES1)
+
+The "Not done here" item above is done in card 3ES1's commit. `Pane::rememberPreset` (new, next to
+`Pane::selectModel`) writes `provider/preset` together with that preset's own `provider/base`,
+`provider/model` and `provider/extra`; `selectModel` and the `model_changed` handler call it instead
+of writing the preset alone. After `/kimi` on a glm-coding pane the settings read
+`base=https://api.moonshot.ai/v1`, `model=kimi-k3`, `preset=kimi`
+(`docs/qa_evidence/2026-09-18-model-switch-mid-turn/implementer-kimi-provider-settings.txt`), so the
+provider dialog opens on the model the chip shows. A Main ↔ Flash role switch still leaves them on
+the main preset, which is right: the role is not the pane's provider.

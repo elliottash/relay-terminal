@@ -37,7 +37,14 @@ of them. Sending an endpoint with no preset is unchanged: the key is looked up f
 
 ## 2. Model and effort without losing the conversation
 
-- `set_model {preset, base_url, model, extra, max_tokens, context_window, use_stored_key, api_key?}` → swaps the provider between turns (refused while a turn runs: error with `agent_busy`). Event `model_changed {model, preset, context_window}`.
+- `set_model {preset, base_url, model, extra, max_tokens, context_window, use_stored_key, api_key?}` → swaps the provider, keeping the conversation. Event `model_changed {model, preset, context_window, effort, applies, in_flight_model?}`.
+  - **Accepted while a turn runs** (issue 3ES1, 2026-09-18; until then it was refused with `agent_busy`). The request already in flight is never aborted: it finishes on the model it started on. The switch lands at the next step boundary of the tool loop — every tool call of the previous response has its result — before the next provider request and before the auto-compaction check, so that request goes to the new model with the whole conversation. `model_changed` then says `applies: "next_step"` and names `in_flight_model`, and `context_window` is the new model's.
+  - When the switch lands the worker emits `model_applied {turn_id, at: "step"|"turn_end", step?, model, from_model, preset, context_window, effort, history_converted?, compacts?}` followed by `context`. `at: "turn_end"` means the turn ended without another request (it answered, stopped, failed or hit a limit): the new model applies from the next turn, and the event comes after `agent_finished`, so `done`/`error`/`cancelled` stay the turn's last events. The worker's own follow-ups of a switch (subagents that inherit the main model, role defaults, `agent_role: "main"`) happen at that moment, not when the request arrives.
+  - Two switches before the next request: the last one wins, and only it is applied. A switch back to the model in force drops the pending one (`applies: "now"`, no `model_applied`).
+  - An image turn (issue EM1E) stays on its vision model to the end: a switch during one says `applies: "turn_end"` and `in_flight_model` is the vision model.
+  - A missing stored key is refused at once, mid-turn or not, with nothing left pending.
+  - Across providers the conversation is converted, not refused: every preset speaks the OpenAI chat format, and `adapt_history` copies reasoning between `reasoning_content` (Kimi, GLM; Kimi requires it on assistant tool-call messages) and `reasoning` (OpenRouter), which `model_applied` reports as `history_converted`. A smaller context window is handled by the usual auto-compaction, which runs right after the switch and before the request (`compacts: true`); a conversation that cannot be compacted under the new window fails that request as any over-long one would.
+  - Idle, it applies at once as before: `applies: "now"`, then `context`.
 - `set_effort {effort}` → event `effort_changed {effort, applied: {...provider params}}`.
 
 ## 3. Effort mapping
@@ -434,7 +441,9 @@ without the JSON object gives `unaddressed: []` plus `error`.
    `update_todos` emits `requests` (when linked statuses change) and `todos` between the two. A delivered steer
    emits `steer_delivered` → `requests`. An escalated steer (12.5) instead emits
    `steer_escalated {escalated: true}` → `interrupting` → `queued {when: "interrupt"}`, and this turn ends at 5
-   as `cancelled`; the escalated prompt then runs as the next turn.
+   as `cancelled`; the escalated prompt then runs as the next turn. A `set_model` accepted mid-turn (section 2)
+   lands at the start of a step, before its `status`: `model_applied {at: "step"}` → `context`, then the
+   `compaction_started`/`compacted` its smaller window may need.
 4. optional `completion_check` (then back to 3), at most twice
 5. `requests` (turn end) → `turn_summary` → `done {open_items, stop_reason?}` | `cancelled {open_items}` |
    `error {text, open_items}`

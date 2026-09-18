@@ -88,7 +88,7 @@ FORWARDED_EVENTS = frozenset({
     "agent_finished", "agent_message_delivered", "agent_started", "agent_stopped", "cancelled",
     "checkpoints", "compacted", "compaction_started", "completion_check", "context",
     "conversation", "conversations", "delta", "done", "effort_changed", "error", "interrupting",
-    "mode_changed", "model_changed", "plan_written", "provider_retry", "queue_changed", "queued",
+    "mode_changed", "model_applied", "model_changed", "plan_written", "provider_retry", "queue_changed", "queued",
     "ready", "recap", "request", "request_audit", "requests", "sessions", "status",
     "steer_delivered", "steer_escalated", "steer_returned", "subagent_event", "subagent_finished",
     "subagent_handoff", "subagent_model", "subagent_progress", "subagent_started", "subagent_transcript",

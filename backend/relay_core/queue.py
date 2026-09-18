@@ -184,6 +184,23 @@ class TurnSupervisor:
         with self._lock:
             return item_id is not None and any(i["id"] == item_id for i in list(self._queue) + self._steer)
 
+    def now_or_later(self, now: Callable, later: Callable):
+        """now() when nothing runs, else later(); decided under the lock, so a turn cannot start (or
+        finish) between the check and the call. set_model uses it (issue 3ES1)."""
+        with self._lock:
+            return now() if self._running is None else later()
+
+    def _settle_model_locked(self, agent) -> None:
+        """A model switch that arrived after the turn's last request applies once the turn is over."""
+        apply = getattr(agent, "apply_pending_model", None)
+        if apply is None:
+            return
+        try:
+            apply(at="turn_end")
+        except Exception as exc:  # never let it wedge the queue; the old model simply stays
+            self._emit({"event": "error", "source": "set_model",
+                        "text": str(exc)[:2000] if isinstance(exc, ValueError) else f"Model switch failed ({type(exc).__name__})."})
+
     def run_exclusive(self, name: str, task: Callable) -> None:
         """Run task(agent) on a background thread while no turn runs (compaction and other
         conversation rewrites). The supervisor counts as busy meanwhile, so queued prompts wait."""
@@ -208,6 +225,7 @@ class TurnSupervisor:
             finally:
                 with self._lock:
                     self._running = None
+                    self._settle_model_locked(agent)
                     self._lock.notify_all()
 
         threading.Thread(target=runner, name=f"relay-{name}", daemon=True).start()
@@ -412,6 +430,7 @@ class TurnSupervisor:
                 if self._steer:
                     self._return_steer_locked()
                 self._running = None
+                self._settle_model_locked(agent)
                 if outcome == "error" and any(not i["force"] for i in self._queue):
                     # Tool actions may already have run; do not fire queued prompts blindly.
                     self._paused = True

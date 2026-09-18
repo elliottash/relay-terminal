@@ -1,0 +1,7 @@
+[provider]
+base=https://api.moonshot.ai/v1
+extra={\"reasoning_effort\":\"high\"}
+model=kimi-k3
+preset=kimi
+
+[url_handler]

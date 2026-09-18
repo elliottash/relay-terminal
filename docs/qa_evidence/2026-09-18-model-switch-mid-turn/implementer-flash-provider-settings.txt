@@ -1,0 +1,7 @@
+[provider]
+base=https://api.z.ai/api/coding/paas/v4
+extra="{\"reasoning_effort\":\"high\",\"thinking\":{\"type\":\"enabled\"}}"
+model=glm-5.3
+preset=glm-coding
+
+[url_handler]

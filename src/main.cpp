@@ -888,19 +888,37 @@ public:
         // Picking a model from the chip puts the pane back on the main agent (protocol 13).
         if (m_agentRole != QStringLiteral("main")) { setAgentRole(QStringLiteral("main")); if (id == m_currentPreset) return; }
         if (id.isEmpty() || id == m_currentPreset) return;
-        if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before switching models.")); changed(); return; }
         const auto preset = presetById(id);
-        if (!m_configured || preset.isEmpty()) { configurePreset(id, true); return; }
-        // Switch the provider between turns; the conversation is kept.
+        // A full configure starts a new conversation, which a running turn cannot have.
+        if (!m_configured || preset.isEmpty()) {
+            if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before configuring a new provider.")); changed(); return; }
+            configurePreset(id, true); return;
+        }
+        // Switch the provider, keeping the conversation. Allowed while a turn runs (issue 3ES1): the
+        // worker lets the request in flight finish on the old model and sends the next one to this
+        // model; `model_changed` says which, and `model_applied` marks the moment in the transcript.
         send({{"type", "set_model"}, {"preset", id}, {"use_stored_key", true},
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
               {"model", preset.value(QStringLiteral("model")).toString()},
               {"extra", preset.value(QStringLiteral("extra")).toObject()},
               {"max_tokens", QSettings().value(QStringLiteral("provider/max_tokens"), 32768).toInt()}});
-        QSettings().setValue(QStringLiteral("provider/preset"), id);
+        rememberPreset(id);
         m_currentPreset = id; changed();
     }
     void openProviderDialog() { configure(); }
+    // The pane's provider settings follow a model switch as a whole (card WFJM): the provider dialog
+    // reads `provider/base|model|extra` as its defaults, and they used to keep the first preset's
+    // endpoint after every chip or /model switch.
+    void rememberPreset(const QString &id) {
+        const auto preset = presetById(id);
+        QSettings settings;
+        settings.setValue(QStringLiteral("provider/preset"), id);
+        if (preset.isEmpty()) return;
+        settings.setValue(QStringLiteral("provider/base"), preset.value(QStringLiteral("base_url")).toString());
+        settings.setValue(QStringLiteral("provider/model"), preset.value(QStringLiteral("model")).toString());
+        settings.setValue(QStringLiteral("provider/extra"), QString::fromUtf8(
+            QJsonDocument(preset.value(QStringLiteral("extra")).toObject()).toJson(QJsonDocument::Compact)));
+    }
 
     // ----- model roles (protocol 13) -------------------------------------------------------
     // Every role defaults to "same as the main agent". Settings live under roles/<id>/{preset,model,effort};
@@ -993,7 +1011,7 @@ public:
     }
     void setAgentRole(const QString &role, bool announce = true) {
         if (role == m_agentRole) return;
-        if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before switching the pane's agent.")); return; }
+        // Allowed mid-turn (issue 3ES1): the worker applies it before the turn's next request.
         m_agentRole = role;
         if (m_configured) send({{"type", "set_agent_role"}, {"role", role}});
         if (announce) {
@@ -3708,12 +3726,21 @@ private:
             const QString warning = event.value(QStringLiteral("warning")).toString();
             if (!warning.isEmpty()) { ensureLineStart(); printInline(warning + '\n', Ink::Note); closeInline(); }
             // A role switch keeps the pane's main preset: only a set_model changes it.
-            if (!preset.isEmpty() && role.isEmpty()) { m_currentPreset = preset; QSettings().setValue(QStringLiteral("provider/preset"), preset); }
+            if (!preset.isEmpty() && role.isEmpty()) { m_currentPreset = preset; rememberPreset(preset); }
+            // Mid-turn (issue 3ES1) the chip moves now, but the context bar keeps the window of the
+            // model still answering until `model_applied`.
+            const QString applies = event.value(QStringLiteral("applies")).toString();
+            const bool later = applies == QStringLiteral("next_step") || applies == QStringLiteral("turn_end");
             const qint64 window = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
-            if (window > 0) m_ctxWindow = window;
+            if (window > 0 && !later) m_ctxWindow = window;
             const QString effort = event.value(QStringLiteral("effort")).toString();
             if (efforts().contains(effort)) m_effort = effort;
-            const QString what = role.isEmpty() || role == QStringLiteral("main")
+            const QString inFlight = event.value(QStringLiteral("in_flight_model")).toString();
+            const QString what = later
+                ? (applies == QStringLiteral("turn_end")
+                       ? QStringLiteral("Model: %1 from the next turn · this image turn finishes on %2").arg(m_model, inFlight)
+                       : QStringLiteral("Model: %1 from the next step · %2 is not interrupted").arg(m_model, inFlight))
+                : role.isEmpty() || role == QStringLiteral("main")
                 ? QStringLiteral("Model: %1 · conversation kept").arg(m_model)
                 : QStringLiteral("%1: %2 · conversation kept").arg(roleLabel(role), m_model);
             status(what); toast(what);
@@ -3811,6 +3838,35 @@ private:
             }
             m_turnsCompleted = std::max(0, event.value(QStringLiteral("turn")).toInt() - 1);
             return true;
+            if (later) {
+                // The clock owns the status line while a turn runs, so the "not now, next step" part
+                // goes in the transcript too; `model_applied` marks where it landed.
+                ensureLineStart();
+                printInline(QStringLiteral("↻ %1 takes over %2 · %3 is not interrupted\n")
+                    .arg(m_model, applies == QStringLiteral("turn_end") ? QStringLiteral("after this turn")
+                                                                        : QStringLiteral("at the next step"),
+                         inFlight), Ink::Note);
+            }
+            changed();
+            return true;
+        }
+        if (type == QStringLiteral("model_applied")) {
+            // The moment a mid-turn switch takes effect (issue 3ES1): at a step boundary, before the
+            // next request, or once the turn is over. One line in the transcript, where it happened.
+            const QString model = event.value(QStringLiteral("model")).toString();
+            const qint64 window = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
+            if (window > 0) m_ctxWindow = window;
+            QString line = QStringLiteral("→ now on %1").arg(model);
+            if (event.value(QStringLiteral("at")).toString() == QStringLiteral("turn_end"))
+                line += QStringLiteral(" · from the next turn");
+            if (event.value(QStringLiteral("history_converted")).toBool())
+                line += QStringLiteral(" · conversation converted from %1").arg(event.value(QStringLiteral("from_model")).toString());
+            if (event.value(QStringLiteral("compacts")).toBool())
+                line += QStringLiteral(" · its window is smaller, compacting first");
+            ensureLineStart();
+            printInline(line + '\n', Ink::Note);
+            if (!m_agentBusy && !moreTurnsPending()) closeInline();
+            updateContextLabel();
         }
         if (type == QStringLiteral("fork_state")) {
             if (!m_forkPending) return true;
@@ -4452,9 +4508,7 @@ private:
             const bool glm = name == QStringLiteral("glm");
             const QStringList order = glm ? QStringList{QStringLiteral("glm-coding"), QStringLiteral("glm")}
                                           : QStringList{QStringLiteral("kimi-code"), QStringLiteral("kimi")};
-            // Checked here rather than left to selectModel, which refuses silently as far as this
-            // command is concerned: it would still fall through to the "Model: …" line below.
-            if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before switching models.")); return; }
+            // No busy check: selectModel accepts a switch mid-turn (issue 3ES1).
             for (const QString &id : order) {
                 const auto stored = std::find_if(m_stored.cbegin(), m_stored.cend(),
                                                  [&](const auto &entry) { return entry.first == id; });

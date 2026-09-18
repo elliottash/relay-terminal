@@ -252,7 +252,8 @@ class ProtocolHandlerTests(unittest.TestCase):
         agent = self.make_agent(ScriptedProvider([slow]))
         self.sup.submit('slow', 'now')
         self.rec.wait(lambda e: e['event'] == 'agent_started')
-        for kind, req in [('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'x'}), ('rewind', {'turn': 1}),
+        # set_model is no longer among them: it is accepted mid-turn (issue 3ES1, ModelSwitchMidTurnTests).
+        for kind, req in [('rewind', {'turn': 1}),
                           ('fork', {}), ('compact', {}), ('resume', {'id': 'a' * 32})]:
             with self.assertRaises(ValueError, msg=kind):
                 self.cmds.handle(kind, req)

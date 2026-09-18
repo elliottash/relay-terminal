@@ -295,16 +295,33 @@ def main():
                 agent = turns.agent
                 if agent is None or agent.roles is None:
                     raise ValueError("Configure a provider and workspace first.")
-                if turns.busy:
-                    raise ValueError("Stop the active agent turn before switching the pane's agent.")
                 resolved = agent.roles.resolve(role)
-                state["agent_role"] = "main" if resolved.is_main else role
-                agent.set_model(resolved.config, resolved.preset_id)
-                emit({"event": "model_changed", "id": request.get("id"), "model": resolved.config.model,
-                      "preset": resolved.preset_id, "context_window": agent.context.window,
-                      "effort": agent.effort, "agent_role": state["agent_role"],
-                      **({"warning": resolved.warning} if resolved.warning else {})})
-                emit(agent.context_event())
+                new_role = "main" if resolved.is_main else role
+                changed = {"event": "model_changed", "id": request.get("id"), "model": resolved.config.model,
+                           "preset": resolved.preset_id, "effort": agent.effort, "agent_role": new_role,
+                           **({"warning": resolved.warning} if resolved.warning else {})}
+
+                def role_now(agent=agent, resolved=resolved, new_role=new_role, changed=changed):
+                    with agent._model_lock:
+                        agent._pending_model = None
+                        state["agent_role"] = new_role
+                        agent.set_model(resolved.config, resolved.preset_id)
+                        emit({**changed, "applies": "now", "context_window": agent.context.window})
+                    return True
+
+                def role_later(agent=agent, resolved=resolved, new_role=new_role, changed=changed):
+                    # Mid-turn (issue 3ES1): like set_model, it lands before the turn's next request.
+                    def follow(_agent, new_role=new_role):
+                        state["agent_role"] = new_role
+                    with agent._model_lock:
+                        outcome = agent.defer_model(resolved.config, resolved.preset_id, on_applied=follow,
+                                                    fields={"agent_role": new_role})
+                        if outcome["applies"] == "now":
+                            state["agent_role"] = new_role
+                        emit({**changed, **outcome})
+                    return False
+                if turns.now_or_later(role_now, role_later):
+                    emit(agent.context_event())
             # --- the agent typing into the program in the visible pane (protocol 17) ---
             elif kind == "program_state":
                 # The pane's live view: who owns the terminal, what it is asking, and whether the
