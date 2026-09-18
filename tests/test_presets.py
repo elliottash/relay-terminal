@@ -45,9 +45,12 @@ class PresetTableTests(unittest.TestCase):
 
     # ----- output limits (card #Z79Y) ---------------------------------------------------------
     def test_every_preset_documents_an_output_cap_that_fits_its_window(self):
+        from relay_core.provider import MIN_OUTPUT_TOKENS
         for preset in P.PRESETS.values():
             with self.subTest(preset.id):
-                self.assertGreaterEqual(preset.max_output, P.DEFAULT_MAX_OUTPUT)
+                # No floor at the fallback: a cap can legitimately be lower than it, as a gateway's
+                # own limit is. Only the settable minimum and the window bound it.
+                self.assertGreaterEqual(preset.max_output, MIN_OUTPUT_TOKENS)
                 # A cap above the window would be unaskable; a cap above a quarter of it would leave
                 # the reply fighting the compaction reserve.
                 self.assertLessEqual(preset.max_output, preset.context_window // 4)
