@@ -1,0 +1,42 @@
+== retried ==
+  -> request 1: max_tokens=32768 messages=2
+  usage: {"prompt_tokens": 48000, "completion_tokens": 32768, "total_tokens": 80768}
+  provider_retry: The model used its whole 32768-token output budget on one step without finishing, so nothing of it was used; reasoning counts towards that budget. The output token limit is already at Relay's maximum: lower the effort in Options › Models, or ask for a smaller step. Taking that step again once, with less to do.
+  status: Output limit reached with nothing produced · retrying once
+  -> request 2: max_tokens=32768 messages=3
+  delta: Done: shell #0a6b8a, agent #7c3aed.
+  done: ""
+  provider calls: 2
+  usage counted: {"prompt_tokens": 48000, "completion_tokens": 32768, "total_tokens": 80768, "requests": 1}
+  requests still open: 0
+  message user/prompt: in the light theme, the terminal and agent colors are too dark
+  message user/note: [Relay note: your previous response reached the 32768-token output limit before it produced any answer text or tool call, so none of it was kept and n
+  message assistant: Done: shell #0a6b8a, agent #7c3aed.
+
+== twice ==
+  -> request 1: max_tokens=32768 messages=2
+  usage: {"prompt_tokens": 48000, "completion_tokens": 32768, "total_tokens": 80768}
+  provider_retry: The model used its whole 32768-token output budget on one step without finishing, so nothing of it was used; reasoning counts towards that budget. The output token limit is already at Relay's maximum: lower the effort in Options › Models, or ask for a smaller step. Taking that step again once, with less to do.
+  status: Output limit reached with nothing produced · retrying once
+  -> request 2: max_tokens=32768 messages=3
+  usage: {"prompt_tokens": 48000, "completion_tokens": 32768, "total_tokens": 80768}
+  error: The model used its whole 32768-token output budget on one step without finishing, so nothing of it was used; reasoning counts towards that budget. The output token limit is already at Relay's maximum: lower the effort in Options › Models, or ask for a smaller step.
+  provider calls: 2
+  usage counted: {"prompt_tokens": 96000, "completion_tokens": 65536, "total_tokens": 161536, "requests": 2}
+  requests still open: 1
+  message user/prompt: in the light theme, the terminal and agent colors are too dark
+  message user/note: [Relay note: your previous response reached the 32768-token output limit before it produced any answer text or tool call, so none of it was kept and n
+  message user/note: [Relay note: the turn above was failed (The model used its whole 32768-token output budget on one step without finishing, so nothing of it was used; r
+
+== partial ==
+  -> request 1: max_tokens=32768 messages=2
+  delta: The cyan reads dark because 
+  usage: {"prompt_tokens": 48000, "completion_tokens": 32768, "total_tokens": 80768}
+  error: The model used its whole 32768-token output budget on one step without finishing, so nothing of it was used; reasoning counts towards that budget. The output token limit is already at Relay's maximum: lower the effort in Options › Models, or ask for a smaller step.
+  provider calls: 1
+  usage counted: {"prompt_tokens": 48000, "completion_tokens": 32768, "total_tokens": 80768, "requests": 1}
+  requests still open: 1
+  message user/prompt: in the light theme, the terminal and agent colors are too dark
+  message assistant: The cyan reads dark because 
+  message user/note: [Relay note: the turn above was failed (The model used its whole 32768-token output budget on one step without finishing, so nothing of it was used; r
+

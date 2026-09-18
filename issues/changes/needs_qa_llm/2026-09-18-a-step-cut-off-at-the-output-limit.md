@@ -12,7 +12,7 @@ created: '2026-09-18'
 labels: [bug]
 acceptance: 'a model call that reaches the output limit having produced nothing is taken again once with a note instead of failing the turn; a cut-off answer that did reach the user is kept in the conversation; the tokens a cut-off call spent are counted; the failure message names the real budget and does not tell the user to raise a limit that is already at its maximum'
 source: 'owner, 2026-09-18: session 270a38a3c36d4201b452f2206d5861b6, "Response was truncated or filtered; partial tools were not executed. Increase output limit or narrow the task."'
-links: {plans: [], commits: [], evidence: [], related: [27YQ, SQAM], github: null}
+links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-a-step-cut-off-at-the-output-limit/'], related: [27YQ, SQAM], github: null}
 ---
 # A step cut off at the output limit threw the whole turn away
 
