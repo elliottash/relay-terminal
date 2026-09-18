@@ -306,6 +306,14 @@ class LiveThreadTests(Home):
         self.assertEqual(info["owner_session"], agent.session_id)
         self.assertTrue(info["owner_exists"])
         self.assertEqual(info["history"][0]["role"], "user")
+        # `done` goes out before the autosave writes the session file; the ⓘ pane asks at `done`.
+        # Force that gap: the pane's own live session still counts as existing (it was flaky).
+        for name in (f"{agent.session_id}.json", f"{agent.session_id}.meta.json"):
+            (self.dir / name).unlink(missing_ok=True)
+        commands.handle("session_info", {"id": "i3", "thread_id": thread_id})
+        self.assertTrue(self.rec.of("session_info")[-1]["owner_exists"])
+        commands.handle("session_info", {"id": "i4"})
+        self.assertTrue(self.rec.of("session_info")[-1]["file_exists"])
         self.assertEqual(info["history"][-1]["role"], "assistant")
 
 

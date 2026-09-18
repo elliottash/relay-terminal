@@ -951,6 +951,10 @@ class SessionCommands:
         # Threads this worker is still running are saved at start and at each run's end; the live
         # rows here keep their status current without writing the files again.
         event = self._session_fields(agent.store, data)
+        # The turn's `done` goes out before the agent's autosave writes the file (Agent.ask's
+        # `finally`), and the ⓘ pane refreshes on `done`: a session with turns is saved or about to
+        # be, so it is not "not saved yet" in that gap.
+        event["file_exists"] = event["file_exists"] or agent.turns > 0
         live = {row.get("thread_id"): row for row in (self.subagents.list() if self.subagents else [])}
         for turn in event["history"]:
             for thread in turn["threads"]:
@@ -966,6 +970,13 @@ class SessionCommands:
                       "instructions_bytes": len(agent.instructions.section.encode("utf-8")) if agent.instructions else 0,
                       "git_branch": session_files.git_branch(event["workspace"]) if event["workspace"] else ""})
         return event
+
+    def _is_live_session(self, store: SessionStore, session_id: str) -> bool:
+        """The session this pane's agent holds, in this directory: it exists even in the moment
+        between a turn's `done` and the autosave that writes its file."""
+        agent = self.turns.agent
+        return (agent is not None and agent.session_id == session_id and agent.store is not None
+                and agent.store.directory == store.directory)
 
     def _saved_session_info(self, store: SessionStore, data: dict) -> dict:
         event = self._session_fields(store, data)
@@ -1003,7 +1014,7 @@ class SessionCommands:
         summary = session_files.thread_summary(data)
         return {"event": "session_info", "kind": "thread", "thread_id": thread_id, **{k: v for k, v in summary.items() if k != "id"},
                 "session_dir": str(store.directory), "file": path, "owner_title": owner_title,
-                "owner_exists": bool(owner_id) and store.path(owner_id).is_file(),
+                "owner_exists": bool(owner_id) and (store.path(owner_id).is_file() or self._is_live_session(store, owner_id)),
                 "parent_title": parent_title, "task": str(data.get("task") or "")[:4000],
                 "effort": data.get("effort"), "tools": data.get("tools"),
                 # Still known to this worker: the pane's subagents pane can show it.
