@@ -1,0 +1,32 @@
+test_an_image_is_estimated_as_a_constant_not_as_its_base64_length (tests.test_images.ContentPartTests.test_an_image_is_estimated_as_a_constant_not_as_its_base64_length) ... ok
+test_an_unsupported_type_and_an_oversized_image_are_refused (tests.test_images.ContentPartTests.test_an_unsupported_type_and_an_oversized_image_are_refused) ... ok
+test_relay_bookkeeping_keys_never_reach_the_wire (tests.test_images.ContentPartTests.test_relay_bookkeeping_keys_never_reach_the_wire) ... ok
+test_the_text_comes_first_and_the_image_is_a_base64_data_url (tests.test_images.ContentPartTests.test_the_text_comes_first_and_the_image_is_a_base64_data_url) ... ok
+test_too_many_or_too_large_a_batch_is_refused (tests.test_images.ContentPartTests.test_too_many_or_too_large_a_batch_is_refused) ... ok
+test_a_non_image_binary_is_still_refused (tests.test_images.ImageFileTests.test_a_non_image_binary_is_still_refused) ... ok
+test_a_text_attachment_still_loads_as_text (tests.test_images.ImageFileTests.test_a_text_attachment_still_loads_as_text) ... ok
+test_an_image_attachment_is_loaded_as_bytes_with_its_media_type (tests.test_images.ImageFileTests.test_an_image_attachment_is_loaded_as_bytes_with_its_media_type) ... ok
+test_an_image_never_appears_as_text_in_the_prompt (tests.test_images.ImageFileTests.test_an_image_never_appears_as_text_in_the_prompt) ... ok
+test_an_image_over_the_cap_is_refused_with_a_message (tests.test_images.ImageFileTests.test_an_image_over_the_cap_is_refused_with_a_message) ... ok
+test_the_type_comes_from_the_bytes_not_the_file_name (tests.test_images.ImageFileTests.test_the_type_comes_from_the_bytes_not_the_file_name) ... ok
+test_a_configured_vision_model_takes_the_image_turn (tests.test_images.ImageTurnTests.test_a_configured_vision_model_takes_the_image_turn) ... ok
+test_a_preset_without_vision_and_no_vision_model_refuses_with_a_message (tests.test_images.ImageTurnTests.test_a_preset_without_vision_and_no_vision_model_refuses_with_a_message) ... ok
+test_a_refused_image_turn_leaves_no_image_in_the_conversation (tests.test_images.ImageTurnTests.test_a_refused_image_turn_leaves_no_image_in_the_conversation) ... ok
+test_a_second_turn_no_longer_carries_the_first_turns_image (tests.test_images.ImageTurnTests.test_a_second_turn_no_longer_carries_the_first_turns_image) ... ok
+test_a_vision_model_the_user_picked_wins_over_a_vision_capable_main_model (tests.test_images.ImageTurnTests.test_a_vision_model_the_user_picked_wins_over_a_vision_capable_main_model) ... ok
+test_an_image_reaches_a_vision_capable_model_as_a_content_part (tests.test_images.ImageTurnTests.test_an_image_reaches_a_vision_capable_model_as_a_content_part) ... ok
+test_glm_swaps_to_glm_53_flash_for_an_image_turn_and_says_so (tests.test_images.ImageTurnTests.test_glm_swaps_to_glm_53_flash_for_an_image_turn_and_says_so) ... ok
+test_the_image_is_replaced_by_a_description_and_its_path_after_the_turn (tests.test_images.ImageTurnTests.test_the_image_is_replaced_by_a_description_and_its_path_after_the_turn) ... ok
+test_the_image_is_still_there_while_its_own_turn_runs (tests.test_images.ImageTurnTests.test_the_image_is_still_there_while_its_own_turn_runs) ... ok
+test_the_main_model_comes_back_even_when_the_image_turn_fails (tests.test_images.ImageTurnTests.test_the_main_model_comes_back_even_when_the_image_turn_fails) ... ok
+test_the_turn_after_an_image_is_back_on_the_main_model (tests.test_images.ImageTurnTests.test_the_turn_after_an_image_is_back_on_the_main_model) ... ok
+test_a_pinned_vision_model_wins_over_the_provider_default (tests.test_images.VisionCapabilityTests.test_a_pinned_vision_model_wins_over_the_provider_default) ... ok
+test_glm_53_is_text_only_and_glm_53_flash_reads_images (tests.test_images.VisionCapabilityTests.test_glm_53_is_text_only_and_glm_53_flash_reads_images) ... ok
+test_openrouter_style_slugs_match_on_their_last_segment (tests.test_images.VisionCapabilityTests.test_openrouter_style_slugs_match_on_their_last_segment) ... ok
+test_presets_report_their_image_support (tests.test_images.VisionCapabilityTests.test_presets_report_their_image_support) ... ok
+test_the_vision_role_defaults_to_glm_flash_on_glm_and_to_nothing_elsewhere (tests.test_images.VisionCapabilityTests.test_the_vision_role_defaults_to_glm_flash_on_glm_and_to_nothing_elsewhere) ... ok
+
+----------------------------------------------------------------------
+Ran 27 tests in 0.012s
+
+OK

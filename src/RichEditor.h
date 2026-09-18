@@ -11,6 +11,10 @@ public:
     explicit RichEditor(QWidget *parent = nullptr);
     // Destination: "auto", "shell", or "agent". Submission never executes here.
     std::function<void(const QString &)> onSubmit;
+    // Image context (issue EM1E): a paste or a drop carrying a picture becomes `@path` tokens
+    // instead of text. The pane supplies this, because it knows where a pasted image is written and
+    // it shows the shortcut hint; an empty result means "no image here" and the text path runs.
+    std::function<QStringList(const QMimeData *, bool dropped)> onImageMime;
     void remember(const QString &text);
     const QStringList &history() const { return m_history; }
     // True unless Up/Down is browsing history (Down on the last line then has nothing to do).
@@ -34,7 +38,12 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
     void inputMethodEvent(QInputMethodEvent *event) override;
     void insertFromMimeData(const QMimeData *source) override;
+    bool canInsertFromMimeData(const QMimeData *source) const override;
+    void dropEvent(QDropEvent *event) override;
 private:
+    // Inserts `@path` tokens for attached images, separated from whatever is already typed.
+    void insertAttachments(const QStringList &tokens);
+    bool m_dropping = false;
     QStringList m_history;
     QString m_draft;
     int m_historyIndex = 0;

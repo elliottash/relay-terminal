@@ -22,6 +22,7 @@
 #include "TerminalBackend.h"
 #include "WindowState.h"   // saved window layout ("reopen where I left off")
 #include "Voice.h"          // voice transcription: capture, the hold key, the transcript
+#include "Images.h"         // image context: paste, drop, `@path` and "Screenshot this pane"
 #include <iterator>
 #include <QAction>
 #include <QApplication>
@@ -366,6 +367,10 @@ private:
         add("agent.continue", "agent", "Continue the agent turn after a step limit (/continue)", {});
         add("agent.instructions", "agent", "Choose agent instruction files", {});
         add("agent.export", "agent", "Export the conversation as Markdown", {});
+        // Image context: G for grab. Ctrl+Shift so it still works while a program owns the terminal,
+        // which is exactly when a picture of the pane is worth sending (issue EM1E).
+        add("agent.screenshotPane", "agent", "Screenshot this pane and attach it to the next prompt",
+            {QStringLiteral("Ctrl+Shift+G")});
         add("help.shortcuts", "palette", "Show all keyboard shortcuts", {QStringLiteral("Ctrl+?"), QStringLiteral("F1")});
         add("keybindings.edit", "terminal", "Edit keyboard shortcuts", {});
         add("keybindings.reload", "terminal", "Reload keyboard shortcuts", {});
@@ -601,6 +606,10 @@ public:
         m_programPoll.setInterval(250);
         connect(&m_programPoll, &QTimer::timeout, this, [this] { pollProgram(); });
         m_editor->onSubmit = [this](const QString &destination) { requestRoute(true, destination); };
+        // Image context (issue EM1E): a picture pasted or dropped into the prompt box is attached.
+        m_editor->onImageMime = [this](const QMimeData *data, bool dropped) {
+            return attachImages(data, dropped);
+        };
         qApp->installEventFilter(this);
         QTimer::singleShot(5000, this, [this] {
             if (!m_seenShell && m_backend) {
@@ -734,8 +743,11 @@ public:
         status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
     }
     void selectModel(const QString &id) {
-        // "role:" is the pane's own role chip entry, "gear:" the model options modal.
-        if (id.startsWith(QStringLiteral("role:")) || id.startsWith(QStringLiteral("gear:"))) return;
+        // "role:" is the pane's own role chip entry, "gear:" the model options modal, and
+        // "vision:" the model this one turn is running on because it carries an image: all three
+        // are labels, not models to switch to.
+        if (id.startsWith(QStringLiteral("role:")) || id.startsWith(QStringLiteral("gear:"))
+            || id.startsWith(QStringLiteral("vision:"))) return;
         // Picking a model from the chip puts the pane back on the main agent (protocol 13).
         if (m_agentRole != QStringLiteral("main")) { setAgentRole(QStringLiteral("main")); if (id == m_currentPreset) return; }
         if (id.isEmpty() || id == m_currentPreset) return;
@@ -3780,6 +3792,21 @@ private:
                     .arg(size),
                     code == 0 ? Ink::Note : Ink::Error);
             } else printInline(QStringLiteral("✓ ") + event.value(QStringLiteral("tool")).toString() + size + '\n', Ink::Note);
+        } else if (type == QStringLiteral("vision_route")) {
+            // Image context (protocol 17): this turn runs on another model because the pane's own
+            // cannot read images. Said plainly, because the answer comes from a different model.
+            ensureLineStart();
+            printInline(QStringLiteral("🖼 ") + event.value(QStringLiteral("text")).toString() + '\n', Ink::Note);
+            m_visionModel = event.value(QStringLiteral("model")).toString();
+            refreshPickers();
+        } else if (type == QStringLiteral("vision_route_ended")) {
+            m_visionModel.clear();
+            refreshPickers();
+        } else if (type == QStringLiteral("vision_unavailable")) {
+            // Refused, not failed: the `error` that follows carries the same text, so only the
+            // "what to do about it" line is added here.
+            ensureLineStart();
+            printInline(QStringLiteral("🖼 No vision model · Settings › Models › Vision model\n"), Ink::Error);
         } else if (type == QStringLiteral("provider_retry")) {
             // The model went silent; the worker is retrying this turn once. Say so in the transcript.
             ensureLineStart();
@@ -4322,7 +4349,10 @@ private:
         const bool notable = type == QStringLiteral("agent_started") || type == QStringLiteral("agent_finished")
                           || type == QStringLiteral("error") || type == QStringLiteral("provider_retry")
                           || type == QStringLiteral("configured") || type == QStringLiteral("turn_summary")
-                          || type == QStringLiteral("ready");
+                          || type == QStringLiteral("ready")
+                          // A turn served by another model is worth a line: the answer did not come
+                          // from the pane's own model (image context).
+                          || type == QStringLiteral("vision_route") || type == QStringLiteral("vision_unavailable");
         QString line = QStringLiteral("event type=%1 pane=%2").arg(type, paneLogId());
         for (const char *field : {"turn_id", "outcome", "stop_reason", "tool", "model", "reason", "attempt"}) {
             const QJsonValue value = event.value(QLatin1String(field));
@@ -4398,7 +4428,16 @@ private:
             m_modelBox->setCurrentIndex(0);
             m_modelBox->setEnabled(true);
         }
-        m_modelBox->setToolTip(modelTooltip());
+        // Image context (protocol 17): while a turn with an image runs on another model, the chip
+        // says which one, so an answer never seems to come from the pane's own model.
+        if (!m_visionModel.isEmpty()) {
+            m_modelBox->insertItem(0, QStringLiteral("🖼 %1 · this turn").arg(m_visionModel),
+                                   QStringLiteral("vision:") + m_visionModel);
+            m_modelBox->setCurrentIndex(0);
+        }
+        m_modelBox->setToolTip(modelTooltip(m_visionModel.isEmpty()
+            ? QString()
+            : QStringLiteral("This turn carries an image, so it runs on %1 and then goes back.").arg(m_visionModel)));
     }
 
     // "glm-5.3", not "Z.AI · GLM-5.3 · Coding Plan": the model id from the worker's preset list,
@@ -5266,6 +5305,79 @@ private:
         return info.exists() ? info.absoluteFilePath() : QString();
     }
 
+    // ----- image context (issue EM1E) --------------------------------------------------------
+    //
+    // Four ways in, one path out: paste, drop, `@path` and "Screenshot this pane" all end as an
+    // image file whose path sits in the composer as an `@` token, so the worker's attachment
+    // plumbing carries it and picks the model (docs/AGENT-SESSIONS-PROTOCOL.md section 17).
+
+    // Called by the composer for every paste and drop. Returns the `@` tokens to insert, or an
+    // empty list when there is no image, which lets the ordinary text paste run.
+    QStringList attachImages(const QMimeData *data, bool dropped) {
+        if (!relay::images::hasImage(data)) return {};
+        const QString dir = relay::images::cacheDir();
+        relay::images::pruneCache(dir, relay::images::kKeepDays, QDateTime::currentDateTime());
+        const QStringList paths = relay::images::fromMimeData(data, dir);
+        if (paths.isEmpty()) {
+            status(QStringLiteral("That image could not be attached (it may be larger than %1 MiB).")
+                       .arg(relay::images::kMaxImageBytes / (1024 * 1024)));
+            return {};
+        }
+        QStringList tokens, tooBig;
+        for (const QString &path : paths) {
+            if (QFileInfo(path).size() > relay::images::kMaxImageBytes) { tooBig << QFileInfo(path).fileName(); continue; }
+            tokens << relay::images::composerToken(path);
+        }
+        if (!tooBig.isEmpty())
+            status(QStringLiteral("Too large to send (over %1 MiB): %2")
+                       .arg(QString::number(relay::images::kMaxImageBytes / (1024 * 1024)),
+                            tooBig.join(QStringLiteral(", "))));
+        if (tokens.isEmpty()) return {};
+        noteImagesAttached(tokens.size(), dropped);
+        return tokens;
+    }
+
+    // Says what happened, and — per the standing shortcut-hints rule — teaches the faster path:
+    // dragging a file is the slow way to do what one paste does.
+    void noteImagesAttached(int count, bool dropped) {
+        status(count == 1 ? QStringLiteral("Image attached · it goes to the agent with your next prompt")
+                          : QStringLiteral("%1 images attached · they go to the agent with your next prompt").arg(count));
+        if (dropped) {
+            const QString paste = QKeySequence(QKeySequence::Paste).toString(QKeySequence::NativeText);
+            hint(QStringLiteral("images.drop"),
+                 relay::ShortcutHints::nextTime(paste, QStringLiteral("paste an image straight into the prompt box")));
+        }
+        focusInput();
+    }
+
+public:
+    // "Screenshot this pane": grabs this pane as it is drawn, writes a PNG and attaches it. The
+    // point is showing the agent what the terminal looks like, so the whole pane is captured.
+    // Run from the palette, the Actions list or its shortcut, so it is part of the pane's API.
+    void screenshotPane() {
+        const QString dir = relay::images::cacheDir();
+        relay::images::pruneCache(dir, relay::images::kKeepDays, QDateTime::currentDateTime());
+        const QPixmap shot = grab();
+        const QString path = relay::images::savePng(shot.toImage(),
+            relay::images::newCapturePath(dir, QStringLiteral("pane"), QDateTime::currentDateTime()));
+        if (path.isEmpty()) {
+            status(QStringLiteral("The pane screenshot could not be saved."));
+            return;
+        }
+        QTextCursor cursor = m_editor->textCursor();
+        cursor.movePosition(QTextCursor::End);
+        const QString before = m_editor->toPlainText();
+        const QString lead = (before.isEmpty() || before.endsWith(QLatin1Char(' '))
+                              || before.endsWith(QLatin1Char('\n'))) ? QString() : QStringLiteral(" ");
+        cursor.insertText(lead + relay::images::composerToken(path) + QLatin1Char(' '));
+        m_editor->setTextCursor(cursor);
+        // Reached from the palette, the palette's own shortcut hint follows this line (see
+        // RelayWindow::activateSelected), so Ctrl+Shift+G is what stays on screen.
+        status(QStringLiteral("Pane screenshot attached · describe what you want done with it"));
+        focusInput();
+    }
+
+private:
     // `@path` tokens that name existing files become attachments on agent prompts.
     QJsonArray attachmentsFor(const QString &text) const {
         QJsonArray attachments;
@@ -6056,6 +6168,8 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
     QString m_currentPreset;
     // model roles (protocol 13): this pane's role and the worker's last role table
     QString m_agentRole = QStringLiteral("main");
+    // The model this pane's current turn runs on because it carries an image, or empty (protocol 17).
+    QString m_visionModel;
     QJsonObject m_roleSummary, m_tierSummary, m_tierCatalog;
     QJsonArray m_roleActions;
     bool m_cleanShell = false, m_closing = false;
@@ -7231,6 +7345,7 @@ private:
         else if (id == QStringLiteral("agent.continue")) pane->continueTurn(Keymap::instance().shortcutText(id).isEmpty());
         else if (id == QStringLiteral("agent.instructions")) pane->openInstructions();
         else if (id == QStringLiteral("agent.export")) pane->exportConversation();
+        else if (id == QStringLiteral("agent.screenshotPane")) pane->screenshotPane();   // image context
         else if (id == QStringLiteral("agent.interrupt")) pane->interruptAgentWithPrompt();
         else if (id == QStringLiteral("agent.clearQueue")) pane->clearAgentQueue();
         else if (id == QStringLiteral("agent.resumeQueue")) pane->resumeAgentQueue();
@@ -7926,6 +8041,11 @@ private:
                             pane && pane->limitReached() ? QStringLiteral("The last turn stopped at its step limit · /continue")
                                                          : QStringLiteral("Send “Continue” to the agent · /continue"), QStringLiteral("agent.continue"));
         items << actionItem(agent, QStringLiteral("Export conversation"), QStringLiteral("Save the conversation as Markdown"), QStringLiteral("agent.export"));
+        // Image context: reaching this from the palette is the slow path, so the palette's own hint
+        // teaches its shortcut (issue EM1E).
+        items << actionItem(agent, QStringLiteral("Screenshot this pane"),
+                            QStringLiteral("Attach a picture of this pane to your next prompt"),
+                            QStringLiteral("agent.screenshotPane"));
         items << submenu(QStringLiteral("menu:settings"), agent, QStringLiteral("Settings"),
                          QStringLiteral("Models, keys, terminal, agent, privacy, shortcuts"),
                          [this] { return settingsMenuItems(); });
@@ -8309,12 +8429,14 @@ private:
             return;
         }
         if (openOnly || !item.run) return;
-        if (!item.shortcut.isEmpty())
-            hint(QStringLiteral("palette.") + item.key, relay::ShortcutHints::nextTime(item.shortcut, item.label.toLower()));
+        const QString hintId = QStringLiteral("palette.") + item.key;
+        const QString hintText = item.shortcut.isEmpty()
+            ? QString() : relay::ShortcutHints::nextTime(item.shortcut, item.label.toLower());
         QStringList recent = QSettings().value(QStringLiteral("palette/recent")).toStringList();
         recent.removeAll(item.key); recent.prepend(item.key);
         QSettings().setValue(QStringLiteral("palette/recent"), QStringList(recent.mid(0, 12)));
         if (item.stayOpen) {
+            hint(hintId, hintText);
             item.run();
             // Toggles stay open and show their new state.
             QTimer::singleShot(150, this, [this] {
@@ -8330,6 +8452,11 @@ private:
         const auto run = item.run;
         closePalette();
         QTimer::singleShot(0, this, run);
+        // The hint comes after the action, not before it: an action that says something itself
+        // ("Pane screenshot attached…") used to replace its own hint on the same toast, so the
+        // shortcut was never the thing left on screen.
+        if (!hintText.isEmpty())
+            QTimer::singleShot(400, this, [this, hintId, hintText] { hint(hintId, hintText); });
     }
 
     bool paletteKey(QKeyEvent *key) {

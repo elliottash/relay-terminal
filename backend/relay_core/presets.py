@@ -42,6 +42,32 @@ EFFORT_MAP: dict[str, dict[str, str]] = {
 # only offer ~262K; the openrouter preset here is DeepSeek, which is 1,048,576 on every endpoint).
 DEFAULT_CONTEXT_WINDOW = 128_000  # conservative fallback for unknown/custom models
 
+# --- image (vision) support -------------------------------------------------------------------
+# Which models can read images, by model-id prefix (issue EM1E, owner decision 2026-09-17). An
+# OpenRouter-style slug is matched on its last segment, so "google/gemini-3.8-flash" counts as Gemini.
+#
+# GLM-5.3 is text-only and Z.AI's image model is GLM-5.3-Flash; that is exactly why a turn carrying
+# an image on GLM swaps to Flash for that turn and back afterwards (roles.VISION_DEFAULTS). Kimi's
+# coding models, MiniMax M3 and DeepSeek are text-only, so an image turn there needs a configured
+# vision model and is otherwise refused with a message instead of being sent and rejected.
+VISION_MODELS: tuple[str, ...] = (
+    "gpt-", "chatgpt-", "o3", "o4",                              # OpenAI: the GPT family reads images
+    "claude-",                                                   # Anthropic: Claude 3 and later
+    "gemini-",                                                   # Google: the Gemini family
+    "glm-5.3-flash", "glm-4.5v", "glm-4.6v", "glm-5v",           # Z.AI: the Flash and V models
+    "qwen-vl", "qwen2-vl", "qwen3-vl", "pixtral", "llava", "minimax-vl",
+    "kimi-latest", "moonshot-v1-8k-vision", "moonshot-v1-32k-vision", "moonshot-v1-128k-vision",
+)
+
+
+def model_supports_vision(model) -> bool:
+    """Whether a model id names a model that can read images. Unknown ids count as text-only."""
+    if not isinstance(model, str):
+        return False
+    name = model.strip().lower().rsplit("/", 1)[-1]
+    return bool(name) and any(name.startswith(prefix) for prefix in VISION_MODELS)
+
+
 # Keys-modal grouping (GUI only; the backend never treats groups differently).
 GROUPS = ("subscription", "aggregator", "payg")
 GROUP_LABELS = {"subscription": "Subscriptions", "aggregator": "Aggregator",
@@ -61,11 +87,16 @@ class Preset:
     key_url: str = ""          # where the user gets a key; shown as a hint, never fetched
     note: str = ""             # one line under the row in the keys modal
 
+    @property
+    def vision(self) -> bool:
+        """Whether this preset's default model can read images. Derived, so it cannot drift."""
+        return model_supports_vision(self.model)
+
     def to_dict(self) -> dict:
         return {"id": self.id, "label": self.label, "base_url": self.base_url,
                 "model": self.model, "extra": dict(self.extra), "context_window": self.context_window,
                 "efforts": distinct_efforts(self.effort_style), "group": self.group,
-                "key_url": self.key_url, "note": self.note}
+                "key_url": self.key_url, "note": self.note, "vision": self.vision}
 
 
 GLM_EXTRA = {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}

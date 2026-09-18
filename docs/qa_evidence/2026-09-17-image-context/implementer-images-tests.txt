@@ -1,0 +1,36 @@
+********* Start testing of ImagesTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : ImagesTests::initTestCase()
+PASS   : ImagesTests::sniffsTheTypeFromTheBytes()
+PASS   : ImagesTests::aMislabelledFileIsJudgedByItsContent()
+PASS   : ImagesTests::composerTokensQuoteAPathWithSpaces()
+PASS   : ImagesTests::captureNamesAreStampedAndNeverCollide()
+PASS   : ImagesTests::savingWritesARealPngAndRefusesAnEmptyImage()
+PASS   : ImagesTests::aDroppedImageFileIsAttachedWhereItIs()
+PASS   : ImagesTests::aDroppedNonImageIsNotAnImage()
+PASS   : ImagesTests::pastedImageDataIsWrittenIntoTheCacheFolder()
+PASS   : ImagesTests::plainTextIsNotAnImage()
+PASS   : ImagesTests::theCacheSweepOnlyTakesOldRelayCaptures()
+PASS   : ImagesTests::theCapMatchesTheWorker()
+PASS   : ImagesTests::cleanupTestCase()
+Totals: 13 passed, 0 failed, 0 skipped, 0 blacklisted, 31ms
+********* Finished testing of ImagesTests *********
+********* Start testing of EditorTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : EditorTests::initTestCase()
+PASS   : EditorTests::nativeSelectionAndUndo()
+PASS   : EditorTests::submissionAndMultiline()
+PASS   : EditorTests::keypadEnterMatchesReturn()
+PASS   : EditorTests::shiftClickSelection()
+PASS   : EditorTests::mouseDragSelection()
+PASS   : EditorTests::pasteNeverSubmits()
+PASS   : EditorTests::imeDoesNotPrematurelySubmit()
+PASS   : EditorTests::historyPreservesDraft()
+PASS   : EditorTests::ghostTextAcceptsWholeOrWord()
+PASS   : EditorTests::pastedImagesBecomeAttachmentTokens()
+PASS   : EditorTests::aPasteWithoutAnImageStillPastesText()
+PASS   : EditorTests::attachmentTokensNeedNoSpaceAfterABlankBox()
+PASS   : EditorTests::upInsideMultilineTextMovesCursor()
+PASS   : EditorTests::cleanupTestCase()
+Totals: 15 passed, 0 failed, 0 skipped, 0 blacklisted, 136ms
+********* Finished testing of EditorTests *********

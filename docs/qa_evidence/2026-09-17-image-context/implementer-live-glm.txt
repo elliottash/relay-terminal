@@ -1,0 +1,81 @@
+Live check against the provider, 2026-09-17
+===========================================
+
+Faithful copy of two runs against the user's real keys. The key itself is never printed; the one
+place the script echoed its length has been replaced with "<from keyring, not shown>". Nothing else
+is edited.
+
+Run A — Z.AI Coding Plan (glm-coding), the swap to GLM-5.3-Flash and back
+------------------------------------------------------------------------
+Driver: a throwaway script that builds a 64x64 red PNG, asks one question about it, then asks a
+text-only follow-up. Two model calls in total.
+
+    preset=glm-coding base_url=https://api.z.ai/api/coding/paas/v4 model=glm-5.3 key=<from keyring, not shown>
+    image=/tmp/tmpnjoxq8y2/red-square.png bytes=178 type=image/png
+
+    --- turn 1: prompt with an image ---
+      [vision_route] {"event": "vision_route", "turn_id": "t9742ac42-1", "model": "glm-5.3-flash",
+                      "from_model": "glm-5.3", "preset": "glm-coding",
+                      "base_url": "https://api.z.ai/api/coding/paas/v4", "source": "default",
+                      "images": 1, "scope": "turn",
+                      "text": "Image in this prompt · this turn runs on glm-5.3-flash, then back to glm-5.3."}
+      [status] {"event": "status", "text": "Image turn · glm-5.3-flash"}
+      [status] {"event": "status", "text": "Requesting model · step 1/50"}
+      [status] {"event": "status", "text": "Model is reasoning…"}
+      [usage] {"event": "usage", "usage": {"prompt_tokens": 704, "completion_tokens": 47,
+               "total_tokens": 751, "prompt_tokens_details": {"cached_tokens": 0},
+               "completion_tokens_details": {"reasoning_tokens": 44}}}
+      [vision_route_ended] {"event": "vision_route_ended", "turn_id": "t9742ac42-1",
+                            "model": "glm-5.3", "was": "glm-5.3-flash", "text": "Back to glm-5.3."}
+      [done] {"event": "done", "turn_id": "t9742ac42-1"}
+    assistant: Red
+
+    --- history after the turn ---
+    prompt content is str
+    tail: what colour fills this image?
+    [Image attached earlier in this conversation and since removed from it:
+     /tmp/tmpnjoxq8y2/red-square.png (image/png, 178 bytes). The picture was shown to the model for
+     that turn only; attach the path again to look at it once more.]
+
+    --- turn 2: text only, must be back on the main model ---
+      [status] {"event": "status", "text": "Requesting model · step 1/50"}
+      [status] {"event": "status", "text": "Model is reasoning…"}
+      [usage] {"event": "usage", "usage": {"prompt_tokens": 802, "completion_tokens": 24,
+               "total_tokens": 826, "prompt_tokens_details": {"cached_tokens": 0},
+               "completion_tokens_details": {"reasoning_tokens": 21}}}
+      [done] {"event": "done", "turn_id": "t9742ac42-2"}
+    assistant: Red
+    provider model now: glm-5.3
+
+    --- event order ---
+    vision_route -> vision_route_ended -> done -> done
+
+What this proves: the turn carrying the image was served by **glm-5.3-flash** and answered it
+correctly from the picture ("Red"); `vision_route_ended` came before `done`; the next turn was back
+on **glm-5.3**; and the image had already left the conversation, replaced by its description and
+path, before that second request was built (its prompt_tokens are text-sized).
+
+Run B — OpenRouter (deepseek/deepseek-v4.1-flash), the refusal
+--------------------------------------------------------------
+The stored openrouter key is present, so this is the real preset; the point is that **no request is
+made at all**.
+
+    preset=openrouter model=deepseek/deepseek-v4.1-flash key=<from keyring, not shown> vision=False
+      [vision_unavailable] {"event": "vision_unavailable", "turn_id": "t5c63f3b5-1",
+                            "model": "deepseek/deepseek-v4.1-flash", "images": 1,
+                            "text": "deepseek/deepseek-v4.1-flash cannot read images and no vision
+                             model is set. Choose one under Settings > Models > Vision model, or
+                             switch this pane to a model that reads images. Nothing was sent to the
+                             provider."}
+      [error] {"event": "error", "turn_id": "t5c63f3b5-1", "text": "<the same text>"}
+
+What this proves: a preset without vision and with no vision model configured refuses the turn with
+a message naming what to do, before anything is sent.
+
+Not verified live
+-----------------
+- The **configured vision model** path on a real endpoint (main without vision, `roles/vision`
+  pinned elsewhere). It has unit coverage (`tests/test_images.py`) but no live run: the two presets
+  with keys that would exercise it are the same two used above.
+- Any provider other than Z.AI and OpenRouter. Only `glm-coding`, `kimi` and `openrouter` have keys
+  on this machine.
