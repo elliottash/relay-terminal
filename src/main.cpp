@@ -6,6 +6,7 @@
 #include "BoardWorker.h"        // the per-window Switchboard worker (protocol 17)
 #include "AgentUi.h"
 #include "Completion.h"
+#include "FileIndex.h"             // the `@` picker's file listing, built without blocking
 #include "ShellHighlighter.h"
 #include "Hints.h"
 #include "Notifications.h"        // window header: the bell and its list
@@ -7115,43 +7116,13 @@ private:
             || mime.name() == QStringLiteral("application/pdf") || mime.inherits(QStringLiteral("application/json"));
     }
 
+    // The listing itself lives in relay::FileIndex, which runs git without blocking the window
+    // (it used to freeze for seconds on the first `@` in a large repository). Results arrive
+    // later, so the popup is rebuilt from here whenever they do.
     void refreshFileIndex() {
-        if (m_fileIndexCwd == m_cwd && m_fileIndexAge.isValid() && m_fileIndexAge.elapsed() < 15000) return;
-        m_fileIndexCwd = m_cwd; m_fileIndexAge.start();
-        m_fileIndex.clear(); m_changedFiles.clear();
-        auto git = [this](const QStringList &args, int timeout) {
-            QProcess process;
-            process.setWorkingDirectory(m_cwd);
-            process.start(QStringLiteral("git"), args);
-            if (!process.waitForFinished(timeout) || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
-                process.kill(); process.waitForFinished(200);
-                return QByteArray();
-            }
-            return process.readAllStandardOutput();
-        };
-        const QString root = QString::fromUtf8(git({QStringLiteral("rev-parse"), QStringLiteral("--show-toplevel")}, 1000)).trimmed();
-        if (!root.isEmpty()) {
-            // Tracked plus untracked-but-not-ignored files, relative to the repository root.
-            const QList<QByteArray> files = git({QStringLiteral("-C"), root, QStringLiteral("ls-files"), QStringLiteral("--cached"), QStringLiteral("--others"),
-                                                 QStringLiteral("--exclude-standard"), QStringLiteral("-z")}, 2500).split('\0');
-            for (const QByteArray &file : files) {
-                if (file.isEmpty()) continue;
-                m_fileIndex.append(QDir(root).filePath(QString::fromUtf8(file)));
-                if (m_fileIndex.size() >= 20000) break;
-            }
-            const QList<QByteArray> status = git({QStringLiteral("-C"), root, QStringLiteral("status"), QStringLiteral("--porcelain"), QStringLiteral("-z")}, 1500).split('\0');
-            for (const QByteArray &entry : status)
-                if (entry.size() > 3) m_changedFiles.insert(QDir(root).filePath(QString::fromUtf8(entry.mid(3))));
-            return;
-        }
-        // Not a repository: a bounded walk that skips hidden and dependency folders.
-        QDirIterator it(m_cwd, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-        while (it.hasNext() && m_fileIndex.size() < 5000) {
-            const QString path = it.next();
-            const QString rel = QDir(m_cwd).relativeFilePath(path);
-            if (rel.startsWith('.') || rel.contains(QStringLiteral("/.")) || rel.contains(QStringLiteral("node_modules/"))) continue;
-            m_fileIndex.append(path);
-        }
+        if (!m_fileIndex.updated)
+            m_fileIndex.updated = [this] { if (m_atList && m_atList->isVisible()) updateAtPopup(); };
+        m_fileIndex.refresh(m_cwd);
     }
 
     QString composerPath(const QString &absolute) const {
@@ -7171,14 +7142,14 @@ private:
         refreshFileIndex();
         struct Ranked { int score; QString path; };
         QList<Ranked> ranked;
-        for (const QString &path : std::as_const(m_fileIndex)) {
+        for (const QString &path : m_fileIndex.files()) {
             const QString rel = QDir(m_cwd).relativeFilePath(path);
             const QString name = QFileInfo(path).fileName();
             int score = 0;
             if (query.isEmpty()) {
                 score = 1;
                 if (m_recentFiles.contains(path)) score += 100000 - m_recentFiles.indexOf(path);
-                if (m_changedFiles.contains(path)) score += 50000;
+                if (m_fileIndex.changedFiles().contains(path)) score += 50000;
             } else {
                 const int nameHit = relayFuzzyScore(query, name), pathHit = relayFuzzyScore(query, rel);
                 if (!nameHit && !pathHit) continue;
@@ -7189,7 +7160,10 @@ private:
             ranked.append({score, path});
         }
         std::stable_sort(ranked.begin(), ranked.end(), [](const Ranked &a, const Ranked &b) { return a.score > b.score; });
-        if (ranked.isEmpty()) { hideAtPopup(); return; }
+        // Nothing yet and nothing at all look the same in an empty popup, so while the first index
+        // of a directory is still being built the picker says so instead of disappearing.
+        const bool indexing = ranked.isEmpty() && m_fileIndex.isLoading();
+        if (ranked.isEmpty() && !indexing) { hideAtPopup(); return; }
         if (!m_atList) {
             m_atList = new QListWidget(this);
             m_atList->setObjectName(QStringLiteral("atPicker"));
@@ -7198,6 +7172,10 @@ private:
             connect(m_atList, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) { m_atList->setCurrentItem(item); acceptAtSelection(); });
         }
         m_atList->clear();
+        if (indexing) {
+            auto *item = new QListWidgetItem(QStringLiteral("Indexing files…"), m_atList);
+            item->setFlags(Qt::NoItemFlags);   // greyed out, and Enter cannot pick it
+        }
         for (int i = 0; i < std::min<int>(50, ranked.size()); ++i) {
             const QString rel = QDir(m_cwd).relativeFilePath(ranked[i].path);
             auto *item = new QListWidgetItem((previewable(ranked[i].path) ? QStringLiteral("◆  ") : QStringLiteral("◇  ")) + rel, m_atList);
@@ -8557,10 +8535,8 @@ private:
     bool m_cardIndexAsked = false;
     int m_cardDismissedAt = -1;
     int m_atDismissedAt = -1;
-    QStringList m_fileIndex, m_recentFiles, m_shellHistory;
-    QSet<QString> m_changedFiles;
-    QString m_fileIndexCwd;
-    QElapsedTimer m_fileIndexAge;
+    relay::FileIndex m_fileIndex;   // the `@` picker's listing; keeps its own cwd and freshness
+    QStringList m_recentFiles, m_shellHistory;
     QDateTime m_shellHistoryStamp;
     QList<QPair<QString, QString>> m_commandLog;   // command, directory
     // Conversation list and search (protocol 14) plus the terminal-history capture.

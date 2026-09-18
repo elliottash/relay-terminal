@@ -437,6 +437,17 @@ and switches the input mode to terminal or agent for one submission (`setPrefixM
 `prefixChip`); Backspace on the empty editor restores the previous mode. `/shell ` and `/agent `
 still work and trigger a shortcut hint.
 
+**The `@` file picker.** `@` after a space opens a fuzzy file picker over the pane's directory.
+Its index is `relay::FileIndex` (`src/FileIndex.*`, library `relay-fileindex`, tests
+`tests/fileindex_test.cpp`): tracked plus untracked-but-not-ignored files from `git ls-files`
+(capped at 20000), the changed set from `git status --porcelain`, and a bounded directory walk
+outside a repository. **It is asynchronous** — each step runs from QProcess signals with a timeout
+of its own, so `refresh()` returns at once and the popup fills in as answers arrive (it shows
+"Indexing files…" until the first ones do); typing `@` used to block the window for as long as five
+seconds in a large monorepo. An index is reused for 15 s, the previous results stay on screen while
+a new one is built, and changing directory mid-flight supersedes the refresh rather than letting a
+late answer overwrite it.
+
 **Slash commands.** A submission is offered to `tryRunSlashCommand` (the built-ins, listed in
 `Pane::slashCommands()`), then to `tryRunAliasSlash` (`/name`, issue G8DK), before the router sees
 anything. A `/command` that is neither is answered by Relay rather than by Bash
@@ -1454,6 +1465,7 @@ of the platform and of the engine itself.
 | `src/SettingsPane.*` | the Settings pane: search, sub-tabs, rows as controls, the Actions tab |
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `src/Conversations.*` | conversation list with search (`/conversations`) and the Ctrl+F find bar |
+| `src/FileIndex.*` | the `@` picker's file listing: the asynchronous git chain, the changed set, the non-git walk |
 | `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |
 | `src/RuntimeDirs.*` | the private `$TMPDIR/relay-XXXXXX` directories: the pid+starttime owner mark, and the startup sweep of the ones a crash left behind (section 2) |
 | `src/PaneTitles.*` | pane titles and the tab labels made from them: tidying a title, the offline "same work" rule, joining and shortening |

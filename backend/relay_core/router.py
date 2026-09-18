@@ -162,20 +162,11 @@ def _tokens(text: str) -> list[tuple[str, str]]:
     return result
 
 
-def _is_question_word(word: str) -> bool:
-    """"really?", "ready?!", "hmm?": a word with its question mark, not a glob. A `?` glob in
-    command position only runs when it happens to expand to a program name on PATH, while these
-    are the commonest one-word replies there are — they used to route to the shell as
-    "runnable" (card #W954)."""
-    bare = word.rstrip("?!.,")
-    return "?" in word[len(bare):] and bare.isalpha() and not any(ch in bare for ch in "*?[")
-
-
 def _resolve(word: str, known: set[str], path: str, cwd: str) -> str:
     """Return "" if the word can run as a command, else the reason it cannot."""
     if PLACEHOLDER in word or "$" in word:
         return ""  # Expanded at run time; cannot be judged statically.
-    if any(ch in word for ch in "*?[") and not _is_question_word(word):
+    if any(ch in word for ch in "*?["):
         # A glob in command position only runs by matching an executable file name, and names a
         # person means to run carry letters. A word with no letters at all — "35*30", "*",
         # "3?" — is arithmetic or a stray glob, never a command (owner report, 2026-09-18).
@@ -540,58 +531,6 @@ def _looks_mistyped(word: str, known: set[str], path: str) -> bool:
                if abs(len(name) - len(word)) <= 1 and name[:1] in {word[:1], word[1:2]})
 
 
-# Replies and sentence openers nobody types meaning a program. The typo test below cannot tell them
-# from slips — "ok" is one edit from `od`, "no" from `nl`, "cool" from `col`, "lets" from `let` —
-# and they are the commonest short lines there are (card #W954). "wait" is also a real command:
-# spelt right and alone it still runs; this only keeps the note quiet for "Wait" or "wait!".
-REPLY_WORDS = frozenset("""
-ok okay k kk yes yep yeah yea yup ya no nope nah sure cool good great fine nice perfect awesome
-thanks thx ty hi hey hello sorry right alright agreed lgtm hmm oh oops well go stop wait
-lets maybe also actually anyway btw
-""".split())
-# Commands that, typed alone, are a reply rather than an invocation: a lone `yes` prints "y" until
-# interrupted, a lone `nice` prints the niceness. Sent to the agent like LOOP_ONLY; with any argument
-# (`yes | rm -i *`, `nice -n 5 make`) they are shell again.
-LONE_REPLY = frozenset("yes nice".split())
-# Sentence punctuation that sticks to a word: "yeah,", "ok.", "wait...", "hmm…", "really?!".
-SENTENCE_TAIL = ",.:;?!…\"'”’)"
-DASHES = "—–"
-CONTRACTION = re.compile(r"(?<=[A-Za-z])['’](?=[A-Za-z])")
-
-
-def _contractions_only(text: str) -> bool:
-    """True when every quote in the line is an apostrophe inside a word — "don't", "let's",
-    "it's" — and nothing else in it is shell. Bash reads the lone apostrophe as an unterminated
-    string, but that syntax error is English, not a command (card #W954)."""
-    if not CONTRACTION.search(text):
-        return False
-    rest = CONTRACTION.sub("", text)
-    if "'" in rest or '"' in rest or "\n" in rest or SHELLISH.search(rest) or GLOBBISH.search(rest):
-        return False
-    return not any(w.startswith(("-", "+")) and w not in {"-", "--"} for w in rest.split()[1:])
-
-
-def _bare_word(word: str) -> tuple[str, bool]:
-    """The word without sentence punctuation stuck to it, and whether there was any.
-
-    "yeah," -> ("yeah", True); "yeah—do" -> ("yeah", True); "don’t" -> ("dont", True);
-    "“yeah”" -> ("yeah", True);
-    "kubectl2" -> ("kubectl2", False), which the caller still reads as a name."""
-    bare, punctuated = word, False
-    for dash in DASHES:
-        if dash in bare:
-            head, *tail = bare.split(dash)
-            if all(part.isalpha() or not part for part in tail):
-                bare, punctuated = head, True
-    stripped = bare.lstrip("“‘(").rstrip(SENTENCE_TAIL)
-    if stripped != bare:
-        bare, punctuated = stripped, True
-    joined = CONTRACTION.sub("", bare)
-    if joined != bare:
-        bare, punctuated = joined, True
-    return bare, punctuated
-
-
 def explain_invalid(text: str, reason: str, known: Iterable[str] = (), path: str | None = None) -> bool:
     """Whether the GUI should print `reason` under a line auto-routed to the agent.
 
@@ -600,51 +539,33 @@ def explain_invalid(text: str, reason: str, known: Iterable[str] = (), path: str
     slip away from a command that exists here. Everything else is language — a lone "resume", or a
     sentence whose first word happens not to be a program — and naming its first word reads as the
     failure of a command the user never ran (owner reports, 2026-09-18).
-
-    Sentence punctuation is language too (card #W954, "yeah, see if there is a clear issue…" got
-    "command not found: yeah,"): a comma, full stop, colon, question or exclamation mark, ellipsis,
-    closing quote or dash stuck to the first word, an apostrophe inside a word ("let's", "don't"),
-    and a capitalised first word ("Yeah", "Sure") are how people write, not how commands look.
     """
-    trimmed = text.strip()
-    if reason and _contractions_only(trimmed):
-        return False                            # "don't break the build": the quote is English
     prefix = "command not found: "
     if not reason.startswith(prefix):
         return bool(reason)                     # a syntax error is about a command either way
     word = reason[len(prefix):]
     if not any(ch.isalpha() for ch in word):
         return False                            # "35 * 30" -> "command not found: 35"
+    trimmed = text.strip()
     if "\n" in trimmed or SHELLISH.search(trimmed) or GLOBBISH.search(trimmed) or '"' in trimmed:
         return True
     try:
         words = shlex.split(trimmed, posix=True)
     except ValueError:
         return True
-    if any(a.startswith(("-", "+")) and a not in {"-", "--"} for a in words[1:]):
-        return True                             # flags are nobody's English; a lone dash is
-    bare, punctuated = _bare_word(word)
-    if not bare.isalpha():
+    if any(a.startswith(("-", "+")) for a in words[1:]):
+        return True                             # flags are nobody's English
+    if not word.isalpha() or not word.islower():
         return True                             # kubectl2, pip3, ./run.sh: a name, not a word
-    lowered = bare.lower()
-    if lowered in REPLY_WORDS or lowered in LOOP_ONLY:
-        return False                            # "ok", "Yes", "Continue", "nope."
     if len(words) > 1:
         # Short English words sit one edit from some command or other ("add" from "adb"), so a line
         # that reads as a sentence is not rescued by the typo test below.
-        if words[1].strip(SENTENCE_TAIL).lower() in SENTENCE_LEAD:
+        if words[1].strip("?.,!:").lower() in SENTENCE_LEAD:
             return False
-        operandish = any("/" in a or "~" in a or "." in a.strip(".,?!…") for a in words[1:])
+        operandish = any("/" in a or "~" in a or "." in a.strip(".,?!") for a in words[1:])
         if len(words) > 3 and not operandish:
             return False
-    if punctuated:
-        return False                            # "yeah,", "ok.", "wait... what": a sentence
-    known = set(known)
-    path = path or os.environ.get("PATH") or os.defpath
-    if lowered != bare and (lowered in known or lowered in BUILTINS or on_path(lowered, path)):
-        return True                             # "Docker ps", "Ls": a real command, capitalised
-    # "Gti status" is still a typo with a capital; "Yeah" and "Sounds good" are not near anything.
-    return _looks_mistyped(lowered, known, path)
+    return _looks_mistyped(word, set(known), path or os.environ.get("PATH") or os.defpath)
 
 
 def _first_word_reason(text: str, known: set[str], path: str, cwd: str) -> str:
@@ -738,10 +659,6 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
         # Nothing to explain under the line: the word is spelt correctly and no command was meant,
         # so a "command not found" note would read as the failure of something never run.
         return Decision("agent", text, f"“{trimmed}” means nothing outside a loop; sent to the agent",
-                        agent_signal=True, explain_invalid=False)
-    if trimmed in LONE_REPLY:
-        # A lone "yes" would print y until interrupted: at a prompt it is an answer, not a command.
-        return Decision("agent", text, f"“{trimmed}” on its own is a reply; sent to the agent",
                         agent_signal=True, explain_invalid=False)
     if NATURAL.match(trimmed):
         # A user-defined function named "explain" can still be a real command.

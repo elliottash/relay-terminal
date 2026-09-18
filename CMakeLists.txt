@@ -121,6 +121,13 @@ target_include_directories(relay-completion PUBLIC src)
 target_link_libraries(relay-completion PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-completion PRIVATE -Wall -Wextra -Wpedantic)
 
+# The `@` file picker's index: the git listing behind it, run asynchronously so typing `@` in a
+# large repository never blocks the window. Plain QtCore, driven from a test without a pane.
+add_library(relay-fileindex STATIC src/FileIndex.cpp src/FileIndex.h)
+target_include_directories(relay-fileindex PUBLIC src)
+target_link_libraries(relay-fileindex PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-fileindex PRIVATE -Wall -Wextra -Wpedantic)
+
 # Rotating diagnostics log (~/.local/share/relay/logs/relay.log). Plain QtCore so the rotation,
 # level and redaction rules can be tested without a window.
 add_library(relay-logging STATIC src/Logging.cpp src/Logging.h)
@@ -263,7 +270,7 @@ if(RELAY_BUILD_APP)
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
-    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-slash relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-slash relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -310,6 +317,9 @@ if(BUILD_TESTING)
     add_executable(relay-completion-tests tests/completion_test.cpp)
     target_link_libraries(relay-completion-tests PRIVATE relay-completion ${RELAY_QT}::Test)
     add_test(NAME completion COMMAND relay-completion-tests)
+    add_executable(relay-fileindex-tests tests/fileindex_test.cpp)
+    target_link_libraries(relay-fileindex-tests PRIVATE relay-fileindex ${RELAY_QT}::Test)
+    add_test(NAME fileindex COMMAND relay-fileindex-tests)
 
     add_executable(relay-requests-tests tests/requests_test.cpp)
     target_link_libraries(relay-requests-tests PRIVATE relay-requests ${RELAY_QT}::Test)
