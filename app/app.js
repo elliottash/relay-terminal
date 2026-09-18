@@ -16,6 +16,8 @@ let reconnectTimer = null;
 let capability = 'view';
 let features = [];
 let screenView = null;
+let historySeq = 0;
+let historyRequest = null;
 let tab = 'agent';
 let driving = false;
 let sticky = { ctrl: false, alt: false };
@@ -367,18 +369,49 @@ function openTerminal() {
   $('terminal-pane').hidden = !hasScreen;
   $('thread-body').hidden = hasScreen;
   if (!hasScreen) return;
-  if (!screenView) screenView = new ScreenView($('screen-wrap'));
+  ensureScreen();
   screenView.fit();
   updateDriveUi();
   rrp.send({ t: 'screen_get', pane: current }).catch(() => {});
 }
 
+// The view, with the two things only this file can give it: how to ask for a page of scrollback,
+// and where the "new output" affordance lives. A desktop that does not offer `history` simply
+// leaves the first one unset, and the view never asks.
+function ensureScreen() {
+  if (screenView) return screenView;
+  screenView = new ScreenView($('screen-wrap'));
+  screenView.onBehind = (behind) => { $('term-new-output').hidden = !behind; };
+  if (features.includes('history')) {
+    screenView.onNeedHistory = (beforeRow, count) => {
+      if (!current) { screenView.pending = false; return; }
+      historySeq += 1;
+      historyRequest = `h${historySeq}`;
+      const message = { t: 'history_get', pane: current, count, id: historyRequest };
+      if (beforeRow !== null) message.before_row = beforeRow;
+      rrp.send(message).catch(() => { screenView.pending = false; });
+    };
+  }
+  return screenView;
+}
+
 function onScreen(message) {
   if (message.pane !== current) return;
-  if (!screenView) screenView = new ScreenView($('screen-wrap'));
-  screenView.apply(message);
-  const wrap = $('screen-wrap');
-  wrap.scrollTop = wrap.scrollHeight;
+  ensureScreen().apply(message);
+}
+
+// A page of scrollback. Anything for another pane, or for a request we have stopped waiting on,
+// is dropped rather than painted above somebody else's screen.
+function onHistory(message) {
+  if (!screenView || message.pane !== current) return;
+  if (message.id && message.id !== historyRequest) return;
+  screenView.applyHistory(message);
+}
+
+// Typing belongs at the live end. Snapping first means a key never lands somewhere the person
+// cannot see it happen.
+function toLive() {
+  if (screenView) screenView.toLive();
 }
 
 // The masked field replaces the prompt box while the pane is at a password prompt and this
@@ -458,6 +491,7 @@ function onDirectKey(event) {
 
 function sendKeys(text) {
   if (!driving || !current) return;
+  toLive();
   const bytes = new TextEncoder().encode(text);
   rrp.send({ t: 'keys', pane: current, bytes: b64(bytes) })
     .catch((error) => { $('term-note').textContent = error.message; });
@@ -1040,6 +1074,7 @@ function sendPrompt() {
   const clear = () => { box.value = ''; box.style.height = 'auto'; };
 
   if (driving) {
+    toLive();
     rrp.send({ t: 'line', pane: current, text }).catch(fail);
     clear();
     return;
@@ -1067,6 +1102,7 @@ rrp.addEventListener('welcome', (event) => {
 
 rrp.addEventListener('screen_snapshot', (event) => onScreen(event.detail));
 rrp.addEventListener('screen_diff', (event) => onScreen(event.detail));
+rrp.addEventListener('history', (event) => onHistory(event.detail));
 
 rrp.addEventListener('authcode', (event) => {
   $('pair-code').textContent = event.detail.code;
@@ -1091,6 +1127,12 @@ rrp.addEventListener('agent', (event) => onAgent(event.detail));
 rrp.addEventListener('error', (event) => {
   const detail = event.detail || {};
   if (voiceRequest && detail.id === voiceRequest) { voiceFailed(detail.message); return; }
+  // A refused page must not leave the view waiting for one for ever; a later drag asks again.
+  if (screenView && detail.id && detail.id === historyRequest) {
+    screenView.pending = false;
+    screenView.more = false;
+    return;
+  }
   if (current) append(el('div', 'note error', detail.message || 'Refused.'));
 });
 
@@ -1183,12 +1225,16 @@ window.addEventListener('DOMContentLoaded', () => {
   $('term-capture').addEventListener('paste', (event) => {
     event.preventDefault();
     const text = event.clipboardData?.getData('text') || '';
-    if (text && current) rrp.send({ t: 'paste', pane: current, text }).catch(() => {});
+    if (text && current) {
+      toLive();
+      rrp.send({ t: 'paste', pane: current, text }).catch(() => {});
+    }
   });
   // Tapping the screen while typing directly puts the keyboard back where it belongs.
   $('screen-wrap').addEventListener('click', () => {
     if (driving && directKeys) $('term-capture').focus();
   });
+  $('term-new-output').addEventListener('click', () => toLive());
   $('notify').addEventListener('click', toggleNotifications);
   $('pair-retry').addEventListener('click', () => location.reload());
   $('forget').addEventListener('click', async () => {

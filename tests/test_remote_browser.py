@@ -23,9 +23,71 @@ from tests.browser import SCREENS_SHOWN, Browser, find_chrome, shown
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
 
 
+class ScrollbackSource(panes_mod.DemoPaneSource):
+    """The demo desktop with a screen and a scrollback behind it.
+
+    A real shell would do as well — `tests/test_remote_terminal.py` drives one — but the point of
+    these is the client, so the rows are made here: it can say exactly when output arrives while
+    somebody is reading further up, which is the case a live shell will not hold still for.
+    """
+
+    scrollback = True
+
+    def __init__(self, rows=14, cols=60, history=600):
+        super().__init__()
+        self.rows, self.cols, self.total = rows, cols, history
+        self._screen_callbacks: list = []
+        self.live = [f"live-{index}" for index in range(rows)]
+
+    # -- the seams the hub looks for when a source has a screen ---------------------------------
+
+    def on_screen(self, callback) -> None:
+        self._screen_callbacks.append(callback)
+
+    def release(self, pane: str, device: str) -> None:
+        return
+
+    def release_device(self, device: str) -> None:
+        return
+
+    @staticmethod
+    def _row(row: int, text: str, fg: int = 0, attrs: int = 0) -> dict:
+        return {"row": row, "segs": [[text, fg, 0, attrs]]}
+
+    def _cursor(self) -> dict:
+        return {"row": self.rows - 1, "col": 0, "visible": True, "shape": 0}
+
+    def screen_snapshot(self, pane: str) -> dict:
+        return {"t": "screen_snapshot", "pane": pane, "rows": self.rows, "cols": self.cols,
+                "alt": False, "cursor": self._cursor(),
+                "lines": [self._row(n, self.live[n]) for n in range(self.rows)]}
+
+    def print_line(self, pane: str, text: str) -> None:
+        """One more line of output: the screen scrolls by one and scrollback grows by one."""
+        self.live = self.live[1:] + [text]
+        self.total += 1
+        message = {"t": "screen_diff", "pane": pane, "cursor": self._cursor(),
+                   "lines": [self._row(n, self.live[n]) for n in range(self.rows)]}
+        for callback in list(self._screen_callbacks):
+            callback(pane, message)
+
+    async def history(self, pane: str, before_row: int, count: int) -> dict:
+        end = self.total if before_row < 0 else max(0, min(before_row, self.total))
+        want = min(count, end)
+        start = end - want
+        # Every other row bold and red, so the browser can be asked whether history is painted by
+        # the same run painter as the live screen rather than as plain text.
+        lines = [self._row(row, f"scrollback-{row}",
+                           fg=(2 << 24) | 0xFF5F5F if row % 2 else 0,
+                           attrs=1 if row % 2 else 0)
+                 for row in range(start, end)]
+        return {"from_row": start, "total": self.total, "more": start > 0, "lines": lines}
+
+
 class Harness:
-    def __init__(self, capability=wire.AGENT, approve=True):
+    def __init__(self, capability=wire.AGENT, approve=True, source=None):
         self.capability, self.approve = capability, approve
+        self.source_factory = source or panes_mod.DemoPaneSource
         self.requests = []
 
     async def __aenter__(self):
@@ -38,7 +100,7 @@ class Harness:
 
         self.identity = identity_mod.Identity.create(directory)
         self.devices = identity_mod.DeviceStore(directory)
-        self.source = panes_mod.DemoPaneSource()
+        self.source = self.source_factory()
 
         async def approver(request):
             self.requests.append(request)
@@ -273,6 +335,94 @@ class BrowserClientTests(unittest.TestCase):
                     await browser.wait_for(
                         "!document.getElementById('composer-mic').classList.contains('busy')"
                         " && !document.getElementById('composer-mic').disabled", timeout=20)
+                    problems = [line for line in browser.console
+                                if "EXCEPTION" in line or "error:" in line.lower()]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 180))
+
+    def test_scrollback_pages_in_when_you_drag_the_terminal_down(self):
+        # Issue W5N2: a phone could watch a shared pane but not read what had scrolled away.
+        # Paired as `view`, because reading back is watching: a device that may not type still
+        # gets the scrollback.
+        async def main():
+            async with Harness(capability=wire.VIEW, source=ScrollbackSource) as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    await browser.evaluate("document.querySelectorAll('.pane-row')[0].click()")
+                    await browser.wait_for(shown('screen-thread'))
+                    await browser.wait_for(shown('terminal-pane'), timeout=20)
+                    await browser.wait_for(
+                        "[...document.querySelectorAll('#screen-wrap .screen-row')]"
+                        ".some(n => n.textContent.includes('live-'))", timeout=20)
+
+                    # A page is fetched before the finger is there, so a drag upward lands in it.
+                    rows = "[...document.querySelectorAll('.screen-history .screen-row')]"
+                    await browser.wait_for(f"{rows}.length >= 80", timeout=20)
+                    newest = await browser.evaluate(f"{rows}.map(n => n.textContent)")
+                    self.assertEqual(newest[-1], "scrollback-599")
+
+                    # Drag it down, repeatedly: each page joins the one below it exactly, with
+                    # nothing repeated and nothing skipped. The poll nudges the scroll back to
+                    # the top the way a finger would keep dragging.
+                    older = await browser.wait_for(
+                        f"(() => {{ const w = document.getElementById('screen-wrap');"
+                        f" const t = {rows}.map(n => n.textContent);"
+                        " if (t.length >= 300) return t;"
+                        " w.scrollTop = 0; return null; })()", timeout=30)
+                    self.assertEqual(older[-1], "scrollback-599")
+                    numbers = [int(text.split("-")[1]) for text in older]
+                    self.assertEqual(numbers,
+                                     list(range(numbers[0], numbers[0] + len(numbers))),
+                                     "the pages must join with no gap and no repeat")
+
+                    # Painted by the run painter the live screen uses, not as plain text: the
+                    # bold red rows are bold and red, the plain ones are not.
+                    style = await browser.evaluate(
+                        "(() => { const of = (text) => { const row = [...document.querySelectorAll("
+                        "'.screen-history .screen-row')].find(n => n.textContent === text);"
+                        " const css = getComputedStyle(row.firstElementChild);"
+                        " return [css.fontWeight, css.color]; };"
+                        " return { bold: of('scrollback-599'), plain: of('scrollback-598') }; })()")
+                    self.assertEqual(style["bold"][0], "700")
+                    self.assertEqual(style["bold"][1], "rgb(255, 95, 95)")
+                    self.assertNotEqual(style["plain"][0], "700")
+
+                    # Output arrives while somebody is reading up here. Nothing may move.
+                    # Settle a screen or so above the live rows first, far enough from the top
+                    # that no further page is on its way to shift the view legitimately.
+                    await browser.evaluate(
+                        "(() => { const w = document.getElementById('screen-wrap');"
+                        " w.scrollTop = w.scrollHeight - w.clientHeight - 400; })()")
+                    before = await browser.wait_for(
+                        "(() => { const w = document.getElementById('screen-wrap');"
+                        " const was = window.__settled; window.__settled = w.scrollTop;"
+                        " return was === w.scrollTop ? w.scrollTop : null; })()", timeout=20)
+                    for index in range(4):
+                        harness.source.print_line("pane-1", f"printed-{index}")
+                    await browser.wait_for(
+                        "[...document.querySelectorAll('#screen-wrap .screen-row')]"
+                        ".some(n => n.textContent === 'printed-3')", timeout=20)
+                    after = await browser.evaluate(
+                        "document.getElementById('screen-wrap').scrollTop")
+                    self.assertEqual(before, after, "new output dragged the reader to the bottom")
+                    self.assertTrue(await browser.evaluate(shown('term-new-output')),
+                                    "there was no way back to the live screen")
+
+                    # And the way back works: tapping it returns to the newest output.
+                    await browser.evaluate(
+                        "document.getElementById('term-new-output').click()")
+                    await browser.wait_for(
+                        "(() => { const w = document.getElementById('screen-wrap');"
+                        " return w.scrollHeight - w.scrollTop - w.clientHeight <= 4; })()",
+                        timeout=20)
+                    self.assertFalse(await browser.evaluate(shown('term-new-output')))
+
                     problems = [line for line in browser.console
                                 if "EXCEPTION" in line or "error:" in line.lower()]
                     self.assertEqual(problems, [], f"console errors: {problems}")

@@ -74,6 +74,9 @@
 
     <div id="terminal-pane" hidden>
       <div id="screen-wrap"></div>
+      <!-- Output arrived while you were reading what scrolled away. Nothing moves until you
+           tap it; scrolling back to the bottom does the same thing. -->
+      <button type="button" id="term-new-output" hidden>New output &darr;</button>
       <div id="term-bar">
         <span id="term-mode" class="chip">Watching</span>
         <span id="term-note" class="muted small"></span>

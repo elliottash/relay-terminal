@@ -7,6 +7,11 @@
 // it cannot be handed half an escape sequence, and it never tells the host what size it is.
 //
 // Every string here comes from program output, so it goes in through textContent.
+//
+// Scrollback lives in the same scroll container as the live screen, above it, so a drag on a phone
+// and a wheel on a trackpad both reach it with no gesture of our own. Pages are named by absolute
+// row (docs/REMOTE-PROTOCOL.md section 6.5), which is what lets a page be de-duplicated exactly
+// and joined with no hole while the shell is still printing.
 
 const ATTR = {
   BOLD: 1 << 0, ITALIC: 1 << 1, UNDERLINE: 1 << 2, DOUBLE_UNDERLINE: 1 << 3,
@@ -46,6 +51,15 @@ function colorOf(packed) {
   return null;                 // default: inherit the theme
 }
 
+// Rows per request. The protocol caps a page at 200; a phone screen holds far fewer, and a
+// smaller page reaches the reader sooner.
+const HISTORY_PAGE = 80;
+// Rows kept here. Reaching live drops the lot, so this only bounds one journey upward.
+const HISTORY_MAX = 2000;
+// Fetch the next page while the top is still this far away, so the rows are there before the
+// finger is.
+const PREFETCH_PX = 600;
+
 export class ScreenView {
   constructor(root) {
     this.root = root;
@@ -56,17 +70,33 @@ export class ScreenView {
     this.alt = false;
     this.grid = document.createElement('div');
     this.grid.className = 'screen-grid';
+    // Scrollback sits above the live rows inside the same grid, so it is painted at the same
+    // font size by the same run painter and scrolls with the same gesture.
+    this.historyBox = document.createElement('div');
+    this.historyBox.className = 'screen-history';
+    this.grid.append(this.historyBox);
     this.root.replaceChildren(this.grid);
     this.rowNodes = [];
+    this.history = [];           // {row, segs}, ascending and contiguous
+    this.historyTop = null;      // absolute row of history[0]; null when nothing is held
+    this.more = true;            // is there anything older than historyTop
+    this.pending = false;        // one request in flight at a time
+    this.stale = false;          // output arrived while the reader was back here
+    this.behind = false;
+    this.onNeedHistory = null;   // (beforeRow | null, count) => void
+    this.onBehind = null;        // (behind) => void, for the "new output" affordance
     this.fit();
     this._onResize = () => this.fit();
+    this._onScroll = () => this.scrolled();
     window.addEventListener('resize', this._onResize);
     window.addEventListener('orientationchange', this._onResize);
+    this.root.addEventListener('scroll', this._onScroll, { passive: true });
   }
 
   destroy() {
     window.removeEventListener('resize', this._onResize);
     window.removeEventListener('orientationchange', this._onResize);
+    this.root.removeEventListener('scroll', this._onScroll);
   }
 
   // The host owns the size; we only scale the font so `cols` columns fit the screen.
@@ -81,13 +111,19 @@ export class ScreenView {
   }
 
   apply(message) {
+    // Measured before anything moves: a live row changes in place, so the only thing that can
+    // shift the reader is us.
+    const wasAtBottom = this.atBottom();
     if (message.t === 'screen_snapshot') {
       this.rows = message.rows ?? this.rows;
       this.cols = message.cols ?? this.cols;
       this.alt = !!message.alt;
       this.lines.clear();
       this.rowNodes = [];
-      this.grid.replaceChildren();
+      this.grid.replaceChildren(this.historyBox);
+      // The geometry may have changed under the rows we hold, and the alternate screen has no
+      // scrollback of its own; either way what is above no longer joins on.
+      this.resetHistory();
       this.fit();
     }
     for (const line of message.lines || []) {
@@ -95,6 +131,117 @@ export class ScreenView {
     }
     if (message.cursor) this.cursor = message.cursor;
     this.paint(message.t === 'screen_snapshot' ? null : (message.lines || []).map((l) => l.row));
+    if (wasAtBottom) {
+      this.toBottom();
+    } else if ((message.lines || []).length) {
+      // Somebody is reading what scrolled away. Say there is more rather than dragging them to it.
+      this.stale = true;
+      this.setBehind(true);
+    }
+    this.requestIfNeeded();
+  }
+
+  // ---- scrollback ---------------------------------------------------------------------------
+
+  atBottom() {
+    return this.root.scrollHeight - this.root.scrollTop - this.root.clientHeight <= 4;
+  }
+
+  toBottom() {
+    this.root.scrollTop = this.root.scrollHeight;
+  }
+
+  setBehind(behind) {
+    if (behind === this.behind) return;
+    this.behind = behind;
+    if (this.onBehind) this.onBehind(behind);
+  }
+
+  resetHistory() {
+    this.history = [];
+    this.historyTop = null;
+    this.more = true;
+    this.pending = false;
+    this.historyBox.replaceChildren();
+  }
+
+  // Back to the newest output. Rows held from before the output that arrived meanwhile no longer
+  // join the live screen, so they go: the next drag upward asks for them again from the end.
+  toLive() {
+    if (this.stale) this.resetHistory();
+    this.stale = false;
+    this.toBottom();
+    this.setBehind(false);
+    this.requestIfNeeded();
+  }
+
+  scrolled() {
+    if (this.atBottom()) {
+      if (this.behind || this.stale) this.toLive();
+      return;
+    }
+    this.requestIfNeeded();
+  }
+
+  requestIfNeeded() {
+    if (this.pending || !this.more || !this.onNeedHistory) return;
+    // The first page is fetched before it is needed: there has to be something above the live
+    // screen for a drag upward to land in.
+    if (this.historyTop !== null && this.root.scrollTop > PREFETCH_PX) return;
+    this.pending = true;
+    this.onNeedHistory(this.historyTop, HISTORY_PAGE);
+  }
+
+  // One `history` reply. Rows carry absolute numbers, so what we already hold is dropped by
+  // number rather than by guesswork, and the page joins exactly onto the top of the buffer.
+  applyHistory(message) {
+    this.pending = false;
+    this.more = !!message.more;
+    const lines = (message.lines || []).filter((line) => Number.isInteger(line.row));
+    const fresh = this.historyTop === null
+      ? lines : lines.filter((line) => line.row < this.historyTop);
+    if (!fresh.length) return;
+    if (this.historyTop !== null && fresh[fresh.length - 1].row + 1 !== this.historyTop) {
+      // A hole, which only a scrollback ring evicting underneath us can make. Start from here.
+      this.history = [];
+      this.historyBox.replaceChildren();
+    }
+
+    const before = this.root.scrollHeight;
+    const batch = document.createDocumentFragment();
+    for (const line of fresh) batch.append(this.historyRow(line));
+    this.historyBox.prepend(batch);
+    this.history.unshift(...fresh);
+    this.historyTop = this.history[0].row;
+    // Everything above the viewport grew by exactly this much; keep the reader on their line.
+    this.root.scrollTop += this.root.scrollHeight - before;
+    this.trim();
+    this.requestIfNeeded();
+  }
+
+  // Bounded memory. We are travelling upward, so the rows furthest from the reader are the ones
+  // nearest the live screen; those go first, and they are below the viewport, so dropping them
+  // moves nothing. The buffer then no longer reaches the live screen, which is what `stale`
+  // means: arriving back at the bottom starts again from the newest page.
+  trim() {
+    if (this.history.length <= HISTORY_MAX) return;
+    while (this.history.length > HISTORY_MAX) {
+      this.history.pop();
+      const last = this.historyBox.lastElementChild;
+      if (!last) break;
+      last.remove();
+    }
+    this.stale = true;
+  }
+
+  historyRow(line) {
+    const node = document.createElement('div');
+    node.className = 'screen-row';
+    for (const [text, fg, bg, attrs] of line.segs || []) {
+      node.append(this.span(text, fg, bg, attrs));
+    }
+    if (!node.childNodes.length) node.append(document.createTextNode(' '));
+    return node;
   }
 
   paint(onlyRows) {
