@@ -49,7 +49,7 @@ Sanitizers (2026-09-17): the suite is clean under ASan+UBSan (Debug; the libvter
 | `relay-ghostty-vt` | Imported libghostty-vt static library; on Linux a partial link keeps only `ghostty_*` global (the Zig archive exports `memcpy`, `__chk_fail`, ...) |
 | `relay-terminal-engine` | Static library: cores, PTY, session, view, backend (links `relay-outputlinks` for the path rules) |
 | `relay-engine-bench` | Headless core throughput (`--core`, `--frames`) |
-| `relay-vterm-spike` | Manual/xdotool harness (name kept for the old scripts): `--core`, `--size`, `--dump`, `--font`, `--folds`, `-e` |
+| `relay-vterm-spike` | Manual/xdotool harness (name kept for the old scripts): `--core`, `--size`, `--dump`, `--font`, `-e` |
 | `relay-screen-bridge` | Headless PTY + core, streaming screen state as line JSON for remote access (`docs/REMOTE-PROTOCOL.md`): `--rows`, `--cols`, `--shell`, `--cwd`, `--raw-out` |
 | `relay-engine-tests` | ctest: core (x2 cores), pty, session (x2), view (x2) |
 
@@ -146,118 +146,14 @@ Documented fallbacks, not implemented: alacritty_terminal (Rust FFI), xterm.js i
 | Links | `stepLink(delta, Link*, index*, count*)`, `endLinkWalk()`, `linkWalkActive()`, `setPlainClickOpensLinks(on)` — the keyboard walk over every file, folder and URL in the screen and the scrollback (`Ctrl+Shift+L`) |
 | Callbacks | `onLinkActivated(target, line, column)` (OSC 8 URI, URL, or absolute path with `:line:col`), `onTitleChanged`, `onCwdChanged`, `onAltScreenChanged`, `onBell`, `onPromptMark(kind 'A'..'D', exitCode)`, `onOutput(bytes)` (opt-in via `setOutputCallbackEnabled`), `onFinished(exitCode)` |
 
-| Folds | `setFoldPrefix()`, `setFoldContent(uri, lines)`, `setFoldExpanded()`, `foldExpanded()`, `removeFold()`, `clearFolds()`, `expandedFolds()`, `toggleFold(uri)`, callback `onFoldRequested(uri)` — the detail of one agent tool call, unfolded inside the grid (see **Folds** below) |
-
 Capabilities reported by `VTermBackend`: ScreenText, Scrollback, AltScreenState, LinkClicks,
 Osc8Links, PromptMarks, CwdTracking, DisplayInjection, Search, ScrollControl, LinkWalk,
-LineDiscipline, Folds.
+LineDiscipline.
 
 `termiosFlags()` is what the host polls to tell a Readline prompt (raw, foreground group ==
 shell) from a full-screen program or a password prompt (cooked, `ECHO` off), twelve times a
 second in every pane; the `/proc/<shell>/fd/0` route it replaces cost an `open`, an `ioctl` and
 a `close` each time. See ARCHITECTURE.md §6.
-
-## Folds
-
-Relay prints each agent tool call into the terminal grid as one concise line wrapped in an OSC 8
-hyperlink (`relay://call/<pane>/<turn>/<call>`, issue #TK9C). Clicking that line unfolds the call's
-detail **in place, underneath it, inside the terminal**, and clicking again folds it away.
-
-### Why it is a view layer
-
-Neither core lets the host insert rows into the scrollback: libghostty-vt owns its page list, and
-the libvterm adapter's host ring is rewrapped on every resize. Both cores reflow. So a fold is not
-content at all — it is a layer of **virtual rows the view lays between the real rows it paints**,
-core-agnostic, and everything about it lives in `view/FoldLayer.{h,cpp}` (no GUI, unit tested in
-`tests/FoldLayerTest.cpp`) and `view/TerminalView.cpp`.
-
-### Coordinates
-
-| | |
-|---|---|
-| real row | absolute scrollback row, 0 = the oldest line — what `scrollViewportToRow()` and `historyRows()` speak. `realRows = historyRows + rows` |
-| visual row | real rows with every open fold's rows spliced in after the fold's anchor row. This is what the user scrolls through, what the scroll bar's range counts and what a selection and a copy are ordered by |
-
-`FoldLayer` maps between them: `visualOfReal(r)` adds the heights of the folds anchored above `r`,
-and `at(v)` answers whether a visual row is a real row or a fold's row, by binary search over the
-open folds (a handful at a time).
-
-### Anchoring
-
-A fold hangs under the **last** real row of the run of cells carrying its anchor URI, so a
-soft-wrapped anchor line keeps its block where the eye expects it. The view needs that row for
-every open fold — including anchors far outside the viewport, because the total scroll height
-depends on them — so `VtCore::hyperlinkRuns(prefix)` walks the scrollback and the screen and
-returns every run whose OSC 8 URI starts with the prefix, in absolute rows:
-
-- **libvterm core**: walks its own ring and the screen; the link id is already on every cell, so
-  there is no libvterm call per cell (~20 ms for a 100 000-line history).
-- **ghostty core**: a hyperlink is answered per grid ref, so a full cell scan would be one FFI call
-  per cell. It walks **column 0** of each row and only then right to the end of the run: two calls
-  per row. Relay's anchor lines carry their link from the first column (the view overpaints the
-  chevron there), so that is where they are found. *An anchor that starts further right is not seen
-  on this core.*
-
-It is re-resolved when the grid is resized (both cores reflow), when a fold is added or toggled,
-and on a 300 ms heartbeat while any fold is open — which is what notices the scrollback trimming an
-anchor away; that fold is then dropped. A fold that has never been anchored is kept, because the
-host may set a call's detail before its line is printed. Nothing runs when no fold is open.
-
-### Painting and scrolling
-
-The block is indented (2–4 cells, 3 by default) with a left rule and a tint mixed from the colour
-scheme (`ColorScheme::foldBackground` / `foldRule` override it). Spans carry their own foreground,
-background, bold/italic/underline/dim and an optional link, so a coloured diff is the host's to
-describe; wide characters, grapheme clusters, box drawing and colour emoji go through the same text
-path as the real grid. The anchor's first cell is overpainted with `▸` (shut) or `▾` (open); the
-host prints a placeholder there.
-
-The view keeps the first *visual* row on screen and drives the core's own viewport to whatever
-covers the real rows that window needs — the window can never show more real rows than the core's
-viewport is tall, so covering its first real row covers them all. That is why a 500-line fold
-scrolls line by line: the wheel, the scroll bar (its range counts the open folds' rows;
-`scrollPositionChanged` and `TerminalView::scrollToVisualRow()` are in visual rows), PgUp/PgDn,
-scroll to top, bottom and prompt, scroll-on-keystroke and `viewportAtBottom()` all count visual
-rows. At the bottom the newest output stays on screen and the older rows are pushed up; toggling a
-fold leaves its anchor where it was on screen unless that would push the cursor row off.
-
-### Selection
-
-The cores own the selection over real rows and know nothing about fold rows, so while a fold is on
-screen the view owns a selection in **visual** coordinates (its ends stored as content: an absolute
-real row, or a fold URI and a row inside it) and hands the real-row part straight back to the core,
-which paints it and yields its text exactly as before. A copy walks the visual range, asks the core
-for each run of real rows and takes each fold's own text, and joins them in the order the rows are
-displayed; a wrapped fold line comes back as its one logical line, without the indent. Double click
-takes a word inside a fold, triple click the line, select-all the scrollback and every open fold,
-and an Alt-drag rectangle still belongs to the core.
-
-### On the alternate screen
-
-Folds are neither painted nor hit-tested while a full-screen program owns the grid, and come back
-when it leaves. Mouse-reporting programs get their clicks as before.
-
-### Limits (2026-09-18)
-
-- **Search does not look inside an open fold.** `searchSet`/`searchStep` are the core's, so matches
-  in the real rows are found, highlighted, counted and stepped through with a fold open, but text
-  inside the block is not searched. The hook the merge needs is already in place:
-  `VtCore::searchCurrentRow()` reports the absolute row of the selected match on both cores, so the
-  view can interleave its own fold matches with the core's in visual order and count them from the
-  newest. Not written yet.
-- On the ghostty core an anchor run must include column 0 (above).
-- A selection that reaches above the visible window is read back through the core's own selection,
-  so its soft-wrapped rows join as they always did.
-- Rectangle (Alt-drag) selection covers real rows only.
-- `screenText()`, `historyText()` and `scrollbackText()` are real rows only, by design; the rows on
-  screen in visual order are `TerminalView::visibleRowsText()`.
-
-### Seeing it
-
-`relay-vterm-spike --folds` prints three tool-call lines and registers their detail (a short run, a
-red and green diff with a link, and a 300-line listing).
-`engine/scripts/gui/folds.sh BIN CORE OUTDIR` drives it under Xvfb and captures the states;
-evidence in [qa_evidence/2026-09-18-concise-tool-call-lines/](qa_evidence/2026-09-18-concise-tool-call-lines/).
 
 ## Status, with KonsolePart as the comparison it replaced
 

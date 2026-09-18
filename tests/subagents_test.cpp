@@ -230,9 +230,12 @@ private slots:
         const QString text = view.plainText();
         QVERIFY(text.contains(QStringLiteral("› List the fixture files")));
         QVERIFY(text.contains(QStringLiteral("⚙ run_command")));
-        QVERIFY(text.contains(QStringLiteral("⚙ $ ls fixture")));
+        // A worker from before protocol § 23 sends no label: the line is built from the preview,
+        // and the preview itself stays behind the fold rather than in the log.
+        QVERIFY(text.contains(QStringLiteral("▸ ran ls fixture · exit 0")));
         QVERIFY(!text.contains(QStringLiteral("Working directory")));
-        QVERIFY(text.contains(QStringLiteral("exit 0")));
+        QVERIFY(!text.contains(QStringLiteral("notes.md")));   // the output is the fold's, not the log's
+        QCOMPARE(view.toolCallCount(), 1);
         QVERIFY(text.contains(QStringLiteral("Found three [31mfiles.")));   // escape byte stripped
         relay::SubagentRow row; row.id = QStringLiteral("a1"); row.type = QStringLiteral("explore"); row.description = QStringLiteral("Summarize");
         row.status = QStringLiteral("running"); row.tools = 2; row.tokens = 1500;
@@ -250,6 +253,94 @@ private slots:
         QVERIFY(input->text().isEmpty());
         QTest::keyClick(input, Qt::Key_Escape);
         QCOMPARE(closes, 1);
+    }
+
+    // Card #TK9C, protocol § 23: one concise line per tool call, rewritten in place when the call
+    // lands, with the detail one click away.
+    void transcriptDrawsOneLinePerToolCall() {
+        SubagentTranscriptView view(QStringLiteral("a1"));
+        view.handleEvent(json("{'event':'subagent_event','id':'a1','payload':{'event':'tool_started',"
+                              "'tool':'run_command','call_id':'c1','preview':'RUN COMMAND\\n\\npytest -q',"
+                              "'label':{'kind':'run','running':'running pytest','title':'ran pytest'}}}"));
+        // While it runs the row is the present tense, and it is the only tool line.
+        QCOMPARE(view.toolLines(), QStringList{QStringLiteral("▸ running pytest")});
+        view.handleEvent(json("{'event':'subagent_event','id':'a1','payload':{'event':'tool_result',"
+                              "'tool':'run_command','call_id':'c1','ms':8100,'result':{'exit_code':1},"
+                              "'label':{'kind':'run','running':'running pytest','title':'ran pytest',"
+                              "'stats':['212 lines','exit 1','8 s'],'ok':false,'open':{'type':'fold'}}}}"));
+        // The same row, rewritten: one line, not two, and ✗ because it failed.
+        QCOMPARE(view.toolCallCount(), 1);
+        QCOMPARE(view.toolLines(), QStringList{QStringLiteral("✗ ran pytest · 212 lines · exit 1 · 8 s")});
+        QVERIFY(!view.plainText().contains(QStringLiteral("running pytest")));
+        QVERIFY(!view.plainText().contains(QStringLiteral("pytest -q")));   // the script is behind the fold
+
+        // A click folds the detail open underneath, and a second click folds it shut again.
+        view.toggleToolCall(0);
+        QVERIFY(view.plainText().contains(QStringLiteral("pytest -q")));
+        // A failed row keeps its ✗ while it is open: the detail underneath already says it is.
+        QCOMPARE(view.toolLines(), QStringList{QStringLiteral("✗ ran pytest · 212 lines · exit 1 · 8 s")});
+        view.toggleToolCall(0);
+        QVERIFY(!view.plainText().contains(QStringLiteral("pytest -q")));
+        QCOMPARE(view.toolLines(), QStringList{QStringLiteral("✗ ran pytest · 212 lines · exit 1 · 8 s")});
+    }
+
+    void transcriptMergesARunOfReadsAndPrintsAShortDiff() {
+        SubagentTranscriptView view(QStringLiteral("a1"));
+        auto read = [&](const char *id, const char *name, int lines) {
+            const QString started = QStringLiteral(
+                "{'event':'subagent_event','payload':{'event':'tool_started','tool':'read_file','call_id':'%1',"
+                "'preview':'READ FILE\\n\\n/w/%2','label':{'kind':'read','running':'reading %2','title':'read %2',"
+                "'merge':{'key':'read','singular':'file','plural':'files'}}}}").arg(QLatin1String(id), QLatin1String(name));
+            const QString landed = QStringLiteral(
+                "{'event':'subagent_event','payload':{'event':'tool_result','tool':'read_file','call_id':'%1',"
+                "'label':{'kind':'read','running':'reading %2','title':'read %2','stats':['%3 lines'],'ok':true,"
+                "'open':{'type':'file','path':'%2'},"
+                "'merge':{'key':'read','singular':'file','plural':'files','lines':%3}}}}")
+                .arg(QLatin1String(id), QLatin1String(name)).arg(lines);
+            view.handleEvent(json(started.toUtf8().constData()));
+            view.handleEvent(json(landed.toUtf8().constData()));
+        };
+        read("c1", "a.py", 100);
+        QCOMPARE(view.toolLines(), QStringList{QStringLiteral("▸ read a.py · 100 lines")});
+        read("c2", "b.py", 200);
+        read("c3", "c.py", 700);
+        // Three consecutive reads, one line (§ 23.7).
+        QCOMPARE(view.toolCallCount(), 1);
+        QCOMPARE(view.toolLines(), QStringList{QStringLiteral("▸ read 3 files · 1,000 lines")});
+
+        // An edit ends the run, and a diff of at most 12 changed lines prints with no click at all.
+        view.handleEvent(json("{'event':'subagent_event','payload':{'event':'tool_started','tool':'edit_file',"
+                              "'call_id':'c4','preview':'EDIT FILE\\n\\n/w/x.py',"
+                              "'label':{'kind':'edit','running':'editing x.py','title':'edited x.py','path':'x.py'}}}"));
+        view.handleEvent(json("{'event':'subagent_event','payload':{'event':'tool_result','tool':'edit_file',"
+                              "'call_id':'c4','diff':'--- a/x.py\\n+++ b/x.py\\n@@ -1,2 +1,2 @@\\n-old = 1\\n+new = 1\\n',"
+                              "'label':{'kind':'edit','running':'editing x.py','title':'edited x.py',"
+                              "'stats':['+1 −1'],'ok':true,'path':'x.py','inline_diff':true,'open':{'type':'fold'}}}}"));
+        QCOMPARE(view.toolCallCount(), 2);
+        QCOMPARE(view.toolLines().last(), QStringLiteral("▸ edited x.py · +1 −1"));
+        const QString text = view.plainText();
+        QVERIFY(text.contains(QStringLiteral("-old = 1")));
+        QVERIFY(text.contains(QStringLiteral("+new = 1")));
+        QVERIFY(!text.contains(QStringLiteral("@@")));      // the hunk headers stay behind the fold
+    }
+
+    void aBigDiffGoesToTheHostRatherThanTheLog() {
+        SubagentTranscriptView view(QStringLiteral("a1"));
+        QString title, diff;
+        view.onOpenDiff = [&](const QString &t, const QString &d) { title = t; diff = d; };
+        view.handleEvent(json("{'event':'subagent_event','payload':{'event':'tool_started','tool':'write_file',"
+                              "'call_id':'c1','label':{'kind':'edit','running':'editing Pane.h','title':'edited Pane.h'}}}"));
+        view.handleEvent(json("{'event':'subagent_event','payload':{'event':'tool_result','tool':'write_file',"
+                              "'call_id':'c1','diff':'--- a/src/Pane.h\\n+++ b/src/Pane.h\\n@@ -1 +1 @@\\n-a\\n+b\\n',"
+                              "'label':{'kind':'edit','running':'editing Pane.h','title':'edited Pane.h',"
+                              "'stats':['+212 −87'],'ok':true,'path':'src/Pane.h','inline_diff':false,"
+                              "'open':{'type':'diff'}}}}"));
+        QCOMPARE(view.toolLines(), QStringList{QStringLiteral("▸ edited Pane.h · +212 −87")});
+        QVERIFY(!view.plainText().contains(QStringLiteral("+b")));   // too big to print inline
+        view.toggleToolCall(0);
+        QCOMPARE(title, QStringLiteral("src/Pane.h"));
+        QVERIFY(diff.contains(QStringLiteral("+b")));
+        QCOMPARE(view.toolLines(), QStringList{QStringLiteral("▸ edited Pane.h · +212 −87")});   // not folded
     }
 };
 

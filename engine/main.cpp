@@ -2,11 +2,7 @@
 // relay-vterm-spike: manual/xdotool harness for the Relay terminal engine.
 //
 //   relay-vterm-spike [--core ghostty|libvterm] [--cwd DIR] [--dump FILE] [--size COLSxROWS]
-//                     [--font "Family,points"] [--folds] [-e PROGRAM ARGS...]
-//
-// --folds prints the concise tool-call lines the agent will print (#TK9C) and
-// registers their detail: a short run, a red and green diff, and a 300-line
-// listing. Click a line (or Ctrl+Shift+F) to unfold it in place.
+//                     [--font "Family,points"] [-e PROGRAM ARGS...]
 //
 // Ctrl+Shift+D appends debugDump() (core, sizes, alt screen, cursor, scrollback,
 // screen text) to --dump FILE (default stdout). Backend callbacks (links, title,
@@ -19,7 +15,6 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
-#include <QTimer>
 
 #include <cstdio>
 
@@ -32,7 +27,6 @@ int main(int argc, char **argv)
     QString program;
     QStringList args;
     QString fontSpec;
-    bool folds = false;
     int cols = 100, rows = 30;
 
     const QStringList a = app.arguments();
@@ -51,8 +45,6 @@ int main(int argc, char **argv)
                 cols = p[0].toInt();
                 rows = p[1].toInt();
             }
-        } else if (a[i] == QLatin1String("--folds")) {
-            folds = true;
         } else if (a[i] == QLatin1String("-e") && i + 1 < a.size()) {
             program = a[++i];
             args = a.mid(i + 1);
@@ -106,69 +98,5 @@ int main(int argc, char **argv)
     }
     w->show();
     backend.focusWidget()->setFocus();
-
-    // --folds: what an agent turn will look like once every tool call prints
-    // one concise line (#TK9C). The lines go in as OSC 8 hyperlinks; the detail
-    // is registered here, so clicking a line unfolds it without a worker.
-    if (folds) {
-        using relay::FoldLine;
-        using relay::FoldSpan;
-        auto span = [](const QString &text, const QColor &fg = QColor(), bool bold = false, bool dim = false) {
-            FoldSpan s;
-            s.text = text;
-            s.fg = fg;
-            s.bold = bold;
-            s.dim = dim;
-            return s;
-        };
-        auto oneLine = [&](const FoldSpan &s) {
-            FoldLine l;
-            l.spans << s;
-            return l;
-        };
-        backend.setFoldPrefix(QStringLiteral("relay://call/"));
-        QTimer::singleShot(400, [&] {
-            auto anchor = [&](const QString &id, const QString &text) {
-                backend.writeToDisplay(QByteArray("\x1b]8;;relay://call/demo/1/") + id.toUtf8() + "\x1b\\  "
-                                       + text.toUtf8() + "\x1b]8;;\x1b\\\r\n");
-            };
-            backend.writeToDisplay("\x1b[1mrelay\x1b[0m  agent turn 1\r\n");
-            anchor(QStringLiteral("run"), QStringLiteral("ran python script \u00B7 14 lines \u00B7 exit 0 \u00B7 1.2 s"));
-            anchor(QStringLiteral("edit"), QStringLiteral("edited engine/view/FoldLayer.cpp \u00B7 +6 \u22122"));
-            anchor(QStringLiteral("read"), QStringLiteral("read 300 lines of build.log"));
-            backend.writeToDisplay("done.\r\n");
-
-            QVector<FoldLine> run;
-            run << oneLine(span(QStringLiteral("$ python3 -c 'print(sum(range(14)))'"), QColor(), true));
-            for (int i = 0; i < 12; ++i)
-                run << oneLine(span(QStringLiteral("row %1 of the script's output").arg(i)));
-            run << oneLine(span(QStringLiteral("91")));
-            backend.setFoldContent(QStringLiteral("relay://call/demo/1/run"), run);
-
-            QVector<FoldLine> diff;
-            diff << oneLine(span(QStringLiteral("engine/view/FoldLayer.cpp"), QColor(), false, true));
-            diff << oneLine(span(QStringLiteral("@@ -120,6 +120,10 @@"), QColor(0x7f, 0xc1, 0xff)));
-            diff << oneLine(span(QStringLiteral("-    const int usable = m_columns;"), QColor(0xe0, 0x6c, 0x75)));
-            diff << oneLine(span(QStringLiteral("+    const int usable = m_columns - m_indent;"), QColor(0x98, 0xc3, 0x79)));
-            diff << oneLine(span(QStringLiteral("+    // a hanging indent keeps a wrapped detail line readable"),
-                                 QColor(0x98, 0xc3, 0x79)));
-            FoldLine linked;
-            linked.spans << span(QStringLiteral("open "), QColor(), false, true);
-            FoldSpan path = span(QStringLiteral("engine/view/FoldLayer.cpp"));
-            path.link = QDir::currentPath() + QStringLiteral("/engine/view/FoldLayer.cpp");
-            linked.spans << path;
-            diff << linked;
-            backend.setFoldContent(QStringLiteral("relay://call/demo/1/edit"), diff);
-
-            QVector<FoldLine> log;
-            for (int i = 0; i < 300; ++i)
-                log << oneLine(span(QStringLiteral("build.log:%1  compiling object %2 of 300").arg(i + 1).arg(i + 1),
-                                    QColor(), false, i % 5 == 0));
-            backend.setFoldContent(QStringLiteral("relay://call/demo/1/read"), log);
-            // They start shut, so the first screenshot is the folded one.
-            for (const QString &id : {QStringLiteral("run"), QStringLiteral("edit"), QStringLiteral("read")})
-                backend.setFoldExpanded(QStringLiteral("relay://call/demo/1/") + id, false);
-        });
-    }
     return app.exec();
 }

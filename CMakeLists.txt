@@ -88,7 +88,8 @@ endif()
 add_library(relay-subagents STATIC src/SubagentsPanel.cpp src/SubagentsPanel.h src/SubagentTranscript.cpp src/SubagentTranscript.h
             src/JobsPanel.cpp src/JobsPanel.h)
 target_include_directories(relay-subagents PUBLIC src)
-target_link_libraries(relay-subagents PUBLIC ${RELAY_QT}::Widgets)
+# relay-toollabel: the transcript draws one concise line per tool call (protocol section 23).
+target_link_libraries(relay-subagents PUBLIC relay-toollabel ${RELAY_QT}::Widgets)
 target_compile_options(relay-subagents PRIVATE -Wall -Wextra -Wpedantic)
 
 # Terminal engine settings (--engine-core / RELAY_ENGINE_CORE) and the pane's right-click menu:

@@ -156,9 +156,17 @@ Label fromEvent(const QJsonObject &event) {
     }
     if (event.contains(QStringLiteral("ok"))) { out.hasOk = true; out.ok = event.value(QStringLiteral("ok")).toBool(true); }
     const QJsonObject result = event.value(QStringLiteral("result")).toObject();
-    if (result.contains(QStringLiteral("error"))) { out.hasOk = true; out.ok = false; }
-    if (event.contains(QStringLiteral("exit_code"))) {
-        const int code = event.value(QStringLiteral("exit_code")).toInt();
+    if (result.contains(QStringLiteral("error"))) {
+        out.hasOk = true;
+        out.ok = false;
+        out.error = result.value(QStringLiteral("error")).toString().section(QLatin1Char('\n'), 0, 0).left(120);
+    }
+    // An old `tool_result` keeps the exit code inside `result`; a turn_summary item has it beside
+    // the preview. Either way the legacy line says so, whether or not it is zero.
+    const QJsonValue exit = event.contains(QStringLiteral("exit_code")) ? event.value(QStringLiteral("exit_code"))
+                                                                       : result.value(QStringLiteral("exit_code"));
+    if (exit.isDouble()) {
+        const int code = exit.toInt();
         out.stats << QStringLiteral("exit %1").arg(code);
         if (code != 0) { out.hasOk = true; out.ok = false; }
     }
