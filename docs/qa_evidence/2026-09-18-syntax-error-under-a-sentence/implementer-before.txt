@@ -1,0 +1,159 @@
+== PROSE
+agent  NOTE 'check my provider (glm), am i out of credits or rate limited'                             syntax error: syntax error near unexpected token `('
+agent  NOTE 'check my provider (glm)'                                                                  syntax error: syntax error near unexpected token `('
+agent  NOTE 'the build is broken (again)'                                                              syntax error: syntax error near unexpected token `('
+agent  NOTE 'ok (I think) that works'                                                                  syntax error: syntax error near unexpected token `I'
+agent  NOTE '(sorry, wrong window)'                                                                    command not found: sorry,
+agent  NOTE 'try the other provider (kimi or openrouter) and compare the answers'                      syntax error: syntax error near unexpected token `('
+agent  NOTE 'is the key (the glm one) still valid?'                                                    syntax error: syntax error near unexpected token `('
+agent  NOTE 'rename the tiers (Main, Flash, Lite) everywhere'                                          syntax error: syntax error near unexpected token `('
+agent  NOTE 'test the provider (glm) and tell me what it says'                                         syntax error: syntax error near unexpected token `('
+agent  NOTE "that didn't work (same error as before)"                                                  syntax error: unexpected EOF while looking for matching `''
+agent  NOTE 'thanks :)'                                                                                syntax error: syntax error near unexpected token `)'
+agent  NOTE 'hmm, not great :('                                                                        syntax error: syntax error near unexpected token `('
+agent  NOTE 'the "fast" tier is slow'                                                                  command not found: the
+agent  NOTE 'rename "Fast" to "Flash" in the settings pane'                                            command not found: rename
+agent  NOTE '"yeah" is "fine"'                                                                         command not found: yeah
+agent       "the 'main' model keeps timing out"                                                        
+agent  NOTE 'it says "rate limited", is that glm or us?'                                               command not found: it
+agent  NOTE "the users' settings are gone"                                                             syntax error: unexpected EOF while looking for matching `''
+agent       "the agent said 'done' but nothing changed"                                                
+agent  NOTE 'run `make test` and fix what fails'                                                       command not found: run
+agent  NOTE 'the `ls -la | wc -l` count looks wrong to me'                                             command not found: the
+agent  NOTE 'i ran `git status` and it shows nothing, is that right'                                   command not found: i
+agent  NOTE 'rename `foo` to `bar` in the router'                                                      command not found: foo
+agent  NOTE 'ok two things\nfirst the provider (glm) is slow\nthen the note under my message is wrong' syntax error: syntax error near unexpected token `('
+agent  NOTE 'yeah do that\nand then commit it'                                                         command not found: yeah
+agent  NOTE 'a few notes:\n- the pane is too narrow\n- the font is wrong'                              command not found: a
+agent  NOTE "three things:\n1. the pane is too narrow\n2. the font (mono) is wrong\n3. it's slow"      syntax error: syntax error near unexpected token `('
+agent  NOTE 'the other one'                                                                            command not found: the
+agent  NOTE 'not sure'                                                                                 command not found: not
+agent       'am i out of credits'                                                                      
+agent  NOTE 'am i out of credits/rate limited'                                                         command not found: am
+agent       'so the and/or case is broken'                                                             
+agent       'that one e.g. the glm key'                                                                
+agent       'my provider is down'                                                                      
+agent  NOTE 'i think the provider is down; check the logs (if there are any)'                          syntax error: syntax error near unexpected token `('
+== COMMAND
+agent  NOTE "echo 'unfinished"                                                                         syntax error: unexpected EOF while looking for matching `''
+agent  NOTE 'echo "unfinished'                                                                         syntax error: unexpected EOF while looking for matching `"'
+agent  NOTE 'echo (hello)'                                                                             syntax error: syntax error near unexpected token `hello'
+agent  NOTE 'ls (foo)'                                                                                 syntax error: syntax error near unexpected token `foo'
+agent  NOTE '(cd /tmp && ls'                                                                           syntax error: syntax error: unexpected end of file
+agent  NOTE '(ls'                                                                                      syntax error: syntax error: unexpected end of file
+agent  NOTE 'for i in 1 2; do echo $i'                                                                 syntax error: syntax error: unexpected end of file
+agent  NOTE 'if true; then ls'                                                                         syntax error: syntax error: unexpected end of file
+agent  NOTE 'ls | | grep x'                                                                            syntax error: syntax error near unexpected token `|'
+agent  NOTE 'cat foo >'                                                                                syntax error: syntax error near unexpected token `newline'
+agent  NOTE 'f() { ls'                                                                                 syntax error: syntax error: unexpected end of file
+agent  NOTE 'gti commit -m "fix the thing"'                                                            command not found: gti
+agent  NOTE 'grpe "foo bar" file.txt'                                                                  command not found: grpe
+agent  NOTE '`gti status`'                                                                             command not found: gti
+agent  NOTE 'frob (glm)'                                                                               syntax error: syntax error near unexpected token `glm'
+agent  NOTE 'gti status\nls'                                                                           command not found: gti
+agent  NOTE 'ls\nnope123'                                                                              command not found: nope123
+agent  NOTE 'cd /tmp\nmkae'                                                                            command not found: mkae
+agent  NOTE 'xyzzy\nfrob'                                                                              command not found: xyzzy
+agent  NOTE 'is'                                                                                       command not found: is
+agent  NOTE 'ls -la | grpe x'                                                                          command not found: grpe
+agent  NOTE 'gti log `date`'                                                                           command not found: gti
+agent  NOTE 'echo $('                                                                                  syntax error: unexpected EOF while looking for matching `)'
+agent  NOTE 'x=(1 2'                                                                                   syntax error: unexpected EOF while looking for matching `)'
+agent  NOTE 'while true; do sleep 1'                                                                   syntax error: syntax error: unexpected end of file
+agent  NOTE 'case x in'                                                                                syntax error: syntax error: unexpected end of file
+agent  NOTE 'ls &&'                                                                                    syntax error: syntax error: unexpected end of file
+agent  NOTE "pyton -c 'print(1)'"                                                                      command not found: pyton
+agent  NOTE 'docekr run --rm (x)'                                                                      syntax error: syntax error near unexpected token `('
+== SHELL
+shell       'echo hi; ls'                                                                              
+shell       '(cd /tmp && ls)'                                                                          
+shell       "echo 'the (glm) provider'"                                                                
+shell       'f() { ls; }; f'                                                                           
+shell       'echo `date`'                                                                              
+shell       'echo "rate limited (again)"'                                                              
+shell       'ls\npwd'                                                                                  
+== HELDOUT_PROSE
+agent  NOTE 'for now, skip the slow tests (they take ages)'                                            syntax error: syntax error near unexpected token `skip'
+agent  NOTE 'if not, lets unblock (and tell me)'                                                       syntax error: syntax error near unexpected token `('
+agent  NOTE 'then the note is wrong (see above)'                                                       syntax error: syntax error near unexpected token `then'
+agent  NOTE 'while you are at it, fix the hint (the ctrl+i one)'                                       syntax error: syntax error near unexpected token `('
+agent  NOTE 'also: the pane (left one) flickers'                                                       syntax error: syntax error near unexpected token `('
+agent  NOTE 'hmm (not sure about that)'                                                                syntax error: syntax error near unexpected token `not'
+agent  NOTE 'which model is this (main or flash)?'                                                     syntax error: syntax error near unexpected token `('
+agent       'who wrote this (git blame?)'                                                              
+agent  NOTE 'sounds good (ship it)'                                                                    syntax error: syntax error near unexpected token `('
+agent  NOTE "Commit it (but don't push)"                                                               syntax error: syntax error near unexpected token `('
+agent  NOTE 'push it; then tell me (briefly) what changed'                                             syntax error: syntax error near unexpected token `then'
+agent  NOTE 'the error was "429 too many requests" (from glm)'                                         syntax error: syntax error near unexpected token `('
+agent  NOTE 'error: rate limited (code 1302)'                                                          syntax error: syntax error near unexpected token `('
+agent       "openrouter says 'insufficient credits', can you check"                                    
+agent  NOTE 'my key is fine, right? (the kimi one)'                                                    syntax error: syntax error near unexpected token `('
+agent  NOTE "I'd like a summary (short) of today's commits"                                            command not found: Id like a summary (short) of todays
+agent  NOTE '2 things: first the font, second the (broken) tabs'                                       syntax error: syntax error near unexpected token `('
+agent  NOTE 'ok so:\n\n1) the router is wrong\n2) the hint is wrong too'                               syntax error: syntax error near unexpected token `)'
+agent  NOTE 'no wait; use the other branch (main)'                                                     syntax error: syntax error near unexpected token `('
+agent  NOTE 'glm is down? (or just slow)'                                                              syntax error: syntax error near unexpected token `('
+agent  NOTE 'we need to talk about the settings pane (again...)'                                       syntax error: syntax error near unexpected token `('
+agent  NOTE 'make it faster (please)'                                                                  syntax error: syntax error near unexpected token `('
+agent  NOTE "kill the old worker (if it's still there) and restart"                                    syntax error: syntax error near unexpected token `('
+agent  NOTE 'look at src/Pane.h (around line 5700) and tell me what it does'                           syntax error: syntax error near unexpected token `('
+agent  NOTE 'bonsai (the local model) keeps stalling'                                                  syntax error: syntax error near unexpected token `the'
+agent  NOTE 'did that work? (y/n)'                                                                     syntax error: syntax error near unexpected token `('
+agent  NOTE 'same as before (but with kimi this time)'                                                 syntax error: syntax error near unexpected token `('
+agent  NOTE 'nvm (figured it out)'                                                                     syntax error: syntax error near unexpected token `figured'
+agent  NOTE "commit & push when you're done (no force)"                                                syntax error: unexpected EOF while looking for matching `''
+agent  NOTE 'use a -> b style arrows (not =>)'                                                         syntax error: syntax error near unexpected token `('
+agent  NOTE 'quick q (sorry): does kimi support tools?'                                                syntax error: syntax error near unexpected token `('
+agent  NOTE 'yes (both)'                                                                               syntax error: syntax error near unexpected token `both'
+agent  NOTE 'no (neither)'                                                                             syntax error: syntax error near unexpected token `neither'
+agent  NOTE 'option 2 (the cheaper one)'                                                               syntax error: syntax error near unexpected token `('
+agent  NOTE 'B (but keep the old name)'                                                                syntax error: syntax error near unexpected token `but'
+agent  NOTE 'thanks (again) :)'                                                                        syntax error: syntax error near unexpected token `again'
+agent  NOTE 'the tests pass now (all 70), commit it'                                                   syntax error: syntax error near unexpected token `('
+agent  NOTE 'ugh, glm again (rate limit?)'                                                             syntax error: syntax error near unexpected token `('
+agent  NOTE 'try again (it timed out)'                                                                 syntax error: syntax error near unexpected token `('
+agent  NOTE 'retry (it timed out)'                                                                     syntax error: syntax error near unexpected token `it'
+agent  NOTE 'deploy (staging only)'                                                                    syntax error: syntax error near unexpected token `staging'
+agent  NOTE 'status (of the build)?'                                                                   syntax error: syntax error near unexpected token `of'
+agent  NOTE 'ok... (sigh) do it'                                                                       syntax error: syntax error near unexpected token `sigh'
+agent  NOTE 'hm, "command not found" again'                                                            command not found: hm,
+agent  NOTE 'Works! (finally)'                                                                         syntax error: syntax error near unexpected token `finally'
+agent  NOTE 'it printed `syntax error near unexpected token` under my message'                         command not found: syntax
+agent  NOTE 'see above (the screenshot)'                                                               syntax error: syntax error near unexpected token `('
+agent  NOTE 'lgtm (one nit: rename x)'                                                                 syntax error: syntax error near unexpected token `one'
+agent  NOTE 'the file (src/Pane.h) is huge'                                                            syntax error: syntax error near unexpected token `('
+agent  NOTE 'fine; whatever (you decide)'                                                              syntax error: syntax error near unexpected token `you'
+== HELDOUT_COMMAND
+agent  NOTE "git commit -m 'wip"                                                                       syntax error: unexpected EOF while looking for matching `''
+agent  NOTE 'grep -r "foo( src'                                                                        syntax error: unexpected EOF while looking for matching `"'
+agent  NOTE 'sudo apt install (foo)'                                                                   syntax error: syntax error near unexpected token `('
+agent  NOTE 'ssh host ('                                                                               syntax error: syntax error near unexpected token `('
+agent  NOTE 'cd (tmp)'                                                                                 syntax error: syntax error near unexpected token `tmp'
+agent  NOTE 'mkdir (new)'                                                                              syntax error: syntax error near unexpected token `new'
+agent  NOTE 'python -c "print(\'hi\')'                                                                 syntax error: unexpected EOF while looking for matching `"'
+agent  NOTE 'gti push; gti status'                                                                     command not found: gti
+agent  NOTE 'cat file.txt | grpe (x)'                                                                  syntax error: syntax error near unexpected token `x'
+agent  NOTE 'make test ('                                                                              syntax error: syntax error near unexpected token `('
+agent  NOTE 'ls; (pwd'                                                                                 syntax error: syntax error: unexpected end of file
+agent  NOTE 'for f in *.py; do echo $f'                                                                syntax error: syntax error: unexpected end of file
+agent  NOTE 'function foo { ls'                                                                        syntax error: syntax error: unexpected end of file
+agent  NOTE '[[ -f x ]'                                                                                syntax error: syntax error in conditional expression
+agent  NOTE 'echo hi >> (out)'                                                                         syntax error: syntax error near unexpected token `('
+agent  NOTE 'kubectl get pods (prod)'                                                                  syntax error: syntax error near unexpected token `('
+agent  NOTE 'npm run build ('                                                                          syntax error: syntax error near unexpected token `('
+agent  NOTE 'docker ps\ndocekr logs x'                                                                 command not found: docekr
+agent  NOTE 'export FOO=(bar'                                                                          syntax error: unexpected EOF while looking for matching `)'
+agent  NOTE 'pip install foo (bar)'                                                                    syntax error: syntax error near unexpected token `('
+agent  NOTE 'gti (status)'                                                                             syntax error: syntax error near unexpected token `status'
+agent  NOTE 'sl ('                                                                                     syntax error: syntax error near unexpected token `newline'
+agent  NOTE 'cd.. ('                                                                                   syntax error: syntax error near unexpected token `newline'
+agent  NOTE 'grpe (foo) bar.txt'                                                                       syntax error: syntax error near unexpected token `foo'
+agent  NOTE 'mkae (all)'                                                                               syntax error: syntax error near unexpected token `all'
+agent  NOTE 'sudo (ls)'                                                                                syntax error: syntax error near unexpected token `ls'
+agent  NOTE 'ls (-la)'                                                                                 syntax error: syntax error near unexpected token `-la'
+agent  NOTE 'echo hi (there)'                                                                          syntax error: syntax error near unexpected token `('
+agent  NOTE 'printf (x)'                                                                               syntax error: syntax error near unexpected token `x'
+agent  NOTE 'git log (HEAD)'                                                                           syntax error: syntax error near unexpected token `('
+agent  NOTE 'cat (a.txt)'                                                                              syntax error: syntax error near unexpected token `a.txt'
+agent  NOTE 'rm (old)'                                                                                 syntax error: syntax error near unexpected token `old'
+agent  NOTE './run.sh (fast)'                                                                          syntax error: syntax error near unexpected token `fast'

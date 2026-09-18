@@ -2,7 +2,7 @@
      edit the card files and regenerate. -->
 # Board
 
-149 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+150 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
 ## Features (94)
 
@@ -103,7 +103,7 @@
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 
-## Bugs (53)
+## Bugs (54)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -160,6 +160,7 @@
 | `#E99H` | [File tools refuse absolute paths and parent traversal; the owner does not want that constraint](changes/needs_qa_llm/2026-09-18-file-tools-refuse-absolute-paths-and-parent-trav.md) | needs-qa-llm |  |  | [6](threads/E99H.md) |
 | `#3ES1` | [Changing the model is refused while the agent is working](changes/needs_qa_llm/2026-09-18-changing-the-model-is-refused-while-the-agent-is.md) | needs-qa-llm | agent |  | [1](threads/3ES1.md) |
 | `#W954` | ["command not found" under a request whose first word ends in a comma](changes/needs_qa_llm/2026-09-18-command-not-found-under-a-request-whose-first-wo.md) | needs-qa-llm | agent |  | [1](threads/W954.md) |
+| `#8G17` | ["syntax error" under a sentence with a parenthesis in it](changes/needs_qa_llm/2026-09-18-syntax-error-under-a-sentence.md) | needs-qa-llm | agent |  |  |
 
 ## Planning (2)
 

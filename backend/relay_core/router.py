@@ -611,123 +611,184 @@ def _bare_word(word: str) -> tuple[str, bool]:
     return bare, punctuated
 
 
-# A first word in straight quotes with nothing but sentence punctuation after it: "yeah" is fine.
-QUOTED_FIRST = re.compile(r"""^(["'])([^\W\d_]+)\1(?=[,.:;?!…]*(?:\s|$))""")
-# A semicolon written as punctuation: a space or the end of the line after it ("hmm; not sure").
-PROSE_SEMICOLON = re.compile(r";(?=\s|$)")
+# ----- Writing, or an attempt at a command? (the note under a line sent to the agent) ---------------
+# Bash calls a good deal of ordinary writing a syntax error: "check my provider (glm), am i out of
+# credits" (owner report, 2026-09-18: the agent answered with "syntax error near unexpected token
+# `('" printed under the question). Parentheses, quotation marks, `code spans`, semicolons and line
+# breaks are punctuation before they are shell, so _as_writing() takes them out the way a reader
+# would and the words that are left are judged. What writing never uses stays shell outright:
+# | & < > $ \ { } =, globs, an unbalanced quote, a `(` or `;` glued to a word.
+PROSE_SEMICOLON = re.compile(r";(?=\s|$)")                     # "hmm; not sure", not `hmm;ls`
+# Where one sentence ends and the next starts: a line break, that semicolon, or an ampersand with a
+# space either side ("commit & push when you're done"). `sleep 5 & ls` splits the same way, and its
+# parts are commands.
+SENTENCE_BREAK = re.compile(r"\n|;(?=\s|$)|(?<=\s)&(?=\s)")
+ARROW = re.compile(r"(?<!\S)(?:<?[-=]{1,2}>|<-)(?!\S)")           # "a -> b", "x => y": never a redirect
+LIST_MARKER = re.compile(r"^\s*(?:[-*•]|\d{1,2}[.)])\s+", re.M)  # "- the pane", "2. the font"
+EMOTICON = re.compile(r"(?<!\S)[:;]-?[()](?!\S)")               # ":)" and ";-(" standing alone
+POSSESSIVE = re.compile(r"(?<=[A-Za-z]s)'(?=[\s,.:;?!…)]|$)")   # "the users' settings"
+CODE_SPAN = re.compile(r"`[^`\n]+`")                            # "run `make test` and fix it"
+QUOTED = re.compile(r"""(?<![^\s(])(["'])(?=\S)([^"'\n]*?)(?<=\S)\1(?=[\s,.:;?!…)]|$)""")
+OPEN_PAREN = re.compile(r"(?<![^\s])\((?=[^\s()])")            # " (glm", never `f()` or `$(`
+CLOSE_PAREN = re.compile(r"(?<=[^\s()])\)(?=[\s,.:;?!…]|$)")
+# Stand-ins that are not words, so one in command position still reads as a name ("`gti status`").
+CODE_WORD, QUOTE_WORD = "_code_", "_quoted_"
+ABBREVIATIONS = frozenset("e.g i.e a.k.a p.s etc vs".split())
+FUNCTION_WORDS = REPLY_WORDS | LOOP_ONLY | SENTENCE_LEAD | SIGNAL_WORDS.keys()
+MAX_SEGMENTS = 40
 
 
-def _unquote_first_word(text: str) -> str:
-    """The line with straight quotes around its first word removed, when that word is letters only.
+def _as_writing(text: str) -> tuple[list[str] | None, bool]:
+    """The line as a reader takes it: its sentences, with the punctuation of writing removed.
 
-    `"yeah" is fine` and `'ok' then` quote a word the way prose does; the shell reads the same
-    command name either way, so the line is judged as if unquoted — the typo test and the
-    real-command test still apply (`"gti" status` is still a slip). A quoted path or a name with
-    other characters (`"./run.sh"`, `"pip4" x`) does not match and keeps today's behaviour (card #W954)."""
-    match = QUOTED_FIRST.match(text)
-    return match.group(2) + text[match.end():] if match else text
+    Returns (segments, ambiguous). `segments` is None when shell syntax is left over that writing
+    does not use. `ambiguous` says something was removed that the shell uses too (parentheses,
+    quotes, a code span, a semicolon, a line break): such a line is only writing if its words are,
+    which is the caller's test. Apostrophes inside words become ’, which _bare_word knows."""
+    view = LIST_MARKER.sub("", text)
+    view = EMOTICON.sub("", view)
+    view = CONTRACTION.sub("’", view)
+    view, spans = CODE_SPAN.subn(f" {CODE_WORD} ", view)
 
-
-def _semicolon_prose(text: str, known: Iterable[str], path: str | None) -> bool:
-    """True for a line whose only shell syntax is sentence semicolons, when no segment reads as an
-    attempted command: "hmm; not sure", "ok; let me think".
-
-    Each `;`-segment must start with something that is not a command — a reply word, a function
-    word (SIGNAL_WORDS, SENTENCE_LEAD), or a first word explain_invalid would stay quiet about on
-    its own ("try again", "don't know") — or with an English-word command in a sentence
-    (assist_signals clears the threshold: "let me think").
-    A segment that starts with a real command or a near-typo of one (`hmm; ls`, `gti; ls`,
-    `cd /tmp; mkae`) means a command was meant, and the note stays. The whole line must also carry
-    at least one reply or function word, so `xyzzy; frob` is not a sentence (card #W954)."""
-    if not PROSE_SEMICOLON.search(text) or ";" in PROSE_SEMICOLON.sub("", text):
-        return False
-    rest = CONTRACTION.sub("", PROSE_SEMICOLON.sub("", text))
-    if "\n" in rest or "'" in rest or '"' in rest or SHELLISH.search(rest) or GLOBBISH.search(rest):
-        return False
-    known = set(known)
-    path = path or os.environ.get("PATH") or os.defpath
-    function_words = REPLY_WORDS | LOOP_ONLY | SENTENCE_LEAD | SIGNAL_WORDS.keys()
-    for segment in (s.strip() for s in text.split(";")):
-        words = segment.split()
-        if not words:
-            continue
-        if any(w.startswith(("-", "+")) and w not in {"-", "--"} for w in words[1:]):
-            return False                        # flags: a command was meant
-        first = words[0]
-        if first in known or first in BUILTINS or first in KEYWORDS or on_path(first, path):
-            if assist_signals(segment)[0] < ASSIST_THRESHOLD:
-                return False                    # "hmm; ls": ls would run, so a command was meant
-            continue                            # "ok; let me think": a command word in a sentence
-        if _bare_word(first)[0].lower() in function_words:
-            continue                            # "not sure", "the other one": "not" is no slip of `nl`
-        if explain_invalid(segment, f"command not found: {first}", known, path):
-            return False                        # "gti; ls", "cd /tmp; mkae", "ok; Docker ps"
-    words = (_bare_word(w)[0].lower() for w in text.replace(";", " ").split())
-    return any(w in function_words for w in words)
+    def unquote(match: re.Match) -> str:
+        inner = match.group(2)
+        return QUOTE_WORD if SHELLISH.search(inner) or GLOBBISH.search(inner) else inner
+    view, quotes = QUOTED.subn(unquote, view)
+    view = POSSESSIVE.sub("’", view)
+    view, opened = OPEN_PAREN.subn("", view)
+    view, closed = CLOSE_PAREN.subn("", view)
+    view = ARROW.sub("", view)                  # after the parentheses: "(not =>)"
+    segments = [s.strip() for s in SENTENCE_BREAK.split(view)]
+    ambiguous = bool(spans or quotes or opened or closed or len(segments) > 1)
+    segments = [s for s in segments if s]
+    if any(SHELLISH.search(s) or GLOBBISH.search(s) or "'" in s or '"' in s for s in segments):
+        return None, ambiguous
+    return segments, ambiguous
 
 
-def explain_invalid(text: str, reason: str, known: Iterable[str] = (), path: str | None = None) -> bool:
-    """Whether the GUI should print `reason` under a line auto-routed to the agent.
-
-    The note is for the moment a command was meant and mistyped ("gti status"), so it wants real
-    evidence of that: shell syntax, flags, a name that is not a plain English word, or a word one
-    slip away from a command that exists here. Everything else is language — a lone "resume", or a
-    sentence whose first word happens not to be a program — and naming its first word reads as the
-    failure of a command the user never ran (owner reports, 2026-09-18).
-
-    Two kinds of shell syntax are read as writing too (card #W954): a first word in straight quotes
-    (`"yeah" is fine`, judged as the unquoted line) and semicolons in a sentence none of whose parts
-    starts with a command or a slip of one (`hmm; not sure`, see _semicolon_prose).
-
-    Sentence punctuation is language too (card #W954, "yeah, see if there is a clear issue…" got
-    "command not found: yeah,"): a comma, full stop, colon, question or exclamation mark, ellipsis,
-    closing quote or dash stuck to the first word, an apostrophe inside a word ("let's", "don't"),
-    and a capitalised first word ("Yeah", "Sure") are how people write, not how commands look.
-    """
-    trimmed = text.strip()
-    unquoted = _unquote_first_word(trimmed)
-    if unquoted != trimmed:
-        return explain_invalid(unquoted, reason, known, path)   # '"yeah" is fine' reads as 'yeah is fine'
-    if reason and _semicolon_prose(trimmed, known, path):
-        return False                            # "hmm; not sure": a semicolon in a sentence
-    if reason and _contractions_only(trimmed):
-        return False                            # "don't break the build": the quote is English
-    prefix = "command not found: "
-    if not reason.startswith(prefix):
-        return bool(reason)                     # a syntax error is about a command either way
-    word = reason[len(prefix):]
-    if not any(ch.isalpha() for ch in word):
-        return False                            # "35 * 30" -> "command not found: 35"
-    if "\n" in trimmed or SHELLISH.search(trimmed) or GLOBBISH.search(trimmed) or '"' in trimmed:
+def _is_writing(word: str) -> bool:
+    """A word only a sentence has: a reply or function word, an apostrophe inside it, or sentence
+    punctuation after it ("error:", "limited,", "down?")."""
+    if "’" in word or _bare_word(word)[0].lower() in FUNCTION_WORDS:
         return True
-    try:
-        words = shlex.split(trimmed, posix=True)
-    except ValueError:
+    return word[-1] in ",:?!…" and word[:-1].isalpha()
+
+
+def _names_a_file(word: str, cwd: str) -> bool:
+    """An operand that reads as a file rather than a word: `~/x`, `src/main.cpp`, `notes.txt`.
+    "and/or" and "credits/rate" are words with a slash, unless that path exists; "e.g." is no file."""
+    bare = word.strip(SENTENCE_TAIL)
+    if not bare or bare.lower() in ABBREVIATIONS:
+        return False
+    if "~" in bare or bare.startswith(("/", "./", "../")):
         return True
+    if "/" in bare:
+        parts = bare.split("/")
+        return not all(p.isalpha() for p in parts) or os.path.exists(os.path.join(cwd, bare))
+    return "." in bare
+
+
+def _sentence_after_command(segment: str, words: list[str], cwd: str) -> bool:
+    """The first word runs here. Is what follows a sentence anyway?
+
+    "test the provider and tell me what it says", "let me think", "if not, lets unblock", "then the
+    note is wrong" — against `hmm; ls`, `if true`, `for i in 1 2` and `echo the build is done`,
+    whose text is literal."""
+    first = words[0]
+    if first in LITERAL_TEXT:
+        return False
+    if first in LONE_REPLY or first in REPLY_WORDS:
+        return True                             # "yes (both)", "wait (not yet)": the reply, not `yes`
+    if first in ENGLISH_COMMANDS:
+        return assist_signals(segment, cwd)[0] >= ASSIST_THRESHOLD
+    if first not in SIGNAL_WORDS or (first in {"for", "select"} and words[2:3] == ["in"]):
+        return False                            # `ls`, `git`, `cd`; a loop header
+    signals = {w.strip(SENTENCE_TAIL).lower() for w in words[1:]} & SIGNAL_WORDS.keys()
+    return sum(SIGNAL_WORDS[w] for w in signals) >= ASSIST_THRESHOLD
+
+
+def _meant_as_command(segment: str, known: set[str], path: str, cwd: str) -> bool:
+    """Whether one sentence of a line — already free of shell syntax — reads as an attempt at a
+    command: flags, a first word that runs here, a name that is not a word, or a word one slip away
+    from a command this machine has."""
+    words = segment.split()
+    if not words:
+        return False
     if any(a.startswith(("-", "+")) and a not in {"-", "--"} for a in words[1:]):
         return True                             # flags are nobody's English; a lone dash is
-    bare, punctuated = _bare_word(word)
+    first = words[0]
+    if first in known or first in BUILTINS or first in KEYWORDS or on_path(first, path):
+        return not _sentence_after_command(segment, words, cwd)     # "hmm; ls" would have run ls
+    bare, punctuated = _bare_word(first)
+    if not any(ch.isalpha() for ch in bare):
+        return False                            # "2 things:", "35": a number is nobody's program
     if not bare.isalpha():
         return True                             # kubectl2, pip3, ./run.sh: a name, not a word
     lowered = bare.lower()
     if lowered in REPLY_WORDS or lowered in LOOP_ONLY:
         return False                            # "ok", "Yes", "Continue", "nope."
     if len(words) > 1:
-        # Short English words sit one edit from some command or other ("add" from "adb"), so a line
-        # that reads as a sentence is not rescued by the typo test below.
+        # Short English words sit one edit from some command or other ("add" from "adb", "the"
+        # from `tee`, "not" from `nl`), so a line that reads as a sentence is not rescued by the
+        # typo test below.
+        files = [a for a in words[1:] if _names_a_file(a, cwd)]
+        if lowered in FUNCTION_WORDS and len(files) < len(words) - 1:
+            return False                        # "not sure", "the other one", "am i out of credits"
         if words[1].strip(SENTENCE_TAIL).lower() in SENTENCE_LEAD:
             return False
-        operandish = any("/" in a or "~" in a or "." in a.strip(".,?!…") for a in words[1:])
-        if len(words) > 3 and not operandish:
+        if len(words) > 3 and not files:
             return False
+        if words[-1][-1] in ",:?!…" and words[-1][:-1].isalpha():
+            return False                        # "three things:", "two questions,". Not "gti stauts."
     if punctuated:
         return False                            # "yeah,", "ok.", "wait... what": a sentence
-    known = set(known)
-    path = path or os.environ.get("PATH") or os.defpath
     if lowered != bare and (lowered in known or lowered in BUILTINS or on_path(lowered, path)):
         return True                             # "Docker ps", "Ls": a real command, capitalised
     # "Gti status" is still a typo with a capital; "Yeah" and "Sounds good" are not near anything.
     return _looks_mistyped(lowered, known, path)
+
+
+def explain_invalid(text: str, reason: str, known: Iterable[str] = (), path: str | None = None,
+                    cwd: str | None = None) -> bool:
+    """Whether the GUI should print `reason` under a line auto-routed to the agent.
+
+    The note is for the moment a command was meant and mistyped ("gti status", "echo 'unfinished"),
+    so it wants real evidence of that: shell syntax writing does not use, flags, a first word that
+    runs here, a name that is not a plain English word, or a word one slip away from a command that
+    exists here. Everything else is language — a lone "resume", or a sentence whose first word
+    happens not to be a program — and a note under it reads as the failure of a command the user
+    never ran (owner reports, 2026-09-18).
+
+    That holds for bash's syntax errors as much as for "command not found": a syntax error used to
+    be explained always, and a parenthesis in a sentence is one. The line is read as writing first
+    (_as_writing), then each of its sentences is judged (_meant_as_command). A line that needed
+    shell-looking punctuation removed must also carry a reply or function word, so `frob (glm)` and
+    `xyzzy; frob` keep their note (_is_writing).
+
+    Sentence punctuation is language too (card #W954, "yeah, see if there is a clear issue…" got
+    "command not found: yeah,"): a comma, full stop, colon, question or exclamation mark, ellipsis,
+    closing quote or dash stuck to the first word, an apostrophe inside a word ("let's", "don't"),
+    and a capitalised first word ("Yeah", "Sure") are how people write, not how commands look.
+    """
+    if not reason:
+        return False
+    prefix = "command not found: "
+    if reason.startswith(prefix):
+        if not any(ch.isalpha() for ch in reason[len(prefix):]):
+            return False                        # "35 * 30" -> "command not found: 35"
+    elif not reason.startswith("syntax error"):
+        return True                             # no such file, not executable: a path was typed
+    segments, ambiguous = _as_writing(text.strip())
+    if segments is None:
+        return True
+    known = set(known)
+    path = path or os.environ.get("PATH") or os.defpath
+    cwd = cwd or os.getcwd()
+    if any(_meant_as_command(s, known, path, cwd) for s in segments[:MAX_SEGMENTS]):
+        return True                             # "gti; ls", "cd /tmp\nmkae", "echo (hello)"
+    if not ambiguous:
+        return False
+    return not any(_is_writing(w) for w in " ".join(segments).split())
 
 
 def _first_word_reason(text: str, known: set[str], path: str, cwd: str) -> str:
@@ -970,5 +1031,9 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
                                                   else " · best guess: shell command"),
                             ok, error, valid, reason, True, why)
         return Decision("shell", text, "Runnable shell command.", ok, error, valid, reason)
-    return Decision("agent", text, f"Not a runnable command ({reason}) · sent to the agent", ok, error, valid, reason,
-                    explain_invalid=explain_invalid(text, reason, known, path))
+    explain = explain_invalid(text, reason, known, path, cwd)
+    # The route line under the composer follows the note: bash's complaint about a sentence is not
+    # why it went to the agent ("syntax error near unexpected token `('" for a parenthesis).
+    why = f"Not a runnable command ({reason})" if explain else "Reads like a request"
+    return Decision("agent", text, why + " · sent to the agent", ok, error, valid, reason,
+                    explain_invalid=explain)

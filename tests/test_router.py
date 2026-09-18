@@ -275,18 +275,60 @@ class ValidityTests(unittest.TestCase):
     def test_a_quoted_first_word_is_a_quotation(self):
         # Card #W954: '"yeah" is fine' printed "command not found: yeah". A quoted plain word is
         # judged as the unquoted line would be.
-        for text in ['"yeah" is fine', "'ok' then", '"yeah", sure', '"Sure" works']:
+        for text in ['"yeah" is fine', "'ok' then", '"yeah", sure', '"Sure" works', '"yeah" is "fine"']:
             with self.subTest(text=text):
                 result = self.check(text)
                 self.assertEqual(result.route, "agent", text)
                 self.assertFalse(result.explain_invalid, f"{text!r}: {result.invalid_reason}")
         self.assertValid('"ls" -la')
-        for text in ['"gti" status', '"pip4" install x', '"yeah" is "fine"']:
+        for text in ['"gti" status', '"pip4" install x']:
             with self.subTest(text=text):
                 self.assertTrue(self.check(text).explain_invalid, text)
         with tempfile.TemporaryDirectory() as d:
             result = self.check('"./run.sh"', cwd=d)
             self.assertEqual((result.route, result.explain_invalid), ("agent", True))
+
+    def test_a_syntax_error_in_a_sentence_is_not_a_broken_command(self):
+        # Owner report 2026-09-18: "check my provider (glm), am i out of credits or rate limited"
+        # was answered by the agent with "syntax error near unexpected token `('" under it. A
+        # syntax error used to be explained always; bash calls a good deal of writing one.
+        owner = "check my provider (glm), am i out of credits or rate limited"
+        prose = [owner, "check my provider (glm)", "the build is broken (again)", "(sorry, wrong window)",
+                 "ok (I think) that works", "test the provider (glm) and tell me what it says",
+                 "that didn't work (same error as before)", "thanks :)", "yes (both)", "error: rate limited (code 1302)",
+                 "for now, skip the slow tests (they take ages)", "if not, lets unblock (and tell me)",
+                 # quotation marks and code spans in a sentence
+                 'the "fast" tier is slow', 'rename "Fast" to "Flash" in the settings pane',
+                 "the users' settings are gone", 'it says "rate limited", is that glm or us?',
+                 "run `make test` and fix what fails", "the `ls -la | wc -l` count looks wrong to me",
+                 # more than one line, lists, ampersands and arrows
+                 "ok two things\nfirst the provider (glm) is slow\nthen the note is wrong",
+                 "three things:\n1. the pane is too narrow\n2. the font (mono) is wrong\n3. it's slow",
+                 "2 things: first the font, second the (broken) tabs",
+                 "commit & push when you're done (no force)", "use a -> b style arrows (not =>)",
+                 # a function word one edit from a program (the/tee, not/nl), a slash that is no path
+                 "the other one", "not sure", "am i out of credits/rate limited"]
+        for text in prose:
+            with self.subTest(text=text):
+                result = self.check(text)
+                self.assertEqual(result.route, "agent", text)
+                self.assertFalse(result.explain_invalid, f"{text!r}: {result.invalid_reason}")
+                self.assertEqual(result.reason, "Reads like a request · sent to the agent")
+        # A command that was meant and is broken keeps its note: the first word runs here, or the
+        # line has syntax, flags or a name that writing does not.
+        for text in ["echo 'unfinished", "echo (hello)", "ls (foo)", "(ls", "(cd /tmp && ls", "cd (tmp)",
+                     "echo the provider (glm) is down", "for i in 1 2; do echo $i", "if true; then ls",
+                     "for f in a b; do ls", "case x in", "ls | | grep x", "f() { ls", "x=(1 2",
+                     "sudo apt install (foo)", "docekr run --rm (x)", "gti (status)", "frob (glm)",
+                     "`gti status`", "gti log `date`", 'grpe "foo bar" file.txt', "gti status\nls",
+                     "cd /tmp\nmkae", "xyzzy\nfrob", "sleep 5 & echo (hi", "is"]:
+            with self.subTest(text=text):
+                result = self.check(text)
+                self.assertEqual(result.route, "agent", text)
+                self.assertTrue(result.explain_invalid, text)
+                self.assertIn("Not a runnable command", result.reason)
+        for text in ["(cd /tmp && ls)", "echo 'the (glm) provider'", 'echo "rate limited (again)"', "echo `date`"]:
+            self.assertValid(text)
 
     def test_one_edit_apart(self):
         for typed, command in [("gti", "git"), ("pyton", "python"), ("docekr", "docker"),
