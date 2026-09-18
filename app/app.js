@@ -13,6 +13,10 @@ import { ScreenView, KEYS, controlByte, keyEventBytes } from './screen.js';
 // nothing below is wired for them; their record is stored apart from this one's, so a person can
 // be the owner of one desktop and a guest of another in the same browser.
 import { guestRoute, startGuest, startGuestIfInvited } from './guest.js';
+// The pane view (docs/REMOTE-PROTOCOL.md section 16): the desktop pane's own queue, reasoning,
+// model and prompt box, drawn from the `pane_state` it publishes. Every label in it was written
+// by the desktop; this file only carries messages in and out.
+import { mountPane } from './pane.js';
 
 const rrp = new Rrp();
 let panes = [];
@@ -345,6 +349,33 @@ async function toggleNotifications() {
 
 // ---- thread -----------------------------------------------------------------------------------
 
+// ---- the pane view ------------------------------------------------------------------------
+
+let paneView = null;
+
+// Mounted on the first pane_state for a pane and torn down when the pane closes, so a device that
+// is only watching a terminal (or a guest, who is never sent pane_state) is unchanged.
+function ensurePaneView() {
+  if (paneView) return paneView;
+  paneView = mountPane($('pane-view'), {
+    send: (message) => { rrp.send(message).catch(() => {}); },
+  });
+  $('pane-view').hidden = false;   // mountPane has already appended its root here
+  // The terminal belongs inside the view, above the reasoning and the queue, exactly as the
+  // desktop pane stacks them. It keeps working where it is if the view is never mounted.
+  paneView.terminalSlot.append($('terminal-pane'));
+  return paneView;
+}
+
+function closePaneView() {
+  if (!paneView) return;
+  $('screen-thread').insertBefore($('terminal-pane'), $('thread-note'));   // back where it was
+  paneView.destroy();
+  paneView = null;
+  $('pane-view').hidden = true;
+  $('pane-view').replaceChildren();
+}
+
 function openPane(paneId) {
   current = paneId;
   const pane = panes.find((item) => item.id === paneId);
@@ -358,6 +389,9 @@ function openPane(paneId) {
   openTerminal();
   show('thread');
   rrp.send({ t: 'pane_focus', pane: paneId }).catch(() => {});
+  // Ask for this pane's state, when the desktop says it publishes one. Without the feature the
+  // view is never mounted and the terminal stays where it is.
+  if (features.includes('pane_state')) rrp.send({ t: 'pane_state_get', pane: paneId }).catch(() => {});
 }
 
 function closePane() {
@@ -365,6 +399,7 @@ function closePane() {
     if (driving) rrp.send({ t: 'control_release', pane: current }).catch(() => {});
     rrp.send({ t: 'pane_blur', pane: current }).catch(() => {});
   }
+  closePaneView();
   current = null;
   driving = false;
   show('inbox');
@@ -1134,6 +1169,20 @@ rrp.addEventListener('panes', (event) => {
 
 rrp.addEventListener('agent', (event) => onAgent(event.detail));
 
+// pane_state and the text of a row taken back for editing (section 16). Both name a pane; one
+// for a pane this device is not looking at is ignored rather than drawn over the open one.
+rrp.addEventListener('pane_state', (event) => {
+  const message = event.detail || {};
+  if (!current || message.pane !== current) return;
+  ensurePaneView().update(message);
+});
+
+rrp.addEventListener('queue_edit_text', (event) => {
+  const message = event.detail || {};
+  if (!paneView || !current || message.pane !== current) return;
+  paneView.onEditText(message);
+});
+
 rrp.addEventListener('error', (event) => {
   const detail = event.detail || {};
   if (voiceRequest && detail.id === voiceRequest) { voiceFailed(detail.message); return; }
@@ -1143,7 +1192,7 @@ rrp.addEventListener('error', (event) => {
     screenView.more = false;
     return;
   }
-  if (current) append(el('div', 'note error', detail.message || 'Refused.'));
+  if (current) $('thread-body').append(el('div', 'note error', detail.message || 'Refused.'));
 });
 
 rrp.addEventListener('revoked', async () => {
@@ -1161,7 +1210,7 @@ rrp.addEventListener('closed', (event) => {
 
 rrp.addEventListener('fault', (event) => {
   setStatus('dropped', 'warn');
-  append(el('div', 'note error', event.detail.message));
+  $('thread-body').append(el('div', 'note error', event.detail.message));
 });
 
 document.addEventListener('visibilitychange', () => {

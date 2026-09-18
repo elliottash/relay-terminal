@@ -9,6 +9,10 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="./style.css">
+<!-- The pane view (REMOTE-PROTOCOL.md section 16): the desktop pane drawn from pane_state.
+     pane-theme.css is generated from src/Theme.cpp by scripts/gen-web-theme.py. -->
+<link rel="stylesheet" href="./pane-theme.css">
+<link rel="stylesheet" href="./pane.css">
 </head>
 <body>
 
@@ -71,6 +75,10 @@
     </div>
 
     <div id="thread-body" hidden></div>
+
+    <!-- Mounted by app.js on the first pane_state for this pane; the terminal below
+         moves into it, so the phone shows the same order the desktop pane does. -->
+    <div id="pane-view" hidden></div>
 
     <div id="terminal-pane" hidden>
       <div id="screen-wrap"></div>

@@ -531,6 +531,9 @@ class Host:
         # Scrollback is the source's to answer, not the hub's: the bridge and the GUI both hold
         # the emulator that owns it, and an agent-only source has none. Advertised only when true.
         self.scrollback = bool(getattr(self.source, "scrollback", False))
+        # pane_state (relay-terminal-71): only a source the GUI drives publishes it, so say so in
+        # `welcome` rather than letting every client ask and be refused (section 16).
+        self.pane_state = callable(getattr(self.source, "send", None))
 
     # ---- registration and the rendezvous link --------------------------------------------------
 
@@ -1294,7 +1297,8 @@ class Host:
             "hub_epoch": self.epoch,
             "features": (["panes", "agent", "compose", "voice"]
                          + (["screen", "takeover"] if self.screens else [])
-                         + (["history"] if self.scrollback else [])),
+                         + (["history"] if self.scrollback else [])
+                         + (["pane_state"] if self.pane_state else [])),
             "server_time": time.time(),
         })
         await channel.send(self.stream("panes", limit=64).add(
