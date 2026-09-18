@@ -20,7 +20,7 @@ SYSTEM = "Reply with the single word: ok"
 USER = "ping"
 # Reasoning models spend output tokens on thinking before the word, and several of them cannot turn
 # thinking off at all, so a tight budget makes the answer come back truncated. 1024 is still a few
-# tenths of a cent, and a truncated answer counts as a pass anyway (see _TRUNCATED below).
+# tenths of a cent, and a truncated answer counts as a pass anyway (see ProviderTruncated below).
 MAX_TOKENS = 1024
 TIMEOUT_S = 30
 # provider.py raises ProviderTruncated when the model hit the output limit. For an ordinary turn that
