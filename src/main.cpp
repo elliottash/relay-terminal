@@ -3560,7 +3560,18 @@ private:
             m_recapManual = false;
             m_lastRecapTurns = event.value(QStringLiteral("turns_covered")).toInt();
             ensureLineStart();
-            printInline(QStringLiteral("Recap · ") + event.value(QStringLiteral("text")).toString() + '\n', Ink::Recap);
+            // The header states the stretch of work the recap covers ("Recap · 09:12 → 11:47 ·
+            // 2h 35m"), from the worker's recorded turn stamps (owner request, 2026-09-17). A
+            // session with no stamps sends no `span_text`, and the summary follows "Recap · " on
+            // one line as before: no span reads better than a guessed one.
+            const QString span = event.value(QStringLiteral("span_text")).toString();
+            const QString summary = event.value(QStringLiteral("text")).toString();
+            if (span.isEmpty()) {
+                printInline(QStringLiteral("Recap · ") + summary + '\n', Ink::Recap);
+            } else {
+                printInline(QStringLiteral("Recap · ") + span + '\n', Ink::Recap);
+                printInline(summary + '\n', Ink::Recap);
+            }
             const QString next = event.value(QStringLiteral("next_action")).toString();
             if (!next.isEmpty()) printInline(QStringLiteral("Next · ") + next + '\n', Ink::Recap);
             const QString openLine = relay::RequestLedgerModel::openItemsLine(relay::RequestLedgerModel::parseOpenItems(event.value(QStringLiteral("open_items")).toArray()));

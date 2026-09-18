@@ -224,6 +224,11 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.assertEqual(loaded['turns'], 3)
         recap = self.rec.wait(lambda e: e['event'] == 'recap')
         self.assertEqual((recap['text'], recap['next_action'], recap['reason']), ('Did three things.', 'Ship it', 'resume'))
+        # The span survives compaction and a resume: it is read off the resumed session's turn
+        # stamps, so it covers the three turns of work and not just this recap's own moment.
+        self.assertEqual(recap['span_start'], agent.checkpoints.items[0]['time'])
+        self.assertEqual(recap['span_end'], agent.checkpoints.items[-1]['ended'])
+        self.assertRegex(recap['span_text'], r'\d\d:\d\d → .*\d\d:\d\d · ')
         self.cmds.handle('recap_request', {'id': 'r', 'reason': 'away'})
         self.rec.wait(lambda e: e['event'] == 'recap' and e.get('id') == 'r')
         # plan execute re-reads the file from disk and switches to build mode

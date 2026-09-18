@@ -1064,6 +1064,9 @@ class Agent:
         self._close_thinking(record)
         record["outcome"] = event["event"]
         record["elapsed_ms"] = int((time.monotonic() - record["started"]) * 1000)
+        # The turn's checkpoint gets its wall-clock end here too - what a recap needs to state
+        # the span it covers, and unrecoverable from the monotonic `elapsed_ms` above.
+        self.checkpoints.end_turn(self._turn)
         # Every end state (done, cancelled, error, limit) passes through here, which makes it the one
         # place to prove no provider connection outlived the turn.
         leaked = self._ensure_no_open_response(record["turn_id"], record["outcome"])

@@ -50,13 +50,14 @@ Verify against provider docs before shipping; keep the table in `backend/relay_c
 
 ## 5. Checkpoints, rewind, fork, sessions, recaps
 
-- A checkpoint is recorded at the start of each user turn: `{turn, prompt_preview, time, message_index}`. Before any agent file write, the file's previous bytes (or "absent") are saved under the session's checkpoint store, keyed by turn.
+- A checkpoint is recorded at the start of each user turn: `{turn, prompt_preview, time, message_index}`, and stamped with `ended` (wall clock) when the turn reaches any end state (done, cancelled, error, limit). `time`/`ended` are what a recap's span is computed from; sessions saved before this version have no `ended`, and fall back to turn starts. Before any agent file write, the file's previous bytes (or "absent") are saved under the session's checkpoint store, keyed by turn.
 - `checkpoints` → `checkpoints {items: [{turn, prompt_preview, time, files: [paths]}]}`.
 - `rewind {turn, restore: "conversation"|"files"|"both"}` → restores; files changed since (hash mismatch) are skipped and reported. Event `rewound {turn, restored_files: [...], conflicts: [...], note}`. Shell side effects are never undone; the note says so.
 - `fork {turn?}` → `fork_state {state}` where `state` is an opaque JSON object (messages up to `turn`, model, effort, mode, instructions). GUI starts a new pane and sends `load_state {state}` → `state_loaded {session_id, turns}`.
 - Sessions auto-save after every turn to `session_dir/<session_id>.json` (title = first prompt preview, updated time, model, turns).
 - `sessions` → `sessions {items: [{id, title, updated, turns, model}]}`; `resume {id}` → `state_loaded`, followed by a `recap {text}` event.
 - **Recap (owner: "claude style recaps", the session-return kind):** when a session is resumed, or when the pane's window regains focus after the agent finished work while the user was away (GUI sends `recap_request`), the worker produces a short summary of what happened (goal, what was done, current state, next step) with a no-tools model call and emits `recap {text, turns_covered}`.
+- **Recap span (owner: "state the start time, the end time and the time spent", 2026-09-17):** the `recap` event also carries `span_start`, `span_end` (epoch seconds), `span_seconds` (int) and `span_text` — the covered stretch of work, already formatted in the worker's local time in Relay's UI idiom: `09:12 → 11:47 · 2h 35m`, dated (`16 Sep 23:40 → 17 Sep 00:25 · 45m`) when the span is not today or crosses midnight. Elapsed is `Xh Ym`, minutes alone under an hour, `Xh` on a whole hour, `<1m` below a minute. The span is computed in `suggestions.span_fields` from the turns' recorded `time`/`ended` stamps (`checkpoints.span`) — never from the model, which is told in `RECAP_SYSTEM` not to mention times at all. **All four fields are absent when no turn carries a stamp**; the GUI then prints the recap with no span line rather than a wrong one.
 
 ## 6. Plan mode (Warp-style)
 

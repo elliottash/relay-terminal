@@ -261,9 +261,14 @@ class SessionCommands:
         messages, turns = list(agent.messages), agent.turns
         provider = agent.side_provider(cheap=True, role="summaries")
         open_items = open_request_items(agent)
+        # The span the recap states comes off the recorded turn stamps, never the model's text
+        # (owner request, 2026-09-17), so the stamps are snapshotted with the messages: the
+        # background thread must not read a checkpoint list a later turn is appending to.
+        turn_items = [{"time": item.get("time"), "ended": item.get("ended")}
+                      for item in agent.checkpoints.items]
 
         def work():
-            event = suggestions.recap(provider, messages, turns, reason)
+            event = suggestions.recap(provider, messages, turns, reason, turn_items=turn_items)
             event["open_items"] = open_items
             return event
         self._background("recap", request_id, work,

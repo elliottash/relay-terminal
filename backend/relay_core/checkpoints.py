@@ -53,6 +53,15 @@ class CheckpointStore:
         self.items.append(item)
         return item
 
+    def end_turn(self, item: dict | None) -> None:
+        """Stamp a turn's wall-clock end.  `time` is when the turn started; a recap has to state
+        the span it covers (owner request, 2026-09-17) and the turn record's `elapsed_ms` is
+        monotonic, which cannot be turned back into a clock time.  First stamp wins, so a rerun
+        through the end path never moves an already-closed turn.
+        """
+        if item is not None and item.get("ended") is None:
+            item["ended"] = time.time()
+
     def record_before(self, item: dict, path: Path, data: bytes | None) -> None:
         key = str(path)
         if key in item["files"]:
@@ -159,6 +168,25 @@ class CheckpointStore:
         self.items = items
         nxt = data.get("next_turn")
         self.next_turn = nxt if type(nxt) is int and nxt > 0 else (max((i["turn"] for i in items), default=0) + 1)
+
+
+def span(items: list[dict]) -> tuple[float, float] | None:
+    """(start, end) epoch seconds covered by `items`, or None when no turn carries a stamp.
+
+    The start is the earliest turn start; the end is the latest of the recorded turn ends and
+    turn starts, so a turn still running (or one saved before `ended` existed) contributes its
+    start rather than dropping out of the span.  Sessions written before this version have no
+    `ended` at all, which is why the fallback is a whole span and not just a missing last turn.
+    """
+    starts = [item["time"] for item in items if _is_stamp(item.get("time"))]
+    if not starts:
+        return None
+    ends = [item["ended"] for item in items if _is_stamp(item.get("ended"))]
+    return min(starts), max(starts + ends)
+
+
+def _is_stamp(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _safe_target(path: Path, root: Path) -> bool:

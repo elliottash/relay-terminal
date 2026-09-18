@@ -427,6 +427,9 @@ function onAgent(message) {
       break;
     }
     case 'recap':
+      // `span_text` is the stretch of work the recap covers, already formatted in the desktop's
+      // local time by the worker (it is the clock the work was done on, not the phone's).
+      if (event.span_text) append(el('div', 'note', event.span_text));
       append(el('div', 'note', event.text || ''));
       break;
     case 'status':

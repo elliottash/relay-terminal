@@ -5,10 +5,11 @@ import os
 import re
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
-from relay_core import attachments, suggestions
+from relay_core import attachments, checkpoints, suggestions
 from relay_core.agent import Agent
 from relay_core.context import SUMMARY_MARKER, ContextTracker, limit_tokens
 from relay_core.provider import ProviderConfig
@@ -417,6 +418,92 @@ class SuggestionTests(unittest.TestCase):
         messages = [{'role': 'system', 'content': 's'}, {'role': 'user', 'content': 'fix bug'}, text('fixed')]
         self.assertEqual(suggestions.next_prompt(provider, messages, 1)['text'], 'run the tests')
         self.assertEqual(suggestions.next_prompt(provider, messages, 0)['text'], '')
+
+
+def local(year, month, day, hour, minute):
+    """Epoch seconds for a local wall-clock time, so the formatting assertions below hold in any
+    timezone (the formatter reads the local clock, and so does this)."""
+    return time.mktime((year, month, day, hour, minute, 0, 0, 1, -1))
+
+
+def month(epoch):
+    """"Sep" as the test machine's LC_TIME spells it."""
+    return time.strftime('%b', time.localtime(epoch))
+
+
+class RecapSpanTests(unittest.TestCase):
+    """The recap's "09:12 → 11:47 · 2h 35m" header (owner request, 2026-09-17): elapsed
+    formatting, which stamps the span is taken from, and the no-stamps fallback."""
+
+    def test_format_elapsed(self):
+        cases = {0: '0m', 1: '<1m', 59: '<1m', 60: '1m', 119: '1m', 35 * 60: '35m',
+                 59 * 60 + 59: '59m', 3600: '1h', 3600 + 59: '1h', 2 * 3600 + 35 * 60: '2h 35m',
+                 2 * 3600 + 35 * 60 + 50: '2h 35m', 7200: '2h', 26 * 3600: '26h'}
+        for seconds, expected in cases.items():
+            self.assertEqual(suggestions.format_elapsed(seconds), expected, seconds)
+        # A clock that moved backwards must not print a negative duration.
+        self.assertEqual(suggestions.format_elapsed(-90), '0m')
+
+    def test_format_span_today_and_dated(self):
+        start, end = local(2026, 9, 17, 9, 12), local(2026, 9, 17, 11, 47)
+        self.assertEqual(suggestions.format_span(start, end, end), '09:12 → 11:47 · 2h 35m')
+        # Not today: the date is stated once, on the start.
+        next_day = local(2026, 9, 18, 10, 0)
+        self.assertEqual(suggestions.format_span(start, end, next_day),
+                         f'17 {month(start)} 09:12 → 11:47 · 2h 35m')
+        # Across midnight: both ends carry their date, whether or not it is "today".
+        night, morning = local(2026, 9, 16, 23, 40), local(2026, 9, 17, 0, 25)
+        self.assertEqual(suggestions.format_span(night, morning, morning),
+                         f'16 {month(night)} 23:40 → 17 {month(morning)} 00:25 · 45m')
+
+    def test_span_picks_first_start_and_last_end(self):
+        items = [{'time': local(2026, 9, 17, 9, 12), 'ended': local(2026, 9, 17, 9, 30)},
+                 {'time': local(2026, 9, 17, 10, 0), 'ended': local(2026, 9, 17, 11, 47)}]
+        self.assertEqual(checkpoints.span(items),
+                         (local(2026, 9, 17, 9, 12), local(2026, 9, 17, 11, 47)))
+        # A turn still running contributes its start, so the span never shrinks behind it.
+        running = items + [{'time': local(2026, 9, 17, 12, 30)}]
+        self.assertEqual(checkpoints.span(running)[1], local(2026, 9, 17, 12, 30))
+        # Sessions saved before `ended` existed: turn starts alone still give a span.
+        self.assertEqual(checkpoints.span([{'time': t['time']} for t in items]),
+                         (local(2026, 9, 17, 9, 12), local(2026, 9, 17, 10, 0)))
+
+    def test_span_absent_without_stamps(self):
+        self.assertIsNone(checkpoints.span([]))
+        self.assertIsNone(checkpoints.span([{'turn': 1}, {'turn': 2, 'time': None}]))
+        self.assertEqual(suggestions.span_fields([{'turn': 1}]), {})
+        self.assertEqual(suggestions.span_fields(None), {})
+
+    def test_span_fields(self):
+        start, end = local(2026, 9, 17, 9, 12), local(2026, 9, 17, 11, 47)
+        fields = suggestions.span_fields([{'time': start, 'ended': end}], end)
+        self.assertEqual(fields, {'span_start': start, 'span_end': end, 'span_seconds': 2 * 3600 + 35 * 60,
+                                  'span_text': '09:12 → 11:47 · 2h 35m'})
+
+
+class RecapSpanAgentTests(Base):
+    def test_turns_are_stamped_and_the_recap_carries_the_span(self):
+        provider = ScriptedProvider(side_reply='{"summary": "Fixed it.", "next_action": null}')
+        agent = self.agent(provider)
+        before = time.time()
+        agent.ask('one')
+        agent.ask('two')
+        after = time.time()
+        items = agent.checkpoints.items
+        self.assertEqual(len(items), 2)
+        for item in items:                                  # every ended turn carries both stamps
+            self.assertGreaterEqual(item['ended'], item['time'])
+            self.assertTrue(before <= item['time'] <= after)
+        event = suggestions.recap(provider, agent.messages, agent.turns, 'resume',
+                                  turn_items=items)
+        self.assertEqual(event['span_start'], items[0]['time'])
+        self.assertEqual(event['span_end'], items[-1]['ended'])
+        self.assertIn('→', event['span_text'])
+        # A session without stamps (a fresh conversation resumed from an old file) has no span.
+        self.assertNotIn('span_text', suggestions.recap(provider, agent.messages, agent.turns,
+                                                        'resume', turn_items=[{'turn': 1}]))
+        # The model is never asked for the times, and is told to keep them out of the summary.
+        self.assertIn('Never state clock times', provider.side_requests[-1][0]['content'])
 
 
 if __name__ == '__main__':
