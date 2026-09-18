@@ -12,7 +12,7 @@ rank: c
 created: '2026-09-18'
 acceptance: 'A model changing an existing file calls `edit_file {path, old_string, new_string, replace_all?}` instead of resending the whole file; the preview is a `EDIT FILE` diff in the same shape as `WRITE FILE`; every refusal says what to do instead; the edit is undone by `rewind` and refused in plan mode; `tests/test_tools.py`, `tests/test_sessions.py`, `tests/test_subagents.py`, `tests/test_agents_defs.py`, evidence in `docs/qa_evidence/2026-09-18-edit-file-tool/`'
 source: 'owner, 2026-09-18: a real edit tool "as part of this" tool-call-notifications work'
-links: {plans: [], commits: [d3f5624], evidence: ['docs/qa_evidence/2026-09-18-edit-file-tool/'], related: [], github: null}
+links: {plans: [], commits: [d3f5624, 882a76d], evidence: ['docs/qa_evidence/2026-09-18-edit-file-tool/'], related: [], github: null}
 ---
 # edit_file: a change to an existing file is one string, not the whole file
 
@@ -95,14 +95,9 @@ sentence of the system prompt says the same. Protocol: `docs/AGENT-SESSIONS-PROT
 
 ## Known gaps
 
-- The GUI still prints `EDIT FILE` previews through the generic path: `src/main.cpp` (~5615) maps
-  `WRITE FILE` to the verb "write" and has no row for `EDIT FILE` yet, and nothing shows the new
-  `added`/`removed` counts. Both are another session's change, by design.
-- `docs/ARCHITECTURE.md`'s tool table has no `edit_file` row: at the time of this commit another
-  session had uncommitted work in exactly that table, and the two could not be separated. It should
-  be added once that lands.
-- `docs/VALIDATION.md` was not updated for the same reason: another session was rewriting both the
-  QA-lane list and the `tests/test_tools.py` row while this landed. This card belongs on that list,
-  and that row is six cases short.
+- The GUI still prints `EDIT FILE` previews through the generic path: `src/Pane.h` (~5190, the
+  title-to-verb map that 48883ad moved out of `src/main.cpp`; `src/SubagentTranscript.cpp` has the
+  same map) turns `WRITE FILE` into the verb "write" and has no row for `EDIT FILE` yet, and nothing
+  shows the new `added`/`removed` counts. Both are another session's change, by design.
 - No multi-edit (several replacements in one call) and no line-number addressing: one exact string
   per call, like Claude Code's `Edit`.
