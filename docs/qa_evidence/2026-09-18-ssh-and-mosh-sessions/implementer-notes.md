@@ -17,6 +17,7 @@ pane and engine edits, 2026-09-18, by Claude Opus 5 (session relay-terminal-be).
 | `implementer-09` | Under mosh the agent's `run_command` ran on the host over the connection mosh's ssh left behind (`ran … on localhost · exit 0`); the reply stays in the side panel by design. |
 | `implementer-10` | The same "ask" run after the colour follow-up: the prompt under the reply is bold green and blue again, as the host drew it (in `implementer-05` it came back plain). |
 | `implementer-11` | A zsh login (`ssh -t localhost zsh -f -i`): the integration was typed and erased, the prompt box typed on the host, and the reply prints under zsh's `%` prompt. A first run of zsh with no `~/.zshrc` shows its setup menu instead of a prompt; Relay typed into that menu, which is what the `m_screenPrompt.actionable()` guard in `maybeEnhanceLogin` now prevents. |
+| `implementer-12` | A tmux on the host (`tmux -f /dev/null new-session`, so its pass-through is off): the prompt box types into the shell inside tmux. Before this, tmux's alternate screen made Relay queue the line for the *local* shell; in between, it was refused with "a full-screen program on localhost has the terminal". The agent's reply stays in the panel here, as under mosh. |
 
 The `implementer-connect-*`, `-options-ssh` and `-split-same-host` shots and `drive-connect.sh` are the
 window half (Connect to host, Split on the same host, Options).

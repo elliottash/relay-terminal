@@ -775,7 +775,9 @@ private:
         sig.mode = terminalMode();
         sig.programRunning = processBusy();
         sig.programReading = m_waiting;
-        sig.altScreen = m_altScreen;
+        // A login's alternate screen is the host's multiplexer, not a full-screen program: the
+        // classifier is still asked, and what it finds on the cursor's row decides (#S5SH).
+        sig.altScreen = m_altScreen && !m_login.active;
         sig.screenReadable = canShowAgentTheScreen();
         return sig;
     }
@@ -6510,6 +6512,16 @@ private:
             typeIntoLogin(text);
             return;
         }
+        if (route == QStringLiteral("shell") && m_login.active) {
+            // Logged in, but a full-screen program on the host has the keyboard. Queueing this for
+            // the local shell would run it on the wrong machine (#S5SH): the text stays in the box.
+            const QString keys = Keymap::instance().shortcutText(QStringLiteral("control.human"));
+            status(QStringLiteral("%1 has the terminal · %2 types into it, or wait for its prompt")
+                       .arg(foregroundProgramName(), keys));
+            toast(QStringLiteral("Not sent · a full-screen program on %1 has the terminal · %2")
+                      .arg(loginHost(), keys));
+            return;
+        }
         if (route == QStringLiteral("shell")) {
             const bool valid = decision.value(QStringLiteral("valid")).toBool(decision.value(QStringLiteral("syntax_ok")).toBool(true));
             const QString problem = decision.value(QStringLiteral("invalid_reason")).toString(
@@ -7687,7 +7699,10 @@ private:
     // Not under mosh: mosh-client repaints the whole screen from the server's copy, which has
     // never heard of Relay's lines, so they would be drawn over; its replies stay in the panel.
     bool inlineReady() const {
-        return shellIdleAtPrompt() || (loginAtPrompt() && !m_login.program.startsWith(QStringLiteral("mosh")));
+        // Never onto the alternate screen: mosh and a remote tmux both repaint it from their own
+        // copy, which has never heard of Relay's lines, so they would be drawn over (#S5SH).
+        return shellIdleAtPrompt()
+            || (loginAtPrompt() && !m_altScreen && !m_login.program.startsWith(QStringLiteral("mosh")));
     }
 
     void flushInline() {
@@ -8829,11 +8844,11 @@ private:
     // ----- program state: alternate screen, passwords, waiting for input ----------------------
     // Called from the backend's onAltScreenChanged.
     void onPrimaryScreen(bool primary) {
-        // mosh-client draws the remote screen on the alternate screen for as long as it runs, so
-        // for mosh it says nothing about a full-screen program: the login is treated like ssh's
-        // (card #S5SH). Full-screen programs on the host are left to the screen classifier.
-        if (!primary && foregroundProgramName() == QStringLiteral("mosh-client")) { m_altScreen = false; updateTakeControl(); return; }
         m_altScreen = !primary;
+        // A login lives on the alternate screen whenever the host runs mosh, tmux or screen, so it
+        // says nothing there about a full-screen program: what the cursor's row holds decides
+        // (updateLoginPrompt), and the login keeps taking lines (card #S5SH).
+        if (!primary && m_login.active) { updateTakeControl(); refreshProgramHint(); return; }
         if (!primary) {
             if (m_native) return;
             const QString program = foregroundProgramName();
@@ -8891,7 +8906,11 @@ private:
     }
 
     // The prompt box types into the login instead of routing to the local shell.
-    bool loginTakesLines() const { return m_login.active && !m_altScreen && !m_native && !m_secretMode; }
+    // Typed ahead when the host is merely busy; on the alternate screen (a remote tmux, mosh, or a
+    // full-screen program) only at a prompt, so a line never lands in vim.
+    bool loginTakesLines() const {
+        return m_login.active && !m_native && !m_secretMode && (m_login.atPrompt || !m_altScreen);
+    }
     // The remote shell is idle at its prompt: agent output may be printed there.
     bool loginAtPrompt() const { return loginTakesLines() && m_login.atPrompt; }
     QString loginHost() const {
@@ -8966,20 +8985,25 @@ private:
     void updateLoginPrompt() {
         if (!m_login.active) return;
         const bool before = m_login.atPrompt;
-        if (m_altScreen || m_native || !m_backend) {
+        if (m_native || !m_backend) {
             m_login.atPrompt = false; m_login.promptTicks = 0;
-        } else if (m_login.integration) {
+        } else if (m_login.integration && !m_altScreen) {
+            // The marks come from the shell Relay enhanced. On the alternate screen something else
+            // is drawing (a remote tmux, mosh), its own shell's marks never reach here, and the
+            // last mark is the "command started" of whatever opened it: the screen decides instead.
             m_login.atPrompt = m_lastPromptMark == 'B' || m_lastPromptMark == 'A';
         } else if (m_inlineOpen && m_login.atPrompt) {
             // Relay's own output is on the cursor row now, not the prompt: it stays a prompt until
             // the block closes or the user sends the login a line (typeIntoLogin).
         } else {
-            bool prompt = m_screenPrompt.kind == relay::screen::Kind::ShellPrompt;
-            if (prompt) {
-                const QPoint cursor = m_backend->cursorPosition();
-                const QString row = m_backend->screenText().split('\n').value(cursor.y());
-                prompt = cursor.y() >= 0 && !row.trimmed().isEmpty() && cursor.x() >= row.trimmed().size();
-            }
+            // The cursor's own row, not the last row of the screen: inside a remote tmux the last
+            // row is its status bar. The cursor must sit at the end of what that row holds, and
+            // that text must read like a shell's prompt.
+            const QPoint cursor = m_backend->cursorPosition();
+            const QString row = cursor.y() >= 0 ? m_backend->screenText().split('\n').value(cursor.y()) : QString();
+            const QString typed = row.left(std::max(0, cursor.x()));
+            bool prompt = !typed.trimmed().isEmpty() && cursor.x() >= row.trimmed().size()
+                          && relay::screen::isShellPrompt(typed) && !m_screenPrompt.actionable();
             m_login.promptTicks = prompt ? m_login.promptTicks + 1 : 0;
             m_login.atPrompt = m_login.promptTicks >= 2;
         }
@@ -9069,7 +9093,8 @@ private:
         checkPasswordPrompt();
         updateScreenPrompt();
         updateLoginPrompt();
-        if (!m_native && !m_altScreen && !m_secretMode && m_runningSince.isValid() && m_runningSince.elapsed() > 300) {
+        if (!m_native && !m_secretMode && m_runningSince.isValid() && m_runningSince.elapsed() > 300
+            && (!m_altScreen || relay::remote::isLoginProgram(foregroundProgramName()))) {
             const QString program = foregroundProgramName();
             if (remoteSessionProgram(program) && !m_remoteHandled) {
                 // ssh and friends never switch screens, so a short list stands in for detection.

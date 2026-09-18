@@ -138,6 +138,24 @@ enhanced without asking; both lists are edited in Options). `off` → never, and
 drops unknown OSC sequences, so a mosh session is never enhanced; it still gets everything the
 screen classifier can give (items 4–6).
 
+### 3b. The alternate screen is not the end of a login
+
+mosh-client draws on the alternate screen for its whole life, and a tmux or screen on the host takes
+it as soon as it starts. Relay used to read that as "a full-screen program owns the terminal", stop
+taking lines, and queue what the user typed **for the local shell** — the original bug, one level
+deeper. So while a login runs, the alternate screen decides nothing by itself:
+
+- the login is still detected and still takes lines, but on the alternate screen only when the
+  remote shell is at a prompt, so a line can never land in vim;
+- what is at a prompt is decided by the cursor's own row (`relay::screen::isShellPrompt`), because
+  the bottom row there is tmux's status bar, and because the marks of the shell Relay enhanced
+  describe the screen underneath, not the one being drawn — the last of them is the "command
+  started" of whatever opened it;
+- a command typed while a full-screen program really does hold the terminal is not sent and not
+  queued: it stays in the prompt box, and the pane says which program has the keyboard;
+- the agent's reply goes to the side panel, never into the alternate screen, because mosh and tmux
+  both repaint it from their own copy and would paint over it.
+
 ### 4. The prompt box types into the remote shell
 
 At a remote prompt, Enter sends the route request with `remote: {"host": …}`. The router then skips

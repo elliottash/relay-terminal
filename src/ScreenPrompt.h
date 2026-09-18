@@ -73,6 +73,12 @@ QStringList lastRows(const QString &screen, int count = kInspectRows);
 // are read. An empty `rows` (or screenReadable false) falls back to the signals alone.
 Detection detect(const QStringList &rows, const Signals &sig);
 
+// The shell's own prompt: a trailing "$", "#", "%" or arrow with something path- or host-shaped
+// before it. The classifier decides a whole screen; this answers for one line, which is what a
+// caller with a cursor position already knows to ask about (card #S5SH, a shell inside a remote
+// tmux: the last row of the screen is tmux's status bar, the cursor's row is the prompt).
+bool isShellPrompt(const QString &line);
+
 // "apt is asking: Do you want to continue? [Y/n]" — the take-control banner's label.
 // Empty when nothing is being asked. A password is named, never quoted back with its line.
 QString bannerText(const QString &program, const Detection &detection);

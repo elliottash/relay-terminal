@@ -141,6 +141,8 @@ double score(double base, const Signals &sig, bool password) {
 
 }  // namespace
 
+bool isShellPrompt(const QString &line) { return shellPrompt(line.trimmed()); }
+
 const char *kindName(Kind kind) {
     switch (kind) {
     case Kind::None: return "none";
