@@ -12,7 +12,7 @@ rank: zzrc
 created: '2026-09-18'
 acceptance: 'Close a pane, a tab and a window; each is in Sessions › Recently closed with where and when; Enter reopens it where it was with its terminal text and conversation; the list survives a restart; typing `exit` is reopenable; `ctest` passes'
 source: '`issues/feature_intake.txt`, 2026-09-18: "ideally we could add soemthing like recently closed windows or recently closed tabs or recently closed panes." Owner in session, 2026-09-18: "persist it and save it", and "this will be part of the session manager right? i think there should be a ''recently closed'' button or something there."'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-recently-closed/'], related: [R6J0, CCKY, 64KE, SB7K, JRWQ], github: null}
+links: {plans: [], commits: [bc14a49], evidence: ['docs/qa_evidence/2026-09-18-recently-closed/'], related: [R6J0, CCKY, 64KE, SB7K, JRWQ], github: null}
 ---
 # Recently closed panes, tabs and windows
 
