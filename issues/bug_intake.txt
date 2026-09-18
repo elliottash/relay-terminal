@@ -1,8 +1,0 @@
-"continue" on its own should read as an agent prompt
-
-the permanent pane icons should use the brighter outline that we had with the dynamic pane icons
-
-in markdown, it should probably say "source (MD)" rather than "source" (ditto for rendered)
-
-for a file preview pane, if you click on another link there, it should open a new pane, or if not , there needs to be a back button. 
-when i did tab autocompelte and selected a folder, it added a "-" for some reason: "cd 2026-09-18-EG/-" and then the command failed. 
