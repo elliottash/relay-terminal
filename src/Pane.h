@@ -5932,6 +5932,14 @@ private:
         const bool wanted = QSettings().value(QStringLiteral("ssh/enhance"), QStringLiteral("auto")).toString() != QStringLiteral("off");
         QString why;
         const bool wrapSsh = wanted && sshSocketDirReady(&why);
+        // A master killed outright leaves its socket behind; nothing else would ever remove it.
+        // Once per run, before the first pane's shell: a socket someone answers on is left alone.
+        static bool sweptSockets = false;
+        if (wrapSsh && !sweptSockets) {
+            sweptSockets = true;
+            if (const int gone = relay::remote::pruneSockets(sshSocketDir()); gone > 0)
+                relay::log::info(QStringLiteral("ssh_sockets_pruned pane=%1 count=%2").arg(paneLogId()).arg(gone));
+        }
         if (wanted && !wrapSsh) {
             // Silence here reads later as "the agent cannot reach the host" with no reason given.
             relay::log::error(QStringLiteral("ssh_share_off pane=%1 reason=%2").arg(paneLogId(), why));

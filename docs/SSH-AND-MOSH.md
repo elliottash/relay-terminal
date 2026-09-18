@@ -47,6 +47,13 @@ sharing so the agent can reuse the login:
   over an existing master anyway (its proxy never runs), so the wrapper also adds
   `--experimental-remote-ip=remote` (the address from `$SSH_CONNECTION` on the server) when no mode
   is given, and leaves mosh alone when the user asks for `proxy`.
+- A destination named after `--` (`ssh -- filly`) is still a destination; a lone `-` is not, and
+  mosh's own valued options (`-p`, `--port`, `--client`, …) are read before the destination, so
+  `mosh host --ssh=x` — where `--ssh=x` is the remote command — still shares.
+- Sockets of masters that were killed outright are swept once per run, before the first pane's
+  shell: Relay connects to each one and removes only those nothing answers on
+  (`relay::remote::pruneSockets`). Nothing else ever removed them, and under the `/tmp` fallback
+  they would outlive the machine's uptime.
 - `RELAY_SSH_DIR` is `$XDG_RUNTIME_DIR/relay-ssh` (mode 0700, created by the GUI). `%C` keeps the
   socket path short. The wrappers only use it when it exists, is absolute, is at most 48 bytes (a
   Unix socket path is 108, and ssh adds `/`, 40 for `%C` and a 17-byte temporary suffix) and has no
@@ -154,6 +161,11 @@ a real tmux with `allow-passthrough` both on and off, reading the pane's own byt
 `tmux pipe-pane`; it also types it into a real zsh over `ssh -t localhost`, which
 `docs/qa_evidence/2026-09-18-ssh-and-mosh-sessions/tmux-zsh-check.py` repeats by hand, with the
 screen each case leaves behind.
+
+If the remote shell already binds `Ctrl+X Ctrl+P`, or holds `PROMPT_COMMAND` read-only, the script
+says so in one line and installs nothing: half an integration is worse than none, and Relay must
+never press a key that runs a command of the user's. Such a login keeps working through the screen
+classifier, as an un-enhanced one does.
 
 When: `ssh/enhance` = `auto` → at the first remote prompt of each login, unless the host is in
 `ssh/hosts_never`. `ask` → a banner offers "Enhance" for this login (hosts in `ssh/hosts_always` are

@@ -3,7 +3,14 @@
 // the dump says, and that the typed bootstrap line decodes, with a row count that fits.
 #include "RemoteSession.h"
 
+#include <QLocalServer>
 #include <QProcess>
+#include <QTemporaryDir>
+
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#include <cstring>
 #include <QStandardPaths>
 #include <QTest>
 
@@ -96,6 +103,32 @@ private slots:
         promptEcho(QString::fromUtf8("➜  code ").toUtf8(), &columns);
         QCOMPARE(columns, 8);
         QCOMPARE(promptEcho(""), QByteArray());
+    }
+
+    void pruningLeavesLiveSocketsAlone() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        // One socket with a server on it, one left behind by a process that is gone, one file.
+        QLocalServer live;
+        QVERIFY(live.listen(dir.filePath("live")));
+        const QByteArray stale = dir.filePath("stale").toLocal8Bit();
+        const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+        QVERIFY(fd >= 0);
+        sockaddr_un address {};
+        address.sun_family = AF_UNIX;
+        ::strncpy(address.sun_path, stale.constData(), sizeof(address.sun_path) - 1);
+        QCOMPARE(::bind(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)), 0);
+        ::close(fd);   // nothing listens on it now, and the file stays
+        QFile plain(dir.filePath("notes.txt"));
+        QVERIFY(plain.open(QIODevice::WriteOnly));
+        plain.write("not a socket");
+        plain.close();
+
+        QCOMPARE(pruneSockets(dir.path()), 1);
+        QVERIFY(QFile::exists(dir.filePath("live")));
+        QVERIFY(!QFile::exists(dir.filePath("stale")));
+        QVERIFY(QFile::exists(dir.filePath("notes.txt")));
+        QCOMPARE(pruneSockets(dir.filePath("nowhere")), 0);
     }
 
     void bootstrapDecodes() {

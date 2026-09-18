@@ -181,6 +181,11 @@ class WrapperTests(unittest.TestCase):
         self.assertIn("STATUS 0", result.stdout)
         return [line[4:-1] for line in result.stdout.splitlines() if line.startswith("ARG[")]
 
+    def test_a_destination_after_the_options_still_shares(self):
+        # `ssh -- host` names the destination after the option terminator; a lone `-` is not one.
+        self.assertEqual(self.argv(["--", "host"]), self.control() + ["--", "host"])
+        self.assertPlain(["-"])
+
     def test_ssh_g_is_asked_only_when_the_configuration_could_matter(self):
         # `ssh -G` runs the user's `Match exec` hooks and can resolve names, so it is asked only
         # when something could be configured, and then once per host rather than once per ssh.
@@ -228,8 +233,14 @@ class WrapperTests(unittest.TestCase):
                          [ssh, "--experimental-remote-ip=local", "host"])
         self.assertEqual(self.mosh(["--experimental-remote-ip", "remote", "host"]),
                          [ssh, "--experimental-remote-ip", "remote", "host"])
+        # `mosh host --ssh=x` runs `--ssh=x` on the host: it says nothing about mosh's own ssh,
+        # so the connection is still shared.
+        self.assertEqual(self.mosh(["host", "--ssh=ssh"]),
+                         [ssh, "--experimental-remote-ip=remote", "host", "--ssh=ssh"])
+        self.assertEqual(self.mosh(["-p", "60001", "--ssh=ssh -4", "host"]),
+                         ["-p", "60001", "--ssh=ssh -4", "host"])   # the value of -p is not a host
         for args in (["--ssh=ssh -p 2222", "host"], ["--ssh", "ssh -4", "host"],
-                     ["host", "--ssh=ssh"], ["--experimental-remote-ip=proxy", "host"],
+                     ["--experimental-remote-ip=proxy", "host"],
                      ["--experimental-remote-ip", "proxy", "host"]):
             with self.subTest(args=args):
                 self.assertEqual(self.mosh(args), args)
@@ -619,6 +630,44 @@ class RemoteScriptTests(unittest.TestCase):
                                     env=self.env, capture_output=True, text=True, timeout=5)
             self.assertEqual(result.stdout, "rc=0\n")
             self.assertNotIn("\x1b", result.stderr)
+
+    def test_a_shell_that_already_uses_the_key_or_the_hook_is_left_alone(self):
+        # Relay redraws with C-x C-p and hooks PROMPT_COMMAND. If either is already the user's,
+        # half an integration would be worse than none — and Relay must not fire their command.
+        def run(prelude, shell="bash", check=""):
+            script = f"{prelude}\nRELAY_R=0\n. {REMOTE}\n{check}"
+            return subprocess.run([shell, "-f", "-i", "-c", script] if shell == "zsh"
+                                  else [shell, "--noprofile", "--norc", "-i", "-c", script],
+                                  capture_output=True, text=True, timeout=20)
+
+        taken = run('bind -x \'"\\C-x\\C-p":true\' 2>/dev/null', check="declare -p PROMPT_COMMAND")
+        self.assertIn("already bound", taken.stdout)
+        self.assertNotIn("__relay_r_pc", taken.stdout)
+
+        frozen = run('readonly PROMPT_COMMAND=":"', check='echo ALIVE')
+        self.assertIn("read-only", frozen.stdout)
+        self.assertIn("ALIVE", frozen.stdout)           # and the shell is still usable
+        self.assertNotIn("__relay_r_pc", frozen.stdout)
+
+        plain = run("", check="declare -p PROMPT_COMMAND; bind -X 2>/dev/null | grep -c relay")
+        self.assertIn("__relay_r_pc", plain.stdout)     # nothing in the way: the usual install
+        self.assertIn("1", plain.stdout.splitlines()[-1])
+
+        if not shutil.which("zsh"):
+            self.skipTest("zsh is not installed")
+        # zsh registers its hooks before it can ask about the key, so they stay registered and
+        # are switched off instead: the user's binding is untouched and no marks are sent, which
+        # is what makes Relay fall back to reading the screen rather than pressing their key.
+        zsh_taken = run('bindkey -M emacs "^X^P" beep', shell="zsh",
+                        check='print -r -- "off:${__relay_r_off-}"; bindkey -M emacs "^X^P"')
+        self.assertIn("already bound", zsh_taken.stdout)
+        self.assertIn("off:1", zsh_taken.stdout)
+        self.assertIn("beep", zsh_taken.stdout)          # their binding, not Relay's
+        quiet = run('bindkey -M emacs "^X^P" beep', shell="zsh",
+                    check='cd /tmp; print -r -- END')    # a prompt would emit 133;A without the flag
+        self.assertNotIn("133;A", quiet.stdout)
+        zsh_plain = run("", shell="zsh", check='print -r -- "precmd:$precmd_functions"')
+        self.assertIn("precmd:__relay_r_pc", zsh_plain.stdout)
 
     def test_small_enough_to_type(self):
         # What matters is the line typed into the remote shell: it goes in one write, and a tty's

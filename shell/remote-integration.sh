@@ -29,6 +29,18 @@ case $__relay_r_l in ?*) [ ${#o} -gt $__relay_r_l ] && return 0;; esac
 __relay_r_o "$o"
 }
 if [ -n "${BASH_VERSION-}" ]; then
+# Relay asks the line editor to redraw with C-x C-p, and it keeps the prompt hook in
+# PROMPT_COMMAND. Either one already spoken for is the user's, not Relay's: leave the session as
+# it is rather than half-enhance it or fire someone else's command (#S5SH).
+__relay_r_k=
+case $(bind -X 2>/dev/null; bind -p 2>/dev/null) in *'"\C-x\C-p"'*) __relay_r_k=key;; esac
+case " $(readonly -p 2>/dev/null | tr '\n' ' ')" in *' PROMPT_COMMAND='*) __relay_r_k=prompt;; esac
+if [ -n "$__relay_r_k" ]; then
+case $__relay_r_k in
+key) printf 'relay: Ctrl+X Ctrl+P is already bound here, so this session is left as it is\n';;
+*) printf 'relay: PROMPT_COMMAND is read-only here, so this session is left as it is\n';;
+esac
+else
 __relay_r_pc() { local s=$?; [ -n "${__relay_r_d-}" ] && __relay_r_o "133;D;$s"; __relay_r_d=1; __relay_r_7; return $s; }
 __relay_r_ps() { local s=$?; case $PS1 in *133\;A*) ;; *) PS1='\['$__relay_r_e'\033]133;A\007'$__relay_r_f'\]'$PS1'\['$__relay_r_e'\033]133;B\007'$__relay_r_f'\]';; esac; __relay_r_a=1; return $s; }
 __relay_r_c() { [ -n "${__relay_r_a-}" ] && case $BASH_COMMAND in __relay_r_*) ;; *) __relay_r_a=; __relay_r_o '133;C';; esac; }
@@ -46,19 +58,24 @@ case $__relay_r_n in *"| gzip -dc)"*) history -d ${__relay_r_n%%[!0-9 ]*};; esac
 case $BASH_VERSION in [123].*|4.[0-3].*) [ -z "$(trap -p DEBUG)" ] && trap __relay_r_c DEBUG;;
 *) case ${PS0-} in *133\;C*) ;; *) PS0=$__relay_r_e'\033]133;C\007'$__relay_r_f${PS0-};; esac;; esac
 for __relay_r_m in emacs-standard vi-insert vi-move; do bind -m $__relay_r_m -x '"\C-x\C-p":__relay_r_redraw' 2>/dev/null; done
+fi
 else
 setopt HIST_IGNORE_SPACE
 # The line was read before HIST_IGNORE_SPACE existed, and zsh cannot delete an entry: keep it out
 # of the file on the host instead, where it would otherwise sit in every Ctrl+R for good.
 case ${HISTORY_IGNORE-} in '') HISTORY_IGNORE='*| gzip -dc)*';; *) HISTORY_IGNORE="(${HISTORY_IGNORE})|(*| gzip -dc)*)";; esac
 __relay_r_p=$(printf "$__relay_r_e") __relay_r_s=$(printf "$__relay_r_f")  # zsh's PS1 wants bytes
-__relay_r_pc() { local s=$?; [ -n "${__relay_r_x-}" ] && __relay_r_o "133;D;$s"; __relay_r_x=; __relay_r_7
+__relay_r_pc() { local s=$?; [ -n "${__relay_r_off-}" ] && return $s
+[ -n "${__relay_r_x-}" ] && __relay_r_o "133;D;$s"; __relay_r_x=; __relay_r_7
 case $PS1 in *133\;A*) ;; *) PS1="%{$__relay_r_p"$'\e]133;A\a'"$__relay_r_s%}"$PS1"%{$__relay_r_p"$'\e]133;B\a'"$__relay_r_s%}";; esac; return $s; }
-__relay_r_pre() { __relay_r_o '133;C'; __relay_r_x=1; }
+__relay_r_pre() { [ -n "${__relay_r_off-}" ] && return; __relay_r_o '133;C'; __relay_r_x=1; }
 __relay_r_redraw() { zle reset-prompt; }
 eval 'precmd_functions+=(__relay_r_pc); preexec_functions+=(__relay_r_pre)'
 zle -N __relay_r_redraw
-for __relay_r_m in emacs viins vicmd; do bindkey -M $__relay_r_m '^X^P' __relay_r_redraw; done
+case $(bindkey -M emacs '^X^P' 2>/dev/null) in *undefined-key*|'')
+for __relay_r_m in emacs viins vicmd; do bindkey -M $__relay_r_m '^X^P' __relay_r_redraw; done;;
+*) printf 'relay: Ctrl+X Ctrl+P is already bound here, so this session is left as it is\n'
+__relay_r_off=1;; esac
 fi
 unset __relay_r_m __relay_r_n __relay_r_q
 __relay_r_7

@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "RemoteSession.h"
 
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
+#include <QLocalSocket>
+
+#include <sys/stat.h>
 #include <QSet>
 
 #include <algorithm>
@@ -144,6 +149,23 @@ bool isLocalHost(const QString &host, const QString &localName) {
     if (host.isEmpty() || host == QStringLiteral("localhost")) return true;
     const QString mine = localName.section('.', 0, 0);
     return host.compare(localName, Qt::CaseInsensitive) == 0 || host.section('.', 0, 0).compare(mine, Qt::CaseInsensitive) == 0;
+}
+
+int pruneSockets(const QString &dir) {
+    int removed = 0;
+    const QDir folder(dir);
+    if (!folder.exists()) return 0;
+    for (const QString &name : folder.entryList(QDir::System | QDir::Files | QDir::NoDotAndDotDot)) {
+        const QString path = folder.filePath(name);
+        struct stat info {};
+        if (::lstat(path.toLocal8Bit().constData(), &info) != 0 || !S_ISSOCK(info.st_mode)) continue;
+        // Connecting is the only honest test: a master can be older than this Relay and still live.
+        QLocalSocket probe;
+        probe.connectToServer(path);
+        if (probe.waitForConnected(150)) { probe.abort(); continue; }
+        if (QFile::remove(path)) ++removed;
+    }
+    return removed;
 }
 
 QByteArray gzip(const QByteArray &data) {

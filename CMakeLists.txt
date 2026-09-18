@@ -247,7 +247,7 @@ target_compile_options(relay-panestatus PRIVATE -Wall -Wextra -Wpedantic)
 # `ssh -G`, and the line that loads shell/remote-integration.sh into the remote shell.
 add_library(relay-remotesession STATIC src/RemoteSession.cpp src/RemoteSession.h)
 target_include_directories(relay-remotesession PUBLIC src)
-target_link_libraries(relay-remotesession PUBLIC ${RELAY_QT}::Core)
+target_link_libraries(relay-remotesession PUBLIC ${RELAY_QT}::Core ${RELAY_QT}::Network)
 target_compile_options(relay-remotesession PRIVATE -Wall -Wextra -Wpedantic)
 # Files on the host a pane is logged into (#S5SH, docs/SSH-AND-MOSH.md section 9): the shell
 # quoting and the remote scripts that fetch and save one file over the user's own ssh connection,

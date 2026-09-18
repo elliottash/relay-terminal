@@ -56,10 +56,14 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
             arg=$1
             shift
             case $arg in
-                --) break ;;
+                # `ssh -- host`: what follows is the destination, not an option.
+                --) [[ -n $host || $# -eq 0 ]] || host=$1
+                    break ;;
                 -?*) ;;
                 *)
-                    # ssh takes options after the destination too, up to the remote command.
+                    # ssh takes options after the destination too, up to the remote command. A lone
+                    # `-` is not a destination (and not an option either): ssh itself rejects it.
+                    [[ $arg == - ]] && return 1
                     [[ -n $host ]] && break
                     host=$arg
                     continue
@@ -143,7 +147,9 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
         }
         while read -r opt value; do
             case $opt in
-                controlmaster) [[ $value == false || $value == no ]] || { __relay_ssh_asked[$host]=1; return 1; } ;;
+                # `ssh -G` normalises: a master is `false` when off, and `controlpath` is printed
+                # only when the user set one (as `none` when they set it to none).
+                controlmaster) [[ $value == false ]] || { __relay_ssh_asked[$host]=1; return 1; } ;;
                 controlpath) [[ $value == none ]] || { __relay_ssh_asked[$host]=1; return 1; } ;;
                 controlpersist) [[ $value == no || $value == false ]] || { __relay_ssh_asked[$host]=1; return 1; } ;;
             esac
@@ -178,16 +184,22 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
         if __relay_ssh_dir_ok; then
             extra=("--ssh=ssh -o ControlMaster=auto -o ControlPath=$RELAY_SSH_DIR/%C -o ControlPersist=600")
             for arg in "$@"; do
-                if [[ $next == mode ]]; then
-                    mode=$arg
+                if [[ -n $next ]]; then
+                    [[ $next == mode ]] && mode=$arg
                     next=
                     continue
                 fi
                 case $arg in
+                    # Past the destination everything belongs to the remote command: `mosh host
+                    # --ssh=x` runs `--ssh=x` over there and says nothing about mosh's own ssh.
                     --) break ;;
                     --ssh | --ssh=*) extra=() && break ;;
                     --experimental-remote-ip) next=mode ;;
                     --experimental-remote-ip=*) mode=${arg#*=} ;;
+                    # mosh's own options that take a separate value; the value is not a destination.
+                    -p | --port | --client | --server | --predict | --family | --bind-server) next=skip ;;
+                    -*) ;;
+                    *) break ;;
                 esac
             done
             if [[ ${#extra[@]} -gt 0 ]]; then

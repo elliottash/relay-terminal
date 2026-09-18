@@ -45,6 +45,12 @@ Resolved parseDump(const QByteArray &dump, const QString &destination = QString(
 // A host name from OSC 7 names this machine (or no machine at all).
 bool isLocalHost(const QString &host, const QString &localName);
 
+// Remove the control sockets in `dir` that no ssh is listening on any more: a master killed
+// outright leaves its socket behind, and under a shared /tmp it would outlive the machine's
+// uptime. A socket someone answers on is never touched, and neither is anything that is not one.
+// Returns how many were removed.
+int pruneSockets(const QString &dir);
+
 // gzip framing around raw deflate, so a remote `gzip -dc` can read what Qt compressed.
 QByteArray gzip(const QByteArray &data);
 
