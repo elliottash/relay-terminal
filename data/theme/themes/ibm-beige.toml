@@ -55,26 +55,34 @@ action = "#803700"
 # dE 27 and 33 from the near-black text, which is what the eye was being asked to do.
 #
 # The case beige is the tight ground here, so the pair is pinned at L 33 whatever its hue; the
-# only free variable is chroma, and the greys were spending almost none of it. These take what
-# each hue allows at 4.5:1 on the case: chroma 31.5 and 82.6, up from 13.3 and 22.5, at the same
-# matched lightness the greyed pair had (L 33.4 and 33.2). They are dE 68 apart, dE 43 and 89
-# from the text, and dE 24 and 48 from the Windows 95 navy, which stays the chrome. The period is
-# on the side of this: a 1990s machine's own 16 colours were saturated, not pastel.
-shell = "#005380"
-agent = "#7220ad"
+# only free variable is chroma, and the greys were spending almost none of it. A first pass at
+# chroma 31.5 and 82.6 was still "a little hard to pick out" (owner), and the reason was the
+# blue: a teal-blue cannot pass chroma 35 at this lightness, so it was buying legibility with
+# hue it did not have to spend. Turning it to HSV 209 — which is where a 1990s machine's own
+# blue was, EGA #0000aa — doubles it to 60.1 at the same L 33, and the purple goes to 99.8.
+#
+# That is the ceiling: both sit at 4.6:1 on the case, and one step more chroma at either hue
+# fails AA. They are dE 52 apart, dE 68 and 106 from the near-black text, dE 68 and 106 from the
+# muted text they used to be mistaken for, and dE 21 and 64 from the Windows 95 navy, which
+# stays the chrome. The shell blue is dE 12 from the terminal's own ANSI 4 — they are cousins on
+# purpose, one is chip chrome and one is grid content, and they are never read against each
+# other. If this pair still has to work harder, the next lever is a tinted chip behind it
+# (`@shellSoft` / `@agentSoft` already exist in src/Theme.cpp), not more chroma.
+shell = "#0049a9"
+agent = "#7500c3"
 
 [syntax]
 # Checked against surface (idle composer) and surface_raised (focused composer, beige): the
 # focused one is the tight ground in this theme.
-command = "#005380"
+command = "#0049a9"
 unknown = "#931c17"
 flag = "#684800"
 string = "#135427"
 path = "#0f5f5a"
 operator = "#5a554a"
-variable = "#7220ad"
-agent = "#7220ad"
-token = "#005380"
+variable = "#7500c3"
+agent = "#7500c3"
+token = "#0049a9"
 
 [terminal]
 # The grid is warm paper, not a white block (owner, 2026-09-18), and the paper is lit rather than
