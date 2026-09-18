@@ -9,6 +9,7 @@
 #include "Notifications.h"        // window header: the bell and its list
 #include "InputPolicy.h"           // prompt-box-only input: where a submitted line goes
 #include "PaneLayout.h"            // pane focus, pane moves and grip drops
+#include "PaneTitles.h"            // model-written pane titles and the tab labels made from them
 #include "TurnTranscript.h"
 #include "ModelSettings.h"
 #include "SkillsDialog.h"
@@ -1188,6 +1189,21 @@ protected:
     bool eventFilter(QObject *object, QEvent *event) override {
         if ((event->type() == QEvent::WindowActivate || event->type() == QEvent::WindowDeactivate) && object == window())
             noteWindowActivation(event->type() == QEvent::WindowActivate);
+        // Pane title (issue JRWQ): double click names this pane by hand; Esc leaves it alone.
+        if (object == m_titleLabel && event->type() == QEvent::MouseButtonDblClick) {
+            beginRename();
+            hint(QStringLiteral("pane.rename"), QStringLiteral("Next time: /rename <name> · /rename-tab names the tab"));
+            return true;
+        }
+        if (object == m_titleEdit && event->type() == QEvent::KeyPress
+            && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
+            endRename();
+            return true;
+        }
+        if (object == m_titleEdit && event->type() == QEvent::FocusOut) {
+            endRename();
+            return false;
+        }
         if (object == m_cwdLabel && event->type() == QEvent::MouseButtonRelease
             && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && !m_cwdLabel->hasSelectedText()) {
             if (onOpenPath) onOpenPath(m_cwd);
@@ -1286,13 +1302,40 @@ protected:
 private:
     void buildUi() {
         auto *layout = new QVBoxLayout(this); layout->setContentsMargins(8, 6, 8, 8); layout->setSpacing(6);
+        // Pane header (issue JRWQ): what this pane is doing, written by the model and refreshed as
+        // the work moves on; the directory keeps its place on the right, smaller and dim. Double
+        // click the title to name the pane by hand (/rename does the same without the mouse).
+        auto *header = new QWidget;
+        auto *headerRow = new QHBoxLayout(header);
+        headerRow->setContentsMargins(0, 0, 0, 0);
+        headerRow->setSpacing(8);
+        m_titleLabel = new QLabel; m_titleLabel->setTextFormat(Qt::PlainText);
+        m_titleLabel->setObjectName(QStringLiteral("paneTitle"));
+        m_titleLabel->setCursor(Qt::IBeamCursor);
+        m_titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        m_titleLabel->installEventFilter(this);
+        m_titleEdit = new QLineEdit;
+        m_titleEdit->setObjectName(QStringLiteral("paneTitleEdit"));
+        m_titleEdit->setVisible(false);
+        m_titleEdit->installEventFilter(this);
+        connect(m_titleEdit, &QLineEdit::returnPressed, this, [this] { commitRename(); });
+        m_titleAuto = new QLabel(QStringLiteral("auto"));
+        m_titleAuto->setObjectName(QStringLiteral("paneAuto"));
+        m_titleAuto->setVisible(false);
         m_cwdLabel = new QLabel; m_cwdLabel->setTextFormat(Qt::PlainText);
+        m_cwdLabel->setObjectName(QStringLiteral("paneCwd"));
         // Clicking the directory line opens it in the explorer pane.
         m_cwdLabel->setCursor(Qt::PointingHandCursor);
-        m_cwdLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        m_cwdLabel->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+        m_cwdLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         m_cwdLabel->installEventFilter(this);
         m_cwdLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        layout->addWidget(m_cwdLabel);
+        headerRow->addWidget(m_titleLabel, 1);
+        headerRow->addWidget(m_titleEdit, 1);
+        headerRow->addWidget(m_titleAuto, 0);
+        headerRow->addStretch(0);
+        headerRow->addWidget(m_cwdLabel, 0);
+        layout->addWidget(header);
         m_terminalHost = new QWidget;
         auto *terminalLayout = new QVBoxLayout(m_terminalHost); terminalLayout->setContentsMargins(0, 0, 0, 0);
         layout->addWidget(m_terminalHost, 1);
@@ -2321,6 +2364,19 @@ private:
             if (onForkState) QTimer::singleShot(0, this, [this, state, title] { if (onForkState) onForkState(state, title); });
             return true;
         }
+        // ----- pane title and tab label (protocol section 17) --------------------------------
+        if (type == QStringLiteral("session_title")) {
+            setTitleFromWorker(event.value(QStringLiteral("title")).toString(),
+                               event.value(QStringLiteral("source")).toString() == QStringLiteral("user"));
+            return true;
+        }
+        if (type == QStringLiteral("tab_label")) {
+            if (onTabLabel)
+                onTabLabel(event.value(QStringLiteral("id")).toString(),
+                           event.value(QStringLiteral("label")).toString(),
+                           event.value(QStringLiteral("related")).toBool(true));
+            return true;
+        }
         if (type == QStringLiteral("state_loaded")) {
             m_sessionId = event.value(QStringLiteral("session_id")).toString(m_sessionId);
             m_turnsCompleted = event.value(QStringLiteral("turns")).toInt();
@@ -2722,6 +2778,8 @@ private:
             {QStringLiteral("agents"), QString(), QStringLiteral("Subagents: definitions and running agents")},
             {QStringLiteral("skills"), QString(), QStringLiteral("Skills: list, exclude, refine, import from a repository")},
             {QStringLiteral("instructions"), QString(), QStringLiteral("Choose instruction files (CLAUDE.md, AGENTS.md, WARP.md…)")},
+            {QStringLiteral("rename"), QStringLiteral("[name]"), QStringLiteral("Name this pane (no name: edit it in the header; empty: back to automatic)")},
+            {QStringLiteral("rename-tab"), QStringLiteral("[name]"), QStringLiteral("Name this tab (no name: edit it in the tab)")},
             {QStringLiteral("export"), QString(), QStringLiteral("Save the conversation as Markdown")},
             {QStringLiteral("shell"), QStringLiteral("<command>"), QStringLiteral("Send to the terminal")},
             {QStringLiteral("agent"), QStringLiteral("<prompt>"), QStringLiteral("Send to the agent")}};
@@ -2804,7 +2862,7 @@ private:
 
     // True when `text` is a Relay slash command (not the router's /shell and /agent prefixes).
     bool tryRunSlashCommand(const QString &text) {
-        static const QRegularExpression pattern(QStringLiteral("^/([a-z]+)(?:\\s+([\\s\\S]*))?$"));
+        static const QRegularExpression pattern(QStringLiteral("^/([a-z-]+)(?:\\s+([\\s\\S]*))?$"));
         const auto match = pattern.match(text.trimmed());
         if (!match.hasMatch()) return false;
         const QString name = match.captured(1);
@@ -2856,6 +2914,14 @@ private:
                 hint(QStringLiteral("find.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("find in this pane")));
         }
         else if (name == QStringLiteral("plan")) togglePlanMode();
+        else if (name == QStringLiteral("rename")) {
+            // With a name it renames straight away; without one it opens the same editor a double
+            // click does, where clearing the field hands the pane back to the model.
+            if (args.isEmpty()) beginRename(); else renameTo(args);
+        }
+        else if (name == QStringLiteral("rename-tab")) {
+            if (onRenameTab) onRenameTab(args, args.isEmpty());
+        }
         else if (name == QStringLiteral("recap")) requestRecap();
         else if (name == QStringLiteral("tasks") || name == QStringLiteral("requests") || name == QStringLiteral("todos")) {
             openRequests();
@@ -5708,8 +5774,91 @@ private:
         m_cwdLabel->setText(width() >= 1000 || m_cwd == m_workspace
             ? QStringLiteral("TERMINAL  ") + tilde(m_cwd) + (m_cwd == m_workspace ? QString() : QStringLiteral("     │     AGENT WORKSPACE  ") + tilde(m_workspace))
             : tilde(m_cwd));
-        m_cwdLabel->setToolTip(QStringLiteral("Terminal: ") + m_cwd + QStringLiteral("\nAgent workspace: ") + m_workspace);
+        m_cwdLabel->setToolTip(headerTooltip());
+        updateHeader();
     }
+
+public:
+    // ----- pane title (issue JRWQ) --------------------------------------------------------
+    // The header shows the session title; the tab label is derived from it (RelayWindow).
+    QString paneTitle() const { return m_title; }
+    bool titleIsUser() const { return m_titleUser; }
+    // Told when the title changes, so the window can relabel the tab.
+    std::function<void()> onTitleChanged;
+
+    QString headerTooltip() const {
+        QString tip = m_title.isEmpty() ? QStringLiteral("This pane has no title yet.")
+                                        : m_title + (m_titleUser ? QStringLiteral("  (set by hand)")
+                                                                 : QStringLiteral("  (written by the model)"));
+        return tip + QStringLiteral("\n\nTerminal: ") + m_cwd + QStringLiteral("\nAgent workspace: ") + m_workspace
+               + QStringLiteral("\n\nDouble click to rename · /rename");
+    }
+
+    void updateHeader() {
+        if (!m_titleLabel) return;
+        const QString shown = m_title.isEmpty() ? QFileInfo(m_cwd).fileName() : m_title;
+        const QFontMetrics metrics(m_titleLabel->font());
+        const int room = std::max(80, m_titleLabel->width());
+        m_titleLabel->setText(metrics.elidedText(shown, Qt::ElideRight, room));
+        m_titleLabel->setToolTip(headerTooltip());
+        if (m_cwdLabel) m_cwdLabel->setToolTip(headerTooltip());
+        // The badge says the name is still the model's to change; a hand-set one loses it.
+        m_titleAuto->setVisible(!m_title.isEmpty() && !m_titleUser);
+    }
+
+    // Double click on the header, /rename, or /rename with no argument: edit the title in place.
+    void beginRename() {
+        if (!m_titleEdit || !m_titleLabel) return;
+        m_titleEdit->setText(m_title);
+        m_titleEdit->selectAll();
+        m_titleLabel->setVisible(false);
+        m_titleEdit->setVisible(true);
+        m_titleEdit->setFocus(Qt::OtherFocusReason);
+    }
+
+    void endRename() {
+        if (!m_titleEdit) return;
+        m_titleEdit->setVisible(false);
+        if (m_titleLabel) m_titleLabel->setVisible(true);
+        focusInput();
+    }
+
+    void commitRename() {
+        if (!m_titleEdit || !m_titleEdit->isVisible()) return;
+        const QString text = m_titleEdit->text().trimmed();
+        endRename();
+        renameTo(text);
+    }
+
+    // An empty name hands the pane back to the model ("Use automatic name").
+    void renameTo(const QString &text) {
+        if (!m_workerReady) { status(QStringLiteral("The agent is not configured yet.")); return; }
+        send({{"type", "set_session_title"}, {"title", text}});
+        status(text.isEmpty() ? QStringLiteral("Pane name back to automatic.")
+                              : QStringLiteral("Pane renamed to “%1”.").arg(text));
+    }
+
+    void setTitleFromWorker(const QString &title, bool user) {
+        if (m_title == title && m_titleUser == user) return;
+        m_title = title;
+        m_titleUser = user;
+        updateHeader();
+        if (onTitleChanged) onTitleChanged();
+    }
+
+    // Tab labels (issue JRWQ): the window asks one pane's worker whether its tab's panes are on the
+    // same work. No extra title call - the titles are already there.
+    void requestTabLabel(const QString &requestId, const QStringList &titles) {
+        if (!m_workerReady) return;
+        QJsonArray items;
+        for (const QString &title : titles) items.append(title);
+        send({{"type", "tab_label"}, {"id", requestId}, {"titles", items}});
+    }
+    std::function<void(const QString &id, const QString &label, bool related)> onTabLabel;
+    // /rename-tab: the tab belongs to the window, so the pane hands the request over.
+    std::function<void(const QString &text, bool edit)> onRenameTab;
+
+private:
     void configure() {
         if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before changing provider settings.")); return; }
         QDialog dialog(this); dialog.setWindowTitle(QStringLiteral("Relay · Bring your own key")); dialog.resize(650, 520);
@@ -5815,6 +5964,11 @@ private:
     RichEditor *m_editor = nullptr;
     QString m_modeValue = defaultInputMode();
     QLabel *m_routeLabel = nullptr, *m_cwdLabel = nullptr, *m_help = nullptr;
+    // Pane title (issue JRWQ): the header line, its in-place editor and the "auto" badge.
+    QLabel *m_titleLabel = nullptr, *m_titleAuto = nullptr;
+    QLineEdit *m_titleEdit = nullptr;
+    QString m_title;
+    bool m_titleUser = false;
     bool m_native = false, m_workerReady = false, m_shellReady = false, m_loading = false;
     bool m_promptReported = false;
     QString m_submitMode, m_model, m_turnText, m_fixCommand;
@@ -6804,6 +6958,22 @@ public:
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override {
+        // Tab labels (issue JRWQ): double click a tab to name it by hand; Esc leaves it alone.
+        if (object == m_tabs->tabBar() && event->type() == QEvent::MouseButtonDblClick) {
+            const int index = m_tabs->tabBar()->tabAt(static_cast<QMouseEvent *>(event)->pos());
+            if (index >= 0) {
+                renameTab(QString(), true, m_tabs->widget(index));
+                hint(QStringLiteral("tab.rename"), QStringLiteral("Next time: /rename-tab <name> · /rename names the pane"));
+                return true;
+            }
+        }
+        if (m_tabEdit && object == m_tabEdit) {
+            if (event->type() == QEvent::KeyPress && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
+                endTabRename();
+                return true;
+            }
+            if (event->type() == QEvent::FocusOut) endTabRename();
+        }
         if (headerDrag(object, event)) return true;
         if (event->type() == QEvent::Resize && object == centralWidget()) placeSidebar();
         if (event->type() == QEvent::Resize && isLeaf(qobject_cast<QWidget *>(object)))
@@ -8432,6 +8602,15 @@ private:
         pane->onOpenSubagent = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openSubagentPane(guard, id); };   // subagents UI
         pane->onShowAgents = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openAgentsMenu(); } };   // /agents → subagents panel menu
         pane->onOpenTurn = [guard](const QString &turnId) { if (auto *w = windowOf(guard)) w->openTurnPane(guard, turnId); };
+        // Pane titles (issue JRWQ): a fresh title relabels the tab; /rename-tab is the window's job.
+        pane->onTitleChanged = [guard] { if (auto *w = windowOf(guard)) w->updateTitles(); };
+        pane->onTabLabel = [guard](const QString &id, const QString &label, bool related) {
+            if (auto *w = windowOf(guard)) w->applyTabJudgement(id, label, related);
+        };
+        pane->onRenameTab = [guard](const QString &text, bool edit) {
+            auto *w = windowOf(guard);
+            if (w) w->renameTab(text, edit, w->pageOf(guard));
+        };
         relay::theme::polishWindow(pane);
         return pane;
     }
@@ -8551,18 +8730,82 @@ private:
         return name.isEmpty() ? path : name;
     }
 
+    // ----- tab labels (issue JRWQ) -------------------------------------------------------------
+    // A tab is labelled from the titles its panes already carry, so it costs no extra model call:
+    // one phrase when the panes are on the same work, the titles joined with "; " when they are
+    // not. Which of the two is a cheap chores-role judgement in the worker (`tab_label`); until it
+    // answers, and whenever no model is configured, the plain-text comparison decides.
+    QStringList paneTitlesIn(QWidget *page) const {
+        QStringList titles;
+        for (QWidget *leaf : leavesIn(page)) {
+            if (auto *pane = dynamic_cast<Pane *>(leaf))
+                titles << (pane->paneTitle().isEmpty() ? shortPath(pane->cwd()) : pane->paneTitle());
+            else if (auto *tool = dynamic_cast<ToolPane *>(leaf))
+                titles << tool->title();
+        }
+        return relay::titles::distinct(titles);
+    }
+
+    QString tabLabelFor(QWidget *page, const QStringList &titles) const {
+        const QString manual = m_tabNames.value(page);
+        if (!manual.isEmpty()) return manual;
+        if (titles.isEmpty()) return QStringLiteral("Relay");
+        const bool related = m_tabRelated.contains(page) ? m_tabRelated.value(page)
+                                                         : relay::titles::relatedText(titles);
+        return relay::titles::join(titles, related, m_tabPhrase.value(page));
+    }
+
+    // Ask the tab's own worker whether its panes are on one job, but only when the titles changed.
+    void refreshTabJudgement(QWidget *page, const QStringList &titles) {
+        const QString key = titles.join(QChar(0x1f));
+        if (m_tabKey.value(page) == key) return;
+        m_tabKey.insert(page, key);
+        m_tabRelated.remove(page);
+        m_tabPhrase.remove(page);
+        if (titles.size() < 2 || !m_tabNames.value(page).isEmpty()) return;
+        QWidget *leaf = m_lastActive.value(page);
+        Pane *pane = dynamic_cast<Pane *>(leaf);
+        if (!pane)
+            for (QWidget *candidate : leavesIn(page))
+                if ((pane = dynamic_cast<Pane *>(candidate))) break;
+        if (!pane) return;
+        const QString id = QStringLiteral("tab-%1").arg(++m_tabLabelSerial);
+        m_tabLabelRequests.insert(id, {QPointer<QWidget>(page), key});
+        pane->requestTabLabel(id, titles);
+    }
+
+    void applyTabJudgement(const QString &id, const QString &phrase, bool related) {
+        const auto request = m_tabLabelRequests.take(id);
+        QWidget *page = request.first.data();
+        // A pane title moved on while the worker was thinking: that answer is stale.
+        if (!page || m_tabKey.value(page) != request.second) return;
+        m_tabRelated.insert(page, related);
+        m_tabPhrase.insert(page, related ? phrase : QString());
+        updateTitles();
+    }
+
+    void forgetTab(QWidget *page) {
+        m_tabNames.remove(page);
+        m_tabKey.remove(page);
+        m_tabRelated.remove(page);
+        m_tabPhrase.remove(page);
+    }
+
     void updateTitles() {
         for (int i = 0; i < m_tabs->count(); ++i) {
             QWidget *page = m_tabs->widget(i);
             const auto leaves = leavesIn(page);
             QWidget *leaf = m_lastActive.value(page);
             if (!leaf && !leaves.isEmpty()) leaf = leaves.first();
-            QString title = QStringLiteral("Relay");
-            if (auto *pane = dynamic_cast<Pane *>(leaf)) title = shortPath(pane->cwd());
-            else if (auto *tool = dynamic_cast<ToolPane *>(leaf)) title = tool->title();
+            const QStringList titles = paneTitlesIn(page);
+            refreshTabJudgement(page, titles);
+            QString title = tabLabelFor(page, titles);
             if (leaves.size() > 1) title += QStringLiteral("  ·  %1").arg(leaves.size());
-            m_tabs->setTabText(i, title);
-            m_tabs->setTabToolTip(i, leaf ? leafCwd(leaf) : QString());
+            const QFontMetrics metrics(m_tabs->tabBar()->font());
+            m_tabs->setTabText(i, metrics.elidedText(title, Qt::ElideRight, 260));
+            m_tabs->setTabToolTip(i, (titles.isEmpty() ? QString() : titles.join(QStringLiteral("\n")) + QStringLiteral("\n\n"))
+                                     + (leaf ? leafCwd(leaf) : QString())
+                                     + QStringLiteral("\n\nDouble click the tab to rename · /rename-tab"));
         }
         syncChrome();
         QString where = m_activeLeaf ? leafCwd(m_activeLeaf) : QString();
@@ -8572,6 +8815,55 @@ private:
         // and model change, so it is the one place the debounced save hangs off.
         m_manager->scheduleSave();
     }
+
+    // /rename-tab, or a double click on the tab: an editor over the tab itself. An empty name puts
+    // the tab back under the pane titles.
+    void renameTab(const QString &text, bool edit, QWidget *page = nullptr) {
+        if (!page) page = m_tabs->currentWidget();
+        if (!page) return;
+        const int index = m_tabs->indexOf(page);
+        if (index < 0) return;
+        if (!edit) {
+            if (text.isEmpty()) m_tabNames.remove(page);
+            else m_tabNames.insert(page, relay::titles::clean(text, relay::titles::kMaxUserTitle, 0));
+            m_tabKey.remove(page);   // re-ask the worker when the tab goes back to automatic
+            updateTitles();
+            return;
+        }
+        if (!m_tabEdit) {
+            m_tabEdit = new QLineEdit(m_tabs->tabBar());
+            m_tabEdit->setObjectName(QStringLiteral("paneTitleEdit"));
+            m_tabEdit->installEventFilter(this);
+            connect(m_tabEdit, &QLineEdit::returnPressed, this, [this] {
+                const QString typed = m_tabEdit->text().trimmed();
+                QWidget *target = m_tabEditPage.data();
+                endTabRename();
+                if (target) renameTab(typed, false, target);
+            });
+        }
+        m_tabEditPage = page;
+        const QRect rect = m_tabs->tabBar()->tabRect(index);
+        m_tabEdit->setGeometry(rect.adjusted(4, 3, -4, -3));
+        m_tabEdit->setText(m_tabNames.value(page, m_tabs->tabBar()->tabText(index)));
+        m_tabEdit->selectAll();
+        m_tabEdit->show();
+        m_tabEdit->raise();
+        m_tabEdit->setFocus(Qt::OtherFocusReason);
+    }
+
+    void endTabRename() {
+        if (m_tabEdit) m_tabEdit->hide();
+        m_tabEditPage = nullptr;
+    }
+
+    // Tab labels (issue JRWQ): names set by hand, and the worker's last "same work?" judgement per
+    // tab page, keyed by the pane titles it was made for.
+    QMap<QWidget *, QString> m_tabNames, m_tabKey, m_tabPhrase;
+    QMap<QWidget *, bool> m_tabRelated;
+    QMap<QString, QPair<QPointer<QWidget>, QString>> m_tabLabelRequests;
+    int m_tabLabelSerial = 0;
+    QLineEdit *m_tabEdit = nullptr;
+    QPointer<QWidget> m_tabEditPage;
 
     void cycleTab(int delta) {
         if (m_tabs->count() < 2) return;
@@ -9065,6 +9357,7 @@ private:
         if (m_lastActive.value(page) == leaf) m_lastActive.remove(page);
         if (last) {
             m_lastActive.remove(page);
+            forgetTab(page);
             m_tabs->removeTab(m_tabs->indexOf(page));
             page->deleteLater();
             if (m_tabs->count() == 0) { m_confirmedClose = true; m_skipRemember = true; QTimer::singleShot(0, this, [this] { close(); }); return true; }
@@ -9132,10 +9425,13 @@ private:
         if (m_active && pageOf(m_active) == page) m_active = nullptr;
         if (m_activeLeaf && pageOf(m_activeLeaf) == page) m_activeLeaf = nullptr;
         m_lastActive.remove(page);
+        const QString tabName = m_tabNames.value(page);
+        forgetTab(page);
         m_tabs->removeTab(index);
         page->setParent(nullptr);
         RelayWindow *window = m_manager->newEmptyWindow(geometry().translated(40, 40));
         window->adoptPage(page, lastActive);
+        if (!tabName.isEmpty()) window->renameTab(tabName, false, page);
         if (QWidget *current = m_tabs->currentWidget()) {
             QWidget *leaf = m_lastActive.value(current);
             if (!leaf) { const auto leaves = leavesIn(current); leaf = leaves.isEmpty() ? nullptr : leaves.first(); }
@@ -9263,6 +9559,7 @@ public:
         if (m_active && pageOf(m_active) == page) m_active = nullptr;
         if (m_activeLeaf && pageOf(m_activeLeaf) == page) m_activeLeaf = nullptr;
         m_lastActive.remove(page);
+        forgetTab(page);
         m_tabs->removeTab(index);
         page->deleteLater();
         if (m_tabs->count() == 0) { m_confirmedClose = true; close(); return; }
