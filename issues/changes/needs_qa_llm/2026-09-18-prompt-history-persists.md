@@ -12,7 +12,7 @@ rank: b
 created: '2026-09-18'
 acceptance: 'After quitting and reopening Relay, Up in the prompt box walks back through what was typed before; a new pane starts with the same history; the store is `$XDG_DATA_HOME/relay/state/prompt-history.txt` (0600); "Clear prompt history" forgets it; `ctest` (48 groups, including the new `prompthistory` group) and `./scripts/test.sh` pass'
 source: 'owner, 2026-09-18: "conversation history isnt persisting on exit and re-open. i cant do up arrows to see what i did before"'
-links: {plans: [], commits: [5838740], evidence: ['docs/qa_evidence/2026-09-18-prompt-history-persists/'], related: [], github: null}
+links: {plans: [], commits: [5838740, 1640d08], evidence: ['docs/qa_evidence/2026-09-18-prompt-history-persists/'], related: [], github: null}
 ---
 # The prompt box remembers across a restart, and every pane shares one history
 
