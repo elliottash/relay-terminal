@@ -115,15 +115,22 @@ export class ScreenView {
     // shift the reader is us.
     const wasAtBottom = this.atBottom();
     if (message.t === 'screen_snapshot') {
-      this.rows = message.rows ?? this.rows;
-      this.cols = message.cols ?? this.cols;
-      this.alt = !!message.alt;
+      const rows = message.rows ?? this.rows;
+      const cols = message.cols ?? this.cols;
+      const alt = !!message.alt;
+      // A snapshot is usually just a full repaint — the desktop sends one whenever the whole
+      // grid changed — and it says nothing about what is above. Only a change of geometry, or
+      // the alternate screen, which has no scrollback of its own, breaks the join, so only
+      // those throw the rows away. Discarding on every snapshot dropped a reader back to the
+      // live screen the moment anything redrew.
+      const broke = rows !== this.rows || cols !== this.cols || alt !== this.alt;
+      this.rows = rows;
+      this.cols = cols;
+      this.alt = alt;
       this.lines.clear();
       this.rowNodes = [];
       this.grid.replaceChildren(this.historyBox);
-      // The geometry may have changed under the rows we hold, and the alternate screen has no
-      // scrollback of its own; either way what is above no longer joins on.
-      this.resetHistory();
+      if (broke) this.resetHistory();
       this.fit();
     }
     for (const line of message.lines || []) {

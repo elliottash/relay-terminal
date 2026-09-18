@@ -370,6 +370,8 @@ function openTerminal() {
   $('thread-body').hidden = hasScreen;
   if (!hasScreen) return;
   ensureScreen();
+  // Another pane's scrollback is not this one's, and the rows are numbered per pane.
+  screenView.resetHistory();
   screenView.fit();
   updateDriveUi();
   rrp.send({ t: 'screen_get', pane: current }).catch(() => {});

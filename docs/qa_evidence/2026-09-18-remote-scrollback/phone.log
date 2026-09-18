@@ -1,0 +1,16 @@
+phone shows code 77912
+paired as view
+live screen ends: k-396 scrollback-397 scrollback-398 scrollback-399 scrollback-400 elliott@spark-dcc9:/tmp/tmp.ApLLa6BQPC/tmp.iMGZ0qiPg7$
+shot 01-live-screen
+first page: 80 rows, oldest scrollback-284 newest scrollback-363
+after dragging: 240 rows, oldest scrollback-124
+pages join with no gap and no repeat: True
+shot 02-scrolled-back
+a history row is painted: ['scrollback-125', '700', 'rgb(255, 140, 143)']
+settled at 2176
+scroll before new output: 2176 after: 2176 moved: False
+the way back to live is offered: True
+shot 03-new-output-while-scrolled-back
+tapping it returns to live: True
+shot 04-back-at-live
+console problems: []

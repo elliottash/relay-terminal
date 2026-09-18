@@ -62,6 +62,12 @@ class ScrollbackSource(panes_mod.DemoPaneSource):
                 "alt": False, "cursor": self._cursor(),
                 "lines": [self._row(n, self.live[n]) for n in range(self.rows)]}
 
+    def redraw(self, pane: str) -> None:
+        """A full frame with the geometry unchanged: the desktop redrew, nothing else."""
+        message = self.screen_snapshot(pane)
+        for callback in list(self._screen_callbacks):
+            callback(pane, message)
+
     def print_line(self, pane: str, text: str) -> None:
         """One more line of output: the screen scrolls by one and scrollback grows by one."""
         self.live = self.live[1:] + [text]
@@ -413,6 +419,18 @@ class BrowserClientTests(unittest.TestCase):
                     self.assertEqual(before, after, "new output dragged the reader to the bottom")
                     self.assertTrue(await browser.evaluate(shown('term-new-output')),
                                     "there was no way back to the live screen")
+
+                    # A full repaint is not a reason to throw the reader's scrollback away.
+                    # Live, a redraw on the desktop dropped the phone back to the live screen.
+                    held = await browser.evaluate(f"{rows}.length")
+                    harness.source.redraw("pane-1")
+                    await asyncio.sleep(1)
+                    self.assertEqual(await browser.evaluate(f"{rows}.length"), held,
+                                     "a full frame discarded the scrollback")
+                    self.assertEqual(
+                        await browser.evaluate(
+                            "document.getElementById('screen-wrap').scrollTop"),
+                        after, "a full frame moved the reader")
 
                     # And the way back works: tapping it returns to the newest output.
                     await browser.evaluate(
