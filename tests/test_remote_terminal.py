@@ -6,7 +6,9 @@ rendezvous, and drive it from the web client in headless Chrome. Skipped when th
 built or Chrome is missing, because both are optional parts of a checkout.
 """
 import asyncio
+import base64
 import contextlib
+import json
 import os
 import tempfile
 import unittest
@@ -390,6 +392,129 @@ class BridgeTests(unittest.TestCase):
             finally:
                 await source.close_all()
         asyncio.run(asyncio.wait_for(main(), 60))
+
+
+@unittest.skipUnless(BRIDGE, "relay-screen-bridge is not built")
+class BridgeHistoryTests(unittest.TestCase):
+    """The bridge's own `history` reply (docs/REMOTE-PROTOCOL.md section 6.5).
+
+    This talks to `relay-screen-bridge` directly, with no hub in between, because the wire shape
+    of a scrollback page is the engine's contract: the hub only re-tags it. `HistoryTests` below
+    is the same page seen through `history_get`.
+    """
+
+    async def _bridge(self):
+        process = await asyncio.create_subprocess_exec(
+            str(BRIDGE), "--rows", "8", "--cols", "40", "--shell", "/bin/bash", "--cwd", "/tmp",
+            "--scrollback", "2000", stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            env=SHELL_ENV, limit=4 * 1024 * 1024)
+        return process
+
+    @staticmethod
+    async def _send(process, message):
+        process.stdin.write(json.dumps(message).encode() + b"\n")
+        await process.stdin.drain()
+
+    @staticmethod
+    async def _expect(process, kinds, *, seconds=20, wanted=None):
+        """The next message of one of `kinds`, optionally the first one `wanted(message)` accepts."""
+        kinds = (kinds,) if isinstance(kinds, str) else kinds
+        deadline = asyncio.get_event_loop().time() + seconds
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise AssertionError(f"the bridge never sent a {'/'.join(kinds)}")
+            line = await asyncio.wait_for(process.stdout.readline(), remaining)
+            if not line:
+                raise AssertionError("the bridge closed")
+            message = json.loads(line)
+            if message.get("t") in kinds and (wanted is None or wanted(message)):
+                return message
+
+    @staticmethod
+    def _text(row):
+        return "".join(segment[0] for segment in row["segs"])
+
+    def _check_rows(self, page):
+        """A page is rows of style runs, numbered in absolute scrollback rows from `from`."""
+        self.assertIsInstance(page["from"], int)
+        self.assertIsInstance(page["total"], int)
+        self.assertEqual(page["more"], page["from"] > 0)
+        for offset, row in enumerate(page["lines"]):
+            self.assertEqual(row["row"], page["from"] + offset)
+            for segment in row["segs"]:
+                text, fg, bg, attrs = segment
+                self.assertTrue(text, "an empty run wastes a segment")
+                for number in (fg, bg, attrs):
+                    self.assertIsInstance(number, int)
+
+    def test_a_scrollback_page_comes_back_styled(self):
+        async def main():
+            process = await self._bridge()
+            try:
+                await self._expect(process, "hello")
+                command = (r"printf '\033[1;31mRED\033[0m plain\n'; "
+                           r"for i in $(seq 1 30); do echo hist-$i; done")
+                await self._send(process, {"t": "input",
+                                           "bytes": base64.b64encode((command + "\n").encode()).decode()})
+                # A screenful of new output can arrive as a full frame or as a diff.
+                await self._expect(process, ("snapshot", "diff"), seconds=30,
+                                   wanted=lambda message: any("hist-30" in self._text(row)
+                                                              for row in message.get("lines", [])))
+
+                await self._send(process, {"t": "history", "before": 0, "count": 10})
+                newest = await self._expect(process, "history")
+                self._check_rows(newest)
+                self.assertEqual(len(newest["lines"]), 10)
+                self.assertEqual(newest["from"], newest["total"] - 10)
+                self.assertTrue(newest["more"])
+
+                # The page above it joins on exactly, with nothing repeated and nothing skipped.
+                await self._send(process, {"t": "history", "before": 10, "count": 10})
+                older = await self._expect(process, "history")
+                self._check_rows(older)
+                self.assertEqual(older["from"] + len(older["lines"]), newest["from"])
+
+                # The whole scrollback in one page: the oldest row is 0 and there is no more.
+                await self._send(process, {"t": "history", "before": 0, "count": 200})
+                everything = await self._expect(process, "history")
+                self._check_rows(everything)
+                self.assertEqual(everything["from"], 0)
+                self.assertFalse(everything["more"])
+                self.assertEqual(len(everything["lines"]), everything["total"])
+                lines = [self._text(row) for row in everything["lines"]]
+                self.assertIn("hist-1", lines)
+                self.assertEqual(len([line for line in lines if line.startswith("hist-")]),
+                                 len(set(line for line in lines if line.startswith("hist-"))),
+                                 "a row was repeated")
+
+                # The styled run survives into history exactly as it does on the live screen:
+                # one bold run in an RGB colour, then the rest in the default one.
+                printed = [row for row in everything["lines"]
+                           if self._text(row) == "RED plain"]
+                self.assertTrue(printed, f"the printed line is not in history: {lines}")
+                red, plain = printed[-1]["segs"][0], printed[-1]["segs"][1]
+                self.assertEqual(red[0], "RED")
+                self.assertEqual(red[3] & 1, 1, "bold was lost")
+                self.assertEqual(red[1] >> 24, 2, "expected an RGB colour from the palette")
+                self.assertEqual(plain[0], " plain")
+                self.assertEqual(plain[1], 0, "the reset should be the default colour")
+                self.assertEqual(plain[3], 0)
+
+                # Past the newest scrollback row: an empty page, not an error.
+                await self._send(process, {"t": "history", "before": everything["total"] + 5,
+                                           "count": 10})
+                empty = await self._expect(process, "history")
+                self.assertEqual(empty["lines"], [])
+                self.assertFalse(empty["more"])
+            finally:
+                with contextlib.suppress(Exception):
+                    await self._send(process, {"t": "quit"})
+                    await asyncio.wait_for(process.wait(), 5)
+                if process.returncode is None:
+                    process.kill()
+        asyncio.run(asyncio.wait_for(main(), 120))
 
 
 if __name__ == "__main__":
