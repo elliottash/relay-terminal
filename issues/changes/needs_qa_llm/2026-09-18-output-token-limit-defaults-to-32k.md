@@ -1,5 +1,7 @@
 ---
-id: OT32
+id: 27YQ
+# Renumbered 2026-09-18: O is not Crockford base32, so no board tool could address OT32.
+aliases: [OT32]
 type: work
 status: needs-qa-llm
 labels: [change]

@@ -1,5 +1,7 @@
 ---
-id: YXMU
+id: P1CE
+# Renumbered 2026-09-18: U is not Crockford base32, so no board tool could address YXMU.
+aliases: [YXMU]
 type: work
 status: needs-qa-llm
 labels: [change, feature]

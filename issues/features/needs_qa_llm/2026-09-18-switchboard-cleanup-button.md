@@ -141,7 +141,7 @@ of this repo's `issues/` tree (129 cards), driven over stdin into `backend/worke
 - 105 `needs-qa-llm` cards left alone, with the honest reason that a snapshot with no
   `docs/qa_evidence/` tree and one commit cannot confirm a landing;
 - it found a real fault in the owner's tree and filed a card instead of fixing it silently: two
-  cards carry ids the format forbids (`OT32`, `Z3LP`, since renumbered `WFJM` — O and L are not Crockford base32), so **no
+  cards carry ids the format forbids (`OT32` and `Z3LP`, since renumbered `27YQ` and `WFJM` — O and L are not Crockford base32), so **no
   board tool can address them at all**. `relay-board.py check` reports both; they are the only two
   errors on the board and they are not new.
 
@@ -216,7 +216,7 @@ paragraph, so a blank line is now inserted at each tool call.
   real applying run on the scratch board was more provider time than the check needed.
 - **A run that ends without a summary** (a worker that dies mid-turn) is caught by a 20-second
   guard that ends the run in the pane and says so, rather than leaving the button on **Stop**.
-- **Card ids the format forbids** (`OT32`, `Z3LP` on this board at the time of the run; `Z3LP` has since been renumbered `WFJM`) are invisible to every board
+- **Card ids the format forbids** (`OT32`, `Z3LP` on this board at the time of the run; since renumbered `27YQ` and `WFJM`) are invisible to every board
   tool, so a cleanup cannot fix them. The live run filed a card about it; it is not fixed here.
 - A merge's undo is best-effort for a card a split created that git has already seen: it is left in
   place rather than removed, exactly as a single creation's undo is.
