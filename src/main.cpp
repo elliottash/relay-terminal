@@ -8207,48 +8207,24 @@ private:
 class PaneChrome final : public QFrame {
 public:
     std::function<void(const QString &action)> onAction;
-    std::function<void(const QPoint &global)> onDragMove;
-    std::function<void(const QPoint &global, bool drop)> onDragEnd;
 
     explicit PaneChrome(QWidget *leaf) : QFrame(leaf) {
         setObjectName(QStringLiteral("paneChrome"));
         setAttribute(Qt::WA_StyledBackground);
         auto *row = new QHBoxLayout(this); row->setContentsMargins(3, 2, 3, 2); row->setSpacing(1);
-        m_grip = new QLabel(QStringLiteral("⠿"));
-        m_grip->setObjectName(QStringLiteral("paneGrip"));
-        m_grip->setCursor(Qt::OpenHandCursor);
-        m_grip->setToolTip(QStringLiteral("Drag onto another pane's edge to move this pane there, or onto the tab bar to make it a tab"));
-        m_grip->installEventFilter(this);
-        row->addWidget(m_grip);
         // The + makes it obvious that these open a new pane (a new shell and chat), not a layout
-        // toggle. Both hover-only buttons sit to the LEFT of the always-on three: the row is
-        // right-anchored, so opening it grows leftward and none of the three moves out from under
-        // the cursor that opened it (which is how pointing at "new pane to the right" used to hand
-        // you "new pane below").
-        m_splitDown = button(row, QStringLiteral("⬓+"), QStringLiteral("pane.splitDown"), QStringLiteral("New pane below"));
+        // toggle. Every button is here at all times: the row no longer grows, lifts onto a tile or
+        // rearranges itself under the pointer (owner, 2026-09-18). The drag grip is gone with the
+        // hover row — pressing anywhere on the header moves the pane.
+        button(row, QStringLiteral("⬓+"), QStringLiteral("pane.splitDown"), QStringLiteral("New pane below"));
         button(row, QStringLiteral("◫+"), QStringLiteral("pane.splitRight"), QStringLiteral("New pane to the right"));
         button(row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
         button(row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
-        // The row keeps the width it has with everything on it, so the header's inset — and with
-        // it the title's elision — does not twitch as the mouse comes and goes. The row is
-        // right-anchored, so the two extras grow leftward and the always-on three never move.
+        // The header gives up exactly this much room for good, so the title and the folder line
+        // never re-elide.
         adjustSize();
         m_fullWidth = width();
-        setHovered(false);
     }
-
-    // On the pane under the mouse: the full row on its raised tile. Everywhere else: the three
-    // buttons alone, quiet, on no background at all.
-    void setHovered(bool hovered) {
-        if (m_hovered == hovered && property("hot").isValid()) return;
-        m_hovered = hovered;
-        setProperty("hot", hovered);
-        m_grip->setVisible(hovered);
-        m_splitDown->setVisible(hovered);
-        style()->unpolish(this); style()->polish(this); update();
-        place();
-    }
-    bool hovered() const { return m_hovered; }
 
     void place() {
         const auto *leaf = parentWidget();
@@ -8280,50 +8256,6 @@ public:
         }
     }
 
-protected:
-    bool eventFilter(QObject *object, QEvent *event) override {
-        if (object != m_grip) return QFrame::eventFilter(object, event);
-        switch (event->type()) {
-        case QEvent::MouseButtonPress: {
-            auto *mouse = static_cast<QMouseEvent *>(event);
-            if (mouse->button() != Qt::LeftButton) break;
-            m_pressAt = mouse->globalPos(); m_pressed = true; m_dragging = false;
-            return true;
-        }
-        case QEvent::MouseMove: {
-            auto *mouse = static_cast<QMouseEvent *>(event);
-            if (!m_pressed) break;
-            if (!m_dragging && (mouse->globalPos() - m_pressAt).manhattanLength() >= QApplication::startDragDistance()) {
-                m_dragging = true;
-                QApplication::setOverrideCursor(Qt::ClosedHandCursor);
-            }
-            if (m_dragging && onDragMove) onDragMove(mouse->globalPos());
-            return true;
-        }
-        case QEvent::MouseButtonRelease: {
-            auto *mouse = static_cast<QMouseEvent *>(event);
-            if (!m_pressed) break;
-            m_pressed = false;
-            if (m_dragging) {
-                m_dragging = false;
-                QApplication::restoreOverrideCursor();
-                if (onDragEnd) onDragEnd(mouse->globalPos(), true);
-            }
-            return true;
-        }
-        case QEvent::KeyPress:
-            if (m_dragging && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
-                m_pressed = m_dragging = false;
-                QApplication::restoreOverrideCursor();
-                if (onDragEnd) onDragEnd(QCursor::pos(), false);
-                return true;
-            }
-            break;
-        default: break;
-        }
-        return QFrame::eventFilter(object, event);
-    }
-
 private:
     QToolButton *button(QHBoxLayout *row, const QString &glyph, const QString &action, const QString &label) {
         auto *b = new QToolButton;
@@ -8335,12 +8267,7 @@ private:
         return b;
     }
 
-    QLabel *m_grip = nullptr;
-    QToolButton *m_splitDown = nullptr;
     int m_fullWidth = 0;
-    bool m_hovered = false;
-    QPoint m_pressAt;
-    bool m_pressed = false, m_dragging = false;
 };
 
 // ----- windows, tabs and panes --------------------------------------------------------------
@@ -9138,12 +9065,6 @@ protected:
         if (object == m_tabs->tabBar() && (event->type() == QEvent::Resize || event->type() == QEvent::MouseMove || event->type() == QEvent::Leave
                                            || event->type() == QEvent::Enter || event->type() == QEvent::LayoutRequest))
             QTimer::singleShot(0, this, [this] { placeTabBarControls(); });
-        if (event->type() == QEvent::Enter || event->type() == QEvent::MouseMove) {
-            if (auto *widget = qobject_cast<QWidget *>(object); widget && widget->window() == this) {
-                QWidget *leaf = leafOf(widget);
-                if (leaf || event->type() == QEvent::Enter) showChromeFor(leaf);
-            }
-        } else if (event->type() == QEvent::Leave && object == this) showChromeFor(nullptr);
         if (event->type() != QEvent::KeyPress && event->type() != QEvent::ShortcutOverride)
             return QMainWindow::eventFilter(object, event);
         auto *widget = qobject_cast<QWidget *>(object);
@@ -11531,7 +11452,6 @@ private:
             if (!takeLeaf(pane) || !anchor || !pane) return;
             insertBeside(anchor, pane, relay::panes::orientationFor(direction), relay::panes::towardStart(direction));
         }
-        showChromeFor(nullptr);
         setActiveLeaf(pane); focusLeaf(pane);
         updateTitles();
     }
@@ -11856,10 +11776,7 @@ private:
                         if (!keys.isEmpty())
                             w->hint(QStringLiteral("chrome.") + action, relay::ShortcutHints::nextTime(keys, Keymap::instance().description(action).toLower()));
                     };
-                    chrome->onDragMove = [guard](const QPoint &global) { if (auto *w = windowOf(guard)) w->dragPaneMove(guard, global); };
-                    chrome->onDragEnd = [guard](const QPoint &global, bool drop) { if (auto *w = windowOf(guard)) w->dragPaneEnd(guard, global, drop); };
-                    // Dragging a terminal pane's header does what dragging the grip does, so the
-                    // whole title row is a handle (owner, 2026-09-17).
+                    // A terminal pane's whole title row is the drag handle (owner, 2026-09-17).
                     if (auto *pane = dynamic_cast<Pane *>(leaf)) {
                         pane->onHeaderDragMove = [guard](const QPoint &global) { if (auto *w = windowOf(guard)) w->dragPaneMove(guard, global); };
                         pane->onHeaderDragEnd = [guard](const QPoint &global, bool drop) { if (auto *w = windowOf(guard)) w->dragPaneEnd(guard, global, drop); };
@@ -11879,29 +11796,6 @@ private:
         for (QObject *child : leaf->children())
             if (auto *chrome = dynamic_cast<PaneChrome *>(child)) return chrome;
         return nullptr;
-    }
-
-    // Open the button row of the pane under the mouse, and only that one. Every pane keeps its
-    // three always-on buttons; this only adds the grip and "new pane below" to the one you are
-    // pointing at, and lifts its row onto a tile.
-    //
-    // Showing and hiding those two makes Qt deliver synthetic enter/leave and mouse-move events
-    // for whatever the change put under the cursor, and those come straight back here through the
-    // window's application event filter. So this only records what is wanted while an update is
-    // running, and the loop applies it once the widgets have settled; hiding a chrome from inside
-    // its own hide() used to recurse until the stack ran out (clicking ⇱ "Move to new tab" crashed).
-    void showChromeFor(QWidget *leaf) {
-        m_wantedHoverLeaf = leaf;
-        if (m_updatingChrome) return;
-        m_updatingChrome = true;
-        // Bounded, so two panes that keep handing the cursor back and forth cannot spin here.
-        for (int pass = 0; pass < 8 && m_hoverLeaf != m_wantedHoverLeaf; ++pass) {
-            QWidget *old = m_hoverLeaf;
-            m_hoverLeaf = m_wantedHoverLeaf;
-            if (old) if (auto *chrome = chromeOf(old)) chrome->setHovered(false);
-            if (m_hoverLeaf) if (auto *chrome = chromeOf(m_hoverLeaf)) { chrome->setHovered(true); chrome->show(); }
-        }
-        m_updatingChrome = false;
     }
 
     enum class Edge { None, Left, Right, Top, Bottom, TabBar };
@@ -12019,7 +11913,6 @@ private:
 
     void dragPaneEnd(QWidget *dragged, const QPoint &global, bool drop) {
         if (m_dropZone) { m_dropZone->hide(); m_dropZone->deleteLater(); m_dropZone = nullptr; }
-        showChromeFor(nullptr);
         if (!drop || !dragged) return;
         const auto target = dropTarget(dragged, global);
         if (target.second == Edge::None) return;
@@ -12042,11 +11935,6 @@ private:
         if (!move.isEmpty())
             if (auto *w = windowOf(dragged))
                 w->hint(QStringLiteral("pane.drag"), QStringLiteral("Next time: %1 and the other arrows move the focused pane").arg(move));
-        // The drop moved panes out from under a cursor that has not itself moved, so nothing will
-        // send an enter event: work out again which pane the mouse is over, once the layout settles.
-        QTimer::singleShot(0, this, [this] {
-            if (auto *w = windowOf(leafOf(QApplication::widgetAt(QCursor::pos())))) w->showChromeFor(leafOf(QApplication::widgetAt(QCursor::pos())));
-        });
     }
 
     // Remove a leaf from its window's layout without destroying it (the shell and worker keep
@@ -12055,10 +11943,7 @@ private:
     bool takeLeaf(QWidget *leaf) {
         QWidget *page = pageOf(leaf);
         if (!page) return false;
-        if (m_hoverLeaf == leaf) m_hoverLeaf = nullptr;
-        if (m_wantedHoverLeaf == leaf) m_wantedHoverLeaf = nullptr;
-        // Closed, not hidden: the three always-on buttons travel with the pane to wherever it lands.
-        if (auto *chrome = chromeOf(leaf)) chrome->setHovered(false);
+        // The buttons travel with the pane to wherever it lands.
         const bool last = leavesIn(page).size() <= 1;
         auto *splitter = dynamic_cast<QSplitter *>(leaf->parentWidget());
         leaf->hide();
@@ -12131,8 +12016,6 @@ private:
         if (!page) return;
         if (m_tabs->count() <= 1) { notice(QStringLiteral("This is the only tab in the window."), 4000); return; }
         QWidget *lastActive = m_lastActive.value(page);
-        if (m_hoverLeaf && pageOf(m_hoverLeaf) == page) m_hoverLeaf = nullptr;
-        if (m_wantedHoverLeaf && pageOf(m_wantedHoverLeaf) == page) m_wantedHoverLeaf = nullptr;
         if (m_active && pageOf(m_active) == page) m_active = nullptr;
         if (m_activeLeaf && pageOf(m_activeLeaf) == page) m_activeLeaf = nullptr;
         m_lastActive.remove(page);
@@ -12172,7 +12055,6 @@ private:
             if (!takeLeaf(current) || !anchor) return;
             insertBeside(anchor, current, orientation, !towardStart);
         }
-        showChromeFor(nullptr);
         setActiveLeaf(current); focusLeaf(current);
         updateTitles();
     }
@@ -12326,8 +12208,6 @@ private:
     QPointer<Pane> m_active;
     QHash<QWidget *, QPointer<QWidget>> m_lastActive;
     QPointer<QWidget> m_activeLeaf;
-    QPointer<QWidget> m_hoverLeaf, m_wantedHoverLeaf;   // shown now, and what showChromeFor was last asked for
-    bool m_updatingChrome = false;
     // Dragging a tool pane (explorer, preview, plan, Switchboard) by its header: the pane being
     // moved, where the press landed, and whether it has gone far enough to be a drag.
     QPointer<QWidget> m_toolLeaf;

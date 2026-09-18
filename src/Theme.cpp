@@ -95,7 +95,7 @@ QString bevelStylesheet(const ThemeSpec &spec) {
     const QString dark = hex(extraColor(spec, QStringLiteral("bevel.dark"), SurfaceRaised.darker(160)));
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
-QFrame#paneChrome[hot="true"], QWidget#sidebar, QFrame#helpCard, QMenu, QFrame#notificationsPopup {
+QWidget#sidebar, QFrame#helpCard, QMenu, QFrame#notificationsPopup {
     border-top: 2px solid %1; border-left: 2px solid %1; border-bottom: 2px solid %2; border-right: 2px solid %2; }
 QPushButton:pressed, QToolButton#stripChip:pressed {
     border-top: 2px solid %2; border-left: 2px solid %2; border-bottom: 2px solid %1; border-right: 2px solid %1; }
@@ -144,7 +144,7 @@ QString metalStylesheet(const ThemeSpec &spec) {
     const Material m = materialOf(spec);
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
-QToolButton#workChip, QFrame#paneChrome[hot="true"], QMenu, QFrame#notificationsPopup,
+QToolButton#workChip, QMenu, QFrame#notificationsPopup,
 QFrame#helpCard, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %4, stop:0.09 %1, stop:0.55 %2, stop:1 %3); }
@@ -173,7 +173,7 @@ QString plasticStylesheet(const ThemeSpec &spec) {
     const Material m = materialOf(spec);
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
-QToolButton#workChip, QFrame#paneChrome[hot="true"], QMenu, QFrame#notificationsPopup,
+QToolButton#workChip, QMenu, QFrame#notificationsPopup,
 QFrame#helpCard, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %1, stop:0.45 %2, stop:1 %3); }
@@ -433,12 +433,9 @@ QComboBox#statusPicker QAbstractItemView { background: @raised; color: @text; se
 /* The pane's button row. It is on screen in every pane, so at rest it is three quiet glyphs on
    the pane's own ground; the pane under the mouse ("hot") gets the raised tile, the grip and the
    second split button. */
+/* The pane's buttons are always there and always the same: no tile under the pointer. */
 QFrame#paneChrome { background: transparent; border: 1px solid transparent; border-radius: 6px; }
-QFrame#paneChrome[hot="true"] { background: @raised; border-color: @border; }
-QLabel#paneGrip { color: @muted; padding: 0 4px; font-size: 11pt; }
-QLabel#paneGrip:hover { color: @text; }
-QToolButton#paneChromeButton { color: @disabled; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; min-width: 16px; }
-QFrame#paneChrome[hot="true"] QToolButton#paneChromeButton { color: @muted; }
+QToolButton#paneChromeButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; min-width: 16px; }
 QToolButton#paneChromeButton:hover { color: @text; border-color: @border; background: @surface; }
 QFrame#dropZone { background: @accentSoft; border: 2px solid @accent; border-radius: 6px; }
 /* Window header: Relay's own title bar (frameless window). The tab row carries the Relay icon
