@@ -1144,7 +1144,12 @@ void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
         }
     }
     QString tip;
-    if (link.valid()) {
+    if (!link.card.isEmpty()) {
+        // A card reference says which card it opens, not the relay://card/<id> behind it.
+        tip = QStringLiteral("#") + link.card;
+        if (!link.cardTitle.isEmpty())
+            tip += QStringLiteral(" · ") + link.cardTitle;
+    } else if (link.valid()) {
         tip = link.target;
         if (link.line > 0)
             tip += QLatin1Char(':') + QString::number(link.line);
@@ -1186,6 +1191,15 @@ QString TerminalView::currentDirectory() const
 bool TerminalView::splitPathToken(const QString &token, QString *path, int *line, int *column)
 {
     return links::splitLocation(token, path, line, column);
+}
+
+void TerminalView::setCardLookup(links::CardLookup lookup)
+{
+    m_cardLookup = std::move(lookup);
+    // The hover is cached per cell and the walk's list is built once: both were scanned without
+    // the board, so a pane that has just learnt its cards re-reads them on the next move.
+    m_hoverCellRow = m_hoverCellCol = -2;
+    endLinkWalk();
 }
 
 // The logical line the cell belongs to: soft-wrapped rows of the viewport joined into one
@@ -1258,13 +1272,16 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
     }
     if (idx < 0 || idx >= logical.text.size())
         return false;
-    for (const links::Found &found : links::scan(logical.text, currentDirectory(), QDir::homePath(), links::systemProbe())) {
+    for (const links::Found &found : links::scan(logical.text, currentDirectory(), QDir::homePath(),
+                                                 links::systemProbe(), m_cardLookup)) {
         const int s = found.candidate.start;
         const int e = s + found.candidate.length - 1;
         if (idx < s || idx > e || e >= int(logical.cellOf.size()))
             continue;
         link->target = found.target.target;
         link->text = found.candidate.text;
+        link->card = found.target.kind == links::Kind::Card ? found.candidate.path : QString();
+        link->cardTitle = found.target.label;
         link->url = found.target.kind == links::Kind::Url;
         link->directory = found.target.directory;
         link->line = found.target.line;
@@ -1310,6 +1327,7 @@ void TerminalView::collectLinks()
     const QString cwd = currentDirectory();
     const QString home = QDir::homePath();
     const links::Probe probe = links::systemProbe();
+    const links::CardLookup cardLookup = m_cardLookup;
     for (int i = 0; i < rows.size() && int(m_linkWalk.size()) < kWalkMaxLinks;) {
         // Rows the emulator filled to the last column continue on the next row: a path
         // that wrapped is one logical line again.
@@ -1319,7 +1337,7 @@ void TerminalView::collectLinks()
             ++last;
             text += rows[last];
         }
-        for (const links::Found &found : links::scan(text, cwd, home, probe)) {
+        for (const links::Found &found : links::scan(text, cwd, home, probe, cardLookup)) {
             WalkLink walk;
             const int s = found.candidate.start;
             const int e = s + found.candidate.length - 1;
@@ -1329,6 +1347,8 @@ void TerminalView::collectLinks()
             walk.endCol = e % columns;
             walk.link.target = found.target.target;
             walk.link.text = found.candidate.text;
+            walk.link.card = found.target.kind == links::Kind::Card ? found.candidate.path : QString();
+            walk.link.cardTitle = found.target.label;
             walk.link.url = found.target.kind == links::Kind::Url;
             walk.link.directory = found.target.directory;
             walk.link.line = found.target.line;
@@ -1406,9 +1426,18 @@ void TerminalView::contextMenuEvent(QContextMenuEvent *e)
     // view (e.g. the shell exits and the host closes the pane) under a stack menu.
     auto *menu = new QMenu(this);
     menu->setAttribute(Qt::WA_DeleteOnClose);
-    // A right click on a path offers the two things a click cannot do (issue YZTK).
+    // A right click on a path offers the two things a click cannot do (issue YZTK); on a card
+    // reference, the card. (Relay's own panes replace this menu — src/main.cpp's
+    // showTerminalMenu() — so this is what the engine offers on its own.)
     const Link link = linkAtPoint(e->pos());
-    if (link.valid()) {
+    if (!link.card.isEmpty()) {
+        const QString reference = QStringLiteral("#") + link.card;
+        menu->addAction(tr("Open %1").arg(reference), this,
+                        [this, link] { emit linkActivated(link.target, -1, -1); });
+        menu->addAction(tr("Copy %1").arg(reference), this,
+                        [reference] { QApplication::clipboard()->setText(reference); });
+        menu->addSeparator();
+    } else if (link.valid()) {
         const QString name = link.url ? link.target : QFileInfo(link.target).fileName();
         menu->addAction(tr("Open %1").arg(name), this,
                         [this, link] { emit linkActivated(link.target, link.line, link.column); });

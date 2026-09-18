@@ -22,19 +22,15 @@ QStringList stringList(const QJsonValue &value)
     return out;
 }
 
-// The columns a plan or memory tab shows. Work columns come from board.yaml instead.
-QList<Column> typeColumns(const QString &type)
+// Where a status that no configured column collects sorts among the sections: a plan's
+// lifecycle first, then the parked ones, then anything the board has invented.
+int extraStatusRank(const QString &status)
 {
-    if (type == QStringLiteral("plan"))
-        return {{QStringLiteral("draft"), QStringLiteral("Draft"), {QStringLiteral("draft")}},
-                {QStringLiteral("approved"), QStringLiteral("Approved"), {QStringLiteral("approved")}},
-                {QStringLiteral("executing"), QStringLiteral("Executing"), {QStringLiteral("executing")}},
-                {QStringLiteral("done"), QStringLiteral("Done"),
-                 {QStringLiteral("done"), QStringLiteral("dropped")}}};
-    if (type == QStringLiteral("memory"))
-        return {{QStringLiteral("active"), QStringLiteral("Active"), {QStringLiteral("active")}},
-                {QStringLiteral("retired"), QStringLiteral("Retired"), {QStringLiteral("retired")}}};
-    return {};
+    static const QMap<QString, int> ranks{
+        {QStringLiteral("draft"), 1},    {QStringLiteral("approved"), 2},
+        {QStringLiteral("executing"), 3}, {QStringLiteral("active"), 4},
+        {QStringLiteral("deferred"), 8}, {QStringLiteral("retired"), 9}};
+    return ranks.value(status, 5);
 }
 
 // Used when the worker sends no column_statuses (an old board.yaml, or a test fixture).
@@ -124,6 +120,34 @@ QString tabTitle(const QString &id)
     return text;
 }
 
+QString statusGlyph(const QString &status)
+{
+    static const QMap<QString, QString> marks{
+        // Open shapes are states nothing has been committed to yet…
+        {QStringLiteral("inbox"), QStringLiteral("○")},
+        {QStringLiteral("discussing"), QStringLiteral("◇")},
+        {QStringLiteral("draft"), QStringLiteral("○")},
+        // …a solid one is work that has been agreed or is running…
+        {QStringLiteral("ready"), QStringLiteral("◆")},
+        {QStringLiteral("approved"), QStringLiteral("◆")},
+        {QStringLiteral("in-progress"), QStringLiteral("▶")},
+        {QStringLiteral("executing"), QStringLiteral("▶")},
+        {QStringLiteral("active"), QStringLiteral("●")},
+        // …a half circle is waiting on somebody, a ringed one is in a QA lane…
+        {QStringLiteral("needs-review"), QStringLiteral("◐")},
+        {QStringLiteral("needs-labels"), QStringLiteral("◐")},
+        {QStringLiteral("needs-ab"), QStringLiteral("◐")},
+        {QStringLiteral("needs-qa"), QStringLiteral("◉")},
+        {QStringLiteral("needs-qa-llm"), QStringLiteral("◉")},
+        {QStringLiteral("needs-qa-human"), QStringLiteral("◉")},
+        // …and a dotted circle, a check or a cross is off the live board.
+        {QStringLiteral("deferred"), QStringLiteral("◌")},
+        {QStringLiteral("retired"), QStringLiteral("◌")},
+        {QStringLiteral("done"), QStringLiteral("✓")},
+        {QStringLiteral("dropped"), QStringLiteral("✗")}};
+    return marks.value(status, QStringLiteral("·"));
+}
+
 QList<Badge> badges(const Card &card, bool showStatus)
 {
     QList<Badge> out;
@@ -153,6 +177,68 @@ QList<Badge> badges(const Card &card, bool showStatus)
         out << Badge{Badge::Thread, QStringLiteral("✎ %1").arg(card.threadEntries)};
     if (card.isPrivate)
         out << Badge{Badge::Private, QStringLiteral("private")};
+    return out;
+}
+
+QList<Badge> rowBadges(const Card &card, bool showStatus, const QDate &today)
+{
+    QList<Badge> out = badges(card, showStatus);
+    const QString age = cardAge(card.created, today);
+    if (!age.isEmpty())
+        out << Badge{Badge::Age, age};
+    return out;
+}
+
+int badgeDropOrder(Badge::Kind kind)
+{
+    switch (kind) {
+    case Badge::Label:
+        return 1;
+    case Badge::Thread:
+        return 2;
+    case Badge::Age:
+        return 3;
+    case Badge::Tasks:
+    case Badge::TasksDone:
+        return 4;
+    case Badge::Assignee:
+        return 5;
+    case Badge::Agent:
+        return 6;
+    case Badge::Private:
+        return 7;
+    case Badge::Status:
+        return 8;
+    case Badge::Waiting:
+        return 9;
+    }
+    return 5;
+}
+
+QList<Badge> fitBadges(const QList<QPair<Badge, int>> &measured, int available, int gap)
+{
+    QList<int> kept;
+    int width = 0;
+    for (int i = 0; i < measured.size(); ++i) {
+        kept << i;
+        width += measured.at(i).second + (i > 0 ? gap : 0);
+    }
+    while (width > available && !kept.isEmpty()) {
+        // The least important goes, and among equals the leftmost: with three labels the row
+        // keeps the last one it can, which sits nearest the badges that earned their place.
+        int worst = 0;
+        for (int i = 1; i < kept.size(); ++i) {
+            const int a = badgeDropOrder(measured.at(kept.at(i)).first.kind);
+            const int b = badgeDropOrder(measured.at(kept.at(worst)).first.kind);
+            if (a < b)
+                worst = i;
+        }
+        width -= measured.at(kept.at(worst)).second + (kept.size() > 1 ? gap : 0);
+        kept.removeAt(worst);
+    }
+    QList<Badge> out;
+    for (int index : std::as_const(kept))
+        out << measured.at(index).first;
     return out;
 }
 
@@ -196,6 +282,28 @@ QString entryAge(const QString &entryId, const QDateTime &now)
                                       : c.toString(day, QStringLiteral("MMM d yyyy"));
 }
 
+QString cardAge(const QString &created, const QDate &today)
+{
+    if (created.isEmpty() || !today.isValid())
+        return QString();
+    // `created` is a date in the front matter, but a timestamp is accepted: take the date part.
+    const QDate day = QDate::fromString(created.left(10), Qt::ISODate);
+    if (!day.isValid())
+        return QString();
+    const qint64 days = day.daysTo(today);
+    if (days < 0)
+        return QStringLiteral("today");
+    if (days == 0)
+        return QStringLiteral("today");
+    if (days < 14)
+        return QStringLiteral("%1 d").arg(days);
+    if (days < 70)
+        return QStringLiteral("%1 w").arg(days / 7);
+    if (days < 730)
+        return QStringLiteral("%1 mo").arg(days / 30);
+    return QStringLiteral("%1 y").arg(days / 365);
+}
+
 QPair<QString, QString> placement(const QStringList &order, const QString &moving, int slot)
 {
     QStringList others = order;
@@ -203,6 +311,70 @@ QPair<QString, QString> placement(const QStringList &order, const QString &movin
     slot = qBound(0, slot, int(others.size()));
     return qMakePair(slot < others.size() ? others.at(slot) : QString(),
                      slot > 0 ? others.at(slot - 1) : QString());
+}
+
+QStringList cardsInSection(const QList<Row> &rows, const QString &columnId)
+{
+    QStringList out;
+    for (const Row &row : rows)
+        if (row.kind == Row::Card && row.columnId == columnId)
+            out << row.cardId;
+    return out;
+}
+
+QPair<QString, int> dropTarget(const QList<Row> &rows, int beforeRow)
+{
+    if (rows.isEmpty())
+        return qMakePair(QString(), 0);
+    beforeRow = qBound(0, beforeRow, int(rows.size()));
+    // Walk back to the header that owns this point. Above the very first header there is nothing
+    // to own it, so the drop falls into the first section.
+    int header = -1;
+    for (int i = beforeRow - 1; i >= 0; --i) {
+        if (rows.at(i).kind == Row::Section) {
+            header = i;
+            break;
+        }
+    }
+    if (header < 0) {
+        for (int i = 0; i < rows.size(); ++i)
+            if (rows.at(i).kind == Row::Section)
+                return qMakePair(rows.at(i).columnId, 0);
+        return qMakePair(QString(), 0);
+    }
+    int slot = 0;
+    for (int i = header + 1; i < beforeRow; ++i)
+        if (rows.at(i).kind == Row::Card)
+            ++slot;
+    return qMakePair(rows.at(header).columnId, slot);
+}
+
+int stepRow(const QList<Row> &rows, int from, int delta)
+{
+    if (delta == 0)
+        return from;
+    for (int i = from + delta; i >= 0 && i < rows.size(); i += delta)
+        if (rows.at(i).kind == Row::Card)
+            return i;
+    return -1;
+}
+
+int rowOfCard(const QList<Row> &rows, const QString &cardId)
+{
+    if (cardId.isEmpty())
+        return -1;
+    for (int i = 0; i < rows.size(); ++i)
+        if (rows.at(i).kind == Row::Card && rows.at(i).cardId == cardId)
+            return i;
+    return -1;
+}
+
+int rowOfSection(const QList<Row> &rows, const QString &columnId)
+{
+    for (int i = 0; i < rows.size(); ++i)
+        if (rows.at(i).kind == Row::Section && rows.at(i).columnId == columnId)
+            return i;
+    return -1;
 }
 
 Card Card::fromJson(const QJsonObject &object)
@@ -237,6 +409,16 @@ bool Card::closed() const
 bool Card::parked() const
 {
     return status == QStringLiteral("deferred");
+}
+
+QString Card::folder() const
+{
+    // `issues/changes/2026-09-17-x.md`, or `issues/.private/changes/…` for a private card.
+    QStringList parts = path.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    while (!parts.isEmpty() && (parts.first() == QStringLiteral("issues")
+                                || parts.first().startsWith(QLatin1Char('.'))))
+        parts.removeFirst();
+    return parts.size() > 1 ? parts.first() : QString();
 }
 
 // --------------------------------------------------------------------------- config
@@ -289,6 +471,11 @@ void Model::setConfig(const QJsonObject &config)
     }
 }
 
+QString doneSection()
+{
+    return QStringLiteral("done");
+}
+
 const Tab *Model::tab(const QString &id) const
 {
     for (const Tab &tab : m_tabs)
@@ -297,72 +484,67 @@ const Tab *Model::tab(const QString &id) const
     return nullptr;
 }
 
-QList<Column> Model::columnsFor(const QString &tabId) const
+// The one list's sections. The configured columns come first in their configured order, then any
+// status they do not collect — a plan's Draft, a memory's Active, a Deferred card — so that one
+// list really does hold every card that is not closed. Done is always last.
+QList<Column> Model::sections() const
 {
-    const Tab *tab = this->tab(tabId);
-    if (!tab)
-        return {};
-    if (tab->type == QStringLiteral("memory")) {
-        // Memory is one list per topic, not a board of work columns
-        // (TASKS-AND-MEMORY-DESIGN section 9).
-        QStringList topics;
-        bool retired = false;
-        for (const Card &card : m_cards) {
-            if (card.type != QStringLiteral("memory"))
-                continue;
-            if (card.status == QStringLiteral("retired")) {
-                retired = true;
-                continue;
-            }
-            const QString topic = card.topic.isEmpty() ? QStringLiteral("general") : card.topic;
-            if (!topics.contains(topic))
-                topics << topic;
-        }
-        topics.sort();
-        QList<Column> out;
-        for (const QString &topic : topics)
-            out << Column{QStringLiteral("topic:") + topic, tabTitle(topic), {QStringLiteral("active")}};
-        if (out.isEmpty())
-            out << Column{QStringLiteral("topic:general"), QStringLiteral("General"),
-                          {QStringLiteral("active")}};
-        if (retired)
-            out << Column{QStringLiteral("retired"), QStringLiteral("Retired"),
-                          {QStringLiteral("retired")}};
-        return out;
-    }
-    if (tab->type != QStringLiteral("work"))
-        return typeColumns(tab->type);
-    if (tab->isFilter()) {
-        // Deferred groups by category; Done is one newest-first column (design section 3).
-        if (tab->filter.contains(QStringLiteral("done"))) {
-            return {{QStringLiteral("done"), QStringLiteral("Done"),
-                     {QStringLiteral("done"), QStringLiteral("dropped")}}};
-        }
-        QList<Column> out;
-        for (const Tab &other : m_tabs) {
-            if (other.folder.isEmpty() || other.type != QStringLiteral("work"))
-                continue;
-            out << Column{other.id, other.title, {QStringLiteral("deferred")}};
-        }
-        return out;
-    }
     QList<Column> out;
+    QSet<QString> collected;
     for (const QString &id : m_columns) {
         QStringList statuses = m_columnStatuses.value(id);
         if (statuses.isEmpty())
             statuses = fallbackStatuses(id);
+        statuses.removeAll(QStringLiteral("done"));
+        statuses.removeAll(QStringLiteral("dropped"));
+        if (statuses.isEmpty())
+            continue;                    // a configured Done column: it is the last section
+        for (const QString &status : statuses)
+            collected.insert(status);
         out << Column{id, statusTitle(id), statuses};
     }
+    QStringList extras;
+    for (const Card &card : m_cards) {
+        if (card.closed() || card.status.isEmpty() || collected.contains(card.status))
+            continue;
+        if (!extras.contains(card.status))
+            extras << card.status;
+    }
+    std::sort(extras.begin(), extras.end(), [](const QString &a, const QString &b) {
+        const int ra = extraStatusRank(a), rb = extraStatusRank(b);
+        return ra != rb ? ra < rb : a < b;
+    });
+    for (const QString &status : std::as_const(extras))
+        out << Column{status, statusTitle(status), {status}};
+    out << Column{doneSection(), statusTitle(QStringLiteral("done")),
+                  {QStringLiteral("done"), QStringLiteral("dropped")}};
     return out;
 }
 
-QString Model::dropStatus(const QString &tabId, const QString &columnId) const
+QString Model::dropStatus(const QString &columnId) const
 {
-    const QList<Column> columns = columnsFor(tabId);
-    for (const Column &column : columns)
+    const QList<Column> list = sections();
+    for (const Column &column : list)
         if (column.id == columnId)
             return column.statuses.value(0);
     return QString();
+}
+
+QMap<QString, QString> Model::sectionIndex(const QList<Column> &sections) const
+{
+    QMap<QString, QString> out;
+    for (const Column &column : sections)
+        for (const QString &status : column.statuses)
+            if (!out.contains(status))
+                out.insert(status, column.id);
+    return out;
+}
+
+QString Model::sectionOf(const Card &card) const
+{
+    if (card.closed())
+        return doneSection();
+    return sectionIndex(sections()).value(card.status);
 }
 
 // ---------------------------------------------------------------------------- cards
@@ -402,53 +584,8 @@ const Card *Model::card(const QString &id) const
     return it == m_cards.constEnd() ? nullptr : &it.value();
 }
 
-bool Model::showsInTab(const Tab &tab, const Card &card) const
+QList<Card> Model::sorted(QList<Card> cards, bool newestFirst) const
 {
-    if (card.type != tab.type)
-        return false;
-    if (tab.isFilter()) {
-        if (tab.filter.contains(QStringLiteral("deferred")))
-            return card.parked();
-        return card.closed();
-    }
-    if (tab.type == QStringLiteral("memory") || tab.type == QStringLiteral("plan"))
-        return true;      // one tab per type; the type check above is the whole test
-    if (card.tab != tab.id && !(tab.folder == card.tab))
-        return false;
-    // A category tab shows the live work; Deferred and Done have their own tabs.
-    if (tab.type == QStringLiteral("work"))
-        return !card.parked() && !card.closed();
-    return true;
-}
-
-QString Model::columnOf(const QString &tabId, const Card &card) const
-{
-    const Tab *tab = this->tab(tabId);
-    if (!tab || !showsInTab(*tab, card))
-        return QString();
-    if (tab->type == QStringLiteral("memory")) {
-        if (card.status == QStringLiteral("retired"))
-            return QStringLiteral("retired");
-        return QStringLiteral("topic:")
-               + (card.topic.isEmpty() ? QStringLiteral("general") : card.topic);
-    }
-    const QList<Column> columns = columnsFor(tabId);
-    for (const Column &column : columns) {
-        if (tab->isFilter() && !tab->filter.contains(QStringLiteral("done"))) {
-            if (column.id == card.tab)
-                return column.id;
-            continue;
-        }
-        if (column.statuses.contains(card.status))
-            return column.id;
-    }
-    return QString();
-}
-
-QList<Card> Model::sorted(QList<Card> cards, const QString &tabId) const
-{
-    const Tab *tab = this->tab(tabId);
-    const bool newestFirst = tab && tab->isFilter() && tab->filter.contains(QStringLiteral("done"));
     std::sort(cards.begin(), cards.end(), [newestFirst](const Card &a, const Card &b) {
         if (newestFirst && a.created != b.created)
             return a.created > b.created;
@@ -459,29 +596,73 @@ QList<Card> Model::sorted(QList<Card> cards, const QString &tabId) const
     return cards;
 }
 
-QList<Card> Model::cards(const QString &tabId, const QString &columnId) const
+QList<Card> Model::cards(const QString &columnId) const
 {
+    const QMap<QString, QString> index = sectionIndex(sections());
     QList<Card> out;
     for (const Card &card : m_cards) {
-        if (columnOf(tabId, card) != columnId)
+        const QString section = card.closed() ? doneSection() : index.value(card.status);
+        if (section != columnId || section.isEmpty())
             continue;
         if (!matches(card, m_filter))
             continue;
         out << card;
     }
-    return sorted(out, tabId);
+    return sorted(out, columnId == doneSection());
 }
 
-int Model::count(const QString &tabId) const
+int Model::openCount() const
 {
-    const Tab *tab = this->tab(tabId);
-    if (!tab)
-        return 0;
     int total = 0;
     for (const Card &card : m_cards)
-        if (showsInTab(*tab, card) && matches(card, m_filter))
+        if (!card.closed() && matches(card, m_filter))
             ++total;
     return total;
+}
+
+QList<Row> Model::rows(const QSet<QString> &collapsed) const
+{
+    const bool filtered = !m_filter.trimmed().isEmpty();
+    const QList<Column> list = sections();
+    const QMap<QString, QString> index = sectionIndex(list);
+    QMap<QString, QList<Card>> grouped;
+    for (const Card &card : m_cards) {
+        if (!matches(card, m_filter))
+            continue;
+        const QString section = card.closed() ? doneSection() : index.value(card.status);
+        if (section.isEmpty())
+            continue;      // a status no section collects and that is not closed: nothing to show
+        grouped[section] << card;
+    }
+    QList<Row> out;
+    for (const Column &column : list) {
+        const QList<Card> cards = sorted(grouped.value(column.id), column.id == doneSection());
+        if (filtered && cards.isEmpty())
+            continue;      // a section with nothing to show gets out of the way
+        Row header;
+        header.kind = Row::Section;
+        header.columnId = column.id;
+        header.title = column.title;
+        header.count = int(cards.size());
+        // Nothing is folded while a filter is active: a search that hid its own matches would be
+        // a search that does nothing.
+        header.collapsed = !filtered && collapsed.contains(column.id);
+        out << header;
+        if (header.collapsed)
+            continue;
+        // A section that collects several statuses (Waiting, Needs QA, Done) names each card's
+        // exact one; the one whose status is the section's own repeats nothing.
+        const bool multi = column.statuses.size() > 1;
+        for (const Card &card : cards) {
+            Row row;
+            row.kind = Row::Card;
+            row.columnId = column.id;
+            row.cardId = card.id;
+            row.showStatus = multi && card.status != column.id;
+            out << row;
+        }
+    }
+    return out;
 }
 
 QStringList Model::allLabels() const
@@ -529,6 +710,13 @@ bool Model::matches(const Card &card, const QString &filter)
             const QString who = term.mid(8);
             const QString wanted = who == QStringLiteral("me") ? QStringLiteral("owner") : who;
             if (card.waitingOn.compare(wanted, Qt::CaseInsensitive) != 0)
+                return false;
+        } else if (term.startsWith(QStringLiteral("folder:"))) {
+            // The folder on disk, or the board.yaml tab id that names it: `folder:changes` and
+            // `folder:bugs` both reach the same cards.
+            const QString want = term.mid(7);
+            if (card.folder().compare(want, Qt::CaseInsensitive) != 0
+                && card.tab.compare(want, Qt::CaseInsensitive) != 0)
                 return false;
         } else if (term.startsWith(QLatin1Char('@'))) {
             if (card.assignee.compare(term.mid(1), Qt::CaseInsensitive) != 0)

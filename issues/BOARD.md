@@ -18,8 +18,6 @@
 | `#P4GP` | [Website and beta release](features/2026-09-17-website-and-beta-release.md) | ready |  |  |  |
 | `#05J2` | [Export settings, and an optional sync across machines](features/2026-09-17-settings-export-and-sync.md) | ready |  |  |  |
 | `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | ready |  |  |  |
-| `#0EXJ` | [/light and /dark commands](features/2026-09-18-light-and-dark-commands.md) | ready | agent |  |  |
-| `#V9V1` | [An open-external button for every file, and a menu order to match](features/2026-09-18-open-external-in-the-right-click-menu.md) | ready | agent |  |  |
 | `#4TNY` | [Text editing for text files: word wrap, syntax highlighting, find](features/2026-09-18-text-editing-for-text-files.md) | ready | agent |  |  |
 | `#WQFS` | [In-app PDF rendering](features/2026-09-18-in-app-pdf-rendering.md) | ready | agent |  |  |
 | `#W5N2` | [Remote access from a phone and multiplayer shared terminals](features/2026-09-17-remote-phone-and-multiplayer.md) | in-progress |  |  |  |
@@ -85,6 +83,8 @@
 | `#X2F1` | [Bring the useful Konsole context-menu items to the engine panes](features/needs_qa_llm/2026-09-17-port-konsole-context-menus.md) | needs-qa-llm | agent |  |  |
 | `#5FY5` | [Ctrl+Shift alternates for the core shortcuts](features/needs_qa_llm/2026-09-17-in-app-shortcut-alternates.md) | needs-qa-llm |  |  |  |
 | `#1AXN` | [Switchboard phase 1: agent tools and policy, the protocol, the pane, `#` references](features/needs_qa_llm/2026-09-17-switchboard-phase1.md) | needs-qa-llm | agent |  |  |
+| `#0EXJ` | [/light and /dark commands](features/needs_qa_llm/2026-09-18-light-and-dark-commands.md) | needs-qa-llm | agent |  |  |
+| `#V9V1` | [An open-external button for every file, and a menu order to match](features/needs_qa_llm/2026-09-18-open-external-in-the-right-click-menu.md) | needs-qa-llm | agent |  |  |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | agent |  |  |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
@@ -95,10 +95,7 @@
 |---|---|---|---|---|---|
 | `#X59Q` | [A bare "continue" should reach the agent, not the shell](changes/2026-09-18-continue-should-reach-the-agent.md) | inbox | agent |  |  |
 | `#0T2R` | [The permanent pane buttons should keep the brighter outline](changes/2026-09-18-pane-buttons-brighter-outline.md) | inbox | agent |  |  |
-| `#VXTF` | [A Markdown preview should label its views "source (MD)" and "rendered (MD)"](changes/2026-09-18-markdown-view-labels-say-md.md) | inbox | agent |  |  |
-| `#S1JP` | [A link clicked inside a file preview replaces the file with no way back](changes/2026-09-18-preview-link-has-no-way-back.md) | inbox | agent |  |  |
 | `#ZW95` | [Tab completion adds a stray "-" after a folder](changes/2026-09-18-tab-completion-adds-a-stray-dash.md) | inbox | agent |  |  |
-| `#3W58` | [Markdown files are not rendered as Markdown](changes/2026-09-18-markdown-files-do-not-render.md) | inbox | agent |  |  |
 | `#GDWE` | [@ file completion runs synchronous git on the GUI thread (multi-second block)](changes/2026-09-17-file-completion-runs-synchronous-git-on-the-gui.md) | ready |  |  | [2](threads/GDWE.md) |
 | `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | ready |  |  | [2](threads/72NR.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | ready |  |  | [2](threads/9MYY.md) |
@@ -119,6 +116,9 @@
 | `#0C7V` | [Single click opens folders in the explorer pane (Dolphin style)](changes/needs_qa_llm/2026-09-17-single-click-folders.md) | needs-qa-llm | agent |  |  |
 | `#SQAM` | [Provider stalls have no visible progress, no retry and no log](changes/needs_qa_llm/2026-09-17-provider-stalls-and-no-logs.md) | needs-qa-llm | agent |  |  |
 | `#FW3Z` | [Cleanup quick wins: dead-code removal, logging for silent failures, stale build dirs, docs index, deploy.sh](changes/needs_qa_llm/2026-09-17-cleanup-quick-wins-dead-code-removal-logging-for.md) | needs-qa-llm |  |  | [3](threads/FW3Z.md) |
+| `#VXTF` | [A Markdown preview should label its views "source (MD)" and "rendered (MD)"](changes/needs_qa_llm/2026-09-18-markdown-view-labels-say-md.md) | needs-qa-llm | agent |  |  |
+| `#S1JP` | [A link clicked inside a file preview replaces the file with no way back](changes/needs_qa_llm/2026-09-18-preview-link-has-no-way-back.md) | needs-qa-llm | agent |  |  |
+| `#3W58` | [Markdown files are not rendered as Markdown](changes/needs_qa_llm/2026-09-18-markdown-files-do-not-render.md) | needs-qa-llm | agent |  |  |
 
 ## Planning (2)
 

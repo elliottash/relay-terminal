@@ -13,6 +13,7 @@
 #include <QFileSystemWatcher>
 #include <QFontDatabase>
 #include <QFrame>
+#include <QHash>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QKeyEvent>
@@ -49,24 +50,19 @@
 namespace relay {
 namespace {
 
-constexpr int kCardRole = Qt::UserRole;          // the card id on a list row
-// CardList has no Q_OBJECT (it declares no signals of its own), so its column travels as a
-// dynamic property rather than through qobject_cast.
-const char *const kColumnProperty = "relayBoardColumn";
+constexpr int kCardRole = Qt::UserRole;          // the card id on a card row; empty on a header
 
-// Card geometry (owner review, 2026-09-17: the columns used to be bare text rows with no card
-// edge, no spacing and the chips run into the title). Each card is a raised, rounded box with
-// the title on top and a footer of badges; the numbers keep a 6 px gutter between two cards.
-constexpr int kCardGap = 3;          // above and below every card, so two cards are 6 px apart
-constexpr int kCardPadX = 10, kCardPadY = 8;
-constexpr int kTitleLines = 3;
-// Below this width the open card takes the whole pane instead of squeezing the columns.
+// Row geometry (owner review, 2026-09-18: with ~96 cards the Trello columns ran off the right
+// edge and wasted the height, and a single-owner tracker reads better as rows). One line per
+// card and one per section header, measured the same way for sizeHint() and paint().
+constexpr int kRowPadX = 10;
+constexpr int kGlyphWidth = 15;      // the status mark's box, so every title starts at one x
+constexpr int kBadgeGap = 5;
+constexpr int kIdGap = 8;
+constexpr int kTitleMin = 80;        // the title never shrinks past this; badges go instead
+constexpr int kAddWidth = 22;        // the `+` at the right of a section header
+// Below this width the open card takes the whole pane instead of squeezing the list.
 constexpr int kStackedWidth = 900;
-
-QString columnIdOf(const QWidget *widget)
-{
-    return widget ? widget->property(kColumnProperty).toString() : QString();
-}
 
 QColor mix(const QColor &a, const QColor &b, qreal t)
 {
@@ -99,237 +95,347 @@ QFont monoFont(const QFont &base, qreal factor)
     return font;
 }
 
-// Up to `maxLines` lines of `text` wrapped at `width`; the last one is elided.
-QStringList wrapLines(const QString &text, const QFont &font, int width, int maxLines)
+// The ink a badge is drawn in, and its pill's edge. An invalid edge means no pill at all: the
+// quiet end of the row (the age, the thread count) is plain text, so a busy row has fewer boxes.
+QPair<QColor, QColor> badgeInk(board::Badge::Kind kind)
 {
-    QStringList lines;
-    const QFontMetrics metrics(font);
-    QTextLayout layout(text, font);
-    layout.beginLayout();
-    for (;;) {
-        QTextLine line = layout.createLine();
-        if (!line.isValid())
-            break;
-        line.setLineWidth(width);
-        if (lines.size() == maxLines - 1) {
-            lines << metrics.elidedText(text.mid(line.textStart()).simplified(), Qt::ElideRight, width);
-            break;
-        }
-        lines << text.mid(line.textStart(), line.textLength()).trimmed();
+    switch (kind) {
+    case board::Badge::Agent:
+        return {theme::Agent, mix(theme::Agent, theme::Surface, 0.55)};
+    case board::Badge::Waiting:
+        return {theme::Warning, mix(theme::Warning, theme::Surface, 0.5)};
+    case board::Badge::TasksDone:
+        return {theme::Success, mix(theme::Success, theme::Surface, 0.6)};
+    case board::Badge::Status:
+        return {theme::Text, theme::BorderStrong};
+    case board::Badge::Assignee:
+        return {theme::Text, theme::Border};
+    case board::Badge::Private:
+        return {theme::Warning, mix(theme::Warning, theme::Surface, 0.5)};
+    case board::Badge::Age:
+    case board::Badge::Thread:
+        return {theme::TextMuted, QColor()};
+    default:
+        return {theme::TextMuted, theme::Border};
     }
-    layout.endLayout();
-    return lines;
 }
 
-// Where everything on one card goes, relative to the row's top-left corner. Computed the same
-// way for sizeHint() and paint(), so a card is always exactly as tall as what it draws.
+// The colour of a card row's status mark: muted where nothing is committed, the accent where
+// work is running, the warning colour where somebody is being waited on.
+QColor glyphInk(const QString &status)
+{
+    if (status == QStringLiteral("in-progress") || status == QStringLiteral("executing"))
+        return theme::Accent;
+    if (status.startsWith(QStringLiteral("needs-qa")))
+        return theme::Agent;
+    if (status.startsWith(QStringLiteral("needs-")))
+        return theme::Warning;
+    if (status == QStringLiteral("done"))
+        return theme::Success;
+    if (status == QStringLiteral("ready") || status == QStringLiteral("approved")
+        || status == QStringLiteral("active"))
+        return theme::Text;
+    return theme::TextMuted;
+}
+
+// Where everything on one card row goes, relative to the row's top-left corner. The badges that
+// do not fit are already gone (board::fitBadges) and the title is elided into what is left, so a
+// narrow pane loses decoration before it loses meaning.
 struct CardShape {
-    QStringList title;
-    QRect titleRect, idRect;
+    QRect glyphRect, titleRect, idRect;
+    QString title;
     QList<QPair<board::Badge, QRect>> badges;
     int height = 0;
 };
 
-CardShape shapeOf(const board::Card &card, bool showStatus, const QFont &font, int width)
+CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font, int width,
+                    const QDate &today)
 {
     CardShape shape;
-    const int inner = qMax(40, width - 2 * kCardPadX);
-    const QFontMetrics titleMetrics(font);
-    shape.title = wrapLines(card.title.isEmpty() ? QStringLiteral("(untitled)") : card.title, font,
-                            inner, kTitleLines);
-    int y = kCardGap + kCardPadY;
-    shape.titleRect = QRect(kCardPadX, y, inner, int(shape.title.size()) * titleMetrics.lineSpacing());
-    y = shape.titleRect.bottom() + 1 + 6;
-
-    const QFont badgeFont = smaller(font, 0.85);
-    const QFontMetrics badgeMetrics(badgeFont);
-    const int rowHeight = badgeMetrics.height() + 4;
+    const QFontMetrics metrics(font);
+    const QFontMetrics badgeMetrics(smaller(font, 0.85));
     const QFontMetrics idMetrics(monoFont(font, 0.85));
-    int x = kCardPadX;
-    shape.idRect = QRect(x, y, idMetrics.horizontalAdvance(card.reference()), rowHeight);
-    x = shape.idRect.right() + 1 + 8;
-    for (const board::Badge &badge : board::badges(card, showStatus)) {
-        const int w = qMin(inner, badgeMetrics.horizontalAdvance(badge.text) + 12);
-        if (x + w > kCardPadX + inner) {
-            x = kCardPadX;
-            y += rowHeight + 4;
-        }
-        shape.badges << qMakePair(badge, QRect(x, y, w, rowHeight));
-        x += w + 4;
+    shape.height = qMax(24, metrics.height() + 10);
+
+    int x = kRowPadX;
+    shape.glyphRect = QRect(x, 0, kGlyphWidth, shape.height);
+    x += kGlyphWidth + 4;
+    const int available = qMax(40, width - x - kRowPadX);
+
+    // No single badge may eat the row. A card whose `assignee` holds a sentence is a mistake in
+    // the file, but the row still has to be readable, so a badge is capped at a quarter of the
+    // width and elided inside its pill.
+    const int cap = qMax(60, available / 4);
+    QHash<QString, int> widths;
+    QList<QPair<board::Badge, int>> measured;
+    for (const board::Badge &badge : board::rowBadges(card, showStatus, today)) {
+        const int w = qMin(cap, badgeMetrics.horizontalAdvance(badge.text) + 12);
+        widths.insert(badge.text, w);
+        measured << qMakePair(badge, w);
     }
-    shape.height = y + rowHeight + kCardPadY + kCardGap;
+    const int idWidth = idMetrics.horizontalAdvance(card.reference()) + kIdGap;
+    // What the title is owed before a badge may have anything: the rest of the row is decoration
+    // next to knowing which card this is.
+    const int titleFloor = qBound(kTitleMin, available * 45 / 100, 280);
+    const QList<board::Badge> kept =
+        board::fitBadges(measured, qMax(0, available - titleFloor - idWidth - 12), kBadgeGap);
+
+    // Right to left from the row's right edge, prepending, so the order on screen ends up the
+    // reading order board::rowBadges returned.
+    int right = width - kRowPadX;
+    for (int i = int(kept.size()) - 1; i >= 0; --i) {
+        const int w = widths.value(kept.at(i).text);
+        const int h = badgeMetrics.height() + 2;
+        right -= w;
+        shape.badges.prepend(qMakePair(kept.at(i), QRect(right, (shape.height - h) / 2, w, h)));
+        right -= kBadgeGap;
+    }
+    const int titleEnd = shape.badges.isEmpty() ? width - kRowPadX : right + kBadgeGap - 10;
+    const int titleZone = qMax(30, titleEnd - x);
+    const int titleWidth = qMax(30, titleZone - idWidth);
+    shape.title = metrics.elidedText(card.title.isEmpty() ? QStringLiteral("(untitled)") : card.title,
+                                     Qt::ElideRight, titleWidth);
+    const int drawn = qMin(titleWidth, metrics.horizontalAdvance(shape.title));
+    shape.titleRect = QRect(x, 0, drawn, shape.height);
+    shape.idRect = QRect(x + drawn + kIdGap, 0, qMax(0, idWidth - kIdGap), shape.height);
     return shape;
 }
 
-// Paints a list row as a card. It reads the card from the model by id, so a row holds nothing
-// but the id and a refill never copies card data into the view.
-class CardDelegate final : public QStyledItemDelegate {
+// A section header: a chevron, the status name, its count, and a `+` that adds into it.
+struct SectionShape {
+    QRect chevronRect, titleRect, addRect;
+    int height = 0;
+};
+
+SectionShape sectionShape(const QFont &font, int width, bool first, bool canAdd)
+{
+    SectionShape shape;
+    const QFontMetrics metrics(smaller(font, 0.85));
+    const int top = first ? 6 : 14;              // the rule above needs air; the first has none
+    shape.height = top + metrics.height() + 6;
+    int x = kRowPadX;
+    shape.chevronRect = QRect(x, top, 12, metrics.height());
+    x += 14;
+    shape.titleRect = QRect(x, top, qMax(20, width - x - kRowPadX - (canAdd ? kAddWidth : 0)),
+                            metrics.height());
+    shape.addRect = canAdd ? QRect(width - kRowPadX - kAddWidth, top, kAddWidth, metrics.height())
+                           : QRect();
+    return shape;
+}
+
+// Paints the single list: a section header or one card per row. It reads the card from the model
+// by id, so a row holds nothing but the id and a refill never copies card data into the view.
+class RowDelegate final : public QStyledItemDelegate {
 public:
-    CardDelegate(const board::Model *model, QListWidget *list)
-        : QStyledItemDelegate(list), m_model(model), m_list(list)
+    RowDelegate(const board::Model *model, const QList<board::Row> *rows, QListWidget *list)
+        : QStyledItemDelegate(list), m_model(model), m_rows(rows), m_list(list)
     {
     }
 
-    // Columns that collect several statuses (Waiting, Needs QA) name the exact one on the card;
-    // `quiet` is the one not worth a badge (Done in the Done column).
-    void setStatusBadges(bool on, const QString &quiet)
-    {
-        m_statusBadges = on;
-        m_quietStatus = quiet;
-    }
-
-    // The card width comes from the list, with room for its scrollbar kept whether or not the
-    // scrollbar is showing. From the viewport instead, a column that grew a scrollbar would be
-    // painted narrower than it was measured (QListView re-measures on a resize of the list, not
-    // of its viewport), and the cards overlapped or left gaps.
-    int cardWidth() const
+    // The row's width comes from the list with room for its scrollbar kept whether or not the
+    // scrollbar is showing: measured at one width and painted at another, the elision would be
+    // computed for a row wider than the one drawn.
+    int rowWidth() const
     {
         const int reserve = m_list->verticalScrollBar()->sizeHint().width() + 2;
-        return qMax(60, m_list->width() - 2 * m_list->frameWidth() - reserve);
+        return qMax(120, m_list->width() - 2 * m_list->frameWidth() - reserve);
     }
 
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
     {
-        const board::Card *card = m_model->card(index.data(kCardRole).toString());
-        const int width = cardWidth();
+        const board::Row *row = rowAt(index.row());
+        const int width = rowWidth();
+        if (!row)
+            return QSize(width, 0);
+        if (row->kind == board::Row::Section)
+            return QSize(width, sectionShape(option.font, width, index.row() == 0, false).height);
+        const board::Card *card = m_model->card(row->cardId);
         if (!card)
             return QSize(width, 0);
-        return QSize(width, shapeOf(*card, showStatus(*card), option.font, width).height);
+        return QSize(width, cardShape(*card, row->showStatus, option.font, width, today()).height);
     }
 
     void paint(QPainter *painter, const QStyleOptionViewItem &option,
                const QModelIndex &index) const override
     {
-        const board::Card *card = m_model->card(index.data(kCardRole).toString());
+        const board::Row *row = rowAt(index.row());
+        if (!row)
+            return;
+        QRect rect = option.rect;
+        rect.setWidth(qMin(rect.width(), rowWidth()));
+        painter->save();
+        painter->setClipRect(rect);
+        painter->setRenderHint(QPainter::Antialiasing);
+        if (row->kind == board::Row::Section)
+            paintSection(painter, option, rect, *row, index.row() == 0);
+        else
+            paintCard(painter, option, rect, *row);
+        painter->restore();
+    }
+
+    // The `+` of the header at `rowIndex`, given that row's rect, or an empty rect.
+    QRect addRectOf(int rowIndex, const QRect &itemRect) const
+    {
+        const board::Row *row = rowAt(rowIndex);
+        if (!row || row->kind != board::Row::Section || !adds(row->columnId))
+            return QRect();
+        return sectionShape(m_list->font(), rowWidth(), rowIndex == 0, true)
+            .addRect.translated(itemRect.topLeft());
+    }
+
+    // Nothing is created straight into Done: a card gets there by being closed.
+    std::function<bool(const QString &columnId)> adds = [](const QString &) { return true; };
+
+private:
+    static QDate today() { return QDate::currentDate(); }
+
+    const board::Row *rowAt(int index) const
+    {
+        return index >= 0 && index < m_rows->size() ? &m_rows->at(index) : nullptr;
+    }
+
+    void paintSection(QPainter *painter, const QStyleOptionViewItem &option, const QRect &rect,
+                      const board::Row &row, bool first) const
+    {
+        const bool canAdd = adds(row.columnId);
+        const SectionShape shape = sectionShape(option.font, rect.width(), first, canAdd);
+        const QPoint origin = rect.topLeft();
+        const bool hover = option.state & QStyle::State_MouseOver;
+        if (!first) {
+            painter->setPen(QPen(theme::Border, 1.0));
+            painter->drawLine(rect.left() + kRowPadX, origin.y() + 4,
+                              rect.left() + rect.width() - kRowPadX, origin.y() + 4);
+        }
+        painter->setFont(smaller(option.font, 0.85));
+        painter->setPen(hover ? theme::Text : theme::TextMuted);
+        painter->drawText(shape.chevronRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
+                          row.collapsed ? QStringLiteral("▸") : QStringLiteral("▾"));
+
+        QFont title = smaller(option.font, 0.85);
+        title.setWeight(QFont::DemiBold);
+        title.setLetterSpacing(QFont::PercentageSpacing, 108);
+        painter->setFont(title);
+        painter->setPen(hover ? theme::Text : theme::TextMuted);
+        const QString text = row.title.toUpper();
+        const int titleWidth = QFontMetrics(title).horizontalAdvance(text);
+        painter->drawText(shape.titleRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter, text);
+
+        painter->setFont(monoFont(option.font, 0.8));
+        painter->setPen(theme::TextMuted);
+        painter->drawText(QRect(shape.titleRect.left() + titleWidth + 8 + origin.x(),
+                                shape.titleRect.top() + origin.y(),
+                                qMax(0, shape.titleRect.width() - titleWidth - 8),
+                                shape.titleRect.height()),
+                          Qt::AlignLeft | Qt::AlignVCenter, QString::number(row.count));
+        if (canAdd && hover) {
+            painter->setFont(smaller(option.font, 0.95));
+            painter->setPen(theme::Text);
+            painter->drawText(shape.addRect.translated(origin), Qt::AlignCenter,
+                              QStringLiteral("+"));
+        }
+    }
+
+    void paintCard(QPainter *painter, const QStyleOptionViewItem &option, const QRect &rect,
+                   const board::Row &row) const
+    {
+        const board::Card *card = m_model->card(row.cardId);
         if (!card)
             return;
-        QRect row = option.rect;
-        row.setWidth(qMin(row.width(), cardWidth()));
-        const CardShape shape = shapeOf(*card, showStatus(*card), option.font, row.width());
+        const CardShape shape = cardShape(*card, row.showStatus, option.font, rect.width(), today());
+        const QPoint origin = rect.topLeft();
         const bool selected = option.state & QStyle::State_Selected;
         const bool hover = option.state & QStyle::State_MouseOver;
         const bool focused = m_list->hasFocus();
 
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing);
-        const QRectF box = QRectF(row).adjusted(0.5, kCardGap + 0.5, -0.5, -kCardGap - 0.5);
-        QColor fill = theme::SurfaceRaised;
-        if (hover || selected)
-            fill = mix(theme::SurfaceRaised, theme::Text, 0.04);
-        QColor edge = theme::Border;
-        if (selected)
-            edge = focused ? theme::Accent : theme::BorderStrong;
-        else if (hover)
-            edge = theme::BorderStrong;
-        painter->setPen(QPen(edge, selected && focused ? 1.5 : 1.0));
-        painter->setBrush(fill);
-        painter->drawRoundedRect(box, 6, 6);
+        // A band, not a box: rows read as a list, and the selection is the one thing with an
+        // edge — a 2px bar at the left, so it is visible without a fill loud enough to hurt.
+        if (selected || hover) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(selected ? alpha(theme::Accent, focused ? 34 : 20)
+                                       : mix(theme::Background, theme::Text, 0.05));
+            painter->drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
+        }
+        if (selected) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(focused ? theme::Accent : theme::BorderStrong);
+            painter->drawRoundedRect(QRectF(rect.left() + 1, rect.top() + 3, 2.0,
+                                            rect.height() - 6), 1, 1);
+        }
 
-        const QPoint origin = row.topLeft();
         painter->setFont(option.font);
-        painter->setPen(theme::Text);
-        const int lineHeight = QFontMetrics(option.font).lineSpacing();
-        for (int i = 0; i < shape.title.size(); ++i)
-            painter->drawText(QRect(shape.titleRect.left() + origin.x(),
-                                    shape.titleRect.top() + origin.y() + i * lineHeight,
-                                    shape.titleRect.width(), lineHeight),
-                              Qt::AlignLeft | Qt::AlignVCenter, shape.title.at(i));
+        painter->setPen(glyphInk(card->status));
+        painter->drawText(shape.glyphRect.translated(origin), Qt::AlignCenter,
+                          board::statusGlyph(card->status));
+
+        painter->setPen(card->closed() ? theme::TextMuted : theme::Text);
+        painter->drawText(shape.titleRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
+                          shape.title);
 
         painter->setFont(monoFont(option.font, 0.85));
         painter->setPen(theme::TextMuted);
         painter->drawText(shape.idRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
                           card->reference());
 
-        painter->setFont(smaller(option.font, 0.85));
+        const QFont badgeFont = smaller(option.font, 0.85);
+        painter->setFont(badgeFont);
         for (const auto &placed : shape.badges) {
-            const QRectF pill = QRectF(placed.second.translated(origin)).adjusted(0.5, 0.5, -0.5, -0.5);
-            QColor ink = theme::TextMuted, border = theme::Border;
-            switch (placed.first.kind) {
-            case board::Badge::Agent:
-                ink = theme::Agent;
-                border = mix(theme::Agent, theme::SurfaceRaised, 0.55);
-                break;
-            case board::Badge::Waiting:
-                ink = theme::Warning;
-                border = mix(theme::Warning, theme::SurfaceRaised, 0.55);
-                break;
-            case board::Badge::TasksDone:
-                ink = theme::Success;
-                break;
-            case board::Badge::Status:
-            case board::Badge::Assignee:
-                ink = theme::Text;
-                break;
-            default:
-                break;
+            const QRect box = placed.second.translated(origin);
+            const auto [ink, edge] = badgeInk(placed.first.kind);
+            if (edge.isValid()) {
+                painter->setPen(QPen(edge, 1.0));
+                painter->setBrush(theme::Surface);
+                painter->drawRoundedRect(QRectF(box).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
             }
-            painter->setPen(QPen(border, 1.0));
-            painter->setBrush(theme::Surface);
-            painter->drawRoundedRect(pill, 4, 4);
             painter->setPen(ink);
-            painter->drawText(pill, Qt::AlignCenter,
-                              QFontMetrics(painter->font())
-                                  .elidedText(placed.first.text, Qt::ElideRight, int(pill.width()) - 8));
+            painter->drawText(box, Qt::AlignCenter,
+                              QFontMetrics(badgeFont).elidedText(placed.first.text, Qt::ElideRight,
+                                                                 box.width() - 8));
         }
-        painter->restore();
-    }
-
-private:
-    bool showStatus(const board::Card &card) const
-    {
-        return m_statusBadges && card.status != m_quietStatus;
     }
 
     const board::Model *m_model;
+    const QList<board::Row> *m_rows;
     QListWidget *m_list;
-    bool m_statusBadges = false;
-    QString m_quietStatus;
 };
 
-// A column list that reports a drop instead of moving the row itself: the card only moves once
-// the worker has written the file and sent board_changed back. While a card is dragged over it,
-// the list tints itself and draws a line where the card would land.
-class CardList final : public QListWidget {
+}  // namespace
+
+// The one list: section headers and cards in a single vertical scroll. It reports a drop instead
+// of moving the row itself — the card only moves once the worker has written the file and sent
+// board_changed back — and draws the line where the card would land.
+class RowList final : public QListWidget {
 public:
-    explicit CardList(const QString &columnId, QWidget *parent = nullptr)
-        : QListWidget(parent), m_columnId(columnId)
+    explicit RowList(const QList<board::Row> *rows, QWidget *parent = nullptr)
+        : QListWidget(parent), m_rows(rows)
     {
         setDragDropMode(QAbstractItemView::DragDrop);
         setDefaultDropAction(Qt::MoveAction);
-        setDropIndicatorShown(false);    // drawn by paintEvent below, between the cards
+        setDropIndicatorShown(false);    // drawn by paintEvent below, between the rows
         setSelectionMode(QAbstractItemView::SingleSelection);
         setUniformItemSizes(false);
-        setResizeMode(QListView::Adjust);           // cards re-wrap when the column resizes
-        setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);   // cards are tall; no jumps
+        setResizeMode(QListView::Adjust);           // rows re-elide when the pane resizes
+        setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
         setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         setFrameShape(QFrame::NoFrame);
         setMouseTracking(true);
         viewport()->setAttribute(Qt::WA_Hover);
-        setObjectName(QStringLiteral("boardColumn"));
-        setProperty(kColumnProperty, columnId);
+        setObjectName(QStringLiteral("boardList"));
     }
 
-    QString columnId() const { return m_columnId; }
-    QString placeholder;             // drawn when the column has no cards
-    // (card id, id it goes before, id it goes after)
-    std::function<void(const QString &, const QString &, const QString &)> onDropped;
+    QString placeholder;             // drawn when the list is empty
+    // (card id, the section it lands in, the id it goes before, the id it goes after)
+    std::function<void(const QString &, const QString &, const QString &, const QString &)> onDropped;
     std::function<void(bool)> onDragging;   // a drag from this list started (true) or ended
+    std::function<void(const QString &columnId)> onToggleSection, onAddInSection;
+    std::function<QRect(int rowIndex, const QRect &itemRect)> addRectOf;
     static QString dragging;
-
-    QStringList ids() const
-    {
-        QStringList out;
-        for (int i = 0; i < count(); ++i)
-            out << item(i)->data(kCardRole).toString();
-        return out;
-    }
 
 protected:
     void resizeEvent(QResizeEvent *event) override
     {
         QListWidget::resizeEvent(event);
         if (event->size().width() != event->oldSize().width())
-            scheduleDelayedItemsLayout();   // the cards re-wrap to the new width
+            scheduleDelayedItemsLayout();   // the rows re-elide to the new width
     }
 
     void showEvent(QShowEvent *event) override
@@ -338,16 +444,41 @@ protected:
         scheduleDelayedItemsLayout();       // measured while hidden, at whatever width it had
     }
 
+    // A click on a section header toggles it, or adds into it; it never becomes a selection.
+    void mousePressEvent(QMouseEvent *event) override
+    {
+#if QT_VERSION_MAJOR >= 6
+        const QPoint at = event->position().toPoint();
+#else
+        const QPoint at = event->pos();
+#endif
+        const QModelIndex index = indexAt(at);
+        const board::Row *row = rowAt(index.row());
+        if (row && row->kind == board::Row::Section && event->button() == Qt::LeftButton) {
+            const QRect add = addRectOf ? addRectOf(index.row(), visualRect(index)) : QRect();
+            if (add.isValid() && add.adjusted(-5, -5, 5, 5).contains(at)) {
+                if (onAddInSection)
+                    onAddInSection(row->columnId);
+            } else if (onToggleSection) {
+                onToggleSection(row->columnId);
+            }
+            event->accept();
+            return;
+        }
+        QListWidget::mousePressEvent(event);
+    }
+
     // Our own drag, not QListWidget's: the default image is the row painted on a transparent
-    // pixmap, which without a compositor is a black box. This one is the card on the board's
+    // pixmap, which without a compositor is a black box. This one is the row on the board's
     // background. The payload is the text `#ID`, so dropping a card on the prompt box types it.
     void startDrag(Qt::DropActions) override
     {
         QListWidgetItem *item = currentItem();
-        if (!item)
+        if (!item || item->data(kCardRole).toString().isEmpty())
             return;
         dragging = item->data(kCardRole).toString();
-        const QRect rect = visualItemRect(item);
+        QRect rect = visualItemRect(item);
+        rect.setWidth(qMin(rect.width(), qMax(260, width() / 2)));
         const qreal ratio = devicePixelRatioF();
         QPixmap pixmap(rect.size() * ratio);
         pixmap.setDevicePixelRatio(ratio);
@@ -365,12 +496,13 @@ protected:
         mime->setText(QStringLiteral("#") + dragging + QLatin1Char(' '));
         drag->setMimeData(mime);
         drag->setPixmap(pixmap);
-        drag->setHotSpot(viewport()->mapFromGlobal(QCursor::pos()) - rect.topLeft());
+        drag->setHotSpot(QPoint(qMin(40, rect.width() / 2), rect.height() / 2));
         if (onDragging)
             onDragging(true);
         drag->exec(Qt::MoveAction | Qt::CopyAction, Qt::MoveAction);   // until dropped or cancelled
         dragging.clear();
         m_dropActive = false;
+        m_dropRow = m_dropHeader = -1;
         viewport()->update();
         if (onDragging)
             onDragging(false);
@@ -395,21 +527,17 @@ protected:
         }
         event->acceptProposedAction();
 #if QT_VERSION_MAJOR >= 6
-        const int row = insertionRow(event->position().toPoint());
+        aimAt(event->position().toPoint());
 #else
-        const int row = insertionRow(event->pos());
+        aimAt(event->pos());
 #endif
-        if (row != m_dropRow) {
-            m_dropRow = row;
-            viewport()->update();
-        }
     }
 
     void dragLeaveEvent(QDragLeaveEvent *event) override
     {
         QListWidget::dragLeaveEvent(event);
         m_dropActive = false;
-        m_dropRow = -1;
+        m_dropRow = m_dropHeader = -1;
         viewport()->update();
     }
 
@@ -418,28 +546,17 @@ protected:
         const QString card = dragging;
         dragging.clear();
         m_dropActive = false;
+        const int header = m_dropHeader, before = m_dropRow;
+        m_dropHeader = m_dropRow = -1;
         viewport()->update();
         if (card.isEmpty()) {
             event->ignore();
             return;
         }
-#if QT_VERSION_MAJOR >= 6
-        const int row = insertionRow(event->position().toPoint());
-#else
-        const int row = insertionRow(event->pos());
-#endif
-        m_dropRow = -1;
-        const QStringList order = ids();
-        const int from = order.indexOf(card);
-        const int slot = from >= 0 && from < row ? row - 1 : row;
         // The model is the file on disk; nothing moves in the view until the worker says so.
         event->setDropAction(Qt::IgnoreAction);
         event->accept();
-        if (from >= 0 && slot == from)
-            return;   // dropped where it already was: no write, no thread entry
-        const auto [before, after] = board::placement(order, card, slot);
-        if (onDropped)
-            onDropped(card, before, after);
+        drop(card, header, before);
     }
 
     void paintEvent(QPaintEvent *event) override
@@ -449,43 +566,85 @@ protected:
         painter.setRenderHint(QPainter::Antialiasing);
         if (count() == 0 && !placeholder.isEmpty()) {
             painter.setPen(theme::TextMuted);
-            painter.setFont(smaller(font(), 0.9));
-            painter.drawText(viewport()->rect().adjusted(8, 14, -8, 0),
+            painter.setFont(smaller(font(), 0.95));
+            painter.drawText(viewport()->rect().adjusted(16, 24, -16, 0),
                              Qt::AlignHCenter | Qt::AlignTop | Qt::TextWordWrap, placeholder);
         }
         if (!m_dropActive)
             return;
-        painter.setPen(QPen(alpha(theme::Accent, 110), 1.0));
-        painter.setBrush(alpha(theme::Accent, 14));
-        painter.drawRoundedRect(QRectF(viewport()->rect()).adjusted(0.5, 0.5, -0.5, -0.5), 6, 6);
-        int y = kCardGap;
+        if (m_dropHeader >= 0 && m_dropHeader < count()) {
+            const QRect rect = visualItemRect(item(m_dropHeader));
+            painter.setPen(QPen(alpha(theme::Accent, 130), 1.0));
+            painter.setBrush(alpha(theme::Accent, 26));
+            painter.drawRoundedRect(QRectF(rect).adjusted(2.5, 2.5, -2.5, -1.5), 5, 5);
+            return;
+        }
+        int y = 1;
         if (count() > 0) {
             const int row = qBound(0, m_dropRow, count());
             y = row < count() ? visualItemRect(item(row)).top()
                               : visualItemRect(item(count() - 1)).bottom() + 1;
         }
         painter.setPen(QPen(theme::Accent, 2.0, Qt::SolidLine, Qt::RoundCap));
-        painter.drawLine(QPointF(6, y), QPointF(viewport()->width() - 6, y));
+        painter.drawLine(QPointF(kRowPadX, y), QPointF(viewport()->width() - kRowPadX, y));
+    }
+
+public:
+    // Where a card dropped with `header` aimed at (or, at -1, between rows at `before`) goes.
+    // Public so the pane's keyboard move and a test can take the same path as the mouse.
+    void drop(const QString &card, int header, int before)
+    {
+        const auto [columnId, slot] =
+            board::dropTarget(*m_rows, header >= 0 ? header + 1 : before);
+        if (columnId.isEmpty())
+            return;
+        const QStringList order = board::cardsInSection(*m_rows, columnId);
+        const int from = order.indexOf(card);
+        const int target = from >= 0 && from < slot ? slot - 1 : slot;
+        if (from >= 0 && target == from)
+            return;   // dropped where it already was: no write, no thread entry
+        const auto [beforeId, afterId] = board::placement(order, card, target);
+        if (onDropped)
+            onDropped(card, columnId, beforeId, afterId);
     }
 
 private:
-    // The row a card dropped at `pos` goes in front of: the first card whose middle is below it.
-    int insertionRow(const QPoint &pos) const
+    const board::Row *rowAt(int index) const
     {
-        for (int i = 0; i < count(); ++i)
-            if (pos.y() < visualItemRect(item(i)).center().y())
-                return i;
-        return count();
+        return index >= 0 && index < m_rows->size() ? &m_rows->at(index) : nullptr;
     }
 
-    QString m_columnId;
+    // A pointer inside a section header aims at that section; anywhere else it aims between two
+    // rows, and board::dropTarget decides which section that point belongs to.
+    void aimAt(const QPoint &pos)
+    {
+        int header = -1, before = count();
+        const QModelIndex index = indexAt(pos);
+        const board::Row *row = rowAt(index.row());
+        if (row && row->kind == board::Row::Section) {
+            header = index.row();
+        } else {
+            for (int i = 0; i < count(); ++i) {
+                if (pos.y() < visualItemRect(item(i)).center().y()) {
+                    before = i;
+                    break;
+                }
+            }
+        }
+        if (header == m_dropHeader && before == m_dropRow)
+            return;
+        m_dropHeader = header;
+        m_dropRow = before;
+        viewport()->update();
+    }
+
+    const QList<board::Row> *m_rows;
     bool m_dropActive = false;
-    int m_dropRow = -1;
+    int m_dropRow = -1, m_dropHeader = -1;
 };
 
-QString CardList::dragging;
+QString RowList::dragging;
 
-}  // namespace
 
 // --------------------------------------------------------------------- card detail
 
@@ -534,7 +693,7 @@ public:
         m_status->setToolTip(QStringLiteral("Status: the column the card sits in"));
         m_tab = new QComboBox(this);
         m_tab->setObjectName(QStringLiteral("boardPicker"));
-        m_tab->setToolTip(QStringLiteral("Tab: the category folder the card lives in"));
+        m_tab->setToolTip(QStringLiteral("Category: the folder the card's file lives in"));
         pickers->addWidget(m_status);
         pickers->addWidget(m_tab);
         pickers->addStretch();
@@ -997,42 +1156,34 @@ BoardView::BoardView(const QString &workspace, QWidget *parent)
 
 void BoardView::buildChrome(QVBoxLayout *layout)
 {
-    // Two rows of chrome: the tabs get the whole width (seven of them do not fit beside a
-    // filter field in a half-width pane), then the filter and the one button that adds.
+    // One row of chrome. There are no tabs (owner decision, 2026-09-18): the pane is one list of
+    // everything that is not done, and the filter box is how it is sliced. The counts live in
+    // the pane's title and on the section headers.
     auto *head = new QWidget(this);
     head->setObjectName(QStringLiteral("boardHead"));
     auto *headLayout = new QVBoxLayout(head);
-    headLayout->setContentsMargins(8, 4, 8, 6);
+    headLayout->setContentsMargins(8, 5, 8, 6);
     headLayout->setSpacing(6);
-    m_tabs = new QTabBar(head);
-    m_tabs->setObjectName(QStringLiteral("boardTabs"));
-    m_tabs->setExpanding(false);
-    m_tabs->setDrawBase(false);
-    m_tabs->setElideMode(Qt::ElideNone);
-    m_tabs->setUsesScrollButtons(true);
-    m_tabs->setFocusPolicy(Qt::NoFocus);
-    m_tabs->setAcceptDrops(true);          // drop a card on a tab: move it to that category
-    m_tabs->installEventFilter(this);
-    m_tabRow = new QHBoxLayout;
-    m_tabRow->setContentsMargins(0, 0, 0, 0);
-    m_tabRow->addWidget(m_tabs, 1);
-    headLayout->addLayout(m_tabRow);
-
-    auto *tools = new QHBoxLayout;
-    tools->setSpacing(6);
+    m_tools = new QHBoxLayout;
+    m_tools->setContentsMargins(0, 0, 0, 0);
+    m_tools->setSpacing(6);
+    m_count = new QLabel(head);
+    m_count->setObjectName(QStringLiteral("boardCount"));
+    m_tools->addWidget(m_count);
     m_filter = new QLineEdit(head);
     m_filter->setObjectName(QStringLiteral("boardFilter"));
-    m_filter->setPlaceholderText(QStringLiteral("Filter  —  words, label:voice, status:ready, @agent, waiting:me"));
+    m_filter->setPlaceholderText(QStringLiteral("Filter  —  words, label:bug, status:done, "
+                                                "folder:changes, @agent, waiting:me"));
     m_filter->setClearButtonEnabled(true);
-    tools->addWidget(m_filter, 1);
+    m_tools->addWidget(m_filter, 1);
     auto *add = new QToolButton(head);
     add->setObjectName(QStringLiteral("boardAddButton"));
     add->setText(QStringLiteral("+  New card"));
-    add->setToolTip(QStringLiteral("New card in the first column (n)"));
+    add->setToolTip(QStringLiteral("New card in the focused section (n)"));
     add->setCursor(Qt::PointingHandCursor);
     add->setFocusPolicy(Qt::NoFocus);
-    tools->addWidget(add);
-    headLayout->addLayout(tools);
+    m_tools->addWidget(add);
+    headLayout->addLayout(m_tools);
     layout->addWidget(head);
 
     m_problems = new QLabel(this);
@@ -1082,18 +1233,78 @@ void BoardView::buildChrome(QVBoxLayout *layout)
 
     m_splitter = new QSplitter(Qt::Horizontal, this);
     m_splitter->setChildrenCollapsible(false);
-    m_scroll = new QScrollArea(m_splitter);
-    m_scroll->setObjectName(QStringLiteral("boardScroll"));
-    m_scroll->setWidgetResizable(true);
-    m_scroll->setFrameShape(QFrame::NoFrame);
-    m_scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);   // each column scrolls itself
-    m_columns = new QWidget(m_scroll);
-    m_columns->setObjectName(QStringLiteral("boardColumns"));
-    auto *columns = new QHBoxLayout(m_columns);
-    columns->setContentsMargins(8, 0, 8, 6);
-    columns->setSpacing(8);
-    m_scroll->setWidget(m_columns);
-    m_splitter->addWidget(m_scroll);
+    // The left half: the quick-add field (hidden until used) over the one scrolling list.
+    m_listPane = new QWidget(m_splitter);
+    m_listPane->setObjectName(QStringLiteral("boardListPane"));
+    m_listPane->setMinimumWidth(240);
+    auto *listLayout = new QVBoxLayout(m_listPane);
+    listLayout->setContentsMargins(0, 0, 0, 0);
+    listLayout->setSpacing(0);
+    buildQuickAdd(listLayout);
+    m_list = new RowList(&m_rows, m_listPane);
+    auto *delegate = new RowDelegate(&m_model, &m_rows, m_list);
+    delegate->adds = [this](const QString &columnId) { return sectionTakesNewCards(columnId); };
+    m_list->setItemDelegate(delegate);
+    m_list->addRectOf = [delegate](int rowIndex, const QRect &itemRect) {
+        return delegate->addRectOf(rowIndex, itemRect);
+    };
+    m_list->onToggleSection = [this](const QString &columnId) { toggleSection(columnId); };
+    m_list->onAddInSection = [this](const QString &columnId) {
+        if (onHint)
+            onHint(QStringLiteral("board.quickAdd"), QStringLiteral("n"));
+        quickAddIn(columnId);
+    };
+    m_list->onDropped = [this](const QString &card, const QString &columnId, const QString &before,
+                               const QString &after) {
+        if (onHint)
+            onHint(QStringLiteral("board.drag"), QStringLiteral("Alt+Shift+Arrows"));
+        m_selected = card;
+        moveCard(card, columnId, before, after);
+    };
+    m_list->onDragging = [this](bool on) {
+        m_dragActive = on;
+        if (on) {
+            m_dragScroll->start();
+            return;
+        }
+        m_dragScroll->stop();
+        if (m_rebuildPending) {
+            // Not from inside startDrag(): a rebuild there would run under its nested loop.
+            QTimer::singleShot(0, this, [this] {
+                if (m_rebuildPending && !m_dragActive)
+                    rebuild();
+            });
+        }
+    };
+    connect(m_list, &QListWidget::itemSelectionChanged, this, [this] {
+        auto *item = m_list->currentItem();
+        if (!item || !item->isSelected())
+            return;
+        const QString id = item->data(kCardRole).toString();
+        if (id.isEmpty())
+            return;
+        m_selected = id;
+        if (detailOpen())
+            m_follow->start();
+    });
+    // A click opens the card, the way a card board did; a drag never counts as a click.
+    connect(m_list, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
+        const QString id = item->data(kCardRole).toString();
+        if (id.isEmpty() || QApplication::keyboardModifiers() != Qt::NoModifier)
+            return;
+        m_selected = id;
+        openSelected();
+    });
+    connect(m_list, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) {
+        const QString id = item->data(kCardRole).toString();
+        if (id.isEmpty())
+            return;
+        m_selected = id;
+        openSelected();
+    });
+    m_list->installEventFilter(this);
+    listLayout->addWidget(m_list, 1);
+    m_splitter->addWidget(m_listPane);
 
     m_detail = new CardDetail(m_splitter);
     m_detail->hide();
@@ -1126,15 +1337,6 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_dragScroll->setInterval(30);
     connect(m_dragScroll, &QTimer::timeout, this, [this] { autoScrollDuringDrag(); });
 
-    connect(m_tabs, &QTabBar::currentChanged, this, [this](int index) {
-        if (m_buildingTabs || index < 0 || index >= m_model.tabs().size())
-            return;
-        m_tab = m_model.tabs().at(index).id;
-        const bool hadFocus = isAncestorOf(QApplication::focusWidget());
-        rebuild();
-        if (hadFocus)
-            focusInput();
-    });
     connect(m_filter, &QLineEdit::textChanged, this, [this](const QString &text) {
         m_model.setFilter(text);
         rebuild();
@@ -1149,11 +1351,10 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     updateDetailLayout();   // the key line's first text
     m_detail->onClose = [this] { closeDetail(); };
     m_detail->onEscape = [this] {
-        // Esc in the reply box goes back to the cards; a second Esc there closes the card. With
-        // the columns hidden (a narrow pane) there is nothing to go back to but the board.
-        auto *list = listOfCard(m_detail->cardId());
-        if (list && !m_scroll->isHidden())
-            list->setFocus();
+        // Esc in the reply box goes back to the rows; a second Esc there closes the card. With
+        // the list hidden (a narrow pane) there is nothing to go back to but the board.
+        if (!m_listPane->isHidden() && board::rowOfCard(m_rows, m_detail->cardId()) >= 0)
+            selectCard(m_detail->cardId());
         else
             closeDetail();
     };
@@ -1204,6 +1405,39 @@ void BoardView::buildChrome(QVBoxLayout *layout)
               {QStringLiteral("card"), card}, {what, value},
               {QStringLiteral("reason"), QStringLiteral("changed in the Switchboard")}});
     };
+}
+
+// The quick-add field, built once and shown when a card is added. It lines up with the rows
+// under it rather than living inside a section, so a refill never takes it away mid-typing.
+void BoardView::buildQuickAdd(QVBoxLayout *layout)
+{
+    m_quickAddRow = new QWidget(m_listPane);
+    m_quickAddRow->setObjectName(QStringLiteral("boardQuickAddRow"));
+    auto *row = new QHBoxLayout(m_quickAddRow);
+    row->setContentsMargins(8, 5, 8, 3);
+    auto *field = new QLineEdit(m_quickAddRow);
+    field->setObjectName(QStringLiteral("boardQuickAdd"));
+    field->setToolTip(QStringLiteral("The text is kept verbatim as the card's request"));
+    row->addWidget(field);
+    m_quickAdd = field;
+    m_quickAddRow->hide();
+    layout->addWidget(m_quickAddRow);
+    field->installEventFilter(this);
+    connect(field, &QLineEdit::returnPressed, this, [this, field] {
+        const QString text = field->text().trimmed();
+        if (text.isEmpty()) {
+            closeQuickAdd();
+            focusInput();
+            return;
+        }
+        const QString status = m_model.dropStatus(m_quickAddColumn);
+        send({{QStringLiteral("type"), QStringLiteral("board_create")},
+              {QStringLiteral("tab"), defaultCategory()},
+              {QStringLiteral("status"), status.isEmpty() ? QStringLiteral("inbox") : status},
+              {QStringLiteral("card_type"), QStringLiteral("work")},
+              {QStringLiteral("text"), text}});
+        field->clear();
+    });
 }
 
 // Watch `issues/` and its folders. A card write anywhere (this window, a pane agent, a
@@ -1261,50 +1495,17 @@ void BoardView::reload()
     send({{QStringLiteral("type"), QStringLiteral("board_open")}});
 }
 
+// "Switchboard · 84 open": the number the pane is actually about, not every card ever filed.
 QString BoardView::title() const
 {
-    const int total = m_model.total();
-    return total > 0 ? QStringLiteral("Switchboard · %1").arg(total) : QStringLiteral("Switchboard");
-}
-
-QString BoardView::currentTab() const
-{
-    return m_tab;
-}
-
-void BoardView::setCurrentTab(const QString &tabId)
-{
-    const QList<board::Tab> tabs = m_model.tabs();
-    if (tabs.isEmpty()) {
-        m_tab = tabId;   // restored before the first `board` event; used once the tabs exist
-        return;
-    }
-    for (int i = 0; i < tabs.size(); ++i) {
-        if (tabs.at(i).id != tabId)
-            continue;
-        m_tab = tabId;
-        if (m_tabs->currentIndex() != i)
-            m_tabs->setCurrentIndex(i);
-        else
-            rebuild();
-        return;
-    }
-}
-
-// Scroll the columns so this one is on screen. Deferred: right after the columns come back from
-// behind an open card their geometry is stale, and revealing then scrolls somewhere arbitrary.
-void BoardView::revealColumn(QWidget *column)
-{
-    QPointer<QWidget> guard(column);
-    QTimer::singleShot(0, this, [this, guard] {
-        if (guard && guard->isVisible())
-            m_scroll->ensureWidgetVisible(guard, 24, 0);
-    });
+    if (m_model.total() == 0)
+        return QStringLiteral("Switchboard");
+    return QStringLiteral("Switchboard · %1 open").arg(m_model.openCount());
 }
 
 void BoardView::setHeaderRightInset(int pixels)
 {
-    m_tabRow->setContentsMargins(0, 0, pixels, 0);
+    m_tools->setContentsMargins(0, 0, pixels, 0);
 }
 
 QString BoardView::notice() const
@@ -1351,11 +1552,7 @@ void BoardView::handleEvent(const QJsonObject &event)
         m_open = true;
         m_model.setConfig(event.value(QStringLiteral("config")).toObject());
         m_model.reset(event.value(QStringLiteral("cards")).toArray());
-        if ((m_tab.isEmpty() || !m_model.tab(m_tab)) && !m_model.tabs().isEmpty())
-            m_tab = m_model.tabs().first().id;
-        m_builtTab.clear();   // the columns may have changed with the config
         const bool hadFocus = hasFocus();   // opened with Ctrl+Shift+S before the cards arrived
-        rebuildTabs();
         rebuild();
         if (hadFocus)
             focusInput();
@@ -1398,8 +1595,8 @@ void BoardView::handleEvent(const QJsonObject &event)
     }
     if (type == QStringLiteral("board_card")) {
         QStringList statuses;
-        const QList<board::Column> columns = m_model.columnsFor(m_tab);
-        for (const board::Column &column : columns)
+        const QList<board::Column> sections = m_model.sections();
+        for (const board::Column &column : sections)
             for (const QString &status : column.statuses)
                 if (!statuses.contains(status))
                     statuses << status;
@@ -1420,8 +1617,8 @@ void BoardView::handleEvent(const QJsonObject &event)
         if (m_replyOnOpen) {
             m_replyOnOpen = false;
             m_detail->focusReply();
-        } else if (m_scroll->isHidden() && !m_detail->isAncestorOf(QApplication::focusWidget())) {
-            m_detail->focusDocument();   // the columns it came from are hidden in a narrow pane
+        } else if (m_listPane->isHidden() && !m_detail->isAncestorOf(QApplication::focusWidget())) {
+            m_detail->focusDocument();   // the list it came from is hidden in a narrow pane
         }
         return;
     }
@@ -1525,220 +1722,137 @@ void BoardView::showProblems(const QJsonArray &problems)
 
 // ------------------------------------------------------------------------ rendering
 
-void BoardView::rebuildTabs()
+// "84 open" at the left of the filter row, with what the filter is hiding when one is set. The
+// pane's own title carries the same number, so the count is never only inside the list.
+void BoardView::updateCounts()
 {
-    // The caller rebuilds the columns once afterwards; currentChanged must not do it again.
-    m_buildingTabs = true;
-    while (m_tabs->count() > 0)
-        m_tabs->removeTab(0);
-    const QList<board::Tab> tabs = m_model.tabs();
-    for (int i = 0; i < tabs.size(); ++i) {
-        m_tabs->addTab(tabs.at(i).title);
-        if (tabs.at(i).id == m_tab)
-            m_tabs->setCurrentIndex(i);
+    const int open = m_model.openCount();
+    QString text = QStringLiteral("%1 open").arg(open);
+    if (!m_model.filter().trimmed().isEmpty()) {
+        int matched = 0;
+        for (const board::Row &row : std::as_const(m_rows))
+            if (row.kind == board::Row::Card)
+                ++matched;
+        text = QStringLiteral("%1 shown").arg(matched);
     }
-    m_buildingTabs = false;
-    updateTabCounts();
-}
-
-void BoardView::updateTabCounts()
-{
-    const QList<board::Tab> tabs = m_model.tabs();
-    for (int i = 0; i < tabs.size() && i < m_tabs->count(); ++i) {
-        const int count = m_model.count(tabs.at(i).id);
-        m_tabs->setTabText(i, count > 0 ? QStringLiteral("%1  %2").arg(tabs.at(i).title).arg(count)
-                                        : tabs.at(i).title);
-    }
+    m_count->setText(text);
+    m_count->setToolTip(QStringLiteral("%1 card%2 on the board in all").arg(m_model.total())
+                            .arg(m_model.total() == 1 ? QString() : QStringLiteral("s")));
 }
 
 QStringList BoardView::columnIds() const
 {
     QStringList out;
-    const QList<board::Column> columns = m_model.columnsFor(m_tab);
-    for (const board::Column &column : columns)
-        out << column.id;
+    const QList<board::Column> sections = m_model.sections();
+    for (const board::Column &section : sections)
+        out << section.id;
     return out;
 }
 
-QListWidget *BoardView::listFor(const QString &columnId) const
+QString BoardView::defaultCategory() const
 {
-    return m_lists.value(columnId);
+    for (const board::Tab &tab : m_model.tabs())
+        if (!tab.folder.isEmpty() && tab.type == QStringLiteral("work"))
+            return tab.id;
+    return QStringLiteral("features");
 }
 
-QListWidget *BoardView::listOfCard(const QString &id) const
+QString BoardView::sectionTitle(const QString &columnId) const
 {
-    if (id.isEmpty())
-        return nullptr;
-    for (auto it = m_lists.begin(); it != m_lists.end(); ++it)
-        for (int i = 0; i < it.value()->count(); ++i)
-            if (it.value()->item(i)->data(kCardRole).toString() == id)
-                return it.value();
-    return nullptr;
+    const QList<board::Column> sections = m_model.sections();
+    for (const board::Column &section : sections)
+        if (section.id == columnId)
+            return section.title;
+    return board::statusTitle(columnId);
 }
 
-QWidget *BoardView::buildColumn(const board::Column &column)
+// Nothing is created straight into Done: a card gets there by being closed.
+bool BoardView::sectionTakesNewCards(const QString &columnId) const
 {
-    auto *frame = new QFrame(m_columns);
-    frame->setObjectName(QStringLiteral("boardColumnFrame"));
-    frame->setMinimumWidth(236);
-    frame->setMaximumWidth(320);
-    frame->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    auto *layout = new QVBoxLayout(frame);
-    // Less on the right: the list keeps its scrollbar's width free there (CardDelegate::cardWidth).
-    layout->setContentsMargins(8, 6, 2, 4);
-    layout->setSpacing(4);
-
-    auto *header = new QHBoxLayout;
-    header->setContentsMargins(2, 0, 6, 2);
-    header->setSpacing(6);
-    auto *title = new QLabel(column.title.toUpper(), frame);
-    title->setObjectName(QStringLiteral("boardColumnHeader"));
-    header->addWidget(title);
-    auto *count = new QLabel(frame);
-    count->setObjectName(QStringLiteral("boardColumnCount"));
-    header->addWidget(count);
-    header->addStretch();
-    auto *add = new QToolButton(frame);
-    add->setObjectName(QStringLiteral("boardColumnAdd"));
-    add->setText(QStringLiteral("+"));
-    add->setToolTip(QStringLiteral("New card in %1").arg(column.title));
-    add->setCursor(Qt::PointingHandCursor);
-    add->setFocusPolicy(Qt::NoFocus);
-    // Nothing is created straight into Done: a card gets there by being closed.
-    const QString landing = m_model.dropStatus(m_tab, column.id);
-    QSizePolicy keepRoom = add->sizePolicy();
-    keepRoom.setRetainSizeWhenHidden(true);   // every header the same height, button or not
-    add->setSizePolicy(keepRoom);
-    add->setVisible(landing != QStringLiteral("done") && landing != QStringLiteral("dropped"));
-    header->addWidget(add);
-    layout->addLayout(header);
-    connect(add, &QToolButton::clicked, this, [this, id = column.id] {
-        if (onHint)
-            onHint(QStringLiteral("board.quickAdd"), QStringLiteral("n"));
-        quickAddIn(id);
-    });
-
-    auto *list = new CardList(column.id, frame);
-    auto *delegate = new CardDelegate(&m_model, list);
-    delegate->setStatusBadges(column.statuses.size() > 1,
-                              column.id == QStringLiteral("done") ? QStringLiteral("done") : QString());
-    list->setItemDelegate(delegate);
-    list->onDropped = [this, id = column.id](const QString &card, const QString &before,
-                                             const QString &after) {
-        if (onHint)
-            onHint(QStringLiteral("board.drag"), QStringLiteral("m"));
-        m_selected = card;
-        moveCard(card, id, before, after);
-    };
-    list->onDragging = [this](bool on) {
-        m_dragActive = on;
-        if (on) {
-            m_dragScroll->start();
-            return;
-        }
-        m_dragScroll->stop();
-        if (m_rebuildPending) {
-            // Not from inside startDrag(): its list may be the one a rebuild replaces.
-            QTimer::singleShot(0, this, [this] {
-                if (m_rebuildPending && !m_dragActive)
-                    rebuild();
-            });
-        }
-    };
-    connect(list, &QListWidget::itemSelectionChanged, this, [this, list] {
-        auto *item = list->currentItem();
-        if (!item || !item->isSelected())
-            return;
-        m_selected = item->data(kCardRole).toString();
-        // Only one card is selected on the whole board.
-        for (QListWidget *other : std::as_const(m_lists))
-            if (other != list && other->currentItem()) {
-                const QSignalBlocker block(other);
-                other->clearSelection();
-                other->setCurrentItem(nullptr);
-                other->viewport()->update();
-            }
-        if (detailOpen())
-            m_follow->start();
-    });
-    // A click opens the card, the way a card board does; a drag never counts as a click.
-    connect(list, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
-        if (QApplication::keyboardModifiers() != Qt::NoModifier)
-            return;
-        m_selected = item->data(kCardRole).toString();
-        openSelected();
-    });
-    connect(list, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) {
-        m_selected = item->data(kCardRole).toString();
-        openSelected();
-    });
-    list->installEventFilter(this);
-    layout->addWidget(list, 1);
-    m_lists.insert(column.id, list);
-    m_counts.insert(column.id, count);
-    fillList(list, column);
-    return frame;
+    const QString landing = m_model.dropStatus(columnId);
+    return !landing.isEmpty() && landing != QStringLiteral("done")
+           && landing != QStringLiteral("dropped");
 }
 
-void BoardView::fillList(QListWidget *list, const board::Column &column)
+// The section the keys act on: the one holding the selection, else the first on screen.
+QString BoardView::focusedSection() const
 {
-    const QList<board::Card> cards = m_model.cards(m_tab, column.id);
-    if (auto *count = m_counts.value(column.id))
-        count->setText(QString::number(cards.size()));
-    auto *cardList = static_cast<CardList *>(list);
-    const board::Tab *tab = m_model.tab(m_tab);
-    const bool filtered = !m_model.filter().trimmed().isEmpty();
-    const bool firstColumn = columnIds().value(0) == column.id;
-    if (filtered)
-        cardList->placeholder = QStringLiteral("No matches");
-    else if (column.id == QStringLiteral("done") && tab && !tab->isFilter())
-        cardList->placeholder = QStringLiteral("Drop a card here to close it");
-    else if (m_model.count(m_tab) == 0)
-        // A tab with nothing in it says so once, not "No cards" in every column.
-        cardList->placeholder = firstColumn && tab
-                                    ? QStringLiteral("Nothing in %1 yet.\nPress n to add a card.").arg(tab->title)
-                                    : QString();
+    const int at = board::rowOfCard(m_rows, m_selected);
+    if (at >= 0)
+        return m_rows.at(at).columnId;
+    for (const board::Row &row : m_rows)
+        if (row.kind == board::Row::Section)
+            return row.columnId;
+    return columnIds().value(0);
+}
+
+void BoardView::selectRow(int index)
+{
+    if (index < 0 || index >= m_rows.size() || index >= m_list->count())
+        return;
+    QListWidgetItem *item = m_list->item(index);
+    m_selected = item->data(kCardRole).toString();
+    m_list->setCurrentItem(item);
+    item->setSelected(true);
+    m_list->scrollToItem(item);
+    m_list->setFocus();
+}
+
+// One list, refilled in place: the scroll position, the selection, the focus and the open
+// quick-add field all survive a change, and nothing flashes.
+void BoardView::refill()
+{
+    const bool hadFocus = m_list->hasFocus();
+    const int scroll = m_list->verticalScrollBar()->value();
+    // Done (and anything parked) starts folded: the list is the live work, and the closed cards
+    // are a count at the bottom that opens on demand.
+    if (!m_collapsedSeeded) {
+        m_collapsedSeeded = true;
+        m_collapsed.insert(board::doneSection());
+        m_collapsed.insert(QStringLiteral("deferred"));
+    }
+    m_rows = m_model.rows(m_collapsed);
+
+    if (!m_model.filter().trimmed().isEmpty())
+        m_list->placeholder = QStringLiteral("No card matches this filter.\nEsc clears it.");
     else
-        cardList->placeholder = QStringLiteral("No cards");
+        m_list->placeholder = QStringLiteral("Nothing open.\nPress n to add a card.");
 
-    // Refilled in place: the scroll position and the selection survive, and nothing flashes.
-    const int scroll = list->verticalScrollBar()->value();
-    const QSignalBlocker block(list);
-    list->setUpdatesEnabled(false);
-    list->clear();
-    for (const board::Card &card : cards) {
-        auto *item = new QListWidgetItem(list);
-        item->setData(kCardRole, card.id);
-        item->setToolTip(QStringLiteral("%1 · %2\n%3").arg(card.reference(), card.title, card.path));
-        if (card.id == m_selected) {
-            list->setCurrentItem(item);
+    const QSignalBlocker block(m_list);
+    m_list->setUpdatesEnabled(false);
+    m_list->clear();
+    for (const board::Row &row : std::as_const(m_rows)) {
+        auto *item = new QListWidgetItem(m_list);
+        if (row.kind == board::Row::Section) {
+            // A header is not a card: it is never selected, never dragged, and Up/Down steps
+            // straight over it (board::stepRow).
+            item->setFlags(Qt::ItemIsEnabled);
+            item->setToolTip(row.collapsed
+                                 ? QStringLiteral("%1 · %2 cards — click to show them")
+                                       .arg(row.title).arg(row.count)
+                                 : QStringLiteral("%1 · %2 cards — click to fold")
+                                       .arg(row.title).arg(row.count));
+            continue;
+        }
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
+        item->setData(kCardRole, row.cardId);
+        if (const board::Card *card = m_model.card(row.cardId))
+            item->setToolTip(QStringLiteral("%1 · %2\n%3").arg(card->reference(), card->title,
+                                                               card->path));
+        if (row.cardId == m_selected) {
+            m_list->setCurrentItem(item);
             item->setSelected(true);
         }
     }
-    list->doItemsLayout();
-    list->verticalScrollBar()->setValue(scroll);
-    list->setUpdatesEnabled(true);
-    list->viewport()->update();
-}
-
-void BoardView::refill()
-{
-    QWidget *focus = QApplication::focusWidget();
-    bool listHadFocus = false;
-    for (QListWidget *list : std::as_const(m_lists))
-        listHadFocus = listHadFocus || list == focus;
-    const QList<board::Column> columns = m_model.columnsFor(m_tab);
-    for (const board::Column &column : columns)
-        if (auto *list = listFor(column.id))
-            fillList(list, column);
-    // A card moved with the keyboard keeps the focus: it follows the card to its new column.
-    if (listHadFocus) {
-        if (auto *list = listOfCard(m_selected)) {
-            list->setFocus();
-            if (list->currentItem())
-                list->scrollToItem(list->currentItem());
-            revealColumn(list->parentWidget());
-        }
+    m_list->doItemsLayout();
+    m_list->verticalScrollBar()->setValue(scroll);
+    m_list->setUpdatesEnabled(true);
+    m_list->viewport()->update();
+    // A card moved with the keyboard keeps the focus: it follows the card to its new section.
+    if (hadFocus) {
+        m_list->setFocus();
+        if (QListWidgetItem *current = m_list->currentItem())
+            m_list->scrollToItem(current);
     }
 }
 
@@ -1749,37 +1863,8 @@ void BoardView::rebuild()
         return;
     }
     m_rebuildPending = false;
-    const QList<board::Column> columns = m_model.columnsFor(m_tab);
-    QStringList ids;
-    for (const board::Column &column : columns)
-        ids << column.id;
-    if (!m_lists.isEmpty() && m_tab == m_builtTab && ids == m_builtColumns) {
-        refill();
-    } else {
-        m_lists.clear();
-        m_counts.clear();
-        m_quickAdd.clear();
-        if (auto *old = m_columns->layout()) {
-            QLayoutItem *item = nullptr;
-            while ((item = old->takeAt(0)) != nullptr) {
-                if (item->widget()) {
-                    item->widget()->hide();
-                    item->widget()->deleteLater();
-                }
-                delete item;
-            }
-        }
-        auto *layout = qobject_cast<QHBoxLayout *>(m_columns->layout());
-        if (!layout)
-            return;
-        for (const board::Column &column : columns)
-            layout->addWidget(buildColumn(column));
-        layout->addStretch();
-        m_builtTab = m_tab;
-        m_builtColumns = ids;
-        m_scroll->horizontalScrollBar()->setValue(0);
-    }
-    updateTabCounts();
+    refill();
+    updateCounts();
 
     const bool empty = m_model.total() == 0;
     if (!m_open)
@@ -1791,6 +1876,54 @@ void BoardView::rebuild()
     m_keys->setVisible(m_open && !empty);
 }
 
+// A section folds and unfolds; which sections are folded is saved with the window's layout, so
+// Done stays folded across a restart.
+void BoardView::toggleSection(QString columnId)
+{
+    if (columnId.isEmpty())
+        return;
+    m_collapsedSeeded = true;
+    if (m_collapsed.contains(columnId))
+        m_collapsed.remove(columnId);
+    else
+        m_collapsed.insert(columnId);
+    const bool hadFocus = m_list->hasFocus();
+    rebuild();
+    // The selection may be inside what just folded: stand on the nearest card still on screen.
+    if (board::rowOfCard(m_rows, m_selected) < 0) {
+        const int header = board::rowOfSection(m_rows, columnId);
+        int next = board::stepRow(m_rows, header, 1);
+        if (next < 0)
+            next = board::stepRow(m_rows, header, -1);
+        if (next >= 0) {
+            if (hadFocus)
+                selectRow(next);
+            else
+                m_selected = m_rows.at(next).cardId;
+        } else {
+            m_selected.clear();
+        }
+    }
+}
+
+QJsonArray BoardView::collapsedSections() const
+{
+    QStringList ids(m_collapsed.begin(), m_collapsed.end());
+    ids.sort();
+    return QJsonArray::fromStringList(ids);
+}
+
+void BoardView::setCollapsedSections(const QJsonArray &state)
+{
+    m_collapsed.clear();
+    m_collapsedSeeded = true;      // a restored pane keeps what the window remembered, even none
+    for (const QJsonValue &value : state)
+        if (!value.toString().isEmpty())
+            m_collapsed.insert(value.toString());
+    if (m_open)
+        rebuild();
+}
+
 void BoardView::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
@@ -1798,16 +1931,17 @@ void BoardView::resizeEvent(QResizeEvent *event)
     placeNotice();
 }
 
-// Wide enough, the open card sits beside the columns; in a narrow pane it takes the whole pane
-// (the columns come back when it closes) instead of squeezing the board to a sliver.
+// Wide enough, the open card sits beside the list; in a narrow pane it takes the whole pane
+// (the list comes back when it closes) instead of squeezing the rows to a sliver.
 void BoardView::updateDetailLayout()
 {
-    // The key line says what the keys do in what is on screen: the board, or a card that has
-    // the pane to itself.
+    // The key line says what the keys do in what is on screen: the list, or a card that has the
+    // pane to itself.
     static const QString boardKeys = QStringLiteral(
-        "<b>Enter</b> open &nbsp; <b>n</b> new &nbsp; <b>m</b> move &nbsp; <b>Alt+Shift+Arrows</b> shift "
-        "&nbsp; <b>/</b> filter &nbsp; <b>t</b> #ID to prompt &nbsp; <b>y</b> copy &nbsp; <b>o</b> file "
-        "&nbsp; <b>Ctrl+Z</b> undo");
+        "<b>Enter</b> open &nbsp; <b>n</b> new &nbsp; <b>←/→</b> fold section &nbsp; "
+        "<b>Alt+Shift+↑↓</b> reorder &nbsp; <b>Alt+Shift+←→</b> status &nbsp; <b>m</b> move "
+        "&nbsp; <b>/</b> filter &nbsp; <b>t</b> #ID to prompt &nbsp; <b>y</b> copy &nbsp; "
+        "<b>o</b> file &nbsp; <b>Ctrl+Z</b> undo");
     static const QString cardKeys = QStringLiteral(
         "<b>Esc</b> back to the board &nbsp; <b>Tab</b> reply &nbsp; <b>Enter</b> asks the agent &nbsp; "
         "<b>Ctrl+Shift+Enter</b> comments only &nbsp; <b>Shift+Enter</b> new line");
@@ -1816,16 +1950,16 @@ void BoardView::updateDetailLayout()
     if (m_keys->text() != keys)
         m_keys->setText(keys);
     if (!detailOpen()) {
-        m_scroll->setVisible(true);
+        m_listPane->setVisible(true);
         return;
     }
-    const bool wasStacked = m_scroll->isHidden();
-    m_scroll->setVisible(!stacked);
+    const bool wasStacked = m_listPane->isHidden();
+    m_listPane->setVisible(!stacked);
     if (stacked)
         return;
     if (!m_detailSized || wasStacked) {
         const int total = qMax(1, m_splitter->width());
-        const int detail = qBound(360, total * 45 / 100, total - 260);
+        const int detail = qBound(360, total * 45 / 100, total - 300);
         m_splitter->setSizes({total - detail, detail});
         m_detailSized = true;
     }
@@ -1848,18 +1982,14 @@ void BoardView::moveCard(const QString &id, const QString &columnId, const QStri
                         {QStringLiteral("id"), requestId},
                         {QStringLiteral("card"), id},
                         {QStringLiteral("reason"), QStringLiteral("moved in the Switchboard")}};
-    const QString status = m_model.dropStatus(m_tab, columnId);
-    const board::Tab *tab = m_model.tab(m_tab);
+    const QString status = m_model.dropStatus(columnId);
     const board::Card *card = m_model.card(id);
-    const bool sameColumn = card && m_model.columnOf(m_tab, *card) == columnId;
+    const bool sameSection = card && m_model.sectionOf(*card) == columnId;
     QString note;
-    if (tab && tab->isFilter() && !tab->filter.contains(QStringLiteral("done"))) {
-        message.insert(QStringLiteral("tab"), columnId);   // Deferred groups by category
-        note = QStringLiteral("Moved #%1 to %2").arg(id, board::tabTitle(columnId));
-    } else if (!status.isEmpty() && !sameColumn) {
-        // Within its own column a card keeps its exact status (Needs QA stays LLM or human).
+    if (!status.isEmpty() && !sameSection) {
+        // Within its own section a card keeps its exact status (Needs QA stays LLM or human).
         message.insert(QStringLiteral("status"), status);
-        note = QStringLiteral("Moved #%1 to %2").arg(id, board::statusTitle(columnId));
+        note = QStringLiteral("Moved #%1 to %2").arg(id, sectionTitle(columnId));
     } else {
         note = QStringLiteral("Reordered #%1").arg(id);
     }
@@ -1895,82 +2025,38 @@ void BoardView::undoLast()
 
 void BoardView::quickAdd()
 {
-    const QStringList columns = columnIds();
-    if (columns.isEmpty())
-        return;
-    QString columnId = columns.first();
-    for (const QString &id : columns)
-        if (auto *list = listFor(id); list && list->hasFocus())
-            columnId = id;
-    quickAddIn(columnId);
+    quickAddIn(focusedSection());
 }
 
-// A field at the top of the column. Enter adds the card and keeps the field open for the next
-// one (a burst of ideas is the common case); Esc, or leaving it empty, closes it.
+// The field sits over the list rather than inside a section: with one long list, a field at a
+// section's head would be scrolled out of sight as often as not. It names the section it adds
+// to. Enter adds the card and keeps the field open for the next one (a burst of ideas is the
+// common case); Esc, or leaving it empty, closes it.
 void BoardView::quickAddIn(const QString &columnId)
 {
-    if (m_model.total() == 0 && !m_open)
+    if (!m_open)
         return;
     if (m_model.total() == 0) {
-        // The empty board hides the columns; show them so the field has somewhere to go.
+        // The empty board hides the list; show it so the field has somewhere to go.
         m_empty->hide();
         m_splitter->show();
     }
-    auto *list = listFor(columnId);
-    if (!list)
+    QString id = columnId;
+    if (id.isEmpty() || !sectionTakesNewCards(id))
+        id = columnIds().value(0);
+    if (id.isEmpty())
         return;
-    if (m_quickAdd) {
-        if (m_quickAddColumn == columnId) {
-            m_quickAdd->setFocus();
-            return;
-        }
-        m_quickAdd->parentWidget()->deleteLater();
-    }
-    // In a row of its own with the list's scrollbar room on the right, so it lines up with the
-    // cards under it. The row goes when the field does.
-    auto *row = new QWidget(list->parentWidget());
-    auto *rowLayout = new QHBoxLayout(row);
-    rowLayout->setContentsMargins(0, 0, list->verticalScrollBar()->sizeHint().width() + 2, 0);
-    auto *field = new QLineEdit(row);
-    rowLayout->addWidget(field);
-    field->setObjectName(QStringLiteral("boardQuickAdd"));
-    const board::Column *column = nullptr;
-    const QList<board::Column> columns = m_model.columnsFor(m_tab);
-    for (const board::Column &candidate : columns)
-        if (candidate.id == columnId)
-            column = &candidate;
-    field->setPlaceholderText(QStringLiteral("New card in %1 — Enter adds, Esc closes")
-                                  .arg(column ? column->title : QStringLiteral("this column")));
-    field->setToolTip(QStringLiteral("The text is kept verbatim as the card's request"));
-    if (auto *layout = qobject_cast<QVBoxLayout *>(list->parentWidget()->layout()))
-        layout->insertWidget(1, row);
-    revealColumn(list->parentWidget());
-    field->setFocus();
-    field->installEventFilter(this);
-    m_quickAdd = field;
-    m_quickAddColumn = columnId;
-    const QString status = m_model.dropStatus(m_tab, columnId);
-    const board::Tab *tab = m_model.tab(m_tab);
-    const QString tabId = tab && !tab->folder.isEmpty() ? tab->id : QStringLiteral("features");
-    const QString cardType = tab ? tab->type : QStringLiteral("work");
-    connect(field, &QLineEdit::returnPressed, this, [this, field, status, tabId, cardType] {
-        const QString text = field->text().trimmed();
-        if (text.isEmpty()) {
-            field->parentWidget()->deleteLater();
-            focusInput();
-            return;
-        }
-        send({{QStringLiteral("type"), QStringLiteral("board_create")},
-              {QStringLiteral("tab"), tabId},
-              {QStringLiteral("status"), status.isEmpty() ? QStringLiteral("inbox") : status},
-              {QStringLiteral("card_type"), cardType},
-              {QStringLiteral("text"), text}});
-        field->clear();
-    });
-    connect(field, &QLineEdit::editingFinished, this, [field] {
-        if (field->text().trimmed().isEmpty() && !field->hasFocus())
-            field->parentWidget()->deleteLater();
-    });
+    m_quickAddColumn = id;
+    m_quickAdd->setPlaceholderText(QStringLiteral("New card in %1 — Enter adds, Esc closes")
+                                       .arg(sectionTitle(id)));
+    m_quickAddRow->show();
+    m_quickAdd->setFocus();
+}
+
+void BoardView::closeQuickAdd()
+{
+    m_quickAdd->clear();
+    m_quickAddRow->hide();
 }
 
 void BoardView::openSelected()
@@ -2002,15 +2088,9 @@ void BoardView::focusFilter()
 void BoardView::selectCard(const QString &id)
 {
     m_selected = id;
-    if (auto *list = listOfCard(id)) {
-        for (int i = 0; i < list->count(); ++i)
-            if (list->item(i)->data(kCardRole).toString() == id) {
-                list->setCurrentItem(list->item(i));
-                list->item(i)->setSelected(true);
-            }
-        list->setFocus();
-        revealColumn(list->parentWidget());
-    }
+    const int at = board::rowOfCard(m_rows, id);
+    if (at >= 0)
+        selectRow(at);
 }
 
 void BoardView::copyReference()
@@ -2040,9 +2120,9 @@ void BoardView::moveSelected()
     if (m_selected.isEmpty())
         return;
     QMenu menu(this);
-    const QList<board::Column> columns = m_model.columnsFor(m_tab);
+    const QList<board::Column> columns = m_model.sections();
     const board::Card *card = m_model.card(m_selected);
-    const QString here = card ? m_model.columnOf(m_tab, *card) : QString();
+    const QString here = card ? m_model.sectionOf(*card) : QString();
     int index = 1;
     for (const board::Column &column : columns) {
         QAction *action = menu.addAction(QStringLiteral("&%1  %2").arg(index++).arg(column.title));
@@ -2052,98 +2132,118 @@ void BoardView::moveSelected()
     }
     menu.addSeparator();
     for (const board::Tab &tab : m_model.tabs()) {
-        if (tab.folder.isEmpty() || tab.id == m_tab)
+        if (tab.folder.isEmpty() || (card && tab.id == card->tab))
             continue;
         QAction *action = menu.addAction(QStringLiteral("Move to %1").arg(tab.title));
         const QString id = tab.id;
         connect(action, &QAction::triggered, this, [this, id] { moveToTab(m_selected, id); });
     }
-    // Under the selected card rather than wherever the mouse happens to be.
+    // Under the selected row rather than wherever the mouse happens to be.
     QPoint at = QCursor::pos();
-    if (auto *list = listOfCard(m_selected); list && list->currentItem())
-        at = list->viewport()->mapToGlobal(list->visualItemRect(list->currentItem()).bottomLeft());
+    if (QListWidgetItem *current = m_list->currentItem())
+        at = m_list->viewport()->mapToGlobal(m_list->visualItemRect(current).bottomLeft());
     menu.exec(at);
 }
 
 void BoardView::focusInput()
 {
-    if (listOfCard(m_selected)) {
-        selectCard(m_selected);
+    const int at = board::rowOfCard(m_rows, m_selected);
+    if (at >= 0) {
+        selectRow(at);
         return;
     }
-    const QStringList columns = columnIds();
-    for (const QString &id : columns) {
-        if (auto *list = listFor(id); list && list->count() > 0) {
-            list->setFocus();
-            list->setCurrentRow(0);
-            list->item(0)->setSelected(true);
-            m_selected = list->item(0)->data(kCardRole).toString();
-            return;
-        }
+    const int first = board::stepRow(m_rows, -1, 1);
+    if (first >= 0) {
+        selectRow(first);
+        return;
     }
-    // No card to stand on (an empty board or a filter with no match): the view itself takes the
+    // No card to stand on (an empty board, or a filter with no match): the view itself takes the
     // keys, so `n` still adds and `/` still filters.
     setFocus();
 }
 
-void BoardView::step(int columns, int rows)
+// Up/Down walk the card rows of the whole list, stepping over the section headers, so the
+// selection crosses a section break without a detour (design 4.6).
+void BoardView::step(int delta)
 {
-    const QStringList ids = columnIds();
-    int at = -1;
-    for (int i = 0; i < ids.size(); ++i)
-        if (auto *list = listFor(ids.at(i)); list && list->hasFocus())
-            at = i;
-    if (at < 0)
-        return;
-    if (columns != 0) {
-        const QListWidget *from = listFor(ids.at(at));
-        // Stay at the same height on screen, not the same index: columns hold different cards.
-        const int y = from && from->currentItem() ? from->visualItemRect(from->currentItem()).center().y()
-                                                  : 0;
-        for (int i = at + columns; i >= 0 && i < ids.size(); i += columns) {
-            auto *list = listFor(ids.at(i));
-            if (!list || list->count() == 0)
-                continue;
-            QListWidgetItem *item = list->itemAt(QPoint(10, y));
-            if (!item)
-                item = y > 0 ? list->item(list->count() - 1) : list->item(0);
-            list->setFocus();
-            list->setCurrentItem(item);
-            item->setSelected(true);
-            revealColumn(list->parentWidget());
-            return;
-        }
-        return;
-    }
-    auto *list = listFor(ids.at(at));
-    if (list && list->count() > 0)
-        list->setCurrentRow(qBound(0, list->currentRow() + rows, list->count() - 1));
+    const int at = m_list->currentRow();
+    const int from = at >= 0 ? at : (delta > 0 ? -1 : int(m_rows.size()));
+    const int next = board::stepRow(m_rows, from, delta);
+    if (next >= 0)
+        selectRow(next);
 }
 
-// Alt+Shift+Up/Down: one place up or down inside the column.
-void BoardView::reorder(QListWidget *list, int delta)
+// Alt+Shift+Up/Down: one place up or down inside the card's own section.
+void BoardView::reorder(int delta)
 {
-    auto *cards = static_cast<CardList *>(list);
-    const QStringList order = cards->ids();
+    const int at = board::rowOfCard(m_rows, m_selected);
+    if (at < 0)
+        return;
+    const QString columnId = m_rows.at(at).columnId;
+    const QStringList order = board::cardsInSection(m_rows, columnId);
     const int from = order.indexOf(m_selected);
     const int slot = from + delta;
     if (from < 0 || slot < 0 || slot >= order.size())
         return;
     const auto [before, after] = board::placement(order, m_selected, slot);
-    moveCard(m_selected, cards->columnId(), before, after);
+    moveCard(m_selected, columnId, before, after);
+}
+
+// Alt+Shift+Left/Right: to the previous or next status, which is the section above or below.
+void BoardView::shiftSection(int delta)
+{
+    const int at = board::rowOfCard(m_rows, m_selected);
+    if (at < 0)
+        return;
+    const QStringList ids = columnIds();
+    const int here = ids.indexOf(m_rows.at(at).columnId);
+    const int next = here + delta;
+    if (here < 0 || next < 0 || next >= ids.size())
+        return;
+    moveCard(m_selected, ids.at(next), {}, {});
+}
+
+// Left folds the section the selection is in.
+void BoardView::foldSelected()
+{
+    const int at = board::rowOfCard(m_rows, m_selected);
+    if (at < 0)
+        return;
+    toggleSection(m_rows.at(at).columnId);
+}
+
+// Right unfolds the folded section nearest the selection, above or below, and stands on its
+// first card. Nearest, not "the next one down": right after Left the folded header is next to
+// the selection, so the two keys undo each other, and at the end of the list Right opens Done
+// rather than jumping back to whatever was folded at the top.
+void BoardView::unfoldNearest()
+{
+    int from = board::rowOfCard(m_rows, m_selected);
+    if (from < 0)
+        from = 0;
+    QString target;
+    int best = -1;
+    for (int i = 0; i < m_rows.size(); ++i) {
+        if (m_rows.at(i).kind != board::Row::Section || !m_rows.at(i).collapsed)
+            continue;
+        const int distance = qAbs(i - from);
+        if (best < 0 || distance < best) {
+            best = distance;
+            target = m_rows.at(i).columnId;
+        }
+    }
+    if (target.isEmpty())
+        return;
+    toggleSection(target);
+    const int first = board::stepRow(m_rows, board::rowOfSection(m_rows, target), 1);
+    if (first >= 0 && m_rows.at(first).columnId == target)
+        selectRow(first);
 }
 
 // Keys that work anywhere in the pane that is not a text field: the list, the view itself.
 bool BoardView::handleBoardKey(QKeyEvent *key)
 {
     const auto mods = key->modifiers() & ~Qt::KeypadModifier;
-    if (mods == Qt::ControlModifier
-        && (key->key() == Qt::Key_PageUp || key->key() == Qt::Key_PageDown)) {
-        const int step = key->key() == Qt::Key_PageDown ? 1 : -1;
-        const int next = (m_tabs->currentIndex() + step + m_tabs->count()) % qMax(1, m_tabs->count());
-        m_tabs->setCurrentIndex(next);
-        return true;
-    }
     if (mods == Qt::ControlModifier && key->key() == Qt::Key_Z) {
         undoLast();
         return true;
@@ -2172,70 +2272,29 @@ void BoardView::keyPressEvent(QKeyEvent *event)
         QWidget::keyPressEvent(event);
 }
 
-// While a card is dragged near the left or right edge of the columns, or the top or bottom of a
-// column, scroll that way: otherwise a column off screen can never be dropped on.
+// While a card is dragged near the top or bottom of the list, scroll that way: otherwise a
+// section off screen can never be dropped on.
 void BoardView::autoScrollDuringDrag()
 {
-    const QPoint global = QCursor::pos();
-    QWidget *viewport = m_scroll->viewport();
-    const QPoint local = viewport->mapFromGlobal(global);
-    if (local.y() >= 0 && local.y() < viewport->height()) {
-        QScrollBar *bar = m_scroll->horizontalScrollBar();
-        if (local.x() >= 0 && local.x() < 48)
-            bar->setValue(bar->value() - 14);
-        else if (local.x() > viewport->width() - 48 && local.x() <= viewport->width())
-            bar->setValue(bar->value() + 14);
-    }
-    for (QListWidget *list : std::as_const(m_lists)) {
-        const QPoint at = list->viewport()->mapFromGlobal(global);
-        if (!list->viewport()->rect().contains(at))
-            continue;
-        QScrollBar *bar = list->verticalScrollBar();
-        if (at.y() < 32)
-            bar->setValue(bar->value() - 12);
-        else if (at.y() > list->viewport()->height() - 32)
-            bar->setValue(bar->value() + 12);
-    }
+    QWidget *viewport = m_list->viewport();
+    const QPoint at = viewport->mapFromGlobal(QCursor::pos());
+    if (at.x() < -40 || at.x() > viewport->width() + 40)
+        return;
+    QScrollBar *bar = m_list->verticalScrollBar();
+    if (at.y() >= -8 && at.y() < 36)
+        bar->setValue(bar->value() - 14);
+    else if (at.y() > viewport->height() - 36 && at.y() <= viewport->height() + 8)
+        bar->setValue(bar->value() + 14);
 }
 
 bool BoardView::eventFilter(QObject *object, QEvent *event)
 {
-    // A card dropped on a tab moves to that category (design 4.2).
-    if (object == m_tabs) {
-        const QEvent::Type type = event->type();
-        if (type == QEvent::DragEnter || type == QEvent::DragMove || type == QEvent::Drop) {
-            auto *drop = static_cast<QDropEvent *>(event);
-#if QT_VERSION_MAJOR >= 6
-            const int index = m_tabs->tabAt(drop->position().toPoint());
-#else
-            const int index = m_tabs->tabAt(drop->pos());
-#endif
-            const QList<board::Tab> tabs = m_model.tabs();
-            const board::Card *card = m_model.card(CardList::dragging);
-            const bool target = card && index >= 0 && index < tabs.size()
-                                && !tabs.at(index).folder.isEmpty() && tabs.at(index).id != card->tab
-                                && tabs.at(index).type == card->type;
-            if (type == QEvent::DragEnter) {
-                // Accept the enter even off a tab, so moves across the bar keep arriving.
-                if (card) drop->acceptProposedAction(); else drop->ignore();
-                return true;
-            }
-            if (!target) {
-                drop->ignore();
-                return true;
-            }
-            drop->acceptProposedAction();
-            if (type == QEvent::DragMove) {
-                showNotice(QStringLiteral("Drop to move %1 to %2").arg(card->reference(),
-                                                                       tabs.at(index).title), false);
-            } else {
-                const QString id = card->id;
-                drop->setDropAction(Qt::IgnoreAction);
-                moveToTab(id, tabs.at(index).id);
-            }
-            return true;
-        }
-        return QWidget::eventFilter(object, event);
+    // An empty quick-add field that loses the focus has been abandoned; one with text in it is
+    // waiting for the person to come back to it. Enter leaves it open and focused either way.
+    if (object == m_quickAdd && event->type() == QEvent::FocusOut) {
+        if (m_quickAdd->text().trimmed().isEmpty())
+            closeQuickAdd();
+        return false;
     }
     if (event->type() != QEvent::KeyPress)
         return QWidget::eventFilter(object, event);
@@ -2256,42 +2315,67 @@ bool BoardView::eventFilter(QObject *object, QEvent *event)
     }
     if (object == m_quickAdd) {
         if (key->key() == Qt::Key_Escape) {
-            m_quickAdd->parentWidget()->deleteLater();
+            closeQuickAdd();
             focusInput();
             return true;
         }
         return QWidget::eventFilter(object, event);
     }
-    auto *list = qobject_cast<QListWidget *>(object);
-    if (!list)
+    if (object != m_list)
         return QWidget::eventFilter(object, event);
 
     const auto mods = key->modifiers() & ~Qt::KeypadModifier;
     if (mods == (Qt::AltModifier | Qt::ShiftModifier)) {
-        const QStringList ids = columnIds();
-        const int at = ids.indexOf(columnIdOf(list));
-        if (key->key() == Qt::Key_Left && at > 0) {
-            moveCard(m_selected, ids.at(at - 1), {}, {});
+        switch (key->key()) {
+        case Qt::Key_Left:
+            shiftSection(-1);
             return true;
-        }
-        if (key->key() == Qt::Key_Right && at >= 0 && at + 1 < ids.size()) {
-            moveCard(m_selected, ids.at(at + 1), {}, {});
+        case Qt::Key_Right:
+            shiftSection(1);
             return true;
-        }
-        if (key->key() == Qt::Key_Up || key->key() == Qt::Key_Down) {
-            reorder(list, key->key() == Qt::Key_Up ? -1 : 1);
+        case Qt::Key_Up:
+            reorder(-1);
             return true;
+        case Qt::Key_Down:
+            reorder(1);
+            return true;
+        default:
+            break;
         }
     }
     if (handleBoardKey(key))
         return true;
     if (mods == Qt::NoModifier) {
         switch (key->key()) {
+        // Up/Down (and Page/Home/End) are taken over from QListWidget, which would leave the
+        // current row standing on a section header it cannot select.
+        case Qt::Key_Up:
+            step(-1);
+            return true;
+        case Qt::Key_Down:
+            step(1);
+            return true;
+        case Qt::Key_PageUp:
+        case Qt::Key_PageDown: {
+            const int page = qMax(1, m_list->viewport()->height() / qMax(1, rowHeight()) - 1);
+            for (int i = 0; i < page; ++i)
+                step(key->key() == Qt::Key_PageUp ? -1 : 1);
+            return true;
+        }
+        case Qt::Key_Home:
+        case Qt::Key_End: {
+            const int edge = key->key() == Qt::Key_Home
+                                 ? board::stepRow(m_rows, -1, 1)
+                                 : board::stepRow(m_rows, int(m_rows.size()), -1);
+            if (edge >= 0)
+                selectRow(edge);
+            return true;
+        }
         case Qt::Key_Left:
-            step(-1, 0);
+            foldSelected();
             return true;
         case Qt::Key_Right:
-            step(1, 0);
+            unfoldNearest();
             return true;
         case Qt::Key_Return:
         case Qt::Key_Enter:
@@ -2336,4 +2420,14 @@ bool BoardView::eventFilter(QObject *object, QEvent *event)
     return QWidget::eventFilter(object, event);
 }
 
+// One card row's height, for a page step.
+int BoardView::rowHeight() const
+{
+    const int at = board::stepRow(m_rows, -1, 1);
+    if (at >= 0 && at < m_list->count())
+        return qMax(16, m_list->visualItemRect(m_list->item(at)).height());
+    return qMax(16, QFontMetrics(m_list->font()).height() + 10);
+}
+
 }  // namespace relay
+

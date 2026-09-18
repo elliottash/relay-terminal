@@ -58,6 +58,10 @@ the repository has `issues/board.yaml`, use YAML front matter and append-only `t
 
 ## 3. Tabs and columns
 
+> **Superseded by 4.6 (2026-09-18):** the pane renders no tabs. `board.yaml`'s `tabs:` are the
+> category folders a card's file lives in; its `columns:`/`column_statuses:` are the sections of
+> the one list. The column table below still describes the statuses and their folders.
+
 **Tabs are categories; columns are status.** Tabs = status would put "bugs" and "needs QA" on one axis, so a bug
 needing QA would live in two places. Deferred and Done are cross-category status tabs.
 
@@ -97,6 +101,8 @@ A QA reopen is not a status: the card returns to Ready with label `reopened` and
 
 ### 4.2 Board view (`BoardPane`, a `ToolPane` leaf)
 
+> **Superseded by 4.6:** one scrolling list of rows, sectioned by status, with no tab row.
+
 Top: tab bar with counts, filter field, label chips, Mine / Agent / Waiting-on-me toggles. Body: horizontally scrolling
 columns; a card shows `#ID`, title (2 lines), labels, assignee (✦ = agent), `waiting_on` badge, thread count and an
 unread dot (tracked locally in QSettings, not git). Drag between columns (status + folder move) or onto a tab (category
@@ -126,7 +132,11 @@ anchor composer and focus it; `y` copy `#ID`; `o` open the file in a preview pan
 
 ### 4.5 As built (UX pass, 2026-09-17)
 
-What the pane does today where it differs from, or fills in, 4.2–4.4 (`src/BoardPane.cpp`, styles in `src/Theme.cpp`).
+> **Superseded by 4.6** where the two disagree: the columns became one sectioned list and the
+> tabs went away. Everything 4.5 says about moving, notices, in-place updates, quick add and the
+> card detail still holds.
+
+What the pane did after that pass where it differs from, or fills in, 4.2–4.4 (`src/BoardPane.cpp`, styles in `src/Theme.cpp`).
 Evidence: `docs/qa_evidence/2026-09-17-switchboard-ux/`.
 
 - **Chrome.** Two rows: the tabs (with counts) get the full width, then the filter and **+ New card**. The pane's hover
@@ -155,11 +165,97 @@ Evidence: `docs/qa_evidence/2026-09-17-switchboard-ux/`.
 - **Not built** from 4.2–4.4: label chips and Mine/Agent/Waiting toggles (the filter language covers them), the
   unread dot, `e` edit, `l`/`a`, `?`, Shift+Enter "own pane", thinking/tool collapse in the thread, tickable tasks.
 
+### 4.6 One list, sectioned by status — no tabs (owner decision, 2026-09-18)
+
+Supersedes 4.2's columns, 4.4's column keys and the tab row in 3. Evidence:
+`docs/qa_evidence/2026-09-18-switchboard-rows/`. Code: `src/BoardPane.cpp`, the layout-independent
+half in `src/BoardModel.cpp` (`Model::sections`, `Model::rows`, `dropTarget`, `stepRow`,
+`fitBadges`, `statusGlyph`, `cardAge`), styles in `src/Theme.cpp`.
+
+**Why.** With ~96 cards the Trello columns ran off the right edge and wasted the height: seven
+narrow strips, each scrolling on its own, and a card had to be hunted for. A single-owner tracker
+reads better as rows. The owner then went further: the tab set (Features, Bugs, Design, Marketing,
+Planning, Deferred, Done) mixed three different ideas — type, area and status — and GitHub Issues
+has no tabs at all. So:
+
+- **One view.** The pane is one list of every card that is not done or dropped. There is no tab
+  row; the counts live in the pane's title (`Switchboard · 84 open`) and beside the filter box.
+- **`bug` and `feature` are labels**, like `voice` or `design`: a badge on the row and
+  `label:bug` in the filter box. Not tabs, not folders-as-tabs, not a card type. The front
+  matter's `type` (work/plan/memory) and the folder layout on disk are unchanged; the UI is simply
+  not driven by them, and `folder:changes` (or `folder:bugs`, the board.yaml id that names it)
+  reaches those cards.
+- **Done is a status, not a place.** Done and dropped share the last section, which starts folded
+  and shows its count; `status:done` and `status:dropped` in the filter box find them. Deferred is
+  likewise a section (also folded by default), not a tab.
+- `issues/board.yaml` is untouched. Its `tabs:` are still the category folders a card's *file*
+  lives in — the choices in the card detail's second picker and in the `m` menu — and its
+  `columns:`/`column_statuses:` still decide the sections.
+
+**Sections.** The configured columns in their configured order, then a section for any status they
+do not collect (a plan's Draft/Approved/Executing, a memory's Active, a Deferred card), then Done.
+So one list really does hold every open card whatever its type. A header carries the status name
+and its count, folds on a click (or Left/Right), and has a `+` on hover that adds into it; which
+sections are folded is saved with the window's layout (`{"board": {"workspace", "collapsed"}}`).
+
+**A row.** Status glyph, title (elided), `#ID`, then labels / `✦ agent` or assignee /
+`waiting: …` / `☑ done/total` / `✎ thread` / age, right-aligned. The title is owed 45% of the row
+(80–280 px) before a badge may have anything, no single badge may take more than a quarter of the
+width, and the badges that do not fit are dropped in order — labels, thread count, age, tasks,
+assignee, agent, private, status, `waiting:` — so a narrow pane loses decoration before it loses
+meaning (`board::fitBadges`, tested). At 390 px the title still elides rather than the row
+wrapping. The glyph set: `○` inbox/draft, `◇` discussing, `◆` ready/approved, `▶` in progress,
+`◐` a Waiting lane, `◉` a QA lane, `◌` deferred/retired, `✓` done, `✗` dropped, coloured by
+family (accent for running, warning for waiting, the agent violet for QA).
+
+**Keyboard.** Up/Down walk the card rows of the whole list, stepping over the headers; PageUp/Down
+and Home/End likewise; Enter opens; Left folds the selection's section and stands on the nearest
+card still on screen; Right unfolds the folded section nearest the selection (so Left and Right
+undo each other, and at the end of the list Right opens Done) and stands on its first card;
+Alt+Shift+Up/Down reorder inside the section; Alt+Shift+Left/Right move the card to the previous
+or next status; `n` adds to the section the selection is in; `/` focuses the filter. `m`, `c`,
+`t`, `y`, `o` and Ctrl+Z are unchanged. Ctrl+PgUp/PgDn no longer switch anything (there are no
+tabs). The key line at the bottom says exactly this, and switches to the card's keys when a card
+has the pane to itself.
+
+**Filtering.** The filter box filters rows live across every section: a section with no match is
+left out, the counts follow, and nothing is folded while a filter is active — a search that hid
+its own matches would be a search that does nothing. The tokens are `label:`, `status:`,
+`folder:`, `@assignee`, `waiting:`, `#ID` and words.
+
+**Quick add** is a field over the list rather than inside a section: with one long list, a field
+at a section's head would be scrolled out of sight as often as not. It names the section it adds
+to, Enter adds and keeps it open for the next card, Esc or losing the focus while empty closes it.
+With no tabs there is no "current" category, so a new card is filed in the first category folder
+`board.yaml` names (features) and `m` re-files it.
+
+**Drag and drop** is unchanged in behaviour: a drag shows the row on the board's background, a
+2 px accent line where it would land between two rows, or the whole section header lit when the
+pointer is on one (including a folded one — the card lands at its top); the list scrolls while a
+card is held near an edge; a drop where the card already was writes nothing; and a card dropped on
+the prompt box types its `#ID`. Dropping a card on a tab is gone with the tabs.
+
+**Unchanged from 4.5:** the floating notice with **Undo** (and Ctrl+Z), the refused-move reason
+shown where the card was dropped, the in-place refill that keeps the scroll position, the
+selection, the focus and an open quick-add field, the problems line, and the card detail (full
+pane below ~900 px of pane, beside the list when wider, per-card unsent replies,
+Ctrl+Shift+Enter comments, Ask/Stop).
+
+**Found on the way.** The worker's row never carried `created`, `tasks_done`, `tasks_total`,
+`milestone`, `topic` or `implemented_by`, although protocol 19.2 promises them, so the pane's age
+and `☑ done/total` badges had nothing to draw. `board_tools._row` now sends the full row.
+
 ## 5. Referencing cards from the terminal
 
 - **Picker.** In agent or auto mode, `#` at the start or after a space, followed by a character, opens a card picker
   like the `@` file picker (fuzzy on id and title, open cards first); Enter inserts `#K7Q2 `. In terminal mode `#` stays
   a Bash comment. A resolved `#ID` forces the agent route (the `!` prefix still forces terminal).
+- **Links in the output.** A `#K7Q2` the agent prints — in a recap, in its prose, or in a
+  board-activity line — is a link like a path or a URL is (`src/OutputLinks.*`): hovering
+  underlines it and shows `#K7Q2 · <title>`, clicking opens the Switchboard in that tab and the
+  card in it, `Ctrl+Shift+L` walks it with the other links, and right-clicking offers the card,
+  `#K7Q2` to the clipboard, and `#K7Q2` to the prompt box. Only ids the pane's board knows link;
+  an unfiled `#ABCD` and a `#` comment stay text.
 - **Attach.** `ask` gains `cards: [{id}]`; the worker prepends a labelled block (front matter, body capped at 16 KiB,
   last 10 thread entries plus summary, file paths), like `attachments`.
 - **Post back.** A turn with an attached card appends a thread event with no model call (`↗ discussed in terminal ·

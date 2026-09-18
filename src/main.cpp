@@ -32,6 +32,7 @@
 #include "Images.h"         // image context: paste, drop, `@path` and "Screenshot this pane"
 #include "Aliases.h"        // aliases: saved commands and prompts, their fields and invocations
 #include "MarkdownAnsi.h"   // agent replies in the terminal: Markdown rendered as it streams
+#include "OutputLinks.h"    // what a link in the output is; `relay://card/<id>` for a `#K7Q2`
 #include <iterator>
 #include <QAbstractButton>
 #include <QAbstractItemView>
@@ -1315,6 +1316,12 @@ public:
                 onOpenTurn(QUrl::fromPercentEncoding(parts.at(1).toUtf8()));
                 return;
             }
+            // A `#K7Q2` in the output (Switchboard design section 5): the Switchboard opens in
+            // this tab if it is not there yet, and the card opens in it.
+            if (url.host() == QStringLiteral("card") && parts.size() == 1 && onOpenCard) {
+                onOpenCard(parts.at(0).toUpper());
+                return;
+            }
             return;
         }
         if (target.contains(QStringLiteral("://")) || target.startsWith(QStringLiteral("mailto:"))) {
@@ -1341,11 +1348,13 @@ public:
         int index = 0, count = 0;
         if (!m_backend->stepLink(delta, &link, &index, &count)) {
             m_walkLink = {};
-            status(QStringLiteral("No files, folders or links in this pane's output."));
+            status(QStringLiteral("No files, folders, links or cards in this pane's output."));
             return;
         }
         m_walkLink = link;
-        const QString where = link.line > 0 ? QStringLiteral("%1:%2").arg(link.target).arg(link.line) : link.target;
+        const QString where = !link.card.isEmpty() ? cardReferenceLabel(link.card, link.cardTitle)
+            : link.line > 0 ? QStringLiteral("%1:%2").arg(link.target).arg(link.line)
+                            : link.target;
         status(QStringLiteral("%1 of %2 · %3 · Enter opens, Esc leaves").arg(index + 1).arg(count).arg(where));
     }
     void openOutputLink() {
@@ -1424,7 +1433,12 @@ public:
             // backend wants it in widget()'s own coordinates, so it is mapped through the screen.
             const QPoint at = m_terminal ? m_terminal->mapFromGlobal(global) : QPoint();
             const QString target = m_terminal ? m_backend->linkAt(at, &line, &column) : QString();
-            if (target.startsWith(QStringLiteral("http://")) || target.startsWith(QStringLiteral("https://"))
+            // A card reference resolves to relay://card/<id> (src/OutputLinks.*), so it is read
+            // back out of the target the way a URL or a path is; it is never also a file.
+            state.cardId = relay::links::cardIdOf(target);
+            if (!state.cardId.isEmpty()) {
+                if (const relay::board::Card *card = m_cardIndex.card(state.cardId)) state.cardTitle = card->title;
+            } else if (target.startsWith(QStringLiteral("http://")) || target.startsWith(QStringLiteral("https://"))
                 || target.startsWith(QStringLiteral("mailto:")) || target.startsWith(QStringLiteral("file://")))
                 state.link = target;
             else if (!target.isEmpty() && QFileInfo::exists(target)) {
@@ -1442,8 +1456,8 @@ public:
             if (const QString keys = terminalMenuShortcut(item.id); !keys.isEmpty())
                 action->setShortcut(QKeySequence(keys));
             const QString id = item.id;
-            const QString link = state.link, file = state.filePath;
-            connect(action, &QAction::triggered, this, [this, id, link, file] { runTerminalMenuAction(id, link, file); });
+            const QString link = state.link, file = state.filePath, card = state.cardId;
+            connect(action, &QAction::triggered, this, [this, id, link, file, card] { runTerminalMenuAction(id, link, file, card); });
         }
         menu->popup(global);
     }
@@ -1462,7 +1476,7 @@ public:
         return action.isEmpty() ? QString() : Keymap::instance().keysFor(action).value(0);
     }
 
-    void runTerminalMenuAction(const QString &id, const QString &link, const QString &file) {
+    void runTerminalMenuAction(const QString &id, const QString &link, const QString &file, const QString &card) {
         if (id == QStringLiteral("turn")) { if (onOpenTurn) onOpenTurn(m_lastTurnId); return; }
         if (id == QStringLiteral("takeControl")) { takeControl(); return; }
         if (id == QStringLiteral("tasks")) { toggleRequests(); return; }
@@ -1470,6 +1484,15 @@ public:
         if (id == QStringLiteral("openLink")) { QDesktopServices::openUrl(QUrl(link)); return; }
         if (id == QStringLiteral("copyLink")) { QApplication::clipboard()->setText(link); return; }
         if (id == QStringLiteral("openFile")) { if (onOpenPath) onOpenPath(file, m_menuFileLine); return; }
+        // A `#K7Q2` under the pointer: open the card, copy the reference, or put it in the prompt
+        // box — the same three the Switchboard's card detail offers.
+        if (id == QStringLiteral("openCard")) { if (onOpenCard) onOpenCard(card); return; }
+        if (id == QStringLiteral("copyCard")) {
+            QApplication::clipboard()->setText(QStringLiteral("#") + card);
+            status(QStringLiteral("Copied #") + card);
+            return;
+        }
+        if (id == QStringLiteral("cardToPrompt")) { insertInComposer(QStringLiteral("#") + card + ' '); return; }
         if (!m_backend) return;
         if (id == QStringLiteral("copy")) { if (!copySelection()) status(QStringLiteral("Nothing is selected.")); return; }
         if (id == QStringLiteral("paste")) { m_backend->paste(); return; }
@@ -4002,6 +4025,8 @@ private:
             {QStringLiteral("conversations"), QStringLiteral("[words]"), QStringLiteral("List and search every conversation and Relay's terminal history")},
             {QStringLiteral("find"), QStringLiteral("[words]"), QStringLiteral("Find in this pane: conversation and terminal scrollback")},
             {QStringLiteral("plan"), QString(), QStringLiteral("Toggle plan mode")},
+            {QStringLiteral("light"), QString(), QStringLiteral("Light theme: IBM Beige")},
+            {QStringLiteral("dark"), QString(), QStringLiteral("Dark theme: Dark Copper")},
         {QStringLiteral("switchboard"), QString(), QStringLiteral("Open the Switchboard: cards, threads and plans")},
         {QStringLiteral("card"), QStringLiteral("<text>"), QStringLiteral("Add a card to the Switchboard inbox, verbatim")},
             {QStringLiteral("recap"), QString(), QStringLiteral("Summarize this session")},
@@ -4166,6 +4191,15 @@ private:
                 hint(QStringLiteral("find.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("find in this pane")));
         }
         else if (name == QStringLiteral("plan")) togglePlanMode();
+        else if (name == QStringLiteral("light") || name == QStringLiteral("dark")) {
+            // The owner named the two (0EXJ, 2026-09-18: "light activates beige; dark activates
+            // copper"), so these are not "any light theme" — they are those two theme files. The
+            // switch is the one the settings picker makes, which restyles the chrome, both
+            // terminal engines and the prompt box's colours and stores `theme/name`.
+            const QString id = name == QStringLiteral("light") ? QStringLiteral("ibm-beige") : QStringLiteral("dark-copper");
+            if (!relay::theme::setActiveTheme(id)) { status(QStringLiteral("The %1 theme could not be read.").arg(id)); return; }
+            status(QStringLiteral("Theme: %1.").arg(relay::theme::active().name));
+        }
         else if (name == QStringLiteral("rename")) {
             // With a name it renames straight away; without one it opens the same editor a double
             // click does, where clearing the field hands the pane back to the model.
@@ -4793,6 +4827,9 @@ private:
             Q_UNUSED(column);
             openOutputTarget(target, line, true);
         };
+        // `#K7Q2` in the output is a card link when this pane's Switchboard index knows the id
+        // (design section 5); the engine asks, the pane answers from the rows it has seen.
+        m_backend->setCardLookup([this](const QString &id, QString *title) { return lookupOutputCard(id, title); });
         // The Bash integration changes to this pane's directory after loading the user's
         // configuration, so a shell started elsewhere still lands where the pane says.
         qputenv("RELAY_START_DIR", m_cwd.toUtf8());
@@ -6779,6 +6816,27 @@ private:
         send({{QStringLiteral("type"), QStringLiteral("board_open")}});
     }
 
+    // "#K7Q2" or "#K7Q2 · Voice transcription": how a reference reads in a tooltip or a status
+    // line, with the title only when the board knows one.
+    static QString cardReferenceLabel(const QString &id, const QString &title) {
+        return title.isEmpty() ? QStringLiteral("#") + id : QStringLiteral("#%1 · %2").arg(id, title);
+    }
+
+    // Which `#K7Q2` in this pane's *output* is a link, and what it is called: the engine's link
+    // scanner asks this (`relay::links::CardLookup`, src/OutputLinks.h) and leaves every id the
+    // board does not know as plain text, so an `#ABCD` nobody filed stays text.
+    //
+    // The index arrives only when something asks for it, and a pane whose agent never typed `#`
+    // has never asked — so the first reference-shaped span in its output asks now and links from
+    // the next hover on, rather than never (2026-09-18).
+    bool lookupOutputCard(const QString &id, QString *title) {
+        if (m_cardIndex.total() == 0) requestCardIndex();
+        const relay::board::Card *card = m_cardIndex.card(id);
+        if (!card) return false;
+        if (title) *title = card->title;
+        return true;
+    }
+
     // `#K7Q2` tokens that name a card travel with an agent prompt (protocol 17.6).
     QJsonArray cardsFor(const QString &text) const {
         static const QRegularExpression token(QStringLiteral("(?:^|\\s)#([0-9A-Za-z]{4})\\b"));
@@ -6800,6 +6858,10 @@ private:
         const QString summary = event.value(QStringLiteral("summary")).toString();
         if (id.isEmpty()) return;
         m_cardIndexAsked = false;   // the rows changed; refresh the picker on its next use
+        // A pane with no rows at all asks for them now, so the `◆ #K7Q2` line it is about to
+        // print is a link straight away rather than text until someone opens the picker. Once
+        // it has rows, `board_changed` keeps them current and no snapshot is needed.
+        if (m_cardIndex.total() == 0) requestCardIndex();
         noteWorkCard(id);
         const QString line = QStringLiteral("◆ #%1 · %2").arg(id, summary);
         status(line);
@@ -6889,7 +6951,14 @@ private:
     void acceptTabSelection() {
         if (!m_tabList || !m_tabList->currentItem()) return;
         const QString insert = m_tabList->currentItem()->data(Qt::UserRole).toString();
-        replaceComposerToken(m_tabCompletion, insert + (insert.endsWith('/') ? QString() : QStringLiteral(" ")));
+        // The word to replace is the one under the cursor *now*, not the one the popup opened on:
+        // Tab has since filled in the candidates' common prefix, and the user may have typed more.
+        // Replacing the stale range left the difference behind — "cd 2026-09-18-EG/G", and with
+        // folders that diverge at a dash, the "cd 2026-09-18-EG/-" of the owner's report.
+        const QTextCursor cursor = m_editor->textCursor();
+        const relay::Completion live =
+            relay::completeAt(cursor.block().text(), cursor.positionInBlock(), m_cwd, knownCommandNames());
+        replaceComposerToken(live, insert + (insert.endsWith('/') ? QString() : QStringLiteral(" ")));
         hideTabPopup();
     }
 
@@ -8132,7 +8201,9 @@ public:
         return name.isEmpty() ? path() : name;
     }
     QJsonObject node() const {
-        if (m_board) return {{"board", QJsonObject{{"workspace", m_board->workspace()}, {"tab", m_board->currentTab()}}}};
+        // The rows board has no tabs to remember; what it keeps is which sections are collapsed.
+        if (m_board) return {{"board", QJsonObject{{"workspace", m_board->workspace()},
+                                                   {"collapsed", m_board->collapsedSections()}}}};
         if (m_subagent || m_turn || m_settingsView) return {};
         if (m_plan) return {{"plan", QJsonObject{{"path", path()}}}};
         return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};
@@ -8168,48 +8239,24 @@ private:
 class PaneChrome final : public QFrame {
 public:
     std::function<void(const QString &action)> onAction;
-    std::function<void(const QPoint &global)> onDragMove;
-    std::function<void(const QPoint &global, bool drop)> onDragEnd;
 
     explicit PaneChrome(QWidget *leaf) : QFrame(leaf) {
         setObjectName(QStringLiteral("paneChrome"));
         setAttribute(Qt::WA_StyledBackground);
         auto *row = new QHBoxLayout(this); row->setContentsMargins(3, 2, 3, 2); row->setSpacing(1);
-        m_grip = new QLabel(QStringLiteral("⠿"));
-        m_grip->setObjectName(QStringLiteral("paneGrip"));
-        m_grip->setCursor(Qt::OpenHandCursor);
-        m_grip->setToolTip(QStringLiteral("Drag onto another pane's edge to move this pane there, or onto the tab bar to make it a tab"));
-        m_grip->installEventFilter(this);
-        row->addWidget(m_grip);
         // The + makes it obvious that these open a new pane (a new shell and chat), not a layout
-        // toggle. Both hover-only buttons sit to the LEFT of the always-on three: the row is
-        // right-anchored, so opening it grows leftward and none of the three moves out from under
-        // the cursor that opened it (which is how pointing at "new pane to the right" used to hand
-        // you "new pane below").
-        m_splitDown = button(row, QStringLiteral("⬓+"), QStringLiteral("pane.splitDown"), QStringLiteral("New pane below"));
+        // toggle. Every button is here at all times: the row no longer grows, lifts onto a tile or
+        // rearranges itself under the pointer (owner, 2026-09-18). The drag grip is gone with the
+        // hover row — pressing anywhere on the header moves the pane.
+        button(row, QStringLiteral("⬓+"), QStringLiteral("pane.splitDown"), QStringLiteral("New pane below"));
         button(row, QStringLiteral("◫+"), QStringLiteral("pane.splitRight"), QStringLiteral("New pane to the right"));
         button(row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
         button(row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
-        // The row keeps the width it has with everything on it, so the header's inset — and with
-        // it the title's elision — does not twitch as the mouse comes and goes. The row is
-        // right-anchored, so the two extras grow leftward and the always-on three never move.
+        // The header gives up exactly this much room for good, so the title and the folder line
+        // never re-elide.
         adjustSize();
         m_fullWidth = width();
-        setHovered(false);
     }
-
-    // On the pane under the mouse: the full row on its raised tile. Everywhere else: the three
-    // buttons alone, quiet, on no background at all.
-    void setHovered(bool hovered) {
-        if (m_hovered == hovered && property("hot").isValid()) return;
-        m_hovered = hovered;
-        setProperty("hot", hovered);
-        m_grip->setVisible(hovered);
-        m_splitDown->setVisible(hovered);
-        style()->unpolish(this); style()->polish(this); update();
-        place();
-    }
-    bool hovered() const { return m_hovered; }
 
     void place() {
         const auto *leaf = parentWidget();
@@ -8225,8 +8272,14 @@ public:
         if (auto *pane = dynamic_cast<Pane *>(parentWidget()))
             pane->setHeaderRightInset(isVisible() ? m_fullWidth + 10 : 0);
         // The Switchboard's first row is its tab bar, which these buttons would otherwise cover.
-        else if (auto *tool = dynamic_cast<ToolPane *>(parentWidget()); tool && tool->board())
-            tool->board()->setHeaderRightInset(isVisible() ? m_fullWidth + 4 : 0);
+        // So is a preview's header, whose view button names the format and so is wide enough to
+        // reach them ("Source (MD)", issue #VXTF), and an explorer's folder line.
+        else if (auto *tool = dynamic_cast<ToolPane *>(parentWidget()); tool) {
+            const int inset = isVisible() ? m_fullWidth + 4 : 0;
+            if (tool->board()) tool->board()->setHeaderRightInset(inset);
+            else if (tool->preview()) tool->preview()->setHeaderRightInset(inset);
+            else if (tool->explorer()) tool->explorer()->setHeaderRightInset(inset);
+        }
     }
 
 protected:
@@ -8241,50 +8294,6 @@ public:
         }
     }
 
-protected:
-    bool eventFilter(QObject *object, QEvent *event) override {
-        if (object != m_grip) return QFrame::eventFilter(object, event);
-        switch (event->type()) {
-        case QEvent::MouseButtonPress: {
-            auto *mouse = static_cast<QMouseEvent *>(event);
-            if (mouse->button() != Qt::LeftButton) break;
-            m_pressAt = mouse->globalPos(); m_pressed = true; m_dragging = false;
-            return true;
-        }
-        case QEvent::MouseMove: {
-            auto *mouse = static_cast<QMouseEvent *>(event);
-            if (!m_pressed) break;
-            if (!m_dragging && (mouse->globalPos() - m_pressAt).manhattanLength() >= QApplication::startDragDistance()) {
-                m_dragging = true;
-                QApplication::setOverrideCursor(Qt::ClosedHandCursor);
-            }
-            if (m_dragging && onDragMove) onDragMove(mouse->globalPos());
-            return true;
-        }
-        case QEvent::MouseButtonRelease: {
-            auto *mouse = static_cast<QMouseEvent *>(event);
-            if (!m_pressed) break;
-            m_pressed = false;
-            if (m_dragging) {
-                m_dragging = false;
-                QApplication::restoreOverrideCursor();
-                if (onDragEnd) onDragEnd(mouse->globalPos(), true);
-            }
-            return true;
-        }
-        case QEvent::KeyPress:
-            if (m_dragging && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
-                m_pressed = m_dragging = false;
-                QApplication::restoreOverrideCursor();
-                if (onDragEnd) onDragEnd(QCursor::pos(), false);
-                return true;
-            }
-            break;
-        default: break;
-        }
-        return QFrame::eventFilter(object, event);
-    }
-
 private:
     QToolButton *button(QHBoxLayout *row, const QString &glyph, const QString &action, const QString &label) {
         auto *b = new QToolButton;
@@ -8296,12 +8305,7 @@ private:
         return b;
     }
 
-    QLabel *m_grip = nullptr;
-    QToolButton *m_splitDown = nullptr;
     int m_fullWidth = 0;
-    bool m_hovered = false;
-    QPoint m_pressAt;
-    bool m_pressed = false, m_dragging = false;
 };
 
 // ----- windows, tabs and panes --------------------------------------------------------------
@@ -8881,8 +8885,10 @@ public:
     QWidget *activeLeaf() const { return m_activeLeaf; }
 
     // Open a folder in an explorer pane or a file in a preview pane, next to `anchor`. An existing
-    // explorer or preview in the same tab is reused, the way editors reuse a preview tab.
-    void openPath(const QString &path, int line, QWidget *anchor) {
+    // explorer or preview in the same tab is reused, the way editors reuse a preview tab — unless
+    // `newPane`, which a link followed from inside a preview passes so the file that carried the
+    // link keeps its pane (issue S1JP).
+    void openPath(const QString &path, int line, QWidget *anchor, bool newPane = false) {
         const QFileInfo info(path);
         if (!info.exists()) { notice(QStringLiteral("No such file or folder: ") + path, 6000); return; }
         if (!anchor || !isLeaf(anchor) || anchor->window() != this) anchor = m_activeLeaf;
@@ -8891,14 +8897,23 @@ public:
         m_tabs->setCurrentWidget(page);
         const auto kind = info.isDir() ? ToolPane::Kind::Explorer : ToolPane::Kind::Preview;
         ToolPane *target = nullptr;
-        for (QWidget *leaf : leavesIn(page))
-            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == kind) target = tool;
+        for (QWidget *leaf : leavesIn(page)) {
+            auto *tool = dynamic_cast<ToolPane *>(leaf);
+            if (!tool || tool->kind() != kind) continue;
+            // A followed link wants its own pane, but not a second pane on a file one of them is
+            // already showing: clicking back and forth between two documents would otherwise pile
+            // up panes. So `newPane` reuses only an exact match, and never the anchor itself.
+            if (!newPane) target = tool;
+            else if (tool != anchor && tool->path() == info.absoluteFilePath()) target = tool;
+        }
         if (target) {
             if (kind == ToolPane::Kind::Explorer) target->explorer()->setRoot(info.absoluteFilePath());
             else target->preview()->open(info.absoluteFilePath());
         } else {
             // A preview opens beside an explorer when there is one, otherwise beside the anchor.
-            if (kind == ToolPane::Kind::Preview)
+            // A link followed from a preview opens beside that preview instead, so the two files
+            // sit side by side and the reader can see where they came from.
+            if (kind == ToolPane::Kind::Preview && !newPane)
                 for (QWidget *leaf : leavesIn(page))
                     if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Explorer) anchor = tool;
             target = createToolPane(kind, info.absoluteFilePath());
@@ -9093,12 +9108,6 @@ protected:
         if (object == m_tabs->tabBar() && (event->type() == QEvent::Resize || event->type() == QEvent::MouseMove || event->type() == QEvent::Leave
                                            || event->type() == QEvent::Enter || event->type() == QEvent::LayoutRequest))
             QTimer::singleShot(0, this, [this] { placeTabBarControls(); });
-        if (event->type() == QEvent::Enter || event->type() == QEvent::MouseMove) {
-            if (auto *widget = qobject_cast<QWidget *>(object); widget && widget->window() == this) {
-                QWidget *leaf = leafOf(widget);
-                if (leaf || event->type() == QEvent::Enter) showChromeFor(leaf);
-            }
-        } else if (event->type() == QEvent::Leave && object == this) showChromeFor(nullptr);
         if (event->type() != QEvent::KeyPress && event->type() != QEvent::ShortcutOverride)
             return QMainWindow::eventFilter(object, event);
         auto *widget = qobject_cast<QWidget *>(object);
@@ -10525,7 +10534,7 @@ public:
                 setActiveLeaf(tool); focusLeaf(tool); return;
             }
         QWidget *anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
-        auto *tool = createBoardPane(workspace, QString());
+        auto *tool = createBoardPane(workspace);
         if (!tool) return;
         if (anchor) insertBeside(anchor, tool, Qt::Horizontal, false);
         else if (page && page->layout()) page->layout()->addWidget(tool);
@@ -10548,6 +10557,26 @@ public:
         tool->board()->openSelected();
         setActiveLeaf(tool);
         focusLeaf(tool);
+        // A Switchboard this call just opened has no rows yet, so openSelected() had nothing to
+        // open and only the selection survives (the pane restores it when the rows land). Keep
+        // asking while they arrive, so one click on a `#K7Q2` in the output really does end on
+        // the card and not merely near it (2026-09-18).
+        if (!tool->board()->model().card(id)) waitForBoardCard(tool, id, 0);
+    }
+
+    // Retries openSelected() every 250 ms for up to 6 s, which covers the worker's first answer
+    // on a large tree. It stops as soon as a card detail is open, so a card the *user* opened in
+    // the meantime is never yanked out from under them.
+    void waitForBoardCard(ToolPane *tool, const QString &id, int attempt) {
+        if (attempt >= 24) return;
+        QPointer<ToolPane> guard(tool);
+        QTimer::singleShot(250, this, [this, guard, id, attempt] {
+            ToolPane *pane = guard.data();
+            if (!pane || !pane->board() || pane->board()->detailOpen()) return;
+            if (!pane->board()->model().card(id)) { waitForBoardCard(pane, id, attempt + 1); return; }
+            pane->board()->selectCard(id);
+            pane->board()->openSelected();
+        });
     }
 
     // The nearest ancestor of the anchor pane's directory that has a Switchboard.
@@ -10609,9 +10638,9 @@ public:
         boardWorker()->start(configure);
     }
 
-    ToolPane *createBoardPane(const QString &workspace, const QString &tab) {
+    ToolPane *createBoardPane(const QString &workspace, const QJsonArray &collapsed = {}) {
         auto *view = new relay::BoardView(workspace);
-        if (!tab.isEmpty()) view->setCurrentTab(tab);
+        if (!collapsed.isEmpty()) view->setCollapsedSections(collapsed);
         auto *tool = new ToolPane(view, workspace);
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
@@ -10699,6 +10728,8 @@ private:
             explorer->onCloseRequested = [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, true); };
         } else if (tool->preview()) {
             tool->preview()->onTitleChanged = [guard](const QString &) { if (auto *w = windowOf(guard)) w->updateTitles(); };
+            // A link inside the preview opens its own pane beside this one (issue S1JP).
+            tool->preview()->onOpenLink = [guard](const QString &file) { if (auto *w = windowOf(guard)) w->openPath(file, 0, guard, true); };
         } else {
             tool->plan()->onTitleChanged = [guard](const QString &) { if (auto *w = windowOf(guard)) w->updateTitles(); };
         }
@@ -10807,7 +10838,7 @@ private:
             const QJsonObject board = node.value(QStringLiteral("board")).toObject();
             const QString workspace = board.value(QStringLiteral("workspace")).toString();
             if (QFileInfo::exists(workspace + QStringLiteral("/issues/board.yaml")))
-                return createBoardPane(workspace, board.value(QStringLiteral("tab")).toString());
+                return createBoardPane(workspace, board.value(QStringLiteral("collapsed")).toArray());
             return createPane({{"cwd", m_manager->workspace()}, {"workspace", m_manager->workspace()}});
         }
         if (node.contains(QStringLiteral("plan"))) {
@@ -11180,7 +11211,6 @@ private:
             if (!takeLeaf(pane) || !anchor || !pane) return;
             insertBeside(anchor, pane, relay::panes::orientationFor(direction), relay::panes::towardStart(direction));
         }
-        showChromeFor(nullptr);
         setActiveLeaf(pane); focusLeaf(pane);
         updateTitles();
     }
@@ -11505,10 +11535,7 @@ private:
                         if (!keys.isEmpty())
                             w->hint(QStringLiteral("chrome.") + action, relay::ShortcutHints::nextTime(keys, Keymap::instance().description(action).toLower()));
                     };
-                    chrome->onDragMove = [guard](const QPoint &global) { if (auto *w = windowOf(guard)) w->dragPaneMove(guard, global); };
-                    chrome->onDragEnd = [guard](const QPoint &global, bool drop) { if (auto *w = windowOf(guard)) w->dragPaneEnd(guard, global, drop); };
-                    // Dragging a terminal pane's header does what dragging the grip does, so the
-                    // whole title row is a handle (owner, 2026-09-17).
+                    // A terminal pane's whole title row is the drag handle (owner, 2026-09-17).
                     if (auto *pane = dynamic_cast<Pane *>(leaf)) {
                         pane->onHeaderDragMove = [guard](const QPoint &global) { if (auto *w = windowOf(guard)) w->dragPaneMove(guard, global); };
                         pane->onHeaderDragEnd = [guard](const QPoint &global, bool drop) { if (auto *w = windowOf(guard)) w->dragPaneEnd(guard, global, drop); };
@@ -11528,29 +11555,6 @@ private:
         for (QObject *child : leaf->children())
             if (auto *chrome = dynamic_cast<PaneChrome *>(child)) return chrome;
         return nullptr;
-    }
-
-    // Open the button row of the pane under the mouse, and only that one. Every pane keeps its
-    // three always-on buttons; this only adds the grip and "new pane below" to the one you are
-    // pointing at, and lifts its row onto a tile.
-    //
-    // Showing and hiding those two makes Qt deliver synthetic enter/leave and mouse-move events
-    // for whatever the change put under the cursor, and those come straight back here through the
-    // window's application event filter. So this only records what is wanted while an update is
-    // running, and the loop applies it once the widgets have settled; hiding a chrome from inside
-    // its own hide() used to recurse until the stack ran out (clicking ⇱ "Move to new tab" crashed).
-    void showChromeFor(QWidget *leaf) {
-        m_wantedHoverLeaf = leaf;
-        if (m_updatingChrome) return;
-        m_updatingChrome = true;
-        // Bounded, so two panes that keep handing the cursor back and forth cannot spin here.
-        for (int pass = 0; pass < 8 && m_hoverLeaf != m_wantedHoverLeaf; ++pass) {
-            QWidget *old = m_hoverLeaf;
-            m_hoverLeaf = m_wantedHoverLeaf;
-            if (old) if (auto *chrome = chromeOf(old)) chrome->setHovered(false);
-            if (m_hoverLeaf) if (auto *chrome = chromeOf(m_hoverLeaf)) { chrome->setHovered(true); chrome->show(); }
-        }
-        m_updatingChrome = false;
     }
 
     enum class Edge { None, Left, Right, Top, Bottom, TabBar };
@@ -11668,7 +11672,6 @@ private:
 
     void dragPaneEnd(QWidget *dragged, const QPoint &global, bool drop) {
         if (m_dropZone) { m_dropZone->hide(); m_dropZone->deleteLater(); m_dropZone = nullptr; }
-        showChromeFor(nullptr);
         if (!drop || !dragged) return;
         const auto target = dropTarget(dragged, global);
         if (target.second == Edge::None) return;
@@ -11691,11 +11694,6 @@ private:
         if (!move.isEmpty())
             if (auto *w = windowOf(dragged))
                 w->hint(QStringLiteral("pane.drag"), QStringLiteral("Next time: %1 and the other arrows move the focused pane").arg(move));
-        // The drop moved panes out from under a cursor that has not itself moved, so nothing will
-        // send an enter event: work out again which pane the mouse is over, once the layout settles.
-        QTimer::singleShot(0, this, [this] {
-            if (auto *w = windowOf(leafOf(QApplication::widgetAt(QCursor::pos())))) w->showChromeFor(leafOf(QApplication::widgetAt(QCursor::pos())));
-        });
     }
 
     // Remove a leaf from its window's layout without destroying it (the shell and worker keep
@@ -11704,10 +11702,7 @@ private:
     bool takeLeaf(QWidget *leaf) {
         QWidget *page = pageOf(leaf);
         if (!page) return false;
-        if (m_hoverLeaf == leaf) m_hoverLeaf = nullptr;
-        if (m_wantedHoverLeaf == leaf) m_wantedHoverLeaf = nullptr;
-        // Closed, not hidden: the three always-on buttons travel with the pane to wherever it lands.
-        if (auto *chrome = chromeOf(leaf)) chrome->setHovered(false);
+        // The buttons travel with the pane to wherever it lands.
         const bool last = leavesIn(page).size() <= 1;
         auto *splitter = dynamic_cast<QSplitter *>(leaf->parentWidget());
         leaf->hide();
@@ -11780,8 +11775,6 @@ private:
         if (!page) return;
         if (m_tabs->count() <= 1) { notice(QStringLiteral("This is the only tab in the window."), 4000); return; }
         QWidget *lastActive = m_lastActive.value(page);
-        if (m_hoverLeaf && pageOf(m_hoverLeaf) == page) m_hoverLeaf = nullptr;
-        if (m_wantedHoverLeaf && pageOf(m_wantedHoverLeaf) == page) m_wantedHoverLeaf = nullptr;
         if (m_active && pageOf(m_active) == page) m_active = nullptr;
         if (m_activeLeaf && pageOf(m_activeLeaf) == page) m_activeLeaf = nullptr;
         m_lastActive.remove(page);
@@ -11821,7 +11814,6 @@ private:
             if (!takeLeaf(current) || !anchor) return;
             insertBeside(anchor, current, orientation, !towardStart);
         }
-        showChromeFor(nullptr);
         setActiveLeaf(current); focusLeaf(current);
         updateTitles();
     }
@@ -11967,8 +11959,6 @@ private:
     QPointer<Pane> m_active;
     QHash<QWidget *, QPointer<QWidget>> m_lastActive;
     QPointer<QWidget> m_activeLeaf;
-    QPointer<QWidget> m_hoverLeaf, m_wantedHoverLeaf;   // shown now, and what showChromeFor was last asked for
-    bool m_updatingChrome = false;
     // Dragging a tool pane (explorer, preview, plan, Switchboard) by its header: the pane being
     // moved, where the press landed, and whether it has gone far enough to be a drag.
     QPointer<QWidget> m_toolLeaf;

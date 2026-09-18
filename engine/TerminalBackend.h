@@ -40,10 +40,12 @@ public:
         LinkWalk = 1 << 11,        // stepLink(): keyboard walk over the links in the output
     };
 
-    // A file, folder or URL found in the output (src/OutputLinks.*).
+    // A file, folder, URL or card reference found in the output (src/OutputLinks.*).
     struct Link {
-        QString target;         // an absolute path, or the URL as written
+        QString target;         // an absolute path, the URL as written, or relay://card/<id>
         QString text;           // the output text it was found as
+        QString card;           // `#K7Q2`: the card id, upper-cased; empty for every other link
+        QString cardTitle;      // what the host's board calls that card, when it knows a title
         bool url = false;       // open in a browser rather than a Relay pane
         bool directory = false; // a folder: the explorer pane, not the preview
         int line = -1;
@@ -139,6 +141,14 @@ public:
     // A plain left click on a link opens it. Hosts that use the first click of an inactive
     // pane to move the focus disarm it until the pane is active; Ctrl+click always opens.
     virtual void setPlainClickOpensLinks(bool on) { Q_UNUSED(on); }
+    // Which `#K7Q2` references in the output are real cards, and what they are called
+    // (`relay::links::CardLookup`; spelt out here so this header stays QtCore-only). The host
+    // answers from the pane's Switchboard index; until it does, and on engines that cannot
+    // hit-test their output, card references stay plain text.
+    virtual void setCardLookup(std::function<bool(const QString &id, QString *title)> lookup)
+    {
+        Q_UNUSED(lookup);
+    }
 
     // ---- host callbacks (GUI thread)
     // OSC 8 URI, URL text or an existing absolute path; line/column are -1 when absent.

@@ -8,6 +8,8 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTextBrowser>
+#include <QToolButton>
 #include <QTreeView>
 
 using relay::FileExplorer;
@@ -153,6 +155,79 @@ private slots:
         QCOMPARE(preview.path(), QFileInfo(temp.filePath(QStringLiteral("e.bin"))).absoluteFilePath());
     }
 
+    // Issue #3W58: a .md file opens rendered, and the one thing that leaves the render — a line
+    // number from an output link — says so, so the view button can offer the render back.
+    void markdownOpensRenderedAndALineNumberSaysItLeftIt() {
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("doc.md"));
+        writeFile(path, "# Title\n\nBody\n\n- one\n- two\n");
+        FilePreview preview;
+        QVERIFY(preview.open(path));
+        QCOMPARE(preview.kind(), FilePreview::Kind::Markdown);
+        QVERIFY(!preview.showingSource());
+        preview.goToLine(5);
+        QVERIFY(preview.showingSource());
+        // Reopening the file renders it again; a line of 0 never leaves the render.
+        QVERIFY(preview.open(path));
+        QVERIFY(!preview.showingSource());
+        preview.goToLine(0);
+        QVERIFY(!preview.showingSource());
+    }
+
+    // Issue #VXTF: the view button names the format, so "Source" cannot be read as the source of
+    // whatever else the pane might be holding. The image preview's Fit/100% button is untouched.
+    void markdownViewButtonNamesTheFormat() {
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("doc.md"));
+        writeFile(path, "# Title\n\nBody\n");
+        QImage image(4, 3, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(temp.filePath(QStringLiteral("shot.png"))));
+
+        FilePreview preview;
+        auto *mode = preview.findChild<QToolButton *>(QStringLiteral("filePreviewMode"));
+        QVERIFY(mode);
+        QVERIFY(preview.open(path));
+        QCOMPARE(mode->text(), QStringLiteral("Source (MD)"));
+        preview.goToLine(3);
+        QCOMPARE(mode->text(), QStringLiteral("Rendered (MD)"));
+        QVERIFY(preview.open(temp.filePath(QStringLiteral("shot.png"))));
+        QCOMPARE(mode->text(), QStringLiteral("100%"));
+    }
+
+    // Issue S1JP: a link inside a rendered Markdown preview is handed to the host for a pane of
+    // its own. The preview never loads it, so the file that carried the link is still there.
+    void aLinkInsideAPreviewIsHandedToTheHost() {
+        QTemporaryDir temp;
+        const QString from = temp.filePath(QStringLiteral("from.md"));
+        const QString to = temp.filePath(QStringLiteral("to.md"));
+        writeFile(from, "# From\n\n[to](to.md) and [gone](missing.md)\n");
+        writeFile(to, "# To\n");
+
+        FilePreview preview;
+        QStringList opened;
+        preview.onOpenLink = [&opened](const QString &path) { opened << path; };
+        QVERIFY(preview.open(from));
+
+        auto *browser = preview.findChild<QTextBrowser *>(QStringLiteral("filePreviewMarkdown"));
+        QVERIFY(browser);
+        Q_EMIT browser->anchorClicked(QUrl(QStringLiteral("to.md")));
+        QCOMPARE(opened, QStringList{QFileInfo(to).absoluteFilePath()});
+        // The pane stayed on the file that carried the link, rendered.
+        QCOMPARE(preview.path(), QFileInfo(from).absoluteFilePath());
+        QCOMPARE(preview.kind(), FilePreview::Kind::Markdown);
+        QVERIFY(!preview.showingSource());
+
+        // A link that resolves nowhere says so instead of opening a pane.
+        Q_EMIT browser->anchorClicked(QUrl(QStringLiteral("missing.md")));
+        QCOMPARE(opened.size(), 1);
+        QVERIFY(preview.notice().contains(QStringLiteral("missing.md")));
+
+        // A `#section` link stays inside the document.
+        Q_EMIT browser->anchorClicked(QUrl(QStringLiteral("#from")));
+        QCOMPARE(opened.size(), 1);
+    }
+
     void largeTextIsTruncatedWithNotice() {
         QTemporaryDir temp;
         const QString path = temp.filePath(QStringLiteral("big.log"));
@@ -171,34 +246,72 @@ private slots:
         QCOMPARE(preview.kind(), FilePreview::Kind::None);
     }
 
-    // ----- the explorer's right-click menu (issue #D60R) ---------------------------------------
+    // ----- the right-click menus (issues #D60R, V9V1) ------------------------------------------
 
     void explorerMenuOffersTheFolderActions() {
         relay::FileMenuHost host;
         host.canNavigateTerminal = host.canPreview = host.canSetWorkspace = true;
         const QStringList ids = menuIds(relay::explorerMenu(relay::FileMenuTarget::Folder, host));
-        QCOMPARE(ids, (QStringList{QStringLiteral("open"), QStringLiteral("navigate"), QStringLiteral("copyPath"),
-                                   QStringLiteral("copyRelativePath"), QStringLiteral("reveal"), QStringLiteral("newFile"),
-                                   QStringLiteral("newFolder"), QStringLiteral("rename"), QStringLiteral("delete"),
+        QCOMPARE(ids, (QStringList{QStringLiteral("openInternal"), QStringLiteral("openExternal"),
+                                   QStringLiteral("openFolder"), QStringLiteral("navigate"),
+                                   QStringLiteral("copyPath"), QStringLiteral("copyRelativePath"),
+                                   QStringLiteral("newFile"), QStringLiteral("newFolder"),
+                                   QStringLiteral("rename"), QStringLiteral("delete"),
                                    QStringLiteral("workspace")}));
     }
 
-    void explorerMenuOffersThePreviewOnlyForFiles() {
+    // Issue V9V1: the owner's three entries lead every menu, in their order, with their names.
+    void everyMenuLeadsWithTheThreeOpenEntries() {
         relay::FileMenuHost host;
         host.canNavigateTerminal = host.canPreview = host.canSetWorkspace = true;
-        const QStringList file = menuIds(relay::explorerMenu(relay::FileMenuTarget::File, host));
-        QVERIFY(file.contains(QStringLiteral("preview")));
-        // A file is not a workspace; "Navigate here" uses the folder it sits in.
-        QVERIFY(!file.contains(QStringLiteral("workspace")));
-        QVERIFY(file.contains(QStringLiteral("navigate")));
-        QVERIFY(!menuIds(relay::explorerMenu(relay::FileMenuTarget::Folder, host)).contains(QStringLiteral("preview")));
+        const QStringList three{QStringLiteral("openInternal"), QStringLiteral("openExternal"),
+                                QStringLiteral("openFolder")};
+        for (auto target : {relay::FileMenuTarget::File, relay::FileMenuTarget::Folder})
+            QCOMPARE(menuIds(relay::explorerMenu(target, host)).mid(0, 3), three);
+        const auto items = relay::explorerMenu(relay::FileMenuTarget::File, host);
+        QCOMPARE(items.at(0).label, QStringLiteral("Open internal"));
+        QCOMPARE(items.at(1).label, QStringLiteral("Open external"));
+        QCOMPARE(items.at(2).label, QStringLiteral("Open folder"));
+        // A preview holds one file and has no clicked row: nothing to create, rename or delete.
+        QCOMPARE(menuIds(relay::previewMenu(host)),
+                 (QStringList{QStringLiteral("openInternal"), QStringLiteral("openExternal"),
+                              QStringLiteral("openFolder"), QStringLiteral("copyPath")}));
+    }
+
+    // "Open internal" needs a preview host for a file; a folder opens in the explorer itself, so
+    // it always works. Neither is ever missing from the menu — the order is a promise.
+    void openInternalIsGreyedOutForAFileWithNoPreviewHost() {
+        const auto file = relay::explorerMenu(relay::FileMenuTarget::File, relay::FileMenuHost{});
+        QCOMPARE(file.at(0).id, QStringLiteral("openInternal"));
+        QVERIFY(!file.at(0).enabled);
+        QVERIFY(file.at(1).enabled);
+        const auto folder = relay::explorerMenu(relay::FileMenuTarget::Folder, relay::FileMenuHost{});
+        QCOMPARE(folder.at(0).id, QStringLiteral("openInternal"));
+        QVERIFY(folder.at(0).enabled);
+    }
+
+    // A preview offers the three entries once a file is open, and nothing before that.
+    void previewOffersTheMenuOnceAFileIsOpen() {
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("doc.md"));
+        writeFile(path, "# Title\n");
+        FilePreview preview;
+        QVERIFY(preview.menu().isEmpty());
+        QVERIFY(preview.open(path));
+        QCOMPARE(menuIds(preview.menu()).mid(0, 3),
+                 (QStringList{QStringLiteral("openInternal"), QStringLiteral("openExternal"),
+                              QStringLiteral("openFolder")}));
+        for (const relay::FileMenuItem &item : preview.menu())
+            if (!item.isSeparator()) QVERIFY(item.enabled);
     }
 
     void explorerMenuOnEmptySpaceActsOnTheShownFolder() {
         relay::FileMenuHost host;
         host.canNavigateTerminal = host.canPreview = host.canSetWorkspace = true;
         const QStringList ids = menuIds(relay::explorerMenu(relay::FileMenuTarget::None, host));
-        QCOMPARE(ids, (QStringList{QStringLiteral("navigate"), QStringLiteral("reveal"), QStringLiteral("newFile"),
+        // Nothing was clicked, so there is no "Open internal": that folder is already open here.
+        QCOMPARE(ids, (QStringList{QStringLiteral("openExternal"), QStringLiteral("openFolder"),
+                                   QStringLiteral("navigate"), QStringLiteral("newFile"),
                                    QStringLiteral("newFolder"), QStringLiteral("workspace")}));
         // Nothing was clicked, so there is nothing to copy, rename or delete.
         QVERIFY(!ids.contains(QStringLiteral("copyPath")));
@@ -209,13 +322,13 @@ private slots:
     void explorerMenuDropsEntriesTheHostCannotDo() {
         const QStringList ids = menuIds(relay::explorerMenu(relay::FileMenuTarget::File, relay::FileMenuHost{}));
         QVERIFY(!ids.contains(QStringLiteral("navigate")));
-        QVERIFY(!ids.contains(QStringLiteral("preview")));
         QVERIFY(!ids.contains(QStringLiteral("workspace")));
         QVERIFY(ids.contains(QStringLiteral("copyPath")));
     }
 
     void explorerMenuGreysOutWritesInAReadOnlyFolder() {
         relay::FileMenuHost host;
+        host.canPreview = true;
         host.writable = false;
         const auto items = relay::explorerMenu(relay::FileMenuTarget::File, host);
         for (const relay::FileMenuItem &item : items) {
@@ -254,8 +367,10 @@ private slots:
         explorer.onOpenInPreview = [](const QString &) {};
         QVERIFY(menuIds(explorer.menuFor(QString())).contains(QStringLiteral("navigate")));
         QVERIFY(!menuIds(explorer.menuFor(QString())).contains(QStringLiteral("rename")));
-        QVERIFY(menuIds(explorer.menuFor(temp.filePath(QStringLiteral("a.txt")))).contains(QStringLiteral("preview")));
-        QVERIFY(!menuIds(explorer.menuFor(temp.filePath(QStringLiteral("sub")))).contains(QStringLiteral("preview")));
+        // "Open internal" leads both, and is live for the file because onOpenInPreview is wired.
+        QVERIFY(explorer.menuFor(temp.filePath(QStringLiteral("a.txt"))).at(0).enabled);
+        QCOMPARE(explorer.menuFor(temp.filePath(QStringLiteral("a.txt"))).at(0).id, QStringLiteral("openInternal"));
+        QCOMPARE(explorer.menuFor(temp.filePath(QStringLiteral("sub"))).at(0).id, QStringLiteral("openInternal"));
         // No "Set as agent workspace" until a host wires it up.
         QVERIFY(!menuIds(explorer.menuFor(temp.filePath(QStringLiteral("sub")))).contains(QStringLiteral("workspace")));
     }

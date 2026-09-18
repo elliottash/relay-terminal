@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Clickable paths (#YZTK) and the keyboard walk over them (#GWXM): which spans of a line of
-// terminal output are links, what they resolve to against a pane's working directory, and how
-// the keyboard cursor moves over the ordered list.
+// Clickable paths (#YZTK), card references (Switchboard design section 5) and the keyboard walk
+// over them (#GWXM): which spans of a line of terminal output are links, what they resolve to
+// against a pane's working directory and card index, and how the keyboard cursor moves over the
+// ordered list.
 //
 // The filesystem is a stub (`probe`), so the rules are tested without touching disk: the same
 // line is a link in one directory and nothing in another, which is exactly the behaviour the
-// cards ask for ("a path that does not exist is not turned into a link").
+// cards ask for ("a path that does not exist is not turned into a link"). The board is a stub
+// the same way (`cards`), so an id is a link in one pane and plain text in another.
 #include "OutputLinks.h"
 
+#include <QMap>
 #include <QSet>
 #include <QTest>
 
@@ -48,7 +51,34 @@ Probe probe()
     };
 }
 
-QVector<Found> found(const QString &text) { return scan(text, kCwd, kHome, probe()); }
+// The cards a pane has seen, the way src/main.cpp answers from its `relay::board::Model`.
+CardLookup cards()
+{
+    static const QMap<QString, QString> known = {
+        {QStringLiteral("K7Q2"), QStringLiteral("Voice transcription")},
+        {QStringLiteral("GWXM"), QStringLiteral("Keyboard jump to output links")},
+        {QStringLiteral("NAME"), QString()}, // a card the board knows but cannot name
+    };
+    return [](const QString &id, QString *title) {
+        const auto it = known.constFind(id);
+        if (it == known.constEnd())
+            return false;
+        *title = it.value();
+        return true;
+    };
+}
+
+QVector<Found> found(const QString &text) { return scan(text, kCwd, kHome, probe(), cards()); }
+
+// The `#K7Q2`-shaped spans of a line. candidates() also offers every word as a possible path
+// (the probe is what rejects those), so a card rule is read off this and not off the whole list.
+QVector<Candidate> cardSpans(const QString &text)
+{
+    QVector<Candidate> out;
+    for (const Candidate &c : candidates(text))
+        if (c.kind == Kind::Card) out << c;
+    return out;
+}
 
 QStringList targets(const QString &text)
 {
@@ -202,6 +232,84 @@ private slots:
         QCOMPARE(links[0].target.target, QStringLiteral("/home/dev/project/src/app.ts"));
         QCOMPARE(links[0].target.line, 12);
         QCOMPARE(links[0].target.column, 5);
+    }
+
+    // ---- Switchboard card references (design section 5) ---------------------------------
+
+    void aKnownCardIdIsALink()
+    {
+        const QString line = QStringLiteral("◆ #K7Q2 · moved to Needs QA (LLM)");
+        const auto links = found(line);
+        QCOMPARE(links.size(), 1);
+        QCOMPARE(links[0].target.kind, Kind::Card);
+        QCOMPARE(links[0].target.target, QStringLiteral("relay://card/K7Q2"));
+        // The title travels with the link, for the hover tooltip and the walk's status line.
+        QCOMPARE(links[0].target.label, QStringLiteral("Voice transcription"));
+        // The underline covers `#K7Q2`, the `#` included.
+        QCOMPARE(line.mid(links[0].candidate.start, links[0].candidate.length), QStringLiteral("#K7Q2"));
+        // A card the board knows but cannot name is still a link.
+        QCOMPARE(targets(QStringLiteral("see #NAME")), {QStringLiteral("relay://card/NAME")});
+    }
+
+    void anUnknownCardIdIsPlainText()
+    {
+        QVERIFY(found(QStringLiteral("filed as #ABCD yesterday")).isEmpty());
+        // The shape is right, so it is a candidate; only the board's answer makes it a link.
+        const auto c = cardSpans(QStringLiteral("filed as #ABCD yesterday"));
+        QCOMPARE(c.size(), 1);
+        QCOMPARE(c[0].path, QStringLiteral("ABCD"));
+        // A pane that has never seen a board links nothing, not even a real id.
+        QVERIFY(scan(QStringLiteral("◆ #K7Q2 · done"), kCwd, kHome, probe()).isEmpty());
+    }
+
+    void cardIdsAtTheEdgesOfALineAndInsidePunctuation()
+    {
+        QCOMPARE(targets(QStringLiteral("#K7Q2 is the card")), {QStringLiteral("relay://card/K7Q2")});
+        QCOMPARE(targets(QStringLiteral("the card is #K7Q2")), {QStringLiteral("relay://card/K7Q2")});
+        QCOMPARE(targets(QStringLiteral("the card is #K7Q2.")), {QStringLiteral("relay://card/K7Q2")});
+        QCOMPARE(targets(QStringLiteral("recap (#K7Q2): shipped")), {QStringLiteral("relay://card/K7Q2")});
+        QCOMPARE(targets(QStringLiteral("\"#K7Q2\", it said")), {QStringLiteral("relay://card/K7Q2")});
+        QCOMPARE(targets(QStringLiteral("#K7Q2, #GWXM")).size(), 2);
+        // An item id links as far as its card; the `.a3` is left as text.
+        const auto links = found(QStringLiteral("#K7Q2.a3 is the task"));
+        QCOMPARE(links.size(), 1);
+        QCOMPARE(links[0].candidate.length, 5);
+        // Crockford is case-insensitive, so a lower-cased reference reaches the same card.
+        QCOMPARE(targets(QStringLiteral("see #k7q2")), {QStringLiteral("relay://card/K7Q2")});
+    }
+
+    void hashesThatAreNotCardReferences()
+    {
+        // A shell comment, which is what `#` means in a terminal pane.
+        QVERIFY(cardSpans(QStringLiteral("echo hi   # note to self")).isEmpty());
+        QVERIFY(cardSpans(QStringLiteral("#!/bin/bash")).isEmpty());
+        // Not four characters, or not the whole word.
+        QVERIFY(cardSpans(QStringLiteral("#K7Q #K7Q2X sha#K7Q2 ##K7Q2 #K7Q2_x")).isEmpty());
+        // I, L, O and U are not Crockford base32, which is what keeps words out.
+        QVERIFY(cardSpans(QStringLiteral("#TODO #FAIL #NOTE #BUIL")).isEmpty());
+        // An all-digit `#1234` is a GitHub issue, never one of ours.
+        QVERIFY(cardSpans(QStringLiteral("fixes #1234")).isEmpty());
+        // A fragment inside a URL belongs to the URL.
+        const auto links = found(QStringLiteral("https://relay.test/board#K7Q2"));
+        QCOMPARE(links.size(), 1);
+        QCOMPARE(links[0].target.kind, Kind::Url);
+    }
+
+    void cardReferencesAndPathsShareALine()
+    {
+        const auto links = found(QStringLiteral("#K7Q2 · evidence in src/main.cpp:42"));
+        QCOMPARE(links.size(), 2);
+        QCOMPARE(links[0].target.kind, Kind::Card);
+        QCOMPARE(links[1].target.target, QStringLiteral("/home/dev/project/src/main.cpp"));
+        QCOMPARE(links[1].target.line, 42);
+    }
+
+    void cardTargetsRoundTrip()
+    {
+        QCOMPARE(cardTarget(QStringLiteral("K7Q2")), QStringLiteral("relay://card/K7Q2"));
+        QCOMPARE(cardIdOf(QStringLiteral("relay://card/K7Q2")), QStringLiteral("K7Q2"));
+        QVERIFY(cardIdOf(QStringLiteral("relay://turn/p1/t-41")).isEmpty());
+        QVERIFY(cardIdOf(QStringLiteral("/home/dev/project/src/main.cpp")).isEmpty());
     }
 
     // ---- what must NOT become a link ----------------------------------------------------

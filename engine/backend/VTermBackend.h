@@ -71,6 +71,7 @@ public:
     void endLinkWalk() override;
     bool linkWalkActive() const override;
     void setPlainClickOpensLinks(bool on) override;
+    void setCardLookup(std::function<bool(const QString &id, QString *title)> lookup) override;
 
     void setOutputCallbackEnabled(bool enabled) override;
 

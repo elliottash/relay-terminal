@@ -132,6 +132,29 @@ private Q_SLOTS:
             if (item.id == QStringLiteral("openFile")) QVERIFY(item.label.contains(QStringLiteral("notes.md")));
     }
 
+    void menuOffersACardReferenceUnderThePointer() {
+        relay::TerminalMenuState state = relayEngineState();
+        QVERIFY(!menuIds(relay::terminalContextMenu(state)).contains(QStringLiteral("openCard")));
+        state.cardId = QStringLiteral("K7Q2");
+        state.cardTitle = QStringLiteral("Voice transcription");
+        const auto items = relay::terminalContextMenu(state);
+        const QStringList ids = menuIds(items);
+        // Open the card, copy `#K7Q2`, and put `#K7Q2` in the prompt box.
+        QVERIFY(ids.contains(QStringLiteral("openCard")));
+        QVERIFY(ids.contains(QStringLiteral("copyCard")));
+        QVERIFY(ids.contains(QStringLiteral("cardToPrompt")));
+        for (const relay::TerminalMenuItem &item : items) {
+            if (item.id == QStringLiteral("openCard")) {
+                QVERIFY(item.label.contains(QStringLiteral("#K7Q2")));
+                QVERIFY(item.label.contains(QStringLiteral("Voice transcription")));
+            }
+            if (item.id == QStringLiteral("copyCard")) QVERIFY(item.label.contains(QStringLiteral("#K7Q2")));
+        }
+        // A card the board cannot name still offers all three.
+        state.cardTitle.clear();
+        QCOMPARE(menuIds(relay::terminalContextMenu(state)).count(QStringLiteral("openCard")), 1);
+    }
+
     void menuNeverHasALooseSeparator() {
         for (int mask = 0; mask < 256; ++mask) {
             relay::TerminalMenuState state;
@@ -145,6 +168,7 @@ private Q_SLOTS:
             state.canTakeControl = mask & 128;
             if (mask & 4) state.link = QStringLiteral("https://example.invalid/");
             if (mask & 8) state.filePath = QStringLiteral("/tmp/relay/x");
+            if (mask & 16) state.cardId = QStringLiteral("K7Q2");
             const auto items = relay::terminalContextMenu(state);
             QVERIFY(!items.isEmpty());
             QVERIFY(!items.first().isSeparator());

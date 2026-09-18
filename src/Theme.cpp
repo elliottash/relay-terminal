@@ -144,7 +144,7 @@ QString metalStylesheet(const ThemeSpec &spec) {
     const Material m = materialOf(spec);
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
-QToolButton#workChip, QFrame#paneChrome[hot="true"], QMenu, QFrame#notificationsPopup,
+QToolButton#workChip, QMenu, QFrame#notificationsPopup,
 QFrame#helpCard, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %4, stop:0.09 %1, stop:0.55 %2, stop:1 %3); }
@@ -173,7 +173,7 @@ QString plasticStylesheet(const ThemeSpec &spec) {
     const Material m = materialOf(spec);
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
-QToolButton#workChip, QFrame#paneChrome[hot="true"], QMenu, QFrame#notificationsPopup,
+QToolButton#workChip, QMenu, QFrame#notificationsPopup,
 QFrame#helpCard, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %1, stop:0.45 %2, stop:1 %3); }
@@ -445,12 +445,9 @@ QComboBox#statusPicker QAbstractItemView { background: @raised; color: @text; se
 /* The pane's button row. It is on screen in every pane, so at rest it is three quiet glyphs on
    the pane's own ground; the pane under the mouse ("hot") gets the raised tile, the grip and the
    second split button. */
+/* The pane's buttons are always there and always the same: no tile under the pointer. */
 QFrame#paneChrome { background: transparent; border: 1px solid transparent; border-radius: 6px; }
-QFrame#paneChrome[hot="true"] { background: @raised; border-color: @border; }
-QLabel#paneGrip { color: @muted; padding: 0 4px; font-size: 11pt; }
-QLabel#paneGrip:hover { color: @text; }
-QToolButton#paneChromeButton { color: @disabled; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; min-width: 16px; }
-QFrame#paneChrome[hot="true"] QToolButton#paneChromeButton { color: @muted; }
+QToolButton#paneChromeButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; min-width: 16px; }
 QToolButton#paneChromeButton:hover { color: @text; border-color: @border; background: @surface; }
 QFrame#dropZone { background: @accentSoft; border: 2px solid @accent; border-radius: 6px; }
 /* Window header: Relay's own title bar (frameless window). The tab row carries the Relay icon
@@ -558,21 +555,17 @@ QWidget#fileExplorer QToolButton, QWidget#filePreview QToolButton { color: @mute
 QWidget#fileExplorer QToolButton:hover, QWidget#filePreview QToolButton:hover { color: @text; border-color: @border; background: @raised; }
 QToolButton#fileExplorerHidden:checked { color: @accent; border-color: @accentBorder; }
 
-/* Switchboard (src/BoardPane.cpp; docs/SWITCHBOARD-AESTHETIC.md intervention 3): flat @surface
-   columns with engraved (uppercase, mono, letter-spaced) headers on the pane's @bg. The cards
-   themselves are painted by CardDelegate from the same tokens, so they follow a theme switch. */
-QWidget#boardView, QWidget#boardColumns, QScrollArea#boardScroll { background: @bg; }
-QTabBar#boardTabs::tab { padding: 4px 9px; margin: 0 2px 0 0; }
+/* Switchboard (src/BoardPane.cpp; docs/SWITCHBOARD-AESTHETIC.md intervention 3): one list of
+   rows on the pane's @bg, with engraved (uppercase, mono, letter-spaced) section headers. The
+   rows themselves are painted by RowDelegate from the same tokens, so they follow a theme
+   switch; only the chrome around the list is styled here. */
+QWidget#boardView, QWidget#boardListPane { background: @bg; }
+QLabel#boardCount { color: @muted; font-family: "@mono"; font-size: 8pt; padding: 0 2px; }
 QLineEdit#boardFilter { padding: 4px 8px; }
 QToolButton#boardAddButton { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 10px; }
 QToolButton#boardAddButton:hover { border-color: @accent; }
-QFrame#boardColumnFrame { background: @surface; border: 1px solid @border; border-radius: 8px; }
-QLabel#boardColumnHeader { color: @muted; font-family: "@mono"; font-size: 8pt; font-weight: 600; letter-spacing: 1px; }
-QLabel#boardColumnCount { color: @muted; font-family: "@mono"; font-size: 8pt; }
-QToolButton#boardColumnAdd { color: @muted; background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; }
-QToolButton#boardColumnAdd:hover { color: @text; border-color: @border; background: @raised; }
-QListWidget#boardColumn { background: transparent; border: none; }
-QListWidget#boardColumn QScrollBar:vertical { width: 6px; margin: 0; }
+QListWidget#boardList { background: transparent; border: none; }
+QListWidget#boardList QScrollBar:vertical { width: 8px; margin: 0; }
 QLineEdit#boardQuickAdd { background: @raised; border-color: @accentBorder; }
 QLabel#boardProblems { color: @warning; border: 1px solid @warningBorder; border-radius: 6px; padding: 4px 8px; }
 QFrame#boardNotice { background: @raised; border: 1px solid @accentBorder; border-radius: 6px; }

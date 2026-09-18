@@ -6,10 +6,12 @@
 #include <QString>
 #include <QStringList>
 #include <QTimer>
+#include <QUrl>
 #include <QWidget>
 #include <functional>
 
 class QFileSystemModel;
+class QHBoxLayout;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -21,7 +23,7 @@ class QTreeView;
 
 namespace relay {
 
-// ----- explorer right-click menu (issue #D60R) --------------------------------------------------
+// ----- right-click menus (issues #D60R, V9V1) ---------------------------------------------------
 //
 // The menu is described as data so the list — which entries appear for a folder, for a file and
 // for the empty space below the rows, and which of them are greyed out — can be checked without a
@@ -30,7 +32,7 @@ namespace relay {
 enum class FileMenuTarget { None, File, Folder };
 
 struct FileMenuItem {
-    QString id;               // "navigate", "open", "preview", "copyPath", …; "-" is a separator
+    QString id;               // "openInternal", "openExternal", "openFolder", "navigate", …; "-" is a separator
     QString label;
     bool enabled = true;
     bool isSeparator() const { return id == QLatin1String("-"); }
@@ -45,9 +47,18 @@ struct FileMenuHost {
     bool writable = true;
 };
 
+// The three entries every menu leads with, appended in the owner's order (issue V9V1, 2026-09-18:
+// "open internal at the top and open external second and open folder third"). Internal is a Relay
+// pane, external is the desktop's default application, folder is the desktop's file manager.
+void openEntries(QList<FileMenuItem> &items, FileMenuTarget target, const FileMenuHost &host);
+
 // The entries for one right-click, in order, with separators as items whose id is "-". Never
 // starts or ends with a separator and never has two in a row.
 QList<FileMenuItem> explorerMenu(FileMenuTarget target, const FileMenuHost &host);
+
+// The same three entries plus Copy path, for a right-click inside a preview pane. The viewer's
+// own Copy / Select all follow them in the QMenu that FilePreview builds.
+QList<FileMenuItem> previewMenu(const FileMenuHost &host);
 
 // A directory browser rooted at one folder. Enter, or a click (double by default, single when
 // "Open items with a single click" is on), opens: a folder navigates into it, a file calls
@@ -68,6 +79,10 @@ public:
     bool activateRow(int row);
     QTreeView *view() const { return m_view; }
     QLineEdit *filterEdit() const { return m_filter; }
+    // Room the host's floating pane buttons need at the right of the header row, so the folder
+    // line and the hidden-files button never end up underneath them (the same contract as a
+    // terminal pane's header).
+    void setHeaderRightInset(int pixels);
 
     // Dolphin-style opening (issue #0C7V). On by default; Ctrl+click and Shift+click never open,
     // they extend the selection, and a drag never opens either.
@@ -107,6 +122,7 @@ private:
     Qt::KeyboardModifiers m_clickModifiers = Qt::NoModifier;
     QFileSystemModel *m_model = nullptr;
     QTreeView *m_view = nullptr;
+    QHBoxLayout *m_header = nullptr;
     QLabel *m_path = nullptr;
     QLineEdit *m_filter = nullptr;
     QToolButton *m_up = nullptr, *m_hidden = nullptr;
@@ -130,20 +146,38 @@ public:
     QString path() const { return m_path; }
     QString title() const;
     Kind kind() const { return m_kind; }
+    // Markdown only: true while the source is on screen rather than the render. A .md file opens
+    // rendered; goToLine() and the view button are the only things that turn this on.
+    bool showingSource() const { return m_kind == Kind::Markdown && m_markdownSource; }
     // Truncation or refusal message, empty when the whole file is shown.
     QString notice() const { return m_notice; }
     // Plain text shown by the Text or Markdown source viewer. Mainly for tests.
     QString text() const;
+    // Room the host's floating pane buttons need at the right of the header row, so the view
+    // button ("Source (MD)") never ends up underneath them.
+    void setHeaderRightInset(int pixels);
+    // The entries a right-click in the preview offers, in order: what showMenu() builds its QMenu
+    // from, and what a test checks. Empty while no file is open.
+    QList<FileMenuItem> menu() const;
 
     static constexpr qint64 kMaxTextBytes = 2 * 1024 * 1024;
     static constexpr qint64 kMaxImageBytes = 64 * 1024 * 1024;
 
     std::function<void(const QString &)> onTitleChanged;
+    // A link to a local file or folder was clicked in the rendered Markdown. The preview never
+    // follows it itself (issue S1JP): the host opens a pane for it and this one keeps its file.
+    // Without a host, the link is handed to the desktop instead.
+    std::function<void(const QString &)> onOpenLink;
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
+    bool eventFilter(QObject *object, QEvent *event) override;
 
 private:
+    void followLink(const QUrl &url);
+    bool showMenu(const QPoint &globalPos, QWidget *source);
+    void runMenuAction(const QString &id);
     void showText(const QString &path, qint64 size);
     void showMarkdown(const QString &path, qint64 size);
     bool showImage(const QString &path, qint64 size);
@@ -158,6 +192,7 @@ private:
     QString m_path, m_notice;
     Kind m_kind = Kind::None;
     bool m_markdownSource = false, m_imageActualSize = false;
+    QHBoxLayout *m_header = nullptr;
     QLabel *m_title = nullptr, *m_noticeLabel = nullptr, *m_info = nullptr, *m_image = nullptr;
     QToolButton *m_mode = nullptr, *m_reload = nullptr, *m_external = nullptr;
     QStackedWidget *m_stack = nullptr;

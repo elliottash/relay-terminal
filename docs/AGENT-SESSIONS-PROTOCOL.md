@@ -1111,8 +1111,10 @@ lists them (each names a `folder` or a `filter`), `columns` as the board configu
 no table of its own.
 
 A **row** is `{id, title, type, status, tab, labels, assignee, waiting_on, rank, private, path,
-thread_entries, tasks_done, tasks_total, created, milestone, component, implemented_by}` — enough to
-draw a card without reading the file.
+thread_entries, tasks_done, tasks_total, created, milestone, topic, implemented_by}` — enough to
+draw a card without reading the file. (Until 2026-09-18 `board_tools._row` sent only the first
+eleven, so the pane's age and `☑ done/total` badges had nothing to draw; it now sends them all.
+`component` is not in the row: the card detail reads it from `front`.)
 
 `board_refresh` is what the GUI sends when its `QFileSystemWatcher` fires (and after a `git pull`).
 The worker diffs the tree against the rows it last sent, so a change to one card is one upsert, not
@@ -1141,6 +1143,12 @@ person, and defaults to `owner`.
 `hash`, `path`, `status`). A refusal is the ordinary `error` event with a `code` — notably
 `board_conflict` (with `current_hash`, after which the GUI re-reads and reapplies) and
 `board_not_found`.
+
+The pane is one list of every open card, sectioned by status, with no tab row (owner decision,
+2026-09-18; `docs/SWITCHBOARD-DESIGN.md` 4.6). `config.tabs` is therefore no longer a view: it is
+the set of category folders a card's file can live in, offered in the card detail's picker and in
+the `m` menu, and `board_move {tab}` still re-files a card between them. `config.columns` and
+`config.column_statuses` are the sections.
 
 The pane gives every request an `id` with a prefix of its own and matches `board_written`,
 `board_undone` and `error` by it: its own move or creation shows a notice with **Undo** (and
