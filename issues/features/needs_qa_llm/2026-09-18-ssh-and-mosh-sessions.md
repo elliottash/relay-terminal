@@ -12,7 +12,7 @@ implemented_by: Claude Opus 5 (Claude Code session relay-terminal-be), 2026-09-1
 created: '2026-09-18'
 acceptance: in a recorded run against a real host, the prompt box types a command into the ssh session, the agent's reply at the remote prompt prints into the terminal, a remote sudo prompt masks the prompt box, and the agent runs a command on the host over the user's connection without a second login
 source: owner, in a Claude Code session, 2026-09-18, after the agent's reply went to the side panel while ssh sat at a remote prompt
-links: {plans: ['docs/SSH-AND-MOSH.md'], commits: ['6796340', 'd1a3bcb', '3f4614c', 'c2f6aae', '70d4b9a', '0e419fe'], evidence: ['docs/qa_evidence/2026-09-18-ssh-and-mosh-sessions'], related: ['SPBN', 'D8J3', 'C1HH'], github: null}
+links: {plans: ['docs/SSH-AND-MOSH.md'], commits: ['6796340', 'd1a3bcb', '3f4614c', 'c2f6aae', '70d4b9a', '0e419fe', 'f4d5f5f', '8bb5b58', '53715ad'], evidence: ['docs/qa_evidence/2026-09-18-ssh-and-mosh-sessions'], related: ['SPBN', 'D8J3', 'C1HH'], github: null}
 ---
 # SSH and mosh sessions: the prompt box, the agent and the reply work on the remote host
 
