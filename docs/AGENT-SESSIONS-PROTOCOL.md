@@ -1054,3 +1054,193 @@ call**. The only judgement is whether the panes are on the same work: one phrase
 (`titles.related_text`, mirrored in `src/PaneTitles.cpp`) is that every title shares a content word
 with the first, and it is what the GUI uses until the worker answers and whenever no model is
 configured. A failed call is not an error: the offline answer is sent instead.
+
+## 19. Aliases: saved commands and prompts (v1.9, 2026-09-17)
+
+Issue `#G8DK`. An alias is a saved terminal command or agent prompt with `{{parameter}}`
+placeholders, Warp-workflow style. Owner decisions: one Markdown file per alias with defaults;
+**global** aliases in the global Switchboard and **local** ones in the repository Switchboard; run
+from the palette, from `/name`, and by typing the name in terminal mode, with parameters filled in
+the composer and Tab between the fields; **import** Warp workflows and shell aliases **with a
+preview**; the agent **may suggest** an alias for a repeated command — a suggestion only, and
+logged.
+
+Implementation: `backend/relay_core/aliases.py` (the store, the format, substitution),
+`backend/relay_core/alias_import.py` (the importers), `backend/relay_core/session_protocol.py`
+(the handlers), `src/Aliases.*` (the composer's fields and the invocation rules, `relay-aliases`).
+
+### 19.1 Where an alias lives
+
+| Scope | Root | Files |
+|---|---|---|
+| global | `$XDG_CONFIG_HOME/relay/switchboard` (override: `RELAY_GLOBAL_SWITCHBOARD`) | `aliases/<name>.md` |
+| local | `<repo>/issues` when it has a Switchboard, else `<repo>/.relay` | `aliases/<name>.md` |
+
+An alias is a Switchboard card (`docs/SWITCHBOARD-FORMAT.md`) of the new type `alias`, with the
+fields `name`, `kind` (`command` \| `prompt`) and `shell` on top of the common ones, statuses
+`active` and `retired`, and `retired` cards under `aliases/archive/`. `relay-board.py check`
+validates them like any other card.
+
+```markdown
+---
+id: A7K2
+type: alias
+status: active
+name: squash
+kind: command
+rank: 0i
+created: '2026-09-17'
+source: 'Warp workflow "Squash the last N commits together"'
+links: {plans: [], commits: [], evidence: [], related: [], github: null}
+---
+# Squash the last N commits together
+
+Squashes the last n commits together.
+
+## Run
+
+```sh
+git reset --soft HEAD~{{num_commits}} && git commit
+```
+
+## Parameters
+
+- `num_commits` = `2` — the number of commits to squash
+```
+
+The runnable text is the first fenced block of `## Run` (or, with no fence, the section itself, so
+a prompt is plain prose). The parameters are a Markdown list in `## Parameters`: a code-span name,
+an optional `= ` code-span default, and an optional `— ` description. **Defaults live in the body,
+not the front matter,** because front matter scalars are single-line (format section 2.1) and a
+default may hold commas, braces or quotes that a YAML flow sequence could not carry. A placeholder
+with no declared default is a required parameter.
+
+**Precedence.** A local alias hides a global one of the same name. The hidden one still appears in
+the list with `shadowed: true`, so the UI can say so instead of silently dropping it.
+
+### 19.2 `aliases`
+
+`aliases {workspace?, id?}` → `aliases {workspace, items: [...], problems: [{path, message}], id?}`
+
+Each item: `{name, kind, title, description, text, params: [{name, default|null, description}],
+placeholders: [name, …], required: [name, …], scope, labels, shell, source, id, path, status,
+shadowed}`. `text` is the **template**, placeholders and all — the GUI needs it to show the fields
+before any value is known. A card that cannot be read becomes a `problems` entry, never an error:
+one bad file does not cost the user the rest of the list.
+
+This needs **no configured provider**, because the palette and `/name` want the list before a key
+has been entered. The GUI asks for it on `ready` and after every write.
+
+### 19.3 `alias_run`
+
+`alias_run {name, values: {param: text}, scope?, workspace?, id?}`
+→ `alias_expanded {name, kind, scope, title, path, text, id?}`
+
+`text` is the alias with its placeholders filled. **The worker does the substitution**, so the
+quoting rules live in one place. A parameter with no value falls back to its declared default; a
+required parameter with neither is an `error` naming it, never a half-filled command line.
+
+All three invocation paths send this same message:
+
+| Path | GUI side |
+|---|---|
+| palette | `relay::aliases::render()` into fields; the values as edited |
+| `/name args` | `matchSlash`, then the words of `args` fill the fields in order |
+| the name typed in terminal mode | `matchTyped`, then the same positional fill |
+
+`matchTyped` fires only in terminal mode, only when the first word is exactly an alias name, and
+never for a line starting with `!`, `*`, `/`, `.`, `~` or `#`, or whose first word contains `=`.
+
+### 19.4 `alias_save`, `alias_delete`
+
+`alias_save {name, kind, text, title?, description?, params?, labels?, source?, status?, scope?,
+workspace?, id?}` → `alias_saved {name, kind, scope, path, alias_id, id?}`, then a fresh `aliases`.
+
+`alias_delete {name, scope?, workspace?, id?}` → `alias_deleted {name, scope, path, id?}`, then a
+fresh `aliases`. `scope` defaults to `local`.
+
+A name is 1–32 characters of `a-z`, `0-9`, `-` or `_`, starting with a letter or digit — short
+enough to type, and with nothing in it that could read as a path. Saving over an existing alias
+keeps that card's id, rank and creation date, so its identity and its thread survive an edit.
+
+### 19.5 `alias_import_preview`, `alias_import_apply`
+
+`alias_import_preview {sources?: ["warp", "shell"], workspace?, id?}`
+→ `alias_import_preview {preview_id, sources, workspace, items: [...], skipped: [{origin, reason}],
+problems, id?}`
+
+Each item: `{source: "warp-sqlite"|"warp-yaml"|"shell", origin, name, kind, title, description,
+text, params, labels, shell, conflict: "local"|"global"|null, warnings: [string, …]}`.
+
+Sources read:
+
+* **Warp's desktop database** — `$XDG_STATE_HOME/warp-terminal/warp.sqlite`, table `workflows`,
+  one JSON blob per row. The file is **copied** to a temporary directory and opened read-only, so
+  the import can neither block nor alter a running Warp. A row with `type: "agent_mode"` carries a
+  `query` rather than a `command`: that is a saved prompt and imports as `kind: prompt`.
+* **Warp workflow YAML** under `~/.warp/workflows/`, `~/.config/warp-terminal/workflows/` and
+  `<repo>/.warp/workflows/`, read with a parser for exactly the shape Warp writes. A file outside
+  that shape is skipped with a reason rather than guessed at.
+* **Shell startup files** — `.bashrc`, `.bash_aliases`, `.bash_profile`, `.zshrc`, `.zshenv`,
+  `.profile`, `.config/fish/config.fish`. Only lines beginning `alias ` are read, and the value is
+  unquoted the way a shell unquotes one word (so bash's own `'\''` escape comes out right). A
+  continued or unbalanced line is reported, never guessed at. A symlinked startup file, or one
+  over 4 MiB, is refused.
+
+`warnings` is what to read before saying yes: that this would replace an existing alias, that the
+name is also a program on `PATH`, that the text contains `sudo`, `rm -rf`, `curl`/`wget` or a pipe
+into a shell, or that the name had to be shortened. A row carrying a warning starts **unticked**.
+
+`alias_import_apply {preview_id, names: [name, …], renames?: {name: name}, scope?, workspace?, id?}`
+→ `alias_imported {scope, written: [{name, kind, scope, path, id}], failed: [{name, reason}], id?}`,
+then a fresh `aliases`.
+
+The worker holds the preview and writes from **its own** copy of it: `names` selects rows and
+`renames` may store one under a different name, but the caller cannot supply text. So an import can
+only ever store bytes the worker read and showed. A `preview_id` it is not holding is an error
+("that preview has expired"), and a name that was not in it is refused.
+
+### 19.6 `suggest {kind: "alias"}`
+
+`suggest {kind: "alias", commands: [string, …], id?}`
+→ `suggestion {kind: "alias", text, reason, alias?: {…}, repeated?: [{command, count}], id?}`
+
+`aliases.repeats()` is a pure rule — a command seen three times or more, most repeated first — and
+it runs **before** any model call, so nothing repeated means no call at all (`reason:
+"no_repeats"`). When there is something, one cheap `suggestions`-role side call proposes a name, a
+title and where the `{{placeholders}}` go; the reply is validated into a real alias, and a reply
+the rules reject comes back empty (`reason: "rejected: …"`) rather than as a half-formed alias.
+
+**Suggestion only, and logged.** The worker writes `alias suggestion requested` and `alias
+suggested` to `worker.log`; nothing is stored until the user saves it, and a saved suggestion
+records `source: 'agent suggestion, <date>'` on its card.
+
+### 19.7 What an alias can and cannot do
+
+* An alias is **stored text**, not a program. Relay never executes an alias file, and neither the
+  import nor the preview runs anything — they read.
+* Expanding an alias puts the line in the **prompt box**; a command then goes through the shell
+  bridge (architecture section 6), which stages it on the prompt line under a hash check before
+  Enter. So an alias can do anything the user could have typed, at the moment they ask for it, and
+  nothing on its own: no background execution, no execution on import, none at start-up.
+* A **parameter value is always data**. `aliases.substitute()` tracks the shell quoting state of
+  the template and escapes each value for the context it lands in — `shlex.quote` outside quotes,
+  `'\''` inside single quotes, and a quoted word spliced in inside double quotes — so a value
+  containing `;`, `&&`, `$(…)`, a backtick or `!` becomes one literal word and never new syntax.
+  `"{{name}}"` and `'{{name}}'` are recognised whole, so the common spelling stays readable. A
+  prompt is substituted as plain text, because it is prose for the model, not a command line.
+* An alias **expands once**. An expansion is never matched against the alias names again, so
+  `ll = "ll -h"` runs `ll -h` rather than looping, exactly as a shell alias does.
+* An alias **cannot shadow a built-in slash command**: `/name` matches only after the built-ins,
+  and the palette and the popup list the built-ins first.
+* An alias **can** shadow a program on `PATH` when its name is typed in terminal mode. The import
+  preview says so, and the staged line is visible on the prompt before Enter.
+
+### 19.8 Remote
+
+All six events — `aliases`, `alias_expanded`, `alias_saved`, `alias_deleted`,
+`alias_import_preview`, `alias_imported` — are **withheld** from a phone in `remote/wire.py`. An
+alias card is a file on the desktop and its body is a command line for this machine's shell, so the
+call is the same one made for `skills` and `agents`: a phone sees the result of a turn, not the
+desktop's saved definitions. Running an alias remotely would be a separate client message and a
+separate decision; none exists.
