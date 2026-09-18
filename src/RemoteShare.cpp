@@ -10,6 +10,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QComboBox>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -23,8 +24,11 @@
 #include <QPixmap>
 #include <QProcess>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QTimer>
 #include <QVBoxLayout>
+
+#include <algorithm>
 
 namespace relay {
 
@@ -67,6 +71,17 @@ QPixmap qrPixmap(const QrMatrix &matrix, int target)
     return pixmap;
 }
 
+QrMatrix qrMatrixOf(const QJsonArray &rows)
+{
+    QrMatrix matrix;
+    for (const QJsonValue &row : rows) {
+        QVector<int> cells;
+        for (const QJsonValue &cell : row.toArray()) cells.append(cell.toInt());
+        matrix.append(cells);
+    }
+    return matrix;
+}
+
 } // namespace
 
 RemoteShare &RemoteShare::instance()
@@ -82,6 +97,13 @@ RemoteShare::RemoteShare()
     m_poll = new QTimer(this);
     m_poll->setInterval(700);
     connect(m_poll, &QTimer::timeout, this, &RemoteShare::poll);
+    // A knock, a control request and a guest prompt each lapse on the hub's clock (2 min, 60 s,
+    // 10 min). One second is the resolution the countdowns on the Sharing pane need; the row goes
+    // when it reaches zero, which is a moment before the hub gives up on it, never after.
+    m_second = new QTimer(this);
+    m_second->setInterval(1000);
+    connect(m_second, &QTimer::timeout, this, [this] { emit secondPassed(); });
+    m_second->start();
     // The presence rule for notifications (docs/REMOTE-PROTOCOL.md section 9): the hub must not
     // push to a phone while this window is the active, focused one, because the person is already
     // looking at it. Only the GUI knows that, so it says so.
@@ -175,12 +197,7 @@ void RemoteShare::handle(const QJsonObject &message)
                 file.write(message.value(QStringLiteral("url")).toString().toUtf8() + '\n');
             }
         }
-        QrMatrix matrix;
-        for (const QJsonValue &row : message.value(QStringLiteral("qr")).toArray()) {
-            QVector<int> cells;
-            for (const QJsonValue &cell : row.toArray()) cells.append(cell.toInt());
-            matrix.append(cells);
-        }
+        const QrMatrix matrix = qrMatrixOf(message.value(QStringLiteral("qr")).toArray());
         emit pairingReady(message.value(QStringLiteral("url")).toString(), matrix,
                           message.value(QStringLiteral("expires")).toInt());
     } else if (kind == QLatin1String("ask")) {
@@ -234,6 +251,54 @@ void RemoteShare::handle(const QJsonObject &message)
         }
     } else if (kind == QLatin1String("history")) {
         sendHistoryPage(message);
+    } else if (kind == QLatin1String("invite")) {
+        // QA hook, the same rule as the pairing one above: an invite link holds an unguessable
+        // secret in its fragment, so it is never logged and only written out when asked for.
+        const QByteArray dump = qgetenv("RELAY_REMOTE_INVITE_FILE");
+        if (!dump.isEmpty()) {
+            QFile file(QString::fromLocal8Bit(dump));
+            if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                file.write(message.value(QStringLiteral("url")).toString().toUtf8() + '\n');
+            }
+        }
+        emit inviteReady(message.value(QStringLiteral("url")).toString(),
+                         qrMatrixOf(message.value(QStringLiteral("qr")).toArray()),
+                         message.value(QStringLiteral("role")).toString(),
+                         message.value(QStringLiteral("uses")).toInt(),
+                         message.value(QStringLiteral("expires")).toInt());
+        requestParticipants();
+    } else if (kind == QLatin1String("knock")) {
+        m_sharing.addKnock(message, QDateTime::currentMSecsSinceEpoch());
+        emit sharingModelChanged();
+        emit needsOwner(message.value(QStringLiteral("pane")).toString(),
+                        QStringLiteral("%1 wants to join a shared pane")
+                            .arg(message.value(QStringLiteral("name")).toString()),
+                        QStringLiteral("Code %1 — refuse or admit them on the Sharing pane.")
+                            .arg(message.value(QStringLiteral("code")).toString()));
+    } else if (kind == QLatin1String("participants")) {
+        m_sharing.setParticipants(message.value(QStringLiteral("items")).toArray(),
+                                  message.value(QStringLiteral("invites")).toArray());
+        emit sharingModelChanged();
+    } else if (kind == QLatin1String("control_ask")) {
+        m_sharing.addControlAsk(message, QDateTime::currentMSecsSinceEpoch());
+        emit sharingModelChanged();
+        emit needsOwner(message.value(QStringLiteral("pane")).toString(),
+                        QStringLiteral("%1 asks to type in a shared pane")
+                            .arg(message.value(QStringLiteral("name")).toString()),
+                        QStringLiteral("They get this pane's keyboard until you take it back."));
+    } else if (kind == QLatin1String("prompt_ask")) {
+        m_sharing.addPromptAsk(message, QDateTime::currentMSecsSinceEpoch());
+        emit sharingModelChanged();
+        emit needsOwner(message.value(QStringLiteral("pane")).toString(),
+                        QStringLiteral("%1 wrote a prompt for your agent")
+                            .arg(message.value(QStringLiteral("name")).toString()),
+                        message.value(QStringLiteral("text")).toString());
+    } else if (kind == QLatin1String("control")) {
+        m_sharing.setControl(message.value(QStringLiteral("pane")).toString(),
+                             message.value(QStringLiteral("holder")).toString(),
+                             message.value(QStringLiteral("name")).toString());
+        emit sharingModelChanged();
     } else if (kind == QLatin1String("agent_stop")) {
         const QString paneId = message.value(QStringLiteral("pane")).toString();
         auto it = m_panes.find(paneId);
@@ -279,6 +344,8 @@ bool RemoteShare::sharePane(const QString &paneId, const PaneHooks &hooks, QStri
     });
     connect(hooks.view, &QObject::destroyed, this, [this, paneId] { stopSharing(paneId); });
     sendFrame(paneId, true);
+    refreshSharedPanes();
+    requestParticipants();
     emit sharingChanged();
     return true;
 }
@@ -287,6 +354,7 @@ void RemoteShare::stopSharing(const QString &paneId)
 {
     if (!m_panes.remove(paneId)) return;
     send({{"t", "unpane"}, {"id", paneId}});
+    refreshSharedPanes();
     emit sharingChanged();
 }
 
@@ -296,6 +364,7 @@ void RemoteShare::stopAll()
     m_panes.clear();
     send({{"t", "stop"}});
     m_poll->stop();
+    refreshSharedPanes();
     emit sharingChanged();
 }
 
@@ -385,6 +454,7 @@ void RemoteShare::poll()
         const QString status = it->hooks.status ? it->hooks.status() : QString();
         if (title != it->lastTitle || cwd != it->lastCwd || status != it->lastStatus) {
             sendPane(it.key());
+            refreshSharedPanes();
         }
     }
 }
@@ -409,6 +479,120 @@ void RemoteShare::revoke(const QString &deviceId)
 void RemoteShare::setPasswordEntry(const QString &deviceId, bool allow)
 {
     send({{"t", "password_entry"}, {"device", deviceId}, {"allow", allow}});
+}
+
+// ---- multiplayer: the owner's controls (docs/REMOTE-PROTOCOL.md section 10.5) -------------------
+// One method per line, each doing nothing but naming it. The hub refuses every one of these from
+// the wire, so this file is the only place they are ever sent from.
+
+void RemoteShare::createInvite(const QString &paneId, const QString &role, int expires, int uses)
+{
+    send({{"t", "invite_create"}, {"pane", paneId}, {"role", role},
+          {"expires", expires}, {"uses", uses}});
+}
+
+void RemoteShare::revokeInvite(const QString &inviteId)
+{
+    send({{"t", "invite_revoke"}, {"id", inviteId}});
+    requestParticipants();
+}
+
+void RemoteShare::answerKnock(const QString &participant, bool admit, const QString &role)
+{
+    send({{"t", "knock_answer"}, {"participant", participant}, {"admit", admit}, {"role", role}});
+    m_sharing.dropRequest(sharing::Request::Kind::Knock, participant);
+    emit sharingModelChanged();
+    requestParticipants();
+}
+
+void RemoteShare::setRole(const QString &participant, const QString &role)
+{
+    send({{"t", "role_set"}, {"participant", participant}, {"role", role}});
+    requestParticipants();
+}
+
+void RemoteShare::removeParticipant(const QString &participant)
+{
+    send({{"t", "participant_remove"}, {"participant", participant}});
+    m_sharing.dropParticipant(participant);
+    emit sharingModelChanged();
+    requestParticipants();
+}
+
+void RemoteShare::answerControl(const QString &paneId, const QString &participant, bool grant)
+{
+    // No participant and no grant is "give it back to me", whoever has it: `control_revoke`.
+    if (participant.isEmpty() && !grant) { send({{"t", "control_revoke"}, {"pane", paneId}}); return; }
+    send({{"t", "control_answer"}, {"pane", paneId}, {"participant", participant}, {"grant", grant}});
+    m_sharing.dropRequest(sharing::Request::Kind::Control, participant);
+    emit sharingModelChanged();
+}
+
+void RemoteShare::takeControl(const QString &paneId)
+{
+    send({{"t", "control_take"}, {"pane", paneId}});
+    // Say so here and now rather than waiting for the hub's `control` to come back: the owner has
+    // physically typed, and the pane header must not still read "alice is typing" while it does.
+    m_sharing.setControl(paneId, QStringLiteral("owner"), QString());
+    emit sharingModelChanged();
+}
+
+void RemoteShare::answerPrompt(const QString &promptId, bool approve)
+{
+    send({{"t", "prompt_answer"}, {"id", promptId}, {"approve", approve}});
+    m_sharing.dropRequest(sharing::Request::Kind::Prompt, promptId);
+    emit sharingModelChanged();
+}
+
+void RemoteShare::pauseShare(const QString &paneId, bool on)
+{
+    send({{"t", "share_pause"}, {"pane", paneId}, {"on", on}});
+    sharing::ShareOptions options = m_sharing.options(paneId);
+    options.paused = on;
+    m_sharing.setOptions(paneId, options);
+    emit sharingModelChanged();
+}
+
+void RemoteShare::endShare(const QString &paneId)
+{
+    send({{"t", "share_end"}, {"pane", paneId}});
+    stopSharing(paneId);
+    requestParticipants();
+}
+
+void RemoteShare::setShareOptions(const QString &paneId, bool promptsImmediate, bool presentOnly)
+{
+    send({{"t", "share_options"}, {"pane", paneId},
+          {"prompts_immediate", promptsImmediate}, {"present_only", presentOnly}});
+    sharing::ShareOptions options = m_sharing.options(paneId);
+    options.promptsImmediate = promptsImmediate;
+    options.presentOnly = presentOnly;
+    m_sharing.setOptions(paneId, options);
+    emit sharingModelChanged();
+}
+
+void RemoteShare::requestParticipants()
+{
+    send({{"t", "participants"}});
+}
+
+// The Sharing pane names a share by the pane's own title, which only the GUI knows, so the list
+// is refreshed wherever a title could have changed: sharing, un-sharing and the title poll.
+void RemoteShare::refreshSharedPanes()
+{
+    QList<sharing::SharedPane> panes;
+    for (auto it = m_panes.constBegin(); it != m_panes.constEnd(); ++it) {
+        sharing::SharedPane pane;
+        pane.id = it.key();
+        pane.title = it->lastTitle.isEmpty() && it->hooks.title ? it->hooks.title() : it->lastTitle;
+        panes.append(pane);
+    }
+    std::sort(panes.begin(), panes.end(), [](const sharing::SharedPane &a, const sharing::SharedPane &b) {
+        return a.id < b.id;
+    });
+    if (panes == m_sharing.sharedPanes()) return;
+    m_sharing.setSharedPanes(panes);
+    emit sharingModelChanged();
 }
 
 // ---- the dialog --------------------------------------------------------------------------------
@@ -451,14 +635,12 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     m_url->setTextFormat(Qt::PlainText);
     m_url->setWordWrap(true);
     m_url->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    // The theme's muted text at the secondary size: palette(mid) is the border colour, about 1.4:1
-    // on the dialog (docs/ARCHITECTURE.md, "Legible text").
-    m_url->setObjectName(QStringLiteral("shareNote"));
+    m_url->setStyleSheet(QStringLiteral("color: palette(mid); font-size: 11px;"));
     column->addWidget(m_url);
 
     m_note = new QLabel;
     m_note->setWordWrap(true);
-    m_note->setObjectName(QStringLiteral("shareNote"));
+    m_note->setStyleSheet(QStringLiteral("color: palette(mid); font-size: 11px;"));
     column->addWidget(m_note);
 
     // The approval box: what a phone claims to be, and the code that proves it is the phone in
@@ -501,6 +683,67 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     connect(allowView, &QPushButton::clicked, this, [this] { answer(true, QStringLiteral("view")); });
     connect(allowType, &QPushButton::clicked, this, [this] { answer(true, QStringLiteral("full")); });
 
+    // ----- inviting somebody else (docs/REMOTE-PROTOCOL.md section 10.2) ----------------------
+    // Under the QR, not instead of it: pairing your own phone is the common case and stays the
+    // first thing offered. This is the second, and it hands out a link rather than a device grant.
+    auto *inviteHeading = new QLabel(QStringLiteral("Invite someone to this pane"));
+    inviteHeading->setObjectName(QStringLiteral("settingsHeading"));
+    column->addWidget(inviteHeading);
+
+    auto *inviteRow = new QHBoxLayout;
+    m_inviteRole = new QComboBox;
+    m_inviteRole->addItem(QStringLiteral("Viewer"), QStringLiteral("viewer"));
+    m_inviteRole->addItem(QStringLiteral("Editor"), QStringLiteral("editor"));
+    connect(m_inviteRole, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this](int) { updateRoleNote(); });
+    inviteRow->addWidget(m_inviteRole);
+    m_inviteExpiry = new QComboBox;
+    m_inviteExpiry->addItem(QStringLiteral("for 1 hour"), 3600);
+    m_inviteExpiry->addItem(QStringLiteral("for 24 hours"), 86400);
+    m_inviteExpiry->addItem(QStringLiteral("for 7 days"), 604800);
+    m_inviteExpiry->setCurrentIndex(1);
+    inviteRow->addWidget(m_inviteExpiry);
+    m_inviteUses = new QSpinBox;
+    m_inviteUses->setRange(1, 20);
+    m_inviteUses->setValue(1);
+    m_inviteUses->setPrefix(QStringLiteral("uses: "));
+    m_inviteUses->setToolTip(QStringLiteral(
+        "How many people the link may let in. One link, one person, is the usual thing."));
+    inviteRow->addWidget(m_inviteUses);
+    auto *makeLink = new QPushButton(QStringLiteral("Make a link"));
+    makeLink->setAutoDefault(false);
+    connect(makeLink, &QPushButton::clicked, this, [this] { createInvite(); });
+    inviteRow->addWidget(makeLink);
+    inviteRow->addStretch(1);
+    column->addLayout(inviteRow);
+
+    m_inviteNote = new QLabel;
+    m_inviteNote->setWordWrap(true);
+    m_inviteNote->setTextFormat(Qt::PlainText);
+    m_inviteNote->setObjectName(QStringLiteral("settingsRowDetail"));
+    column->addWidget(m_inviteNote);
+    updateRoleNote();
+
+    m_inviteQr = new QLabel;
+    m_inviteQr->setAlignment(Qt::AlignCenter);
+    m_inviteQr->hide();
+    column->addWidget(m_inviteQr, 0, Qt::AlignHCenter);
+    m_inviteUrl = new QLabel;
+    m_inviteUrl->setWordWrap(true);
+    m_inviteUrl->setTextFormat(Qt::PlainText);
+    m_inviteUrl->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_inviteUrl->setObjectName(QStringLiteral("settingsRowDetail"));
+    m_inviteUrl->hide();
+    column->addWidget(m_inviteUrl);
+    m_inviteCopy = new QPushButton(QStringLiteral("Copy link"));
+    m_inviteCopy->setAutoDefault(false);
+    m_inviteCopy->hide();
+    connect(m_inviteCopy, &QPushButton::clicked, this, [this] {
+        QGuiApplication::clipboard()->setText(m_inviteLink);
+        m_inviteCopy->setText(QStringLiteral("Copied"));
+    });
+    column->addWidget(m_inviteCopy, 0, Qt::AlignLeft);
+
     m_devices = new QListWidget;
     m_devices->setMaximumHeight(90);
     column->addWidget(m_devices);
@@ -541,6 +784,7 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     connect(&share, &RemoteShare::pairingAsked, this, &RemoteShareDialog::showAsk);
     connect(&share, &RemoteShare::devicesChanged, this, &RemoteShareDialog::showDevices);
     connect(&share, &RemoteShare::addressesChanged, this, &RemoteShareDialog::showAddresses);
+    connect(&share, &RemoteShare::inviteReady, this, &RemoteShareDialog::showInvite);
     showAddresses(share.addresses());
     connect(&share, &RemoteShare::failed, this, [this](const QString &message) {
         m_status->setText(message);
@@ -609,6 +853,45 @@ void RemoteShareDialog::answer(bool allow, const QString &capability)
     } else {
         m_status->setText(QStringLiteral("Paired for viewing. That device cannot type."));
     }
+}
+
+// What the chosen role will let the person do, in one sentence, before the link exists. The same
+// sentence the Sharing pane shows beside them afterwards, so the promise does not change wording.
+void RemoteShareDialog::updateRoleNote()
+{
+    m_inviteNote->setText(sharing::roleSentence(m_inviteRole->currentData().toString()));
+}
+
+void RemoteShareDialog::createInvite()
+{
+    RemoteShare::instance().createInvite(m_paneId, m_inviteRole->currentData().toString(),
+                                         m_inviteExpiry->currentData().toInt(),
+                                         m_inviteUses->value());
+    m_status->setText(QStringLiteral("Making a link…"));
+}
+
+void RemoteShareDialog::showInvite(const QString &url, const QrMatrix &qr, const QString &role,
+                                   int uses, int expires)
+{
+    m_inviteLink = url;
+    const QPixmap code = qrPixmap(qr, 220);
+    if (!code.isNull()) {
+        m_inviteQr->setFixedSize(code.size());
+        m_inviteQr->setPixmap(code);
+        m_inviteQr->show();
+    }
+    // The whole link, secret and all: unlike the pairing QR this one is meant to be copied and
+    // sent to somebody, so it has to be on screen where it can be selected.
+    m_inviteUrl->setText(url);
+    m_inviteUrl->show();
+    m_inviteCopy->setText(QStringLiteral("Copy link"));
+    m_inviteCopy->show();
+    m_status->setText(QStringLiteral("Send this link to the person you want on this pane. It lets "
+                                     "in %1 and stops working in %2.\n%3")
+                          .arg(uses == 1 ? QStringLiteral("one person")
+                                         : QStringLiteral("%1 people").arg(uses),
+                               sharing::expiryText(expires), sharing::roleSentence(role)));
+    fit();
 }
 
 // Wrapped labels need more height the narrower they are, and a top-level window's automatic

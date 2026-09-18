@@ -193,6 +193,8 @@ const QList<Kind> &kinds() {
         {QStringLiteral("settings"), QStringLiteral("Options"), QStringLiteral("tools"), Glyph::Options},
         {QStringLiteral("actions"), QStringLiteral("Actions"), QStringLiteral("tools"), Glyph::Actions},
         {QStringLiteral("sessions"), QStringLiteral("Sessions"), QStringLiteral("tools"), Glyph::Sessions},
+        // Multiplayer (#W5N2): who is on the panes you are sharing, and what is waiting for you.
+        {QStringLiteral("sharing"), QStringLiteral("Sharing"), QStringLiteral("tools"), Glyph::Phone},
         {QStringLiteral("subagent"), QStringLiteral("Subagent"), QStringLiteral("agents"), Glyph::Subagent},
         {QStringLiteral("turn"), QStringLiteral("Agent turn"), QStringLiteral("agents"), Glyph::Turn},
     };

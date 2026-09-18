@@ -270,6 +270,10 @@ private:
         // Sharing a pane with a phone (#W5N2). No default shortcut: it is a deliberate act,
         // and the strip button beside the microphone is the usual way in.
         add("pane.share", "terminal", "Share this pane with a phone", {});
+        // The Sharing pane (#W5N2): the ongoing "who is here, who is knocking, what is waiting
+        // for me" surface. No default key either — it opens by itself when someone knocks, and
+        // the share chip and the palette are the other two ways in.
+        add("pane.sharing", "terminal", "Sharing: who is on your shared panes, and what is waiting for you", {});
         add("agent.interrupt", "agent", "Send to the agent; while it is busy, interrupt it and send now (prompt box)",
             {QStringLiteral("Ctrl+Return"), QStringLiteral("Ctrl+Enter"), QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
         add("agent.provider", "agent", "Provider and API keys (advanced endpoint settings)", {});

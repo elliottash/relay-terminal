@@ -287,6 +287,8 @@ public:
     std::function<void()> onOpenBoard;                 // Switchboard: /switchboard from this pane
     std::function<void(const QString &)> onOpenCard;   // Switchboard: one card, from the work chip
     std::function<void(const QString &turnId)> onOpenTurn;   // "✦ N tool calls" link or palette
+    // The Sharing pane (#W5N2): who is on this shared pane, who is knocking, what is waiting.
+    std::function<void()> onOpenSharing;
     // Right-click menu entries the window owns: new pane, close pane, tasks (issue #X2F1).
     std::function<void(const QString &action)> onWindowAction;
     // Dragging the pane's header moves the whole pane; the window decides where it lands (owner,
@@ -1662,6 +1664,16 @@ protected:
         // Voice push-to-talk. The filter is on qApp, so only the pane holding the keyboard acts,
         // and the event is never consumed: Right Alt is AltGr on most layouts and must keep typing.
         // F9 is the exception — it is not a modifier, so it is swallowed while voice uses it.
+        if (event->type() == QEvent::KeyPress && ownsKeyboard() && !static_cast<QKeyEvent *>(event)->isAutoRepeat()) {
+            // A real keystroke, not a modifier being held down on its own: the owner is typing
+            // into this pane, so nobody else is driving it any more (section 10.3). The event is
+            // passed on untouched — taking control back must never cost the key that did it.
+            switch (static_cast<QKeyEvent *>(event)->key()) {
+            case Qt::Key_Shift: case Qt::Key_Control: case Qt::Key_Alt: case Qt::Key_Meta:
+            case Qt::Key_AltGr: case Qt::Key_CapsLock: case Qt::Key_NumLock: break;
+            default: takeBackFromGuest();
+            }
+        }
         if ((event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease) && ownsKeyboard()) {
             auto *key = static_cast<QKeyEvent *>(event);
             const QString hold = voiceHoldKey();
@@ -1970,7 +1982,7 @@ private:
         m_share->setIcon(stripIcon(QStringLiteral("share")));
         m_share->setIconSize(QSize(14, 14));
         m_share->setAccessibleName(QStringLiteral("Share this pane with a phone"));
-        connect(m_share, &QToolButton::clicked, this, [this] { toggleShare(); });
+        connect(m_share, &QToolButton::clicked, this, [this] { shareChipPressed(); });
         routeRow->addWidget(m_share);
         updateShareChip();
         auto *cancel = new QToolButton;
@@ -3378,13 +3390,35 @@ public:
 
     void updateShareChip() {
         if (!m_share) return;
-        const bool sharing = relay::RemoteShare::instance().isSharing(m_token);
+        relay::RemoteShare &share = relay::RemoteShare::instance();
+        const bool sharing = share.isSharing(m_token);
+        const int guests = share.sharingModel().guestsOn(m_token);
         m_share->setProperty("dest", sharing ? QStringLiteral("agent") : QVariant());
-        m_share->setToolTip(sharing
-            ? QStringLiteral("Shared with your phone — click to show the code or stop")
-            : QStringLiteral("Share this pane with your phone"));
+        m_share->setToolTip(!sharing
+            ? QStringLiteral("Share this pane with your phone, or invite someone to it")
+            : guests == 0
+                ? QStringLiteral("Shared — click for who is here, invites and what is waiting")
+                : QStringLiteral("Shared with %1 · click for who is here and what is waiting")
+                      .arg(guests == 1 ? QStringLiteral("one other person")
+                                       : QStringLiteral("%1 other people").arg(guests)));
         m_share->style()->unpolish(m_share);
         m_share->style()->polish(m_share);
+    }
+
+    // The chip under the prompt box. Nothing shared yet: pair a phone or make an invite, which is
+    // the dialog. Already shared: the ongoing question is who is here and what is waiting, which
+    // is the pane — and its first button opens the dialog again for one more link.
+    void shareChipPressed() {
+        if (relay::RemoteShare::instance().isSharing(m_token) && onOpenSharing) {
+            onOpenSharing();
+            // pane.sharing has no key of its own on purpose; the palette is the fast path, so
+            // the hint teaches that rather than inventing one (WARP.md, "Shortcut hints").
+            hint(QStringLiteral("pane.sharing"),
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("palette.open")),
+                                                QStringLiteral("then “Sharing”")));
+            return;
+        }
+        toggleShare();
     }
 
     void toggleShare() {
@@ -3445,6 +3479,29 @@ public:
         m_echoTicks = 0;
         status(QStringLiteral("Password sent from your phone."));
         return true;
+    }
+
+    // A guest is driving this pane and the owner has just typed in it. docs/REMOTE-PROTOCOL.md
+    // section 10.3: the owner's physical keystroke always takes control back, without asking. It
+    // is the same rule as taking a running program back from the agent, so it is applied in the
+    // same two places — setNative(), where endDelegation() already does it for the agent (card
+    // #C1HH), and the key filter, for a keystroke that never goes through setNative(). The key
+    // itself is never swallowed: this only sends the line that says who is driving.
+    void takeBackFromGuest() {
+        relay::RemoteShare &share = relay::RemoteShare::instance();
+        if (!share.isSharing(m_token)) return;
+        const QString driver = share.sharingModel().driverOn(m_token);
+        if (driver.isEmpty()) return;
+        share.takeControl(m_token);
+        toast(QStringLiteral("You typed — this pane is yours again, not %1's.").arg(driver));
+    }
+
+    // The window posting on this pane's behalf: somebody knocking, asking for the keyboard or
+    // writing a prompt on a pane it is sharing (#W5N2). The same rules as the pane's own notices,
+    // which is the point of going through here — the bell always keeps it, the desktop only hears
+    // about it while Relay is not the window you are looking at, and neither takes the keyboard.
+    void notifyFromWindow(const QString &title, const QString &body, const QString &kind) {
+        notify(title, body, kind);
     }
 
     // The pane status a phone sees: the same vocabulary as the protocol's pane list.
@@ -9556,6 +9613,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         // The one rule the agent cannot argue with: the moment the user has the keyboard, the
         // agent stops typing. Ctrl+H, the button and F12 all come through here.
         if (enabled) endDelegation(QStringLiteral("take_over"));
+        if (enabled) takeBackFromGuest();          // and the same for a guest (section 10.3)
         m_native = enabled;
         changed();
         m_editor->setReadOnly(enabled);

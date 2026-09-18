@@ -39,6 +39,10 @@
 #include "OutputLinks.h"
 #include "Conversations.h"
 #include "SessionInfo.h"
+// The Sharing pane and the sidecar controller behind it (#W5N2): this header opens the pane,
+// answers RemoteShare's signals and reads sharing::Model for the pane-header chip.
+#include "RemoteShare.h"
+#include "SharingPane.h"
 
 #include <QAbstractButton>
 #include <QDateTime>
@@ -280,6 +284,25 @@ public:
         // Pane state glyphs and tab icons (#XM0T), and the remote-session header (#SPBN).
         connect(&m_statusTimer, &QTimer::timeout, this, [this] { refreshPaneStatus(); });
         m_statusTimer.start(kStatusPollMs);
+        // Multiplayer (#W5N2, docs/REMOTE-PROTOCOL.md section 10). A knock, a request for the
+        // keyboard or a guest prompt has to be noticed from another pane or another window, and
+        // must never take the keyboard: the next keystroke would land on Admit. So it opens the
+        // Sharing pane without focusing it and rings the bell, which is exactly what
+        // Pane::notify() already does (the desktop only hears about it when Relay is not active).
+        {
+            relay::RemoteShare &share = relay::RemoteShare::instance();
+            connect(&share, &relay::RemoteShare::needsOwner, this,
+                    [this](const QString &paneId, const QString &title, const QString &body) {
+                        Pane *owner = paneWithToken(paneId);
+                        if (!owner) return;          // another window is sharing that pane
+                        owner->notifyFromWindow(title, body, relay::NotificationCenter::kindWarning);
+                        openSharingPane(owner, false);
+                    });
+            connect(&share, &relay::RemoteShare::sharingModelChanged, this,
+                    [this] { refreshSharingPanes(false); });
+            connect(&share, &relay::RemoteShare::secondPassed, this,
+                    [this] { refreshSharingPanes(true); });
+        }
         // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+A).
         Keymap::instance().listen(this, [this] { syncChromeTooltips(); });
         // The status bar stays out of the layout until something transient needs it, so the
@@ -963,6 +986,7 @@ private:
         else if (id == QStringLiteral("agent.agentsMenu")) openAgentsMenu();
         else if (id == QStringLiteral("voice.toggle")) pane->toggleVoice(true);
         else if (id == QStringLiteral("pane.share")) pane->toggleShare();
+        else if (id == QStringLiteral("pane.sharing")) openSharingPane(pane, true);
         else if (id == QStringLiteral("agent.provider")) pane->openProviderDialog();
         else if (id == QStringLiteral("agent.modelKeys")) {
             pane->openKeysDialog();
@@ -1894,6 +1918,24 @@ private:
             items << actionItem(agent, QStringLiteral("Clear queue"), QStringLiteral("%1 queued item(s)").arg(pane->queuedPrompts()), QStringLiteral("agent.clearQueue"));
         if (pane && pane->queuePaused())
             items << actionItem(agent, QStringLiteral("Resume queue"), QStringLiteral("Paused after a stop, failure or edit"), QStringLiteral("agent.resumeQueue"));
+        {
+            // Sharing (#W5N2). Two rows, because they are two different things: hand out a way in,
+            // and look after the people who came in.
+            relay::RemoteShare &share = relay::RemoteShare::instance();
+            const bool shared = pane && share.isSharing(pane->sessionToken());
+            const int guests = pane ? share.sharingModel().guestsOn(pane->sessionToken()) : 0;
+            const int waiting = share.sharingModel().waiting();
+            items << actionItem(terminal, QStringLiteral("Share this pane…"),
+                                shared ? QStringLiteral("Already shared · pair another phone, or invite someone")
+                                       : QStringLiteral("Pair your phone, or make a link for somebody else"),
+                                QStringLiteral("pane.share"));
+            if (share.sharingModel().anyShared())
+                items << actionItem(terminal, QStringLiteral("Sharing"),
+                                    waiting > 0 ? QStringLiteral("%1 waiting for you").arg(waiting)
+                                    : guests > 0 ? QStringLiteral("%1 here · invites, roles and what is waiting").arg(guests)
+                                                 : QStringLiteral("Who is here, live invites, and what is waiting for you"),
+                                    QStringLiteral("pane.sharing"));
+        }
         items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Stop the running program · Esc in the prompt box") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
         items << actionItem(terminal, QStringLiteral("Take control"),
                             QStringLiteral("Hide the prompt box and type into the terminal · the only way keys reach it"),
@@ -2631,6 +2673,99 @@ public:
         updateTitles();
     }
 
+    // ----- the Sharing pane (#W5N2, docs/REMOTE-PROTOCOL.md section 10) ------------------------
+    // One per tab, beside the pane it was opened from. It shows every share this desktop has, so
+    // a second one would only ever repeat the first.
+    static ToolPane *sharingPaneIn(QWidget *page) {
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Sharing)
+                return tool;
+        return nullptr;
+    }
+
+    Pane *paneWithToken(const QString &token) const {
+        for (Pane *pane : allPanes()) if (pane->sessionToken() == token) return pane;
+        return nullptr;
+    }
+
+    // `focus` is false when a knock opened this by itself: the pane appears and the bell rings,
+    // but the keyboard stays exactly where the owner left it (section 10.5, and the reason the
+    // pairing dialog puts Refuse on the default button).
+    ToolPane *openSharingPane(Pane *owner, bool focus) {
+        if (!owner) return nullptr;
+        QWidget *page = pageOf(owner);
+        if (!page) return nullptr;
+        ToolPane *tool = sharingPaneIn(page);
+        auto *view = tool ? dynamic_cast<relay::sharing::SharingView *>(tool->hosted()) : nullptr;
+        if (!tool) {
+            view = new relay::sharing::SharingView;
+            view->setModel(&relay::RemoteShare::instance().sharingModel());
+            tool = new ToolPane(ToolPane::Kind::Sharing, view, view, owner->cwd());
+            tool->setProperty("paneType", QStringLiteral("sharing"));
+            relay::theme::polishWindow(tool);
+            QPointer<ToolPane> guard(tool);
+            QPointer<Pane> ownerGuard(owner);
+            view->onTitleChanged = [guard] { if (auto *w = windowOf(guard)) w->updateTitles(); };
+            view->onClose = [guard, ownerGuard] {
+                auto *w = windowOf(guard);
+                if (!w) return;
+                w->closePane(guard, false);
+                if (ownerGuard && ownerGuard->window() == w) { w->setActiveLeaf(ownerGuard); focusLeaf(ownerGuard); }
+            };
+            relay::RemoteShare &share = relay::RemoteShare::instance();
+            view->onKnockAnswer = [&share](const QString &participant, bool admit, const QString &role) {
+                share.answerKnock(participant, admit, role);
+            };
+            view->onControlAnswer = [&share](const QString &pane, const QString &participant, bool grant) {
+                share.answerControl(pane, participant, grant);
+            };
+            view->onPromptAnswer = [&share](const QString &promptId, bool approve) {
+                share.answerPrompt(promptId, approve);
+            };
+            view->onRoleSet = [&share](const QString &participant, const QString &role) {
+                share.setRole(participant, role);
+            };
+            view->onRemove = [&share](const QString &participant) { share.removeParticipant(participant); };
+            view->onRevokeInvite = [&share](const QString &inviteId) { share.revokeInvite(inviteId); };
+            view->onPause = [&share](const QString &pane, bool on) { share.pauseShare(pane, on); };
+            view->onEndShare = [&share](const QString &pane) { share.endShare(pane); };
+            view->onOptions = [&share](const QString &pane, bool immediate, bool present) {
+                share.setShareOptions(pane, immediate, present);
+            };
+            // One more link for this share: the dialog, which is also where the QR is.
+            view->onInvite = [guard](const QString &pane) {
+                auto *w = windowOf(guard);
+                if (!w) return;
+                Pane *target = w->paneWithToken(pane);
+                if (target) target->toggleShare();
+            };
+            insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        }
+        if (view) {
+            view->focusPane(owner->sessionToken());
+            view->refresh();
+        }
+        if (focus) {
+            if (QWidget *held = pageOf(tool)) m_tabs->setCurrentWidget(held);
+            setActiveLeaf(tool);
+            focusLeaf(tool);
+        }
+        updateTitles();
+        return tool;
+    }
+
+    // Every Sharing pane in this window. `onlyClocks` is the one-second tick: it moves the
+    // countdowns without rebuilding the rows under the owner's fingers.
+    void refreshSharingPanes(bool onlyClocks) {
+        for (int i = 0; i < m_tabs->count(); ++i)
+            for (QWidget *leaf : leavesIn(m_tabs->widget(i)))
+                if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Sharing)
+                    if (auto *view = dynamic_cast<relay::sharing::SharingView *>(tool->hosted())) {
+                        if (onlyClocks) view->tick(); else view->refresh();
+                    }
+        if (!onlyClocks) for (Pane *pane : allPanes()) pane->updateShareChip();
+    }
+
     // ----- Switchboard (docs/SWITCHBOARD-DESIGN.md 4, protocol 17) -----------------------------
     // Ctrl+Shift+S: open the Switchboard beside the anchor, focus the one this tab already has,
     // or, pressed on it, go back to the last terminal pane.
@@ -2961,6 +3096,8 @@ private:
         pane->onOpenSubagent = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openSubagentTab(guard, id); };   // subagents UI (#WD83)
         pane->onShowAgents = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openAgentsMenu(); } };   // /agents → subagents panel menu
         pane->onOpenTurn = [guard](const QString &turnId) { if (auto *w = windowOf(guard)) w->openTurnPane(guard, turnId); };
+        // The share chip, once this pane is shared: who is here and what is waiting (#W5N2).
+        pane->onOpenSharing = [guard] { if (auto *w = windowOf(guard)) w->openSharingPane(guard, true); };
         // A tool-call line whose diff is too big to read inline (#TK9C).
         pane->onOpenDiff = [guard](const QString &title, const QString &unifiedDiff) {
             if (auto *w = windowOf(guard)) w->openDiffPane(guard, title, unifiedDiff);
@@ -3813,7 +3950,12 @@ private:
                 if (watched && now - chrome->watchedSince >= kSeenAfterMs) chrome->seenSerial = facts.finishSerial;
                 const ps::State state = ps::resolve(facts, chrome->seenSerial);
                 const QString remoteLine = pane->remoteCommandLine();
-                chrome->setStatus(state, remoteLine, pane->sharedWithPhone());
+                const bool shared = pane->sharedWithPhone();
+                chrome->setStatus(state, remoteLine, shared);
+                // Shared with how many people, and who is driving when it is not the owner.
+                const relay::sharing::ChipState chip =
+                    relay::RemoteShare::instance().sharingModel().chip(pane->sessionToken(), shared);
+                if (shared) chrome->setSharing(chip.text, chip.tooltip, chip.guestDriving);
                 if (!remoteLine.isEmpty()) sshSessionSeen(pane, remoteLine);
                 states << state;
                 remote = remote || !remoteLine.isEmpty();

@@ -328,7 +328,7 @@ private:
 // as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
 class ToolPane final : public QWidget {
 public:
-    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff };
+    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff, Sharing };
 
     ToolPane(Kind kind, const QString &path, bool planActions = true) : m_kind(kind) {
         setObjectName(QStringLiteral("pane"));
@@ -456,6 +456,7 @@ public:
     QString defaultPaneType() const {
         switch (m_kind) {
         case Kind::Board: return QStringLiteral("board");
+        case Kind::Sharing: return QStringLiteral("sharing");
         case Kind::Settings:
             return m_settingsView && m_settingsView->mode() == relay::SettingsPane::Mode::Actions ? QStringLiteral("actions") : QStringLiteral("options");
         case Kind::Subagent: return QStringLiteral("subagent");
@@ -604,7 +605,7 @@ public:
             m_remoteChip->setToolTip(QStringLiteral("Remote session · %1\nWhat you type here goes to %2, not this machine.")
                                          .arg(remoteCommand, host.isEmpty() ? QStringLiteral("another machine") : host));
             m_remoteChip->setVisible(remote);
-            m_backdrop->setVisible(remote);
+            m_backdrop->setVisible(remote || m_guestDriving);
             if (auto *pane = dynamic_cast<Pane *>(parentWidget())) {
                 pane->setProperty("remoteSession", remote ? host : QString());
                 pane->updateHeader();   // the title gives the chip its room
@@ -616,6 +617,23 @@ public:
             m_phoneChip->setVisible(phone);
             if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->updateHeader();
         }
+    }
+
+    // Multiplayer (#W5N2, docs/REMOTE-PROTOCOL.md section 10.3). The chip beside the pane's title
+    // is the one thing always on screen while a pane is shared, so it is where "and two other
+    // people are watching" and "alice has the keyboard" have to be said. A guest driving gets the
+    // remote session's own treatment — the error hue on the chip and the hatched band across the
+    // title row — because it means the same thing: the keys landing here are not yours.
+    void setSharing(const QString &text, const QString &tooltip, bool guestDriving) {
+        if (!m_phoneChip) return;
+        m_phoneChip->setText(text.isEmpty() ? QStringLiteral("phone") : text);
+        m_phoneChip->setToolTip(tooltip);
+        if (guestDriving == m_guestDriving) return;
+        m_guestDriving = guestDriving;
+        m_phoneChip->setAlarm(guestDriving);
+        m_backdrop->setVisible(m_remote || m_guestDriving);
+        placeBackdrop();
+        if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->updateHeader();
     }
 
     // Pane title (issue JRWQ): the header's right-hand directory must not end up under these
@@ -731,7 +749,10 @@ private:
             setObjectName(glyph == relay::panestatus::Glyph::Remote ? QStringLiteral("paneRemoteChip") : QStringLiteral("panePhoneChip"));
             setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
         }
-        void setText(const QString &text) { m_text = text; updateGeometry(); update(); }
+        void setText(const QString &text) { if (m_text == text) return; m_text = text; updateGeometry(); update(); }
+        // A phone chip that has to be noticed: painted as the remote-session chip is, because
+        // "somebody else's keys are landing here" is the same warning.
+        void setAlarm(bool alarm) { if (m_alarm == alarm) return; m_alarm = alarm; update(); }
         QSize sizeHint() const override {
             QFont bold = font(); bold.setWeight(QFont::DemiBold);
             const int text = std::min(220, QFontMetrics(bold).horizontalAdvance(m_text));
@@ -742,7 +763,7 @@ private:
     protected:
         void paintEvent(QPaintEvent *) override {
             const relay::panestatus::Tokens t = relay::chrome::tokens();
-            const bool remote = m_glyph == relay::panestatus::Glyph::Remote;
+            const bool remote = m_glyph == relay::panestatus::Glyph::Remote || m_alarm;
             const relay::panestatus::TypeStyle style = remote ? relay::panestatus::remoteStyle(t) : relay::panestatus::phoneStyle(t);
             QPainter p(this);
             p.setRenderHint(QPainter::Antialiasing);
@@ -761,6 +782,7 @@ private:
     private:
         relay::panestatus::Glyph m_glyph;
         QString m_text;
+        bool m_alarm = false;
     };
 
     // The remote band behind a terminal's title row: the error hue, hatched, with a firm line under
@@ -795,7 +817,7 @@ private:
     PaneHeaderChip *m_remoteChip = nullptr, *m_phoneChip = nullptr;
     RemoteBackdrop *m_backdrop = nullptr;
     relay::panestatus::State m_state = relay::panestatus::State::Idle;
-    bool m_remote = false, m_phone = false;
+    bool m_remote = false, m_phone = false, m_guestDriving = false;
     QString m_remoteHost;
 };
 

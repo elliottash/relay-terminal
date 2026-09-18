@@ -86,6 +86,8 @@ struct Request {
 // its session token, which is what a guest never sees either).
 struct SharedPane {
     QString id, title;
+    bool operator==(const SharedPane &other) const { return id == other.id && title == other.title; }
+    bool operator!=(const SharedPane &other) const { return !(*this == other); }
 };
 
 // Per shared pane, and per share: both off by default (section 10.5).

@@ -12,6 +12,8 @@
 // Screen state comes from the frame `relay::TerminalView` has already pulled: `VtCore::updateFrame`
 // consumes the dirty state, so a second caller would stop the pane repainting. A pane without a
 // frame cannot be shared (docs/ENGINE.md).
+#include "SharingPane.h"
+
 #include <QByteArray>
 #include <QDialog>
 #include <QJsonArray>
@@ -27,6 +29,7 @@ class QLabel;
 class QListWidget;
 class QProcess;
 class QPushButton;
+class QSpinBox;
 class QTimer;
 
 namespace relay {
@@ -89,6 +92,35 @@ public:
     // (docs/REMOTE-PROTOCOL.md section 6.7); this is the switch the dialog drives.
     void setPasswordEntry(const QString &deviceId, bool allow);
 
+    // ----- multiplayer, the owner's controls (docs/REMOTE-PROTOCOL.md section 10.5) ------------
+    // Every one of these is desktop-only by the protocol: the same name arriving over the wire
+    // from any device, the owner's own paired phone included, is refused `not_permitted`. They
+    // are here rather than in the Sharing pane so that the pane stays a view.
+
+    // `invite_create {pane, role, expires, uses}` → an `invite` line with the link and its QR.
+    void createInvite(const QString &paneId, const QString &role, int expires, int uses);
+    void revokeInvite(const QString &inviteId);
+    // `knock_answer`. May lower the invite's role and never raise it; the hub checks that too.
+    void answerKnock(const QString &participant, bool admit, const QString &role);
+    void setRole(const QString &participant, const QString &role);
+    void removeParticipant(const QString &participant);
+    // `control_answer {pane, participant, grant}`. An empty participant with `grant` false is the
+    // owner taking a pane back from whoever holds it (`control_revoke`).
+    void answerControl(const QString &paneId, const QString &participant, bool grant);
+    // `control_take {pane}`: the owner's own keystroke landed in a pane a guest was driving. Sent
+    // from Pane's event filter, which never swallows the key that sent it.
+    void takeControl(const QString &paneId);
+    void answerPrompt(const QString &promptId, bool approve);
+    void pauseShare(const QString &paneId, bool on);
+    void endShare(const QString &paneId);
+    void setShareOptions(const QString &paneId, bool promptsImmediate, bool presentOnly);
+    void requestParticipants();
+
+    // Who is here, what is waiting and who is driving, for every shared pane. One per process:
+    // the Sharing pane and the pane headers read the same rows.
+    sharing::Model &sharingModel() { return m_sharing; }
+    const sharing::Model &sharingModel() const { return m_sharing; }
+
     // The answer to one `voice` line, carrying back the id it arrived with so that two clips in
     // flight cannot be given each other's words. `error` is what the phone shows when `ok` is
     // false; no audio and no key ever leaves this machine.
@@ -104,6 +136,17 @@ signals:
     void devicesChanged(const QJsonArray &items);
     void failed(const QString &message);
     void sharingChanged();
+    // An `invite` line: the link to hand out, its QR, and what it grants.
+    void inviteReady(const QString &url, const relay::QrMatrix &qr, const QString &role,
+                     int uses, int expires);
+    // Something changed in sharingModel(): the Sharing pane and the pane headers redraw.
+    void sharingModelChanged();
+    // Somebody is at the door, wants the keyboard, or has written a prompt. The window opens the
+    // Sharing pane and posts a notification — and never takes the keyboard, because the next
+    // keystroke would otherwise land on a button that admits a stranger.
+    void needsOwner(const QString &paneId, const QString &title, const QString &body);
+    // One second passed: the waiting rows' countdowns move and a lapsed one goes.
+    void secondPassed();
 
 private:
     RemoteShare();
@@ -125,6 +168,9 @@ public:
 private:
     void sendPane(const QString &paneId);
     void poll();
+    // Which panes are shared, and what the owner calls each one, handed to the model so the
+    // Sharing pane can name a share by its pane's title rather than by its session token.
+    void refreshSharedPanes();
 
     struct Shared {
         PaneHooks hooks;
@@ -142,6 +188,8 @@ private:
     QString m_base;
     QString m_note;
     QJsonArray m_addresses;
+    sharing::Model m_sharing;
+    QTimer *m_second = nullptr;
 };
 
 // The window behind the share button: the QR code, the code to compare, and who is connected.
@@ -152,6 +200,10 @@ public:
 
 private:
     void showPairing(const QString &url, const relay::QrMatrix &qr, int expires);
+    void showInvite(const QString &url, const relay::QrMatrix &qr, const QString &role,
+                    int uses, int expires);
+    void createInvite();
+    void updateRoleNote();
     void showAsk(int id, const QString &name, const QString &platform, const QString &fingerprint,
                  const QString &code, const QString &peer);
     void showDevices(const QJsonArray &items);
@@ -174,6 +226,16 @@ private:
     QPushButton *m_passwords = nullptr;
     QPushButton *m_stop = nullptr;
     int m_askId = -1;
+    // "Invite someone to this pane": the second way in, under the pairing QR, because pairing
+    // your own phone is the common case and stays the first thing offered.
+    QComboBox *m_inviteRole = nullptr;
+    QComboBox *m_inviteExpiry = nullptr;
+    QSpinBox *m_inviteUses = nullptr;
+    QLabel *m_inviteNote = nullptr;
+    QLabel *m_inviteQr = nullptr;
+    QLabel *m_inviteUrl = nullptr;
+    QPushButton *m_inviteCopy = nullptr;
+    QString m_inviteLink;
 };
 
 } // namespace relay
