@@ -12,7 +12,7 @@ rank: zzzz12
 created: '2026-09-18'
 acceptance: a model served on this machine (llama.cpp, Ollama, LM Studio or vLLM) can be Main, Flash or Lite with no API key, and a real agent turn with a tool call runs against Ternary Bonsai 2 27B
 source: 'owner in chat, 2026-09-18: "research how opencode and other harnesses use local LLMs. in relay, set this up as a robust feature for agentic terminal use with local LLMs. install and set up bonsai 27B to run in relay as a test case."'
-links: {plans: [], commits: [48c80f7, 82237ad, 2a819ed, 4d55a1a, dd35ead], evidence: [docs/qa_evidence/2026-09-18-local-models/], related: [docs/LOCAL-MODELS.md], github: null}
+links: {plans: [], commits: [48c80f7, 82237ad, 2a819ed, 4d55a1a, dd35ead, 920aec7, 234bd4d, 9b47e6e], evidence: [docs/qa_evidence/2026-09-18-local-models/], related: [docs/LOCAL-MODELS.md, JH22, M109], github: null}
 ---
 # Local models: an agent on a model this machine serves
 
@@ -27,7 +27,7 @@ research how opencode and other harnesses use local LLMs. in relay, set this up 
 - [x] GUI: a local endpoint is a row in the model dropdown and can be pinned to a tier or a role <!-- t:a5 -->
 - [x] `scripts/relay-local.py`, `relay-agent.py --provider local:<id>`, `docs/LOCAL-MODELS.md` <!-- t:a6 -->
 - [x] Ternary Bonsai 2 27B installed under `/home/elliott/data/llms/`, served on 127.0.0.1:8080, unloaded when idle, and a real turn with a tool call run against it <!-- t:a7 -->
-- [ ] A Local models pane in Settings (health, Detect, model list) <!-- t:a8 s=deferred -->
+- [x] A Local models pane in Settings (health, Detect, model list) <!-- t:a8 -->
 - [ ] Per-request Ollama `num_ctx`: needs the native `/api/chat`, a second transport <!-- t:a9 s=deferred -->
 - [ ] Servers on the LAN: unencrypted traffic off this machine is the owner's decision <!-- t:aa s=deferred -->
 
@@ -80,7 +80,31 @@ research how opencode and other harnesses use local LLMs. in relay, set this up 
   `docs/AGENT-SESSIONS-PROTOCOL.md`: section 22 there was another session's uncommitted text when
   this landed, and a section appended after it could not be committed apart from it.
 
+## Second round, the same day
+The owner asked for a Settings section, an agent that sets a model up, and research on what is
+current. What landed:
+- `9b47e6e` **Options › Local models**: saved servers with status, Test, Refresh and Remove; Find
+  servers; Add by address; the two per-endpoint switches; "Set up a model with the agent…".
+- `234bd4d` the bundled **`local-model-setup` skill** (Relay's first bundled skill, in
+  `backend/relay_core/skills_bundled/`), dated runtime and model recipes, and
+  **`relay-local.py smoke`**: it answers, a native tool call, two consecutive calls, the literal
+  strings `<tool_call>` and `</think>` explained in prose, plausible usage. Measured: Muse Glimmer
+  through Ollama 5/5; Bonsai 2 on the PrismML llama-server 4/5 (the server's parser turns tags the
+  user typed into a bogus call; Relay refuses a tool it did not offer, so it is a wasted step).
+- `920aec7` `tool_arguments_as_object` per endpoint (Muse Glimmer's template on llama.cpp refuses
+  JSON-string arguments), Meta's ATEM and DeepSeek's DSML in text recovery, and side calls
+  (summaries, recaps, suggestions) keeping the local transport instead of rebuilding a hosted-style
+  config.
+- `#JH22` (`5ef8058`) the Local tier and `/local`; `#M109` (`74cac3e`) the provider dialog.
+- Research, in `docs/LOCAL-MODELS.md` and the skill's recipes: DwarfStar is a runtime (antirez's
+  `ds4`), not a model; GLM-5.3-Flash and DeepSeek V4/V4.1 Flash are open weights but too large or
+  too unsettled to set up by default; Muse Glimmer 30B is the strongest small agent model found and
+  already runs here through Ollama. The catalog is dated and the smoke test decides.
+
 ## For QA
+- [ ] Options › Local models: Find servers lists what is running, Save adds it to every pane's dropdown, Remove takes it away
+- [ ] "Set up a model with the agent…" opens an agent turn that loads `local-model-setup` and starts with a read-only survey
+- [ ] `scripts/relay-local.py smoke http://127.0.0.1:8080 --model bonsai-2-27b` reports 4/5 with check 4 failing as described; against Ollama's `muse-glimmer:latest` 5/5
 - [ ] With no key stored anywhere and `local:bonsai` saved, a new pane's model chip reads `bonsai-2-27b · local` and a prompt that needs a tool gets a tool call and an answer
 - [ ] With one keyed preset, a new pane opens on the keyed preset, not the local row; picking the local row keeps the conversation and the context gauge takes 131,072
 - [ ] Settings › Models › API keys has no local row; Model roles lets Flash or Lite be the local endpoint with no "(no key)"
