@@ -72,4 +72,19 @@ Direction dropEdge(const QPoint &local, const QSize &size) {
     return Direction::Down;
 }
 
+QList<QPointer<QSplitter>> enclosingSplitters(QWidget *pane) {
+    QList<QPointer<QSplitter>> splitters;
+    for (QWidget *widget = pane ? pane->parentWidget() : nullptr; widget; widget = widget->parentWidget())
+        if (auto *splitter = qobject_cast<QSplitter *>(widget)) splitters.append(splitter);
+    return splitters;
+}
+
+void restoreSizes(const QList<QPointer<QSplitter>> &splitters, const QList<QList<int>> &sizes) {
+    for (int i = 0; i < splitters.size() && i < sizes.size(); ++i) {
+        QSplitter *splitter = splitters.at(i);
+        if (!splitter || splitter->count() != sizes.at(i).size()) continue;
+        splitter->setSizes(sizes.at(i));
+    }
+}
+
 }  // namespace relay::panes

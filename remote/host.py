@@ -261,6 +261,10 @@ class Host:
         self.devices.on_revoke(self._device_changed)
         self.source.on_panes(self._panes_changed)
         self.source.on_agent(self._agent_event)
+        # A source that can produce screen state opts in; an agent-only one simply does not have it.
+        self.screens = hasattr(self.source, "on_screen")
+        if self.screens:
+            self.source.on_screen(self._screen_event)
 
     # ---- registration and the rendezvous link --------------------------------------------------
 
@@ -372,6 +376,8 @@ class Host:
             await channel.run()
         finally:
             self.channels.pop(channel.id, None)
+            if self.screens and channel.device_id:
+                self.source.release_device(channel.device_id)
 
     async def _send_envelope(self, kind: int, channel: bytes, payload: bytes) -> None:
         if self.socket is None:
@@ -396,7 +402,13 @@ class Host:
 
     def _panes_changed(self) -> None:
         message = self.stream("panes", limit=64).add({"t": "panes", "items": self.source.snapshot()})
-        self._fan_out("panes", message, needed=wire.VIEW)
+        self._fan_out(message, needed=wire.VIEW)
+
+    def _screen_event(self, pane: str, message: dict) -> None:
+        # Screen frames are large and only interesting to whoever is looking at that pane, so they
+        # are not kept in a long ring: a client that falls behind asks for a fresh snapshot.
+        stream = self.stream(f"screen:{pane}", limit=8)
+        self._fan_out(stream.add(message), needed=wire.VIEW, pane=pane)
 
     def _agent_event(self, pane: str, event: dict) -> None:
         name = event.get("event", "")
@@ -404,7 +416,7 @@ class Host:
             return                      # denied by default; see remote/wire.py
         message = self.stream(f"agent:{pane}").add(
             {"t": "agent", "pane": pane, "event": self._scrub(event)})
-        self._fan_out(f"agent:{pane}", message, needed=wire.VIEW, pane=pane)
+        self._fan_out(message, needed=wire.VIEW, pane=pane)
 
     @staticmethod
     def _scrub(event: dict) -> dict:
@@ -414,15 +426,16 @@ class Host:
             event["message"] = event["message"].split(":")[0][:200]
         return event
 
-    def _fan_out(self, stream: str, message: dict, *, needed: str, pane: str | None = None) -> None:
+    def _fan_out(self, message: dict, *, needed: str, pane: str | None = None) -> None:
+        """Send to every channel allowed to see it. Capability is re-read per channel, so a
+        downgrade or a revoke that happened a moment ago takes effect on this very message."""
         for channel in list(self.channels.values()):
             capability = channel.capability()
             if capability is None or not wire.allows(capability, needed):
                 continue
             if pane is not None and pane not in channel.subscribed:
                 continue
-            if stream == "panes" or pane is not None:
-                self._spawn(channel.send(message))
+            self._spawn(channel.send(message))
 
     def _spawn(self, coroutine) -> None:
         task = asyncio.create_task(coroutine)
@@ -436,6 +449,8 @@ class Host:
             if channel.device_id != device_id:
                 continue
             if device is None or device.revoked:
+                if self.screens:
+                    self.source.release_device(device_id)
                 self._spawn(self._revoke_channel(channel))
 
     async def _revoke_channel(self, channel: Channel) -> None:
@@ -468,7 +483,8 @@ class Host:
             "capability": device.capability,
             "password_entry": device.password_entry,
             "hub_epoch": self.epoch,
-            "features": ["panes", "agent", "compose", "voice"],
+            "features": (["panes", "agent", "compose", "voice"]
+                         + (["screen", "takeover"] if self.screens else [])),
             "server_time": time.time(),
         })
         await channel.send(self.stream("panes", limit=64).add(
@@ -560,9 +576,14 @@ class Host:
         stream = self.stream(f"agent:{pane}")
         for item in list(stream.ring)[-40:]:
             await channel.send(item)
+        if self.screens:
+            await channel.send(self.source.screen_snapshot(pane))
 
     async def _on_pane_blur(self, channel: Channel, message: dict) -> None:
-        channel.subscribed.discard(message.get("pane", ""))
+        pane = message.get("pane", "")
+        channel.subscribed.discard(pane)
+        if self.screens and channel.device_id:
+            self.source.release(pane, channel.device_id)
 
     # -- agent -----------------------------------------------------------------------------------
 
@@ -638,15 +659,59 @@ class Host:
         await channel.send({"t": "agent", "pane": pane, "id": message.get("id"),
                             "event": {"event": "tool_output", "output": payload}})
 
+    # -- take over ---------------------------------------------------------------------------------
+    # All of these need `full`, which wire.CLIENT_TYPES enforces before we are called. The source
+    # refuses them again if the pane is at a password prompt, read fresh from the tty.
+
+    def _typing_pane(self, channel: Channel, message: dict) -> str:
+        if not self.screens:
+            raise wire.WireError("not_permitted", "this desktop is not sharing a terminal.")
+        return self._pane_of(message)
+
+    async def _on_keys(self, channel: Channel, message: dict) -> None:
+        pane = self._typing_pane(channel, message)
+        data = message.get("bytes")
+        if not isinstance(data, str) or len(data) > 8192:
+            raise wire.WireError("unknown_type", "keys needs base64 bytes.")
+        try:
+            raw = base64.b64decode(data, validate=True)
+        except Exception as error:
+            raise wire.WireError("unknown_type", "keys must be base64.") from error
+        await self.source.send_keys(pane, raw, device=channel.device_id)
+
+    async def _on_line(self, channel: Channel, message: dict) -> None:
+        pane = self._typing_pane(channel, message)
+        text = message.get("text")
+        if not isinstance(text, str) or len(text) > 4096:
+            raise wire.WireError("unknown_type", "line needs text.")
+        await self.source.send_line(pane, text, device=channel.device_id)
+
+    async def _on_paste(self, channel: Channel, message: dict) -> None:
+        pane = self._typing_pane(channel, message)
+        text = message.get("text")
+        if not isinstance(text, str) or len(text) > 64_000:
+            raise wire.WireError("unknown_type", "paste needs text.")
+        await self.source.paste(pane, text, device=channel.device_id)
+
+    async def _on_control_request(self, channel: Channel, message: dict) -> None:
+        pane = self._typing_pane(channel, message)
+        await self.source.send_keys(pane, b"", device=channel.device_id)
+        await channel.send({"t": "agent", "pane": pane,
+                            "event": {"event": "status", "text": "You have the keyboard."}})
+
+    async def _on_control_release(self, channel: Channel, message: dict) -> None:
+        pane = self._typing_pane(channel, message)
+        self.source.release(pane, channel.device_id)
+
+    async def _on_screen_get(self, channel: Channel, message: dict) -> None:
+        pane = self._typing_pane(channel, message)
+        await channel.send(self.source.screen_snapshot(pane))
+
     # -- not in P1 ---------------------------------------------------------------------------------
 
     async def _on_history_get(self, channel: Channel, message: dict) -> None:
-        raise wire.WireError("not_permitted", "the terminal stream arrives in P2.")
-
-    async def _on_keys(self, channel: Channel, message: dict) -> None:
-        raise wire.WireError("not_permitted", "take-over arrives in P3.")
-
-    _on_paste = _on_line = _on_control_request = _on_control_release = _on_keys
+        # Needs a const VtCore::historyLines in both cores; see the design doc section 12.1.
+        raise wire.WireError("not_permitted", "scrollback paging is not implemented yet.")
 
     async def _on_secret_input(self, channel: Channel, message: dict) -> None:
         # Deliberately refused until the desktop can re-read termios at write time and mint a

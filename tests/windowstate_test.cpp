@@ -179,6 +179,30 @@ private slots:
         QCOMPARE(currentOf(windows.first().toObject()), 0);
     }
 
+    // #RDQ7: a start opens exactly the windows the layout asks for and no more. usableWindows() is
+    // the whole restore decision — main() opens one window per entry, and one plain window when it
+    // comes back empty — so a fresh profile must yield none and a saved two-window set exactly two.
+    void restoreOpensOneWindowPerSavedWindow() {
+        // A fresh profile: read() of a missing file gives an empty object, and nothing is reopened,
+        // so main() falls through to its single new window.
+        QCOMPARE(usableWindows(QJsonObject{}).size(), 0);
+        QCOMPARE(usableWindows(document(QJsonArray{})).size(), 0);
+        // One saved window stays one window, never a second helper record.
+        const QJsonObject one = document(QJsonArray{
+            windowRecord(QRect(0, 0, 800, 600), QStringLiteral("DP-1"), QJsonArray{pane(QStringLiteral("/tmp"))}, 0)});
+        QCOMPARE(usableWindows(one).size(), 1);
+        // Two saved windows restore as exactly two, each keeping its own tabs.
+        const QJsonObject two = document(QJsonArray{
+            windowRecord(QRect(0, 0, 800, 600), QStringLiteral("DP-1"), QJsonArray{pane(QStringLiteral("/tmp"))}, 0),
+            windowRecord(QRect(900, 0, 700, 500), QStringLiteral("DP-1"),
+                         QJsonArray{pane(QStringLiteral("/tmp")), pane(QStringLiteral("/"))}, 1)});
+        const QJsonArray windows = usableWindows(two);
+        QCOMPARE(windows.size(), 2);
+        QCOMPARE(tabsOf(windows.at(0).toObject()).size(), 1);
+        QCOMPARE(tabsOf(windows.at(1).toObject()).size(), 2);
+        QCOMPARE(currentOf(windows.at(1).toObject()), 1);
+    }
+
     void clampKeepsAWindowOnItsOwnScreen() {
         const QList<Screen> screens{{QStringLiteral("DP-1"), QRect(0, 0, 1920, 1080)},
                                     {QStringLiteral("HDMI-1"), QRect(1920, 0, 1280, 1024)}};

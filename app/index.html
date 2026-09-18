@@ -58,7 +58,30 @@
         <div id="thread-cwd" class="muted small"></div>
       </div>
     </div>
+
+    <div id="thread-tabs" hidden>
+      <button type="button" id="tab-agent" class="tab is-on">Agent</button>
+      <button type="button" id="tab-terminal" class="tab">Terminal</button>
+    </div>
+
     <div id="thread-body"></div>
+
+    <div id="terminal-pane" hidden>
+      <div id="screen-wrap"></div>
+      <div id="term-bar">
+        <span id="term-mode" class="chip">Watching</span>
+        <span id="term-note" class="muted small"></span>
+        <button type="button" id="term-take">Take over</button>
+        <button type="button" id="term-release" hidden>Hand back</button>
+      </div>
+      <div id="term-keys" hidden></div>
+      <div id="term-composer" hidden>
+        <input id="term-line" type="text" placeholder="Type a line, Enter to run"
+               autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">
+        <button type="button" id="term-send">Run</button>
+      </div>
+    </div>
+
     <div id="thread-note" class="muted small pad"></div>
     <div id="composer">
       <textarea id="composer-text" rows="1" placeholder="Ask the agent…"

@@ -86,11 +86,6 @@
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
-| `#308N` | [Next command and next prompt suggestions never appear](changes/2026-09-17-suggestions-not-working.md) | ready |  |  |  |
-| `#4PW5` | [A new pane is not active: typing and Ctrl+W do nothing](changes/2026-09-17-new-pane-not-active.md) | ready |  |  |  |
-| `#RDQ7` | [A small second window opens when Relay starts](changes/2026-09-17-second-window-on-start.md) | ready |  |  |  |
-| `#T9ZS` | [Ctrl+? does not open the shortcuts overlay](changes/2026-09-17-ctrl-question-shortcuts.md) | ready |  |  |  |
-| `#G152` | [Ctrl+H shrinks a pane to almost nothing](changes/2026-09-17-ctrl-h-shrinks-pane.md) | ready |  |  |  |
 | `#0C7V` | [Single click opens folders in the explorer pane (Dolphin style)](changes/2026-09-17-single-click-folders.md) | ready |  |  |  |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
 | `#90JF` | [Check that a terminal command will run before it is sent](changes/needs_qa_llm/2026-09-17-pre-submit-run-check.md) | needs-qa-llm |  |  |  |
@@ -99,4 +94,9 @@
 | `#H3QW` | [Tasks are the model's todos only; the request ledger becomes invisible](changes/needs_qa_llm/2026-09-17-tasks-are-todos-only.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code), 2026-09-17 |  |  |
 | `#D8VN` | [A turn that writes no todo list is checked by nothing — add a no-list nudge](changes/needs_qa_llm/2026-09-17-no-list-nudge.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code), 2026-09-17 |  |  |
 | `#ERES` | [Ctrl+Alt+arrow pane moves and pane dragging do not work](changes/needs_qa_llm/2026-09-17-pane-move-keys-and-drag-broken.md) | needs-qa-llm | agent |  |  |
+| `#308N` | [Next command and next prompt suggestions never appear](changes/needs_qa_llm/2026-09-17-suggestions-not-working.md) | needs-qa-llm | agent |  |  |
+| `#4PW5` | [A new pane is not active: typing and Ctrl+W do nothing](changes/needs_qa_llm/2026-09-17-new-pane-not-active.md) | needs-qa-llm | agent |  |  |
+| `#RDQ7` | [A small second window opens when Relay starts](changes/needs_qa_llm/2026-09-17-second-window-on-start.md) | needs-qa-llm | agent |  |  |
+| `#T9ZS` | [Ctrl+? does not open the shortcuts overlay](changes/needs_qa_llm/2026-09-17-ctrl-question-shortcuts.md) | needs-qa-llm | agent |  |  |
+| `#G152` | [Ctrl+H shrinks a pane to almost nothing](changes/needs_qa_llm/2026-09-17-ctrl-h-shrinks-pane.md) | needs-qa-llm | agent |  |  |
 | `#SQAM` | [Provider stalls have no visible progress, no retry and no log](changes/needs_qa_llm/2026-09-17-provider-stalls-and-no-logs.md) | needs-qa-llm | implemented by Claude Opus 5 (1M context), Claude Code session, 2026-09-17 |  |  |

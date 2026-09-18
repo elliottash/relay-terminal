@@ -23,7 +23,11 @@
 //        {"t":"title","text":"..."} {"t":"cwd","path":"..."} {"t":"bell"}
 //        {"t":"mark","kind":K,"row":R,"exit":E}                OSC 133
 //        {"t":"status","foreground_pid":N,"running":bool}       tcgetpgrp on the master
+//        {"t":"out","bytes":"<base64>"}     raw PTY bytes, only with --raw-out
 //        {"t":"exit","code":N}
+//
+// --raw-out exists so the desktop can attach its own terminal to the same shell while a phone
+// watches the screen state. The phone never receives these bytes.
 //
 //   <row> is {"row":N,"segs":[[text,fg,bg,attrs],...]} — runs of identical style, so the client
 //   needs no index arithmetic and no second emulator. fg/bg are packed relay::CellColor.
@@ -113,9 +117,15 @@ QJsonObject rowOf(const Line &line, int row)
 
 class Bridge : public QObject {
 public:
-    Bridge(TerminalSession *session, int rows, int cols)
+    Bridge(TerminalSession *session, int rows, int cols, bool rawOut)
         : m_session(session), m_rows(rows), m_cols(cols)
     {
+        if (rawOut) {
+            session->setOutputSignalEnabled(true);
+            connect(session, &TerminalSession::output, this, [](const QByteArray &bytes) {
+                writeLine({{"t", "out"}, {"bytes", QString::fromLatin1(bytes.toBase64())}});
+            });
+        }
         connect(session, &TerminalSession::titleChanged, this, [](const QString &title) {
             writeLine({{"t", "title"}, {"text", title}});
         });
@@ -263,6 +273,7 @@ int main(int argc, char **argv)
 
     int rows = kDefaultRows, cols = kDefaultCols, scrollback = 2000;
     QString core, program, directory;
+    bool rawOut = false;
     const QStringList arguments = QCoreApplication::arguments();
     for (int i = 1; i < arguments.size(); ++i) {
         const QString &argument = arguments[i];
@@ -273,6 +284,7 @@ int main(int argc, char **argv)
         else if (argument == QLatin1String("--shell")) program = next();
         else if (argument == QLatin1String("--cwd")) directory = next();
         else if (argument == QLatin1String("--scrollback")) scrollback = next().toInt();
+        else if (argument == QLatin1String("--raw-out")) rawOut = true;
     }
     if (rows <= 0) rows = kDefaultRows;
     if (cols <= 0) cols = kDefaultCols;
@@ -290,7 +302,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    Bridge bridge(&session, rows, cols);
+    Bridge bridge(&session, rows, cols, rawOut);
     bridge.sendHello();
     return app.exec();
 }

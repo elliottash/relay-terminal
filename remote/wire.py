@@ -48,6 +48,7 @@ CLIENT_TYPES: dict[str, str | None] = {
     "turn_transcript_get": VIEW,
     "tool_output_get": VIEW,
     "history_get": VIEW,
+    "screen_get": VIEW,
     "compose": AGENT,
     "agent_stop": AGENT,
     "queue_remove": AGENT,

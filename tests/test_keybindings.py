@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -10,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from relay_core.agent import Agent
-from relay_core.keybindings import KeybindingCatalog, KeybindingError, normalize_key
+from relay_core.keybindings import MAX_KEYS, KeybindingCatalog, KeybindingError, normalize_key
 from relay_core.provider import ProviderConfig
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -255,6 +256,37 @@ class WorkerTests(unittest.TestCase):
         events = self.run_worker([{'type': 'keybindings', 'path': str(self.root / 'keybindings.json'), 'actions': ACTIONS}],
                                  until=lambda ev: len(ev) >= 2)
         self.assertEqual(events[1]['event'], 'error')
+
+
+class GuiDefaultsTests(unittest.TestCase):
+    """The action registry lives in src/main.cpp; these read it as text (no window needed)."""
+
+    def defaults(self, action):
+        source = (ROOT / 'src/main.cpp').read_text(encoding='utf-8')
+        match = re.search(r'add\("' + re.escape(action) + r'",.*?\{(.*?)\}\);', source, re.S)
+        self.assertIsNotNone(match, f'{action} is not in the action registry')
+        return re.findall(r'QStringLiteral\("([^"]+)"\)', match.group(1))
+
+    def test_the_shortcuts_overlay_binds_every_spelling_of_ctrl_question(self):
+        # #T9ZS: "Ctrl+?" is one gesture with several spellings. Qt reports the main-row key as
+        # Key_Question on a US layout but as Key_Slash on others and on the keypad, always with
+        # Shift held, so a lone "Ctrl+?" binding never fires on those keyboards.
+        keys = self.defaults('help.shortcuts')
+        for spelling in ('Ctrl+?', 'Ctrl+Shift+/', 'Ctrl+/'):
+            self.assertIn(spelling, keys)
+        self.assertIn('F1', keys, 'F1 must keep working')
+        for key in keys:
+            normalize_key(key)
+        self.assertLessEqual(len(keys), MAX_KEYS, 'the agent tool caps an action at MAX_KEYS keys')
+
+    def test_no_other_action_claims_a_shortcuts_overlay_key(self):
+        source = (ROOT / 'src/main.cpp').read_text(encoding='utf-8')
+        claimed = set(self.defaults('help.shortcuts'))
+        for action, block in re.findall(r'add\("([a-zA-Z.]+)", "[a-z]+", "[^"]*",\s*\{(.*?)\}\);', source, re.S):
+            if action == 'help.shortcuts':
+                continue
+            for key in re.findall(r'QStringLiteral\("([^"]+)"\)', block):
+                self.assertNotIn(key, claimed, f'{action} collides with help.shortcuts on {key}')
 
 
 if __name__ == '__main__':

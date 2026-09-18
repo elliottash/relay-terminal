@@ -178,6 +178,17 @@ public:
         const auto keys = keysFor(id);
         return keys.isEmpty() ? QString() : QKeySequence::fromString(keys.first(), QKeySequence::PortableText).toString(QKeySequence::NativeText);
     }
+    // Every key bound to an action, as the desktop writes them. An action whose one gesture needs
+    // several spellings (help.shortcuts: Ctrl+? is Ctrl+Shift+/ on most keyboards) can then tell
+    // the user which keys actually work instead of only the first one.
+    QStringList shortcutTexts(const QString &id) const {
+        QStringList texts;
+        for (const auto &key : keysFor(id)) {
+            const QString text = QKeySequence::fromString(key, QKeySequence::PortableText).toString(QKeySequence::NativeText);
+            if (!text.isEmpty() && !texts.contains(text)) texts << text;
+        }
+        return texts;
+    }
     QStringList conflicts() const { return m_conflicts; }
 
     // Returns the action bound to a key event, or an empty string.
@@ -372,7 +383,12 @@ private:
         // which is exactly when a picture of the pane is worth sending (issue EM1E).
         add("agent.screenshotPane", "agent", "Screenshot this pane and attach it to the next prompt",
             {QStringLiteral("Ctrl+Shift+G")});
-        add("help.shortcuts", "palette", "Show all keyboard shortcuts", {QStringLiteral("Ctrl+?"), QStringLiteral("F1")});
+        // "Ctrl+?" is one gesture with several spellings. Qt reports the main-row key as
+        // Key_Question on a US layout and as Key_Slash on others and on the keypad, with Shift
+        // held either way, so all of them are bound: Ctrl+Shift+? reaches Ctrl+? and Ctrl+Shift+/
+        // on a Key_Slash layout reaches Ctrl+/ through match()'s shifted-symbol fallback.
+        add("help.shortcuts", "palette", "Show all keyboard shortcuts",
+            {QStringLiteral("Ctrl+?"), QStringLiteral("Ctrl+Shift+/"), QStringLiteral("Ctrl+/"), QStringLiteral("F1")});
         add("keybindings.edit", "terminal", "Edit keyboard shortcuts", {});
         add("keybindings.reload", "terminal", "Reload keyboard shortcuts", {});
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
@@ -1384,6 +1400,12 @@ private:
         auto *terminalLayout = new QVBoxLayout(m_terminalHost); terminalLayout->setContentsMargins(0, 0, 0, 0);
         layout->addWidget(m_terminalHost, 1);
         auto *composer = new QFrame; composer->setFrameShape(QFrame::StyledPanel);
+        // The prompt box never sets the pane's minimum width. Its chip row is wider than a pane in
+        // a three-pane split, and a splitter that cannot satisfy every minimum redistributes as
+        // soon as one of them changes — which is what made taking control (Ctrl+H) shrink a pane
+        // to almost nothing (#G152). Ignored means the row is squeezed instead, as it already is
+        // in a narrow pane; the pane's minimum width stays the terminal's.
+        composer->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         m_composer = composer;
         auto *composerLayout = new QVBoxLayout(composer);
         auto *routeRow = new QHBoxLayout;
@@ -1422,8 +1444,11 @@ private:
         m_secretChip->setToolTip(QStringLiteral("The line is written to the program and never stored"));
         m_secretChip->hide();
         routeRow->addWidget(m_secretChip);
-        // The routing verdict has no chip of its own: it is the mode chip's tooltip.
-        m_routeLabel = new QLabel;
+        // The routing verdict has no chip of its own: it is the mode chip's tooltip. The label
+        // survives only as the place that text and tooltip live, so it is parented to the composer
+        // and never added to a layout or shown. A parentless QWidget that is shown becomes a
+        // top-level window of its own: that is the tiny second window of #RDQ7.
+        m_routeLabel = new QLabel(composer);
         m_routeLabel->hide();
         m_opaqueHint = new QLabel;
         m_opaqueHint->setObjectName(QStringLiteral("opaqueHint"));
@@ -2513,6 +2538,19 @@ private:
         if (type == QStringLiteral("suggestion")) {
             const QString kind = event.value(QStringLiteral("kind")).toString();
             const QString text = event.value(QStringLiteral("text")).toString().trimmed();
+            // A side call that failed says so, on the status line, naming the call and the model it
+            // ran on. Without this the only sign was a bare provider error and no ghost text, which
+            // reads as "suggestions do not work" (#308N).
+            const QString error = event.value(QStringLiteral("error")).toString();
+            if (!error.isEmpty()) {
+                if (event.value(QStringLiteral("id")).toString() != m_suggestionId) return true;
+                m_suggestionId.clear();
+                const QString model = event.value(QStringLiteral("model")).toString();
+                status(QStringLiteral("%1 suggestion failed%2: %3")
+                           .arg(kind == QStringLiteral("next_prompt") ? QStringLiteral("Next-prompt") : QStringLiteral("Next-command"),
+                                model.isEmpty() ? QString() : QStringLiteral(" (") + model + ')', error));
+                return true;
+            }
             if (event.value(QStringLiteral("id")).toString() != m_suggestionId || text.isEmpty() || !m_editor->toPlainText().isEmpty()) return true;
             if (kind == QStringLiteral("next_command") && m_modeValue == QStringLiteral("agent")) return true;
             if (kind == QStringLiteral("next_prompt") && m_modeValue == QStringLiteral("shell")) return true;
@@ -3201,7 +3239,12 @@ public:
             row(QStringLiteral("Ctrl+Shift+O"), QStringLiteral("search past conversations"));
             row(keys.shortcutText(QStringLiteral("control.human")), QStringLiteral("type into the terminal"));
             row(QStringLiteral("Esc"), QStringLiteral("stop the agent or the program"));
-            row(keys.shortcutText(QStringLiteral("help.shortcuts")), QStringLiteral("show all shortcuts"));
+            // Ctrl+? is Ctrl+Shift+/ on most keyboards, so the card names every key that works
+            // rather than only the first spelling (#T9ZS).
+            const QStringList helpKeys = keys.shortcutTexts(QStringLiteral("help.shortcuts"));
+            row(helpKeys.value(0), helpKeys.size() > 1
+                    ? QStringLiteral("show all shortcuts (also %1)").arg(helpKeys.mid(1).join(QStringLiteral(", ")))
+                    : QStringLiteral("show all shortcuts"));
             auto *hide = new QLabel(QStringLiteral("?  to hide this"));
             hide->setObjectName(QStringLiteral("helpFooter"));
             box->addWidget(hide);
@@ -5669,7 +5712,7 @@ private:
         }
         m_opaqueHint->setText(text);
         m_opaqueHint->setVisible(!text.isEmpty());
-        m_routeLabel->setVisible(text.isEmpty());
+        // m_routeLabel is not shown here: it is the mode chip's tooltip, not a widget on the row.
     }
 
     // A program is blocked reading a line (`apt`'s `[Y/n]`). The prompt box keeps the keyboard;
@@ -5978,6 +6021,21 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
         }
     }
 
+    // Hiding or showing the prompt box changes this pane's minimum size, and every splitter above
+    // it then redistributes the panes: taking control in a three-pane row shrank the last pane to
+    // almost nothing (#G152), and the saved window layout stored that collapsed size. Run the
+    // change with the enclosing splitters' sizes frozen and put them back, once straight away and
+    // once after the layout has run, because the new minimum only reaches the splitter then.
+    void keepPaneSizes(const std::function<void()> &change) {
+        const QList<QPointer<QSplitter>> splitters = relay::panes::enclosingSplitters(this);
+        QList<QList<int>> sizes;
+        for (const auto &splitter : splitters) sizes.append(splitter ? splitter->sizes() : QList<int>());
+        change();
+        auto restore = [splitters, sizes] { relay::panes::restoreSizes(splitters, sizes); };
+        restore();
+        if (!splitters.isEmpty()) QTimer::singleShot(0, this, restore);
+    }
+
     void setNative(bool enabled, bool cancelLine = true) {
         // Taking control leaves masked input: the password is then typed into the program itself.
         if (enabled && m_secretMode) { m_secretDeclined = true; leaveSecretMode(); }
@@ -5985,7 +6043,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
         changed();
         m_editor->setReadOnly(enabled);
         // Human control hides the prompt box entirely; the terminal gets the space and the keys.
-        if (m_composer) m_composer->setVisible(!enabled);
+        if (m_composer) keepPaneSizes([this, enabled] { m_composer->setVisible(!enabled); });
         placeSubagentsPanel();   // subagents UI: hidden with the composer
         if (!enabled) m_hideReason = HideReason::None;
         if (enabled) hideAtPopup();
@@ -6018,7 +6076,10 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
     void focusTerminal() {
         // Only native input puts the keyboard in the terminal (issue decision 1).
         if (!m_native) { focusInput(); return; }
-        if (QWidget *target = m_backend ? m_backend->focusWidget() : nullptr) target->setFocus(Qt::OtherFocusReason);
+        if (QWidget *target = m_backend ? m_backend->focusWidget() : nullptr) { target->setFocus(Qt::OtherFocusReason); return; }
+        // A pane whose terminal is not up yet still has to hold the keyboard: otherwise nothing in
+        // the pane is focused, and the window's shortcuts have no pane to act on (#4PW5).
+        m_editor->setFocus(Qt::OtherFocusReason);
     }
     void updatePaths() {
         if (m_cwdChip) {
@@ -7322,7 +7383,13 @@ protected:
         // Accept the override so neither the composer nor Konsole consumes the key,
         // then act on the key press itself. Auto-repeat does not open a burst of tabs.
         event->accept();
-        if (event->type() == QEvent::KeyPress && !key->isAutoRepeat()) QTimer::singleShot(0, this, [this, id] { runAction(id); });
+        if (event->type() == QEvent::KeyPress && !key->isAutoRepeat()) {
+            // Remember the combination as the desktop writes it, so an action can name the key
+            // that actually reached it (the shortcuts overlay does, #T9ZS).
+            m_lastShortcut = {id, QKeySequence(int(key->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier))
+                                               | key->key()).toString(QKeySequence::NativeText)};
+            QTimer::singleShot(0, this, [this, id] { runAction(id); });
+        }
         return true;
     }
 
@@ -7431,6 +7498,18 @@ private:
         tree->setRootIsDecorated(false);
         tree->setAlternatingRowColors(true);
         layout->addWidget(tree, 1);
+        // Which keys reach this overlay, and which one just did. "Ctrl+?" is Ctrl+Shift+/ on most
+        // keyboards, so naming the key that worked is the answer to "Ctrl+? does nothing" (#T9ZS).
+        const QStringList openKeys = Keymap::instance().shortcutTexts(QStringLiteral("help.shortcuts"));
+        QString opened = QStringLiteral("Opens with %1, or from the palette (%2).")
+                             .arg(openKeys.isEmpty() ? QStringLiteral("no key") : openKeys.join(QStringLiteral(", ")),
+                                  Keymap::instance().shortcutText(QStringLiteral("palette.open")));
+        if (m_lastShortcut.first == QStringLiteral("help.shortcuts") && !m_lastShortcut.second.isEmpty())
+            opened += QStringLiteral("  You pressed %1.").arg(m_lastShortcut.second);
+        m_lastShortcut = {};
+        auto *opensWith = new QLabel(opened);
+        opensWith->setWordWrap(true); opensWith->setObjectName(QStringLiteral("transcriptHeader"));
+        layout->addWidget(opensWith);
         auto *note = new QLabel(QStringLiteral("Unbound actions run from the palette (%1). Edit shortcuts: Actions › Edit keyboard shortcuts.")
                                     .arg(Keymap::instance().shortcutText(QStringLiteral("palette.open"))));
         note->setWordWrap(true); note->setObjectName(QStringLiteral("transcriptHeader"));
@@ -9228,7 +9307,14 @@ private:
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
         insertBeside(anchor, pane, orientation, false);
         setActive(pane);
-        QTimer::singleShot(0, pane, [pane] { pane->focusInput(); });
+        // Take the keyboard now and again once the splitter, the engine view and the pane's own
+        // startup have settled. A deferred focus on its own loses to anything that focuses while
+        // the pane is being inserted, and the pane then has no keyboard at all: nothing typed
+        // reaches it and the window's shortcuts find no pane under the focus (#4PW5).
+        focusLeaf(pane);
+        QPointer<Pane> guard(pane);
+        QTimer::singleShot(0, pane, [guard] { if (guard) guard->focusInput(); });
+        QTimer::singleShot(120, pane, [this, guard] { if (guard && m_activeLeaf == guard.data()) guard->focusInput(); });
     }
 
     void navigate(relay::panes::Direction direction) {
@@ -9928,6 +10014,9 @@ private:
     QPointer<QWidget> m_hoverLeaf, m_wantedHoverLeaf;   // shown now, and what showChromeFor was last asked for
     bool m_updatingChrome = false;
     QPointer<QToolButton> m_newTabButton;
+    // The last action run from the keyboard and the key that ran it, so an action can name the
+    // combination that reached it. Cleared by whoever reads it; a palette run never sets it.
+    QPair<QString, QString> m_lastShortcut;
     // Window header (see buildWindowChrome). m_nativeFrame: this window kept the system title bar.
     static constexpr int kFrameMargin = 5;
     bool m_nativeFrame = false;
