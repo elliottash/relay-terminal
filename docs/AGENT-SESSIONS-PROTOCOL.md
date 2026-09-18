@@ -859,3 +859,69 @@ the event's native keysym because Qt reports both Alt keys as `Qt::Key_Alt`. The
 consumed unless it is F9: Right Alt is AltGr on most layouts and must keep typing. Pressing any
 other key while it is held cancels the recording, and the first-run default is `off` on keyboards
 whose layout types with AltGr (`/etc/default/keyboard`).
+
+## 17. Pane title and tab label (v1.7, 2026-09-17)
+
+Backend: `backend/relay_core/titles.py` with the state on `Agent` and the handlers in
+`session_protocol.py`; GUI: `src/PaneTitles.{h,cpp}` and `src/main.cpp`; tests:
+`tests/test_titles.py`, `tests/panetitles_test.cpp`. Source:
+`issues/features/needs_qa_llm/2026-09-17-pane-title-summary.md` (owner, 2026-09-17). Additive: a
+worker that never sends `session_title` leaves the header showing the pane's directory, and a
+worker that never receives `set_session_title` is simply never renamed.
+
+A session's `title` is no longer the first 80 characters of the first prompt but a short phrase
+saying what the pane is working on, at most six words. It is stored in the session file, so the
+conversation list (section 14) and the resume picker show the same text.
+
+### 17.1 `session_title` (event)
+
+`session_title {title, source: "user"|"model", session_id}`
+
+Sent when the title changes, and again whenever a session is resumed or loaded (`state_loaded`)
+or a new conversation starts, so a pane can put its header back without asking. `source` is
+`"user"` for a name the user typed and `"model"` for one Relay maintains — model-written, or the
+first-prompt fallback before any model has answered. It is what tells the header whether the name
+may still be replaced; only a `"user"` title is fixed.
+
+**When the worker writes one.** One no-tools side call on the `chores` role
+(section 13, Lite tier by default), started from the protocol layer after a turn ends so nothing
+waits for it:
+
+| Situation | A title call? |
+|---|---|
+| Before the first turn finishes | no |
+| Right after the first turn | yes |
+| Each of the next four turns | no |
+| Five turns after the last title (`titles.REFRESH_TURNS`) | yes |
+| After a compaction | yes, at the end of the next turn |
+| The user set the title | never, whatever happened |
+| Rewound to before the last title | no |
+
+The call sends a capped plain-text rendering of the conversation (`sidecall.render_transcript`,
+12 000 characters) and asks for `{"title": "..."}`; the reply is stripped of quotes, a `Title:`
+preamble and a trailing period, cut to six words and 60 characters. At most one title call per
+pane is ever in flight. **Fallback:** with no model configured, or when the call fails, the title
+stays the first prompt (80 characters) and `session_title` carries that text with
+`source: "model"`; the cadence still moves on, so a dead provider is not asked again every turn.
+
+### 17.2 `set_session_title`
+
+`set_session_title {title, id?}` → `session_title`
+
+Names the pane by hand (`/rename <text>`, or the in-place editor a double click on the header
+opens). The text is collapsed and capped at 200 characters. **An empty title hands the name back
+to the model** ("Use automatic name"): the pane goes back to `source: "model"` and a fresh title
+is written straight away rather than at the next cadence point.
+
+### 17.3 `tab_label`
+
+`tab_label {titles: [string, …] (≤32), id?}` → `tab_label {label, related, source: "model"|"text", id?}`
+
+A tab's label is derived from the titles its panes already have, so it costs **no extra title
+call**. The only judgement is whether the panes are on the same work: one phrase when they are
+(`"Fixing pane drag"`), the titles joined with `"; "` when they are not
+(`"Fixing pane drag; Release notes"`), shortened to fit the tab. That judgement is another cheap
+`chores` call; `source` says whether the model or the offline comparison made it. The offline rule
+(`titles.related_text`, mirrored in `src/PaneTitles.cpp`) is that every title shares a content word
+with the first, and it is what the GUI uses until the worker answers and whenever no model is
+configured. A failed call is not an error: the offline answer is sent instead.

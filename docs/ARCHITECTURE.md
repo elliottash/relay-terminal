@@ -87,7 +87,8 @@ Options: `--workspace/-w PATH` (initial terminal directory and agent workspace) 
 | `Pane` (leaf) | Terminal pane: KonsolePart, Bash bridge, composer, its own worker and conversation |
 | `ToolPane` (leaf) | Folder explorer or file preview (section 10) |
 
-Pane anatomy, top to bottom: directory line (click opens the explorer), an optional
+Pane anatomy, top to bottom: the header (the pane title on the left, the directory on the right;
+clicking the directory opens the explorer), an optional
 banner (memory kill, restart), the terminal, the transcript panel (section 8), the composer
 frame (route label, input-mode picker, model picker, interrupt-shell button, Submit, editor,
 key hints). Overlays float over the terminal without resizing it (a resize makes the idle shell
@@ -174,6 +175,27 @@ does not depend on an emoji font and hover, disabled and close-button colours co
   the header then shows only the bell and the gear, and the tab row no longer drags the window.
   It applies to windows opened after the change.
 
+### Pane titles and tab labels
+
+`src/PaneTitles.{h,cpp}` (library `relay-titles`, tests `tests/panetitles_test.cpp`) and protocol
+section 17. A pane's header shows what that pane is **doing**, not where it lives: a phrase of at
+most six words the worker writes on a cheap side call (the `chores` role) after the first turn, and
+then only when the work has moved on — five turns later, or after a compaction. It is kept in the
+session file, so the conversation list and the resume picker show the same text, and it falls back
+to today's first-prompt title when no model is configured or the call fails.
+
+- **Naming a pane by hand.** Double click the header title, or `/rename <name>`; `/rename` with no
+  argument opens the same in-place editor (Enter commits, Esc cancels). A hand-set name is fixed:
+  the model never overwrites it, and the small `auto` badge beside the title disappears. Clearing
+  the field hands the pane back to the model, which writes a fresh title straight away.
+- **Tab labels** are derived from the pane titles, so they cost no extra title call: one phrase when
+  the panes are on the same work, the titles joined with `"; "` when they are not ("Fixing pane
+  drag; Release notes"), elided to the tab. Which of the two is a cheap `tab_label` judgement on the
+  same `chores` role, asked only when a pane title actually changed and answered offline
+  (`relay::titles::relatedText`) until it comes back or when no model is configured.
+- `/rename-tab <name>`, or a double click on the tab, names the tab by hand; it too is fixed until
+  the field is cleared, and it follows the tab into a new window.
+
 ### Notification centre
 
 `relay::NotificationCenter` (`src/Notifications.*`, the `relay-notifications` library) is one
@@ -247,7 +269,8 @@ triggers: toolbar and palette activations of actions with shortcuts, pane button
 tab close and ⧉ buttons, clicking into another pane, mouse model/effort/mode pickers, clicking
 the directory line (`@`), the queue ×, `/shell ` and `/agent ` (`!`, `*`), palette rewinds, pane
 drags, the first `relay://` link, the Tasks chip and `/tasks`, `/requests`, `/todos` (→ `agent.requests`, Ctrl+Shift+K), Continue
-from the link or palette (→ `/continue` or `agent.continue`), and rotating idle tips 4 s after a finished agent turn with an
+from the link or palette (→ `/continue` or `agent.continue`), renaming a pane or a tab by double
+click (→ `/rename`, `/rename-tab`), and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
 in `WARP.md`); tests in `tests/hints_test.cpp`.
 
@@ -632,7 +655,7 @@ worker whose unread output exceeds 8 MiB and ignores its stderr. The worker rais
 Events: `ready`, `route`, `configured`, `presets`, `key_stored`, `warp_imported`,
 `keybindings_updated`, `queued`, `queue_changed`, `interrupting`, `agent_started`,
 `agent_finished`, `status`, `delta`, `usage`, `tool_started`, `tool_output`, `tool_result`,
-`done`, `cancelled`, `error`, `reset`. Errors carry `agent_busy`.
+`done`, `cancelled`, `error`, `reset`, `session_title` (section 17). Errors carry `agent_busy`.
 
 ### Conversation index and search
 
@@ -1100,11 +1123,12 @@ Other limits:
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `src/Conversations.*` | conversation list with search (Ctrl+Shift+O) and the Ctrl+F find bar |
 | `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |
+| `src/PaneTitles.*` | pane titles and the tab labels made from them: tidying a title, the offline "same work" rule, joining and shortening |
 | `src/Voice.*` | voice transcription: capture tool and arguments, the hold key, the transcript's place in the composer, WAV repair |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
 | `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search), `logs` (rotating `worker.log`) |
-| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `voice` (transcription) |
+| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and tab labels), `voice` (transcription) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `src/KonsoleBackend.*`, `src/EngineBackend.*` | the two `TerminalBackend` implementations |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |
