@@ -315,6 +315,13 @@ target_include_directories(relay-requests PUBLIC src)
 target_link_libraries(relay-requests PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-requests PRIVATE -Wall -Wextra -Wpedantic)
 
+# Multiplayer, the owner's side (#W5N2): the Sharing pane and the model behind it. The model eats
+# the sidecar's line JSON and holds no widgets, so tests/sharingpane_test.cpp runs it without a hub.
+add_library(relay-sharing STATIC src/SharingPane.cpp src/SharingPane.h)
+target_include_directories(relay-sharing PUBLIC src)
+target_link_libraries(relay-sharing PUBLIC ${RELAY_QT}::Widgets)
+target_compile_options(relay-sharing PRIVATE -Wall -Wextra -Wpedantic)
+
 # Relay's own terminal engine (engine/, docs/ENGINE.md). The library is built and linked
 # into the app (RELAY_HAVE_ENGINE, --engine=relay); the manual harness and the benchmark
 # are extra targets behind RELAY_BUILD_ENGINE.
@@ -337,7 +344,7 @@ if(RELAY_BUILD_APP)
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
     target_link_libraries(relay PRIVATE relay-closedlist)
-    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-remotesession relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-remotesession relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -402,6 +409,10 @@ if(BUILD_TESTING)
     add_executable(relay-requests-tests tests/requests_test.cpp)
     target_link_libraries(relay-requests-tests PRIVATE relay-requests ${RELAY_QT}::Test)
     add_test(NAME requests COMMAND relay-requests-tests)
+    add_executable(relay-sharing-tests tests/sharingpane_test.cpp)
+    target_link_libraries(relay-sharing-tests PRIVATE relay-sharing ${RELAY_QT}::Test)
+    add_test(NAME sharing COMMAND relay-sharing-tests)
+    set_tests_properties(sharing PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     set_tests_properties(requests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-windowstate-tests tests/windowstate_test.cpp)
     target_link_libraries(relay-windowstate-tests PRIVATE relay-windowstate ${RELAY_QT}::Test)
