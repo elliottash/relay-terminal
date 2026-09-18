@@ -250,6 +250,14 @@ target_include_directories(relay-highlight PUBLIC src)
 target_link_libraries(relay-highlight PUBLIC ${RELAY_QT}::Gui ${RELAY_QT}::Widgets relay-theme)
 target_compile_options(relay-highlight PRIVATE -Wall -Wextra -Wpedantic)
 
+# Unified diffs from the agent's file tools: the parser the concise tool-call notification and the
+# diff pane share, and the read-only viewer. relay-highlight carries src/Theme.cpp, so the add and
+# remove tints are derived from the live tokens and follow a theme switch.
+add_library(relay-diffview STATIC src/DiffView.cpp src/DiffView.h)
+target_include_directories(relay-diffview PUBLIC src)
+target_link_libraries(relay-diffview PUBLIC relay-highlight ${RELAY_QT}::Widgets)
+target_compile_options(relay-diffview PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
 target_include_directories(relay-requests PUBLIC src)
 target_link_libraries(relay-requests PUBLIC ${RELAY_QT}::Widgets)
@@ -410,6 +418,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-board-tests PRIVATE relay-board ${RELAY_QT}::Test)
     add_test(NAME board COMMAND relay-board-tests)
     set_tests_properties(board PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-diffview-tests tests/diffview_test.cpp)
+    target_link_libraries(relay-diffview-tests PRIVATE relay-diffview ${RELAY_QT}::Test)
+    add_test(NAME diffview COMMAND relay-diffview-tests)
+    set_tests_properties(diffview PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME backend-and-bash COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -v)
     # XDG_DATA_HOME keeps session autosaves and the conversation index out of the real profile.
     set_tests_properties(backend-and-bash PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
