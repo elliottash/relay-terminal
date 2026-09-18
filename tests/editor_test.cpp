@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QInputMethodEvent>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QTest>
 #include <QTextCursor>
@@ -108,6 +109,49 @@ private Q_SLOTS:
         QCOMPARE(editor.toPlainText(), QStringLiteral("git commit -m wip"));
         QVERIFY(editor.ghost().isEmpty());
         QVERIFY(!editor.acceptGhost(true));
+    }
+    // Image context (issue EM1E): a paste or a drop the pane claims as an image becomes `@path`
+    // tokens instead of text, and everything the pane does not claim still pastes as text.
+    void pastedImagesBecomeAttachmentTokens() {
+        RichEditor editor;
+        int calls = 0;
+        bool sawDrop = false;
+        editor.onImageMime = [&](const QMimeData *data, bool dropped) -> QStringList {
+            ++calls;
+            sawDrop = dropped;
+            return data->hasImage() ? QStringList{QStringLiteral("@/tmp/shot.png")} : QStringList{};
+        };
+        QMimeData *image = new QMimeData;
+        QImage picture(4, 4, QImage::Format_RGB32);
+        picture.fill(Qt::blue);
+        image->setImageData(picture);
+        QApplication::clipboard()->setMimeData(image);
+        editor.setPlainText(QStringLiteral("look at"));
+        editor.moveCursor(QTextCursor::End);
+        editor.paste();
+        QCOMPARE(calls, 1);
+        QVERIFY(!sawDrop);
+        QCOMPARE(editor.toPlainText(), QStringLiteral("look at @/tmp/shot.png "));
+    }
+    void aPasteWithoutAnImageStillPastesText() {
+        RichEditor editor;
+        editor.onImageMime = [](const QMimeData *, bool) { return QStringList{}; };
+        QMimeData *text = new QMimeData;
+        text->setText(QStringLiteral("git status"));
+        QApplication::clipboard()->setMimeData(text);
+        editor.paste();
+        QCOMPARE(editor.toPlainText(), QStringLiteral("git status"));
+    }
+    void attachmentTokensNeedNoSpaceAfterABlankBox() {
+        RichEditor editor;
+        editor.onImageMime = [](const QMimeData *, bool) {
+            return QStringList{QStringLiteral("@/tmp/a.png"), QStringLiteral("@\"/tmp/b c.png\"")};
+        };
+        QMimeData *text = new QMimeData;
+        text->setText(QStringLiteral("ignored"));
+        QApplication::clipboard()->setMimeData(text);
+        editor.paste();
+        QCOMPARE(editor.toPlainText(), QStringLiteral("@/tmp/a.png @\"/tmp/b c.png\" "));
     }
     void upInsideMultilineTextMovesCursor() {
         RichEditor editor; editor.remember(QStringLiteral("git status"));

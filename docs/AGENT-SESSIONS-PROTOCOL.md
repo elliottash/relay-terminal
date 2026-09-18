@@ -859,3 +859,110 @@ the event's native keysym because Qt reports both Alt keys as `Qt::Key_Alt`. The
 consumed unless it is F9: Right Alt is AltGr on most layouts and must keep typing. Pressing any
 other key while it is held cancels the recording, and the first-run default is `off` on keyboards
 whose layout types with AltGr (`/etc/default/keyboard`).
+
+## 17. Image context in agent prompts (v1.7, 2026-09-17)
+
+Implements issue `#EM1E`. GUI: `src/Images.{h,cpp}`, the composer hook in `src/RichEditor.cpp` and
+the pane's `attachImages` / `screenshotPane` in `src/main.cpp`; backend:
+`backend/relay_core/{attachments,provider,presets,roles,agent}.py`; tests: `tests/images_test.cpp`,
+`tests/editor_test.cpp` and `tests/test_images.py`.
+
+Owner decisions this implements (issue file, 2026-09-17): paste, drag-and-drop, a file path and a
+"screenshot this pane" action; GLM swaps to GLM-5.3-Flash **only for turns that carry an image**, and
+says so; a preset without vision uses the configured vision model, else the turn is refused with a
+message; images stay for their own turn and are then replaced by a short description plus the path;
+the vision model is chosen separately from the main model in Agent options.
+
+### 17.1 No new message: images ride the existing `attachments`
+
+`ask {attachments: [{path}]}` (section 10) is unchanged. The worker reads each attachment and now
+decides from its **first bytes**, not its name, whether it is an image: PNG, JPEG, WebP and GIF are
+attachments of `kind: "image"`, everything else is text as before. So all four inputs — paste, drop,
+`@path` and the pane screenshot — are one code path, and a GUI that knows nothing about images still
+works. The GUI's job is only to put a path in the composer.
+
+Caps (`backend/relay_core/provider.py`, mirrored by `relay::images::kMaxImageBytes`):
+
+| Limit | Value | Why |
+|---|---|---|
+| One image | 3 MiB | its base64 data URL is 4/3 of that, inside the 8 MiB request cap |
+| Images per turn | 4 | — |
+| All images in a turn | 6 MiB | the conversation has to fit beside them |
+
+Over a cap is a `ValueError` with the file named, which reaches the GUI as the ordinary `error`
+event; the GUI checks the same cap before sending so it can say so sooner.
+
+### 17.2 On the wire to the provider
+
+A user turn carrying images sends OpenAI-compatible multimodal content instead of a string:
+
+```json
+{"role": "user",
+ "content": [{"type": "text", "text": "<prompt, attachment labels and context>"},
+             {"type": "image_url",
+              "image_url": {"url": "data:image/png;base64,…", "detail": "auto"}}]}
+```
+
+The text part always comes first. The bytes are **always inlined as a data URL** — never an http(s)
+URL — so a picture of the user's screen goes to the configured provider and to nobody else, and no
+third party has to be able to fetch it. `provider.wire_messages` strips Relay's `relay_*` keys, so
+`relay_images` (the bookkeeping that remembers which file each part came from) never leaves the
+machine.
+
+### 17.3 Which model serves an image turn
+
+Decided once per turn, before the first model request, from the model id
+(`presets.model_supports_vision`, a prefix table; an OpenRouter-style slug matches on its last
+segment). Three outcomes:
+
+| Case | What happens |
+|---|---|
+| The pane's model reads images | nothing changes; no event |
+| It does not, and a vision model resolves | **that turn only** runs on it, then the pane goes back |
+| It does not, and none resolves | the turn is refused before anything is sent |
+
+The vision model is the `vision` role (section 13). Its default is `roles.VISION_DEFAULTS`: GLM-5.3
+Flash on `glm` and `glm-coding`, nothing elsewhere — which is exactly the owner's "GLM swaps to GLM
+5.3 Flash for that turn". A vision model the user picked by hand wins even over a main model that
+can read images: they chose it for pictures.
+
+New events:
+
+| Event | When | Fields |
+|---|---|---|
+| `vision_route` | an image turn starts on another model | `turn_id`, `model`, `from_model`, `preset`, `base_url`, `source`, `images`, `scope: "turn"`, `text` |
+| `vision_route_ended` | that turn is over, whatever ended it | `turn_id`, `model` (back to this), `was`, `text` |
+| `vision_unavailable` | the turn is refused | `turn_id`, `model`, `images`, `text` |
+
+Both `vision_route` and `vision_route_ended` come **before** the turn's terminal event, so
+`done` / `error` / `cancelled` stay last. `vision_unavailable` is followed by the ordinary `error`
+with the same `text`: refused, not failed — nothing was sent to the provider, and the prompt stays in
+the conversation so it can be re-sent once a model is chosen. The GUI shows the routing line in the
+pane and names the serving model in the model chip while the turn runs.
+
+### 17.4 Images live for one turn
+
+When a turn ends, every image part still in the conversation is replaced, in place, by one line:
+
+```
+[Image attached earlier in this conversation and since removed from it: /path/shot.png
+ (image/png, 12 KiB). The picture was shown to the model for that turn only; attach the path
+ again to look at it once more.]
+```
+
+So the conversation still records that a picture was there and which file it was, later turns cost
+nothing for it, and saved sessions stay plain text (`sessions.validate_messages` accepts only string
+content). For context accounting an image counts as a flat `context.IMAGE_TOKENS`, never as the
+length of its base64, so a screenshot cannot trigger a compaction in the middle of its own turn.
+
+A steering prompt that carries an image names it by path only: its turn's model was chosen before
+the steer existed.
+
+### 17.5 GUI side (no protocol)
+
+Pasting or dropping a picture into the prompt box writes it to `$XDG_CACHE_HOME/relay/images`
+(captures older than 7 days are swept) and inserts the `@path` token; an image file that is *named*
+by a drop or `@path` is attached where it is and never copied. `agent.screenshotPane`
+(**Ctrl+Shift+G**, Actions › "Screenshot this pane") grabs the pane as drawn and attaches that.
+Per the standing shortcut-hints rule, dropping a file hints the paste shortcut, and reaching the
+screenshot action from the palette hints Ctrl+Shift+G.

@@ -130,6 +130,7 @@ private:
     QStringList effortsFor(const QString &presetId) const;
     QJsonObject tierDefault(const QString &tier) const;
     void buildTierRow(QVBoxLayout *into, const QString &tier, const QJsonObject &spec);
+    void buildVisionRow(QVBoxLayout *into);   // image context (issue EM1E)
     void buildActionRow(QVBoxLayout *into, const QJsonObject &action);
     void pinRole(const QString &role);
 

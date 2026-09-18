@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <QApplication>
+#include <QDropEvent>
 #include <QFontDatabase>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
@@ -214,6 +215,12 @@ void RichEditor::inputMethodEvent(QInputMethodEvent *event) {
 }
 
 void RichEditor::insertFromMimeData(const QMimeData *source) {
+    // An image pasted or dropped here is attached, not pasted as text: the pane writes it out and
+    // hands back `@path` tokens (issue EM1E). Text is unaffected.
+    if (onImageMime) {
+        const QStringList tokens = onImageMime(source, m_dropping);
+        if (!tokens.isEmpty()) { insertAttachments(tokens); return; }
+    }
     // Pasting never submits, and HTML formatting is never interpreted as commands.
     const QString text = source->text();
     if (text.toUtf8().size() + toPlainText().toUtf8().size() > 131072) {
@@ -221,4 +228,30 @@ void RichEditor::insertFromMimeData(const QMimeData *source) {
         return;
     }
     insertPlainText(text);
+}
+
+bool RichEditor::canInsertFromMimeData(const QMimeData *source) const {
+    // A drop of image files may carry no text at all, so the base class would refuse it.
+    if (onImageMime && source && (source->hasImage() || source->hasUrls())) return true;
+    return QPlainTextEdit::canInsertFromMimeData(source);
+}
+
+void RichEditor::dropEvent(QDropEvent *event) {
+    // Remembered for insertFromMimeData, which cannot otherwise tell a drop from a paste — and the
+    // two get different hints (a drop is told about the paste shortcut).
+    m_dropping = true;
+    QPlainTextEdit::dropEvent(event);
+    m_dropping = false;
+}
+
+void RichEditor::insertAttachments(const QStringList &tokens) {
+    QTextCursor cursor = textCursor();
+    cursor.movePosition(QTextCursor::End);
+    const QString before = toPlainText();
+    QString text;
+    if (!before.isEmpty() && !before.endsWith(QLatin1Char(' ')) && !before.endsWith(QLatin1Char('\n')))
+        text += QLatin1Char(' ');
+    text += tokens.join(QLatin1Char(' ')) + QLatin1Char(' ');
+    cursor.insertText(text);
+    setTextCursor(cursor);
 }

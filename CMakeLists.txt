@@ -123,6 +123,14 @@ target_include_directories(relay-panes PUBLIC src)
 target_link_libraries(relay-panes PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-panes PRIVATE -Wall -Wextra -Wpedantic)
 
+# Image context (issue EM1E): where a pasted, dropped or captured image is written, what counts as
+# an image, the `@` token the composer gets and the cache sweep. Plain Qt Gui so every rule can be
+# tested without a window; the worker attaches the file and picks the model (protocol 17).
+add_library(relay-images STATIC src/Images.cpp src/Images.h)
+target_include_directories(relay-images PUBLIC src)
+target_link_libraries(relay-images PUBLIC ${RELAY_QT}::Gui)
+target_compile_options(relay-images PRIVATE -Wall -Wextra -Wpedantic)
+
 # Voice transcription (issue NY7Z): which capture tool to run, which key event is the hold key,
 # where the transcript lands in the composer, and WAV repair. Plain QtCore so every rule can be
 # tested without a microphone or a window; the worker does the transcribing (protocol 16).
@@ -160,7 +168,7 @@ if(RELAY_BUILD_APP)
         src/ModelSettings.cpp src/ModelSettings.h
         src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    target_link_libraries(relay PRIVATE relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-images relay-terminal-engine ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -232,6 +240,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-voice-tests PRIVATE relay-voice ${RELAY_QT}::Test)
     add_test(NAME voice COMMAND relay-voice-tests)
     set_tests_properties(voice PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-images-tests tests/images_test.cpp)
+    target_link_libraries(relay-images-tests PRIVATE relay-images ${RELAY_QT}::Test)
+    add_test(NAME images COMMAND relay-images-tests)
+    set_tests_properties(images PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-hints-tests tests/hints_test.cpp src/Hints.cpp)
     target_include_directories(relay-hints-tests PRIVATE src)
     target_link_libraries(relay-hints-tests PRIVATE ${RELAY_QT}::Test)

@@ -33,6 +33,7 @@ Backend tests by module:
 | `tests/test_keystore.py` | 11 | Preset URL matching, secrets passed on stdin, env var overrides keyring, bad ids and keys, Warp TOML 1.1 tables, Warp default preset, custom preset matched by URL, import success, missing keys and no keys |
 | `tests/test_shell.py` | 8 | Real Bash in a PTY: acknowledged command loading and exit status, cwd/env persistence, multiline Unicode, heredoc, native `read` and interrupt, alias reporting, existing prompt arrays, existing DEBUG trap falls back to native |
 | `tests/test_isolation.py` | 4 | Worker raises its own `oom_score_adj`, never lowers it, starts with the raised score; integration script raises the shell's |
+| `tests/test_images.py` | 27 | Image context: attachments loaded as bytes with the type sniffed from them, text attachments unchanged, the per-image cap, multimodal content parts and their base64 data URLs, `relay_*` keys never reaching the wire, an image estimated as a constant, which models read images, the GLM-5.3 → GLM-5.3-Flash swap and the swap back (including after a failed turn), the refusal when nothing can read images, a configured vision model, and the replacement of each image by its description and path once the turn is over |
 | `tests/test_version.py` | 1 | `relay_core.__version__` matches `project(Relay VERSION …)` in `CMakeLists.txt` |
 | **Total** | **127** | |
 
@@ -42,6 +43,7 @@ Qt tests:
 |---|---|
 | `tests/editor_test.cpp` | native selection and undo, submission shortcuts and multiline, Shift+click, mouse drag, paste never submits, IME preedit does not submit, history keeps the draft, Up inside multiline text moves the cursor |
 | `tests/filepanes_test.cpp` | explorer navigates in and up, filter, hidden files, Enter opens a file, typing starts the filter, filter then Down+Enter opens the match, preview picks a viewer by type, large text truncated with a notice, missing path returns false |
+| `tests/images_test.cpp` | image context: type sniffed from the bytes (including a mislabelled file), `@` tokens quoted for paths with spaces, capture names stamped and never colliding, PNG writing and the empty-image refusal, what a paste or a drop carries (file URLs used in place, inline data written to the cache), plain text is not an image, the cache sweep takes only old `relay-*` captures, and the 3 MiB cap matches the worker's |
 
 Provider tests use a local mock server and synthetic responses. They do not validate real
 accounts, quotas, billing or model behavior.
@@ -79,6 +81,7 @@ Claude session. They show the feature worked once; they are not independent QA.
 | Agent queue strip, remove, interrupt, pause/resume | [`qa_evidence/2026-09-17-queue-interrupt-gui/`](qa_evidence/2026-09-17-queue-interrupt-gui/) |
 | libvterm engine spike (vim, less, htop, tmux, throughput) | [`qa_evidence/2026-09-17-engine-spike/`](qa_evidence/2026-09-17-engine-spike/), report in [ENGINE-SPIKE.md](ENGINE-SPIKE.md) |
 | Terminal-first fallback (superseded behavior) | [`qa_evidence/2026-09-17-terminal-first-fallback/`](qa_evidence/2026-09-17-terminal-first-fallback/) |
+| Image context: paste, pane screenshot, the GLM-5.3-Flash swap and back, the vision-model row | [`qa_evidence/2026-09-17-image-context/`](qa_evidence/2026-09-17-image-context/) |
 
 Live provider smoke test, 2026-09-16, through the real `Agent` loop with keys imported from
 Warp: Kimi K3 (`kimi`), GLM-5.3 Coding Plan (`glm-coding`) and DeepSeek V4.1 Flash via
@@ -86,6 +89,12 @@ OpenRouter (`openrouter`) each returned a plain reply and completed one `list_di
 round trip, with the reasoning field retained. Per-action approval still existed at the time;
 the tool was auto-approved for the test. The `glm` standard endpoint was not tested.
 Several GUI checks above also used Kimi K3 as the live provider.
+
+Image context (issue EM1E), 2026-09-17, live with the stored keys: on GLM-5.3 Coding Plan a prompt
+carrying a PNG was served by `glm-5.3-flash` and answered from the picture, and the pane was back on
+`glm-5.3` for the next turn (once through the worker API, once through the GUI). On OpenRouter
+(`deepseek/deepseek-v4.1-flash`) the same prompt was refused with a message and nothing was sent.
+Transcripts in [`qa_evidence/2026-09-17-image-context/`](qa_evidence/2026-09-17-image-context/).
 
 Bugs found only by running the real app:
 
@@ -137,6 +146,7 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-file-explorer-and-preview-panes.md`
 - `2026-09-17-fix-and-rerun-terminal-commands.md`
 - `2026-09-17-human-agent-control-and-password-prompts.md`
+- `2026-09-17-image-context.md`
 - `2026-09-17-keyboard-shortcuts-and-palettes.md`
 - `2026-09-17-load-global-warp-skills.md`
 - `2026-09-17-model-roles-and-fast-agent.md`
