@@ -56,4 +56,8 @@ relevant information.
 - [x] Package C — backend labels: `tool_labels.py`, the `label` on the tool events and the turn summary, the structured `detail` on the `tool_output_get` reply, and the protocol section the other packages read <!-- t:c1 -->
 - [ ] Package E — the engine fold layer: a terminal line that folds its detail open in place <!-- t:e1 -->
 - [ ] Package G — the GUI: render the label fields, the inline diff, the merged runs, and what a click opens (fold, file, diff pane, subagent, card, plan, todos) <!-- t:g1 -->
-- [ ] The other surfaces (web app, remote panes) render the same labels <!-- t:s1 -->
+- [x] The other surfaces (web app, remote panes) render the same labels <!-- t:s1 -->
+      Package F: `src/ToolLabel.{h,cpp}` (the shared parser, reused by the terminal pane's
+      `src/CallLines.h`), the subagent transcript, the turn pane, the Switchboard cleanup's
+      progress line, `app/app.js` and the `remote/panes.py` demo. Evidence:
+      `docs/qa_evidence/2026-09-18-concise-tool-call-lines/surfaces-README.md`.
