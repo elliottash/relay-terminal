@@ -7,6 +7,7 @@
 #include <memory>
 
 QObject *makeCoreTest();
+QObject *makeFaintInkTest();
 QObject *makeFoldLayerTest();
 QObject *makeFoldSearchTest();
 QObject *makePtyTest();
@@ -22,7 +23,8 @@ int main(int argc, char **argv)
     // filters on the command line apply to it only).
     const QByteArray only = qgetenv("RELAY_ENGINE_TEST");
     int failures = 0;
-    for (auto make : {makeCoreTest, makeFoldLayerTest, makeFoldSearchTest, makePtyTest, makeSessionTest, makeViewTest}) {
+    for (auto make : {makeCoreTest, makeFaintInkTest, makeFoldLayerTest, makeFoldSearchTest, makePtyTest,
+                      makeSessionTest, makeViewTest}) {
         std::unique_ptr<QObject> test(make());
         if (!only.isEmpty() && only != test->metaObject()->className())
             continue;

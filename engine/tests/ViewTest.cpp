@@ -569,6 +569,46 @@ private slots:
         QVERIFY(t.view->visibleRowsText().contains(QStringLiteral("   one")));
     }
 
+    // A real row is painted by the same path whether or not a block is open under it, and a
+    // fold's own rows leave nothing behind them: the row's ink, its font and its glyph positions
+    // are the same pixels either way (#TK9C). The row here is the one a tool-call line ends with
+    // — muted grey stats — because that is the row a reader would notice restyling on first.
+    void anOpenFoldLeavesTheRealRowsAloneWhenItIsPainted()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.view->setFoldPrefix(QStringLiteral("relay://call/"));
+        for (int i = 0; i < 14; ++i)
+            t.backend->writeToDisplay(QByteArray("filler ") + QByteArray::number(i) + "\r\n");
+        t.backend->writeToDisplay("\x1b]8;;relay://call/p/1/a\x1b\\* ran python\x1b]8;;\x1b\\\r\n");
+        // The muted remainder the pane prints after the title, in its own truecolour grey.
+        t.backend->writeToDisplay("\x1b[38;2;150;150;150m15 lines exit 0\x1b[0m\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("15 lines exit 0")));
+
+        const QString stats = QStringLiteral("15 lines exit 0");
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        const auto rowPixels = [&](const QImage &img, int row) {
+            return img.copy(QRect(2, 2 + row * ch, stats.size() * cw, ch));
+        };
+        const QImage shut = t.grab();
+        const int rowShut = t.rowOf(stats);
+        QVERIFY2(rowShut >= 0, qPrintable(t.view->visibleRowsText().join(QLatin1Char('|'))));
+        const QImage before = rowPixels(shut, rowShut);
+
+        t.view->setFoldContent(QStringLiteral("relay://call/p/1/a"),
+                               foldBody({QStringLiteral("python -c 'print(1)'"), QStringLiteral("1")}));
+        QTest::qWait(120);
+        QVERIFY(t.view->foldExpanded(QStringLiteral("relay://call/p/1/a")));
+        const QImage open = t.grab();
+        const int rowOpen = t.rowOf(stats);
+        QVERIFY2(rowOpen >= 0, qPrintable(t.view->visibleRowsText().join(QLatin1Char('|'))));
+        // The block's last row is painted immediately before this one, so anything a fold row
+        // left in the painter would land here.
+        QCOMPARE(t.view->visibleRowsText().value(rowOpen - 1).trimmed(), QStringLiteral("1"));
+        QVERIFY2(rowPixels(open, rowOpen) == before,
+                 "an open fold changed how a real row is drawn (ink, font or position)");
+    }
+
     void selectionCrossesTheFoldBoundaryInVisualOrder()
     {
         QFETCH_GLOBAL(QString, core);

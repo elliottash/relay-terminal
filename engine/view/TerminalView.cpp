@@ -2,6 +2,7 @@
 #include "TerminalView.h"
 
 #include "BoxDrawing.h"
+#include "FaintInk.h"
 #include "session/TerminalSession.h"
 
 #include <QAccessible>
@@ -637,8 +638,10 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
                 bgDefault = false;
             }
         }
+        // Faint (SGR 2) is a real colour, not 60% alpha: faded toward the ground this cell is
+        // actually drawn on, and no further than 4.5:1 on it (view/FaintInk.h, #LG7T).
         if (c.attrs & AttrFaint)
-            fg.setAlphaF(0.6);
+            fg = faintInk(fg, bgDefault && bg == m_scheme.background ? groundAt(y) : bg);
         return {fg, bg, bgDefault && bg == m_scheme.background};
     };
 
@@ -869,8 +872,15 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
             p.fillRect(QRect(x, y, c.width * m_cw, m_ch), m_scheme.selection);
         if (hit)
             p.fillRect(QRect(x, y, c.width * m_cw, m_ch), hitCurrent ? m_scheme.searchCurrent : m_scheme.searchMatch);
-        if (c.dim)
-            fg.setAlphaF(0.6);
+        // A dim span, against whatever was just painted under it — the block's band, a diff's
+        // tint, the selection — and never below 4.5:1 on it (view/FaintInk.h, #LG7T).
+        if (c.dim) {
+            const QColor under = hit ? (hitCurrent ? m_scheme.searchCurrent : m_scheme.searchMatch)
+                : (selected && col >= selFrom && col <= selTo) ? m_scheme.selection
+                : c.bg.isValid()                               ? c.bg
+                                                               : foldBackground();
+            fg = faintInk(fg, under);
+        }
         const bool hovered = screenRow == m_hoverRow && col >= m_hoverStart && col <= m_hoverEnd;
         if (c.underline || !c.link.isEmpty() || hovered) {
             const int uy = baseline + std::max(1, m_descent / 3);
