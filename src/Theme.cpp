@@ -120,6 +120,11 @@ QLabel#brand { color: @text; letter-spacing: 3px; }
 QLabel { color: @text; background: transparent; }
 QLabel#muted, QLabel#cwd, QLabel#help, QLabel#privacy { color: @muted; }
 QLabel#route { color: @accent; font-family: "@mono"; }
+/* Pane header (issue JRWQ): the session title, the "auto" badge and the directory beside it. */
+QLabel#paneTitle { color: @text; font-weight: 600; }
+QLabel#paneCwd { color: @muted; font-size: 11px; }
+QLabel#paneAuto { color: @muted; font-size: 9px; letter-spacing: 1px; border: 1px solid @border; border-radius: 4px; padding: 0 4px; }
+QLineEdit#paneTitleEdit { background: @surface; color: @text; border: 1px solid @accentBorder; border-radius: 4px; padding: 1px 6px; }
 
 QPushButton { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 5px 14px; }
 QPushButton:hover { border-color: @muted; }

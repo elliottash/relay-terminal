@@ -95,6 +95,8 @@ FORWARDED_EVENTS = frozenset({
     # User-facing like model_changed, not routing internals like route: the owner's decision for
     # #EM1E is that Relay says when it swaps to a vision model, and a phone is a user surface.
     "vision_route", "vision_route_ended", "vision_unavailable",
+    # Pane titles and tab labels: what a phone needs to label the panes it is showing.
+    "session_title", "tab_label",
 })
 
 # Never forwarded, with the reason. Key material, provider configuration, desktop-local

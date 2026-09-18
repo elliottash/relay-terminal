@@ -82,13 +82,17 @@ Claude session. They show the feature worked once; they are not independent QA.
 | libvterm engine spike (vim, less, htop, tmux, throughput) | [`qa_evidence/2026-09-17-engine-spike/`](qa_evidence/2026-09-17-engine-spike/), report in [ENGINE-SPIKE.md](ENGINE-SPIKE.md) |
 | Terminal-first fallback (superseded behavior) | [`qa_evidence/2026-09-17-terminal-first-fallback/`](qa_evidence/2026-09-17-terminal-first-fallback/) |
 | Image context: paste, pane screenshot, the GLM-5.3-Flash swap and back, the vision-model row | [`qa_evidence/2026-09-17-image-context/`](qa_evidence/2026-09-17-image-context/) |
+| Model-written pane titles, tab labels, `/rename`, `/rename-tab` (loopback stub and, separately, a real model) | [`qa_evidence/2026-09-17-pane-title-summary/`](qa_evidence/2026-09-17-pane-title-summary/) |
 
 Live provider smoke test, 2026-09-16, through the real `Agent` loop with keys imported from
 Warp: Kimi K3 (`kimi`), GLM-5.3 Coding Plan (`glm-coding`) and DeepSeek V4.1 Flash via
 OpenRouter (`openrouter`) each returned a plain reply and completed one `list_directory` tool
 round trip, with the reasoning field retained. Per-action approval still existed at the time;
 the tool was auto-approved for the test. The `glm` standard endpoint was not tested.
-Several GUI checks above also used Kimi K3 as the live provider.
+Several GUI checks above also used Kimi K3 as the live provider. The pane-title run
+(2026-09-17) added GLM-5.3 Coding Plan as the pane's model with the chores role falling through
+to the Lite tier on OpenRouter, and confirmed that the header and the tab label fill with text a
+real model wrote.
 
 Image context (issue EM1E), 2026-09-17, live with the stored keys: on GLM-5.3 Coding Plan a prompt
 carrying a PNG was served by `glm-5.3-flash` and answered from the picture, and the pane was back on
@@ -152,6 +156,7 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-model-roles-and-fast-agent.md`
 - `2026-09-17-model-roles.md`
 - `2026-09-17-pane-process-isolation.md`
+- `2026-09-17-pane-title-summary.md`
 - `2026-09-17-program-control-policy.md`
 - `2026-09-17-queue-or-interrupt-agent-prompts.md`
 - `2026-09-17-request-ledger-todos-completion.md`

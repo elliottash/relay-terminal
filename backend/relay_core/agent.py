@@ -15,6 +15,7 @@ from typing import Callable
 from . import context as compaction
 from . import logs
 from . import route_assist
+from . import titles as session_titles
 from . import todos as todo_tool
 from .attachments import content_parts as image_content_parts
 from .attachments import format_block as format_attachments
@@ -200,7 +201,15 @@ class Agent:
     def _new_session(self, session_id: str | None = None) -> None:
         self.session_id = session_id or new_session_id()
         self.created = time.time()
+        # Session title (issue JRWQ): `title` is what the header, the conversation list and the
+        # resume picker show; `title_source` is "user" for a hand-set name (never overwritten),
+        # "model" for one this pane's chores role wrote, "" while it is still the first-prompt
+        # fallback. `title_turn` is the turn the last automatic title covered.
         self.title = ""
+        self.title_source = ""
+        self.title_turn = 0
+        self._title_stale = False
+        self._title_running = False
         self.epoch = 0
         self.snapshots: dict[str, list[dict]] = {}
         self.checkpoints = CheckpointStore(self.store.blob_dir(self.session_id) if self.store else None)
@@ -215,6 +224,8 @@ class Agent:
     def reset_conversation(self) -> None:
         self._new_session()
         self.announce_requests()
+        if self._announce:
+            self.emit(self.title_event())
 
     # ----- requests and todos ------------------------------------------------------
     def _requests_changed(self) -> None:
@@ -457,6 +468,8 @@ class Agent:
             self.messages = result["messages"]
             self.context.invalidate()
             after, _ = self.context.used(self.messages, tools)
+            # The work moved on enough to rewrite the conversation: the pane title is owed a refresh.
+            self._title_stale = True
             event = {"event": "compacted", "reason": reason, "before_tokens": before, "after_tokens": after,
                      "summary_chars": result["summary_chars"], "trimmed_tool_outputs": result["trimmed"]}
             if result.get("carried") is not None:
@@ -551,7 +564,7 @@ class Agent:
             record["messages"].append(message)
 
         if not self.title:
-            self.title = " ".join(prompt.split())[:80]
+            self.title = session_titles.fallback_title(prompt)
         message = {"role": "user", "content": note + prompt, "relay_kind": "prompt"}
         if self.track_requests:
             turn["todos_before"] = self.todos.snapshot()   # rewind restores the list as it was
@@ -1049,6 +1062,77 @@ class Agent:
             return result
         return self.executor.execute(prepared)
 
+    # ----- session title (issue JRWQ) ---------------------------------------------------
+    def title_event(self) -> dict:
+        """`session_title` for the GUI. `source` is "user" for a name the user typed and "model"
+        for one Relay maintains (model-written, or the first-prompt fallback before a model has
+        answered), which is all the header needs to know about whether it may be replaced."""
+        return {"event": "session_title", "title": self.title,
+                "source": "user" if self.title_source == "user" else "model",
+                "session_id": self.session_id}
+
+    def set_title(self, title, source: str = "user") -> dict:
+        """Name this session. A user title is never overwritten by a model one; an empty user title
+        hands the name back to the model, which rewrites it at the next chance."""
+        if source not in ("user", "model"):
+            raise ValueError('title source must be "user" or "model".')
+        if title is not None and not isinstance(title, str):
+            raise ValueError("title must be text.")
+        with self._lock:
+            if source == "user":
+                text = session_titles.clean(title, session_titles.MAX_USER_TITLE, max_words=0)
+                if text:
+                    self.title, self.title_source = text, "user"
+                else:
+                    # "Use automatic name": keep the text on screen until a fresh one arrives.
+                    self.title_source = ""
+                    self.title_turn = 0
+                    self._title_stale = True
+            else:
+                if self.title_source == "user":
+                    return self.title_event()
+                text = session_titles.clean(title)
+                if text:
+                    self.title, self.title_source = text, "model"
+                self.title_turn = self.turns
+                self._title_stale = False
+        self.autosave()
+        return self.title_event()
+
+    def title_due(self) -> bool:
+        """Whether an automatic title is owed: see titles.due for the cadence."""
+        with self._lock:
+            return bool(self.track_requests) and not self._title_running and session_titles.due(
+                self.turns, self.title_source, self.title_turn, self._title_stale)
+
+    def claim_title(self) -> dict | None:
+        """Claim the next automatic refresh, or None when none is owed or one is already running.
+
+        The caller does the model call off the protocol thread and hands the result back to
+        release_title(), so exactly one title call is ever in flight per pane.
+        """
+        with self._lock:
+            if self._title_running or not self.title_due():
+                return None
+            self._title_running = True
+            return {"messages": list(self.messages), "turns": self.turns, "first": self.title_turn <= 0}
+
+    def release_title(self, text: str, claim: dict) -> dict | None:
+        """Apply a claimed refresh. Returns the `session_title` event to emit, or None."""
+        with self._lock:
+            self._title_running = False
+        if text:
+            return self.set_title(text, "model")
+        if claim.get("first") and self.title:
+            # No model, or the call failed: today's first-prompt title names the pane, and the
+            # cadence moves on so a dead provider is not asked again after every turn.
+            with self._lock:
+                if self.title_source != "user":
+                    self.title_turn = claim.get("turns") or self.turns
+                    self._title_stale = False
+            return self.title_event()
+        return None
+
     # ----- rewind, fork, persistence --------------------------------------------
     def _location(self, item: dict):
         """(epoch key, message list, index) where this turn's user message starts, or None."""
@@ -1122,6 +1206,7 @@ class Agent:
                  "todos": {"next_id": self.todos.next_id, "items": todo_items},
                  "plan_path": self.plan_path} if self.track_requests else {}
         return {**extra, "version": STATE_VERSION, "kind": "relay_agent_state", "title": self.title,
+                "title_source": self.title_source, "title_turn": self.title_turn,
                 "model": self.config.model, "preset": self.preset.id if self.preset else None,
                 "effort": self.effort, "mode": self.mode,
                 "instructions": list(self.instructions.loaded) if self.instructions else [],
@@ -1204,7 +1289,10 @@ class Agent:
             self.todos = todo_tool.TodoList()
         self.plan_path = data.get("plan_path") if isinstance(data.get("plan_path"), str) else None
         self.mode = mode
-        self.title = str(data.get("title") or "")[:200]
+        self.title = str(data.get("title") or "")[:session_titles.MAX_USER_TITLE]
+        self.title_source = data.get("title_source") if data.get("title_source") in ("user", "model") else ""
+        title_turn = data.get("title_turn")
+        self.title_turn = title_turn if type(title_turn) is int and title_turn >= 0 else (self.turns if self.title else 0)
         if keep_id and isinstance(data.get("created"), (int, float)):
             self.created = data["created"]
         self.epoch = epoch
@@ -1212,9 +1300,13 @@ class Agent:
         self.snapshots = {k: [system] + v for k, v in snapshots.items()}
         self.messages = [system] + adapt_history(list(messages), self._effort_style(), skip_system=True)
         self.context.invalidate()
+        # A resumed pane puts its header back before the first new turn (issue JRWQ).
+        if self._announce:
+            self.emit(self.title_event())
 
     def session_data(self) -> dict:
         return {"version": STATE_VERSION, "kind": "relay_session", "id": self.session_id, "title": self.title,
+                "title_source": self.title_source, "title_turn": self.title_turn,
                 "created": self.created, "updated": time.time(), "workspace": str(self.executor.workspace.root),
                 "model": self.config.model, "preset": self.preset.id if self.preset else None,
                 "effort": self.effort, "mode": self.mode, "turns": self.turns, "epoch": self.epoch,

@@ -66,6 +66,7 @@ def main():
     def turn_emit(obj: dict):
         emit(obj)
         subagents.observe(obj)
+        sessions.observe(obj)   # pane title (protocol 18): a finished turn may be owed a fresh one
 
     turns = TurnSupervisor(turn_emit)
     subagents.turns = turns
