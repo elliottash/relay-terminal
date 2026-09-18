@@ -34,6 +34,10 @@
 // tested on its own (engine/tests/FoldLayerTest.cpp).
 #pragma once
 
+// relay::FoldSpan and relay::FoldLine -- what the host hands in -- live in the
+// host-facing header, so a host only has to know that one.
+#include "TerminalBackend.h"
+
 #include <QColor>
 #include <QHash>
 #include <QString>
@@ -43,28 +47,6 @@
 #include <vector>
 
 namespace relay {
-
-// One run of text inside a fold with its own colours and attributes. The host
-// builds these (a diff's red and green tints, a dim byte count, a path that is
-// also a link); the view paints them in the terminal's own cell grid and font.
-struct FoldSpan {
-    QString text;
-    QColor fg;              // invalid = the colour scheme's foreground
-    QColor bg;              // invalid = the fold block's own background
-    bool bold = false;
-    bool italic = false;
-    bool underline = false;
-    bool dim = false;
-    QString link;           // non-empty: clickable, reported through the normal link-open path
-};
-
-// One logical line of a fold. The view wraps it to the grid width; every
-// wrapped row keeps the block indent (a hanging indent), and a copy of the
-// selection puts the logical line back together without the indent.
-struct FoldLine {
-    QVector<FoldSpan> spans;
-    QString text() const;
-};
 
 class FoldLayer {
 public:
@@ -160,6 +142,9 @@ public:
     VisualRow at(int visualRow) const;
     // The first visual row of a fold's block (its anchor's visual row + 1), or -1.
     int foldVisualStart(int foldIndex) const;
+    // The fold whose anchor run *starts* on this absolute real row, or -1. The
+    // view overpaints the chevron there, whether the fold is open or shut.
+    int foldAtAnchorStart(int realRow) const;
 
     // ---- access
     const std::vector<Fold> &folds() const { return m_folds; }
@@ -189,6 +174,7 @@ private:
     std::vector<Fold> m_folds;
     QHash<QString, int> m_index;
     std::vector<Anchor> m_anchors; // expanded, resolved, non-empty; sorted by row
+    QHash<int, int> m_anchorStarts; // real row -> fold index, for every resolved fold
     int m_totalHeight = 0;
     int m_columns = 80;
     int m_indent = 3;

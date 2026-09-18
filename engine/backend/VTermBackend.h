@@ -75,6 +75,15 @@ public:
     void setPlainClickOpensLinks(bool on) override;
     void setCardLookup(std::function<bool(const QString &id, QString *title)> lookup) override;
 
+    void setFoldPrefix(const QString &uriPrefix) override;
+    void setFoldContent(const QString &uri, const QVector<FoldLine> &lines) override;
+    void setFoldExpanded(const QString &uri, bool expanded) override;
+    bool foldExpanded(const QString &uri) const override;
+    void removeFold(const QString &uri) override;
+    void clearFolds() override;
+    QStringList expandedFolds() const override;
+    bool toggleFold(const QString &uri) override;
+
     void setOutputCallbackEnabled(bool enabled) override;
 
 private:

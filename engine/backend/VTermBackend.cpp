@@ -42,9 +42,15 @@ VTermBackend::VTermBackend(const QString &coreName, QWidget *parent)
         m_updatingScrollBar = false;
     });
     connect(m_scrollBar, &QScrollBar::valueChanged, this, [this](int value) {
+        // The bar counts visual rows: with a fold open its range includes the
+        // fold's own rows, and with none it is the core's scrollback again.
         if (!m_updatingScrollBar && m_view)
-            m_view->scrollToRow(value);
+            m_view->scrollToVisualRow(value);
     });
+    m_view->onFoldRequested = [this](const QString &uri) {
+        if (onFoldRequested)
+            onFoldRequested(uri);
+    };
     connect(m_view, &TerminalView::linkActivated, this, [this](const QString &target, int line, int column) {
         if (onLinkActivated)
             onLinkActivated(target, line, column);
@@ -130,8 +136,46 @@ void VTermBackend::redrawPrompt()
 int VTermBackend::capabilities() const
 {
     return ScreenText | Scrollback | AltScreenState | LinkClicks | Osc8Links | PromptMarks | CwdTracking | DisplayInjection
-        | Search | ScrollControl | FontZoom | LinkWalk | LineDiscipline;
+        | Search | ScrollControl | FontZoom | LinkWalk | LineDiscipline | Folds;
 }
+
+// ---- folds (#TK9C): straight through to the view, which owns the layer.
+
+void VTermBackend::setFoldPrefix(const QString &uriPrefix)
+{
+    if (m_view)
+        m_view->setFoldPrefix(uriPrefix);
+}
+
+void VTermBackend::setFoldContent(const QString &uri, const QVector<FoldLine> &lines)
+{
+    if (m_view)
+        m_view->setFoldContent(uri, lines);
+}
+
+void VTermBackend::setFoldExpanded(const QString &uri, bool expanded)
+{
+    if (m_view)
+        m_view->setFoldExpanded(uri, expanded);
+}
+
+bool VTermBackend::foldExpanded(const QString &uri) const { return m_view && m_view->foldExpanded(uri); }
+
+void VTermBackend::removeFold(const QString &uri)
+{
+    if (m_view)
+        m_view->removeFold(uri);
+}
+
+void VTermBackend::clearFolds()
+{
+    if (m_view)
+        m_view->clearFolds();
+}
+
+QStringList VTermBackend::expandedFolds() const { return m_view ? m_view->expandedFolds() : QStringList(); }
+
+bool VTermBackend::toggleFold(const QString &uri) { return m_view && m_view->toggleFold(uri); }
 
 bool VTermBackend::stepLink(int delta, Link *link, int *index, int *count)
 {

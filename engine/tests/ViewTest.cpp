@@ -17,9 +17,24 @@ using namespace relay;
 
 namespace {
 
+// A fold's detail as the host builds it: one span per line, default colours.
+QVector<FoldLine> foldBody(const QStringList &texts)
+{
+    QVector<FoldLine> out;
+    for (const QString &t : texts) {
+        FoldSpan s;
+        s.text = t;
+        FoldLine l;
+        l.spans << s;
+        out << l;
+    }
+    return out;
+}
+
 struct Term {
     std::unique_ptr<VTermBackend> backend;
     TerminalView *view = nullptr;
+    QStringList links;
 
     Term(const QString &core, const QString &program, const QStringList &args = {}, const QString &cwd = QString())
     {
@@ -31,6 +46,28 @@ struct Term {
         QVERIFY2(backend->startProgram(program, args, cwd.isEmpty() ? QDir::tempPath() : cwd),
                  qPrintable(backend->session()->errorString()));
         view->setFocus();
+        QObject::connect(view, &TerminalView::linkActivated, view,
+                         [this](const QString &target, int, int) { links << target; });
+    }
+    // Three lines of output, the middle one an OSC 8 fold anchor. Its first
+    // cell is a placeholder the view overpaints with the chevron.
+    void anchoredLines()
+    {
+        view->setFoldPrefix(QStringLiteral("relay://call/"));
+        // Enough output to fill the screen, so the anchor sits where a real
+        // one does: some way up from the prompt, with history above it.
+        for (int i = 0; i < 14; ++i)
+            backend->writeToDisplay(QByteArray("filler ") + QByteArray::number(i) + "\r\n");
+        backend->writeToDisplay("before\r\n");
+        backend->writeToDisplay("\x1b]8;;relay://call/p/1/a\x1b\\* ran python\x1b]8;;\x1b\\\r\n");
+        backend->writeToDisplay("after\r\n");
+        QTest::qWait(120);
+    }
+    int rowOf(const QString &text) const { return view->visibleRowsText().indexOf(text); }
+    QPoint cellPoint(int row, int col) const
+    {
+        return QPoint(2 + col * view->cellWidth() + view->cellWidth() / 2,
+                      2 + row * view->cellHeight() + view->cellHeight() / 2);
     }
     bool waitScreen(const QString &needle, int ms = 4000)
     {
@@ -375,6 +412,149 @@ private slots:
 #else
         QVERIFY(!mapKeyEvent(Qt::Key_K, Qt::MetaModifier, QStringLiteral("k"), false, &k));
 #endif
+    }
+
+    // ---- folds (#TK9C): the detail of a tool call, unfolded inside the grid
+
+    void foldOpensUnderItsAnchorAndShutsAgain()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        const QString uri = QStringLiteral("relay://call/p/1/a");
+        QVERIFY(t.view->expandedFolds().isEmpty());
+
+        t.view->setFoldContent(uri, foldBody({QStringLiteral("python -c 'print(1)'"), QStringLiteral("1")}));
+        QTest::qWait(80);
+        QCOMPARE(t.view->expandedFolds(), QStringList{uri});
+        QVERIFY(t.view->foldExpanded(uri));
+        QStringList rows = t.view->visibleRowsText();
+        const int anchor = rows.indexOf(QStringLiteral("* ran python"));
+        QVERIFY(anchor >= 0);
+        QCOMPARE(rows.value(anchor + 1).trimmed(), QStringLiteral("python -c 'print(1)'"));
+        QCOMPARE(rows.value(anchor + 2).trimmed(), QStringLiteral("1"));
+        QCOMPARE(rows.value(anchor + 3), QStringLiteral("after"));
+        QVERIFY(rows.value(anchor + 1).startsWith(QStringLiteral("   "))); // the block's indent
+
+        // Shut again: the rows go away and the real ones close up.
+        t.view->setFoldExpanded(uri, false);
+        QTest::qWait(80);
+        rows = t.view->visibleRowsText();
+        QCOMPARE(rows.value(rows.indexOf(QStringLiteral("* ran python")) + 1), QStringLiteral("after"));
+        QVERIFY(!t.view->foldExpanded(uri));
+    }
+
+    void anUnknownFoldAsksTheHostForItsDetail()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        QStringList asked;
+        t.view->onFoldRequested = [&asked](const QString &uri) { asked << uri; };
+        // A plain left click on the anchor line.
+        const QPoint p = t.cellPoint(t.rowOf(QStringLiteral("* ran python")), 4);
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::NoModifier, p);
+        QTest::qWait(60);
+        QCOMPARE(asked, QStringList{QStringLiteral("relay://call/p/1/a")});
+        // The click did not open the URI as a link.
+        QVERIFY(t.links.isEmpty());
+
+        // Once the host answers, the same click shuts and opens it again.
+        t.view->setFoldContent(asked.first(), foldBody({QStringLiteral("detail")}));
+        QTest::qWait(80);
+        QVERIFY(t.view->foldExpanded(asked.first()));
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::NoModifier, t.cellPoint(t.rowOf(QStringLiteral("* ran python")), 4));
+        QTest::qWait(60);
+        QVERIFY(!t.view->foldExpanded(asked.first()));
+        QCOMPARE(asked.size(), 1); // it had content, so the host was not asked again
+        QVERIFY(t.links.isEmpty());
+    }
+
+    void aFoldStaysUnderItsLineAcrossAResize()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        const QString uri = QStringLiteral("relay://call/p/1/a");
+        t.view->setFoldContent(uri, foldBody({QStringLiteral("one"), QStringLiteral("two")}));
+        QTest::qWait(80);
+        t.backend->resizeTerminal(14, 34);
+        QTest::qWait(150);
+        const QStringList rows = t.view->visibleRowsText();
+        const int anchor = rows.indexOf(QStringLiteral("* ran python"));
+        QVERIFY2(anchor >= 0, qPrintable(rows.join(QLatin1Char('|'))));
+        QCOMPARE(rows.value(anchor + 1).trimmed(), QStringLiteral("one"));
+        QCOMPARE(rows.value(anchor + 2).trimmed(), QStringLiteral("two"));
+        QVERIFY(t.view->foldExpanded(uri));
+    }
+
+    void clearingTheScrollbackDropsTheFold()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        const QString uri = QStringLiteral("relay://call/p/1/a");
+        t.view->setFoldContent(uri, foldBody({QStringLiteral("one")}));
+        QTest::qWait(80);
+        QVERIFY(t.view->foldExpanded(uri));
+        // Clear the screen and the scrollback: the anchor line is gone, so the
+        // fold that hung under it goes too.
+        t.backend->clear();
+        t.backend->writeToDisplay("plain\r\n");
+        QTest::qWait(900); // the anchor walk runs on its own slow heartbeat
+        QVERIFY2(t.view->expandedFolds().isEmpty(), qPrintable(t.view->expandedFolds().join(QLatin1Char(','))));
+    }
+
+    void foldRowsCountInTheScrollRangeAndScrollOneByOne()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        QSignalSpy spy(t.view, &TerminalView::scrollPositionChanged);
+        QStringList body;
+        for (int i = 0; i < 40; ++i)
+            body << QStringLiteral("detail %1").arg(i);
+        t.view->setFoldContent(QStringLiteral("relay://call/p/1/a"), foldBody(body));
+        QTest::qWait(120);
+        QVERIFY(!spy.isEmpty());
+        const QList<QVariant> last = spy.last();
+        QVERIFY2(last.at(1).toInt() >= 30, qPrintable(QString::number(last.at(1).toInt())));
+        QVERIFY(t.view->viewportAtBottom());
+        // At the bottom the newest output is still on screen: the fold pushed
+        // the older rows up, not the prompt off.
+        QVERIFY(t.view->visibleRowsText().contains(QStringLiteral("after")));
+
+        // One wheel notch back moves the window by three visual rows, which are
+        // rows of the fold, not of the output.
+        const QStringList before = t.view->visibleRowsText();
+        t.view->scrollLines(-1);
+        QTest::qWait(60);
+        const QStringList after = t.view->visibleRowsText();
+        QVERIFY(!t.view->viewportAtBottom());
+        QCOMPARE(after.value(1), before.value(0));
+        t.view->scrollToBottom();
+        QTest::qWait(60);
+        QVERIFY(t.view->viewportAtBottom());
+        QCOMPARE(t.view->visibleRowsText(), before);
+    }
+
+    void aFullScreenProgramHidesTheFolds()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        t.view->setFoldContent(QStringLiteral("relay://call/p/1/a"), foldBody({QStringLiteral("one")}));
+        QTest::qWait(80);
+        QVERIFY(t.view->visibleRowsText().contains(QStringLiteral("   one")));
+        t.backend->writeToDisplay("\x1b[?1049h"); // alternate screen
+        QTest::qWait(80);
+        QVERIFY(t.backend->altScreen());
+        const QStringList alt = t.view->visibleRowsText();
+        for (const QString &row : alt)
+            QVERIFY2(!row.contains(QStringLiteral("one")), qPrintable(alt.join(QLatin1Char('|'))));
+        t.backend->writeToDisplay("\x1b[?1049l");
+        QTest::qWait(80);
+        QVERIFY(t.view->visibleRowsText().contains(QStringLiteral("   one")));
     }
 
     void hostShortcutFilter()

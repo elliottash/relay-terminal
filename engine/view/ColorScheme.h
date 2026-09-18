@@ -20,6 +20,11 @@ struct ColorScheme {
     QColor searchCurrent{0xd0, 0x9a, 0x2a};
     QColor searchText{0x10, 0x10, 0x10};
     QColor link{0x6c, 0xb6, 0xff};
+    // Folds (#TK9C): the tint behind an unfolded block and the rule down its
+    // left edge. Invalid (the default) = mixed from background and foreground,
+    // so a host that knows nothing about folds still gets a readable block.
+    QColor foldBackground;
+    QColor foldRule;
     // ANSI 0-15
     std::array<QRgb, 16> palette{{
         0xff1c1e24, 0xffe06c75, 0xff98c379, 0xffe5c07b, 0xff61afef, 0xffc678dd, 0xff56b6c2, 0xffd8d8d8,

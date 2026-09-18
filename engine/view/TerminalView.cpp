@@ -62,6 +62,14 @@ QString ucs4ToString(const std::u32string &cps)
     return QString::fromUcs4(cps.data(), int(cps.size()));
 }
 
+// A colour `amount` of the way from `from` to `to` (both opaque).
+QColor mix(const QColor &from, const QColor &to, double amount)
+{
+    return QColor(int(from.red() + (to.red() - from.red()) * amount),
+                  int(from.green() + (to.green() - from.green()) * amount),
+                  int(from.blue() + (to.blue() - from.blue()) * amount));
+}
+
 QString defaultEmojiFamily()
 {
 #if defined(Q_OS_MACOS)
@@ -233,6 +241,7 @@ TerminalView::TerminalView(TerminalSession *session, QWidget *parent)
     setColorScheme(m_scheme);
     m_sinceFrame.start();
     m_lastClick.start();
+    m_foldResolveAt.start();
 }
 
 TerminalView::~TerminalView() = default;
@@ -425,19 +434,27 @@ void TerminalView::applyGeometry()
     m_cols = cols;
     m_session->resize(rows, cols, m_cw, m_ch);
     m_forceFull = true;
+    // Both cores rewrap the scrollback on a resize, so every fold has to be
+    // told its new width and then find its anchor row again.
+    m_folds.setGeometry(cols, m_folds.indent());
+    if (!m_folds.folds().empty())
+        m_foldAnchorsDirty = true;
     emit gridSizeChanged(rows, cols);
     scheduleFrame();
 }
 
 void TerminalView::scheduleFrame()
 {
-    if (m_frameTimer.isActive())
-        return;
     // Typing echo should appear within one frame; a flood repaints at ~30 fps so
     // painting (and the X server) never becomes the bottleneck.
     const quint64 bytes = m_session->bytesReceived();
     const bool flooding = bytes - m_bytesAtFrame > 512 * 1024;
-    m_frameTimer.start(flooding ? 33 : 4);
+    const int wanted = flooding ? 33 : 4;
+    // A slower frame may already be pending -- the fold layer's anchor
+    // heartbeat uses this same timer -- and must not hold up this one.
+    if (m_frameTimer.isActive() && m_frameTimer.interval() <= wanted)
+        return;
+    m_frameTimer.start(wanted);
 }
 
 void TerminalView::pullFrame()
@@ -445,7 +462,20 @@ void TerminalView::pullFrame()
     const bool force = m_forceFull;
     m_forceFull = false;
     m_bytesAtFrame = m_session->bytesReceived();
-    const bool changed = m_session->withCore([&](VtCore &c) { return c.updateFrame(&m_frame, force); });
+    // Anchors are re-read before the frame, so the rows the fold layer works
+    // with belong to the same content the frame will show.
+    if (m_foldAnchorsDirty || (m_folds.active() && m_foldResolveAt.elapsed() > 250))
+        resolveFoldAnchors();
+    bool changed = false;
+    m_session->withCore([&](VtCore &c) {
+        changed = c.updateFrame(&m_frame, force);
+        syncFoldViewport(c, &changed);
+    });
+    // While a fold is open the anchors are re-read on a slow heartbeat, which
+    // is what notices the scrollback trimming its oldest lines away underneath
+    // them. Nothing runs when no fold is open.
+    if (m_folds.active() && !m_frameTimer.isActive())
+        m_frameTimer.start(300);
     if (!changed)
         return;
     emit frameChanged();
@@ -458,7 +488,10 @@ void TerminalView::pullFrame()
         setCursor(Qt::IBeamCursor);
     }
 
-    if (m_frame.full || force) {
+    if (m_frame.full || force || foldsVisible()) {
+        // With a fold open every row below it may have moved, so the dirty-row
+        // fast path only applies while the layer is empty (or an alt-screen
+        // program owns the grid), which is also the throughput path.
         update();
     } else {
         QRegion region;
@@ -481,10 +514,14 @@ void TerminalView::pullFrame()
     m_paintedCursor = m_frame.cursor;
     m_paintedCursorInViewport = m_frame.cursorInViewport;
 
-    if (m_frame.viewportTop != m_lastTop || m_frame.historyRows != m_lastHistory) {
-        m_lastTop = m_frame.viewportTop;
-        m_lastHistory = m_frame.historyRows;
-        emit scrollPositionChanged(m_frame.viewportTop, m_frame.historyRows, m_frame.rows);
+    // The scroll bar counts visual rows: real rows with the rows of every open
+    // fold spliced in. With no fold open these are the core's own numbers.
+    const int top = foldsVisible() ? m_visualTop : m_frame.viewportTop;
+    const int range = foldsVisible() ? maxVisualTop() : m_frame.historyRows;
+    if (top != m_lastTop || range != m_lastHistory) {
+        m_lastTop = top;
+        m_lastHistory = range;
+        emit scrollPositionChanged(top, range, foldsVisible() ? m_rows : m_frame.rows);
     }
     if (QAccessible::isActive()) {
         QAccessibleEvent ev(this, QAccessible::VisibleDataChanged);
@@ -542,15 +579,27 @@ void TerminalView::paintEvent(QPaintEvent *e)
     if (m_frame.lines.empty())
         return;
     const int firstRow = std::max(0, (dirty.top() - m_padding) / m_ch);
-    const int lastRow = std::min(int(m_frame.lines.size()) - 1, (dirty.bottom() - m_padding) / m_ch);
-    for (int row = firstRow; row <= lastRow; ++row)
-        paintRow(p, row);
+    const bool folds = foldsVisible();
+    const int lastRow = std::min(folds ? m_rows - 1 : int(m_frame.lines.size()) - 1, (dirty.bottom() - m_padding) / m_ch);
+    for (int row = firstRow; row <= lastRow; ++row) {
+        if (!folds) {
+            paintRow(p, row, m_frame.lines[size_t(row)], m_frame.viewportTop + row);
+            continue;
+        }
+        const FoldLayer::VisualRow v = m_folds.at(m_visualTop + row);
+        if (v.fold) {
+            paintFoldRow(p, row, v.foldIndex, v.foldRow);
+            continue;
+        }
+        const int frameRow = v.realRow - m_frame.viewportTop;
+        if (frameRow >= 0 && frameRow < int(m_frame.lines.size()))
+            paintRow(p, row, m_frame.lines[size_t(frameRow)], v.realRow);
+    }
     paintCursor(p);
 }
 
-void TerminalView::paintRow(QPainter &p, int row)
+void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
 {
-    const Line &line = m_frame.lines[size_t(row)];
     const int cols = std::min<int>(int(line.cells.size()), m_frame.columns);
     const int y = m_padding + row * m_ch;
     const int baseline = y + m_ascent;
@@ -706,6 +755,140 @@ void TerminalView::paintRow(QPainter &p, int row)
         p.setPen(b.qcolor);
         p.drawGlyphRun(QPointF(0, 0), run);
     }
+
+    // A fold anchor says whether its block is open, in its own first cell: the
+    // host prints a placeholder there and the view overpaints the chevron.
+    if (!m_frame.altScreen && !m_folds.prefix().isEmpty() && cols > 0) {
+        const int foldIndex = m_folds.foldAtAnchorStart(realRow);
+        if (foldIndex >= 0) {
+            const QRect r = cellRect(row, 0, 1);
+            const CellColors cc = colorsFor(0);
+            p.save();
+            p.setClipRect(r);
+            p.fillRect(r, cc.bgIsDefault ? groundAt(y) : cc.bg);
+            p.setFont(m_fonts[0]);
+            p.setPen(cc.fg);
+            p.drawText(r, Qt::AlignCenter,
+                       m_folds.folds()[size_t(foldIndex)].expanded ? QStringLiteral("▾") : QStringLiteral("▸"));
+            p.restore();
+        }
+    }
+}
+
+// The colour the background gradient (if any) has at this pixel row, so an
+// overpainted cell lands on exactly what the full paint put there.
+QColor TerminalView::groundAt(int y) const
+{
+    if (!m_scheme.backgroundEnd.isValid() || height() <= 0)
+        return m_scheme.background;
+    return mix(m_scheme.background, m_scheme.backgroundEnd, std::min(1.0, std::max(0.0, double(y) / height())));
+}
+
+QColor TerminalView::foldBackground() const
+{
+    if (m_scheme.foldBackground.isValid())
+        return m_scheme.foldBackground;
+    return mix(m_scheme.background, m_scheme.foreground, 0.07);
+}
+
+QColor TerminalView::foldRule() const
+{
+    if (m_scheme.foldRule.isValid())
+        return m_scheme.foldRule;
+    return mix(m_scheme.background, m_scheme.foreground, 0.38);
+}
+
+// One wrapped row of an open fold: the block's tint across the width, a rule
+// down its left edge, and the row's cells in the terminal's own grid and font
+// starting at the indent. Spans bring their own colours (a diff's red and
+// green), so the host decides what the detail looks like.
+void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int foldRow)
+{
+    const std::vector<FoldLayer::Fold> &folds = m_folds.folds();
+    if (foldIndex < 0 || foldIndex >= int(folds.size()))
+        return;
+    const FoldLayer::Fold &f = folds[size_t(foldIndex)];
+    if (foldRow < 0 || foldRow >= int(f.rows.size()))
+        return;
+    const FoldLayer::Row &row = f.rows[size_t(foldRow)];
+    const int y = m_padding + screenRow * m_ch;
+    const int baseline = y + m_ascent;
+    const int indent = m_folds.indent();
+
+    p.fillRect(QRect(m_padding, y, m_cols * m_cw, m_ch), foldBackground());
+    const int ruleX = m_padding + std::max(0, indent - 2) * m_cw + m_cw / 2;
+    p.fillRect(QRect(ruleX, y, std::max(1, m_cw / 8), m_ch), foldRule());
+
+    const std::vector<FoldLayer::Cell> &cells = f.cells[size_t(row.line)];
+    struct Batch {
+        int variant;
+        QRgb color;
+        QColor qcolor;
+        QVector<quint32> glyphs;
+        QVector<QPointF> positions;
+    };
+    std::vector<Batch> batches;
+    auto batchFor = [&](int variant, const QColor &color) -> Batch & {
+        for (Batch &b : batches) {
+            if (b.variant == variant && b.color == color.rgba())
+                return b;
+        }
+        batches.push_back({variant, color.rgba(), color, {}, {}});
+        return batches.back();
+    };
+
+    int col = indent;
+    for (int i = row.first; i < row.first + row.count && i < int(cells.size()); ++i) {
+        const FoldLayer::Cell &c = cells[size_t(i)];
+        if (col + c.width > m_cols)
+            break;
+        const int x = m_padding + col * m_cw;
+        QColor fg = c.fg.isValid() ? c.fg : m_scheme.foreground;
+        if (c.bg.isValid())
+            p.fillRect(QRect(x, y, c.width * m_cw, m_ch), c.bg);
+        if (c.dim)
+            fg.setAlphaF(0.6);
+        const bool hovered = screenRow == m_hoverRow && col >= m_hoverStart && col <= m_hoverEnd;
+        if (c.underline || !c.link.isEmpty() || hovered) {
+            const int uy = baseline + std::max(1, m_descent / 3);
+            p.fillRect(QRect(x, uy, c.width * m_cw, 1), hovered || !c.link.isEmpty() ? m_scheme.link : fg);
+        }
+        if (!c.link.isEmpty())
+            fg = m_scheme.link;
+        const int variant = (c.bold ? 1 : 0) | (c.italic ? 2 : 0);
+        const std::u32string cps = c.text.toStdU32String();
+        if (!cps.empty() && cps[0] != U' ') {
+            if (cps.size() == 1 && cps[0] >= 0x2500 && cps[0] <= 0x259F
+                && drawBoxCharacter(p, cps[0], QRect(x, y, m_cw, m_ch), fg)) {
+                // drawn as a rectangle, like the real grid's box characters
+            } else if (cps.size() == 1 && glyphFor(variant, cps[0])) {
+                Batch &b = batchFor(variant, fg);
+                b.glyphs.push_back(glyphFor(variant, cps[0]));
+                b.positions.push_back(QPointF(x, baseline));
+            } else {
+                // Clusters, emoji and anything missing from the primary font go
+                // through the same fallback path the real rows use.
+                p.save();
+                p.setClipRect(QRect(x, y, c.width * m_cw, m_ch));
+                p.setFont(wantsEmojiFont(cps, c.width) ? m_emojiFont : m_fonts[variant]);
+                p.setPen(fg);
+                if (wantsEmojiFont(cps, c.width))
+                    p.drawText(QRect(x, y, c.width * m_cw, m_ch), Qt::AlignCenter, c.text);
+                else
+                    p.drawText(QPointF(x, baseline), c.text);
+                p.restore();
+            }
+        }
+        col += c.width;
+    }
+    for (const Batch &b : batches) {
+        QGlyphRun run;
+        run.setRawFont(m_raw[b.variant]);
+        run.setGlyphIndexes(b.glyphs);
+        run.setPositions(b.positions);
+        p.setPen(b.qcolor);
+        p.drawGlyphRun(QPointF(0, 0), run);
+    }
 }
 
 void TerminalView::paintCursor(QPainter &p)
@@ -713,11 +896,17 @@ void TerminalView::paintCursor(QPainter &p)
     const ViewportFrame &f = m_frame;
     if (!f.cursorInViewport || f.cursor.row < 0 || f.cursor.row >= int(f.lines.size()))
         return;
+    int screenRow = f.cursor.row;
+    if (foldsVisible()) {
+        screenRow = screenRowOfReal(f.viewportTop + f.cursor.row);
+        if (screenRow < 0 || screenRow >= m_rows)
+            return;
+    }
     const Line &line = f.lines[size_t(f.cursor.row)];
     const int col = std::max(0, std::min(f.cursor.col, f.columns - 1));
     const Cell cell = col < int(line.cells.size()) ? line.cells[size_t(col)] : Cell();
     const int w = cell.width == 2 ? 2 : 1;
-    QRect r = cellRect(f.cursor.row, col, w);
+    QRect r = cellRect(screenRow, col, w);
 
     if (!m_preedit.isEmpty()) {
         const QFontMetrics fm(m_fonts[0]);
@@ -901,7 +1090,12 @@ void TerminalView::inputMethodEvent(QInputMethodEvent *e)
 
 QVariant TerminalView::inputMethodQuery(Qt::InputMethodQuery query) const
 {
-    const QRect cursorRect = cellRect(m_frame.cursor.row, m_frame.cursor.col);
+    // An open fold above the cursor moves its row on screen, and the input
+    // method has to be told where the caret really is.
+    const int cursorScreenRow = foldsVisible()
+        ? std::max(0, std::min(screenRowOfReal(m_frame.viewportTop + m_frame.cursor.row), m_rows - 1))
+        : m_frame.cursor.row;
+    const QRect cursorRect = cellRect(cursorScreenRow, m_frame.cursor.col);
     switch (query) {
     case Qt::ImEnabled:
         return true;
@@ -973,9 +1167,23 @@ void TerminalView::mousePressEvent(QMouseEvent *e)
     if (e->button() == Qt::LeftButton) {
         endLinkWalk();
         m_pressedLink = Link();
+        m_pressedFold.clear();
+        // A fold anchor answers the click itself, before the "open this link"
+        // path an OSC 8 URI would otherwise take -- with Ctrl too.
+        const QString foldUri = foldAnchorAt(pos);
+        if (!foldUri.isEmpty()) {
+            if (e->modifiers() & Qt::ControlModifier) {
+                toggleFold(foldUri);
+                return;
+            }
+            if (e->modifiers() == Qt::NoModifier) {
+                m_pressedFold = foldUri;
+                m_pressedRow = pos.row;
+            }
+        }
         Link link;
         int s = 0, en = 0;
-        const bool onLink = linkAt(pos, &link, &s, &en);
+        const bool onLink = foldUri.isEmpty() && linkAt(pos, &link, &s, &en);
         if (onLink && (e->modifiers() & Qt::ControlModifier)) {
             emit linkActivated(link.target, link.line, link.column);
             return;
@@ -999,7 +1207,8 @@ void TerminalView::mousePressEvent(QMouseEvent *e)
             : m_clickCount == 2                      ? SelectionUnit::Word
                                                      : SelectionUnit::Cell;
         const bool rect = e->modifiers() & Qt::AltModifier;
-        m_session->withCore([&](VtCore &c) { c.selectionBegin(pos.row, pos.col, unit, rect); });
+        const int frameRow = frameRowClamped(pos.row);
+        m_session->withCore([&](VtCore &c) { c.selectionBegin(frameRow, pos.col, unit, rect); });
         m_selecting = true;
         m_selectionMoved = unit != SelectionUnit::Cell;
         scheduleFrame();
@@ -1031,7 +1240,8 @@ void TerminalView::mouseMoveEvent(QMouseEvent *e)
     }
     if (m_selecting && (e->buttons() & Qt::LeftButton)) {
         const CellPos pos = cellAt(e->pos());
-        m_session->withCore([&](VtCore &c) { c.selectionExtend(pos.row, pos.col); });
+        const int frameRow = frameRowClamped(pos.row);
+        m_session->withCore([&](VtCore &c) { c.selectionExtend(frameRow, pos.col); });
         m_selectionMoved = true;
         if (e->pos().y() < m_padding || e->pos().y() >= height() - m_padding)
             m_autoScroll.start();
@@ -1051,10 +1261,9 @@ void TerminalView::autoScrollTick()
     }
     const bool up = m_lastMousePos.y() < m_padding;
     const CellPos pos = cellAt(m_lastMousePos);
-    m_session->withCore([&](VtCore &c) {
-        c.scrollViewport(up ? -1 : 1);
-        c.selectionExtend(up ? 0 : m_rows - 1, pos.col);
-    });
+    scrollLines(up ? -1 : 1);
+    const int frameRow = frameRowClamped(up ? 0 : m_rows - 1);
+    m_session->withCore([&](VtCore &c) { c.selectionExtend(frameRow, pos.col); });
     scheduleFrame();
 }
 
@@ -1071,6 +1280,15 @@ void TerminalView::mouseReleaseEvent(QMouseEvent *e)
     if (!m_selectionMoved) {
         m_session->withCore([](VtCore &c) { c.selectionClear(); });
         scheduleFrame();
+        // A plain click on an anchor that neither dragged nor left it toggles
+        // the fold: the view opens or shuts it, or asks the host for the detail.
+        if (!m_pressedFold.isEmpty() && e->button() == Qt::LeftButton) {
+            const QString uri = m_pressedFold;
+            m_pressedFold.clear();
+            if (cellAt(e->pos()).row == m_pressedRow)
+                toggleFold(uri);
+            return;
+        }
         // A click that neither dragged nor left the link follows it.
         if (m_pressedLink.valid() && e->button() == Qt::LeftButton) {
             const CellPos pos = cellAt(e->pos());
@@ -1082,6 +1300,7 @@ void TerminalView::mouseReleaseEvent(QMouseEvent *e)
         return;
     }
     m_pressedLink = Link();
+    m_pressedFold.clear();
     if (m_copyOnSelect && QApplication::clipboard()->supportsSelection()) {
         const QString text = selectedText();
         if (!text.isEmpty())
@@ -1214,12 +1433,15 @@ struct LogicalRow {
 bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endCol)
 {
     *link = Link();
-    if (c.row < 0 || c.row >= int(m_frame.lines.size()))
+    // A screen row may be one of a fold's own rows; those carry FoldSpan links,
+    // which foldLinkAt() answers, not the emulator's cells.
+    const int row = frameRowOf(c.row);
+    if (row < 0 || row >= int(m_frame.lines.size()))
         return false;
-    const Line &l = m_frame.lines[size_t(c.row)];
+    const Line &l = m_frame.lines[size_t(row)];
 
     // An OSC 8 hyperlink: the program itself said what the text points at.
-    const QString uri = m_session->withCore([&](VtCore &core) { return core.hyperlinkAt(c.row, c.col); });
+    const QString uri = m_session->withCore([&](VtCore &core) { return core.hyperlinkAt(row, c.col); });
     if (!uri.isEmpty() && c.col < int(l.cells.size())) {
         const uint32_t id = l.cells[size_t(c.col)].link;
         int s = c.col, e = c.col;
@@ -1244,7 +1466,7 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
 
     // Plain text, joined across the soft-wrapped rows of the viewport (long URLs and
     // paths wrap at the terminal edge).
-    int firstRow = c.row, lastRow = c.row;
+    int firstRow = row, lastRow = row;
     while (firstRow > 0 && m_frame.lines[size_t(firstRow)].continuation)
         --firstRow;
     while (lastRow + 1 < int(m_frame.lines.size()) && m_frame.lines[size_t(lastRow + 1)].continuation)
@@ -1265,7 +1487,7 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
     }
     int idx = -1;
     for (int i = 0; i < int(logical.cellOf.size()); ++i) {
-        if (logical.cellOf[size_t(i)].first == c.row && logical.cellOf[size_t(i)].second == c.col) {
+        if (logical.cellOf[size_t(i)].first == row && logical.cellOf[size_t(i)].second == c.col) {
             idx = i;
             break;
         }
@@ -1287,8 +1509,8 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
         link->line = found.target.line;
         link->column = found.target.column;
         // The hover underline is per row: clip the span to the row under the pointer.
-        *startCol = logical.cellOf[size_t(s)].first == c.row ? logical.cellOf[size_t(s)].second : 0;
-        *endCol = logical.cellOf[size_t(e)].first == c.row ? logical.cellOf[size_t(e)].second : m_frame.columns - 1;
+        *startCol = logical.cellOf[size_t(s)].first == row ? logical.cellOf[size_t(s)].second : 0;
+        *endCol = logical.cellOf[size_t(e)].first == row ? logical.cellOf[size_t(e)].second : m_frame.columns - 1;
         return true;
     }
     return false;
@@ -1367,6 +1589,10 @@ void TerminalView::showWalkLink(const WalkLink &walk)
     int top = m_session->withCore([](VtCore &core) { return core.viewportTop(); });
     if (walk.row < top || walk.endRow > top + m_rows - 1) {
         scrollToRow(std::max(0, walk.row - m_rows / 3));
+        if (foldsVisible()) {
+            m_forceFull = true;
+            pullFrame(); // settle the core's viewport before rows are counted off it
+        }
         top = m_session->withCore([](VtCore &core) { return core.viewportTop(); });
     }
     const int row = walk.row - top;
@@ -1375,10 +1601,12 @@ void TerminalView::showWalkLink(const WalkLink &walk)
         core.selectionBegin(row, walk.col, SelectionUnit::Cell, false);
         core.selectionExtend(endRow, walk.endCol);
     });
-    // The underline the mouse draws, for the row the link starts on.
-    m_hoverRow = row >= 0 && row < m_rows ? row : -1;
+    // The underline the mouse draws, for the row the link starts on (a screen
+    // row: an open fold above it may have pushed it down).
+    const int screenRow = screenRowOfReal(walk.row);
+    m_hoverRow = screenRow >= 0 && screenRow < m_rows ? screenRow : -1;
     m_hoverStart = walk.col;
-    m_hoverEnd = row == endRow ? walk.endCol : m_frame.columns - 1;
+    m_hoverEnd = walk.row == walk.endRow ? walk.endCol : m_frame.columns - 1;
     m_hoverCellRow = m_hoverCellCol = -2;
     m_forceFull = true;
     scheduleFrame();
@@ -1414,6 +1642,288 @@ void TerminalView::endLinkWalk()
     m_hoverCellRow = m_hoverCellCol = -2;
     m_forceFull = true;
     scheduleFrame();
+}
+
+// ---------------------------------------------------------------- folds
+//
+// A fold is a block of virtual rows the view lays under the row its OSC 8
+// anchor ends on. Neither core can be asked to hold those rows, so everything
+// about them lives here and in FoldLayer: the view keeps `m_visualTop` (the
+// first visual row on screen) and drives the core's own viewport to whatever
+// covers the real rows that window needs. With no fold open the two are the
+// same number and every path below is the one that was here before.
+
+FoldLayer::VisualRow TerminalView::visualAt(int screenRow) const
+{
+    if (!foldsVisible()) {
+        FoldLayer::VisualRow v;
+        v.realRow = m_frame.viewportTop + screenRow;
+        return v;
+    }
+    return m_folds.at(m_visualTop + screenRow);
+}
+
+int TerminalView::frameRowOf(int screenRow) const
+{
+    if (!foldsVisible())
+        return screenRow;
+    const FoldLayer::VisualRow v = m_folds.at(m_visualTop + screenRow);
+    if (v.fold)
+        return -1;
+    const int frameRow = v.realRow - m_frame.viewportTop;
+    return frameRow >= 0 && frameRow < int(m_frame.lines.size()) ? frameRow : -1;
+}
+
+int TerminalView::frameRowClamped(int screenRow) const
+{
+    if (!foldsVisible())
+        return std::max(0, std::min(screenRow, std::max(0, m_frame.rows - 1)));
+    for (int r = screenRow; r >= 0; --r) {
+        const int frameRow = frameRowOf(r);
+        if (frameRow >= 0)
+            return frameRow;
+    }
+    for (int r = screenRow + 1; r < m_rows; ++r) {
+        const int frameRow = frameRowOf(r);
+        if (frameRow >= 0)
+            return frameRow;
+    }
+    return 0;
+}
+
+int TerminalView::screenRowOfReal(int realRow) const
+{
+    if (!foldsVisible())
+        return realRow - m_frame.viewportTop;
+    return m_folds.visualOfReal(realRow) - m_visualTop;
+}
+
+// Ask the core where every fold anchor is now. Called when the grid was
+// resized (both cores reflow), when a fold was added or toggled, and on a
+// 250 ms throttle while any fold is open, which is what catches the scrollback
+// trimming its oldest lines away underneath us. A fold that once had an anchor
+// and no longer does is dropped; one that never had an anchor yet is kept,
+// because the host may set a call's content before its line is printed.
+void TerminalView::resolveFoldAnchors()
+{
+    m_foldAnchorsDirty = false;
+    m_foldResolveAt.restart();
+    const QString prefix = m_folds.prefix();
+    if (prefix.isEmpty() || m_folds.folds().empty())
+        return;
+    const std::vector<VtCore::HyperlinkRun> runs =
+        m_session->withCore([&](VtCore &c) { return c.hyperlinkRuns(prefix); });
+
+    QVector<QString> seen;
+    const int before = m_folds.visualRows();
+    for (const VtCore::HyperlinkRun &r : runs) {
+        if (m_folds.known(r.uri)) {
+            m_folds.setAnchor(r.uri, r.startRow, r.endRow);
+            seen << r.uri;
+        }
+    }
+    for (const FoldLayer::Fold &f : m_folds.folds()) {
+        if (f.anchorStartRow < 0 && !seen.contains(f.uri))
+            seen << f.uri; // never anchored: the line may still be on its way
+    }
+    m_folds.retainAnchored(seen);
+    if (m_folds.visualRows() != before) {
+        m_forceFull = true;
+        update();
+    }
+}
+
+void TerminalView::invalidateFoldAnchors()
+{
+    m_foldAnchorsDirty = true;
+    m_forceFull = true;
+    scheduleFrame();
+}
+
+// Clamp the visual window and put the core's viewport wherever it has to be for
+// the frame to contain every real row that window shows. Runs with the session
+// lock held, right after updateFrame(), so at most one extra frame copy is
+// needed when the window moved.
+void TerminalView::syncFoldViewport(VtCore &core, bool *changed)
+{
+    if (!foldsVisible()) {
+        m_visualTop = m_frame.viewportTop;
+        m_followBottom = core.viewportAtBottom();
+        m_paintedVisualTop = m_visualTop;
+        return;
+    }
+    const int maxTop = maxVisualTop();
+    const int wanted = m_followBottom ? maxTop : std::max(0, std::min(m_visualTop, maxTop));
+    m_visualTop = wanted;
+
+    // The core's viewport is `rows` real rows wide and the window can never
+    // show more than that, so covering its first real row covers them all.
+    int first = -1;
+    for (int i = 0; i < m_rows; ++i) {
+        const FoldLayer::VisualRow v = m_folds.at(m_visualTop + i);
+        if (!v.fold) {
+            first = v.realRow;
+            break;
+        }
+    }
+    if (first < 0) {
+        // The whole window sits inside one fold: keep the core on its anchor.
+        const FoldLayer::VisualRow v = m_folds.at(m_visualTop);
+        first = v.fold ? m_folds.folds()[size_t(v.foldIndex)].anchorRow : m_visualTop;
+    }
+    const int want = std::max(0, std::min(first, m_frame.historyRows));
+    if (want != m_frame.viewportTop) {
+        core.scrollViewportToRow(want);
+        core.updateFrame(&m_frame, true);
+        *changed = true;
+    }
+    if (m_visualTop != m_paintedVisualTop)
+        *changed = true;
+    m_paintedVisualTop = m_visualTop;
+}
+
+void TerminalView::setVisualTop(int top)
+{
+    const int maxTop = maxVisualTop();
+    m_visualTop = std::max(0, std::min(top, maxTop));
+    m_followBottom = m_visualTop >= maxTop;
+    m_forceFull = true;
+    scheduleFrame();
+}
+
+QString TerminalView::foldAnchorAt(const CellPos &c) const
+{
+    if (!m_frame.altScreen && !m_folds.prefix().isEmpty()) {
+        const int frameRow = frameRowOf(c.row);
+        if (frameRow >= 0) {
+            const QString uri = m_session->withCore([&](VtCore &core) { return core.hyperlinkAt(frameRow, c.col); });
+            if (m_folds.isAnchorUri(uri))
+                return uri;
+        }
+    }
+    return QString();
+}
+
+void TerminalView::setFoldPrefix(const QString &uriPrefix)
+{
+    if (m_folds.prefix() == uriPrefix)
+        return;
+    m_folds.setPrefix(uriPrefix);
+    m_folds.setGeometry(m_cols, m_folds.indent());
+    if (!m_foldResolveAt.isValid())
+        m_foldResolveAt.start();
+    invalidateFoldAnchors();
+}
+
+void TerminalView::setFoldIndent(int cells)
+{
+    if (m_folds.setGeometry(m_cols, std::max(2, std::min(4, cells)))) {
+        m_forceFull = true;
+        scheduleFrame();
+    }
+}
+
+void TerminalView::setFoldContent(const QString &uri, const QVector<FoldLine> &lines)
+{
+    if (uri.isEmpty())
+        return;
+    const int anchor = m_folds.known(uri) ? m_folds.fold(uri)->anchorRow : -1;
+    const int keep = anchor >= 0 ? screenRowOfReal(anchor) : -1;
+    m_folds.setGeometry(m_cols, m_folds.indent());
+    m_folds.setContent(uri, lines);
+    if (!m_foldResolveAt.isValid())
+        m_foldResolveAt.start();
+    // A fold whose anchor is already known opens without waiting for the walk.
+    if (anchor >= 0 && keep >= 0 && keep < m_rows && !m_followBottom)
+        m_visualTop = std::max(0, m_folds.visualOfReal(anchor) - keep);
+    invalidateFoldAnchors();
+}
+
+void TerminalView::setFoldExpanded(const QString &uri, bool expanded)
+{
+    if (uri.isEmpty() || m_folds.expanded(uri) == expanded)
+        return;
+    const int anchor = m_folds.known(uri) ? m_folds.fold(uri)->anchorRow : -1;
+    const int keep = anchor >= 0 ? screenRowOfReal(anchor) : -1;
+    m_folds.setExpanded(uri, expanded);
+    // The row that was clicked stays where it was on screen.
+    if (anchor >= 0 && keep >= 0 && keep < m_rows && !m_followBottom)
+        m_visualTop = std::max(0, std::min(m_folds.visualOfReal(anchor) - keep, maxVisualTop()));
+    m_forceFull = true;
+    scheduleFrame();
+}
+
+bool TerminalView::foldExpanded(const QString &uri) const { return m_folds.expanded(uri); }
+
+void TerminalView::removeFold(const QString &uri)
+{
+    if (!m_folds.known(uri))
+        return;
+    m_folds.remove(uri);
+    m_forceFull = true;
+    scheduleFrame();
+}
+
+void TerminalView::clearFolds()
+{
+    if (m_folds.folds().empty())
+        return;
+    m_folds.clear();
+    m_forceFull = true;
+    scheduleFrame();
+}
+
+QStringList TerminalView::expandedFolds() const { return m_folds.expandedUris(); }
+
+bool TerminalView::toggleFold(const QString &uri)
+{
+    if (uri.isEmpty() || !m_folds.isAnchorUri(uri))
+        return false;
+    if (m_folds.hasContent(uri)) {
+        setFoldExpanded(uri, !m_folds.expanded(uri));
+        return true;
+    }
+    // No content yet: the host fetches it and calls setFoldContent(), which
+    // expands the block.
+    if (onFoldRequested) {
+        onFoldRequested(uri);
+        return true;
+    }
+    return false;
+}
+
+bool TerminalView::toggleFoldAt(const QPoint &pos)
+{
+    const QString uri = foldAnchorAt(cellAt(pos));
+    return !uri.isEmpty() && toggleFold(uri);
+}
+
+QStringList TerminalView::visibleRowsText() const
+{
+    QStringList out;
+    for (int i = 0; i < m_rows; ++i) {
+        const FoldLayer::VisualRow v = visualAt(i);
+        if (v.fold) {
+            out << QString(m_folds.indent(), QLatin1Char(' ')) + m_folds.rowText(v.foldIndex, v.foldRow);
+            continue;
+        }
+        const int frameRow = v.realRow - m_frame.viewportTop;
+        out << (frameRow >= 0 && frameRow < int(m_frame.lines.size()) ? m_frame.lines[size_t(frameRow)].text() : QString());
+    }
+    return out;
+}
+
+bool TerminalView::toggleNearestFold()
+{
+    if (m_folds.prefix().isEmpty() || m_frame.altScreen)
+        return false;
+    const int cursorRow = m_frame.cursorInViewport ? m_frame.cursor.row : m_frame.rows - 1;
+    for (int r = cursorRow; r >= 0; --r) {
+        const QString uri = m_session->withCore([&](VtCore &core) { return core.hyperlinkAt(r, 0); });
+        if (m_folds.isAnchorUri(uri))
+            return toggleFold(uri);
+    }
+    return false;
 }
 
 void TerminalView::contextMenuEvent(QContextMenuEvent *e)
@@ -1485,10 +1995,16 @@ void TerminalView::focusOutEvent(QFocusEvent *)
 
 // ---------------------------------------------------------------- host API
 
+// Scrolling counts visual rows: a 500-line fold scrolls line by line like any
+// other output. With no fold open these all go straight to the core, as before.
 void TerminalView::scrollLines(int lines)
 {
-    m_session->withCore([&](VtCore &c) { c.scrollViewport(lines); });
-    scheduleFrame();
+    if (!foldsVisible()) {
+        m_session->withCore([&](VtCore &c) { c.scrollViewport(lines); });
+        scheduleFrame();
+        return;
+    }
+    setVisualTop(m_visualTop + lines);
 }
 
 void TerminalView::scrollPages(int pages)
@@ -1499,30 +2015,60 @@ void TerminalView::scrollPages(int pages)
 void TerminalView::scrollToTop()
 {
     m_session->withCore([](VtCore &c) { c.scrollViewportToTop(); });
-    scheduleFrame();
+    if (foldsVisible())
+        setVisualTop(0);
+    else
+        scheduleFrame();
 }
 
 void TerminalView::scrollToBottom()
 {
     m_session->withCore([](VtCore &c) { c.scrollViewportToBottom(); });
-    scheduleFrame();
+    m_followBottom = true;
+    if (foldsVisible())
+        setVisualTop(maxVisualTop());
+    else
+        scheduleFrame();
 }
 
 void TerminalView::scrollToRow(int row)
 {
+    if (foldsVisible()) {
+        setVisualTop(m_folds.visualOfReal(row));
+        return;
+    }
     m_session->withCore([&](VtCore &c) { c.scrollViewportToRow(row); });
     scheduleFrame();
 }
 
+void TerminalView::scrollToVisualRow(int row)
+{
+    if (foldsVisible()) {
+        setVisualTop(row);
+        return;
+    }
+    scrollToRow(row);
+}
+
 bool TerminalView::viewportAtBottom() const
 {
+    if (foldsVisible())
+        return m_followBottom;
     return m_session->withCore([](VtCore &c) { return c.viewportAtBottom(); });
 }
 
 bool TerminalView::scrollToPrompt(int direction)
 {
-    const bool ok = m_session->withCore([&](VtCore &c) { return c.scrollToPrompt(direction); });
-    scheduleFrame();
+    int top = -1;
+    const bool ok = m_session->withCore([&](VtCore &c) {
+        const bool found = c.scrollToPrompt(direction);
+        top = c.viewportTop();
+        return found;
+    });
+    if (ok && foldsVisible())
+        setVisualTop(m_folds.visualOfReal(top));
+    else
+        scheduleFrame();
     return ok;
 }
 
@@ -1678,6 +2224,24 @@ QString TerminalView::debugDump()
                  .arg(m_session->bytesReceived())
                  .arg(m_paints);
         s += QStringLiteral("title=%1 cwd=%2\n").arg(c.title(), cwd.isEmpty() ? QStringLiteral("-") : cwd);
+    });
+    if (!m_folds.prefix().isEmpty()) {
+        s += QStringLiteral("folds prefix=%1 known=%2 expanded=%3 visualRows=%4 visualTop=%5 atBottom=%6\n")
+                 .arg(m_folds.prefix())
+                 .arg(m_folds.folds().size())
+                 .arg(m_folds.expandedCount())
+                 .arg(m_folds.visualRows())
+                 .arg(m_visualTop)
+                 .arg(m_followBottom);
+        for (const FoldLayer::Fold &f : m_folds.folds())
+            s += QStringLiteral("  %1 rows=%2 anchor=%3..%4 %5\n")
+                     .arg(f.uri)
+                     .arg(f.height())
+                     .arg(f.anchorStartRow)
+                     .arg(f.anchorRow)
+                     .arg(f.expanded ? QStringLiteral("open") : QStringLiteral("shut"));
+    }
+    m_session->withCore([&](VtCore &c) {
         s += QStringLiteral("--- historyText(5) ---\n") + c.historyText(5).join(QLatin1Char('\n'));
         s += QStringLiteral("\n--- screenText() ---\n") + c.screenText() + QLatin1Char('\n');
     });

@@ -292,9 +292,12 @@ void FoldLayer::retainAnchored(const QVector<QString> &seen)
 void FoldLayer::rebuildAnchors()
 {
     m_anchors.clear();
+    m_anchorStarts.clear();
     m_totalHeight = 0;
     for (int i = 0; i < int(m_folds.size()); ++i) {
         const Fold &f = m_folds[size_t(i)];
+        if (f.anchorStartRow >= 0)
+            m_anchorStarts.insert(f.anchorStartRow, i);
         if (!f.expanded || !f.resolved() || f.height() == 0)
             continue;
         m_anchors.push_back(Anchor{f.anchorRow, f.height(), i, 0});
@@ -357,6 +360,12 @@ FoldLayer::VisualRow FoldLayer::at(int visualRow) const
     }
     out.realRow = a.row + (offset - a.height);
     return out;
+}
+
+int FoldLayer::foldAtAnchorStart(int realRow) const
+{
+    const auto it = m_anchorStarts.constFind(realRow);
+    return it == m_anchorStarts.constEnd() ? -1 : *it;
 }
 
 int FoldLayer::foldVisualStart(int foldIndex) const

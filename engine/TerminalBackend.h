@@ -12,16 +12,43 @@
 #pragma once
 
 #include <QByteArray>
+#include <QColor>
 #include <QFont>
 #include <QPoint>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 #include <QtGlobal>
 #include <functional>
 
 class QWidget;
 
 namespace relay {
+
+// ---- folds (#TK9C): the detail of one agent tool call, unfolded in the grid
+//
+// Relay prints each tool call as one concise line wrapped in an OSC 8
+// hyperlink; clicking it unfolds the call's detail *underneath that line,
+// inside the terminal*. The host builds the detail as logical lines of spans
+// -- one span per run of text with its own colours, so a coloured diff or a
+// dim byte count is the host's to describe -- and the view wraps them to the
+// grid and paints them in the terminal's own font. Declared here so a host
+// only has to know this header.
+struct FoldSpan {
+    QString text;
+    QColor fg;            // invalid = the terminal's default foreground
+    QColor bg;            // invalid = the fold block's own background
+    bool bold = false;
+    bool italic = false;
+    bool underline = false;
+    bool dim = false;
+    QString link;         // non-empty: clickable, reported through onLinkActivated
+};
+
+struct FoldLine {
+    QVector<FoldSpan> spans;
+    QString text() const; // the spans joined
+};
 
 class TerminalBackend {
 public:
@@ -39,6 +66,7 @@ public:
         FontZoom = 1 << 10,        // zoom()
         LinkWalk = 1 << 11,        // stepLink(): keyboard walk over the links in the output
         LineDiscipline = 1 << 12,  // termiosFlags(): ICANON/ECHO of the terminal, cheaply
+        Folds = 1 << 13,           // setFoldContent(): tool-call detail unfolded inside the grid
     };
 
     // ICANON/ECHO of the terminal the shell is reading. Together with
@@ -170,7 +198,44 @@ public:
         Q_UNUSED(lookup);
     }
 
+    // ---- folds (#TK9C); needs the Folds capability
+    //
+    // OSC 8 URIs starting with the prefix are fold anchors: a plain left click
+    // (and Ctrl+click) on one toggles its block instead of opening the URI, and
+    // an anchor with no content yet reaches the host through onFoldRequested.
+    // The block is painted between the real rows, scrolls, selects, copies and
+    // is searched as if it were output. See docs/ENGINE.md, "Folds".
+    virtual void setFoldPrefix(const QString &uriPrefix) { Q_UNUSED(uriPrefix); }
+    // Sets a fold's detail and opens it.
+    virtual void setFoldContent(const QString &uri, const QVector<FoldLine> &lines)
+    {
+        Q_UNUSED(uri);
+        Q_UNUSED(lines);
+    }
+    virtual void setFoldExpanded(const QString &uri, bool expanded)
+    {
+        Q_UNUSED(uri);
+        Q_UNUSED(expanded);
+    }
+    virtual bool foldExpanded(const QString &uri) const
+    {
+        Q_UNUSED(uri);
+        return false;
+    }
+    virtual void removeFold(const QString &uri) { Q_UNUSED(uri); }
+    virtual void clearFolds() {}
+    virtual QStringList expandedFolds() const { return {}; }
+    // Open or shut a fold by URI; without content the host is asked for it.
+    virtual bool toggleFold(const QString &uri)
+    {
+        Q_UNUSED(uri);
+        return false;
+    }
+
     // ---- host callbacks (GUI thread)
+    // An anchor was clicked and the view has no detail for it: fetch it and
+    // call setFoldContent(), which opens the block.
+    std::function<void(const QString &uri)> onFoldRequested;
     // OSC 8 URI, URL text or an existing absolute path; line/column are -1 when absent.
     std::function<void(const QString &target, int line, int column)> onLinkActivated;
     std::function<void(const QString &title)> onTitleChanged;

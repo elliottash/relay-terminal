@@ -3,6 +3,7 @@
 #pragma once
 
 #include "ColorScheme.h"
+#include "FoldLayer.h"
 #include "KeyMapper.h"
 #include "OutputLinks.h"
 #include "core/CellTypes.h"
@@ -13,6 +14,7 @@
 #include <QTimer>
 #include <QWidget>
 
+#include <algorithm>
 #include <functional>
 #include <unordered_map>
 #include <vector>
@@ -23,6 +25,7 @@ class QLineEdit;
 namespace relay {
 
 class TerminalSession;
+class VtCore;
 
 class TerminalView : public QWidget {
     Q_OBJECT
@@ -57,6 +60,10 @@ public:
     void scrollToTop();
     void scrollToBottom();
     void scrollToRow(int row); // row from the top of the scrollback
+    // The same, in the visual rows a scroll bar sees: real rows with the rows of
+    // every expanded fold spliced in. Identical to scrollToRow() while no fold
+    // is open, which is what scrollPositionChanged() reports too.
+    void scrollToVisualRow(int row);
     bool scrollToPrompt(int direction);
     bool viewportAtBottom() const; // showing the newest output rather than sitting back in history
 
@@ -128,6 +135,46 @@ public:
     int linkWalkIndex() const { return m_linkCursor.index(); }
     int linkWalkCount() const { return m_linkCursor.count(); }
 
+    // ---- folds: the detail of an agent tool call, unfolded inside the grid (#TK9C)
+    //
+    // Relay prints each tool call as one concise line wrapped in an OSC 8
+    // hyperlink whose URI starts with the fold prefix ("relay://call/"). A
+    // click on such a line unfolds its detail **in place, underneath it**, as a
+    // block of virtual rows the view lays between the real ones; a second click
+    // folds it away. The rows are real rows of the scroll bar's range and of
+    // every scrolling gesture, they are selected, copied and searched in visual
+    // order, and they survive a resize (the anchor is found again in the
+    // reflowed scrollback) and disappear with their anchor when the scrollback
+    // is trimmed. See docs/ENGINE.md, "Folds".
+    //
+    // OSC 8 URIs starting with this are fold anchors; empty turns folds off.
+    void setFoldPrefix(const QString &uriPrefix);
+    QString foldPrefix() const { return m_folds.prefix(); }
+    // How far a fold block is indented, in cells (2..4, default 3).
+    void setFoldIndent(int cells);
+    // An anchor was clicked (or toggled with the keyboard) and the view has no
+    // content for it: the host fetches the detail and calls setFoldContent().
+    std::function<void(const QString &uri)> onFoldRequested;
+    // Set a fold's content and expand it. Spans carry their own colours, so a
+    // coloured diff is the host's to build.
+    void setFoldContent(const QString &uri, const QVector<FoldLine> &lines);
+    void setFoldExpanded(const QString &uri, bool expanded);
+    bool foldExpanded(const QString &uri) const;
+    void removeFold(const QString &uri);
+    void clearFolds();
+    QStringList expandedFolds() const; // visual order, oldest first
+    // Toggle by URI: with content the view opens or shuts it itself, without it
+    // asks the host through onFoldRequested. False when there is no such anchor.
+    bool toggleFold(const QString &uri);
+    // Toggle the anchor under a point in this view's coordinates.
+    bool toggleFoldAt(const QPoint &pos);
+    // Toggle the nearest anchor at or above the cursor row.
+    bool toggleNearestFold();
+    // The rows on screen in visual order: real rows and the rows of every open
+    // fold interleaved exactly as they are painted, fold rows with their
+    // indent. screenText() and scrollbackText() stay real rows only.
+    QStringList visibleRowsText() const;
+
     // Resolve a Ctrl+click token to an absolute path (relative to the shell's
     // current directory) if it exists. Exposed for tests.
     static bool splitPathToken(const QString &token, QString *path, int *line, int *column);
@@ -187,8 +234,40 @@ private:
     QRect cellRect(int row, int col, int width = 1) const;
     CellPos cellAt(const QPoint &p, bool clamp = true) const;
     QColor resolve(uint32_t packed, bool foreground) const;
-    void paintRow(QPainter &p, int row);
+    void paintRow(QPainter &p, int screenRow, const Line &line, int realRow);
+    void paintFoldRow(QPainter &p, int screenRow, int foldIndex, int foldRow);
     void paintCursor(QPainter &p);
+    QColor groundAt(int y) const;
+    QColor foldBackground() const;
+    QColor foldRule() const;
+    // Folds are laid out and hit-tested only on the primary screen: vim and
+    // less own the grid while they run, and the folds come back on return.
+    bool foldsVisible() const { return m_folds.active() && !m_frame.altScreen; }
+
+    // ---- folds
+    // What sits on a screen row: a real row of the frame, or a fold's row.
+    FoldLayer::VisualRow visualAt(int screenRow) const;
+    // The frame line index a screen row shows, or -1 when it shows a fold row
+    // or nothing. Identical to `screenRow` while no fold is open.
+    int frameRowOf(int screenRow) const;
+    // The same, but a screen row inside a fold answers with the nearest real
+    // row above it, so a gesture that crosses a fold still has somewhere to go.
+    int frameRowClamped(int screenRow) const;
+    // The screen row a real (absolute) row is painted on; outside [0, rows).
+    int screenRowOfReal(int realRow) const;
+    int realRows() const { return m_frame.historyRows + m_frame.rows; }
+    int visualTotal() const { return m_folds.visualTotal(realRows()); }
+    int maxVisualTop() const { return std::max(0, visualTotal() - m_rows); }
+    // Ask the core for every anchor row again (after a resize, a trim, a clear
+    // or a new fold) and drop the folds whose anchors have left the scrollback.
+    void resolveFoldAnchors();
+    void invalidateFoldAnchors();
+    // Put the core's viewport where the visual window needs it and clamp
+    // m_visualTop. Called with the session lock held, right after updateFrame.
+    void syncFoldViewport(VtCore &core, bool *frameChanged);
+    void setVisualTop(int top);
+    // The fold anchor under a screen cell (its URI), or empty.
+    QString foldAnchorAt(const CellPos &c) const;
     quint32 glyphFor(int variant, char32_t cp);
     bool handleBuiltinShortcut(QKeyEvent *e);
     void sendKey(const KeyInput &k);
@@ -241,6 +320,15 @@ private:
     int m_lastTop = -1;
     int m_lastHistory = -1;
 
+    // Folds. m_visualTop is the authority while a fold is open: the core's own
+    // viewport is then driven to cover the real rows the visual window needs.
+    FoldLayer m_folds;
+    int m_visualTop = 0;
+    int m_paintedVisualTop = 0;
+    bool m_followBottom = true;  // the view sits at the newest output
+    bool m_foldAnchorsDirty = false;
+    QElapsedTimer m_foldResolveAt;
+
     bool m_focused = false;
     bool m_unfocusedCursor = true;
     bool m_blinkEnabled = true;
@@ -267,6 +355,7 @@ private:
     int m_hoverCellCol = -2;   // one cell costs nothing
     bool m_plainClickOpens = true;
     Link m_pressedLink;        // the link a plain left press landed on
+    QString m_pressedFold;     // the fold anchor a plain left press landed on
     int m_pressedRow = -1;
     int m_pressedStart = -1;
     int m_pressedEnd = -1;
