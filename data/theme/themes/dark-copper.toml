@@ -82,7 +82,7 @@ face = "#1a1210"
 metal = "#c08556"
 metal_dim = "#6b4a33"
 
-[metal]
+[material]
 # Copper is a metal, and a flat fill of it is brown paint (owner, 2026-09-18: "there's no way to
 # make the copper look metallic?"). A metal face is a gradient with one specular line: light
 # falls on the top edge, the face falls away into shade, and a press turns that round. `mid` is

@@ -108,39 +108,89 @@ QFrame#composer[relayActive="true"] { border: 2px solid @accent; }
     return css.arg(light, dark);
 }
 
-// `[flags] metal = true` (Dark Copper): the raised chrome is a milled metal face rather than a
-// flat fill. Metal is a gradient and a specular edge — a flat fill of any copper reads as brown
-// paint — so every raised surface runs from a lit top to a shaded bottom with one bright line
-// along its top edge, and a press turns the light round. The grid is never touched
-// (docs/SWITCHBOARD-AESTHETIC.md 2.2), and neither is any surface text is read on: the composer
-// and the file panes stay flat, because a gradient behind a caret is a distraction, not a
-// material. Colours come from `[metal]`, and both ends of every face carry the theme's contrast
-// contract (tests/theme_test.cpp).
+// --- chrome materials: `[flags] metal` and `[flags] plastic` -------------------------------------
+//
+// A material is how a surface takes light, and both treatments say it the same way: one
+// `[material]` table (light, mid, dark, edge, chrome_light, chrome_dark) and a gradient per
+// raised face. Metal gets a specular line and a wide range; plastic gets a broad soft highlight
+// and a narrow one. Both leave two things alone: the grid (no chrome colour reaches it,
+// docs/SWITCHBOARD-AESTHETIC.md 2.2) and any surface text is typed on — a gradient behind a
+// caret is a distraction, not a material.
+//
+// A tiled grain was tried over all of this and cut (owner, 2026-09-18: the texture on the
+// buttons "looks crap"). Qt only paints a stylesheet background-image on some widget classes,
+// so it landed on chips and never on the tab row, which is exactly the inconsistency that made
+// it read as dirt rather than as a material.
+
+struct Material {
+    QString light, mid, dark, edge, chromeTop, chromeBottom;
+};
+
+Material materialOf(const ThemeSpec &spec) {
+    Material m;
+    m.light = hex(extraColor(spec, QStringLiteral("material.light"), SurfaceRaised.lighter(125)));
+    m.mid = hex(extraColor(spec, QStringLiteral("material.mid"), SurfaceRaised));
+    m.dark = hex(extraColor(spec, QStringLiteral("material.dark"), SurfaceRaised.darker(130)));
+    m.edge = hex(extraColor(spec, QStringLiteral("material.edge"), SurfaceRaised.lighter(190)));
+    m.chromeTop = hex(extraColor(spec, QStringLiteral("material.chrome_light"), Background.lighter(135)));
+    m.chromeBottom = hex(extraColor(spec, QStringLiteral("material.chrome_dark"), Background.darker(115)));
+    return m;
+}
+
+// Metal (Dark Copper): milled. A flat fill of any copper reads as brown paint, so a raised face
+// is a specular line along its top edge, a lit upper half and shade below — and a press turns
+// the light round, because a pressed key faces away from the lamp.
 QString metalStylesheet(const ThemeSpec &spec) {
-    const QString light = hex(extraColor(spec, QStringLiteral("metal.light"), SurfaceRaised.lighter(125)));
-    const QString mid = hex(extraColor(spec, QStringLiteral("metal.mid"), SurfaceRaised));
-    const QString dark = hex(extraColor(spec, QStringLiteral("metal.dark"), SurfaceRaised.darker(130)));
-    const QString edge = hex(extraColor(spec, QStringLiteral("metal.edge"), SurfaceRaised.lighter(190)));
-    const QString chromeTop = hex(extraColor(spec, QStringLiteral("metal.chrome_light"), Background.lighter(135)));
-    const QString chromeBottom = hex(extraColor(spec, QStringLiteral("metal.chrome_dark"), Background.darker(115)));
+    const Material m = materialOf(spec);
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
 QToolButton#workChip, QFrame#paneChrome[hot="true"], QMenu, QFrame#notificationsPopup,
 QFrame#helpCard, QLabel#toast {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %4, stop:0.09 %1, stop:0.55 %2, stop:1 %3); }
 QPushButton:hover, QComboBox:hover, QToolButton#stripChip:hover, QToolButton#workChip:hover {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %4, stop:0.14 %1, stop:0.6 %1, stop:1 %2); }
 QPushButton:pressed, QToolButton#stripChip:pressed, QToolButton#workChip:pressed {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %3, stop:0.9 %2, stop:1 %4); }
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %3, stop:0.9 %2, stop:1 %4); }
 QPushButton:disabled { background: %3; }
-/* The frame the panes sit in: a shallower sheen, so the chrome reads as one sheet of metal
-   with the chips raised out of it rather than as a second set of buttons. */
-QToolBar, QTabBar {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %5, stop:1 %6); }
+/* The chassis the panes are bolted to: one sheet, with a shallower sheen than a chip, so the
+   chips read as raised out of it rather than as a second set of buttons. The tab row and the
+   toolbar are cleared so that sheet runs behind them unbroken. */
+QMainWindow#relayWindow, QDialog, QWidget#sidebar {
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %5, stop:1 %6); }
+QTabBar, QToolBar { background: transparent; }
 )");
-    return css.arg(light, mid, dark, edge, chromeTop, chromeBottom);
+    return css.arg(m.light, m.mid, m.dark, m.edge, m.chromeTop, m.chromeBottom);
+}
+
+// Plastic (IBM Beige): moulded ABS, and the opposite of metal in the two ways that matter. The
+// highlight is broad and soft instead of a line, because the surface scatters light rather than
+// reflecting it; and the range is narrow, because a beige case in a lit room is nearly one
+// colour — it is the *shape* that shows, not a shine. The two-tone bevel ([flags] bevel) is
+// what supplies the moulded edge; this supplies the face inside it.
+QString plasticStylesheet(const ThemeSpec &spec) {
+    const Material m = materialOf(spec);
+    QString css = QStringLiteral(R"(
+QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
+QToolButton#workChip, QFrame#paneChrome[hot="true"], QMenu, QFrame#notificationsPopup,
+QFrame#helpCard, QLabel#toast {
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 %1, stop:0.45 %2, stop:1 %3); }
+QPushButton:hover, QComboBox:hover, QToolButton#stripChip:hover, QToolButton#workChip:hover {
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %4, stop:0.5 %1, stop:1 %2); }
+/* A pressed key is the same piece of plastic with the light coming from the other side. */
+QPushButton:pressed, QToolButton#stripChip:pressed, QToolButton#workChip:pressed {
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %3, stop:0.5 %2, stop:1 %1); }
+QPushButton:disabled { background: %3; }
+/* The case: the largest moulded surface here, and the one that has to read as a machine rather
+   than a light grey web page. One gentle top light across the whole window and the deck the
+   panes sit on, with the tab row and toolbar cleared so the moulding runs behind them. */
+QMainWindow#relayWindow, QDialog, QWidget#sidebar, QWidget#pane {
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %5, stop:1 %6); }
+QTabBar, QToolBar { background: transparent; }
+)");
+    return css.arg(m.light, m.mid, m.dark, m.edge, m.chromeTop, m.chromeBottom);
 }
 
 // --- the theme registry -------------------------------------------------------------------------
@@ -537,6 +587,8 @@ QPushButton#boardReplyButton, QFrame#boardReply QPushButton#primary { padding: 4
     const QColor selection = spec.uiColor(QStringLiteral("selection"), Accent.darker(200));
     const QColor caution = blend(Warning, Error, 0.7);
     // The @on… tokens come first: replacing @warning before @onWarning would eat the prefix.
+    // Any token added here needs the same check — a `@textures` added at the end of this list
+    // came out as "#ece6e0ures/…", because `@text` had already taken its head.
     const QList<QPair<QString, QString>> tokens{
         {QStringLiteral("@onWarning"), hex(inkOn(Warning))}, {QStringLiteral("@onCaution"), hex(inkOn(caution))},
         {QStringLiteral("@onShell"), hex(inkOn(Shell))}, {QStringLiteral("@onAgent"), hex(inkOn(Agent))},
@@ -564,6 +616,7 @@ QPushButton#boardReplyButton, QFrame#boardReply QPushButton#primary { padding: 4
     // sheet above unchanged.
     if (spec.flag(QStringLiteral("bevel"))) css += bevelStylesheet(spec);
     if (spec.flag(QStringLiteral("metal"))) css += metalStylesheet(spec);
+    if (spec.flag(QStringLiteral("plastic"))) css += plasticStylesheet(spec);
     if (themeDataDir().isEmpty()) {
         // Without bundled icons, fall back to the style's own arrows and check marks.
         css.remove(QRegularExpression(QStringLiteral(R"([^\n]*url\(@icons[^\n]*\n)")));

@@ -95,8 +95,27 @@ face = "#e0d6bd"
 metal = "#63492b"
 metal_dim = "#8a7550"
 
+[material]
+# Moulded ABS, the material a 1990s case is actually made of (owner, 2026-09-18: "make ibm beige
+# look like computer plastic"). Plastic is the opposite of this theme's metal cousin in the two
+# ways that matter: the highlight is broad rather than a specular line, because the surface
+# scatters light instead of reflecting it, and the range is narrow, because a beige case in a lit
+# room is nearly one colour — what you see is the moulding, not a shine. `mid` is the #ded3bf the
+# flat version used, so a chip still averages to the colour the palette was measured on.
+light = "#e4dac6"
+mid = "#ded3bf"
+dark = "#d6cbb4"
+# The soft inner light a moulded face catches under the pointer. Not a specular line: on plastic
+# there is no such thing.
+edge = "#efe7d8"
+# The case itself, the largest moulded surface here. It stops at the #cdc0a8 the palette was
+# measured on, because one step further (#c6b89e) puts ochre at 4.27:1 and fails AA.
+chrome_light = "#d6cbb4"
+chrome_dark = "#cdc0a8"
+
 [flags]
 # Windows 95 had no rounded corners and drew every control with a bevel.
 bevel = true
 square = true
 board_material = true
+plastic = true

@@ -83,13 +83,27 @@ the bottom edge as often as the top. Only the default ground is shaded: a cell c
 background colour still paints solid, so `\e[41m` is the same red everywhere on the page. The
 gradient is the engine's own, drawn by `TerminalView::paintEvent`.
 
-A theme may also declare `[flags] metal = true` with a `[metal]` table (`light`, `mid`, `dark`,
-`edge`, `chrome_light`, `chrome_dark`). Raised chrome — buttons, chips, menus, the pane header —
-is then painted as a metal face: a specular line along the top edge, a lit upper half, and shade
-below, with the light turned round on a press. It is for a theme whose chrome is a material
-(Dark Copper), and it never touches the grid or a surface text is typed on. Both ends of a face
-are grounds people read on, so the rules above are measured on `metal.light` and `metal.dark`
+A theme may also declare a **chrome material**: `[flags] metal = true` (Dark Copper) or
+`[flags] plastic = true` (IBM Beige), with a `[material]` table (`light`, `mid`, `dark`, `edge`,
+`chrome_light`, `chrome_dark`). Raised chrome — buttons, chips, menus, the pane header — is then
+painted as a face of that material rather than a flat fill, and the window behind it as the
+chassis or the case it is set into:
+
+| | metal | plastic |
+|---|---|---|
+| highlight | a specular line along the top edge | a broad soft band across the upper half |
+| range | wide: it reflects | narrow: it scatters |
+| pressed | the light turns round | the same, gentler |
+| edge | the theme's own border | the two-tone `[bevel]` moulding |
+
+It is for a theme whose chrome is a material, and it never touches the grid or a surface text is
+typed on. Both ends of a face are grounds people read on, so the rules above are measured on
+`material.light` and `material.dark` — and on `material.chrome_light` / `material.chrome_dark` —
 as well as on `surface_raised`.
+
+A tiled grain (brushed streaks, moulded stipple) was built for both and cut on sight: Qt paints a
+stylesheet `background-image` on some widget classes and not others, so it landed on the chips
+and never on the tab row, and an inconsistent grain reads as dirt rather than as a material.
 
 **Distinctness** (the rule WCAG does not have): `accent` and `border_strong` against `warning` and
 `error`; `surface_raised` against `warning`; `border` against `error`; and `shell` against

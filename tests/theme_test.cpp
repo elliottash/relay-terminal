@@ -281,11 +281,12 @@ private Q_SLOTS:
         struct Pair { QColor fg, bg; double min; const char *what; };
         const auto ui = [&spec](const char *t) { return spec.uiColor(QString::fromLatin1(t)); };
         QList<Pair> pairs;
-        // A `[flags] metal` theme paints its raised chrome as a gradient, so the lit top and the
-        // shaded bottom of a chip are both grounds text is read on.
+        // A theme with a chrome material paints its raised faces as a gradient, so the lit top
+        // and the shaded bottom of a chip are both grounds text is read on.
         QList<QColor> raisedFaces{ui("surface_raised")};
-        if (spec.flag(QStringLiteral("metal"))) {
-            for (const char *stop : {"metal.light", "metal.dark"}) {
+        if (spec.flag(QStringLiteral("metal")) || spec.flag(QStringLiteral("plastic"))) {
+            for (const char *stop : {"material.light", "material.dark", "material.chrome_light",
+                                     "material.chrome_dark"}) {
                 const QStringList raw = spec.extra.value(QString::fromLatin1(stop));
                 QVERIFY2(!raw.isEmpty(), stop);
                 const QColor face(raw.first().trimmed());
