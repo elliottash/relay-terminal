@@ -12,10 +12,12 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"unpane","id":"p1"}                                 pane closed or stopped sharing
     {"t":"pair"}                                             open a pairing room, get a QR
     {"t":"answer","id":N,"allow":true,"capability":"full"}   the user answered the dialog
+    {"t":"address","value":"192.168.1.9"}                    serve the QR on another address
     {"t":"revoke","device":"..."}   {"t":"devices"}   {"t":"stop"}
 
   here → GUI
-    {"t":"started","base":"...","fingerprint":"...","note":"..."}
+    {"t":"started","base":"...","fingerprint":"...","note":"...",
+     "addresses":[{"value":"192.168.1.9","where":"this network","current":true}, ...]}
     {"t":"pairing","url":"...","qr":[[0,1,...],...],"expires":N}
     {"t":"ask","id":N,"name":"...","platform":"...","fingerprint":"...","code":"12345","peer":"..."}
     {"t":"paired","device":"...","name":"...","capability":"..."}
@@ -211,6 +213,10 @@ class Sidecar:
         self.identity: identity_mod.Identity | None = None
         self.devices: identity_mod.DeviceStore | None = None
         self.host: host_mod.Host | None = None
+        self.address = ""
+        self.tls_port = 0
+        self.base = ""
+        self.note = """"""
         self.server = None
         self.store = None
         self.serving: asyncio.Task | None = None
@@ -254,6 +260,9 @@ class Sidecar:
             self.source.set_frame(message)
         elif kind == "pair":
             await self.pair()
+        elif kind == "address":
+            self.set_address(str(message.get("value", "")))
+            await self.pair()
         elif kind == "answer":
             future = self.asks.pop(int(message.get("id", -1)), None)
             if future and not future.done():
@@ -281,11 +290,16 @@ class Sidecar:
 
         self.note = ""
         self.base = local
+        self.address = ""
+        self.tls_port = 0
         if message.get("tls", True):
-            address = message.get("address") or devtls.preferred_address()
+            # One listener on every interface; which address goes in the QR is a separate choice,
+            # because only the person knows whether the phone is on the Wi-Fi or on the tailnet.
             listener = await self.server.start("0.0.0.0", int(message.get("tls_port") or 0),
                                                ssl_context=devtls.context(identity_mod.state_dir()))
-            self.base = f"https://{address}:{self.server.port_of(listener)}"
+            self.tls_port = self.server.port_of(listener)
+            self.address = message.get("address") or devtls.preferred_address()
+            self.base = f"https://{self.address}:{self.tls_port}"
             self.note = ("The certificate is self-signed, so your phone warns once. Its SHA-256 "
                          f"begins {devtls.fingerprint(identity_mod.state_dir())}.")
 
@@ -298,8 +312,26 @@ class Sidecar:
             if self.host.socket is not None:
                 break
         self.emit({"t": "started", "base": self.base, "fingerprint": self.identity.fingerprint,
-                   "note": self.note})
+                   "note": self.note, "addresses": self.address_list()})
         self.report_devices()
+
+    def address_list(self) -> list[dict]:
+        if not self.tls_port:
+            return []
+        return [{"value": address, "where": devtls.describe(address),
+                 "current": address == self.address}
+                for address in devtls.local_addresses()]
+
+    def set_address(self, address: str) -> None:
+        """Point the pairing link at another of this machine's addresses."""
+        if not self.tls_port or address not in devtls.local_addresses():
+            return
+        self.address = address
+        self.base = f"https://{address}:{self.tls_port}"
+        if self.host is not None:
+            self.host.app_base = self.base
+        self.emit({"t": "started", "base": self.base, "fingerprint": self.identity.fingerprint,
+                   "note": self.note, "addresses": self.address_list()})
 
     async def pair(self) -> None:
         if self.host is None:

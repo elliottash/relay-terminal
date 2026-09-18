@@ -22,6 +22,7 @@
 
 #include <functional>
 
+class QComboBox;
 class QLabel;
 class QListWidget;
 class QProcess;
@@ -62,11 +63,17 @@ public:
     void stopAll();
 
     void requestPairing();
+    // Which of this machine's addresses the pairing link points at. A phone on the same Wi-Fi
+    // needs the network address; a phone on the tailnet needs the tailnet one, and only the
+    // person knows which the phone is on.
+    QJsonArray addresses() const { return m_addresses; }
+    void useAddress(const QString &address);
     void answer(int askId, bool allow, const QString &capability);
     void revoke(const QString &deviceId);
 
 signals:
     void startedChanged();
+    void addressesChanged(const QJsonArray &addresses);
     void pairingReady(const QString &url, const relay::QrMatrix &qr, int expires);
     void pairingAsked(int id, const QString &name, const QString &platform,
                       const QString &fingerprint, const QString &code, const QString &peer);
@@ -101,6 +108,7 @@ private:
     bool m_running = false;
     QString m_base;
     QString m_note;
+    QJsonArray m_addresses;
 };
 
 // The window behind the share button: the QR code, the code to compare, and who is connected.
@@ -114,12 +122,14 @@ private:
     void showAsk(int id, const QString &name, const QString &platform, const QString &fingerprint,
                  const QString &code, const QString &peer);
     void showDevices(const QJsonArray &items);
+    void showAddresses(const QJsonArray &addresses);
     void answer(bool allow);
 
     QString m_paneId;
     QLabel *m_status = nullptr;
     QLabel *m_qr = nullptr;
     QLabel *m_url = nullptr;
+    QComboBox *m_address = nullptr;
     QLabel *m_note = nullptr;
     QWidget *m_askBox = nullptr;
     QLabel *m_askText = nullptr;

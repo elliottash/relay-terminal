@@ -194,6 +194,7 @@ class Subagent:
     waiters: int = 0
     generation: int = 0
     run_start_index: int = 1
+    pending_model: tuple | None = None  # (config, preset_id) a running subagent switches to at its next step
     done: threading.Event = field(default_factory=threading.Event)
 
     @property
@@ -238,6 +239,11 @@ class _SubInbox:
 
     def drain(self) -> list[str]:
         with self.manager._lock:
+            # A model change from the list (agent_set_model) lands here, on the subagent's own
+            # thread at a step boundary, so it never swaps the provider under a running request.
+            pending, self.sub.pending_model = self.sub.pending_model, None
+            if pending is not None:
+                self.manager._apply_model(self.sub, *pending)
             items, self.sub.inbox = self.sub.inbox, []
             return items
 
@@ -642,6 +648,46 @@ class SubagentManager:
                 sub.agent.stop()
             self._lock.notify_all()
             return [sub.id for sub in subs]
+
+    def set_model(self, target, model) -> list[str]:
+        """agent_set_model: move one subagent, or every listed one ("all"), to another model.
+
+        A running subagent switches before its next model call; a waiting or finished one at once
+        (a finished one uses it when a message resumes it). Emits ``subagent_model`` per subagent."""
+        if not isinstance(model, str) or not model.strip() or len(model) > 200:
+            raise ValueError("model must be text.")
+        with self._lock:
+            if self.factory is None:
+                raise ValueError("Subagents are not configured.")
+            if target == "all":
+                subs = list(self._agents.values())
+            else:
+                sub = self._agents.get(target) if isinstance(target, str) else None
+                if sub is None:
+                    raise ValueError(f"Unknown subagent {target!r}.")
+                subs = [sub]
+            for sub in subs:
+                warnings: list[str] = []
+                config, preset_id = self.factory.resolve(model.strip(), warnings)
+                if sub.effort:
+                    extra = effort_extra(preset_id, config.extra, sub.effort)
+                    if extra is not None:
+                        config = dataclasses.replace(config, extra=extra)
+                sub.model = config.model
+                if sub.status == "running":
+                    sub.pending_model, applies = (config, preset_id), "next_step"
+                else:
+                    sub.pending_model, applies = None, "now"
+                    self._apply_model(sub, config, preset_id)
+                event = {"event": "subagent_model", "id": sub.id, "model": config.model, "applies": applies}
+                if warnings:
+                    event["warnings"] = warnings
+                self._emit(event)
+            return [sub.id for sub in subs]
+
+    def _apply_model(self, sub: Subagent, config: ProviderConfig, preset_id: str | None) -> None:
+        factory = self.factory.provider_factory if self.factory is not None else None
+        sub.agent.set_model(config, preset_id, provider=factory(config) if factory else None)
 
     def stop_all(self, *, reset: bool = False) -> list[str]:
         """Stop everything; with reset, also forget pending results (new conversation or configuration)."""

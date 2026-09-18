@@ -262,6 +262,9 @@ def main():
             elif kind == "agent_stop":
                 target = request.get("id")
                 emit({"event": "agent_stopped", "ids": subagents.stop("all" if target in (None, "all") else target)})
+            elif kind == "agent_set_model":
+                target = request.get("id")
+                subagents.set_model("all" if target in (None, "all") else target, request.get("model"))
             elif kind == "set_agent_options":
                 validate_turn_options(request)  # refuse bad values before changing anything
                 role_table = model_roles.validate_roles(request.get("roles")) if "roles" in request else None

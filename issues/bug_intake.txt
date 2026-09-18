@@ -1,0 +1,1 @@
+markdown rendering isnt working in the terminal. fix taht and then put in the system prompts that the agents should use markdown. 

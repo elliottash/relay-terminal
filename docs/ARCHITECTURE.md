@@ -1300,6 +1300,8 @@ Other limits:
 | `src/InputPolicy.*` | who may type where: the prompt-box-only rules, passwords, and whether the agent may type into the program |
 | `src/ScreenPrompt.*` | the screen-text classifier: is the foreground program waiting for input, and for what (section 9.1) |
 | `src/Voice.*` | voice transcription: capture tool and arguments, the hold key, the transcript's place in the composer, WAV repair |
+| `src/RemoteShare.*` | sharing a pane with a phone: the sidecar process, the pane's frames going out, the keys coming back, and the QR/approval dialog (section 19) |
+| `remote/`, `rendezvous/`, `app/` | the remote protocol and its Noise handshake, the ciphertext-only relay, and the phone's web client (`docs/REMOTE-PROTOCOL.md`) |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
 | `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search), `logs` (rotating `worker.log`) |
@@ -1316,3 +1318,30 @@ Other limits:
 | `packaging/`, `.github/workflows/`, `site/` | packages, CI, release, website |
 | `tests/` | Python backend and PTY tests, Qt editor and file pane tests |
 | `issues/` | file-based tracker, and the Switchboard's storage (`board.yaml`, cards, `threads/`) |
+
+## 19. Sharing a pane with a phone
+
+The share chip sits beside the microphone in the composer strip, and the palette action is
+"Share this pane with a phone" (`pane.share`). Both call `Pane::toggleShare`.
+
+The protocol, the cryptography and the phone's web client live in a Python sidecar,
+`remote/gui_host.py`, started on demand and spoken to in line JSON exactly as the agent worker is
+(`src/RemoteShare.cpp`). Relay links no crypto library, and the sidecar touches no widget.
+
+| Direction | What crosses |
+|---|---|
+| GUI → sidecar | the pane's title, cwd and status; a screen frame whenever the view pulls one; the answer to a pairing question |
+| sidecar → GUI | the pairing URL and its QR matrix; a pairing request to put to the person; the keystrokes a phone sent |
+
+Two rules decide the shape:
+
+- **Screen state comes from the frame `TerminalView` already pulled** (`TerminalView::frame()`,
+  `frameChanged()`). `VtCore::updateFrame` consumes the dirty state, so a second caller would stop
+  the pane repainting. It also means **only engine panes can be shared**: KonsolePart cannot
+  produce a frame at all (`docs/ENGINE.md`), and the button says so.
+- **Approving a device is a deliberate click.** The dialog shows a five-digit code derived from the
+  Noise handshake on both ends, and *Refuse* holds the focus, because allowing hands a phone the
+  keyboard of a live shell.
+
+Everything else — pairing, capabilities, the password-prompt refusal, revocation — is the protocol's
+job and is described in [REMOTE-PROTOCOL.md](REMOTE-PROTOCOL.md).

@@ -7,6 +7,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -144,7 +145,9 @@ void RemoteShare::handle(const QJsonObject &message)
         m_running = true;
         m_base = message.value(QStringLiteral("base")).toString();
         m_note = message.value(QStringLiteral("note")).toString();
+        m_addresses = message.value(QStringLiteral("addresses")).toArray();
         m_poll->start();
+        emit addressesChanged(m_addresses);
         emit startedChanged();
     } else if (kind == QLatin1String("pairing")) {
         // QA hook: the pairing URL carries a one-time secret, so it is never logged. A driver
@@ -276,6 +279,11 @@ void RemoteShare::poll()
 
 void RemoteShare::requestPairing() { send({{"t", "pair"}}); }
 
+void RemoteShare::useAddress(const QString &address)
+{
+    send({{"t", "address"}, {"value", address}});
+}
+
 void RemoteShare::answer(int askId, bool allow, const QString &capability)
 {
     send({{"t", "answer"}, {"id", askId}, {"allow", allow}, {"capability", capability}});
@@ -304,6 +312,18 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     m_qr->setAlignment(Qt::AlignCenter);
     m_qr->setMinimumSize(240, 240);
     column->addWidget(m_qr);
+
+    // Which address the phone should reach this machine on. Getting it wrong is the most likely
+    // reason a phone says it cannot reach the site, so the choice is in front of the QR code.
+    m_address = new QComboBox;
+    m_address->setToolTip(QStringLiteral(
+        "The address your phone will open. Use the network one when the phone is on the same "
+        "Wi-Fi, the tailnet one when it is signed in to your tailnet."));
+    connect(m_address, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
+        const QString address = m_address->itemData(index).toString();
+        if (!address.isEmpty()) RemoteShare::instance().useAddress(address);
+    });
+    column->addWidget(m_address);
 
     m_url = new QLabel;
     m_url->setTextFormat(Qt::PlainText);
@@ -371,6 +391,8 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     connect(&share, &RemoteShare::pairingReady, this, &RemoteShareDialog::showPairing);
     connect(&share, &RemoteShare::pairingAsked, this, &RemoteShareDialog::showAsk);
     connect(&share, &RemoteShare::devicesChanged, this, &RemoteShareDialog::showDevices);
+    connect(&share, &RemoteShare::addressesChanged, this, &RemoteShareDialog::showAddresses);
+    showAddresses(share.addresses());
     connect(&share, &RemoteShare::failed, this, [this](const QString &message) {
         m_status->setText(message);
     });
@@ -392,8 +414,13 @@ void RemoteShareDialog::showPairing(const QString &url, const QrMatrix &qr, int 
 {
     m_qr->setPixmap(qrPixmap(qr, 260));
     m_url->setText(url);
-    m_status->setText(QStringLiteral("Scan this with your phone's camera. The code lasts %1 s.")
-                          .arg(expires));
+    QString text = QStringLiteral("Scan this with your phone's camera. The code lasts %1 s.")
+                       .arg(expires);
+    if (m_address->count() > 1) {
+        text += QStringLiteral("\nIf your phone says it cannot reach the site, pick the other "
+                               "address under the code — the phone has to be on that network.");
+    }
+    m_status->setText(text);
 }
 
 void RemoteShareDialog::showAsk(int id, const QString &name, const QString &platform,
@@ -416,6 +443,24 @@ void RemoteShareDialog::answer(bool allow)
     m_askBox->hide();
     m_status->setText(allow ? QStringLiteral("Paired. Your phone can watch and type.")
                             : QStringLiteral("Refused."));
+}
+
+void RemoteShareDialog::showAddresses(const QJsonArray &addresses)
+{
+    m_address->blockSignals(true);
+    m_address->clear();
+    for (const QJsonValue &value : addresses) {
+        const QJsonObject entry = value.toObject();
+        const QString address = entry.value(QStringLiteral("value")).toString();
+        m_address->addItem(QStringLiteral("%1 — reachable from %2")
+                               .arg(address, entry.value(QStringLiteral("where")).toString()),
+                           address);
+        if (entry.value(QStringLiteral("current")).toBool()) {
+            m_address->setCurrentIndex(m_address->count() - 1);
+        }
+    }
+    m_address->setVisible(m_address->count() > 1);
+    m_address->blockSignals(false);
 }
 
 void RemoteShareDialog::showDevices(const QJsonArray &items)

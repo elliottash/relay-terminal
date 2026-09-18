@@ -363,6 +363,38 @@ class StopAndMessageTests(Base):
         self.rec.wait(lambda e: e['event'] == 'subagent_finished', count=2)
         self.assertEqual(len(self.rec.of('subagent_event')), count)
 
+    def test_set_model_running_switches_at_next_step_finished_at_once(self):
+        built = []
+
+        def provider_for(config):
+            built.append(config.model)
+            return SubProvider(self.hub)
+        factory = SubagentFactory(CONFIG, self.temp.name, key_lookup=lambda preset: 'zkey', provider_factory=provider_for)
+        self.manager.configure(load_catalog(self.root, []), factory)
+        self.spawn('F')
+        self.rec.wait(lambda e: e['event'] == 'subagent_finished' and e['id'] == 'a1')
+        self.spawn('M tool gate:g1')
+        self.rec.wait(lambda e: e['event'] == 'subagent_progress' and e['id'] == 'a2' and e['status'] == 'running')
+        self.assertEqual(sorted(self.manager.set_model('all', 'glm-coding')), ['a1', 'a2'])
+        now = self.rec.wait(lambda e: e['event'] == 'subagent_model' and e['id'] == 'a1')
+        later = self.rec.wait(lambda e: e['event'] == 'subagent_model' and e['id'] == 'a2')
+        self.assertEqual((now['model'], now['applies']), ('glm-5.3', 'now'))
+        self.assertEqual((later['model'], later['applies']), ('glm-5.3', 'next_step'))
+        sub = self.manager._agents['a2']
+        self.assertEqual(sub.agent.config.model, 'mock')   # not under the running request
+        self.hub.open('g1')
+        self.rec.wait(lambda e: e['event'] == 'subagent_finished' and e['id'] == 'a2')
+        self.assertEqual(sub.agent.config.model, 'glm-5.3')
+        self.assertIsNone(sub.pending_model)
+        self.assertEqual(built.count('glm-5.3'), 2)
+        self.assertEqual({s['model'] for s in self.manager.list()}, {'glm-5.3'})
+        self.manager.set_model('a1', 'inherit')
+        self.assertEqual(self.manager._agents['a1'].agent.config.model, 'mock')
+        with self.assertRaises(ValueError):
+            self.manager.set_model('a99', 'inherit')
+        with self.assertRaises(ValueError):
+            self.manager.set_model('a1', '')
+
 
 class HandoffTests(Base):
     def test_background_completion_wakes_idle_main_agent(self):

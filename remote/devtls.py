@@ -29,8 +29,15 @@ VALID_DAYS = 365
 
 
 def local_addresses() -> list[str]:
-    """Every address this machine might be reached on, tailnet first."""
-    found: list[str] = []
+    """Every address this machine might be reached on, most-likely-to-work first.
+
+    Ordinary network addresses come before tailnet ones. A phone on the same Wi-Fi is the common
+    case and reaches the LAN address; a tailnet address only works if the phone itself is signed
+    in to the tailnet and online, which is easy to assume and wrong. The caller offers the list so
+    the person can pick the other one when the first does not answer.
+    """
+    lan: list[str] = []
+    tailnet: list[str] = []
     try:
         output = subprocess.run(["ip", "-4", "-o", "addr", "show", "scope", "global"],
                                 capture_output=True, text=True, timeout=10).stdout
@@ -41,10 +48,15 @@ def local_addresses() -> list[str]:
         if len(parts) < 4:
             continue
         interface, address = parts[1], parts[3].split("/")[0]
-        if address.startswith("172.17."):          # docker
+        if address.startswith("172.17.") or interface.startswith("docker"):
             continue
-        (found.insert(0, address) if interface.startswith("tailscale") else found.append(address))
-    return found
+        (tailnet if interface.startswith("tailscale") else lan).append(address)
+    return lan + tailnet
+
+
+def describe(address: str) -> str:
+    """A word for where an address can be reached from, for the picker."""
+    return "tailnet" if address.startswith("100.") else "this network"
 
 
 def preferred_address() -> str:

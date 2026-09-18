@@ -79,6 +79,7 @@ Verify against provider docs before shipping; keep the table in `backend/relay_c
 - Events: `subagent_started {id, type, description, background, model}`, `subagent_progress {id, status: "running"|"waiting"|"done"|"failed"|"stopped", tools, tokens, elapsed_ms, last_activity}`, `subagent_finished {id, outcome, summary}`.
 - `agent_subscribe {id, on: bool}` → while on, the worker also sends `subagent_event {id, event: {...}}` wrapping that subagent's delta/tool_started/tool_output/tool_result events.
 - `agent_message {id, text}` (user → subagent), `agent_stop {id | "all"}`.
+- `agent_set_model {id | "all", model}` moves one subagent, or every listed one, to another model (`model` as in the `agent` tool: `inherit`, a preset id or an alias). The worker emits `subagent_model {id, model, applies: "now"|"next_step", warnings?}` for each: a running subagent switches before its next model call, a waiting or finished one at once.
 - Background completion: the result is delivered to the main agent before its next model call; if the main agent is idle, the worker enqueues a main turn "Background agent <id> finished: <summary>" (owner decision 4).
 
 ## 9. Suggestions

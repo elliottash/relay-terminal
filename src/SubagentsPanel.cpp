@@ -191,6 +191,18 @@ bool SubagentModel::handle(const QJsonObject &event) {
         changed();
         return true;
     }
+    if (type == QStringLiteral("subagent_model")) {
+        SubagentRow *row = find(id);
+        if (!row) return true;
+        row->model = str(event, "model");
+        QStringList warnings;
+        for (const auto &w : event.value(QStringLiteral("warnings")).toArray()) warnings << w.toString();
+        if (onStatus) onStatus(QStringLiteral("%1 → %2%3%4").arg(id, row->model,
+            str(event, "applies") == QStringLiteral("next_step") ? QStringLiteral(" from its next step") : QString(),
+            warnings.isEmpty() ? QString() : QStringLiteral(" (") + warnings.join(QStringLiteral("; ")) + QLatin1Char(')')));
+        changed();
+        return true;
+    }
     if (type == QStringLiteral("subagent_transcript") || type == QStringLiteral("subagent_event")) {
         if (onTranscript) onTranscript(id, event);
         return true;
@@ -321,6 +333,17 @@ void SubagentsPanel::act(bool stop) {
     refresh();
 }
 
+void SubagentsPanel::pickModel(int row) {
+    if (row <= 0 || !onPickModel) return;
+    m_selected = row;
+    const QString id = selectedId();
+    if (id.isEmpty()) return;
+    QRect chip = m_modelChips.value(row);
+    if (chip.isNull()) chip = QRect(0, 2 + (row - firstVisible()) * rowHeight(), width(), rowHeight());
+    update();
+    onPickModel(id, mapToGlobal(chip.bottomLeft()));
+}
+
 void SubagentsPanel::keyPressEvent(QKeyEvent *event) {
     const auto mods = event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
     const int n = m_model->rows().size();
@@ -342,6 +365,9 @@ void SubagentsPanel::keyPressEvent(QKeyEvent *event) {
     case Qt::Key_X: case Qt::Key_Delete: case Qt::Key_Backspace:
         act(true);
         return;
+    case Qt::Key_M:
+        pickModel(m_selected);
+        return;
     case Qt::Key_Escape:
         if (onExit) onExit();
         return;
@@ -355,14 +381,17 @@ void SubagentsPanel::mousePressEvent(QMouseEvent *event) {
     if (row < 0) return;
     m_selected = row;
     setFocus(Qt::MouseFocusReason);
-    // The × at the right edge stops or dismisses.
+    // The × at the right edge stops or dismisses; the model chip opens the model picker.
     if (row > 0 && event->pos().x() >= width() - 24) act(true);
+    else if (row > 0 && m_modelChips.value(row).contains(event->pos())) pickModel(row);
     update();
 }
 
 void SubagentsPanel::mouseDoubleClickEvent(QMouseEvent *event) {
     const int row = rowAt(event->pos());
-    if (row > 0 && event->pos().x() < width() - 24 && onOpen) { m_selected = row; onOpen(selectedId()); }
+    if (row > 0 && event->pos().x() < width() - 24 && !m_modelChips.value(row).contains(event->pos()) && onOpen) {
+        m_selected = row; onOpen(selectedId());
+    }
 }
 
 void SubagentsPanel::focusInEvent(QFocusEvent *event) { QWidget::focusInEvent(event); update(); }
@@ -373,7 +402,7 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
     const QFontMetrics fm = fontMetrics();
     const int h = rowHeight();
     const bool focused = hasFocus();
-    // The list floats over the bottom of the terminal, so it draws its own card.
+    // The list sits beneath the prompt box and draws its own card.
     p.setRenderHint(QPainter::Antialiasing);
     p.setPen(theme::Border);
     p.setBrush(theme::Surface);
@@ -382,8 +411,10 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
     p.setRenderHint(QPainter::Antialiasing, false);
     const int nameWidth = std::max(fm.horizontalAdvance(QStringLiteral("general a00")) + 8, 96);
 
+    m_modelChips.clear();
     auto drawRow = [&](int line, bool selected, const QString &icon, const QColor &iconColor, const QString &name,
-                       const QString &description, const QString &metrics, const QString &badge, bool closable) {
+                       const QString &description, const QString &metrics, const QString &badge, bool closable,
+                       const QString &model = QString(), int rowIndex = 0) {
         const QRect r(0, 2 + line * h, width(), h);
         if (selected) p.fillRect(r.adjusted(4, 0, -4, 0), focused ? theme::SurfaceRaised.lighter(135) : theme::SurfaceRaised);
         int x = 10;
@@ -406,6 +437,20 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
             p.setBrush(Qt::NoBrush);
             right -= bw + 8;
         }
+        if (rowIndex > 0) {
+            // The model chip: click it, or press m on the row, to pick another model.
+            const QString label = fm.elidedText(model.isEmpty() ? QStringLiteral("model") : model, Qt::ElideMiddle, 150)
+                                  + QStringLiteral(" ▾");
+            const int cw = fm.horizontalAdvance(label) + 12;
+            const QRect cr(right - cw, r.top() + 3, cw, h - 6);
+            p.setPen(theme::Border); p.setBrush(theme::SurfaceRaised);
+            p.drawRoundedRect(cr, 4, 4);
+            p.setPen(theme::Text);
+            p.drawText(cr, Qt::AlignCenter, label);
+            p.setBrush(Qt::NoBrush);
+            m_modelChips.insert(rowIndex, cr);
+            right -= cw + 8;
+        }
         const int mw = std::min(fm.horizontalAdvance(metrics) + 8, std::max(0, (right - x) / 2));
         p.setPen(theme::TextMuted);
         p.drawText(QRect(right - mw, r.top(), mw, h), Qt::AlignVCenter | Qt::AlignRight, fm.elidedText(metrics, Qt::ElideLeft, mw));
@@ -418,7 +463,7 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
         }
     };
 
-    const QString hint = focused ? QStringLiteral("↑↓ select · Enter open · x stop/dismiss · Esc back")
+    const QString hint = focused ? QStringLiteral("↑↓ select · Enter open · m model · x stop/dismiss · Esc back")
                                  : QStringLiteral("↓ from the prompt to select");
     drawRow(0, focused && m_selected == 0, m_model->mainBusy() ? QStringLiteral("●") : QStringLiteral("○"),
             m_model->mainBusy() ? theme::Accent : theme::TextMuted, QStringLiteral("main"),
@@ -443,7 +488,7 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
             description += QStringLiteral("  ·  ") + row.lastActivity;
         drawRow(i + 1, m_selected == first + i + 1 && focused, SubagentModel::statusIcon(row.status), color,
                 QStringLiteral("%1 %2").arg(row.type, row.id), description, parts.join(QStringLiteral(" · ")),
-                row.background ? QStringLiteral("bg") : QString(), true);
+                row.background ? QStringLiteral("bg") : QString(), true, row.model, first + i + 1);
     }
     if (rows.size() > kMaxVisible) {
         const int hidden = rows.size() - kMaxVisible;

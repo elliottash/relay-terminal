@@ -2,9 +2,11 @@
 #pragma once
 // Subagents UI (Claude Code style): a model fed by the worker's subagent_* events and the
 // running-agents list shown under a pane's composer. See docs/AGENT-SESSIONS-PROTOCOL.md section 8.
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
+#include <QRect>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
@@ -82,7 +84,8 @@ private:
 
 // The running-agents list under the composer: a `main` row plus one row per subagent.
 // Hidden when there are no subagents. Up/Down move, Enter opens a transcript, x or Delete stops a
-// running agent or dismisses a finished row, Esc (or Up past the first row) returns to the composer.
+// running agent or dismisses a finished row, m picks the row's model, Esc (or Up past the first row)
+// returns to the composer.
 class SubagentsPanel final : public QWidget {
     Q_OBJECT
 public:
@@ -91,6 +94,8 @@ public:
     std::function<void(const QString &id)> onOpen;
     std::function<void(const QString &id)> onStop;
     std::function<void()> onExit;    // give focus back to the composer
+    // The row's model chip was clicked (or m pressed): show a model picker at `at` (global).
+    std::function<void(const QString &id, const QPoint &at)> onPickModel;
 
     // Called after the model changed. Visible when allowed and there are subagents.
     void refresh();
@@ -119,7 +124,9 @@ private:
     int visibleCount() const;
     int rowAt(const QPoint &pos) const;
     void act(bool stop);
+    void pickModel(int row);
     SubagentModel *m_model;
+    QHash<int, QRect> m_modelChips;   // row index (1.. = subagents) -> model chip, from the last paint
     int m_selected = 1;
     bool m_allowed = true;
     QTimer m_tick;

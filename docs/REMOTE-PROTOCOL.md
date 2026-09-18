@@ -570,8 +570,7 @@ and P3 clients interoperate at P1's level.
 ## 14. What exists today (2026-09-17)
 
 P0 is written; P1 runs against a demo agent source, and the P2 screen stream and P3 take-over run
-against **real shells**. What is not yet wired is Relay's GUI: the panes come from
-`relay-screen-bridge`, not from the app's own tabs.
+against **real shells** — including Relay's own panes, from the share button in the app.
 
 | Part | Where | State |
 |---|---|---|
@@ -585,6 +584,10 @@ against **real shells**. What is not yet wired is Relay's GUI: the panes come fr
 | Screen stream (P2) | `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `app/screen.js` | A real PTY parsed by Relay's own emulator, streamed as styled rows, painted as a cell grid on the phone |
 | Take-over (P3) | `remote/host.py`, `app/app.js` | `keys`, `paste`, `line`, `control_request`/`control_release`, an extra-keys row and a line box, refused at a password prompt |
 | Local attach | `remote/attach.py` | The desktop's own terminal joins the same shell, so both ends drive it |
+| In the app | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` | The share chip beside the microphone, the QR and approval dialog, and a sidecar that carries one of Relay's own panes (`ARCHITECTURE.md` section 19) |
+
+Sharing from the app works on **engine panes only** (`--engine=relay`): KonsolePart cannot hand
+over a frame, and the button says so rather than failing quietly.
 
 Not implemented, and refused explicitly rather than silently: `history_get` — scrollback paging
 needs the const `VtCore::historyLines` in both cores — and `secret_input`, which stays refused until

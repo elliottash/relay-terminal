@@ -4069,6 +4069,7 @@ private:
         m_agentsPanel->onOpen = [this](const QString &id) { openSubagent(id); };
         m_agentsPanel->onStop = [this](const QString &id) { stopSubagent(id); toast(QStringLiteral("Stopping ") + id); };
         m_agentsPanel->onExit = [this] { focusInput(); };
+        m_agentsPanel->onPickModel = [this](const QString &id, const QPoint &at) { pickSubagentModel(id, at); };
         m_subagents.onChanged = [this] {
             m_agentsPanel->refresh();
             placeSubagentsPanel();
@@ -4092,6 +4093,48 @@ private:
             for (const auto &view : std::as_const(m_subagentViews)) if (view && view->agentId() == id) view->handleEvent(event);
         };
         m_subagents.onStatus = [this](const QString &text) { status(text); };
+    }
+
+    // The model chip on a subagent row: pick a model, then (with more than one subagent listed)
+    // choose between changing every subagent and only this one.
+    void pickSubagentModel(const QString &id, const QPoint &at) {
+        const auto *row = m_subagents.row(id);
+        if (!row) return;
+        const QString current = row->model;
+        QMenu menu(this);
+        QAction *inherit = menu.addAction(QStringLiteral("Same as the main agent"));
+        inherit->setData(QStringLiteral("inherit"));
+        menu.addSeparator();
+        for (const auto &model : std::as_const(m_stored)) {
+            QAction *action = menu.addAction(conciseModel(model.first, model.second));
+            action->setData(model.first);
+            action->setCheckable(true);
+            action->setChecked(presetById(model.first).value(QStringLiteral("model")).toString() == current);
+        }
+        if (m_stored.isEmpty()) menu.addAction(QStringLiteral("No stored keys"))->setEnabled(false);
+        const QAction *chosen = menu.exec(at);
+        if (!chosen || chosen->data().toString().isEmpty()) { if (m_agentsPanel) m_agentsPanel->setFocus(); return; }
+        const QString model = chosen->data().toString();
+        const QString label = chosen->text();
+        QString target = id;
+        const int count = int(m_subagents.rows().size());
+        if (count > 1) {
+            QMessageBox box(window());
+            box.setIcon(QMessageBox::Question);
+            box.setWindowTitle(QStringLiteral("Change subagent model"));
+            box.setText(QStringLiteral("Change all subagents to %1?").arg(label));
+            box.setInformativeText(QStringLiteral("All %1 subagents in the list can switch to %2, or only %3. "
+                                                  "A running agent switches before its next step.").arg(count).arg(label, id));
+            QPushButton *all = box.addButton(QStringLiteral("Change all"), QMessageBox::AcceptRole);
+            QPushButton *one = box.addButton(QStringLiteral("Only ") + id, QMessageBox::ActionRole);
+            box.addButton(QMessageBox::Cancel);
+            box.setDefaultButton(all);
+            box.exec();
+            if (box.clickedButton() == all) target = QStringLiteral("all");
+            else if (box.clickedButton() != one) { if (m_agentsPanel) m_agentsPanel->setFocus(); return; }
+        }
+        send({{"type", "agent_set_model"}, {"id", target}, {"model", model}});
+        if (m_agentsPanel && m_agentsPanel->isVisible()) m_agentsPanel->setFocus();
     }
 
     void openSubagentOverlay(const QString &id) {

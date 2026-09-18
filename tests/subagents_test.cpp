@@ -176,6 +176,38 @@ private slots:
         QCOMPARE(exits, 2);
     }
 
+    void panelModelPicker() {
+        Harness h;
+        SubagentsPanel panel(&h.model);
+        QStringList picked;
+        panel.onPickModel = [&](const QString &id, const QPoint &) { picked << id; };
+        h.start("a1"); h.start("a2");
+        panel.refresh();
+        panel.resize(700, panel.sizeHint().height());
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        panel.enter();
+        QTest::keyClick(&panel, Qt::Key_Down);
+        QTest::keyClick(&panel, Qt::Key_M);       // m on the row
+        QCOMPARE(picked, QStringList{QStringLiteral("a2")});
+        // A click on a1's chip: it sits left of the metrics, right of the description.
+        const QImage image = panel.grab().toImage();
+        if (!qEnvironmentVariableIsEmpty("RELAY_SUBAGENTS_SHOT")) image.save(qEnvironmentVariable("RELAY_SUBAGENTS_SHOT"));
+        const int rowY = 2 + (panel.fontMetrics().height() + 6) * 3 / 2;
+        int hits = 0;
+        for (int x = panel.width() - 30; x > panel.width() / 2 && picked.size() < 2; x -= 4) {
+            QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier, QPoint(x, rowY));
+            ++hits;
+        }
+        QCOMPARE(picked.size(), 2);
+        QCOMPARE(picked.last(), QStringLiteral("a1"));
+        // The worker's answer updates the row and says when it applies.
+        h.model.handle(json("{'event':'subagent_model','id':'a1','model':'glm-5.3','applies':'next_step'}"));
+        QCOMPARE(h.model.row(QStringLiteral("a1"))->model, QStringLiteral("glm-5.3"));
+        QVERIFY(h.statuses.last().contains(QStringLiteral("glm-5.3 from its next step")));
+        QVERIFY(h.model.handle(json("{'event':'subagent_model','id':'a9','model':'x'}")));   // unknown: consumed, ignored
+    }
+
     void panelShowsAtMostFiveRows() {
         Harness h;
         SubagentsPanel panel(&h.model);
