@@ -91,6 +91,8 @@ Claude session. They show the feature worked once; they are not independent QA.
 | Image context: paste, pane screenshot, the GLM-5.3-Flash swap and back, the vision-model row | [`qa_evidence/2026-09-17-image-context/`](qa_evidence/2026-09-17-image-context/) |
 | Model-written pane titles, tab labels, `/rename`, `/rename-tab` (loopback stub and, separately, a real model) | [`qa_evidence/2026-09-17-pane-title-summary/`](qa_evidence/2026-09-17-pane-title-summary/) |
 | Colour themes: four built-ins switched in one running process, every light surface, the Relay engine and a user theme | [`qa_evidence/2026-09-17-color-themes/`](qa_evidence/2026-09-17-color-themes/) |
+| An unknown `/command` answered by Relay (with a suggestion), `/help`, a real command, and `/bin/echo` and `/tmp` still going to the shell | [`qa_evidence/2026-09-18-unknown-slash-command/`](qa_evidence/2026-09-18-unknown-slash-command/) |
+| Terminal scrollback surviving a quit and restart: 120 lines printed, Relay quit, reopened with the text back, scrollable, and a second quit saving the restored text with the new output | [`qa_evidence/2026-09-18-scrollback-survives-restart/`](qa_evidence/2026-09-18-scrollback-survives-restart/) |
 
 Live provider smoke test, 2026-09-16, through the real `Agent` loop with keys imported from
 Warp: Kimi K3 (`kimi`), GLM-5.3 Coding Plan (`glm-coding`) and DeepSeek V4.1 Flash via
@@ -186,6 +188,8 @@ Waiting for QA (`issues/changes/needs_qa_llm/`):
 - `2026-09-17-composer-page-scroll.md`
 - `2026-09-17-pre-submit-run-check.md`
 - `2026-09-17-terminal-not-directly-typable.md`
+- `2026-09-18-unknown-slash-command.md`
+- `2026-09-18-scrollback-survives-restart.md`
 
 Closed (`issues/features/done/`): `2026-09-17-review-opencode-agent-design.md` (research) and
 `2026-09-17-terminal-first-agent-fallback.md` (superseded before QA).

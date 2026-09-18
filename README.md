@@ -69,7 +69,7 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 | F12 | Toggle native terminal input (same hand-over as Ctrl+H) |
 | Ctrl+Shift+R | Restart a pane's shell or agent after it was stopped |
 | Ctrl+Tab, Ctrl+Shift+Tab | Next, previous tab |
-| Up (empty prompt box, items queued) | Select queued items; Ctrl+Up/Down move, Enter edits, Delete removes, Esc leaves |
+| Up (empty prompt box, items queued) | Open the queued items in the prompt box, one at a time: Up/Down move between them, Ctrl+Up/Down reorder, Enter saves, Esc cancels, Shift+Delete removes |
 | Up / Down (first / last line) | Prompt history |
 | PageUp / PageDown (prompt box) | Scroll the terminal |
 | Ctrl+C in the terminal | Copy the selection, or interrupt when nothing is selected |
@@ -117,10 +117,15 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
 - **One queue for commands and prompts.** Terminal commands entered while the shell is busy and
   agent prompts entered while the agent is busy wait in one queue per pane and run in the order
   entered: an agent prompt queued after a command waits for that command, and vice versa. The
-  strip over the terminal shows commands in amber (`$`) and agent prompts in cyan (`✦`). Drag
-  rows or use Ctrl+Up/Down to reorder, × or Delete to remove, Enter to edit (editing the next
-  item holds the queue until you resubmit). A failing command or a stopped agent pauses the
-  queue until **Resume**.
+  strip over the terminal shows commands in amber (`$`) and agent prompts in cyan (`✦`).
+  **Up on an empty prompt box opens the queued items for editing**, starting with the one queued
+  last: the highlighted item's text sits in the prompt box and is edited there like anything else.
+  Up and Down move between items — inside a multi-line item they move the cursor first, and only
+  step to the next item from its first or last line — Enter saves the edit and leaves, Esc drops it,
+  Ctrl+Up/Down reorder, Shift+Delete removes. While the **top** item is highlighted the queue holds,
+  so the item being edited cannot run out from under the edit; leaving it releases the queue. Rows
+  can also be dragged to reorder and have an × to remove. A failing command or a stopped agent
+  pauses the queue until **Resume**.
 - **The prompt box is the only keyboard input.** Clicking the terminal selects text, scrolls and
   follows links, but never takes the keyboard: typed keys always reach the prompt box. **Ctrl+H**
   (or F12) is the one deliberate exception — it hides the prompt box and types straight into the

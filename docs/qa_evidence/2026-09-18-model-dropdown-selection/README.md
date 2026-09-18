@@ -24,8 +24,9 @@ layout; override them if the strip moves.
 | `implementer-d-flash-again.png` | Flash a second time, byte-identical to `b` — the swap is repeatable in both directions |
 | `implementer-e-still-flash.png` | the same pane later, still open, text typed in the composer: still Flash |
 | `implementer-f-model-options.png` | the ⚙ row opened the Main / Flash / Lite modal; the chip stayed on the pane's agent |
+| `implementer-g-no-stored-keys.png` | with no stored key at all: "No stored keys", the two role rows with no model yet, and the gear still reachable |
 
-`relay-stderr.log` is the run's stderr (empty on a clean run).
+`relay-stderr.log` and `relay-stderr-no-key.log` are the two runs' stderr (empty on a clean run).
 
 Before the fix, every one of these rows did nothing at all: `selectModel` returns early on a `role:`
 or `gear:` id, and nothing else handled them.

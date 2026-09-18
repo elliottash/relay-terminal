@@ -10,6 +10,7 @@
 #   implementer-d-flash-again.png   Flash again, to show the swap works both ways more than once
 #   implementer-e-still-flash.png   the same pane later: the role survived, chip unchanged
 #   implementer-f-model-options.png the gear row: the Main / Flash / Lite modal is open
+#   implementer-g-no-stored-keys.png with no stored key: the role rows and the gear are still there
 #
 # No provider account and no network turn: the profile stores a literal non-key string in the
 # environment (RELAY_GLM_CODING_API_KEY) so one preset shows up as "stored", and the script never
@@ -109,4 +110,18 @@ xdotool key ctrl+a; xdotool key BackSpace; sleep 0.5
 open_list
 k Down Down Down Return; sleep 2.5
 shot f-model-options root
+
+# g. the same list with no stored key at all: the role rows and the gear are still there, which is
+#    when the gear matters most. Same profile, restarted without the environment key.
+kill "$relay_pid" 2>/dev/null; wait "$relay_pid" 2>/dev/null
+unset RELAY_GLM_CODING_API_KEY
+"$build/relay" --workspace "$work" >"$out/relay-stderr-no-key.log" 2>&1 &
+relay_pid=$!
+sleep 7
+largest_window
+[[ -z $win ]] && { echo "no Relay window (no-key run)"; exit 1; }
+xdotool windowmove "$win" 0 0 windowsize "$win" $width $height
+xdotool windowfocus "$win"; sleep 2
+open_list
+shot g-no-stored-keys root
 printf 'done: %s\n' "$out"
