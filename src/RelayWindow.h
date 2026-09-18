@@ -34,6 +34,8 @@
 #include "Voice.h"
 #include "Aliases.h"
 #include "OutputLinks.h"
+#include "Conversations.h"
+#include "SessionInfo.h"
 
 #include <QAbstractButton>
 #include <QDateTime>
@@ -839,6 +841,13 @@ private:
         }
         else if (id == QStringLiteral("agent.fork")) pane->requestFork();
         else if (id == QStringLiteral("agent.resume")) pane->openResume();
+        else if (id == QStringLiteral("agent.info")) {
+            // The ⓘ button and the Actions pane both land here: the fast path is /status.
+            pane->openInfo();
+            if (Keymap::instance().shortcutText(id).isEmpty())
+                hint(QStringLiteral("info.click"), QStringLiteral("Next time: /status in the prompt box"));
+        }
+
         else if (id == QStringLiteral("conversations.open")) pane->openConversations();
         else if (id == QStringLiteral("find.inView")) pane->openFindInView();
         else if (id == QStringLiteral("agent.recap")) pane->requestRecap();
@@ -2137,6 +2146,146 @@ public:
         focusLeaf(tool);
         updateTitles();
     }
+    // ----- the session manager pane and the ⓘ pane (cards #R6J0, #Y63Z) ------------------------
+    // One session manager per tab, bound to the pane that opened it: its queries go to that pane's
+    // worker and Enter resumes there. /resume, /conversations, Ctrl+Shift+Y (agent.resume) and
+    // conversations.open all come here through Pane::openConversations.
+    using SessionsTabFactory = std::function<QWidget *(RelayWindow *window)>;
+    struct SessionsTab { QString id, label; SessionsTabFactory make; };
+    static QList<SessionsTab> &sessionsTabs() { static QList<SessionsTab> tabs; return tabs; }
+    // Another feature's tab in every session manager opened from now on (e.g. "closed": recently
+    // closed windows, tabs and panes). The factory builds the widget for one pane in `window`.
+    static void addSessionsTab(const QString &id, const QString &label, SessionsTabFactory make) {
+        for (const SessionsTab &tab : sessionsTabs()) if (tab.id == id) return;
+        sessionsTabs().append({id, label, std::move(make)});
+    }
+
+    static ToolPane *sessionsPaneIn(QWidget *page) {
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Sessions) return tool;
+        return nullptr;
+    }
+    static relay::conversations::SessionManager *sessionsViewOf(ToolPane *tool) {
+        return tool ? dynamic_cast<relay::conversations::SessionManager *>(tool->hosted()) : nullptr;
+    }
+
+    // Open this tab's session manager on `tab` ("" is the session list), bound to the active pane.
+    void openSessions(const QString &tab = QString(), const QString &query = QString()) {
+        Pane *owner = m_active;
+        if (!owner) { const auto panes = panesIn(m_tabs->currentWidget()); owner = panes.isEmpty() ? nullptr : panes.first(); }
+        if (owner) openSessionsFor(owner, query, tab);
+    }
+
+    void openSessionsFor(Pane *owner, const QString &query, const QString &tab = QString()) {
+        QWidget *page = pageOf(owner);
+        if (!page) return;
+        ToolPane *tool = sessionsPaneIn(page);
+        relay::conversations::SessionManager *view = sessionsViewOf(tool);
+        if (!tool) {
+            view = new relay::conversations::SessionManager;
+            tool = new ToolPane(ToolPane::Kind::Sessions, view, view, owner->cwd());
+            tool->setProperty("paneType", QStringLiteral("sessions"));
+            relay::theme::polishWindow(tool);
+            for (const SessionsTab &extra : sessionsTabs())
+                if (QWidget *widget = extra.make ? extra.make(this) : nullptr) view->addTab(extra.id, extra.label, widget);
+            insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        }
+        // Bound to the pane that asked, every time: Enter resumes where /resume was typed.
+        owner->bindSessionManager(view);
+        QPointer<ToolPane> guard(tool);
+        QPointer<Pane> ownerGuard(owner);
+        auto close = [guard, ownerGuard] {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            w->closeSessionsPane(guard, ownerGuard);
+        };
+        view->onClose = close;
+        auto resume = view->onResume;
+        // Close first: a resume may focus another pane (the one that already has the session),
+        // and closing afterwards would take the focus back.
+        view->onResume = [resume, close](const QJsonObject &item, bool newPane) { close(); if (resume) resume(item, newPane); };
+        view->onOpenInfo = [ownerGuard, guard](const QJsonObject &item) {
+            auto *w = windowOf(guard);
+            if (!w || !ownerGuard) return;
+            w->openInfoPane(ownerGuard, item.value(QStringLiteral("session_id")).toString(),
+                            item.value(QStringLiteral("session_dir")).toString());
+        };
+        view->showTab(tab);
+        if (!query.isEmpty()) view->setQuery(query);
+        view->refresh();
+        setActiveLeaf(tool);
+        focusLeaf(tool);
+        updateTitles();
+    }
+
+    void closeSessionsPane(ToolPane *tool, Pane *back) {
+        if (!tool) return;
+        QWidget *page = pageOf(tool);
+        if (page && leavesIn(page).size() <= 1 && m_tabs->count() <= 1) {
+            try { insertBeside(tool, createPane(paneNode(m_manager->workspace())), Qt::Horizontal, true); }
+            catch (const std::exception &error) { notice(QString::fromUtf8(error.what())); }
+        }
+        closePane(tool, false);
+        if (back && back->window() == this) { setActiveLeaf(back); focusLeaf(back); }
+    }
+
+    // A session already open in some pane of any window: that pane, else null.
+    static Pane *paneWithSession(const QString &sessionId, const QString &sessionDir, const Pane *except) {
+        for (QWidget *top : QApplication::topLevelWidgets())
+            if (auto *w = dynamic_cast<RelayWindow *>(top))
+                for (Pane *pane : w->allPanes())
+                    if (pane != except && pane->sessionId() == sessionId
+                        && (sessionDir.isEmpty() || pane->sessionDir().isEmpty() || pane->sessionDir() == sessionDir))
+                        return pane;
+        return nullptr;
+    }
+
+    // The ⓘ pane beside `owner`: its own live session, or a saved session / one thread when named.
+    // One per owner pane; opening it again brings it forward and starts over.
+    ToolPane *infoPaneOf(Pane *owner) {
+        QWidget *page = pageOf(owner);
+        if (!page) return nullptr;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Info
+                && tool->property("infoOwner").value<QObject *>() == owner)
+                return tool;
+        return nullptr;
+    }
+
+    void openInfoPane(Pane *owner, const QString &sessionId = QString(), const QString &sessionDir = QString(),
+                      const QString &threadId = QString(), const QString &threadOwner = QString()) {
+        if (!owner) return;
+        ToolPane *tool = infoPaneOf(owner);
+        relay::sessioninfo::InfoView *view = tool ? dynamic_cast<relay::sessioninfo::InfoView *>(tool->hosted()) : nullptr;
+        if (!tool) {
+            view = new relay::sessioninfo::InfoView;
+            tool = new ToolPane(ToolPane::Kind::Info, view, view, owner->cwd());
+            tool->setProperty("paneType", QStringLiteral("info"));
+            tool->setProperty("infoOwner", QVariant::fromValue<QObject *>(owner));
+            relay::theme::polishWindow(tool);
+            QPointer<ToolPane> guard(tool);
+            QPointer<Pane> ownerGuard(owner);
+            view->onClose = [guard, ownerGuard] {
+                auto *w = windowOf(guard);
+                if (!w) return;
+                w->closePane(guard, false);
+                if (ownerGuard && ownerGuard->window() == w) { w->setActiveLeaf(ownerGuard); focusLeaf(ownerGuard); }
+            };
+            view->onTitleChanged = [guard] { if (auto *w = windowOf(guard)) w->updateTitles(); };
+            // Closing the owner takes its ⓘ pane with it: nothing else can answer its links.
+            connect(owner, &QObject::destroyed, tool, [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, false); });
+            insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        }
+        owner->bindInfoView(view);
+        if (!threadId.isEmpty()) view->showThread(threadId, sessionDir, threadOwner);
+        else if (!sessionId.isEmpty()) view->showSession(sessionId, sessionDir);
+        else view->showLiveSession();
+        if (QWidget *page = pageOf(tool)) m_tabs->setCurrentWidget(page);
+        setActiveLeaf(tool);
+        focusLeaf(tool);
+        updateTitles();
+    }
+
     // ----- Switchboard (docs/SWITCHBOARD-DESIGN.md 4, protocol 17) -----------------------------
     // Ctrl+Shift+S: open the Switchboard beside the anchor, focus the one this tab already has,
     // or, pressed on it, go back to the last terminal pane.
@@ -2465,6 +2614,20 @@ private:
         pane->onOpenSubagent = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openSubagentTab(guard, id); };   // subagents UI (#WD83)
         pane->onShowAgents = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openAgentsMenu(); } };   // /agents → subagents panel menu
         pane->onOpenTurn = [guard](const QString &turnId) { if (auto *w = windowOf(guard)) w->openTurnPane(guard, turnId); };
+        // Session manager and ⓘ (cards #R6J0, #Y63Z).
+        pane->onOpenSessions = [guard](const QString &query) { if (auto *w = windowOf(guard)) w->openSessionsFor(guard, query); };
+        pane->onOpenInfo = [guard] { if (auto *w = windowOf(guard)) w->openInfoPane(guard); };
+        pane->onOpenThreadInfo = [guard](const QString &threadId, const QString &dir, const QString &owner) {
+            if (auto *w = windowOf(guard)) w->openInfoPane(guard, QString(), dir, threadId, owner);
+        };
+        pane->onSessionOpenElsewhere = [guard](const QString &sessionId, const QString &dir) {
+            Pane *other = paneWithSession(sessionId, dir, guard);
+            auto *w = other ? dynamic_cast<RelayWindow *>(other->window()) : nullptr;
+            if (!w) return false;
+            w->revealPane(other);
+            other->toast(QStringLiteral("This session was already open here"));
+            return true;
+        };
         // Pane titles (issue JRWQ): a fresh title relabels the tab; /rename-tab is the window's job.
         pane->onTitleChanged = [guard] { if (auto *w = windowOf(guard)) w->updateTitles(); };
         pane->onTabLabel = [guard](const QString &id, const QString &label, bool related) {
@@ -3216,6 +3379,22 @@ private:
                 if (!chrome) {
                     chrome = new PaneChrome(leaf);
                     QPointer<QWidget> guard(leaf);
+                    // The conversation info button (ⓘ, card #Y63Z), first in an agent pane's row.
+                    if (dynamic_cast<Pane *>(leaf)) {
+                        if (auto *row = qobject_cast<QHBoxLayout *>(chrome->layout())) {
+                            auto *info = new relay::sessioninfo::InfoButton;
+                            info->setObjectName(QStringLiteral("paneChromeButton"));
+                            info->setProperty("action", QStringLiteral("agent.info"));
+                            info->setProperty("label", QStringLiteral("Conversation info (/status)"));
+                            QObject::connect(info, &QToolButton::clicked, chrome, [guard] {
+                                auto *w = windowOf(guard);
+                                if (!w) return;
+                                w->setActiveLeaf(guard);
+                                w->runAction(QStringLiteral("agent.info"));
+                            });
+                            row->insertWidget(0, info);
+                        }
+                    }
                     chrome->onAction = [guard](const QString &action) {
                         auto *w = windowOf(guard);
                         if (!w) return;

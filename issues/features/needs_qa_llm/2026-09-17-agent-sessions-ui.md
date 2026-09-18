@@ -77,3 +77,9 @@ QA checklist (rewind split):
 3. "Code and chat…" restores both.
 4. Edit the file by hand before `/rewind-code`: it is reported as a conflict and left alone.
 5. Palette: "undo" finds Rewind chat… and Rewind code….
+
+## Superseded in part (2026-09-18, card #R6J0)
+
+`/resume` (Ctrl+Shift+Y) no longer opens the four-column resume picker: it opens the session manager
+pane, which lists and searches every session (and, on request, every subagent thread) and resumes
+with Enter. `/resume words` searches for them. See #R6J0 for its QA.

@@ -379,7 +379,7 @@ triggers: toolbar and palette activations of actions with shortcuts, pane button
 tab close and ⧉ buttons, clicking into another pane, mouse model/effort/mode pickers, clicking
 the directory line (`@`), the queue ×, `/shell ` and `/agent ` (`!`, `*`), `/help` (→ `?` in an
 empty prompt box), palette rewinds, pane
-drags, the first `relay://` link, the Tasks chip and `/tasks`, `/requests`, `/todos` (→ `agent.requests`, Ctrl+Shift+K), Continue
+drags, the first `relay://` link, a click on the pane's ⓘ button (→ `/status`), the Tasks chip and `/tasks`, `/requests`, `/todos` (→ `agent.requests`, Ctrl+Shift+K), Continue
 from the link or palette (→ `/continue` or `agent.continue`), wrong-mode submissions (section 5,
 "Wrong-mode hints": a request that failed in terminal mode or a failing shell command in agent
 mode → `input.toggle`, with the mode chip flashing), dropping an image on the prompt box (→ the
@@ -435,10 +435,10 @@ Default window shortcuts:
 | Toggle terminal/agent input | Ctrl+I | Restart stopped shell/agent | Ctrl+Shift+R |
 | Interrupt agent with prompt | Ctrl+Alt+Enter | Step through links in the output | Ctrl+Shift+L |
 
-Resume a saved session (`/resume`) is Ctrl+Shift+Y, Warp's key for its conversations menu. Options and
+The session manager (`/resume`, `agent.resume`) is Ctrl+Shift+Y, Warp's key for its conversations menu. Options and
 resume have no plain-Ctrl twin (owner, 2026-09-18): Ctrl+O and Ctrl+Y belong to the shell.
 
-Unbound by default: `conversations.open`, `files.open`, `terminal.interrupt`, `agent.newChat`,
+Unbound by default: `conversations.open`, `agent.info` (the ⓘ view; `/status`), `files.open`, `terminal.interrupt`, `agent.newChat`,
 `agent.stop`, `agent.clearQueue`, `agent.resumeQueue`, `agent.provider`, `input.mode*`,
 `keybindings.edit`, `keybindings.reload`.
 
@@ -1012,9 +1012,19 @@ tool call, capped tool output, Relay-run terminal command and captured command o
 mirrored into an external-content FTS5 table by triggers.
 
 The index is a **cache**, never the source of truth: `SessionStore.save` refreshes a session's rows
-on every autosave, and `index_rebuild` recreates everything from the session JSON. A database that
-is corrupt or written by a different `SCHEMA_VERSION` is deleted and recreated, in the constructor
-and again if SQLite reports corruption mid-query. Only sessions under
+on every autosave, `reconcile()` (run once per worker, on its first conversation command) picks up
+files the index missed and drops rows whose file is gone, and `index_rebuild` recreates everything
+from the session JSON. A corrupt database is deleted and recreated, in the constructor and again if
+SQLite reports corruption mid-query; a v1 database is migrated in place to v2 (subagent threads),
+since terminal history cannot be rebuilt. User titles and pins live in `<id>.meta.json`, not only in
+the index.
+
+Subagent threads (protocol section 25) are rows too (`source: "subagent"`), each with its
+`owner_session` (the session that started it) and `parent_thread`, read from
+`<session>.threads/<thread-id>.json`, which `SubagentManager` writes when a subagent starts and
+whenever one of its runs ends. Searches include them only when asked (`include_threads`).
+
+Only sessions under
 `$XDG_DATA_HOME/relay/sessions` are indexed, so a pane with a custom `session_dir` (and every test)
 stays out of it; `RELAY_INDEX=off` disables it.
 
@@ -1026,13 +1036,29 @@ window, cut at the next `OSC 133;A` so the redrawn prompt is not part of the out
 sequences stripped by `relay::conversations::stripAnsi`). Commands typed straight into the terminal
 in native mode never pass through Relay and are not indexed.
 
-The GUI side is `src/Conversations.{h,cpp}`: the list dialog (`/conversations`,
-Actions › Conversations…), which asks the worker through callbacks and is fed `conversations` and
-`conversation` events, and the Ctrl+F find bar, which searches the terminal through
-`TerminalBackend::find()` and counts matches in the pane's conversation with
-`conversation_get {query}`. Enter resumes in the pane (`resume`, or `load_state` with a session
-reference when the conversation belongs to another workspace); Shift+Enter opens it in a new pane
-through the same path as a fork.
+The GUI side is `src/Conversations.{h,cpp}`: the **session manager pane**
+(`relay::conversations::SessionManager`, a `ToolPane` of kind `Sessions`, `paneType` `sessions`;
+cards #CCKY, #R6J0), which replaced both the conversation dialog and the resume picker, and the
+Ctrl+F find bar, which searches the terminal through `TerminalBackend::find()` and counts matches
+in the pane's conversation with `conversation_get {query}`. `/resume`, `/conversations`,
+Ctrl+Shift+Y and the palette rows all reach `RelayWindow::openSessionsFor(pane, query)`: one
+manager per tab, bound to the pane that asked (its queries go to that pane's worker). Enter resumes
+in that pane (`resume`, or `load_state` with a session reference when the session belongs to
+another workspace); Shift+Enter opens it in a new pane through the same path as a fork; a session
+already open in some pane is focused there instead (`paneWithSession`). The "Subagent threads" box
+(off by default) lists threads under their owner sessions; Enter on one opens its history in the
+ⓘ pane. Other features add tabs beside the list with `RelayWindow::addSessionsTab(id, label,
+factory)` and open one with `RelayWindow::openSessions(tab)`.
+
+The **ⓘ pane** is `src/SessionInfo.{h,cpp}` (`relay::sessioninfo::InfoView`, `ToolPane` kind
+`Info`, `paneType` `info`): opened by the painted ⓘ button in an agent pane's header row
+(`agent.info`) or `/status`, beside that pane, one per pane. It renders the worker's
+`session_info` (protocol section 25): model and provider, context, provider-reported tokens and
+cost, the session file, times, turns, instructions, and the history — the turns in order with each
+subagent thread as a link at the turn that started it. A thread link shows that thread's own
+history in the same view with "↑ owner session" (and "↑ parent thread"); a thread the worker still
+holds also links to `RelayWindow::openSubagentTab`. `ToolPane` hosts both views through
+`relay::PaneView` (`src/PaneView.h`): a title, focus and the header inset.
 
 ### Model roles and the Main / Flash / Lite tiers
 
@@ -1642,7 +1668,8 @@ of the platform and of the engine itself.
 | `src/ModelSettings.*` | the API-keys and model-roles modals |
 | `src/SettingsPane.*` | the Actions pane and the Options pane: one widget, two modes |
 | `src/AgentUi.*` | pickers and instructions dialog |
-| `src/Conversations.*` | conversation list with search (`/conversations`) and the Ctrl+F find bar |
+| `src/Conversations.*` | the session manager pane (`/resume`, `/conversations`, Ctrl+Shift+Y) and the Ctrl+F find bar |
+| `src/SessionInfo.*`, `src/PaneView.h` | the ⓘ conversation info pane (`/status`) and its painted button; the interface `ToolPane` hosts both through |
 | `src/FileIndex.*` | the `@` picker's file listing: the asynchronous git chain, the changed set, the non-git walk |
 | `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |
 | `src/RuntimeDirs.*` | the private `$TMPDIR/relay-XXXXXX` directories: the pid+starttime owner mark, and the startup sweep of the ones a crash left behind (section 2) |

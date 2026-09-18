@@ -15,6 +15,7 @@
 #include "SettingsPane.h"
 #include "SubagentTranscript.h"
 #include "OutputLinks.h"
+#include "PaneView.h"
 
 #include "PaneStatus.h"
 #include "Theme.h"
@@ -326,7 +327,7 @@ private:
 // as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
 class ToolPane final : public QWidget {
 public:
-    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings };
+    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions };
 
     ToolPane(Kind kind, const QString &path, bool planActions = true) : m_kind(kind) {
         setObjectName(QStringLiteral("pane"));
@@ -385,16 +386,27 @@ public:
     }
     relay::TurnTranscriptView *turn() const { return m_turn; }
 
+    // Views that only need a title, focus and the header inset (relay::PaneView): the ⓘ
+    // conversation info (Kind::Info) and the session manager (Kind::Sessions). Transient.
+    ToolPane(Kind kind, QWidget *view, relay::PaneView *hosted, const QString &cwd) : m_kind(kind), m_hosted(hosted), m_subagentCwd(cwd) {
+        setObjectName(QStringLiteral("pane"));
+        setAttribute(Qt::WA_StyledBackground);
+        auto *layout = new QVBoxLayout(this); layout->setContentsMargins(1, 1, 1, 1);
+        layout->addWidget(view);
+    }
+    relay::PaneView *hosted() const { return m_hosted; }
+
     Kind kind() const { return m_kind; }
     relay::FileExplorer *explorer() const { return m_explorer; }
     relay::FilePreview *preview() const { return m_preview; }
     relay::PlanEditor *plan() const { return m_plan; }
     relay::SubagentTabsView *subagent() const { return m_subagent; }
-    QString path() const { return (m_subagent || m_turn || m_board || m_settingsView) ? QString() : m_explorer ? m_explorer->root() : m_plan ? m_plan->path() : m_preview->path(); }
-    QString cwd() const { return (m_subagent || m_turn || m_board || m_settingsView) ? m_subagentCwd : m_explorer ? m_explorer->root() : QFileInfo(path()).absolutePath(); }
+    QString path() const { return (m_subagent || m_turn || m_board || m_settingsView || m_hosted) ? QString() : m_explorer ? m_explorer->root() : m_plan ? m_plan->path() : m_preview->path(); }
+    QString cwd() const { return (m_subagent || m_turn || m_board || m_settingsView || m_hosted) ? m_subagentCwd : m_explorer ? m_explorer->root() : QFileInfo(path()).absolutePath(); }
     QString title() const {
         if (m_settingsView) return m_settingsView->mode() == relay::SettingsPane::Mode::Actions ? QStringLiteral("Actions") : QStringLiteral("Options");
         if (m_board) return m_board->title();
+        if (m_hosted) return m_hosted->paneTitle();
         if (m_subagent) return m_subagent->title();
         if (m_turn) return m_turn->title();
         if (m_plan) return (m_plan->isDirty() ? QStringLiteral("● ") : QString()) + m_plan->title();
@@ -408,13 +420,14 @@ public:
                                                    {"collapsed", m_board->collapsedSections()},
                                                    {"hidden", m_board->hiddenSections()}}}};
         if (m_subagent) return m_subagent->node();
-        if (m_turn || m_settingsView) return {};
+        if (m_turn || m_settingsView || m_hosted) return {};
         if (m_plan) return {{"plan", QJsonObject{{"path", path()}}}};
         return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};
     }
     void focusInput() {
         if (m_settingsView) m_settingsView->focusSearch();
         else if (m_board) m_board->focusInput();
+        else if (m_hosted) m_hosted->focusView();
         else if (m_subagent) m_subagent->focusInput();
         else if (m_turn) m_turn->focusInput();
         else if (m_plan) m_plan->editor()->setFocus(Qt::OtherFocusReason);
@@ -436,6 +449,8 @@ public:
         case Kind::Explorer: return QStringLiteral("explorer");
         case Kind::Preview: return QStringLiteral("preview");
         case Kind::Plan: return QStringLiteral("plan");
+        case Kind::Info: return QStringLiteral("info");
+        case Kind::Sessions: return QStringLiteral("sessions");
         default: return {};   // a kind added later is plain until it sets paneType itself
         }
     }
@@ -477,6 +492,7 @@ private:
     relay::TurnTranscriptView *m_turn = nullptr;
     relay::BoardView *m_board = nullptr;
     relay::SettingsPane *m_settingsView = nullptr;
+    relay::PaneView *m_hosted = nullptr;
     QString m_subagentCwd;
 };
 
@@ -598,6 +614,7 @@ public:
             // Settings' search row and a subagent transcript's title row are their first rows too.
             else if (tool->settings()) tool->settings()->setHeaderRightInset(inset);
             else if (tool->subagent()) tool->subagent()->setHeaderRightInset(inset);
+            else if (tool->hosted()) tool->hosted()->setHeaderRightInset(inset);
         }
     }
 

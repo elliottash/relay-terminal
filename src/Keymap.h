@@ -288,9 +288,10 @@ private:
         add("agent.fork", "agent", "Fork the conversation into a new pane", {});
         // Ctrl+Shift+Y is Warp's key for its conversations menu (owner, 2026-09-18). No plain
         // Ctrl+Y twin: that is yank in the shell.
-        add("agent.resume", "agent", "Resume a saved agent session (/resume)", {QStringLiteral("Ctrl+Shift+Y")});
+        add("agent.resume", "agent", "Sessions: resume a saved session, search, subagent threads (/resume)", {QStringLiteral("Ctrl+Shift+Y")});
+        add("agent.info", "agent", "Conversation info: model, tokens, file and history with subagent threads (/status, the ⓘ button)", {});
         // Conversation list with full-text search, and find-in-view for this pane.
-        add("conversations.open", "agent", "Conversations: list and search every saved conversation and Relay's terminal history", {});
+        add("conversations.open", "agent", "Sessions: search every saved session and Relay's terminal history (/conversations)", {});
         add("find.inView", "agent", "Find in this pane: the conversation and the terminal scrollback (from the prompt box)",
             {QStringLiteral("Ctrl+F"), QStringLiteral("Ctrl+Shift+F")});
         add("agent.recap", "agent", "Recap this agent session", {});

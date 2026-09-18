@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-// Conversation list with full-text search (/conversations) and the Ctrl+F
+// The session manager pane (/resume, /conversations; cards #CCKY, #R6J0) and the Ctrl+F
 // find-in-view bar. Plain Qt, no KDE dependencies; the worker does the searching
 // (docs/AGENT-SESSIONS-PROTOCOL.md section 14).
 //
-// The dialog never talks to the worker itself: it asks through onQuery/onPreview/... and is fed
+// The manager never talks to the worker itself: it asks through onQuery/onPreview/... and is fed
 // with setResults()/setPreview(), so it can be built and tested without a pane.
+#include "PaneView.h"
+
 #include <QDateTime>
-#include <QDialog>
+#include <QWidget>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
@@ -18,7 +20,9 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QTabWidget;
 class QTextBrowser;
+class QTimer;
 class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -43,22 +47,33 @@ double sinceFor(const QString &id, const QDateTime &now);
 // bytes removed, trailing blank lines dropped, capped at maxChars.
 QString stripAnsi(const QByteArray &bytes, int maxChars = 4000);
 
-// ----- the dialog ------------------------------------------------------------------------
+// ----- the session manager pane (card #R6J0) ----------------------------------------------
 
-class Dialog : public QDialog {
+// Every saved session, newest first, grouped by project, searchable; with "Subagent threads"
+// ticked (off by default) every subagent thread too, under its owner session or labelled with it.
+// It was a modal dialog (/conversations) and a resume picker (/resume) until 2026-09-18; it is now
+// one pane, opened by /resume, Ctrl+Shift+Y, /conversations and the palette. Other features can add
+// tabs beside the list (addTab), e.g. recently closed windows, tabs and panes.
+class SessionManager : public QWidget, public relay::PaneView {
     Q_OBJECT
 public:
-    explicit Dialog(QWidget *parent = nullptr);
+    explicit SessionManager(QWidget *parent = nullptr);
 
     // Asked whenever the query or a filter changes. The object is the `conversations` request
-    // body without "type"/"id": {query, scope, model, has_open_tasks, since, sources, limit}.
+    // body without "type"/"id": {query, scope, model, has_open_tasks, since, sources, limit,
+    // include_threads, sort, offset}.
     std::function<void(const QJsonObject &request)> onQuery;
     std::function<void(const QString &sessionId, const QString &query)> onPreview;
     // The whole result row (session_id, session_dir, title, workspace…) plus Shift+Enter.
     std::function<void(const QJsonObject &item, bool newPane)> onResume;
+    // Enter on a subagent thread row: open its history (the ⓘ view).
+    std::function<void(const QJsonObject &item)> onOpenThread;
+    // Info (Ctrl+I) on a session row: its ⓘ view without resuming it.
+    std::function<void(const QJsonObject &item)> onOpenInfo;
     std::function<void(const QString &sessionId, const QString &title)> onRename;
     std::function<void(const QString &sessionId, bool pinned)> onPin;
     std::function<void(const QString &sessionId)> onDelete;
+    std::function<void()> onClose;     // Esc, Close, or after a resume
 
     // Worker events.
     void setResults(const QJsonObject &event);
@@ -68,15 +83,30 @@ public:
 
     void focusSearch();
     QString query() const;
-    // Re-run the current query (also done whenever the dialog is shown).
+    void setQuery(const QString &text);
+    // Re-run the current query (also done whenever the pane is shown).
     void refresh();
+    bool threadsShown() const;
+    void setThreadsShown(bool on);
+
+    // Tabs beside the list. The list is the tab "sessions"; addTab puts a widget (owned by the
+    // pane from then on) after it, and showTab brings one to the front. Unknown ids are ignored.
+    void addTab(const QString &id, const QString &label, QWidget *widget);
+    void showTab(const QString &id);
+    QString currentTab() const;
+
+    QString paneTitle() const override;
+    void focusView() override;
+    void setHeaderRightInset(int pixels) override;
 
 protected:
     void showEvent(QShowEvent *event) override;
 
 private:
     void requery();
+    void requestMore();
     void scheduleQuery();
+    void rebuildTree(const QString &keep);
     void selectionChanged();
     void activate(bool newPane);
     QString selectedId() const;
@@ -87,17 +117,21 @@ private:
     void updateButtons();
     bool eventFilter(QObject *object, QEvent *event) override;
 
+    QTabWidget *m_tabs = nullptr;
+    QWidget *m_inset = nullptr;
     QLineEdit *m_search = nullptr;
-    QComboBox *m_scope = nullptr, *m_model = nullptr, *m_date = nullptr, *m_kind = nullptr;
-    QCheckBox *m_open = nullptr;
+    QComboBox *m_scope = nullptr, *m_model = nullptr, *m_date = nullptr, *m_kind = nullptr, *m_sort = nullptr;
+    QCheckBox *m_open = nullptr, *m_threads = nullptr;
     QTreeWidget *m_tree = nullptr;
     QTextBrowser *m_preview = nullptr;
     QLabel *m_status = nullptr, *m_header = nullptr;
-    QPushButton *m_resume = nullptr, *m_newPane = nullptr, *m_rename = nullptr,
-                *m_pin = nullptr, *m_delete = nullptr;
+    QPushButton *m_resume = nullptr, *m_newPane = nullptr, *m_info = nullptr, *m_rename = nullptr,
+                *m_pin = nullptr, *m_delete = nullptr, *m_more = nullptr;
     QJsonArray m_items;
     QString m_pendingSelect;
-    class QTimer *m_debounce = nullptr;
+    int m_nextOffset = -1;
+    double m_elapsed = 0;
+    QTimer *m_debounce = nullptr;
     bool m_filling = false;
 };
 

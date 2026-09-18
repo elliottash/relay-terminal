@@ -160,9 +160,11 @@ target_include_directories(relay-screen PUBLIC src)
 target_link_libraries(relay-screen PUBLIC relay-input ${RELAY_QT}::Core)
 target_compile_options(relay-screen PRIVATE -Wall -Wextra -Wpedantic)
 
-# Conversation list with full-text search (Ctrl+Shift+O) and the Ctrl+F find bar. The worker does
-# the searching (docs/AGENT-SESSIONS-PROTOCOL.md section 14); this is the dialog and its helpers.
-add_library(relay-conversations STATIC src/Conversations.cpp src/Conversations.h)
+# The session manager pane (/resume, Ctrl+Shift+Y: every session and, on request, every subagent
+# thread, searchable), the Ctrl+F find bar and the ⓘ conversation info view. The worker does the
+# searching (docs/AGENT-SESSIONS-PROTOCOL.md sections 14 and 25); these are the views and helpers.
+add_library(relay-conversations STATIC src/Conversations.cpp src/Conversations.h
+    src/SessionInfo.cpp src/SessionInfo.h src/PaneView.h)
 target_include_directories(relay-conversations PUBLIC src)
 target_link_libraries(relay-conversations PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-conversations PRIVATE -Wall -Wextra -Wpedantic)

@@ -1,13 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Pure helpers of the conversation list and the find bar (src/Conversations.h).
+// Pure helpers of the session manager and the find bar (src/Conversations.h), the session manager
+// pane itself, and the ⓘ view's rendering (src/SessionInfo.h).
 #include "Conversations.h"
+#include "SessionInfo.h"
 
+#include <QCheckBox>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
+#include <QTabBar>
 #include <QTest>
+#include <QTextBrowser>
 #include <QTreeWidget>
+#include <QUrl>
 
 using namespace relay::conversations;
 
@@ -95,8 +102,8 @@ private slots:
         QCOMPARE(stripAnsi(QByteArray("\xc3\xa9t\xc3\xa9")), QString::fromUtf8("été"));
     }
 
-    void dialogGroupsByProjectAndSearches() {
-        Dialog dialog;
+    void managerGroupsByProjectAndSearches() {
+        SessionManager dialog;
         QJsonObject asked;
         int queries = 0;
         dialog.onQuery = [&asked, &queries](const QJsonObject &request) { asked = request; ++queries; };
@@ -107,6 +114,7 @@ private slots:
         QCOMPARE(asked.value(QStringLiteral("query")).toString(), QString());
         QVERIFY(!asked.contains(QStringLiteral("since")));
         QVERIFY(!asked.contains(QStringLiteral("sources")));
+        QVERIFY(!asked.contains(QStringLiteral("include_threads")));   // threads are off by default
         QJsonObject item{{QStringLiteral("session_id"), QString(32, QLatin1Char('a'))},
                          {QStringLiteral("source"), QStringLiteral("agent")},
                          {QStringLiteral("title"), QStringLiteral("Relay engine")},
@@ -158,6 +166,159 @@ private slots:
         QVERIFY(resume->isEnabled());
         resume->click();
         QVERIFY(resumed);
+    }
+
+    // Card #R6J0: the "Subagent threads" box is unticked at first; ticked, the query asks for
+    // threads, and each thread row sits under its owner session or names it.
+    void subagentThreadsHangUnderTheirOwner() {
+        SessionManager manager;
+        QJsonObject asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked = request; };
+        manager.show();
+        auto *box = manager.findChild<QCheckBox *>(QStringLiteral("sessionsThreads"));
+        QVERIFY(box);
+        QVERIFY(!box->isChecked());
+        box->setChecked(true);
+        QVERIFY(asked.value(QStringLiteral("include_threads")).toBool());
+        const QString owner(32, QLatin1Char('a')), thread(32, QLatin1Char('b')), nested(32, QLatin1Char('c')),
+            orphan(32, QLatin1Char('d'));
+        auto session = [](const QString &id, const QString &title) {
+            return QJsonObject{{QStringLiteral("session_id"), id}, {QStringLiteral("source"), QStringLiteral("agent")},
+                               {QStringLiteral("title"), title}, {QStringLiteral("project"), QStringLiteral("relay")},
+                               {QStringLiteral("updated"), 1.0e9}, {QStringLiteral("turns"), 3}};
+        };
+        auto sub = [](const QString &id, const QString &ownerId, const QString &parent, const QString &title) {
+            return QJsonObject{{QStringLiteral("session_id"), id}, {QStringLiteral("source"), QStringLiteral("subagent")},
+                               {QStringLiteral("title"), title}, {QStringLiteral("project"), QStringLiteral("relay")},
+                               {QStringLiteral("owner_session"), ownerId}, {QStringLiteral("owner_title"), QStringLiteral("Owner title")},
+                               {QStringLiteral("parent_thread"), parent}, {QStringLiteral("agent_id"), QStringLiteral("a1")},
+                               {QStringLiteral("agent_type"), QStringLiteral("general")}, {QStringLiteral("status"), QStringLiteral("done")},
+                               {QStringLiteral("updated"), 1.0e9}};
+        };
+        // Newest first from the worker: the nested thread arrives before its parent.
+        manager.setResults({{QStringLiteral("items"), QJsonArray{
+            sub(nested, owner, thread, QStringLiteral("Nested dig")), sub(thread, owner, QString(), QStringLiteral("Find it")),
+            session(owner, QStringLiteral("Owner title")), sub(orphan, QString(40, QLatin1Char('e')).left(32), QString(), QStringLiteral("Lost owner"))}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QVERIFY(tree);
+        QTreeWidgetItem *group = tree->topLevelItem(0);
+        QTreeWidgetItem *ownerRow = group->child(0);
+        QCOMPARE(ownerRow->text(0), QStringLiteral("Owner title"));
+        QCOMPARE(ownerRow->childCount(), 1);
+        QVERIFY(ownerRow->child(0)->text(0).contains(QStringLiteral("Find it")));
+        QCOMPARE(ownerRow->child(0)->childCount(), 1);                           // nested under its parent
+        QVERIFY(ownerRow->child(0)->child(0)->text(0).contains(QStringLiteral("Nested dig")));
+        // A thread whose owner is not in the list still hangs under it: a muted owner row.
+        QTreeWidgetItem *lostOwner = group->child(1);
+        QCOMPARE(lostOwner->text(0), QStringLiteral("Owner title"));
+        QVERIFY(lostOwner->font(0).italic());
+        QCOMPARE(lostOwner->childCount(), 1);
+        QVERIFY(lostOwner->child(0)->text(0).contains(QStringLiteral("Lost owner")));
+        // Enter on a thread opens its history, never a resume.
+        QJsonObject opened;
+        bool resumed = false;
+        manager.onOpenThread = [&opened](const QJsonObject &row) { opened = row; };
+        manager.onResume = [&resumed](const QJsonObject &, bool) { resumed = true; };
+        tree->setCurrentItem(ownerRow->child(0));
+        QTest::keyClick(tree, Qt::Key_Return);
+        QCOMPARE(opened.value(QStringLiteral("session_id")).toString(), thread);
+        QVERIFY(!resumed);
+    }
+
+    void extraTabsAndEscape() {
+        SessionManager manager;
+        auto *bar = manager.findChild<QTabBar *>();
+        QVERIFY(bar);
+        QVERIFY(!bar->isVisibleTo(&manager));                 // one tab: no tab bar
+        manager.addTab(QStringLiteral("closed"), QStringLiteral("Recently closed"), new QLabel(QStringLiteral("x")));
+        QVERIFY(bar->isVisibleTo(&manager));
+        QCOMPARE(manager.currentTab(), QStringLiteral("sessions"));
+        manager.showTab(QStringLiteral("closed"));
+        QCOMPARE(manager.currentTab(), QStringLiteral("closed"));
+        manager.showTab(QString());
+        QCOMPARE(manager.currentTab(), QStringLiteral("sessions"));
+        bool closed = false;
+        manager.onClose = [&closed] { closed = true; };
+        manager.show();
+        QTest::keyClick(manager.findChild<QLineEdit *>(), Qt::Key_Escape);
+        QVERIFY(closed);
+    }
+
+    // The ⓘ view: the facts the card asks for, thread links placed at their turn, the way back.
+    void infoRendersSessionAndThread() {
+        using namespace relay::sessioninfo;
+        const QDateTime now = QDateTime::fromSecsSinceEpoch(2000000000);
+        QJsonObject thread{{QStringLiteral("id"), QString(32, QLatin1Char('b'))}, {QStringLiteral("agent_id"), QStringLiteral("a1")},
+                           {QStringLiteral("type"), QStringLiteral("general")}, {QStringLiteral("title"), QStringLiteral("Find & fix")},
+                           {QStringLiteral("status"), QStringLiteral("done")}, {QStringLiteral("owner_session"), QString(32, QLatin1Char('a'))},
+                           {QStringLiteral("children"), QJsonArray{QJsonObject{{QStringLiteral("id"), QString(32, QLatin1Char('c'))},
+                                                                              {QStringLiteral("agent_id"), QStringLiteral("a2")}}}}};
+        QJsonObject info{{QStringLiteral("kind"), QStringLiteral("session")}, {QStringLiteral("live"), true},
+                         {QStringLiteral("title"), QStringLiteral("Index work")}, {QStringLiteral("model"), QStringLiteral("glm-5")},
+                         {QStringLiteral("provider"), QStringLiteral("GLM Coding Plan (glm)")},
+                         {QStringLiteral("session_id"), QString(32, QLatin1Char('a'))},
+                         {QStringLiteral("session_dir"), QStringLiteral("/data/relay/sessions/d&x")},
+                         {QStringLiteral("file"), QStringLiteral("/data/s.json")}, {QStringLiteral("file_exists"), true},
+                         {QStringLiteral("context"), QJsonObject{{QStringLiteral("used_tokens"), 41200}, {QStringLiteral("window"), 200000},
+                                                                 {QStringLiteral("percent"), 20.6}}},
+                         {QStringLiteral("usage"), QJsonObject{{QStringLiteral("prompt_tokens"), 120000}, {QStringLiteral("completion_tokens"), 8000},
+                                                               {QStringLiteral("total_tokens"), 128000}, {QStringLiteral("requests"), 34}}},
+                         {QStringLiteral("turns"), 2}, {QStringLiteral("thread_count"), 2},
+                         {QStringLiteral("instructions"), QJsonArray{QStringLiteral("/w/CLAUDE.md")}},
+                         {QStringLiteral("history"), QJsonArray{
+                              QJsonObject{{QStringLiteral("turn"), 1}, {QStringLiteral("prompt"), QStringLiteral("first <b>")},
+                                          {QStringLiteral("threads"), QJsonArray{thread}}},
+                              QJsonObject{{QStringLiteral("turn"), 2}, {QStringLiteral("prompt"), QStringLiteral("second")}}}}};
+        const QString html = renderInfo(info, now);
+        for (const char *needle : {"glm-5", "GLM Coding Plan", "41.2k / 200.0k", "20.6%", "128.0k total", "34 requests",
+                                   "not reported by this provider", "/data/s.json", "CLAUDE.md", "first &lt;b&gt;",
+                                   "a1 general", "Find &amp; fix", "a2"})
+            QVERIFY2(html.contains(QString::fromUtf8(needle)), needle);
+        QVERIFY(html.indexOf(QStringLiteral("Find &amp; fix")) < html.indexOf(QStringLiteral("second")));   // at its turn
+        // A link survives a session directory with '&' in it.
+        const int at = html.indexOf(QStringLiteral("relay-info:thread?"));
+        QVERIFY(at > 0);
+        const QString href = html.mid(at, html.indexOf(QLatin1Char('"'), at) - at).replace(QStringLiteral("&amp;"), QStringLiteral("&"));
+        const auto query = linkQuery(QUrl(href));
+        QCOMPARE(query.value(QStringLiteral("dir")), QStringLiteral("/data/relay/sessions/d&x"));
+        QCOMPARE(query.value(QStringLiteral("id")), QString(32, QLatin1Char('b')));
+
+        QJsonObject threadInfo{{QStringLiteral("kind"), QStringLiteral("thread")}, {QStringLiteral("thread_id"), QString(32, QLatin1Char('b'))},
+                               {QStringLiteral("agent_id"), QStringLiteral("a1")}, {QStringLiteral("title"), QStringLiteral("Find it")},
+                               {QStringLiteral("owner_session"), QString(32, QLatin1Char('a'))}, {QStringLiteral("owner_title"), QStringLiteral("Index work")},
+                               {QStringLiteral("owner_exists"), true}, {QStringLiteral("status"), QStringLiteral("done")},
+                               {QStringLiteral("history"), QJsonArray{QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
+                                                                                  {QStringLiteral("text"), QStringLiteral("the task")}}}}};
+        const QString threadHtml = renderInfo(threadInfo, now);
+        QVERIFY(threadHtml.contains(QStringLiteral("↑ owner session: “Index work”")));
+        QVERIFY(threadHtml.indexOf(QStringLiteral("↑ owner session")) < threadHtml.indexOf(QStringLiteral("the task")));
+        QCOMPARE(compactNumber(812), QStringLiteral("812"));
+        QCOMPARE(compactNumber(1300000), QStringLiteral("1.3M"));
+    }
+
+    void infoViewNavigatesAndGoesBack() {
+        using namespace relay::sessioninfo;
+        InfoView view;
+        QList<QJsonObject> asked;
+        view.onRequest = [&asked](const QJsonObject &request) { asked << request; };
+        view.showLiveSession();
+        QCOMPARE(asked.size(), 1);
+        QVERIFY(!asked.last().contains(QStringLiteral("session_id")));
+        view.setInfo({{QStringLiteral("event"), QStringLiteral("session_info")}, {QStringLiteral("id"), asked.last().value(QStringLiteral("id"))},
+                      {QStringLiteral("kind"), QStringLiteral("session")}, {QStringLiteral("title"), QStringLiteral("Mine")}, {QStringLiteral("live"), true}});
+        QCOMPARE(view.paneTitle(), QStringLiteral("Info · Mine"));
+        view.showThread(QString(32, QLatin1Char('b')), QStringLiteral("/d"), QString(32, QLatin1Char('a')));
+        QCOMPARE(asked.last().value(QStringLiteral("thread_id")).toString(), QString(32, QLatin1Char('b')));
+        // A stale answer (an earlier id) is ignored.
+        view.setInfo({{QStringLiteral("id"), asked.first().value(QStringLiteral("id"))}, {QStringLiteral("kind"), QStringLiteral("session")},
+                      {QStringLiteral("title"), QStringLiteral("Stale")}});
+        QCOMPARE(view.paneTitle(), QStringLiteral("Info · Mine"));
+        view.back();
+        QVERIFY(!asked.last().contains(QStringLiteral("thread_id")));
+        bool closed = false;
+        view.onClose = [&closed] { closed = true; };
+        QTest::keyClick(view.findChild<QTextBrowser *>(), Qt::Key_Escape);
+        QVERIFY(closed);
     }
 
     void findBarCountsBothSides() {

@@ -169,3 +169,15 @@ grouping and the find bar). `./scripts/test.sh` 420 tests, `ctest` 10 tests.
 - The live QA run used a loopback stub endpoint (`stub-provider.py`) instead of a real provider, so
   that the run needs no API key and no network; everything else in it is the real code path
   (real worker, real autosave, real index, real terminal capture).
+
+## Superseded in part (2026-09-18, cards #R6J0 and #Y63Z)
+
+The conversation **dialog** is now the **session manager pane** (`relay::conversations::SessionManager`,
+same file), opened by `/conversations`, `/resume`, Ctrl+Shift+Y and the palette; the resume picker is
+gone. Everything above still holds, with these changes: several words AND over the whole
+conversation, not one message (the first known gap); sort (newest, oldest, most turns, most matches)
+and "Show more" paging; up to 20 matching turns per conversation on request; renames and pins live
+in `<id>.meta.json`, not only in the index; the index reconciles itself with the session files once
+per worker (sessions saved before it existed were never found); a v1 index is migrated in place, not
+wiped; a "Subagent threads" checkbox (off by default) lists every subagent thread under its owner
+session. Protocol sections 14 and 25. QA for these changes is on #R6J0.

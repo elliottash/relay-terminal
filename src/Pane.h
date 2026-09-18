@@ -33,6 +33,7 @@
 #include "RequestLedger.h"
 #include "RequestsPanel.h"
 #include "Conversations.h"
+#include "SessionInfo.h"
 #include "Logging.h"
 #include "TerminalBackends.h"
 #include "TerminalBackend.h"
@@ -321,6 +322,7 @@ public:
     QString currentPreset() const { return m_currentPreset; }
     QString model() const { return m_model; }
     QString sessionId() const { return m_sessionId; }
+    QString sessionDir() const { return m_sessionDir; }
 
     // ----- saved window layout ("reopen where I left off", src/WindowState.h) ------------------
     // Values a restored pane starts with, taken from the saved layout before its first `configure`.
@@ -1278,11 +1280,9 @@ public:
         m_forkPending = true;
         send(request);
     }
-    void openResume() {
-        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
-        m_resumePending = true;
-        send({{"type", "sessions"}});
-    }
+    // /resume, Ctrl+Shift+Y and the palette's Resume: the session manager pane (card #R6J0), which
+    // replaced the resume picker. "/resume words" opens it searching for them.
+    void openResume(const QString &query = QString()) { openConversations(query); }
     void requestRecap() {
         if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
         m_recapManual = true;
@@ -2259,6 +2259,11 @@ private:
             }
             if (id.startsWith(QStringLiteral("turn-"))) {
                 status(QStringLiteral("Turn details: ") + event.value(QStringLiteral("text")).toString());
+                return true;
+            }
+            // The ⓘ view's requests (protocol 25): the view says what went wrong, in place.
+            if (id.startsWith(QStringLiteral("info-"))) {
+                if (m_infoView) m_infoView->setError(id, event.value(QStringLiteral("text")).toString());
                 return true;
             }
             // The × on a steer lost the race: the turn took it (or gave it back) first. The
@@ -3733,7 +3738,9 @@ private:
         }
         // ----- conversation list and search (protocol section 14) -----------------------------
         if (type == QStringLiteral("conversations")) {
-            if (m_conversations) m_conversations->setResults(event);
+            // Only the manager's own queries (another client may ask this worker too).
+            if (m_conversations && event.value(QStringLiteral("id")).toString() == QStringLiteral("conv-list"))
+                m_conversations->setResults(event);
             return true;
         }
         if (type == QStringLiteral("conversation")) {
@@ -3758,11 +3765,12 @@ private:
                            .arg(event.value(QStringLiteral("ms")).toInt()));
             return true;
         }
-        if (type == QStringLiteral("sessions")) {
-            if (!m_resumePending) return true;
-            m_resumePending = false;
-            const QJsonArray items = event.value(QStringLiteral("items")).toArray();
-            QTimer::singleShot(0, this, [this, items] { showResumePicker(items); });
+        // The resume picker's list (protocol section 5) is not asked for any more: /resume opens
+        // the session manager. An answer to another client's request is simply dropped.
+        if (type == QStringLiteral("sessions")) return true;
+        // ----- conversation info, the ⓘ view (protocol section 25) --------------------------
+        if (type == QStringLiteral("session_info")) {
+            if (m_infoView) m_infoView->setInfo(event);
             return true;
         }
         if (type == QStringLiteral("recap")) {
@@ -3846,6 +3854,9 @@ private:
         }
         if (type == QStringLiteral("reset")) {
             m_turnsCompleted = 0; m_lastRecapTurns = -1;
+            // A new conversation has a new id (protocol 25); an older worker does not say it, and
+            // then the old one must not be taken for what this pane still holds.
+            m_sessionId = event.value(QStringLiteral("session_id")).toString();
             if (m_reconfigureOnNewChat) {
                 m_reconfigureOnNewChat = false;
                 QTimer::singleShot(0, this, [this] { if (!m_agentBusy) configurePreset(m_currentPreset, false); });
@@ -3916,64 +3927,80 @@ private:
         send({{"type", "rewind"}, {"turn", turn}, {"restore", result.action}});
     }
 
-    void showResumePicker(const QJsonArray &items) {
-        QList<relay::agentui::PickerRow> rows;
-        QStringList ids;
-        for (const auto &value : items) {
-            const QJsonObject item = value.toObject();
-            relay::agentui::PickerRow row;
-            row.columns = QStringList{item.value(QStringLiteral("title")).toString(),
-                           QDateTime::fromSecsSinceEpoch(qint64(item.value(QStringLiteral("updated")).toDouble())).toString(QStringLiteral("yyyy-MM-dd HH:mm")),
-                           QString::number(item.value(QStringLiteral("turns")).toInt()),
-                           item.value(QStringLiteral("model")).toString()};
-            rows << row;
-            ids << item.value(QStringLiteral("id")).toString();
-        }
-        const auto result = relay::agentui::pick(this, QStringLiteral("Resume session"),
-            QStringLiteral("Saved agent sessions for this workspace. Resuming replaces this pane's conversation."),
-            {QStringLiteral("Title"), QStringLiteral("Updated"), QStringLiteral("Turns"), QStringLiteral("Model")}, rows,
-            {{QStringLiteral("resume"), QStringLiteral("Resume"), true}});
-        if (result.row < 0) { focusInput(); return; }
-        if (m_agentBusy) { status(QStringLiteral("Stop the agent turn before resuming a session.")); return; }
-        send({{"type", "resume"}, {"id", ids.at(result.row)}});
-    }
-
-    // ===== conversation list and full-text search (protocol section 14) =====================
+    // ===== the session manager pane and the ⓘ view (protocol sections 14 and 25) ==============
 public:
-    // /conversations and the Actions list: every saved conversation and Relay's terminal
-    // history, searchable. The worker searches the index; this only shows what comes back.
+    // The window opens (or brings forward) its session manager pane and binds it to this pane:
+    // queries go to this pane's worker, Enter resumes here (cards #CCKY, #R6J0).
+    std::function<void(const QString &query)> onOpenSessions;
+    // The window opens the ⓘ pane beside this one (the header button, /status) ...
+    std::function<void()> onOpenInfo;
+    // ... or on one thread (a thread row in the session manager).
+    std::function<void(const QString &threadId, const QString &sessionDir, const QString &owner)> onOpenThreadInfo;
+    // Before resuming a session here: if another pane already has it open, the window focuses that
+    // pane and returns true (two workers must never autosave one session file).
+    std::function<bool(const QString &sessionId, const QString &sessionDir)> onSessionOpenElsewhere;
+
+    // /resume, /conversations, Ctrl+Shift+Y and the palette: the session manager pane.
     void openConversations(const QString &initialQuery = QString()) {
         if (!m_workerReady) { status(QStringLiteral("The agent worker is still starting.")); return; }
-        if (!m_conversations) {
-            m_conversations = new relay::conversations::Dialog(this);
-            m_conversations->setAttribute(Qt::WA_DeleteOnClose, false);
-            m_conversations->onQuery = [this](const QJsonObject &request) {
-                QJsonObject message = request;
-                message.insert(QStringLiteral("type"), QStringLiteral("conversations"));
-                message.insert(QStringLiteral("workspace"), m_workspace);
-                message.insert(QStringLiteral("id"), QStringLiteral("conv-list"));
-                send(message);
-            };
-            m_conversations->onPreview = [this](const QString &sessionId, const QString &query) {
-                send({{"type", "conversation_get"}, {"id", QStringLiteral("conv-preview")},
-                      {"session_id", sessionId}, {"query", query}});
-            };
-            m_conversations->onResume = [this](const QJsonObject &item, bool newPane) { openSavedSession(item, newPane); };
-            m_conversations->onRename = [this](const QString &sessionId, const QString &title) {
-                send({{"type", "conversation_rename"}, {"session_id", sessionId}, {"title", title}});
-            };
-            m_conversations->onPin = [this](const QString &sessionId, bool pinned) {
-                send({{"type", "conversation_pin"}, {"session_id", sessionId}, {"pinned", pinned}});
-            };
-            m_conversations->onDelete = [this](const QString &sessionId) {
-                send({{"type", "conversation_delete"}, {"session_id", sessionId}});
-            };
-        }
-        if (!initialQuery.isEmpty()) m_conversations->findChildren<QLineEdit *>().value(0)->setText(initialQuery);
-        m_conversations->show();
-        m_conversations->raise();
-        m_conversations->activateWindow();
-        m_conversations->focusSearch();
+        if (onOpenSessions) onOpenSessions(initialQuery);
+    }
+
+    void bindSessionManager(relay::conversations::SessionManager *view) {
+        m_conversations = view;
+        QPointer<Pane> self(this);
+        view->onQuery = [self](const QJsonObject &request) {
+            if (!self) return;
+            QJsonObject message = request;
+            message.insert(QStringLiteral("type"), QStringLiteral("conversations"));
+            message.insert(QStringLiteral("workspace"), self->m_workspace);
+            message.insert(QStringLiteral("id"), QStringLiteral("conv-list"));
+            self->send(message);
+        };
+        view->onPreview = [self](const QString &sessionId, const QString &query) {
+            if (self) self->send({{"type", "conversation_get"}, {"id", QStringLiteral("conv-preview")},
+                                  {"session_id", sessionId}, {"query", query}});
+        };
+        view->onResume = [self](const QJsonObject &item, bool newPane) { if (self) self->openSavedSession(item, newPane); };
+        view->onOpenThread = [self](const QJsonObject &item) {
+            if (self && self->onOpenThreadInfo)
+                self->onOpenThreadInfo(item.value(QStringLiteral("session_id")).toString(),
+                                       item.value(QStringLiteral("session_dir")).toString(),
+                                       item.value(QStringLiteral("owner_session")).toString());
+        };
+        view->onRename = [self](const QString &sessionId, const QString &title) {
+            if (self) self->send({{"type", "conversation_rename"}, {"session_id", sessionId}, {"title", title}});
+        };
+        view->onPin = [self](const QString &sessionId, bool pinned) {
+            if (self) self->send({{"type", "conversation_pin"}, {"session_id", sessionId}, {"pinned", pinned}});
+        };
+        view->onDelete = [self](const QString &sessionId) {
+            if (self) self->send({{"type", "conversation_delete"}, {"session_id", sessionId}});
+        };
+    }
+
+    // The ⓘ view's requests go to this pane's worker; its answers come back as `session_info`.
+    void bindInfoView(relay::sessioninfo::InfoView *view) {
+        m_infoView = view;
+        QPointer<Pane> self(this);
+        view->onRequest = [self](const QJsonObject &request) {
+            if (!self) return;
+            if (!self->m_workerReady) { self->status(QStringLiteral("The agent worker is still starting.")); return; }
+            QJsonObject message = request;
+            message.insert(QStringLiteral("type"), QStringLiteral("session_info"));
+            self->send(message);
+        };
+        // A thread still running here opens in this pane's subagent pane (RelayWindow::openSubagentTab).
+        view->onOpenLive = [self](const QString &agentId, const QString &) { if (self) self->openSubagent(agentId); };
+        view->onOpenFile = [self](const QString &path) { if (self && self->onOpenPath) self->onOpenPath(path, 0); };
+    }
+    relay::sessioninfo::InfoView *infoView() const { return m_infoView; }
+
+    // The ⓘ button and /status.
+    void openInfo() {
+        if (!m_workerReady) { status(QStringLiteral("The agent worker is still starting.")); return; }
+        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+        if (onOpenInfo) onOpenInfo();
     }
 
     // Enter resumes in this pane, Shift+Enter opens the conversation in a new one. A conversation
@@ -3983,6 +4010,9 @@ public:
         const QString directory = item.value(QStringLiteral("session_dir")).toString();
         const QString title = item.value(QStringLiteral("title")).toString();
         if (sessionId.isEmpty()) return;
+        // Open in another pane already: go there instead of loading it twice.
+        if (sessionId != m_sessionId && onSessionOpenElsewhere
+            && onSessionOpenElsewhere(sessionId, directory.isEmpty() ? m_sessionDir : directory)) return;
         const QJsonObject reference{{QStringLiteral("version"), 1},
                                     {QStringLiteral("kind"), QStringLiteral("relay_agent_state_ref")},
                                     {QStringLiteral("session_id"), sessionId},
@@ -3990,6 +4020,10 @@ public:
         if (newPane) {
             if (onOpenSessionInNewPane) onOpenSessionInNewPane(reference, title);
             else if (onForkState) onForkState(reference, title);
+            return;
+        }
+        if (sessionId == m_sessionId && (directory.isEmpty() || directory == m_sessionDir)) {
+            status(QStringLiteral("That session is already open in this pane."));
             return;
         }
         if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
@@ -4139,8 +4173,10 @@ private:
             {QStringLiteral("rewind"), QString(), QStringLiteral("Rewind chat to an earlier turn (files are not changed)")},
             {QStringLiteral("rewind-code"), QString(), QStringLiteral("Restore files the agent changed since an earlier turn")},
             {QStringLiteral("fork"), QString(), QStringLiteral("Continue this conversation in a new pane")},
-            {QStringLiteral("resume"), QString(), QStringLiteral("Resume a saved session")},
-            {QStringLiteral("conversations"), QStringLiteral("[words]"), QStringLiteral("List and search every conversation and Relay's terminal history")},
+            {QStringLiteral("resume"), QStringLiteral("[words]"), QStringLiteral("Sessions: resume, search, subagent threads (same as /conversations)")},
+            {QStringLiteral("conversations"), QStringLiteral("[words]"), QStringLiteral("Sessions: search every session and Relay's terminal history")},
+            {QStringLiteral("status"), QString(), QStringLiteral("Conversation info: model, tokens, file and history with subagent threads (the ⓘ button)")},
+            {QStringLiteral("info"), QString(), QStringLiteral("Conversation info (same as /status)")},
             {QStringLiteral("find"), QStringLiteral("[words]"), QStringLiteral("Find in this pane: conversation and terminal scrollback")},
             {QStringLiteral("plan"), QString(), QStringLiteral("Toggle plan mode")},
             {QStringLiteral("light"), QString(), QStringLiteral("Light theme: IBM Beige")},
@@ -4449,13 +4485,20 @@ private:
         else if (name == QStringLiteral("rewind-code")) openRewind(QStringLiteral("code"));
         else if (name == QStringLiteral("fork")) requestFork();
         else if (name == QStringLiteral("resume")) {
-            openResume();
+            openResume(args);
             if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.resume")); !keys.isEmpty())
-                hint(QStringLiteral("resume.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("resume a session")));
+                hint(QStringLiteral("resume.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("sessions")));
         } else if (name == QStringLiteral("conversations")) {
             openConversations(args);
-            if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("conversations.open")); !keys.isEmpty())
-                hint(QStringLiteral("conversations.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("conversations")));
+            // One pane now: the key that opens it is agent.resume's (conversations.open is unbound).
+            QString keys = Keymap::instance().shortcutText(QStringLiteral("conversations.open"));
+            if (keys.isEmpty()) keys = Keymap::instance().shortcutText(QStringLiteral("agent.resume"));
+            if (!keys.isEmpty())
+                hint(QStringLiteral("conversations.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("sessions")));
+        } else if (name == QStringLiteral("status") || name == QStringLiteral("info")) {
+            openInfo();
+            if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.info")); !keys.isEmpty())
+                hint(QStringLiteral("info.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("conversation info")));
         } else if (name == QStringLiteral("find")) {
             openFindInView();
             if (!args.isEmpty() && m_findBar) m_findBar->start(args);
@@ -5679,6 +5722,7 @@ private:
             }
         } else if (type == QStringLiteral("done") || type == QStringLiteral("cancelled")) {
             stopTurnClock();
+            if (m_infoView) m_infoView->refreshIfLive();   // the ⓘ pane follows the turns it lists
             if (type == QStringLiteral("cancelled")) {
                 ensureLineStart(); printInline(QStringLiteral("Stopped. Actions that already ran are not rolled back.\n"), Ink::Error);
             }
@@ -8809,7 +8853,8 @@ private:
     QDateTime m_shellHistoryStamp;
     QList<QPair<QString, QString>> m_commandLog;   // command, directory
     // Conversation list and search (protocol 14) plus the terminal-history capture.
-    relay::conversations::Dialog *m_conversations = nullptr;
+    QPointer<relay::conversations::SessionManager> m_conversations;   // the window's manager pane, bound here
+    QPointer<relay::sessioninfo::InfoView> m_infoView;                // the ⓘ pane, bound here
     relay::conversations::FindBar *m_findBar = nullptr;
     QByteArray m_capture;
     QString m_captureCommand, m_captureCwd;
@@ -8883,7 +8928,7 @@ private:
     QString m_ctxNextModel, m_ctxInFlightModel;
     bool m_ctxEstimated = false, m_compacting = false, m_contextNotePending = false;
     QString m_rewindKind = QStringLiteral("chat");
-    bool m_rewindPending = false, m_forkPending = false, m_resumePending = false, m_recapManual = false;
+    bool m_rewindPending = false, m_forkPending = false, m_recapManual = false;
     bool m_instructionsDialogPending = false, m_onboarding = false, m_agentsListPending = false, m_reconfigureOnNewChat = false;
     bool m_finishedWhileAway = false, m_forkLoadPending = false, m_commandLoaded = false, m_initialIsFork = true;
     int m_turnsCompleted = 0, m_lastRecapTurns = -1, m_skillCount = 0;
