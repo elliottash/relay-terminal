@@ -11,15 +11,16 @@ implemented_by: Claude Fable 5.1 (Claude Code, milestone review), 2026-09-18
 rank: c
 created: '2026-09-18'
 acceptance: '`kill <relay pid>` exits 0, leaves no /tmp/relay-* directory behind, and writes windows.json and the panes'' scrollback; a plain quit removes the panes'' directories too; `ctest` (29) passes'
-source: 'milestone review of the code base, 2026-09-18: 1,262 stale /tmp/relay-* directories on the owner''s machine with one Relay running'
+source: 'milestone review of the code base, 2026-09-18: about 870 stale /tmp/relay-* directories on the owner''s machine with one Relay running'
 links: {plans: [], commits: [0f49c89], evidence: ['docs/qa_evidence/2026-09-18-a-signal-is-a-quit/'], related: [SB7K], github: null}
 ---
 # A signal is a quit: SIGTERM saves, and a quit cleans up after its panes
 
 ## Report
 
-`/tmp` held 876 `relay-XXXXXX` and 386 `relay-open-XXXXXX` directories (44 MB) while one Relay was
-running. Each `relay-XXXXXX` is a pane's private runtime directory and keeps its last
+`/tmp` held about 490 `relay-XXXXXX` and 386 `relay-open-XXXXXX` directories (876 in all, 44 MB)
+while one Relay was running, which was using four of the first and one of the second. (The commit
+message of 0f49c89 says 1,262: that figure counted the `relay-open-*` directories twice.) Each `relay-XXXXXX` is a pane's private runtime directory and keeps its last
 `state.json` — the shell's `PATH` and the names of its aliases and functions.
 
 Two causes, one behind the other:

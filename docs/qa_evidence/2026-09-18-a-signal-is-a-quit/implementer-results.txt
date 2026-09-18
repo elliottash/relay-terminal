@@ -20,5 +20,7 @@ After ~WindowManager as well (0f49c89):
   layout saved: 1   scrollback files: 1
   stderr: (empty)
 
-On the owner's machine at the time: 876 /tmp/relay-XXXXXX and 386 /tmp/relay-open-XXXXXX
-directories, 44 MB, with one Relay running.
+On the owner's machine at the time: 876 /tmp/relay-* directories, 44 MB — about 490 pane
+directories (relay-XXXXXX) and 386 socket directories (relay-open-XXXXXX) — with one Relay running
+that was using four and one of them. (An earlier version of this note, and the commit message of
+0f49c89, said 1,262: the glob relay-* matches relay-open-* too, so those were counted twice.)
