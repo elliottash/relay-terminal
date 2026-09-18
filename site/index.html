@@ -50,23 +50,48 @@
             <a href="#privacy">read this first</a>.</p>
         </div>
 
-        <div class="screen" role="img" aria-label="A Relay session: the command make fails, the question 'why does the build fail?' goes to the agent, which runs make, patches greet.c and explains the missing semicolon. The prompt box below shows the destination changing from terminal to agent.">
-          <div class="screen-body">
-            <p class="ln"><span class="sh">$</span> make</p>
-            <p class="ln out">greet.c:7:3: error: expected ';' before 'return'</p>
-            <p class="ln out dim">make: *** [greet] Error 1</p>
+        <div class="stage">
+        <div class="board" data-line="shell">
+          <!-- The patch panel: one line in, two lines out. Clicking or keyboarding a jack re-patches
+               it, and the session below shows what that line does. Static and readable without JS. -->
+          <div class="board-face">
+            <svg class="cords" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+              <path class="cord cord-shell" vector-effect="non-scaling-stroke" d="M9 20 C 9 72, 20 60, 20 78" />
+              <path class="cord cord-agent" vector-effect="non-scaling-stroke" d="M9 20 C 9 86, 55 62, 55 78" />
+            </svg>
+            <div class="jack-in"><span class="jack-ring"></span><span class="jack-label">your line</span></div>
+            <div class="jacks" role="radiogroup" aria-label="Where this line is patched">
+              <button type="button" class="jack jack-shell" role="radio" aria-checked="true" data-target="shell">
+                <span class="jack-ring"></span>
+                <span class="jack-label">shell</span>
+              </button>
+              <button type="button" class="jack jack-agent" role="radio" aria-checked="false" data-target="agent">
+                <span class="jack-ring"></span>
+                <span class="jack-label">agent</span>
+              </button>
+            </div>
+          </div>
+          <p class="board-note">Relay patches every line you type to one of these two. Try the other jack.</p>
+        </div>
+
+        <div class="screen">
+          <div class="screen-body" data-for="shell">
+            <p class="ln"><span class="sh">$</span> git status --short</p>
+            <p class="ln out"> M src/greet.c</p>
+            <p class="ln out">?? notes.md</p>
+            <p class="ln dim">exit 0 · 40 ms · your shell, nothing sent anywhere</p>
+          </div>
+          <div class="screen-body" data-for="agent" hidden>
             <p class="ln"><span class="ag">✦</span> why does the build fail?</p>
+            <p class="ln out dim">ran make · read greet.c · wrote greet.c</p>
             <p class="ln ag-out">Missing semicolon after <code>printf(...)</code> on line 6. Patched <code>greet.c</code> and rebuilt — it compiles.</p>
-            <p class="ln dim">2 tool calls · 1.4 s</p>
+            <p class="ln dim">2 tool calls · 1.4 s · glm-5.3 on your key</p>
           </div>
           <div class="screen-input">
-            <p class="input-line"><span class="caret caret-shell" aria-hidden="true"></span> git status</p>
-            <p class="input-meta"><span class="chip">~/project</span><span class="chip sh-chip">terminal</span></p>
+            <p class="input-line"><span class="caret" aria-hidden="true"></span><span class="input-text">git status --short</span></p>
+            <p class="input-meta"><span class="chip">~/project</span><span class="chip dest-chip sh-chip">terminal</span></p>
           </div>
-          <div class="screen-input">
-            <p class="input-line"><span class="caret caret-agent" aria-hidden="true"></span> rebase this onto main and fix the conflicts</p>
-            <p class="input-meta"><span class="chip">~/project</span><span class="chip ag-chip">agent</span></p>
-          </div>
+        </div>
         </div>
       </div>
     </section>
@@ -314,5 +339,40 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
       </ul>
     </div>
   </footer>
+  <script>
+    // One interactive moment on the page: re-patching the line. Everything works without it —
+    // the shell jack is plugged in the markup, and its session is the one shown.
+    (function () {
+      var board = document.querySelector('.board');
+      if (!board) return;
+      var screen = document.querySelector('.screen');
+      var text = screen.querySelector('.input-text');
+      var chip = screen.querySelector('.dest-chip');
+      var lines = { shell: 'git status --short', agent: 'rebase this onto main and fix the conflicts' };
+      var labels = { shell: 'terminal', agent: 'agent' };
+      function patch(target) {
+        board.dataset.line = target;
+        board.querySelectorAll('.jack').forEach(function (jack) {
+          jack.setAttribute('aria-checked', String(jack.dataset.target === target));
+        });
+        screen.querySelectorAll('[data-for]').forEach(function (body) {
+          body.hidden = body.dataset.for !== target;
+        });
+        text.textContent = lines[target];
+        chip.textContent = labels[target];
+        chip.className = 'chip dest-chip ' + (target === 'shell' ? 'sh-chip' : 'ag-chip');
+      }
+      board.querySelectorAll('.jack').forEach(function (jack) {
+        jack.addEventListener('click', function () { patch(jack.dataset.target); });
+      });
+      board.querySelector('.jacks').addEventListener('keydown', function (event) {
+        if (['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown'].indexOf(event.key) === -1) return;
+        event.preventDefault();
+        var next = board.dataset.line === 'shell' ? 'agent' : 'shell';
+        patch(next);
+        board.querySelector('.jack-' + next).focus();
+      });
+    })();
+  </script>
 </body>
 </html>
