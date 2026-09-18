@@ -12,7 +12,7 @@ rank: zzzzzw
 created: '2026-09-18'
 acceptance: 'A sentence whose first word carries punctuation, a capital or an apostrophe gets no "command not found" note under its ✦ echo; mistyped commands keep theirs; `tests/test_router.py` passes'
 source: issues/bug_intake.txt, 2026-09-18
-links: {plans: [], commits: [54f4c0c, c09bdde], evidence: ['docs/qa_evidence/2026-09-18-command-not-found-sentence-punctuation/'], related: [T4JV], github: null}
+links: {plans: [], commits: [54f4c0c, c09bdde, 0a45937], evidence: ['docs/qa_evidence/2026-09-18-command-not-found-sentence-punctuation/'], related: [T4JV], github: null}
 ---
 # "command not found" under a request whose first word ends in a comma
 
