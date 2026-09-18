@@ -403,6 +403,13 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
   border-radius: var(--qss-menu-item-border-radius);
 }
 .rp-session-row.rp-current { background: var(--rt-accent-soft); }
+/* A row that can be opened is a button filling its row; the current one stays a plain line. */
+.rp-session-open {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: 0; padding: 0; margin: 0; color: inherit; font: inherit;
+  text-align: left; cursor: pointer; min-height: 44px;
+}
+.rp-session-open:hover { color: var(--rt-text); }
 .rp-session-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .rp-session-when { color: var(--rt-muted); font-family: var(--rt-mono); font-size: var(--rt-floor-size); }
 .rp-session-dot { width: 7px; height: 7px; border-radius: 50%; }

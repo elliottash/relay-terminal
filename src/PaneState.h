@@ -87,6 +87,9 @@ struct Inputs {
     // sessions
     QList<Session> sessions;
     bool canNew = false;             // a new conversation may be started now
+    // A past conversation may be opened into this pane. Both are the owner's level: the hub drops
+    // the whole sessions block below `full` (owner's three levels, 2026-09-18).
+    bool canOpen = false;
 };
 
 // "idle", "thinking", "tool" or "waiting".

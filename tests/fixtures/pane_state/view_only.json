@@ -65,31 +65,5 @@
   "context": {
     "label": "91% left",
     "percent_left": 91
-  },
-  "sessions": {
-    "rows": [
-      {
-        "id": "s1",
-        "title": "Thinking copy test",
-        "when": "14:02",
-        "current": true,
-        "running": false
-      },
-      {
-        "id": "s2",
-        "title": "Queue as one list",
-        "when": "11:40",
-        "current": false,
-        "running": false
-      },
-      {
-        "id": "s3",
-        "title": "Fix the flaky PTY test",
-        "when": "Mon",
-        "current": false,
-        "running": false
-      }
-    ],
-    "can_new": false
   }
 }

@@ -143,7 +143,8 @@ QJsonObject build(qint64 seq, const Inputs &in, Tokens &choiceTokens, Tokens &se
                                        {QStringLiteral("current"), session.current},
                                        {QStringLiteral("running"), session.running}});
     }
-    QJsonObject sessions{{QStringLiteral("rows"), sessionRows}, {QStringLiteral("can_new"), in.canNew}};
+    QJsonObject sessions{{QStringLiteral("rows"), sessionRows}, {QStringLiteral("can_new"), in.canNew},
+                         {QStringLiteral("can_open"), in.canOpen}};
 
     return QJsonObject{{QStringLiteral("t"), QStringLiteral("pane_state")},
                        {QStringLiteral("v"), kVersion},

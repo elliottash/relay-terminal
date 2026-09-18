@@ -210,7 +210,10 @@ CLIENT_TYPES.update({
     "queue_edit": AGENT,           # {pane, row}: withdraws the row, answered by queue_edit_text
     "queue_send_now": AGENT,       # {pane, row}: a steer, now, interrupting the running turn
     "model_pick": AGENT,           # {pane, choice}: only a model with a stored key is ever offered
-    "conversation_new": AGENT,     # {pane}: opening a *past* conversation is not offered remotely
+    # The owner's three levels (2026-09-18): viewer observes, partner types, owner also reaches
+    # the conversations before this one. So these two are FULL, not AGENT.
+    "conversation_new": FULL,      # {pane}: start a new conversation in this pane
+    "conversation_open": FULL,     # {pane, session}: open one of this pane's past conversations
 })
 GUEST_NEVER.update({
     "pane_state_get": "the owner's queue, models and sessions are the owner's pane, not the share",
@@ -219,6 +222,7 @@ GUEST_NEVER.update({
     "queue_send_now": "interrupts the owner's turn; not among an editor's actions",
     "model_pick": "model changes are never a guest's (section 10.1)",
     "conversation_new": "resets the owner's conversation",
+    "conversation_open": "the owner's other conversations are not part of a share",
 })
 SERVER_TYPES = SERVER_TYPES | frozenset({"pane_state", "queue_edit_text"})
 
@@ -330,6 +334,13 @@ WITHHELD_EVENTS: dict[str, str] = {
     "local_endpoints": "provider configuration and loopback URLs",
     "local_endpoint_saved": "provider configuration and loopback URLs",
     "local_endpoint_deleted": "desktop-local administration",
+    # Relay Free's allowance (protocol 13.9): `{limit, used, resets_at}` for the owner's hosted
+    # account, and the reply to the desktop's own `hosted_quota` request rather than anything
+    # about the pane a phone is watching. Same call as `presets` and `configured`: what the
+    # owner's provider arrangement is stays on the desktop. Classified by the security review of
+    # 2026-09-18 because the "denied by default" test had gone red waiting for somebody to; the
+    # session that added it can move it to FORWARDED_EVENTS if a phone should show the chip.
+    "hosted_quota": "the owner's hosted-account allowance; a reply to the desktop's own request",
 }
 
 # Every event name backend/relay_core and backend/worker.py emit today. The test that compares this

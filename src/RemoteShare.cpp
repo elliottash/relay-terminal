@@ -282,6 +282,11 @@ void RemoteShare::handle(const QJsonObject &message)
         auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
         if (it != m_panes.end() && it->hooks.conversationNew)
             it->hooks.conversationNew(message.value(QStringLiteral("device_name")).toString());
+    } else if (kind == QLatin1String("conversation_open")) {
+        auto it = m_panes.find(message.value(QStringLiteral("pane")).toString());
+        if (it != m_panes.end() && it->hooks.conversationOpen)
+            it->hooks.conversationOpen(message.value(QStringLiteral("session")).toString(),
+                                       message.value(QStringLiteral("device_name")).toString());
     } else if (kind == QLatin1String("recap_request")) {
         // Forwarded by the sidecar since the phone first had a recap button, and dropped here
         // until now (relay-terminal-71, 2026-09-18).

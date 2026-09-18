@@ -40,9 +40,12 @@ sessions in the actual relay terminal app on my laptop. sphinxpad should be reac
   unenforceable. So: the desktop publishes one pane model and both views draw it.
 - The web view **ports the Qt appearance**: theme generated from `src/Theme.cpp`, the same layout
   order, desktop-written labels, desktop keys on a keyboard, touch sizes on a phone.
-- Allowed for any device that may prompt (AGENT): **switching models** (desktop-minted choice ids,
-  only presets with a stored key) and **steering**. Also **creating a conversation** and
-  **observing the session manager**. Opening a past conversation remotely is **not** approved.
+- **Three levels** (owner, 2026-09-18), on the existing capabilities:
+  **viewer** (`view`) observes this conversation; **partner** (`agent`) can type in it, act on the
+  rows it was offered and pick a model; **owner** (`full`) can also reach the conversations before
+  it — the session list, opening one, and starting a new one. The whole sessions block is dropped
+  below `full`. (This replaces the earlier decision that opening a past conversation was not
+  offered remotely, and moves `conversation_new` from AGENT to FULL.)
 - Keys, provider settings, the keyring and conversation deletion stay on the desktop.
 - Qt 6 port: not now.
 

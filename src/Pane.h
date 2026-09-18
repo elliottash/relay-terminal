@@ -3485,6 +3485,9 @@ public:
             hooks.queueSendNow = [this](const QString &row) { return remoteQueueSendNow(row); };
             hooks.modelPick = [this](const QString &choice, const QString &name) { return remoteModelPick(choice, name); };
             hooks.conversationNew = [this](const QString &name) { return remoteConversationNew(name); };
+            hooks.conversationOpen = [this](const QString &session, const QString &name) {
+                return remoteConversationOpen(session, name);
+            };
             hooks.publishPaneState = [this] { m_paneState.publishNow(); };
             hooks.recap = [this] { send({{"type", "recap_request"}, {"reason", "remote"}}); };
             hooks.stopAgent = [this] { stopAgent(); };
@@ -7517,6 +7520,7 @@ public:
                                                      current, current && m_agentBusy};
         }
         in.canNew = m_workerReady && !m_agentBusy;
+        in.canOpen = m_workerReady && !m_agentBusy;   // as the session manager's own rows behave
         return in;
     }
 
@@ -7590,6 +7594,25 @@ public:
         }
         status(QStringLiteral("Model changed from %1 · %2").arg(who, remoteState().modelLabel));
         return true;
+    }
+
+    // conversation_open: a token from this pane's last pane_state, resolved here against the list
+    // it published. Never a path or a session file name — those would read another conversation
+    // into this pane. The owner's level only; the hub sends the list to nobody else.
+    bool remoteConversationOpen(const QString &sessionId, const QString &deviceName) {
+        if (!m_workerReady || m_agentBusy) return false;
+        const QString key = m_paneState.sessionKey(sessionId);
+        if (key.isEmpty()) return false;
+        for (const QJsonValue &value : std::as_const(m_remoteSessions)) {
+            const QJsonObject item = value.toObject();
+            if (item.value(QStringLiteral("session_id")).toString() != key) continue;
+            openSavedSession(item, false);   // this pane, not a new one: the phone is watching it
+            status(QStringLiteral("Conversation opened from %1 · %2")
+                       .arg(deviceName.trimmed().isEmpty() ? QStringLiteral("a paired device") : deviceName.trimmed(),
+                            item.value(QStringLiteral("title")).toString()));
+            return true;
+        }
+        return false;
     }
 
     // conversation_new: the same as /new, refused while a turn runs exactly as /new is.

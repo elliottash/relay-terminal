@@ -505,18 +505,34 @@ export function mountPane(container, options = {}) {
         node.appendChild(fresh);
       }
       const list = el('ul', 'rp-session-list');
+      // Opening one is the owner's level, and the current conversation is already open: a row is a
+      // button only where the desktop said so (`can_open`), and a plain line otherwise.
+      const canOpen = sessions.can_open === true;
       for (const session of arr(sessions.rows).filter(obj)) {
         const item = el('li', 'rp-session-row');
         item.dataset.sessionId = str(session.id);
-        if (session.current === true) {
+        const current = session.current === true;
+        if (current) {
           item.classList.add('rp-current');
           item.setAttribute('aria-current', 'true');
         }
         const dot = el('span', 'rp-session-dot');
         dot.setAttribute('aria-hidden', 'true');
         if (session.running === true) dot.classList.add('rp-running');
-        item.append(dot, el('span', 'rp-session-title', str(session.title)),
-          el('span', 'rp-session-when', str(session.when)));
+        const title = el('span', 'rp-session-title', str(session.title));
+        const when = el('span', 'rp-session-when', str(session.when));
+        if (canOpen && !current) {
+          const open = button('rp-session-open', '');
+          open.setAttribute('aria-label', `Open ${str(session.title)}`);
+          open.append(dot, title, when);
+          open.addEventListener('click', () => {
+            closeSheet();
+            emit('conversation_open', { session: str(session.id) });
+          });
+          item.appendChild(open);
+        } else {
+          item.append(dot, title, when);
+        }
         list.appendChild(item);
       }
       node.appendChild(list);

@@ -170,6 +170,10 @@ class PaneViewTests(unittest.TestCase):
                     await browser.evaluate("document.querySelectorAll('.rp-model option:not([disabled])').length"),
                     0, "a view-only device is offered a model to switch to")
                 self.assertEqual(await browser.evaluate(f"{drawn}('.rp-sessions-new')"), 0)
+                # The owner's other conversations are not part of what a viewer is sent, so the
+                # button that opens the list is not drawn either (owner's three levels).
+                self.assertNotIn("sessions", state)
+                self.assertEqual(await browser.evaluate(f"{drawn}('.rp-sessions-button')"), 0)
                 self.assertEqual(await self.sent(browser), [])
             finally:
                 await browser.stop()
@@ -191,6 +195,32 @@ class PaneViewTests(unittest.TestCase):
                          "text": "the words that were in the row"}))
                 self.assertEqual(await browser.evaluate("document.querySelector('.rp-input').value"),
                                  "the words that were in the row")
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+
+    def test_an_owner_opens_a_past_conversation_by_the_desktops_token(self):
+        state = fixture("sessions_50")
+        row = next(r for r in state["sessions"]["rows"] if not r.get("current"))
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "sessions_50")
+                await browser.evaluate("document.querySelector('.rp-sessions-button').click()")
+                await browser.wait_for("!!document.querySelector('.rp-session-list')")
+                # The conversation the pane is already on is a line, not a button.
+                self.assertEqual(await browser.evaluate(
+                    "document.querySelectorAll('.rp-session-row.rp-current .rp-session-open').length"), 0)
+                await browser.evaluate(
+                    "document.querySelector('.rp-session-row[data-session-id=\"%s\"] .rp-session-open').click()"
+                    % row["id"])
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                self.assertEqual(await self.sent(browser),
+                                 [{"t": "conversation_open", "pane": state["pane"], "session": row["id"]}])
             finally:
                 await browser.stop()
 

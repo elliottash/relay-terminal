@@ -2290,6 +2290,18 @@ class Host:
         self._pane_state_line({"t": "conversation_new", "pane": pane,
                                **self._pane_state_origin(channel)})
 
+    async def _on_conversation_open(self, channel: Channel, message: dict) -> None:
+        """Open one of this pane's past conversations (owner level, section 16).
+
+        The session is named by a token from a `pane_state` this desktop sent, and the pane
+        resolves it against the list it published — a path or a session file name from the wire
+        would read somebody else's conversation into the pane.
+        """
+        pane = self._pane_state_pane(channel, message)
+        session = pane_state_mod.session_of(message)
+        self._pane_state_line({"t": "conversation_open", "pane": pane, "session": session,
+                               **self._pane_state_origin(channel)})
+
 
 # pane_state (relay-terminal-71): imported here, below the class, so this module's shared import
 # block stays untouched while other sessions edit it; nothing above runs before the module is done.
@@ -2299,5 +2311,6 @@ QUEUE_EDIT_TIMEOUT = 15.0          # a wedged GUI is an error on the phone, not 
 LIMITS.update({
     "model_pick": (20, 60),        # each one reconfigures the pane's provider
     "conversation_new": (10, 60),
+    "conversation_open": (20, 60),   # reading past conversations, not writing anything
     "queue_edit": (60, 60),
 })

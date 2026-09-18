@@ -186,7 +186,8 @@ def clean(message) -> dict | None:
         "composer": {"mode": _enum(composer.get("mode"), MODES, "auto"),
                      "placeholder": _text(composer.get("placeholder")), "modes": modes},
         "context": {"label": _text(context.get("label")), "percent_left": percent},
-        "sessions": {"rows": session_rows, "can_new": _flag(sessions.get("can_new"))},
+        "sessions": {"rows": session_rows, "can_new": _flag(sessions.get("can_new")),
+                     "can_open": _flag(sessions.get("can_open"))},
     }
 
 
@@ -194,19 +195,28 @@ def for_capability(state: dict, capability: str | None) -> dict | None:
     """What one device may be sent of a cleaned state, or None for no capability at all.
 
     Called per device on every message with the capability read from the live device record, so a
-    downgrade applies to the very next state. ``view`` observes: it sees the rows, the model and the
-    sessions, and is offered nothing to press — no row actions, no model choices, no ``can_new``,
-    and no composer modes. ``agent`` composes only to the agent (section 6.6), so its ``modes`` is
-    ``["agent"]``; ``full`` gets the desktop's list.
+    downgrade applies to the very next state. The owner named the three levels on 2026-09-18:
+
+    * **viewer** (``view``) observes this conversation: the rows, the model it is on, the reasoning.
+      Nothing to press — no row actions, no model choices, no composer modes.
+    * **partner** (``agent``) can type in this conversation: it composes to the agent (section 6.6),
+      so its ``modes`` is ``["agent"]``, and it may act on the queue rows it was offered.
+    * **owner** (``full``) can type in this conversation *and* see the ones before it: the session
+      list, opening one, and starting a new one are this level alone.
+
+    So the whole ``sessions`` block is dropped below ``full``: a partner is not shown the titles of
+    the owner's other conversations, which is what "observes this convo" and "can type in this
+    convo" mean literally.
     """
     if capability not in wire.CAPABILITIES:
         return None
     out = copy.deepcopy(state)
+    if capability != wire.FULL:
+        out.pop("sessions", None)
     if capability == wire.VIEW:
         for row in out["queue"]["rows"]:
             row.pop("actions", None)
         out["model"].pop("choices", None)
-        out["sessions"].pop("can_new", None)
         out["composer"]["modes"] = []
     elif capability == wire.AGENT:
         out["composer"]["modes"] = [mode for mode in out["composer"]["modes"] if mode == "agent"]
@@ -235,6 +245,15 @@ def choice_of(message: dict) -> str:
         # Never a preset id: only a token this desktop minted in a pane_state it sent.
         raise wire.WireError("unknown_type", "model_pick needs a choice id from pane_state.")
     return choice
+
+
+def session_of(message: dict) -> str:
+    """The session token in a `conversation_open`. Never a path or a session file name: only an id
+    this desktop minted in a `pane_state` it sent, which the pane resolves against its own list."""
+    session = message.get("session")
+    if not isinstance(session, str) or not SESSION_ID.match(session):
+        raise wire.WireError("unknown_type", "conversation_open needs a session id from pane_state.")
+    return session
 
 
 def edit_answer(message: dict) -> tuple[bool, str]:
@@ -327,5 +346,5 @@ EXAMPLE = {
     "context": {"label": "96% left", "percent_left": 96},
     "sessions": {"rows": [{"id": "s1", "title": "Thinking copy test", "when": "14:02",
                            "current": True, "running": False}],
-                 "can_new": True},
+                 "can_new": True, "can_open": True},
 }

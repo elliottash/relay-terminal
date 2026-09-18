@@ -142,20 +142,25 @@ class CapabilityTests(unittest.TestCase):
             self.assertNotIn("actions", row)
         self.assertNotIn("choices", view["model"])
         self.assertEqual(view["model"]["label"], "fake · local")
-        self.assertNotIn("can_new", view["sessions"])
-        self.assertTrue(view["sessions"]["rows"], "observing the session manager is allowed")
+        # A viewer observes *this* conversation. The ones before it are the owner's level, so the
+        # whole block goes rather than its buttons (owner, 2026-09-18).
+        self.assertNotIn("sessions", view)
         self.assertEqual(view["composer"]["modes"], [])
 
-    def test_an_agent_device_composes_only_to_the_agent(self):
+    def test_a_partner_types_here_and_sees_no_other_conversation(self):
         agent = pane_state.for_capability(self.cleaned, wire.AGENT)
         self.assertEqual(agent["composer"]["modes"], ["agent"])
         self.assertTrue(agent["queue"]["rows"][0]["actions"])
         self.assertTrue(agent["model"]["choices"])
-        self.assertTrue(agent["sessions"]["can_new"])
+        # "can type in this convo" and nothing about the others: not their titles, not their count.
+        self.assertNotIn("sessions", agent)
 
-    def test_a_full_device_gets_the_desktop_s_modes(self):
+    def test_only_an_owner_device_reaches_the_other_conversations(self):
         full = pane_state.for_capability(self.cleaned, wire.FULL)
         self.assertEqual(full["composer"]["modes"], ["auto", "shell", "agent"])
+        self.assertTrue(full["sessions"]["rows"])
+        self.assertTrue(full["sessions"]["can_new"])
+        self.assertTrue(full["sessions"]["can_open"])
 
     def test_no_capability_is_nothing(self):
         for capability in (None, "", "owner", "editor", "viewer"):
@@ -169,7 +174,7 @@ class CapabilityTests(unittest.TestCase):
 
 class WireTests(unittest.TestCase):
     NEW_CLIENT = ("queue_move", "queue_edit", "queue_send_now", "model_pick", "conversation_new",
-                  "pane_state_get")
+                  "conversation_open", "pane_state_get")
 
     def test_the_new_client_types_are_classified(self):
         for kind in self.NEW_CLIENT:
@@ -177,8 +182,12 @@ class WireTests(unittest.TestCase):
             self.assertIn(kind, wire.GUEST_NEVER, kind)
             self.assertNotIn(kind, wire.GUEST_TYPES, kind)
             self.assertNotIn(kind, wire.NEVER_FROM_CLIENT, kind)
-        for kind in ("queue_move", "queue_edit", "queue_send_now", "model_pick", "conversation_new"):
+        # A partner types here: the queue and the model are its level.
+        for kind in ("queue_move", "queue_edit", "queue_send_now", "model_pick"):
             self.assertEqual(wire.CLIENT_TYPES[kind], wire.AGENT, kind)
+        # The conversations before this one are the owner's level (owner, 2026-09-18).
+        for kind in ("conversation_new", "conversation_open"):
+            self.assertEqual(wire.CLIENT_TYPES[kind], wire.FULL, kind)
         # Reading, like screen_get: a view device is sent pane_state, so it may ask for one.
         self.assertEqual(wire.CLIENT_TYPES["pane_state_get"], wire.VIEW)
 
@@ -196,8 +205,15 @@ class WireTests(unittest.TestCase):
         """model_pick is a token from pane_state, never the worker's set_model with a preset."""
         self.assertIn("set_model", wire.NEVER_FROM_CLIENT)
         self.assertIn("conversation_delete", wire.NEVER_FROM_CLIENT)
-        self.assertNotIn("conversation_open", wire.CLIENT_TYPES)
+        # conversation_open is offered now, but only at the owner's level and only by a token
+        # from a pane_state: never a path, a session file name or the worker's own types.
+        self.assertEqual(wire.CLIENT_TYPES["conversation_open"], wire.FULL)
         self.assertNotIn("conversation_resume", wire.CLIENT_TYPES)
+        with self.assertRaises(wire.WireError):
+            pane_state.session_of({"session": "../../etc/passwd"})
+        with self.assertRaises(wire.WireError):
+            pane_state.session_of({"session": "2026-09-18-thinking.json"})
+        self.assertEqual(pane_state.session_of({"session": "s3"}), "s3")
 
 
 # ---- the hub ------------------------------------------------------------------------------------
@@ -342,7 +358,8 @@ class FanOutTests(unittest.TestCase):
                 second = await client.expect("pane_state")
                 self.assertNotIn("actions", second["queue"]["rows"][0])
                 self.assertNotIn("choices", second["model"])
-                self.assertNotIn("can_new", second["sessions"])
+                # Downgraded to a viewer mid-stream: the other conversations go with the buttons.
+                self.assertNotIn("sessions", second)
                 await client.close()
         run(main())
 
@@ -471,8 +488,18 @@ class ActionTests(unittest.TestCase):
                                    "text": "ignored", "item": "ignored"})
                 now = await harness.settle("queue_send_now")
                 self.assertEqual(set(now), {"t", "pane", "row", "origin", "device_name"})
+                # conversation_new and conversation_open are the owner's level, so this device
+                # is refused and a full one is not.
                 await client.send({"t": "conversation_new", "pane": "p1"})
+                refused = await client.expect("error")
+                self.assertEqual(refused["code"], "not_permitted")
+                owner, _ = await harness.device(wire.FULL, name="laptop")
+                await owner.send({"t": "conversation_new", "pane": "p1"})
                 self.assertEqual((await harness.settle("conversation_new"))["pane"], "p1")
+                await owner.send({"t": "conversation_open", "pane": "p1", "session": "s2"})
+                opened = await harness.settle("conversation_open")
+                self.assertEqual((opened["pane"], opened["session"]), ("p1", "s2"))
+                await owner.close()
                 await client.close()
         run(main())
 

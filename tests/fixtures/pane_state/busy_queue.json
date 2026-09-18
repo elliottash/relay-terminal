@@ -134,6 +134,7 @@
         "running": false
       }
     ],
-    "can_new": true
+    "can_new": true,
+    "can_open": true
   }
 }

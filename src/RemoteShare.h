@@ -88,6 +88,8 @@ public:
         std::function<bool(const QString &row)> queueSendNow;
         std::function<bool(const QString &choice, const QString &deviceName)> modelPick;
         std::function<bool(const QString &deviceName)> conversationNew;
+        // {session}: a token from a pane_state this pane sent, never a path (owner level).
+        std::function<bool(const QString &session, const QString &deviceName)> conversationOpen;
         std::function<void()> publishPaneState;   // pane_state_get: publish this pane now
         std::function<void()> recap;              // recap_request, which used to be dropped here
     };
