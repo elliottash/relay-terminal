@@ -352,6 +352,23 @@ def may_forward(event: str) -> bool:
     return event in FORWARDED_EVENTS
 
 
+# The owner's three levels (2026-09-18) are about *conversations*, not only about buttons: a
+# viewer observes this conversation and a partner types in it, and neither is shown the ones
+# before it. `pane_state` drops its `sessions` block below `full` for that reason, and these
+# worker events carry the same titles, so they need the same floor — otherwise the rule would
+# hold in one stream and leak in the other.
+EVENT_FLOOR: dict[str, str] = {
+    "sessions": FULL,          # the session manager's list
+    "conversations": FULL,     # a listing, including other panes' conversations
+    "conversation": FULL,      # one conversation's record, by id
+}
+
+
+def floor_for(event: str) -> str:
+    """The capability a device needs for this event. `view` unless it names other conversations."""
+    return EVENT_FLOOR.get(event, VIEW)
+
+
 # A participant sees a **narrower** list than a device (section 10.1): the turn lifecycle, the
 # pane's status and its queue. Not the agent's words — those already reach a guest on the screen,
 # because Relay prints them into the terminal — and above all not `turn_summary`, `tool_started`,

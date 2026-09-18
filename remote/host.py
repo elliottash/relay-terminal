@@ -756,7 +756,9 @@ class Host:
             return                      # denied by default; see remote/wire.py
         message = self.stream(f"agent:{pane}").add(
             {"t": "agent", "pane": pane, "event": self._scrub(event)})
-        self._fan_out(message, needed=wire.VIEW, pane=pane)
+        # Most events are for anyone watching the pane; the ones naming other conversations are
+        # the owner's level, the same rule pane_state's `sessions` block follows (section 16).
+        self._fan_out(message, needed=wire.floor_for(name), pane=pane)
 
     @staticmethod
     def _scrub(event: dict) -> dict:

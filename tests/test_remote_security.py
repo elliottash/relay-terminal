@@ -935,17 +935,19 @@ class PaneStateTests(unittest.TestCase):
     def test_a_view_device_reads_the_pane_and_is_offered_nothing_to_press(self):
         state = pane_state_mod.clean(dict(pane_state_mod.EXAMPLE))
         view = pane_state_mod.for_capability(state, wire.VIEW)
-        # Section 16: "a `view` device is sent no `actions`, no `model.choices` and no
-        # `sessions.can_new`". The session list itself is sent, deliberately — "the session list
-        # is there to be read" — and the same titles already reach a view device as the worker's
-        # own `sessions` event, so this is one decision rather than two.
+        # Section 16, the owner's three levels (2026-09-18): a viewer observes *this* conversation
+        # and is offered nothing to press. The ones before it are the owner's level, so the whole
+        # `sessions` block goes — and with it the worker's own `sessions` event, which carries the
+        # same titles and would otherwise leak in the other stream what this one withholds.
         self.assertNotIn("choices", view["model"])
-        self.assertNotIn("can_new", view["sessions"])
+        self.assertNotIn("sessions", view)
         self.assertEqual(view["composer"]["modes"], [])
         for row in view["queue"]["rows"]:
             self.assertNotIn("actions", row)
-        self.assertTrue(view["sessions"]["rows"])
         self.assertIn("sessions", wire.FORWARDED_EVENTS)
+        for event in ("sessions", "conversations", "conversation"):
+            self.assertEqual(wire.floor_for(event), wire.FULL, event)
+        self.assertEqual(wire.floor_for("delta"), wire.VIEW)
 
     def test_an_agent_device_may_pick_only_a_model_the_desktop_offered(self):
         """`model_pick` carries a per-publish token (`m<n>`), never a preset id, a provider name

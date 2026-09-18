@@ -250,6 +250,30 @@ private slots:
         QCOMPARE(now.value("seq").toInt(), 2);
         QCOMPARE(now.value("pane").toString(), QStringLiteral("tok-1"));
     }
+    // What the pane puts in `choices` is the presets that already have a stored key plus the
+    // agent roles (Pane::remoteState), and `model_pick` checks that list again before switching
+    // (Pane::remoteModelPick). This pins the half that lives here: whatever the pane offered, the
+    // message carries an opaque token and the desktop's own label — never the key of the choice,
+    // so a preset id cannot reach a phone through this field and cannot be guessed back.
+    void a_choice_carries_a_token_and_a_label_but_never_its_key() {
+        Inputs in = busyPane();
+        in.choices = {Choice{QStringLiteral("preset:glm-coding"), QStringLiteral("GLM · Main"), true},
+                      Choice{QStringLiteral("role:flash"), QStringLiteral("Flash · Kimi K2"), false}};
+        Tokens choices(QLatin1Char('m')), sessions(QLatin1Char('s'));
+        const QJsonObject state = build(7, in, choices, sessions);
+        const QJsonArray rows = state.value("model").toObject().value("choices").toArray();
+        QCOMPARE(rows.size(), 2);
+        QCOMPARE(rows[0].toObject().value("id").toString(), QStringLiteral("m1"));
+        QCOMPARE(rows[0].toObject().value("label").toString(), QStringLiteral("GLM · Main"));
+        QCOMPARE(rows[0].toObject().keys(), QStringList({"current", "id", "label"}));
+        const QString whole = QString::fromUtf8(QJsonDocument(state).toJson());
+        QVERIFY(!whole.contains(QStringLiteral("glm-coding")));
+        QVERIFY(!whole.contains(QStringLiteral("preset:")));
+        QVERIFY(!whole.contains(QStringLiteral("role:")));
+        QCOMPARE(choices.keyFor(QStringLiteral("m1")), QStringLiteral("preset:glm-coding"));
+        QVERIFY(choices.keyFor(QStringLiteral("m9")).isEmpty());   // never minted here
+    }
+
     void a_published_token_resolves_back_on_the_desktop() {
         Publisher publisher([] { return busyPane(); }, [](const QJsonObject &) {}, [] { return true; });
         const QJsonObject state = publisher.publishNow();
