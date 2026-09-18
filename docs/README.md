@@ -13,6 +13,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [RELEASING.md](RELEASING.md) | How to cut a Linux beta: `.deb`s, AUR, checksums, GitHub Pages, version scheme |
 | [QUEUE-INTERRUPT.md](QUEUE-INTERRUPT.md) | Agent prompt queue and interrupt protocol; design for queuing shell commands |
 | [KEYBINDING-PRESETS.md](KEYBINDING-PRESETS.md) | Warp, VS Code and Konsole shortcut presets and how they map to Relay actions |
+| [F-KEYS.md](F-KEYS.md) | Proposal: what belongs on an F-key versus a Ctrl chord, which four keys to assign, and what each would cost vim, nano and mc |
 | [ENGINE.md](ENGINE.md) | Relay's own terminal engine: cores, PTY, view, `TerminalBackend`, status and plans (spike history folded in) |
 | [ENGINE-PERF.md](ENGINE-PERF.md) | Terminal engine and emulator-core benchmarks (2026-09-17 measurements) |
 | [AGENT-SESSIONS-PROTOCOL.md](AGENT-SESSIONS-PROTOCOL.md) | GUI ↔ worker message contract: sessions, planning, subagents, suggestions |
