@@ -15,20 +15,28 @@ namespace relay {
 // renderer's own. Lines end in '\n'; the caller turns that into "\r\n" for the terminal.
 class MarkdownAnsi {
 public:
-    // Every colour the renderer can emit, as SGR parameter lists ("38;2;R;G;B", plus any
-    // attributes). The defaults are the dark-theme values this renderer shipped with; the app
-    // fills them from the live theme instead, because near-white prose on IBM Beige's warm paper
-    // is unreadable (owner report, 2026-09-18). Lines already printed keep the colours they were
-    // written in: a terminal cannot recolour its scrollback.
+    // Every colour the renderer can emit, as SGR parameter lists (attributes included).
+    //
+    // The defaults name the *terminal's own* colours — the default foreground (39), the faint
+    // attribute, and the ANSI indices — rather than absolute RGB, and that is the point. An
+    // absolute colour is burnt into the scrollback: prose written under one theme stays that
+    // colour when the theme changes, so a switch to IBM Beige left near-white paragraphs on warm
+    // paper and a switch back left dark ones on charcoal (owner report, 2026-09-18). Indexed
+    // colours are resolved by the engine at paint time from the active theme, so the whole
+    // transcript, scrollback included, follows the theme for free — and it inherits the contrast
+    // every theme's palette is measured for (docs/THEMES.md; tests/theme_test.cpp asserts AA for
+    // ANSI 1-7 and 9-15 on the grid).
+    //
+    // An app that wants its own colours can still set them; nothing here requires the defaults.
     struct Palette {
-        QString base = QStringLiteral("39");
-        QString heading = QStringLiteral("1;38;2;180;142;247");
-        QString marker = QStringLiteral("38;2;180;142;247");
-        QString quote = QStringLiteral("3;38;2;160;166;180");
-        QString inlineCode = QStringLiteral("38;2;230;170;120");
-        QString codeBlock = QStringLiteral("38;2;170;200;230");
-        QString dim = QStringLiteral("38;2;110;117;132");
-        QString link = QStringLiteral("4;38;2;110;170;245");
+        QString base = QStringLiteral("39");            // the terminal's own foreground
+        QString heading = QStringLiteral("1;35");       // magenta, the agent's end of the palette
+        QString marker = QStringLiteral("35");
+        QString quote = QStringLiteral("3;2;39");       // italic, faint: quieter by proportion
+        QString inlineCode = QStringLiteral("33");
+        QString codeBlock = QStringLiteral("36");
+        QString dim = QStringLiteral("2;39");
+        QString link = QStringLiteral("4;34");
     };
 
     // `baseSgr` is the SGR parameter list of plain text, e.g. "38;2;226;229;235".

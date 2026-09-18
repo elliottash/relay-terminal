@@ -38,7 +38,7 @@ private slots:
         QVERIFY(out.contains(QStringLiteral(";1m")));
         QVERIFY(out.contains(QStringLiteral(";3m")));
         QVERIFY(out.contains(QStringLiteral(";9m")));
-        QVERIFY(out.contains(QStringLiteral("38;2;230;170;120m")));
+        QVERIFY(out.contains(QStringLiteral("33m")));   // `code`, the palette's default
     }
 
     void literalsStayLiteral() {
@@ -92,9 +92,7 @@ private slots:
         QCOMPARE(plain(md.finish()), QStringLiteral("• "));
     }
 
-    // The app fills these from the live theme; the renderer must use every one of them, or a
-    // light theme gets the dark defaults and prose disappears into the paper (owner report,
-    // 2026-09-18: "some of the text in beige mode is too light and not readable").
+    // A caller can still replace every colour, and the renderer must use every one it is given.
     void everyColourComesFromThePalette() {
         MarkdownAnsi::Palette p;
         p.base = QStringLiteral("38;2;1;1;1");
@@ -113,10 +111,24 @@ private slots:
         for (const QString &sgr : {p.base, p.heading, p.marker, p.quote, p.inlineCode, p.codeBlock,
                                    p.dim, p.link})
             QVERIFY2(out.contains(sgr + QStringLiteral("m")), qPrintable(sgr));
-        // None of the shipped dark defaults survive a palette that replaced them.
-        for (const QString &dead : {QStringLiteral("180;142;247"), QStringLiteral("230;170;120"),
-                                    QStringLiteral("110;170;245"), QStringLiteral("160;166;180")})
+        // None of the defaults survive a palette that replaced them.
+        for (const QString &dead : {QStringLiteral("39m"), QStringLiteral("35m"), QStringLiteral("33m"),
+                                    QStringLiteral("36m"), QStringLiteral("34m")})
             QVERIFY2(!out.contains(dead), qPrintable(dead));
+    }
+
+    // The regression this renderer was given a palette for (owner report, 2026-09-18: "some of the
+    // text in beige mode is too light and not readable", and the same in reverse on the dark
+    // theme). An absolute colour is burnt into the scrollback, so prose written under one theme
+    // stays that colour when the theme changes. The defaults therefore name the terminal's own
+    // colours — 39, the faint attribute, and the ANSI indices — which the engine resolves from the
+    // active theme every time it paints, scrollback included.
+    void theDefaultPaletteNamesNoColourOfItsOwn() {
+        const QString out = render(QStringLiteral("# Title\n\ntext with `code`, [a link](https://x.invalid)\n"
+                                                 "\n- bullet\n\n> quoted\n\n```\nblock\n```\n"));
+        QVERIFY2(!out.contains(QStringLiteral("38;2;")), "truecolor in the default palette");
+        QVERIFY2(!out.contains(QStringLiteral("38;5;")), "indexed 256-colour in the default palette");
+        QVERIFY(out.contains(QStringLiteral("39m")));   // prose is the terminal's own foreground
     }
 
     // A table cell is rendered by a second instance: it has to inherit the palette, not just the

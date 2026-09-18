@@ -1977,10 +1977,6 @@ private:
 
     void buildUi() {
         auto *layout = new QVBoxLayout(this); layout->setContentsMargins(8, 6, 8, 8); layout->setSpacing(6);
-        // A theme switch repaints the chrome; the terminal's own scrollback keeps the colours it
-        // was written in, but everything printed from here on follows the new theme.
-        connect(relay::theme::notifier(), &relay::theme::Notifier::themeChanged, this,
-                [this] { m_markdown.setPalette(markdownPalette()); });
         // Pane header (issue JRWQ): what this pane is doing, written by the model and refreshed as
         // the work moves on; the directory keeps its place on the right, smaller and dim. Double
         // click the title to name the pane by hand (/rename does the same without the mouse).
@@ -6117,27 +6113,6 @@ private:
         return t::Text;
     }
 
-    // The Markdown renderer's colours, from the same live tokens the inks use. Without this the
-    // agent's prose is the near-white it shipped with, which on IBM Beige's warm paper is not
-    // readable at all (owner report, 2026-09-18).
-    static relay::MarkdownAnsi::Palette markdownPalette() {
-        namespace t = relay::theme;
-        const auto sgr = [](const QColor &c, const char *attrs = "") {
-            return QString::fromLatin1(attrs) + QStringLiteral("38;2;%1;%2;%3")
-                                                    .arg(c.red()).arg(c.green()).arg(c.blue());
-        };
-        relay::MarkdownAnsi::Palette p;
-        p.base = sgr(t::Text);
-        p.heading = sgr(t::Agent, "1;");
-        p.marker = sgr(t::Agent);
-        p.quote = sgr(t::TextMuted, "3;");
-        p.inlineCode = sgr(t::Warning);
-        p.codeBlock = sgr(t::Shell);
-        p.dim = sgr(t::TextMuted);
-        p.link = sgr(t::Accent, "4;");
-        return p;
-    }
-
     static QByteArray inkCode(Ink ink) {
         const QColor c = inkColor(ink);
         // Bold for the lines the user typed, italic for notes, plain otherwise.
@@ -8058,7 +8033,11 @@ private:
     bool m_chipFlashOn = false;
     bool m_inlineOpen = false, m_atLineStart = true;
     QList<QPair<QString, Ink>> m_inlinePending;
-    relay::MarkdownAnsi m_markdown{markdownPalette()};
+    // Its default palette on purpose: the terminal's own foreground and ANSI indices, which the
+    // engine resolves from the active theme at paint time, so a theme switch recolours the whole
+    // transcript including the scrollback (src/MarkdownAnsi.h). Filling it with absolute RGB from
+    // the live tokens, as this did until 2026-09-18, burnt one theme's colours into the history.
+    relay::MarkdownAnsi m_markdown;
     QList<QPair<QString, QString>> m_stored;
     QComboBox *m_modelBox = nullptr;
     QToolButton *m_cwdChip = nullptr, *m_modeChip = nullptr;
