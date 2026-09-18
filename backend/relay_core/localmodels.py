@@ -398,14 +398,18 @@ def _probe_llamacpp(root: str, base: str, timeout: float) -> Probe | None:
     settings = props.get("default_generation_settings")
     window = _window(settings.get("n_ctx")) if isinstance(settings, dict) else None
     caps = props.get("chat_template_caps")
-    tools = None
+    tools = thinking = None
     if isinstance(caps, dict):
         known = [caps[k] for k in ("supports_tools", "supports_tool_calls") if isinstance(caps.get(k), bool)]
         tools = any(known) if known else None
+        # The template says whether it has a reasoning mode (measured on llama-server b10706:
+        # supports_preserve_reasoning, supports_reasoning_effort). Absent keys mean "not known".
+        reasons = [v for k, v in caps.items() if "reasoning" in k and isinstance(v, bool)]
+        thinking = any(reasons) if reasons else None
     probe = Probe(base, ok=True, server="llamacpp", context_window=window,
                   state="sleeping" if props.get("is_sleeping") is True else "ready")
     _, listing = _get(base + "/models", timeout)
-    probe.models = _model_rows(listing, window, tools)
+    probe.models = _model_rows(listing, window, tools, thinking)
     return probe
 
 

@@ -40,7 +40,7 @@ milestone; four of six items depend on its integration.
 |---|---|---|
 | **No Konsole fork**, and since 2026-09-18 no Konsole at all: Relay's own engine is the terminal. | Screen text, click signals and alternate-screen state are Relay's to provide; KDE Frameworks is no longer a runtime dependency | [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section A; [ENGINE.md](ENGINE.md) |
 | **No per-action approvals.** Agent tools run immediately; every action is previewed inline and Stop is always available. | Safety relies on previews, guards, limits and clear warnings. opencode-style permission rules are not planned. | commit `1ad28fa`; [OPENCODE-NOTES.md](OPENCODE-NOTES.md) status header |
-| **BYOK only.** Keys come from environment variables or the desktop keyring. | No hosted models, no billing, no Relay account | `backend/relay_core/keystore.py` |
+| **BYOK only.** Keys come from environment variables or the desktop keyring. | No hosted models, no billing, no Relay account. A model server on this machine needs no key, and Relay neither hosts nor bills one (`#24XJ`, [LOCAL-MODELS.md](LOCAL-MODELS.md)) | `backend/relay_core/keystore.py` |
 | **No telemetry.** No analytics, crash reporting or Relay server. | Any update check must be opt-in | `site/index.html` privacy section; [DISTRIBUTION-RESEARCH.md](DISTRIBUTION-RESEARCH.md) section 1 |
 | The agent drives the user's **visible** pane, not a hidden one. | Delegate/take-over needs screen reading in the visible terminal | `issues/features/2026-09-17-agent-delegate-and-take-over.md` |
 | File panes are plain Qt, not KDE parts. | They already work on the future macOS/Windows path | `issues/features/needs_qa_llm/2026-09-17-file-explorer-and-preview-panes.md` |

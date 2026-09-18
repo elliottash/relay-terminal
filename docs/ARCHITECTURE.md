@@ -994,6 +994,13 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
 - `POST <base_url>/chat/completions` with `stream: true`; JSON (non-stream) responses are also accepted.
 - HTTPS required, except plain HTTP to `localhost`, `127.0.0.1` or `::1`. No credentials,
   query or fragment in the URL. Redirects are refused.
+- Plain HTTP to a loopback host is a **local model server** (`ProviderConfig.local`, card `#24XJ`):
+  no key is looked up or sent, the first token gets its own deadline (300 s) apart from the idle
+  stall, a 503 "Loading model" is waited out, `stream_options.include_usage` and
+  `parallel_tool_calls: false` are sent, tool-call envelope quirks are repaired, `<think>` tags
+  become reasoning, and a context overflow is named without quoting the body. Saved endpoints
+  (`local:<id>`), the probe and the worker messages are `backend/relay_core/localmodels.py`; a
+  hosted provider's request is unchanged. See [LOCAL-MODELS.md](LOCAL-MODELS.md).
 - Extra request keys are limited to `thinking`, `reasoning`, `reasoning_effort`,
   `temperature`, `top_p`. `max_tokens` 256–32768, default 32768 (the Settings pane, the provider dialog and every fallback when `provider/max_tokens` is unset).
 - Limits: 8 MiB request and response, 2 MiB per SSE event, 16 tool calls per response,
@@ -1224,7 +1231,9 @@ run three times or more — a suggestion only, logged in `worker.log`.
 
 ## 12. Keys, keyring and imports
 
-`backend/relay_core/keystore.py`.
+`backend/relay_core/keystore.py`. A model server on this machine has no key and no entry here: its
+id is `local:<slug>`, which the keystore refuses, and it is absent from the keys modal
+([LOCAL-MODELS.md](LOCAL-MODELS.md)).
 
 - Lookup order for a preset: environment variable `RELAY_<PRESET>_API_KEY` (for example
   `RELAY_GLM_CODING_API_KEY`), then the Secret Service keyring through `secret-tool`

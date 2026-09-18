@@ -6,21 +6,29 @@ import getpass
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
-from relay_core import keystore
+from relay_core import keystore, localmodels
 from relay_core.agent import Agent
 from relay_core.presets import PRESETS
-from relay_core.provider import ProviderConfig
+from relay_core.session_protocol import provider_config
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--workspace', default=str(Path.cwd()))
-parser.add_argument('--provider', choices=[*PRESETS, 'custom'], default='kimi')
+parser.add_argument('--provider', default='kimi',
+                    help="a preset (%s), 'custom', or a model server on this machine saved with "
+                         "scripts/relay-local.py, as local:<id>" % ', '.join(PRESETS))
 parser.add_argument('--base-url')
 parser.add_argument('--model')
 parser.add_argument('--import-warp', action='store_true',
                     help="copy Warp's custom-endpoint keys into Relay's keyring entries and exit")
 parser.add_argument('--save-key', action='store_true', help='save an entered key to the keyring')
 parser.add_argument('--list', action='store_true', help='list presets and whether a key is stored')
+parser.add_argument('--prompt', help='ask this once and exit, instead of reading prompts from the terminal')
+parser.add_argument('--yes', action='store_true', help='skip the confirmation (for scripted checks)')
 args = parser.parse_args()
+local = localmodels.find(args.provider)
+if args.provider not in PRESETS and args.provider != 'custom' and local is None:
+    known = ', '.join([*PRESETS, 'custom', *localmodels.catalog()])
+    sys.exit(f'Unknown provider {args.provider!r}. Known: {known}')
 
 if args.import_warp:
     try:
@@ -36,9 +44,13 @@ if args.list:
     stored = keystore.available()
     for preset in PRESETS.values():
         print(f"{preset.id:12} {preset.model:32} {'key stored' if stored[preset.id] else 'no key'}  {preset.base_url}")
+    for endpoint in localmodels.catalog().values():
+        print(f"{endpoint.id:12} {endpoint.model:32} {'no key needed':10}  {endpoint.base_url}")
     sys.exit(0)
 
-if args.provider == 'custom':
+if local is not None:
+    base, model, extra = local.base_url, local.model, dict(local.extra)
+elif args.provider == 'custom':
     base, model, extra = 'http://127.0.0.1:11434/v1', '', {}
 else:
     preset = PRESETS[args.provider]
@@ -46,17 +58,20 @@ else:
 base, model = args.base_url or base, args.model or model
 print(f'Provider: {base}\nModel: {model}\nWorkspace: {Path(args.workspace).resolve()}')
 print('Submitted prompts and tool results go to this provider. Tools run WITHOUT confirmation and shell commands are NOT sandboxed.')
-if input('Continue? [y/N] ').strip().lower() != 'y': sys.exit(0)
-key = keystore.lookup(args.provider) if args.provider != 'custom' else ''
+if not args.yes and input('Continue? [y/N] ').strip().lower() != 'y': sys.exit(0)
+keyless = localmodels.keyless(args.provider, base)       # plain HTTP to this machine: there is no key
+key = keystore.lookup(args.provider) if args.provider in PRESETS else ''
 if key:
     print(f'Using stored key for {args.provider}.')
+elif keyless:
+    print('Local model server: no key is needed or sent.')
 else:
     key = getpass.getpass('API key (memory only; empty for local server): ')
     if args.save_key and key and args.provider != 'custom':
         keystore.store(args.provider, key)
         print('Key saved to keyring.')
-config = ProviderConfig(base, model, key, extra)
-config.validate()
+# The same funnel the worker uses, so a local endpoint gets its window, deadlines and clamped output.
+config = provider_config({'preset': args.provider, 'base_url': base, 'model': model, 'extra': extra, 'api_key': key})
 
 def emit(event):
     kind = event['event']
@@ -70,7 +85,11 @@ def emit(event):
     elif kind in {'error','status','done','cancelled'}:
         print('\n[' + kind + '] ' + event.get('text',''))
 
-agent = Agent(config, args.workspace, emit)
+agent = Agent(config, args.workspace, emit, preset_id=args.provider if args.provider != 'custom' else None)
+if args.prompt:
+    agent.ask(args.prompt)
+    print()
+    sys.exit(0)
 try:
     while True:
         prompt = input('\nrelay-agent> ')

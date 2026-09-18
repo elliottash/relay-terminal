@@ -54,9 +54,10 @@ class FakeServer:
         self.server.shutdown(); self.server.server_close(); self.thread.join()
 
 
-def llama_routes(n_ctx=131072, tools=True, sleeping=None, model='bonsai-2-27b'):
+def llama_routes(n_ctx=131072, tools=True, sleeping=None, model='bonsai-2-27b', thinking=True):
     props = {'default_generation_settings': {'n_ctx': n_ctx}, 'total_slots': 1,
-             'chat_template_caps': {'supports_tools': tools, 'supports_tool_calls': tools}}
+             'chat_template_caps': {'supports_tools': tools, 'supports_tool_calls': tools,
+                                    'supports_preserve_reasoning': thinking}}
     if sleeping is not None:
         props['is_sleeping'] = sleeping
     return {'/health': (200, {'status': 'ok'}), '/props': (200, props),
@@ -95,7 +96,10 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual((found.server, found.state, found.context_window), ('llamacpp', 'ready', 131072))
         self.assertEqual(found.base_url, server.root + '/v1')
         self.assertEqual(found.models, [{'id': 'bonsai-2-27b', 'context_window': 131072,
-                                         'tools': True, 'thinking': None}])
+                                         'tools': True, 'thinking': True}])
+        bare = self.serve({'/props': (200, {'default_generation_settings': {'n_ctx': 4096}}),
+                           '/v1/models': (200, {'data': [{'id': 'm'}]})})
+        self.assertEqual(L.probe(bare.root).models, [{'id': 'm', 'context_window': 4096, 'tools': None, 'thinking': None}])
 
     def test_a_root_url_and_a_v1_url_name_the_same_server(self):
         server = self.serve(llama_routes())
