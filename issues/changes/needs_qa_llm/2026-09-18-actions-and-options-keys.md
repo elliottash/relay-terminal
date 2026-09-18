@@ -12,7 +12,7 @@ rank: b
 created: '2026-09-18'
 acceptance: 'Ctrl+Shift+A opens the Settings pane on Actions, Ctrl+Shift+O (and the gear, and Ctrl+,) opens it on the options, each key moves an open pane to its side and closes it from its own side; Ctrl+Shift+Y runs /resume; none of the three has a plain-Ctrl twin; no preset reports a key conflict.'
 source: 'owner, in session 2026-09-18: "i want ... ctrl shift o for options ... ctrl shift y for /resume (same as warp) ... then ctrl shift a for actions (and actually remove ctrl o and ctrl y on their own, to avoid confusion)"'
-links: {plans: [], commits: [ae0fead], evidence: ['docs/qa_evidence/2026-09-18-actions-and-options-keys/'], related: [], github: null}
+links: {plans: [], commits: [ae0fead], evidence: ['docs/qa_evidence/2026-09-18-actions-and-options-keys/'], related: [V4NA], github: null}
 ---
 # Actions, Options and Resume each get one Ctrl+Shift key
 
@@ -41,9 +41,7 @@ new window/tab/pane, rewind). The owner wants the two told apart, starting with 
 - The `?` help card lists actions, options and resume with their keys, in place of the
   conversations row.
 
-Not in this change: moving rows between the two sides (the verb-shaped button rows under General
-and Appearance, the shortcut preset rows on the Actions tab) and giving Actions a slimmer list of
-its own. That is the next step of the same split.
+The split itself — two modes of the pane, the verb rows moved out of Options — is card #V4NA.
 
 ## QA checklist
 

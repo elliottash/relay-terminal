@@ -1,17 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-// The Settings pane: a full pane in the splitter layout (never a floating strip), with a search
-// box over every setting and every action, one sub-tab per section, and the rows drawn as real
-// controls. Ctrl+Shift+A opens it on the Actions tab; Ctrl+Shift+O, Ctrl+, and the gear in the
-// title bar open it on the options. The same key, Esc on an empty search, or the pane's × in the
-// chrome row put it away and hand focus back.
+// The Actions pane and the Options pane: one widget, two modes, a full pane in the splitter layout
+// (never a floating strip). The owner's line between them (2026-09-18): an option persists — it is
+// a default, written to QSettings, true in every pane after a restart; an action is something you
+// do now, to this pane, conversation or window, and may do again or undo an hour later.
+//
+//  * Actions (Ctrl+Shift+A, Ctrl+?): a search box over one filterable list — Recent first, then
+//    every action under its section with its keys. Enter runs the highlighted one.
+//  * Options (Ctrl+Shift+O, Ctrl+, and the gear in the title bar): one sub-tab per section, the
+//    rows drawn as real controls, changed in place.
+//
+// Pressing the other pane's key swaps the mode in place, so there is never a second pane. The same
+// key, Esc on an empty search, or the pane's × in the chrome row put it away and hand focus back.
+// The search box covers both catalogs in either mode, best matches of the pane's own kind first:
+// in Actions an option shows as an "Options › …" row that opens Options on that control.
 //
 // Two catalogs feed it and both are the caller's (RelayWindow builds them):
 //
 //  * SettingsSection / SettingRow — one row per setting with its own reader and writer, so
 //    QSettings stays the single source of truth and nothing here knows how a value is used.
-//  * ActionItem — every runnable action (the actions palette's items), grouped by section and
-//    with an optional submenu; the Actions tab lists them with their keys and Enter runs one.
+//  * ActionItem — every runnable action, grouped by section and with an optional submenu.
 //
 // What the reference apps do, and what was taken from each (2026-09-18):
 //  * Warp: a settings window with a section list, a search box, instant apply and sub-tabs inside
@@ -20,8 +28,9 @@
 //    place with Enter; Esc closes and focus returns to the prompt. Taken: Enter changes the
 //    highlighted row, Esc closes, focus goes back where it was.
 //  * opencode: no settings UI; ctrl+p lists commands and the toggles among them persist. Taken:
-//    actions and settings share one search, so the key that used to open the palette still ends
-//    in "type, Enter".
+//    one search reaches both, so "Ctrl+Shift+A, type, Enter" always lands somewhere.
+//  * JetBrains Find Action (Ctrl+Shift+A) and VS Code's palette: a flat list with keys, recent
+//    first, separate from Settings. Taken: that separation.
 #include <QHash>
 #include <QJsonObject>
 #include <QList>
@@ -79,21 +88,31 @@ struct ActionItem {
 
 class SettingsPane final : public QWidget {
 public:
-    SettingsPane(std::function<QList<SettingsSection>()> sections,
+    enum class Mode { Options, Actions };
+
+    SettingsPane(Mode mode, std::function<QList<SettingsSection>()> sections,
                  std::function<QList<ActionItem>()> actions, QWidget *parent = nullptr);
 
-    // The tab that lists actions with their keys; it also carries the shortcut settings rows.
-    static QString actionsTabId() { return QStringLiteral("shortcuts"); }
+    // The one page of Actions mode, as a tab id, so currentTab() and tabIds() read the same way.
+    static QString actionsTabId() { return QStringLiteral("actions"); }
 
-    std::function<void()> onClose;                          // Esc on an empty search, Ctrl+Shift+A
+    std::function<void()> onClose;                          // Esc on an empty search, the pane's own key
     std::function<void(const ActionItem &)> onRun;          // an action was chosen; the caller runs it
+    std::function<void()> onModeChanged;                    // the pane's title follows the mode
+
+    Mode mode() const { return m_mode; }
+    // Swap in place: the search is cleared, the catalogs re-read, the first page shown.
+    void setMode(Mode mode);
+    // Options mode: show the section's tab with this row highlighted and in view. From Actions
+    // mode it switches to Options first, which is what an "Options › …" search row does.
+    void revealOption(const QString &sectionId, const QString &rowId);
 
     void showTab(const QString &id);
     QString currentTab() const;
     void setSearch(const QString &text);
     QString search() const;
     void focusSearch();
-    void scrollToGroup(const QString &key);                 // an action submenu on the Actions tab
+    void scrollToGroup(const QString &key);                 // an action submenu, in Actions mode
     // Room kept free at the right of the search row for the pane chrome's buttons (PaneChrome).
     void setHeaderRightInset(int pixels);
     // Re-read both catalogs and redraw, keeping the tab, the scroll position and the focused row.
@@ -123,6 +142,8 @@ private:
     void buildResults(const QString &needle);
     QWidget *settingRow(const SettingRow &row);
     QWidget *actionRow(const ActionItem &item, const QString &prefix = QString());
+    QWidget *optionJumpRow(const SettingsSection &section, const SettingRow &row);
+    void applyMode();
     QWidget *groupHeader(const QString &text, const QString &key = QString());
     void addActionsList(QVBoxLayout *into);
     void setCurrent(int index, bool scroll);
@@ -133,6 +154,7 @@ private:
 
     std::function<QList<SettingsSection>()> m_sections;
     std::function<QList<ActionItem>()> m_actions;
+    Mode m_mode = Mode::Options;
     QLineEdit *m_search = nullptr;
     QTabBar *m_tabs = nullptr;
     QStackedWidget *m_pages = nullptr;

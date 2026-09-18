@@ -98,7 +98,7 @@ logged as `runtime_sweep` only when something was removed or failed.
 | Class | Role |
 |---|---|
 | `WindowManager` | Window list, a stack of up to 25 closed items (pane, tab or window), the saved window layout, the `relay open` socket |
-| `RelayWindow` | `QMainWindow`: its own title bar (the tab row), a `QTabWidget`, the Settings pane (a `ToolPane`, section 12), an application event filter for shortcuts |
+| `RelayWindow` | `QMainWindow`: its own title bar (the tab row), a `QTabWidget`, the Actions / Options pane (a `ToolPane`, section 12), an application event filter for shortcuts |
 | Tab page | One root widget: a leaf or a tree of `QSplitter`s |
 | `Pane` (leaf) | Terminal pane: the engine, a Bash bridge, a composer, its own worker and conversation |
 | `ToolPane` (leaf) | Folder explorer or file preview (section 10) |
@@ -178,7 +178,7 @@ title bar, with two `QTabWidget` corner widgets on it (`buildWindowChrome`):
 | Corner | Holds |
 |---|---|
 | Top left | The Relay icon |
-| Top right | Bell (notification centre), gear (opens the Settings pane), then minimize, maximize/restore and close |
+| Top right | Bell (notification centre), gear (opens Options), then minimize, maximize/restore and close |
 
 `ChromeButton` paints each glyph with `QPainter` instead of using a font character, so the header
 does not depend on an emoji font and hover, disabled and close-button colours come from the theme.
@@ -366,7 +366,7 @@ Default window shortcuts:
 |---|---|---|---|
 | New window | Ctrl+N | Close pane → tab → window | Ctrl+W |
 | Next / previous window | Alt+Tab / Alt+Shift+Tab | Restore closed | Ctrl+Shift+W |
-| New tab | Ctrl+T | Actions (Settings pane, Actions tab) / Options | Ctrl+Shift+A / Ctrl+Shift+O |
+| New tab | Ctrl+T | Actions pane / Options pane | Ctrl+Shift+A / Ctrl+Shift+O |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Take control (from composer) | Ctrl+H |
 | Split right / down | Ctrl+P / Ctrl+Shift+P | Back to the prompt | Ctrl+Shift+H |
 | Focus neighbor pane | Alt+Arrows | Native input toggle (same hand-over as Ctrl+H) | F12 |
@@ -383,11 +383,12 @@ Unbound by default: `conversations.open`, `files.open`, `terminal.interrupt`, `a
 **Actions** (Ctrl+Shift+A or Ctrl+?). The action catalog (`rootItems()` in
 `src/RelayWindow.h`) is the same list the palette overlay used to render: items with a stable key and
 either a run function or a submenu (Model, Input mode, Reasoning effort, Aliases, Agents, Log
-detail). Since 2026-09-18 it is rendered by the Settings pane (section 12, "Settings pane"): the
-Actions tab lists every item with its keys — Recent (from `palette/recent`) first, then Agent,
-Terminal, Panes and tabs, Shortcuts, submenus opened inline under their own header — and the
-pane's search box reaches every item and every submenu entry ("deep" finds Model › DeepSeek)
-alongside the settings rows. Enter or a click runs one: the pane closes, focus goes back to the
+detail). Since 2026-09-18 it is rendered by the Actions pane (section 12, "Actions pane and Options
+pane"): one list of every item with its keys — Recent (from `palette/recent`) first, then Agent,
+Terminal, Panes and tabs, Relay (Options…, Reload themes, Open your themes folder, Open the log
+folder, Reset shortcut hints), Shortcuts, submenus opened inline under their own header — and the
+pane's search box reaches every item and every submenu entry ("deep" finds Model › DeepSeek), with
+matching options below them as "Options › …" rows. Enter or a click runs one: the pane closes, focus goes back to the
 widget that had it, and the action runs against that pane. Toggles (`stayOpen`) run in place and
 the pane redraws with their new state. The `set:`/`menu:settings` palette entries are gone: a
 setting is now a control in the pane, found by the same search.
@@ -426,7 +427,7 @@ its own and the GUI deletes the clip; the transcript is inserted at the cursor a
 
 The hold key is matched on the event's native keysym (Qt reports both Alt keys as `Qt::Key_Alt`) and
 the event is not consumed unless it is F9, because Right Alt is AltGr on most layouts; pressing any
-other key while it is held cancels the recording. Settings › Voice has the key, the model, the
+other key while it is held cancels the recording. Options › Voice has the key, the model, the
 recording cap, the microphone and the recorder in use.
 
 At a password prompt the composer swaps `RichEditor` for a masked `QLineEdit` (section 9); nothing
@@ -1016,7 +1017,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   different provider.
 - GUI: `src/ModelSettings.*` (the `relay-modelsettings` library, so the dialogs are testable
   headlessly — `tests/modelsettings_test.cpp`) — `RolesDialog` (default provider, the three tier rows,
-  an Advanced disclosure with one row per job showing the model it resolves to). Reached from Settings › Models,
+  an Advanced disclosure with one row per job showing the model it resolves to). Reached from Options › Models,
   the palette (`agent.modelRoles`) and the ⚙ entry at the bottom of the pane's model box. Plus
   "New panes use the Flash agent" (off by default; the first pane keeps the Main agent), the pane's model
   chip (role and effective model, all roles in its tooltip), "Flash agent for this pane"
@@ -1044,7 +1045,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   (`local:<id>`), the probe and the worker messages are `backend/relay_core/localmodels.py`; a
   hosted provider's request is unchanged. See [LOCAL-MODELS.md](LOCAL-MODELS.md).
 - Extra request keys are limited to `thinking`, `reasoning`, `reasoning_effort`,
-  `temperature`, `top_p`. `max_tokens` 256–32768, default 32768 (the Settings pane, the provider dialog and every fallback when `provider/max_tokens` is unset).
+  `temperature`, `top_p`. `max_tokens` 256–32768, default 32768 (the Options pane, the provider dialog and every fallback when `provider/max_tokens` is unset).
 - Limits: 8 MiB request and response, 2 MiB per SSE event, 16 tool calls per response,
   30 s socket timeout. Cancel closes the response from another thread.
 - Tool-call fragments are assembled by index. `reasoning_content` and OpenRouter's
@@ -1077,7 +1078,7 @@ MiniMax has no `reasoning_effort` at all — both use the `none` style, which se
 leaves the model's own default. MiniMax's Coding Plan was renamed the Token Plan and shares the
 pay-as-you-go base URL; only the key differs, and the two kinds are not interchangeable.
 
-The advanced Provider dialog (Settings › Models › Advanced provider settings) still accepts a custom
+The advanced Provider dialog (Options › Models › Advanced provider settings) still accepts a custom
 base URL, model and extras, requires an existing workspace and a consent checkbox for sending prompts
 and tool results to the provider. Saving makes no network call. Switching model starts a new
 conversation.
@@ -1244,7 +1245,7 @@ content part with an inlined base64 data URL (never an http URL), and caps it at
 model** for that turn only and then goes back, which `vision_route` / `vision_route_ended` say in the
 pane and in the model chip; with no vision model it is refused (`vision_unavailable` plus `error`)
 rather than sent and rejected. The vision model is the `vision` role, chosen in its own row beside
-the Main / Flash / Lite tiers in Settings › Models; its default is the provider's own image model,
+the Main / Flash / Lite tiers in Options › Models; its default is the provider's own image model,
 which on GLM is `glm-5.3-flash`. When the turn ends, each image is replaced in the conversation by a
 one-line description and its path, and an image is estimated as a flat `context.IMAGE_TOKENS` so it
 cannot compact its own turn.
@@ -1315,33 +1316,52 @@ Non-secret provider settings live in QSettings (`provider/preset`, `base`, `mode
 `max_tokens`) in `~/.config/RelayTerminal/relay.conf`, alongside the tier and role overrides
 (`tiers/<tier>/…`, `roles/<role>/…`).
 
-### Settings pane
+### Actions pane and Options pane
 
-`src/SettingsPane.{h,cpp}` (`relay-settings`, `tests/settingspane_test.cpp`), hosted by a
-`ToolPane` of kind `Settings`. Ctrl+Shift+A (`palette.open`) opens it on the Actions tab; Ctrl+Shift+O,
-Ctrl+, (`app.settings`) and the gear in the title bar open it on the options. Either key moves an open
-pane to its side and, pressed on its own side, closes it. It is one Settings pane beside the focused pane, in the splitter layout like the
-explorer and the Switchboard — a full pane, not a strip over the right edge (owner, 2026-09-18).
-Pressed again on the pane, the same key closes it; so do Esc on an empty search and the ✕. Closing
+`src/SettingsPane.{h,cpp}` (`relay-settings`, `tests/settingspane_test.cpp`): one widget with a
+`Mode`, hosted by a `ToolPane` of kind `Settings` whose title and `paneType` property ("actions" /
+"options", which the pane chrome colours and labels a header by) follow the mode. The owner's line
+between the two (2026-09-18): **an option persists** — a default, written to QSettings, true in every
+pane after a restart — and **an action is something you do now**, to this pane, conversation or
+window, and may do again or undo an hour later. "Default reasoning effort" is an option; "Reasoning
+effort" for this pane is an action. A verb never sits in Options as a button row; a button row there
+opens the editor of something that persists (API keys, Model roles, Instructions, Skills,
+keybindings.json).
+
+- **Actions** — Ctrl+Shift+A (`palette.open`), Ctrl+? (`help.shortcuts`). A search box over one
+  filterable list, no tabs: `rootItems()` as described in section 5.
+- **Options** — Ctrl+Shift+O and Ctrl+, (`app.settings`), and the gear in the title bar. One sub-tab
+  per section (General, Appearance, Models, Terminal, Agent, Voice, Privacy, Keyboard) and the rows as
+  real controls.
+
+There is one such pane per tab, beside the focused pane in the splitter layout like the explorer and
+the Switchboard — a full pane, not a strip over the right edge (owner, 2026-09-18). Pressing the
+other pane's key swaps it in place (`SettingsPane::setMode()`, which clears the search and re-reads
+both catalogs; `RelayWindow::openSettingsPane(mode)`); so does choosing Options… in Actions. Pressed
+while its own pane has the focus, the key closes it; so do Esc on an empty search and the ✕. Closing
 returns focus exactly where it was (vim in the terminal, or the prompt box). The pane is transient:
 `node()` is empty, so it is never saved with the layout, and closing it when it is the last leaf of
 the last tab puts a terminal pane beside it first rather than closing the window.
 
-Inside: a search box, one sub-tab per section (General, Appearance, Models, Terminal, Agent, Voice,
-Privacy, Actions) and the rows as real controls — a toggle row flips when clicked anywhere on it,
-choices are combo boxes, numbers are spin boxes that write once per finished edit, text writes on
-`editingFinished`. Headings inside a section (`SettingRow::Heading`) group long tabs (Agent:
-Instructions and skills / Turn limits; Voice: Capture / Model; General: Diagnostics).
+Options rows: a toggle row flips when clicked anywhere on it, choices are combo boxes, numbers are
+spin boxes that write once per finished edit, text writes on `editingFinished`. Headings inside a
+section (`SettingRow::Heading`) group long tabs (Agent: Instructions and skills / Turn limits; Voice:
+Capture / Model; General: Diagnostics).
 `RelayWindow::settingsSections()` builds the catalog of `SettingRow`s, each carrying its own reader
 and writer, so QSettings stays the single source of truth and the pane knows nothing about how a
 value is used; `searchableActions()` hands it the action catalog with the hidden search words folded
 in. Changing a row rebuilds the pane, and the rebuild keeps the tab, the scroll offset, the highlighted
 row and the focused control, so a long tab does not jump back to the top.
 
-Keyboard, from the search box: typing filters settings rows and actions together into one list, best
-match first, each row saying where it lives ("General · …"); ↑ ↓ (and Ctrl+N/P) move a highlight, Enter
-changes or runs the highlighted row (flips a toggle, opens a choice, focuses a field, clicks a button,
-runs an action), ← → switch tabs while the search is empty, Esc clears the search and then closes; Esc
+Search, in either mode, covers both catalogs so it never dead-ends, best match first, each row
+saying where it lives ("General · …"), with the pane's own kind ranked first (the other kind's scores
+are halved). In Options an action found this way runs like any other. In Actions an option is not
+drawn as its control: it is an "Options › Appearance › Theme" row, and Enter swaps the pane to
+Options on that tab with that row highlighted (`revealOption()`).
+
+Keyboard, from the search box: ↑ ↓ (and Ctrl+N/P) move a highlight, Enter runs or changes the
+highlighted row (runs an action, flips a toggle, opens a choice, focuses a field, clicks a button),
+← → switch Options tabs while the search is empty, Esc clears the search and then closes; Esc
 in a control goes back to the search first. What was taken from the reference apps is written at the
 top of `src/SettingsPane.h`: Warp's search-first sections with instant apply, Claude Code's Enter/Esc
 panel that returns to the prompt, opencode's one command list that carries the toggles too.
@@ -1405,7 +1425,7 @@ all in one place (issue `0JA7`).
 | User themes | `~/.config/relay/themes/*.toml`; a file of the same id replaces the built-in one |
 | Reader, token contract, discovery | `src/ThemeFile.{h,cpp}` (`relay-theme`, `tests/theme_test.cpp`) |
 | Live palette, stylesheet, the switch | `src/Theme.{h,cpp}` |
-| Picker | Settings › Appearance (built in `src/RelayWindow.h`; the Settings pane renders and searches it) |
+| Picker | Options › Appearance (built in `src/RelayWindow.h`; the Options pane renders and searches it) |
 
 A theme file has `[theme]` (name, variant `dark`/`light`, description), `[ui]`, `[syntax]`,
 `[terminal]` (background, foreground, cursor and a 16-entry `palette`) and `[flags]`. Missing
@@ -1548,7 +1568,7 @@ of the platform and of the engine itself.
 | `src/TurnTranscript.*` | turn details pane (tool calls, transcript) |
 | `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |
 | `src/ModelSettings.*` | the API-keys and model-roles modals |
-| `src/SettingsPane.*` | the Settings pane: search, sub-tabs, rows as controls, the Actions tab |
+| `src/SettingsPane.*` | the Actions pane and the Options pane: one widget, two modes |
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `src/Conversations.*` | conversation list with search (`/conversations`) and the Ctrl+F find bar |
 | `src/FileIndex.*` | the `@` picker's file listing: the asynchronous git chain, the changed set, the non-git walk |

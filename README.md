@@ -42,7 +42,7 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Quick start
 
-1. Start Relay and open **Settings › Models › API keys…** (Ctrl+, , the gear at the bottom of the
+1. Start Relay and open **Options › Models › API keys…** (Ctrl+, , the gear at the bottom of the
    model box, or Actions › API keys…). Add a key for one provider — or click **Import from Warp** or
    **Import from Claude Code / Codex**. **Test** checks the key reaches the provider.
    Then open **Model roles…** and pick your default provider; GLM Coding Plan + OpenRouter and
@@ -61,7 +61,9 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 | Shift+Enter | New line |
 | Ctrl+I | Toggle terminal / agent input (from the prompt box; at a password prompt it switches to the agent) |
 | Ctrl+H / Ctrl+Shift+H | Take control of the terminal (the only way keys reach it) / back to the prompt box |
-| Ctrl+Shift+A | Settings pane: every setting and every action, one search (again to close) |
+| Ctrl+Shift+A | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
+| Ctrl+Shift+O | Options: what persists, a tab per section (again to close; also Ctrl+, and the gear) |
+| Ctrl+Shift+Y | Resume a saved session (`/resume`) |
 | Ctrl+T, Ctrl+N | New tab, new window |
 | Ctrl+P, Ctrl+Shift+P | Split right, split down |
 | Alt+Arrows | Move between panes |
@@ -76,16 +78,19 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 | Ctrl+C in the prompt box (nothing selected, program running) | Interrupt the program |
 
 Shortcut presets: **Relay** (Chrome-style, default), **Warp**, **VS Code**, **Konsole**
-(Settings › Shortcuts). Every shortcut can be changed in
-`~/.config/RelayTerminal/relay/keybindings.json` (Settings › Shortcuts › Edit keyboard shortcuts),
-which reloads live. Copy on select is off by default (Settings › Terminal).
+(Options › Keyboard). Every shortcut can be changed in
+`~/.config/RelayTerminal/relay/keybindings.json` (Options › Keyboard › Edit keyboard shortcuts),
+which reloads live. Copy on select is off by default (Options › Terminal).
 
-**Settings** is a full pane beside the one you are in, with two ways in. **Ctrl+Shift+A** opens it
-on **Actions**: everything you can do now, with its keys, in a list you can filter. **Ctrl+Shift+O**
-(also the gear at the top right, and Ctrl+,) opens it on the **options**: what persists, a tab per
-section — General, Appearance, Models, Terminal, Agent, Voice, Privacy. One search box covers all
-of it. Type, ↑ ↓, Enter changes the row or
-runs the action; Esc closes and puts focus back where it was, so nothing there needs the mouse.
+**Actions and Options** are two panes that open beside the one you are in, one at a time.
+**Actions** (Ctrl+Shift+A) is everything you can do *now*, to this pane, conversation or window —
+resume a session, open the Switchboard, pick the model, a new pane, rewind, open Options — in one
+list you can filter, recent first, each with its keys. **Options** (Ctrl+Shift+O, the gear at the
+top right, or Ctrl+,) is what *persists*: a tab per section — General, Appearance, Models, Terminal,
+Agent, Voice, Privacy, Keyboard — with every setting as a real control. Pressing the other key
+swaps the pane in place. Either search box reaches both: in Actions, an option shows as an
+"Options › …" row that takes you to it. Type, ↑ ↓, Enter runs the action or changes the row; Esc
+closes and puts focus back where it was, so nothing there needs the mouse.
 
 ## Feature tour
 
@@ -111,7 +116,7 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   terminal in distinct colors. They are written to the display, never typed into the shell.
   While a program such as vim runs, output shows in a small panel and prints when it exits.
 - **Thinking and tool calls.** Model reasoning streams dimly in a panel over the bottom of the
-  terminal (Settings › General › Show thinking); the terminal keeps one line,
+  terminal (Options › General › Show thinking); the terminal keeps one line,
   `✦ thought for 7 s`. A turn that used tools ends with `✦ 3 tool calls · 12 s`: Ctrl+click it
   (or Actions › Open last agent turn) for a pane listing each call; Enter on a call opens its
   full output. The link is a `relay://` URL; Relay registers a user-level
@@ -165,7 +170,7 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   (Markdown under `.relay/exports`), `/main` and `/flash` (this pane's model tier), `/glm` and `/kimi`
   (switch provider), `/help` (the card `?` shows). A `/command` Relay does not have is answered by
   Relay, not by the shell: it names the closest real commands and points at `/` and `/help`. Coming back to the window after 3 minutes, with a finished
-  turn and an empty prompt, prints a short recap (Settings › General turns it off).
+  turn and an empty prompt, prints a short recap (Options › General turns it off).
 - **Conversations: list and full-text search.** `/conversations` (also Actions › Conversations…;
   Ctrl+Shift+Y is `/resume`, this workspace's saved sessions) opens every saved conversation, grouped by project and newest first, with a
   search field that filters as you type. The search covers **both** agent threads (your prompts,
@@ -182,7 +187,7 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   updated on every autosave and rebuildable from the session files at any time (Actions › Rebuild
   the conversation index). It holds message text, so it stays on this machine and is deleted with
   the conversation; `RELAY_INDEX=off` turns indexing off entirely.
-- **Model roles: Main, Flash, Lite.** Settings › Models › **Model roles…** (also the ⚙ at the bottom
+- **Model roles: Main, Flash, Lite.** Options › Models › **Model roles…** (also the ⚙ at the bottom
   of the model box, or Actions › Model roles…) asks for one thing: your default provider. Everything
   else follows from it as three models — **Main** for agent turns and subagents, **Flash** for driving
   programs and quick side calls, **Lite** for titles, labels and duplicate checks. Picking GLM gives
@@ -198,7 +203,7 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   Command routing is pinned to `google/gemini-3.5-flash-lite` on purpose: routing has a sub-second
   budget and that model measures 0.5–0.6 s against 2.3–4.9 s for Gemini 3.8 Flash.
   A tier whose provider has no key steps down to the next one and says so inline; nothing ever fails
-  because a key is missing. Every pane starts on the Main agent unless Settings › Agent › "New panes
+  because a key is missing. Every pane starts on the Main agent unless Options › Agent › "New panes
   use the Flash agent" is on, and then every pane after a window's first one starts on the Flash agent.
   **`/flash`**, Alt+F, the **Flash agent** row in the model box, or Actions › Flash agent for this
   pane moves a pane to the Flash model, and **`/main`** or the **Main agent** row moves it back,
@@ -219,10 +224,10 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   open the task list: requests (your words, verbatim) with their tasks under them, marked
   ✓ ◐ ○ ✗ ⏸ ✕; keys: Enter folds, `d` marks done, `x` cancels, `o` reopens, `r` re-asks, Esc
   closes. When a turn stops at its step limit (default 256 model calls, 150 tool calls; Actions ›
-  Settings › Agent), the terminal shows **▸ Continue** (Ctrl+click, `/continue` or the palette), and
+  Options › Agent), the terminal shows **▸ Continue** (Ctrl+click, `/continue` or the palette), and
   turns with more than one task end with a line such as
   `✦ Tasks 3/5 (1 failed, 1 deferred) · T4 “…” failed, T5 “…” deferred`. Resume and recaps list
-  unfinished requests. Settings › Agent › Audit requests after each turn (off by default)
+  unfinished requests. Options › Agent › Audit requests after each turn (off by default)
   flags asks that may be unaddressed.
 - **When a model goes quiet.** A turn whose model sends nothing usable for 60 s (SSE keepalives do
   not count) ends instead of hanging: the connection is closed, the turn is retried once
@@ -237,8 +242,8 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   level — its opt-in "Verbose" level does add your prompt text to the file.
 - **Instruction files.** On first launch Relay lists instruction files from other tools
   (CLAUDE.md, AGENTS.md, WARP.md, …) to include, and can combine them into a global
-  `~/.config/relay/relay.md`. Change it later in Settings › Agent › Instructions….
-- **AI suggestions (off by default).** Settings › Privacy: a suggested next command after a
+  `~/.config/relay/relay.md`. Change it later in Options › Agent › Instructions….
+- **AI suggestions (off by default).** Options › Privacy: a suggested next command after a
   command finishes (→ or Tab accepts) and a suggested next prompt after an agent turn (Tab).
 - **Reopen where you left off.** Quit Relay and start it again: your windows come back with their
   tabs, splits, sizes and screens, each pane in the directory it was in, on the same model and
@@ -260,15 +265,15 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
 - **File panes.** Folder explorer and file preview (code, Markdown, images, optional PDF).
   Open with `relay open PATH`, a click on the pane's directory line, or Ctrl+click on a text
   file in terminal output.
-- **Actions and shortcuts.** The Settings pane's Actions tab lists every action with its keys, and
-  the pane's search finds actions and settings together; it also matches related words
+- **Actions and shortcuts.** The Actions pane (Ctrl+Shift+A, Ctrl+?) lists every action with its
+  keys, and its search finds actions and options together; it also matches related words
   ("undo" finds Rewind, "reasoning" finds effort, "detach" finds the move actions). Shortcuts
   live in `~/.config/RelayTerminal/relay/keybindings.json`, reload live, and the agent can change
   them.
 - **Shortcut hints.** When you click something that has a faster key, a short toast says so
   ("Next time: Ctrl+P · new pane to the right"), at most 3 times per hint and not more than once
-  every 20 s. After a finished agent turn, an idle empty prompt box shows a tip. Actions ›
-  Settings › General › Shortcut hints turns them off; Reset shortcut hints shows them again.
+  every 20 s. After a finished agent turn, an idle empty prompt box shows a tip. Options ›
+  General › Shortcut hints turns them off; Actions › Reset shortcut hints shows them again.
 - **Skills.** The agent sees your Warp-style skills (`~/.warp/skills`, `~/.claude/skills`,
   refined copies and imports) and loads one before following it. `/skills` (or Actions ›
   Skills…) lists them: uncheck to exclude, **Refine selected** has the agent write an improved
@@ -313,7 +318,7 @@ regenerates `issues/BOARD.md`. A repository without `issues/board.yaml` never se
   OpenAI-compatible endpoint.
 - **Where keys live.** The desktop keyring (GNOME Keyring or KWallet) through `secret-tool`,
   or environment variables such as `RELAY_KIMI_API_KEY` (`RELAY_KEYRING=off` skips the keyring). Keys are passed on stdin, never on a
-  command line, in settings files or logs. Settings › Models › **API keys…** shows, per provider,
+  command line, in settings files or logs. Options › Models › **API keys…** shows, per provider,
   whether the key is in the keyring, comes from `RELAY_*_API_KEY` or is missing; **Test** makes one
   two-word call and reports ok or the HTTP status without ever printing the key. **Import from Warp**
   copies Warp's custom-endpoint keys; **Import from Claude Code / Codex** copies an API key out of

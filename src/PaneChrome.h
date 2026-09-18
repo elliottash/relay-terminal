@@ -72,7 +72,7 @@ public:
     }
     relay::BoardView *board() const { return m_board; }
 
-    // The Settings pane (src/SettingsPane.h). Transient: not saved with the layout (node() is empty).
+    // The Actions pane or the Options pane (src/SettingsPane.h; its mode says which). Transient: not saved with the layout (node() is empty).
     ToolPane(relay::SettingsPane *view, const QString &cwd) : m_kind(Kind::Settings), m_settingsView(view), m_subagentCwd(cwd) {
         setObjectName(QStringLiteral("pane"));
         setAttribute(Qt::WA_StyledBackground);
@@ -98,7 +98,7 @@ public:
     QString path() const { return (m_subagent || m_turn || m_board || m_settingsView) ? QString() : m_explorer ? m_explorer->root() : m_plan ? m_plan->path() : m_preview->path(); }
     QString cwd() const { return (m_subagent || m_turn || m_board || m_settingsView) ? m_subagentCwd : m_explorer ? m_explorer->root() : QFileInfo(path()).absolutePath(); }
     QString title() const {
-        if (m_settingsView) return QStringLiteral("Settings");
+        if (m_settingsView) return m_settingsView->mode() == relay::SettingsPane::Mode::Actions ? QStringLiteral("Actions") : QStringLiteral("Options");
         if (m_board) return m_board->title();
         if (m_subagent) return m_subagent->title();
         if (m_turn) return m_turn->title();

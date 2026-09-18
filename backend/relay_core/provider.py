@@ -414,7 +414,7 @@ class ChatProvider:
         if code in (401, 403):
             return (f"Provider HTTP {code}: the API key was rejected for {where}. "
                     "The stored key is missing, wrong, or belongs to a different endpoint of the "
-                    "same provider - open Settings › Models › API keys… to check it.")
+                    "same provider - open Options › Models › API keys… to check it.")
         return (f"Provider HTTP {code} for {where}. "
                 "Check endpoint, model access, key, quota, and parameters.")
 

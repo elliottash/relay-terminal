@@ -4,6 +4,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -96,10 +97,16 @@ QList<SettingsSection> catalog(State *state) {
     }
     sections << agent;
 
-    SettingsSection shortcuts;
-    shortcuts.id = SettingsPane::actionsTabId();
-    shortcuts.title = QStringLiteral("Actions");
-    sections << shortcuts;
+    SettingsSection keyboard;
+    keyboard.id = QStringLiteral("keyboard");
+    keyboard.title = QStringLiteral("Keyboard");
+    {
+        SettingRow row;
+        row.kind = SettingRow::Toggle; row.id = QStringLiteral("option:hints");
+        row.label = QStringLiteral("Shortcut hints"); row.detail = QStringLiteral("A brief tip");
+        keyboard.rows << row;
+    }
+    sections << keyboard;
     return sections;
 }
 
@@ -150,14 +157,20 @@ private slots:
 
     void tabsFollowTheCatalog() {
         State state;
-        SettingsPane pane([&] { return catalog(&state); }, [&] { return actions(&state); });
+        SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
         QCOMPARE(pane.tabIds(), (QStringList{QStringLiteral("general"), QStringLiteral("appearance"),
-                                             QStringLiteral("agent"), QStringLiteral("shortcuts")}));
+                                             QStringLiteral("agent"), QStringLiteral("keyboard")}));
         auto *tabs = pane.findChild<QTabBar *>(QStringLiteral("settingsTabs"));
         QVERIFY(tabs);
         QCOMPARE(tabs->count(), 4);
-        QCOMPARE(tabs->tabText(3), QStringLiteral("Actions"));
+        QCOMPARE(tabs->tabText(3), QStringLiteral("Keyboard"));
+        QVERIFY(!tabs->isHidden());
         QCOMPARE(pane.currentTab(), QStringLiteral("general"));
+        // Options holds no actions: no page lists one.
+        for (const QString &id : pane.tabIds()) {
+            pane.showTab(id);
+            for (const QString &row : pane.visibleRowIds()) QVERIFY2(!row.startsWith(QStringLiteral("pane.")), qPrintable(row));
+        }
         // Headings and info lines are not rows the keyboard lands on.
         pane.showTab(QStringLiteral("agent"));
         QCOMPARE(pane.visibleRowIds(), (QStringList{QStringLiteral("option:plans"), QStringLiteral("agent.instructions")}));
@@ -165,7 +178,7 @@ private slots:
 
     void arrowsSwitchTabsAndRows() {
         State state;
-        SettingsPane pane([&] { return catalog(&state); }, [&] { return actions(&state); });
+        SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
         pane.show();
         pane.focusSearch();
         auto *search = pane.findChild<QLineEdit *>(QStringLiteral("settingsSearch"));
@@ -174,7 +187,7 @@ private slots:
         QCOMPARE(pane.currentTab(), QStringLiteral("appearance"));
         press(search, Qt::Key_Left);
         press(search, Qt::Key_Left);
-        QCOMPARE(pane.currentTab(), QStringLiteral("shortcuts"));   // wraps
+        QCOMPARE(pane.currentTab(), QStringLiteral("keyboard"));   // wraps
         pane.showTab(QStringLiteral("general"));
         QCOMPARE(pane.currentRow(), -1);
         press(search, Qt::Key_Down);
@@ -189,7 +202,7 @@ private slots:
 
     void enterTogglesTheHighlightedRow() {
         State state;
-        SettingsPane pane([&] { return catalog(&state); }, [&] { return actions(&state); });
+        SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
         pane.show();
         pane.focusSearch();
         auto *search = pane.findChild<QLineEdit *>(QStringLiteral("settingsSearch"));
@@ -204,16 +217,16 @@ private slots:
         QVERIFY(check);
         QCOMPARE(check->isChecked(), false);
         // Enter with nothing highlighted takes the first row.
-        SettingsPane fresh([&] { return catalog(&state); }, [&] { return actions(&state); });
+        SettingsPane fresh(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
         fresh.show();
         fresh.focusSearch();
         press(fresh.findChild<QLineEdit *>(QStringLiteral("settingsSearch")), Qt::Key_Return);
         QCOMPARE(state.thinking, true);
     }
 
-    void searchMixesSettingsAndActions() {
+    void optionsSearchFindsActionsToo() {
         State state;
-        SettingsPane pane([&] { return catalog(&state); }, [&] { return actions(&state); });
+        SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
         pane.show();
         pane.setSearch(QStringLiteral("deep"));
         // A submenu entry is found through its parent: Model › DeepSeek V4.
@@ -238,7 +251,7 @@ private slots:
 
     void enterRunsAnActionThroughTheOwner() {
         State state;
-        SettingsPane pane([&] { return catalog(&state); }, [&] { return actions(&state); });
+        SettingsPane pane(SettingsPane::Mode::Actions, [&] { return catalog(&state); }, [&] { return actions(&state); });
         QStringList handed;
         pane.onRun = [&](const ActionItem &item) { handed << item.key; };
         pane.show();
@@ -254,11 +267,14 @@ private slots:
         QCOMPARE(state.ran, QStringList{QStringLiteral("pane.splitRight")});
     }
 
-    void actionsTabListsRecentThenSections() {
+    void actionsListsRecentThenSections() {
         State state;
         QSettings().setValue(QStringLiteral("palette/recent"), QStringList{QStringLiteral("pane.splitRight")});
-        SettingsPane pane([&] { return catalog(&state); }, [&] { return actions(&state); });
-        pane.showTab(SettingsPane::actionsTabId());
+        SettingsPane pane(SettingsPane::Mode::Actions, [&] { return catalog(&state); }, [&] { return actions(&state); });
+        // One list and nothing to tab between.
+        QCOMPARE(pane.tabIds(), QStringList{SettingsPane::actionsTabId()});
+        QVERIFY(pane.findChild<QTabBar *>(QStringLiteral("settingsTabs"))->isHidden());
+        QCOMPARE(pane.findChild<QLineEdit *>(QStringLiteral("settingsSearch"))->placeholderText(), QStringLiteral("Search actions"));
         const QStringList ids = pane.visibleRowIds();
         // Recent first, then Agent (the Model submenu opened inline, then the fast-agent toggle),
         // then Panes and tabs.
@@ -268,9 +284,73 @@ private slots:
         QSettings().remove(QStringLiteral("palette/recent"));
     }
 
+    // In Actions, an option is found but not shown as a control: its row opens Options on it.
+    void anOptionFoundFromActionsOpensOptionsOnIt() {
+        State state;
+        SettingsPane pane(SettingsPane::Mode::Actions, [&] { return catalog(&state); }, [&] { return actions(&state); });
+        int modeChanges = 0;
+        pane.onModeChanged = [&] { ++modeChanges; };
+        pane.show();
+        pane.focusSearch();
+        auto *search = pane.findChild<QLineEdit *>(QStringLiteral("settingsSearch"));
+        QTest::keyClicks(search, QStringLiteral("theme"));
+        QCOMPARE(pane.visibleRowIds(), QStringList{QStringLiteral("option-jump:appearance/option:theme")});
+        QVERIFY(!pane.findChild<QComboBox *>());   // the control itself lives in Options
+        press(search, Qt::Key_Return);
+        QTest::qWait(50);
+        QCOMPARE(pane.mode(), SettingsPane::Mode::Options);
+        QCOMPARE(modeChanges, 1);
+        QCOMPARE(pane.currentTab(), QStringLiteral("appearance"));
+        QVERIFY(search->text().isEmpty());
+        QCOMPARE(pane.visibleRowIds().value(pane.currentRow()), QStringLiteral("option:theme"));
+        QCOMPARE(pane.focusWidget(), search);
+        QCOMPARE(state.theme, QStringLiteral("dark"));   // finding it changed nothing
+    }
+
+    // A word that names both: the pane's own kind ranks first.
+    void thePanesOwnKindRanksFirst() {
+        State state;
+        SettingsPane actionsPane(SettingsPane::Mode::Actions, [&] { return catalog(&state); }, [&] { return actions(&state); });
+        actionsPane.setSearch(QStringLiteral("pla"));   // "Plans folder" (option), no action says "pla" directly
+        QVERIFY(actionsPane.visibleRowIds().contains(QStringLiteral("option-jump:agent/option:plans")));
+        // Several words, in any order, each matched where it fits: the section and the row.
+        actionsPane.setSearch(QStringLiteral("appearance theme"));
+        QCOMPARE(actionsPane.visibleRowIds(), QStringList{QStringLiteral("option-jump:appearance/option:theme")});
+        actionsPane.setSearch(QStringLiteral("theme appearance"));
+        QCOMPARE(actionsPane.visibleRowIds(), QStringList{QStringLiteral("option-jump:appearance/option:theme")});
+        actionsPane.setSearch(QStringLiteral("theme zzzz"));
+        QVERIFY(actionsPane.visibleRowIds().isEmpty());
+        actionsPane.setSearch(QStringLiteral("limit"));   // only an option
+        QCOMPARE(actionsPane.visibleRowIds(), QStringList{QStringLiteral("option-jump:general/option:steps")});
+        SettingsPane optionsPane(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
+        optionsPane.setSearch(QStringLiteral("p"));
+        const QStringList ids = optionsPane.visibleRowIds();
+        QVERIFY(ids.indexOf(QStringLiteral("option:plans")) >= 0);
+        QVERIFY(ids.indexOf(QStringLiteral("pane.splitRight")) >= 0);
+        QVERIFY(ids.indexOf(QStringLiteral("option:plans")) < ids.indexOf(QStringLiteral("pane.splitRight")));
+    }
+
+    void setModeSwapsInPlace() {
+        State state;
+        SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
+        pane.show();
+        pane.setSearch(QStringLiteral("theme"));
+        pane.setMode(SettingsPane::Mode::Actions);
+        QVERIFY(pane.search().isEmpty());
+        QCOMPARE(pane.currentTab(), SettingsPane::actionsTabId());
+        QVERIFY(pane.visibleRowIds().contains(QStringLiteral("pane.splitRight")));
+        QCOMPARE(pane.findChild<QLineEdit *>(QStringLiteral("settingsSearch"))->placeholderText(), QStringLiteral("Search actions"));
+        pane.setMode(SettingsPane::Mode::Options);
+        QCOMPARE(pane.currentTab(), QStringLiteral("general"));
+        QCOMPARE(pane.findChild<QLineEdit *>(QStringLiteral("settingsSearch"))->placeholderText(), QStringLiteral("Search options"));
+        // A submenu's header is reachable from either mode.
+        pane.scrollToGroup(QStringLiteral("menu:model"));
+        QCOMPARE(pane.mode(), SettingsPane::Mode::Actions);
+    }
+
     void escapeClearsThenCloses() {
         State state;
-        SettingsPane pane([&] { return catalog(&state); }, [&] { return actions(&state); });
+        SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
         int closed = 0;
         pane.onClose = [&] { ++closed; };
         pane.show();
@@ -294,10 +374,9 @@ private slots:
 
     void rebuildKeepsTabScrollAndFocus() {
         State state;
-        SettingsPane pane([&] { return catalog(&state); }, [&] { return actions(&state); });
+        SettingsPane pane(SettingsPane::Mode::Actions, [&] { return catalog(&state); }, [&] { return actions(&state); });
         pane.resize(500, 160);   // short, so the pages scroll
         pane.show();
-        pane.showTab(SettingsPane::actionsTabId());
         auto *pages = pane.findChild<QStackedWidget *>();
         QVERIFY(pages);
         auto *scroll = qobject_cast<QScrollArea *>(pages->currentWidget());
@@ -314,7 +393,7 @@ private slots:
         QVERIFY(after->verticalScrollBar()->maximum() >= 30);
         QCOMPARE(after->verticalScrollBar()->value(), 30);
         // A control that had focus has it again after the rebuild its own edit caused.
-        pane.showTab(QStringLiteral("general"));
+        pane.setMode(SettingsPane::Mode::Options);
         auto *spin = pane.findChild<QSpinBox *>();
         spin->setFocus();
         pane.rebuild();
@@ -323,7 +402,7 @@ private slots:
 
     void controlsWriteThroughTheirRows() {
         State state;
-        SettingsPane pane([&] { return catalog(&state); }, [&] { return actions(&state); });
+        SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
         pane.show();
         auto *spin = pane.findChild<QSpinBox *>();
         spin->setValue(75);
@@ -352,6 +431,10 @@ private slots:
                 SettingsPane::fuzzyScore(QStringLiteral("theme"), QStringLiteral("Reload themes")));
         QVERIFY(SettingsPane::fuzzyScore(QStringLiteral("thm"), QStringLiteral("Theme")) > 0);
         QCOMPARE(SettingsPane::fuzzyScore(QStringLiteral("xyz"), QStringLiteral("Theme")), 0);
+        // Letters scattered across a sentence do not count; a tight abbreviation does.
+        QCOMPARE(SettingsPane::fuzzyScore(QStringLiteral("reset"), QStringLiteral("Reasoning effort › low")), 0);
+        QCOMPARE(SettingsPane::fuzzyScore(QStringLiteral("theme"), QStringLiteral("Cards, threads, plans and project memory")), 0);
+        QVERIFY(SettingsPane::fuzzyScore(QStringLiteral("nwpn"), QStringLiteral("New pane to the right")) > 0);
     }
 };
 

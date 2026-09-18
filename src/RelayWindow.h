@@ -873,12 +873,13 @@ private:
     // ----- palette ----------------------------------------------------------------------------
     using PaletteItem = relay::ActionItem;
 
-    // ----- Settings pane (src/SettingsPane.h) ---------------------------------------------------
-    // One Settings pane beside the focused pane (owner, 2026-09-18: a full pane, not a strip over
-    // the right edge), with two ways in. Ctrl+Shift+A opens it on the Actions tab: every action
-    // with its keys, the things you do now and switch back and forth. Ctrl+Shift+O, Ctrl+, and the
-    // gear open it on the options: every persistent setting as a real control, one tab per section.
-    // One search box covers both, so "Ctrl+Shift+A, type, Enter" still runs an action. The pane is
+    // ----- Actions pane and Options pane (src/SettingsPane.h) -----------------------------------
+    // Two panes, one at a time, beside the focused pane (owner, 2026-09-18: a full pane, not a strip
+    // over the right edge). Ctrl+Shift+A is Actions: one filterable list of everything you can do
+    // now, with its keys — resume, the Switchboard, the model, a new pane, rewind, Options itself.
+    // Ctrl+Shift+O, Ctrl+, and the gear are Options: what persists, every setting as a real control,
+    // one tab per section. Pressing the other's key swaps the pane in place. Either search reaches
+    // both catalogs, so "Ctrl+Shift+A, type, Enter" always lands somewhere. The pane is
     // transient: it is not saved with the layout, and closing it returns focus to the widget that
     // had it (vim in the terminal, or the prompt box).
     static ToolPane *settingsPaneIn(QWidget *page) {
@@ -887,12 +888,26 @@ private:
         return nullptr;
     }
 
-    ToolPane *createSettingsPane() {
-        auto *view = new relay::SettingsPane([this] { return settingsSections(); }, [this] { return searchableActions(); });
+    // The pane-type property is what the pane chrome colours and labels a header by.
+    static void markSettingsPaneType(ToolPane *tool) {
+        const bool actions = tool->settings()->mode() == relay::SettingsPane::Mode::Actions;
+        tool->setProperty("paneType", actions ? QStringLiteral("actions") : QStringLiteral("options"));
+    }
+
+    ToolPane *createSettingsPane(relay::SettingsPane::Mode mode) {
+        auto *view = new relay::SettingsPane(mode, [this] { return settingsSections(); }, [this] { return searchableActions(); });
         auto *tool = new ToolPane(view, m_manager->workspace());
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
+        markSettingsPaneType(tool);
         QPointer<ToolPane> guard(tool);
+        // An "Options › …" row in Actions swaps the pane itself; its title and type follow.
+        view->onModeChanged = [guard] {
+            if (!guard) return;
+            markSettingsPaneType(guard);
+            guard->update();
+            if (auto *w = windowOf(guard)) w->updateTitles();
+        };
         view->onClose = [guard] { if (auto *w = windowOf(guard)) w->closeSettingsPane(guard); };
         view->onRun = [guard](const relay::ActionItem &item) { if (auto *w = windowOf(guard)) w->runFromSettings(guard, item); };
         return tool;
@@ -906,8 +921,9 @@ private:
         return items;
     }
 
-    // Open the pane in this tab, or bring the one it has to the front; `tab` picks the section.
-    void openSettingsPane(const QString &tab = QString(), const QString &search = QString()) {
+    // Open the pane in this tab in that mode, or swap the one it has to it; `tab` picks the
+    // Options section.
+    void openSettingsPane(relay::SettingsPane::Mode mode, const QString &tab = QString(), const QString &search = QString()) {
         QWidget *page = m_tabs->currentWidget();
         ToolPane *tool = page ? settingsPaneIn(page) : nullptr;
         if (!tool) {
@@ -917,9 +933,11 @@ private:
             // the list was last read, so ask again on the way in (issue G8DK).
             if (m_active) m_active->refreshAliases();
             QWidget *anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
-            tool = createSettingsPane();
+            tool = createSettingsPane(mode);
             if (anchor) insertBeside(anchor, tool, Qt::Horizontal, false);
             else if (page && page->layout()) page->layout()->addWidget(tool);
+        } else if (tool->settings()->mode() != mode) {
+            tool->settings()->setMode(mode);   // re-reads both catalogs
         } else {
             tool->settings()->rebuild();
         }
@@ -931,18 +949,19 @@ private:
     }
 
     // Two keys, one pane: Ctrl+Shift+A is Actions (things to do now), Ctrl+Shift+O and the gear are
-    // Options (what persists). Each opens the pane on its side or moves an open pane there;
-    // pressed while its own side is showing, it closes the pane.
+    // Options (what persists). Each opens its pane or swaps an open one to it; pressed while its
+    // own pane has the focus, it closes it.
     void toggleSettingsPane(bool actions) {
-        const QString actionsTab = relay::SettingsPane::actionsTabId();
+        const auto mode = actions ? relay::SettingsPane::Mode::Actions : relay::SettingsPane::Mode::Options;
         if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data()); tool && tool->settings()) {
-            if ((tool->settings()->currentTab() == actionsTab) == actions) { closeSettingsPane(tool); return; }
+            if (tool->settings()->mode() == mode) { closeSettingsPane(tool); return; }
         }
-        openSettingsPane(actions ? actionsTab : QStringLiteral("general"));
+        openSettingsPane(mode);
     }
 
+    // Ctrl+?: every action and its keys, which is the Actions pane.
     void openShortcutsTab() {
-        openSettingsPane(relay::SettingsPane::actionsTabId());
+        openSettingsPane(relay::SettingsPane::Mode::Actions);
         // "Ctrl+?" is Ctrl+Shift+/ on most keyboards, so name the key that worked (#T9ZS).
         if (m_lastShortcut.first == QStringLiteral("help.shortcuts") && !m_lastShortcut.second.isEmpty())
             notice(QStringLiteral("Every action and its keys. You pressed %1.").arg(m_lastShortcut.second), 6000);
@@ -984,6 +1003,12 @@ private:
         QStringList recent = QSettings().value(QStringLiteral("palette/recent")).toStringList();
         recent.removeAll(item.key); recent.prepend(item.key);
         QSettings().setValue(QStringLiteral("palette/recent"), QStringList(recent.mid(0, 12)));
+        if (item.key == QStringLiteral("app.settings")) {
+            // Options, chosen from Actions: the pane swaps in place rather than closing and reopening.
+            hint(hintId, hintText);
+            openSettingsPane(relay::SettingsPane::Mode::Options);
+            return;
+        }
         if (item.stayOpen) {
             hint(hintId, hintText);
             item.run();
@@ -1027,7 +1052,12 @@ private:
     // its keyboard path. Values live in QSettings under exactly the keys they used before, because
     // several of them are read straight from QSettings elsewhere.
     //
-    // Sections: General, Appearance, Models, Terminal, Agent, Voice, Privacy, Actions.
+    // Sections: General, Appearance, Models, Terminal, Agent, Voice, Privacy, Keyboard.
+    //
+    // What belongs here (owner, 2026-09-18): what persists — a default, true in every pane after
+    // a restart. A verb ("Reload themes", "Reset shortcut hints", "Open the log folder") is an
+    // action and lives in rootItems(); a button row is for opening the editor of something that
+    // persists (API keys, Model roles, Instructions, Skills, keybindings.json).
 
     relay::SettingRow toggleRow(const QString &key, const QString &label, const QString &detail,
                                 bool fallback, std::function<void(bool)> extra = {}) {
@@ -1149,11 +1179,6 @@ private:
             hints.onToggle = [](bool on) { relay::ShortcutHints::instance().setEnabled(on); };
             general.rows << hints;
         }
-        general.rows << buttonRow(QStringLiteral("option:shortcut_hints_reset"), QStringLiteral("Reset shortcut hints"),
-                                  QStringLiteral("Show every tip again"), QStringLiteral("Reset"), [this] {
-            relay::ShortcutHints::instance().resetAll();
-            notice(QStringLiteral("Shortcut hints reset."), 4000);
-        });
         general.rows << toggleRow(QStringLiteral("recap/away"), QStringLiteral("Recap when you come back"),
                                   QStringLiteral("After 3+ minutes away while the agent worked"), true);
         {
@@ -1183,10 +1208,8 @@ private:
             };
             general.rows << reopen;
         }
-        general.rows << buttonRow(QStringLiteral("windows.fresh"), QStringLiteral("Start a fresh window set"),
-                                  QStringLiteral("Forget the saved layout; the next start opens one new window"),
-                                  QStringLiteral("Forget"), [this] { startFreshWindowSet(); });
-        // Diagnostics (issue SQAM) used to live only in the palette; the pane is the complete list.
+        // Diagnostics (issue SQAM): how much is logged persists, so it is an option; opening the log
+        // folder is something you do, so it is in Actions (Relay › Open the log folder).
         general.rows << headingRow(QStringLiteral("Diagnostics"));
         {
             QStringList ids, labels;
@@ -1203,19 +1226,6 @@ private:
                                                 ids, labels, current, [](const QString &id) { relay::log::setLevel(id); });
             level.aliases = QStringLiteral("log logs diagnostics debug verbose troubleshoot");
             general.rows << level;
-        }
-        {
-            relay::SettingRow open = buttonRow(QStringLiteral("logs.open"), QStringLiteral("Log folder"),
-                                               relay::log::directory().isEmpty() ? QStringLiteral("No writable data directory")
-                                                                                 : relay::log::directory(),
-                                               QStringLiteral("Open…"), [this] {
-                const QString dir = relay::log::directory();
-                if (dir.isEmpty()) { notice(QStringLiteral("No writable data directory for logs."), 6000); return; }
-                QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
-                notice(dir, 8000);
-            });
-            open.aliases = QStringLiteral("log logs diagnostics debug troubleshoot relay.log worker.log");
-            general.rows << open;
         }
         sections << general;
 
@@ -1244,22 +1254,6 @@ private:
                 notice(QStringLiteral("Theme: %1.").arg(relay::theme::active().name), 4000);
             });
         }
-        appearance.rows << buttonRow(QStringLiteral("theme.reload"), QStringLiteral("Reload themes"),
-                                     QStringLiteral("Pick up a theme file you added or edited"),
-                                     QStringLiteral("Reload"), [this] {
-            relay::theme::refreshThemes();
-            relay::theme::setActiveTheme(relay::theme::activeThemeId());
-            notice(QStringLiteral("Themes reloaded. A theme added while Relay runs reaches new terminal panes; "
-                                  "restart to give it to the ones already open."), 8000);
-        });
-        appearance.rows << buttonRow(QStringLiteral("theme.folder"), QStringLiteral("Your themes folder"),
-                                     QStringLiteral("~/.config/relay/themes"), QStringLiteral("Open…"), [this] {
-            const QString dir = QDir(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation))
-                                    .absoluteFilePath(QStringLiteral("relay/themes"));
-            QDir().mkpath(dir);
-            QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
-            notice(dir, 8000);
-        });
         sections << appearance;
 
         relay::SettingsSection models;
@@ -1490,10 +1484,11 @@ private:
         sections << privacy;
 
         relay::SettingsSection shortcuts;
-        shortcuts.id = relay::SettingsPane::actionsTabId();
-        shortcuts.title = QStringLiteral("Actions");
-        shortcuts.blurb = QStringLiteral("Every action and the keys it answers to; Enter or a click runs one. Keys are "
-                                         "read from keybindings.json, and your own overrides sit on top of the preset.");
+        shortcuts.id = QStringLiteral("keyboard");
+        shortcuts.title = QStringLiteral("Keyboard");
+        shortcuts.blurb = QStringLiteral("Keys are read from keybindings.json, and your own overrides sit on top of the "
+                                         "preset. Every action and the keys it answers to: %1.")
+                              .arg(Keymap::instance().shortcutText(QStringLiteral("palette.open")));
         {
             const QString presetId = Keymap::instance().preset();
             QStringList values, labels;
@@ -1516,16 +1511,15 @@ private:
                                         programKeys,
                                         [](const QString &value) { Keymap::instance().setProgramKeys(value); });
         }
+        // Like API keys and Instructions, this opens the editor of something that persists, so it
+        // stays an option (and is an action too). Reloading the file is only an action.
         shortcuts.rows << buttonRow(QStringLiteral("keybindings.edit"), QStringLiteral("Edit keyboard shortcuts"),
                                     QStringLiteral("Opens keybindings.json in your editor"),
                                     QStringLiteral("Edit…"), [this] { runAction(QStringLiteral("keybindings.edit")); });
-        shortcuts.rows << buttonRow(QStringLiteral("keybindings.reload"), QStringLiteral("Reload keyboard shortcuts"),
-                                    QStringLiteral("Re-read keybindings.json now"),
-                                    QStringLiteral("Reload"), [this] { runAction(QStringLiteral("keybindings.reload")); });
         {
             // What the mouse does, which no keybinding can say (owner, 2026-09-18). These are not
-            // actions with keys, so they are one informational row on the tab Ctrl+? opens rather
-            // than rows in a list that offers to run them.
+            // actions with keys, so they are one informational row here rather than rows in a list
+            // that offers to run them.
             relay::SettingRow mouse;
             mouse.kind = relay::SettingRow::Info;
             mouse.id = QStringLiteral("info:mouse");
@@ -1546,7 +1540,8 @@ private:
     QList<PaletteItem> rootItems() {
         QList<PaletteItem> items;
         Pane *pane = m_active;
-        const QString agent = QStringLiteral("Agent"), terminal = QStringLiteral("Terminal"), panes = QStringLiteral("Panes and tabs"), keys = QStringLiteral("Shortcuts");
+        const QString agent = QStringLiteral("Agent"), terminal = QStringLiteral("Terminal"), panes = QStringLiteral("Panes and tabs"),
+                      app = QStringLiteral("Relay"), keys = QStringLiteral("Shortcuts");
         QString currentModel;
         if (pane) for (const auto &model : pane->storedModels()) if (model.first == pane->currentPreset()) currentModel = model.second;
         items << submenu(QStringLiteral("menu:model"), agent, QStringLiteral("Model"), currentModel.isEmpty() ? QStringLiteral("No stored keys") : currentModel, [this] {
@@ -1816,14 +1811,58 @@ private:
         items << actionItem(panes, QStringLiteral("Move pane up"), QString(), QStringLiteral("pane.moveUp"));
         items << actionItem(panes, QStringLiteral("Move pane down"), QString(), QStringLiteral("pane.moveDown"));
         items << actionItem(panes, QStringLiteral("Restore closed"), QStringLiteral("Last closed pane, tab or window"), QStringLiteral("closed.restore"));
-        // "Reopen windows on start" is a row in Settings > General.
+        // "Reopen windows on start" is a row in Options › General.
         items << actionItem(panes, QStringLiteral("Start a fresh window set"),
                             QStringLiteral("Forget the saved layout; the next start opens one new window"),
                             QStringLiteral("windows.fresh"));
         items << actionItem(panes, QStringLiteral("Next tab"), QString(), QStringLiteral("tab.next"));
         items << actionItem(panes, QStringLiteral("Previous tab"), QString(), QStringLiteral("tab.previous"));
 
-        // "Shortcut hints", "Shortcut preset" and "Shortcuts inside programs" are rows in Settings.
+        // Relay itself. Options is an action like any other: it is how you get there from here.
+        items << actionItem(app, QStringLiteral("Options…"),
+                            QStringLiteral("What persists: appearance, models, terminal, agent, voice, privacy, keyboard"),
+                            QStringLiteral("app.settings"));
+        {
+            PaletteItem themes; themes.key = QStringLiteral("theme.reload"); themes.section = app;
+            themes.label = QStringLiteral("Reload themes"); themes.detail = QStringLiteral("Pick up a theme file you added or edited");
+            themes.run = [this] {
+                relay::theme::refreshThemes();
+                relay::theme::setActiveTheme(relay::theme::activeThemeId());
+                notice(QStringLiteral("Themes reloaded. A theme added while Relay runs reaches new terminal panes; "
+                                      "restart to give it to the ones already open."), 8000);
+            };
+            items << themes;
+            PaletteItem folder; folder.key = QStringLiteral("theme.folder"); folder.section = app;
+            folder.label = QStringLiteral("Open your themes folder"); folder.detail = QStringLiteral("~/.config/relay/themes");
+            folder.run = [this] {
+                const QString dir = QDir(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation))
+                                        .absoluteFilePath(QStringLiteral("relay/themes"));
+                QDir().mkpath(dir);
+                QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+                notice(dir, 8000);
+            };
+            items << folder;
+            PaletteItem logs; logs.key = QStringLiteral("logs.open"); logs.section = app;
+            logs.label = QStringLiteral("Open the log folder");
+            logs.detail = relay::log::directory().isEmpty() ? QStringLiteral("No writable data directory") : relay::log::directory();
+            logs.aliases = QStringLiteral("log logs diagnostics debug troubleshoot relay.log worker.log");
+            logs.run = [this] {
+                const QString dir = relay::log::directory();
+                if (dir.isEmpty()) { notice(QStringLiteral("No writable data directory for logs."), 6000); return; }
+                QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+                notice(dir, 8000);
+            };
+            items << logs;
+            PaletteItem hints; hints.key = QStringLiteral("hints.reset"); hints.section = app;
+            hints.label = QStringLiteral("Reset shortcut hints"); hints.detail = QStringLiteral("Show every tip again");
+            hints.run = [this] {
+                relay::ShortcutHints::instance().resetAll();
+                notice(QStringLiteral("Shortcut hints reset."), 4000);
+            };
+            items << hints;
+        }
+
+        // "Shortcut hints", "Shortcut preset" and "Shortcuts inside programs" are rows in Options.
         items << actionItem(keys, QStringLiteral("Edit keyboard shortcuts…"), Keymap::instance().path(), QStringLiteral("keybindings.edit"));
         items << actionItem(keys, QStringLiteral("Reload keyboard shortcuts"), QString(), QStringLiteral("keybindings.reload"));
         if (Keymap::instance().hasOverrides()) {
@@ -1965,7 +2004,7 @@ private:
     }
 
     void openAgentsMenu() {
-        openSettingsPane(relay::SettingsPane::actionsTabId());
+        openSettingsPane(relay::SettingsPane::Mode::Actions);
         if (ToolPane *tool = settingsPaneIn(m_tabs->currentWidget())) tool->settings()->scrollToGroup(QStringLiteral("menu:agents"));
     }
 

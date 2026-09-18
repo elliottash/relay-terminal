@@ -399,7 +399,6 @@ QLabel#toast { background: @raised; color: @text; border: 1px solid @accentBorde
 /* Settings pane (src/SettingsPane.cpp): a full pane, engraved headers like the Switchboard's,
    rows that light up under the pointer and under the keyboard highlight. */
 QWidget#settingsPane { background: @bg; }
-QLabel#settingsTitle { color: @muted; font-family: "@mono"; font-size: 8pt; font-weight: 600; letter-spacing: 1px; padding: 0 4px; }
 QLineEdit#settingsSearch { padding: 6px 10px; font-size: 10.5pt; }
 QTabBar#settingsTabs::tab { padding: 4px 10px; margin: 0 2px 0 0; }
 QScrollArea#settingsPage, QWidget#settingsPageBody { background: transparent; border: none; }

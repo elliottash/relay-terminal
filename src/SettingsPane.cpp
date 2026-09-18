@@ -71,9 +71,9 @@ constexpr int kMaxResults = 60;
 
 // ----- construction ------------------------------------------------------------------------------
 
-SettingsPane::SettingsPane(std::function<QList<SettingsSection>()> sections,
+SettingsPane::SettingsPane(Mode mode, std::function<QList<SettingsSection>()> sections,
                            std::function<QList<ActionItem>()> actions, QWidget *parent)
-    : QWidget(parent), m_sections(std::move(sections)), m_actions(std::move(actions)) {
+    : QWidget(parent), m_sections(std::move(sections)), m_actions(std::move(actions)), m_mode(mode) {
     setObjectName(QStringLiteral("settingsPane"));
     setAttribute(Qt::WA_StyledBackground);
     setFocusPolicy(Qt::StrongFocus);
@@ -83,14 +83,10 @@ SettingsPane::SettingsPane(std::function<QList<SettingsSection>()> sections,
 
     auto *header = new QHBoxLayout;
     header->setSpacing(8);
-    auto *title = new QLabel(QStringLiteral("SETTINGS"));
-    title->setObjectName(QStringLiteral("settingsTitle"));
-    header->addWidget(title);
+    // No title of its own: the pane's header names it (Actions / Options), as it names every pane.
     m_search = new QLineEdit;
     m_search->setObjectName(QStringLiteral("settingsSearch"));
-    m_search->setPlaceholderText(QStringLiteral("Search settings and actions"));
     m_search->setClearButtonEnabled(true);
-    m_search->setAccessibleName(QStringLiteral("Search settings and actions"));
     m_search->installEventFilter(this);
     header->addWidget(m_search, 1);
     // No close button of its own: the pane's × in the chrome row closes it, as it closes every
@@ -111,10 +107,11 @@ SettingsPane::SettingsPane(std::function<QList<SettingsSection>()> sections,
     m_pages = new QStackedWidget;
     layout->addWidget(m_pages, 1);
 
-    m_footer = new QLabel(QStringLiteral("↑ ↓ move   ·   Enter changes or runs   ·   ← → tabs   ·   Esc closes"));
+    m_footer = new QLabel;
     m_footer->setObjectName(QStringLiteral("settingsFooter"));
     m_footer->setTextFormat(Qt::PlainText);
     layout->addWidget(m_footer);
+    applyMode();
 
     connect(m_tabs, &QTabBar::currentChanged, this, [this](int index) {
         if (m_building || index < 0) return;
@@ -139,6 +136,55 @@ SettingsPane::SettingsPane(std::function<QList<SettingsSection>()> sections,
     build();
 }
 
+// ----- mode -----------------------------------------------------------------------------------------
+
+// The words that say which pane this is; the rows themselves come from build().
+void SettingsPane::applyMode() {
+    const bool actions = m_mode == Mode::Actions;
+    const QString hint = actions ? QStringLiteral("Search actions") : QStringLiteral("Search options");
+    m_search->setPlaceholderText(hint);
+    m_search->setAccessibleName(hint);
+    m_tabs->setVisible(!actions);   // Actions is one list; there is nothing to tab between
+    m_footer->setText(actions ? QStringLiteral("↑ ↓ move   ·   Enter runs   ·   Esc closes")
+                              : QStringLiteral("↑ ↓ move   ·   Enter changes   ·   ← → tabs   ·   Esc closes"));
+}
+
+void SettingsPane::setMode(Mode mode) {
+    if (mode == m_mode) return;
+    m_mode = mode;
+    m_wantedTab.clear();
+    {
+        const QSignalBlocker blocker(m_search);
+        m_search->clear();
+    }
+    applyMode();
+    build();
+    if (onModeChanged) onModeChanged();
+}
+
+void SettingsPane::revealOption(const QString &sectionId, const QString &rowId) {
+    setMode(Mode::Options);
+    {
+        const QSignalBlocker blocker(m_search);
+        m_search->clear();
+    }
+    showTab(sectionId);
+    const int index = std::max(0, m_tabs->currentIndex());
+    m_pages->setCurrentIndex(index);
+    m_rows = m_pageRows.value(m_pages->widget(index));
+    setCurrent(-1, false);
+    for (int i = 0; i < m_rows.size(); ++i) {
+        if (m_rows[i].id != rowId) continue;
+        setCurrent(i, false);
+        // The page may never have been shown, so its layout settles on the next pass.
+        QPointer<QWidget> row(m_rows[i].widget);
+        QTimer::singleShot(0, this, [this, row] {
+            if (QScrollArea *area = currentScroll(); area && row) area->ensureWidgetVisible(row, 0, 24);
+        });
+        break;
+    }
+}
+
 // ----- catalog → widgets -------------------------------------------------------------------------
 
 void SettingsPane::build() {
@@ -160,7 +206,29 @@ void SettingsPane::build() {
         while (m_tabs->count() > 0) m_tabs->removeTab(0);
     }
     m_tabIds.clear();
+    if (m_mode == Mode::Actions) {
+        // One page, no tabs: the list. The option sections stay cached for the search.
+        m_tabIds << actionsTabId();
+        m_tabs->addTab(QStringLiteral("Actions"));
+        auto *scroll = new QScrollArea;
+        scroll->setObjectName(QStringLiteral("settingsPage"));
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        auto *body = new QWidget;
+        body->setObjectName(QStringLiteral("settingsPageBody"));
+        body->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        auto *list = new QVBoxLayout(body);
+        list->setContentsMargins(2, 0, 8, 12);
+        list->setSpacing(2);
+        addActionsList(list);
+        list->addStretch(1);
+        scroll->setWidget(body);
+        m_pages->addWidget(scroll);
+        m_pageRows.insert(scroll, m_rows);
+    }
     for (const SettingsSection &section : std::as_const(m_sectionCache)) {
+        if (m_mode == Mode::Actions) break;
         m_tabIds << section.id;
         m_tabs->addTab(section.title);
         auto *scroll = new QScrollArea;
@@ -213,7 +281,6 @@ void SettingsPane::buildPage(QWidget *page, const SettingsSection &section) {
         layout->addSpacing(6);
     }
     for (const SettingRow &row : section.rows) layout->addWidget(settingRow(row));
-    if (section.id == actionsTabId()) addActionsList(layout);
     layout->addStretch(1);
 }
 
@@ -223,10 +290,10 @@ QWidget *SettingsPane::groupHeader(const QString &text, const QString &key) {
     return label;
 }
 
-// The actions with their keys, under the shortcut settings: Recent first, then each section in
-// the order the caller listed them, submenus opened inline under their own header.
+// The actions with their keys: Recent first, then each section in the order the caller listed
+// them, submenus opened inline under their own header.
 void SettingsPane::addActionsList(QVBoxLayout *into) {
-    into->addSpacing(8);
+    into->addSpacing(6);
     const QStringList recent = QSettings().value(QStringLiteral("palette/recent")).toStringList();
     QList<ActionItem> recentItems;
     for (const QString &key : recent) {
@@ -391,6 +458,24 @@ QWidget *SettingsPane::actionRow(const ActionItem &item, const QString &prefix) 
     return line;
 }
 
+// An option, found from the Actions pane: not the control itself (options are changed in Options)
+// but a row that takes you to it.
+QWidget *SettingsPane::optionJumpRow(const SettingsSection &section, const SettingRow &row) {
+    ActionItem item;
+    item.key = QStringLiteral("option-jump:") + section.id + QLatin1Char('/') + row.id;
+    item.label = QStringLiteral("Options › %1 › %2").arg(section.title, row.label);
+    item.detail = row.detail;
+    QWidget *line = actionRow(item);
+    Row &entry = m_rows.last();
+    entry.activate = [this, sectionId = section.id, rowId = row.id] {
+        // Queued: the row that was clicked is deleted by the rebuild this starts.
+        QMetaObject::invokeMethod(this, [this, sectionId, rowId] { revealOption(sectionId, rowId); focusSearch(); },
+                                  Qt::QueuedConnection);
+    };
+    static_cast<ClickRow *>(line)->onClick = entry.activate;
+    return line;
+}
+
 // ----- search -------------------------------------------------------------------------------------
 
 int SettingsPane::fuzzyScore(const QString &needle, const QString &haystack) {
@@ -406,22 +491,41 @@ int SettingsPane::fuzzyScore(const QString &needle, const QString &haystack) {
         if (first < 0) first = pos;
         last = pos++;
     }
+    // Letters scattered across a whole sentence are not a match: "reset" is not in "Reasoning
+    // effort", nor "theme" in "Cards, threads, plans and project memory". An abbreviation
+    // ("thm", "nwpn") still fits, because its letters sit close together.
+    if (last - first >= 2 * n.size() + 2) return 0;
     return std::max(1, 5000 - (last - first) * 10 - first);
 }
 
-// One flat list, best match first: settings rows and actions side by side, each row saying
-// where it lives ("General · …"), because the person typed a word, not a section.
+// One flat list, best match first, each row saying where it lives ("General · …"), because the
+// person typed a word, not a section. Both catalogs are searched in either mode so the search
+// never dead-ends, but the pane's own kind comes first: the other kind's scores are halved, and
+// in Actions an option is a row that jumps to it rather than the control.
 void SettingsPane::buildResults(const QString &needle) {
-    struct Hit { int score; int order; SettingRow row; ActionItem action; QString where; bool isAction; };
+    struct Hit { int score; int order; SettingRow row; ActionItem action; QString where; bool isAction; SettingsSection section; };
+    const bool actionsMode = m_mode == Mode::Actions;
+    // Each word is matched on its own, against whichever field it fits best, and every word has
+    // to land somewhere: "appearance theme" and "theme appearance" both find Appearance › Theme.
+    const QStringList words = needle.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    auto scoreOf = [&words](const QString &label, const QString &detail, const QString &where, const QString &aliases) {
+        int total = 0;
+        for (const QString &word : words) {
+            const int best = std::max({fuzzyScore(word, label), fuzzyScore(word, detail) / 3, fuzzyScore(word, where) / 4,
+                                       word.size() >= 2 ? fuzzyScore(word, aliases) / 2 : 0});
+            if (best <= 0) return 0;
+            total += best;
+        }
+        return words.isEmpty() ? 0 : total / int(words.size());
+    };
     QList<Hit> hits;
     int order = 0;
     for (const SettingsSection &section : std::as_const(m_sectionCache)) {
         for (const SettingRow &row : section.rows) {
             if (row.kind == SettingRow::Info || row.kind == SettingRow::Heading) continue;
-            const int score = std::max({fuzzyScore(needle, row.label), fuzzyScore(needle, row.detail) / 3,
-                                        fuzzyScore(needle, section.title) / 4,
-                                        needle.size() >= 2 ? fuzzyScore(needle, row.aliases) / 2 : 0});
-            if (score > 0) hits.append({score, order++, row, {}, section.title, false});
+            const int score = scoreOf(row.label, row.detail, section.title, row.aliases);
+            if (score > 0) hits.append({actionsMode ? score / 2 : score, order++, row, {}, section.title, false,
+                                        actionsMode ? section : SettingsSection()});
         }
     }
     QList<ActionItem> flat;
@@ -434,10 +538,8 @@ void SettingsPane::buildResults(const QString &needle) {
         }
     }
     for (const ActionItem &item : std::as_const(flat)) {
-        const int score = std::max({fuzzyScore(needle, item.label), fuzzyScore(needle, item.detail) / 3,
-                                    fuzzyScore(needle, item.section) / 4,
-                                    needle.size() >= 2 ? fuzzyScore(needle, item.aliases) / 2 : 0});
-        if (score > 0) hits.append({score, order++, {}, item, item.section, true});
+        const int score = scoreOf(item.label, item.detail, item.section, item.aliases);
+        if (score > 0) hits.append({actionsMode ? score : score / 2, order++, {}, item, item.section, true, {}});
     }
     std::stable_sort(hits.begin(), hits.end(), [](const Hit &a, const Hit &b) { return a.score > b.score; });
     if (hits.size() > kMaxResults) hits = hits.mid(0, kMaxResults);
@@ -459,6 +561,8 @@ void SettingsPane::buildResults(const QString &needle) {
             ActionItem item = hit.action;
             item.detail = hit.where + (item.detail.isEmpty() ? QString() : QStringLiteral("  ·  ") + item.detail);
             layout->addWidget(actionRow(item));
+        } else if (actionsMode) {
+            layout->addWidget(optionJumpRow(hit.section, hit.row));
         } else {
             SettingRow row = hit.row;
             row.detail = hit.where + (row.detail.isEmpty() ? QString() : QStringLiteral("  ·  ") + row.detail);
@@ -506,7 +610,7 @@ void SettingsPane::activateCurrent() {
 }
 
 void SettingsPane::switchTab(int delta) {
-    if (m_tabs->count() == 0) return;
+    if (m_tabs->count() < 2) return;
     int index = (m_tabs->currentIndex() + delta) % m_tabs->count();
     if (index < 0) index += m_tabs->count();
     m_tabs->setCurrentIndex(index);
@@ -599,7 +703,7 @@ void SettingsPane::focusSearch() {
 }
 
 void SettingsPane::scrollToGroup(const QString &key) {
-    showTab(actionsTabId());
+    setMode(Mode::Actions);
     QWidget *header = m_groups.value(key);
     if (!header) return;
     QScrollArea *area = currentScroll();

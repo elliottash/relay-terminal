@@ -38,7 +38,7 @@ import uuid
 BASE_URL = "https://openrouter.ai/api/v1"
 PRESET = "openrouter"
 DEFAULT_MODEL = "google/gemini-3.5-flash-lite"
-# Offered in Settings › Voice. The GUI lists the same three ids; tests/test_voice.py checks that
+# Offered in Options › Voice. The GUI lists the same three ids; tests/test_voice.py checks that
 # whichever one is chosen still routes to an endpoint this module knows how to call.
 MODELS = {
     "google/gemini-3.5-flash-lite": "Gemini 3.5 Flash-Lite (default, cheapest accurate)",

@@ -1123,7 +1123,7 @@ class Agent:
             if main_reads_images:
                 return None
             text = (f"{self.config.model} cannot read images and no vision model is set. "
-                    "Choose one under Settings › Models › Vision model, or switch this pane to a model "
+                    "Choose one under Options › Models › Vision model, or switch this pane to a model "
                     "that reads images. Nothing was sent to the provider.")
             self.emit({"event": "vision_unavailable", "turn_id": turn_id, "model": self.config.model,
                        "images": len(pictures), "text": text})

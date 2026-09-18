@@ -21,7 +21,7 @@ leaves F2–F8 to plugins; less uses none. That is the budget.
 
 Taken today: **F1** shortcuts list (dropped in the VS Code preset), **F12** native terminal input
 (all four presets, and drop-down terminals such as Yakuake grab it globally), **F9** one of three
-choices for the voice push-to-talk hold key (Settings › Voice; the default is Right Alt).
+choices for the voice push-to-talk hold key (Options › Voice; the default is Right Alt).
 
 ## What I would assign
 
@@ -32,7 +32,7 @@ As *alternates*, never replacing the Ctrl chords people already have:
 | F2 | `agent.thinkingPanel` — reasoning panel (Alt+R) | mc rename, nano write-out |
 | F3 | `agent.requests` — tasks panel (Ctrl+Shift+K) | mc view, nano find |
 | F4 | `files.explorer` — explorer pane (Ctrl+B) | mc edit, nano replace |
-| F6 | `palette.open` — Actions, in the Settings pane (Ctrl+Shift+A) | mc move |
+| F6 | `palette.open` — the Actions pane (Ctrl+Shift+A) | mc move |
 
 One row of keys, one idea: each shows or hides a panel, in the order the panels sit in the window.
 F12 already fits — native input is a toggle.

@@ -266,7 +266,7 @@ private:
         add("agent.modelRoles", "agent", "Model roles: default provider and the Main / Flash / Lite models", {});
         // O for options (owner, 2026-09-18). No plain Ctrl+O twin: one key per surface, and Ctrl+Shift
         // is the one a program cannot swallow. Ctrl+, stays as the key other apps taught.
-        add("app.settings", "window", "Options: the Settings pane, General tab (again to close it)",
+        add("app.settings", "window", "Options: what persists, a tab per section (again to close it)",
             {QStringLiteral("Ctrl+Shift+O"), QStringLiteral("Ctrl+,")});
         add("agent.flashAgent", "agent", "Switch this pane between the Main agent and the Flash agent", {QStringLiteral("Alt+F")});   // model roles
         add("input.modeAuto", "agent", "Input mode: auto", {});
@@ -310,7 +310,7 @@ private:
         // Key_Question on a US layout and as Key_Slash on others and on the keypad, with Shift
         // held either way, so all of them are bound: Ctrl+Shift+? reaches Ctrl+? and Ctrl+Shift+/
         // on a Key_Slash layout reaches Ctrl+/ through match()'s shifted-symbol fallback.
-        add("help.shortcuts", "palette", "Settings › Actions: every action and the keys it answers to",
+        add("help.shortcuts", "palette", "Actions: every action and the keys it answers to",
             {QStringLiteral("Ctrl+?"), QStringLiteral("Ctrl+Shift+/"), QStringLiteral("Ctrl+/"), QStringLiteral("F1")});
         add("keybindings.edit", "terminal", "Edit keyboard shortcuts", {});
         add("keybindings.reload", "terminal", "Reload keyboard shortcuts", {});

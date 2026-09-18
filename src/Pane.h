@@ -1760,7 +1760,7 @@ private:
                 refreshPickers();   // put the box back on the pane's model: the gear is not a choice
                 openRolesDialog();
                 hint(QStringLiteral("model.options.mouse"),
-                     QStringLiteral("Tip: Actions › Settings › Models opens the same modals"));
+                     QStringLiteral("Tip: Options › Models opens the same modals"));
                 return;
             }
             if (data.startsWith(QStringLiteral("role:"))) {
@@ -2486,7 +2486,7 @@ public:
         }
         if (!m_thinking || m_thinkingView->document()->isEmpty()) {
             toast(showThinking() ? QStringLiteral("No reasoning yet in this pane")
-                                 : QStringLiteral("Show thinking is off · Settings › General turns it on"));
+                                 : QStringLiteral("Show thinking is off · Options › General turns it on"));
             return;
         }
         // Second in line for room, behind the queue strip — the way placeThinking() measures it.
@@ -3005,7 +3005,7 @@ public:
 
 private:
     void startVoice(bool hold) {
-        if (!voiceEnabled()) { status(QStringLiteral("Voice transcription is off (Settings › Voice).")); return; }
+        if (!voiceEnabled()) { status(QStringLiteral("Voice transcription is off (Options › Voice).")); return; }
         if (m_native) { status(QStringLiteral("Voice types into the prompt box; leave native input first.")); return; }
         if (m_secretMode) { status(QStringLiteral("Not while a password prompt is open.")); return; }
         if (m_voiceTranscribing) { status(QStringLiteral("Still transcribing the last clip…")); return; }
@@ -4144,7 +4144,7 @@ private:
                 status(QStringLiteral("Model: %1.").arg(stored->second));
                 return;
             }
-            status(QStringLiteral("No stored %1 key. Add one in Settings › Models › API keys….")
+            status(QStringLiteral("No stored %1 key. Add one in Options › Models › API keys….")
                        .arg(glm ? QStringLiteral("GLM") : QStringLiteral("Kimi")));
         } else if (name == QStringLiteral("effort")) {
             if (efforts().contains(args.toLower())) setEffort(args.toLower());
@@ -5097,7 +5097,7 @@ private:
             if (m_rolesDialog) m_rolesDialog->setPresets(m_presets, m_tierCatalog, m_roleActions);
             changed();
             if (m_stored.isEmpty()) {
-                status(QStringLiteral("No stored provider keys. Open Settings › Models › API keys… to add one or import from Warp."));
+                status(QStringLiteral("No stored provider keys. Open Options › Models › API keys… to add one or import from Warp."));
                 return;
             }
             if (!m_configured && !m_configuring) {
@@ -5324,7 +5324,7 @@ private:
             // Refused, not failed: the `error` that follows carries the same text, so only the
             // "what to do about it" line is added here.
             ensureLineStart();
-            printInline(QStringLiteral("🖼 No vision model · Settings › Models › Vision model\n"), Ink::Error);
+            printInline(QStringLiteral("🖼 No vision model · Options › Models › Vision model\n"), Ink::Error);
         } else if (type == QStringLiteral("provider_retry")) {
             // The model went silent; the worker is retrying this turn once. Say so in the transcript.
             ensureLineStart();
