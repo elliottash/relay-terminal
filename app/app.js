@@ -373,14 +373,23 @@ function ensurePaneView() {
   // The terminal belongs inside the view, above the reasoning and the queue, exactly as the
   // desktop pane stacks them. It keeps working where it is if the view is never mounted.
   paneView.terminalSlot.append($('terminal-pane'));
+  // The view has the pane's own prompt box, with the desktop's placeholder, its mode chip and its
+  // three-way send. The client's older one would be a second composer under it saying the same
+  // thing, so it stands down while the view is up (the voice button moves, see below).
+  $('composer').hidden = true;
+  // …except the microphone, which is the client's own and has no equivalent in the pane: it moves
+  // into the strip beside the model, so voice still works while the view is up.
+  paneView.hostSlot.append($('composer-mic'));
   return paneView;
 }
 
 function closePaneView() {
   if (!paneView) return;
   $('screen-thread').insertBefore($('terminal-pane'), $('thread-note'));   // back where it was
+  $('composer').insertBefore($('composer-mic'), $('composer-stop'));   // back where it was
   paneView.destroy();
   paneView = null;
+  $('composer').hidden = false;
   $('pane-view').hidden = true;
   $('pane-view').replaceChildren();
 }

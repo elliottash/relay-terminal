@@ -223,13 +223,16 @@ export function mountPane(container, options = {}) {
   const modelChevron = el('span', 'rp-model-chevron', '▾');
   modelChevron.setAttribute('aria-hidden', 'true');
   modelWrap.append(model, modelChevron);
+  // Where the host puts a control of its own (the client's microphone), so its buttons sit in the
+  // pane's strip instead of a second bar under it. Empty and invisible until the host fills it.
+  const hostSlot = el('span', 'rp-host-slot');
   const sendGroup = el('span', 'rp-send-group');
   const sendButton = button('rp-send', '', 'Send');
   sendButton.append(svgIcon(ICON_SEND));
   const sendMenuButton = button('rp-send-menu', '▾', 'When to send');
   sendMenuButton.setAttribute('aria-haspopup', 'menu');
   sendGroup.append(sendButton, sendMenuButton);
-  strip.append(folderChip, sessionsButton, spacer, clockChip, contextChip, modelWrap, sendGroup);
+  strip.append(folderChip, sessionsButton, spacer, clockChip, contextChip, modelWrap, hostSlot, sendGroup);
   composer.append(line, strip);
 
   // ---- sheets: row actions, the send menu, the session manager -----------------------------
@@ -866,6 +869,7 @@ export function mountPane(container, options = {}) {
   return {
     element: root,
     terminalSlot,
+    hostSlot,
 
     update(message) {
       const next = obj(message);

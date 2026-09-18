@@ -250,6 +250,8 @@
 }
 .rp-composer[data-mode="agent"] .rp-input { caret-color: var(--rt-agent); }
 .rp-input::placeholder { color: var(--rt-muted); opacity: 1; }
+.rp-host-slot { display: inline-flex; align-items: center; gap: 6px; }
+.rp-host-slot:empty { display: none; }
 .rp-input::selection { background: var(--rt-selection); color: var(--rt-selection-text); }
 
 .rp-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }

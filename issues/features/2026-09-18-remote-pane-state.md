@@ -71,6 +71,15 @@ sessions in the actual relay terminal app on my laptop. sphinxpad should be reac
 - [ ] Relay-to-Relay: the owner's laptop pairs as a full device and its Relay draws a remote pane
       from the same `pane_state` plus screen frames (after #W5N2's transport work settles)
 
+## Live evidence
+
+`docs/qa_evidence/2026-09-18-web-pane-view/live.sh` runs the whole path offline: a real Relay under
+Xvfb against the streaming fake model, in an isolated HOME and XDG profile, shares a pane to a real
+headless browser running the real client. The browser pairs, opens the pane, and the view draws the
+desktop's own rows. With the desktop's message waiting for the next tool call, the phone's × on that
+row withdraws it: the row goes from both screens, and the model — asked again after the tool call,
+which is the step a waiting message would have ridden on — never received it.
+
 ## Notes
 
 Found by the work, and fixed here rather than listed: `app/app.js` called an `append()` that never
