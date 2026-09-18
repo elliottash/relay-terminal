@@ -899,8 +899,12 @@ public:
         }
         return tiers;
     }
+    // Off by default (owner report, 2026-09-18: "it keeps changing from glm 5.3 to glm 5.3 flash").
+    // A pane that quietly answers on a smaller model than the one the window says it is using is a
+    // surprise, not a saving; the fast agent is a choice per pane (the model chip, or the toggle in
+    // Settings › Agent) rather than what every pane after the first does by itself.
     static bool newPanesUseFastAgent() {
-        return QSettings().value(QStringLiteral("agent/panes_fast"), true).toBool();
+        return QSettings().value(QStringLiteral("agent/panes_fast"), false).toBool();
     }
     QString agentRole() const { return m_agentRole; }
     // The model a role resolves to, as last reported by the worker.
@@ -5236,15 +5240,14 @@ private:
         } else {
             // "agent", or a legacy "ambiguous" decision: the agent is the default for invalid input.
             // Show why non-command input went to the agent, e.g. "command not found: foo" — but only
-            // when the named word could have been a mistyped command. "35 * 30" routes here as
-            // "command not found: 35", and printing that under the prompt reads as the failure of a
-            // command the user never meant to run, so a word with no letters stays quiet
-            // (owner report, 2026-09-18).
+            // when the line reads as an attempt at a command. Under a plain request the note reads as
+            // the failure of a command the user never meant to run ("symlink from ~/projects to
+            // here", answered fine, with "command not found: symlink" under it — owner report,
+            // 2026-09-18). Which lines qualify is router.explain_invalid's call, next to the rest of
+            // the language rules; an older worker that does not send it keeps the note.
             QString why = !decision.value(QStringLiteral("valid")).toBool(true) && mode != QStringLiteral("agent")
+                              && decision.value(QStringLiteral("explain_invalid")).toBool(true)
                 ? decision.value(QStringLiteral("invalid_reason")).toString() : QString();
-            static const QString notFound = QStringLiteral("command not found: ");
-            if (why.startsWith(notFound) && !why.mid(notFound.size()).contains(QRegularExpression(QStringLiteral("[A-Za-z]"))))
-                why.clear();
             // Wrong-mode hints: remember a runnable command submitted in agent mode, so a failing
             // run_command of the same text can suggest the terminal (see the tool_result handler).
             const QString shellText = mode == QStringLiteral("agent")
@@ -9661,7 +9664,7 @@ private:
             });
         }
         models.rows << toggleRow(QStringLiteral("agent/panes_fast"), QStringLiteral("New panes use the fast agent"),
-                                 QStringLiteral("The first pane of a window keeps the main agent"), true);
+                                 QStringLiteral("Off: every pane starts on the main agent. On: the first pane of a window keeps it"), false);
         models.rows << numberRow(QStringLiteral("provider/max_tokens"), QStringLiteral("Output token limit"),
                                  QStringLiteral("Per model call; applies to the next conversation"), 8192, 256, 32768);
         models.rows << buttonRow(QStringLiteral("agent.provider"), QStringLiteral("Advanced provider settings"),

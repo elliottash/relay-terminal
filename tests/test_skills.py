@@ -72,7 +72,31 @@ class IndexTests(SkillFixture):
             write(many / f's{i:03}' / 'SKILL.md', f'---\nname: s{i}\ndescription: {"x" * 300}\n---\n')
         big = SkillIndex.load([many]).prompt_section()
         self.assertLessEqual(len(big.encode('utf-8')), skills.MAX_PROMPT_BYTES)
-        self.assertIn('more skills not listed', big)
+        # 120 long descriptions cannot fit, so the tail names them instead (owner report,
+        # 2026-09-18: a skill the user asked for by name was reported missing because its
+        # description did not fit).
+        self.assertIn('also loadable by name', big)
+        self.assertIn('s119', big)
+        # Only when the names themselves overflow does the model have to ask.
+        wordy = Path(self.temp.name) / 'wordy'
+        for i in range(120):
+            name = f'{"long-skill-name-" * 5}{i:03}'
+            write(wordy / name / 'SKILL.md', f'---\nname: {name}\ndescription: {"x" * 300}\n---\n')
+        crowded = SkillIndex.load([wordy]).prompt_section()
+        self.assertLessEqual(len(crowded.encode('utf-8')), skills.MAX_PROMPT_BYTES)
+        self.assertIn('ask the user for their names', crowded)
+
+    def test_every_skill_is_at_least_named(self):
+        # A library whose descriptions overflow the budget but whose names do not: every name
+        # reaches the prompt, so load_skill resolves anything the user asks for.
+        many = Path(self.temp.name) / 'named'
+        for i in range(60):
+            write(many / f's{i:03}' / 'SKILL.md', f'---\nname: s{i}\ndescription: {"x" * 200}\n---\n')
+        index = SkillIndex.load([many])
+        section = index.prompt_section()
+        self.assertLessEqual(len(section.encode('utf-8')), skills.MAX_PROMPT_BYTES)
+        for name in index.skills:
+            self.assertIn(name, section)
 
     def test_empty_directory_gives_no_section(self):
         self.assertEqual(SkillIndex.load([Path(self.temp.name) / 'missing']).prompt_section(), '')

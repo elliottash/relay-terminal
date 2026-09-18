@@ -176,7 +176,8 @@ nothing there needs the mouse.
   subagents, the Switchboard agent, the fast agent, chores, vision and route assist. Each role is
   "same as the main agent" until you pick one, and a role whose key is missing quietly falls back to
   the main agent. The fast agent has a default per provider (GLM-5.3 Flash, DeepSeek V4.1 Flash,
-  Kimi K2.7 Code HighSpeed). New panes start on the fast agent (the first pane keeps the main agent);
+  Kimi K2.7 Code HighSpeed). Every pane starts on the main agent; Settings › Agent › "New panes use
+  the fast agent" makes every pane after a window's first one start on the fast agent instead;
   turn and an empty prompt, prints a short recap (Settings › General turns it off).
 - **Model roles: Main, Flash, Lite.** Settings › Models › **Model roles…** (also the ⚙ at the bottom
   of the model box, or Actions › Model roles…) asks for one thing: your default provider. Everything
@@ -190,7 +191,8 @@ nothing there needs the mouse.
   Command routing is pinned to `google/gemini-3.5-flash-lite` on purpose: routing has a sub-second
   budget and that model measures 0.5–0.6 s against 2.3–4.9 s for Gemini 3.8 Flash.
   A tier whose provider has no key steps down to the next one and says so inline; nothing ever fails
-  because a key is missing. New panes start on the fast agent (the first pane keeps the main agent);
+  because a key is missing. Every pane starts on the main agent unless Settings › Agent › "New panes
+  use the fast agent" is on, and then every pane after a window's first one starts on the fast agent.
   Alt+F, or Actions › Fast agent for this pane, switches a pane either way without losing the
   conversation.
 - **Plan mode.** Shift+Tab in the prompt box (or `/plan`) shows a PLAN chip: the agent

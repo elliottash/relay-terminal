@@ -148,6 +148,23 @@ class ValidityTests(unittest.TestCase):
         # A letter-bearing glob in command position stays un-decidable, so still runnable.
         self.assertValid("p* --version")
 
+    def test_only_a_command_attempt_explains_itself(self):
+        # Owner report 2026-09-18: "symlink from ~/projects to here" was answered by the agent, with
+        # "command not found: symlink" printed under it, which reads as a failed command. The note is
+        # for a mistyped command, so plain English keeps quiet.
+        for text in ["symlink from ~/projects to here", "add a note about this", "commit this",
+                     "deploy the site", "tell ryan about the meeting", "35 * 30"]:
+            result = self.check(text)
+            self.assertEqual(result.route, "agent", text)
+            self.assertFalse(result.explain_invalid, text)
+        for text in ["nonexistentcmd123", "gti status", "docekr ps -a", "pyton script.py",
+                     "ls | nonexistentcmd123"]:
+            result = self.check(text)
+            self.assertEqual(result.route, "agent", text)
+            self.assertTrue(result.explain_invalid, text)
+        # A syntax error is about a command however it is worded, so it is always explained.
+        self.assertTrue(self.check("don't break the build").explain_invalid)
+
     def test_syntax_errors(self):
         result = self.assertInvalid("don't break the build", "syntax error:")
         self.assertFalse(result.syntax_ok)

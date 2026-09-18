@@ -49,6 +49,11 @@ class Decision:
     # treats valid text without it as a shell command. High confidence only
     # (_reads_like_request), so typos and real commands never trigger it.
     agent_signal: bool = False
+    # May the GUI print invalid_reason under a line auto-routed to the agent? The note explains a
+    # mistyped command ("gti status" -> command not found: gti); under a plain request it reads as
+    # the failure of a command the user never meant to run (owner report, 2026-09-18:
+    # "symlink from ~/projects to here" answered fine, with "command not found: symlink" under it).
+    explain_invalid: bool = True
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -473,6 +478,43 @@ def assist_signals(text: str, cwd: str | None = None) -> tuple[int, list[str], s
     return score, reasons, first
 
 
+# Words no command takes as its first operand. A second word from this set means the line is a
+# sentence about something, not an invocation with an argument.
+SENTENCE_LEAD = frozenset("""
+a an the this that these those my our your its from to into onto with without for about
+at here there please and or of in on over under again back now then some any every
+""".split())
+
+
+def explain_invalid(text: str, reason: str) -> bool:
+    """Whether the GUI should print `reason` under a line auto-routed to the agent.
+
+    True for what reads as an attempt at a command: one bare word, flags, shell operators, or a
+    two-word invocation. False for plain English, where the missing "command" is just the first
+    word of a sentence and naming it reads as an error the user caused.
+    """
+    prefix = "command not found: "
+    if not reason.startswith(prefix):
+        return bool(reason)                     # a syntax error is about a command either way
+    word = reason[len(prefix):]
+    if not any(ch.isalpha() for ch in word):
+        return False                            # "35 * 30" -> "command not found: 35"
+    trimmed = text.strip()
+    if "\n" in trimmed or SHELLISH.search(trimmed) or GLOBBISH.search(trimmed) or '"' in trimmed:
+        return True
+    try:
+        words = shlex.split(trimmed, posix=True)
+    except ValueError:
+        return True
+    if len(words) <= 1:
+        return True
+    if any(a.startswith(("-", "+")) for a in words[1:]):
+        return True
+    if len(words) == 2:
+        return words[1].strip("?.,!:").lower() not in SENTENCE_LEAD
+    return False
+
+
 def _first_word_reason(text: str, known: set[str], path: str, cwd: str) -> str:
     try:
         words = shlex.split(text, posix=True)
@@ -587,4 +629,5 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
                                                   else " · best guess: shell command"),
                             ok, error, valid, reason, True, why)
         return Decision("shell", text, "Runnable shell command.", ok, error, valid, reason)
-    return Decision("agent", text, f"Not a runnable command ({reason}) · sent to the agent", ok, error, valid, reason)
+    return Decision("agent", text, f"Not a runnable command ({reason}) · sent to the agent", ok, error, valid, reason,
+                    explain_invalid=explain_invalid(text, reason))
