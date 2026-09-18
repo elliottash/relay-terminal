@@ -593,9 +593,16 @@ protected:
         // click; only a bare arrow acts, and everything else is passed on untouched. Which widget
         // has the keyboard does not matter: with no focus at all the key reaches the window itself,
         // and the arrow still places the pane (see #4PW5).
+        // A click on the "which side?" prompt's own arrow buttons (#803C) is theirs to handle.
         if (m_placement.armed(m_placementClock.elapsed())
             && (event->type() == QEvent::KeyPress || event->type() == QEvent::MouseButtonPress)
-            && [&] { auto *w = qobject_cast<QWidget *>(object); return !w || w->window() == this; }()) {
+            && [&] { auto *w = qobject_cast<QWidget *>(object); return !w || w->window() == this; }()
+            && !(event->type() == QEvent::MouseButtonPress && m_placementPrompt && [&] {
+                   // Asked of the point, not the receiver: the press reaches this filter through
+                   // the QWindow first, which is not a widget at all.
+                   QWidget *hit = QApplication::widgetAt(static_cast<QMouseEvent *>(event)->globalPos());
+                   return hit && (hit == m_placementPrompt || m_placementPrompt->isAncestorOf(hit));
+               }())) {
             using Placement = relay::panes::PlacementWindow;
             const auto *key = event->type() == QEvent::KeyPress ? static_cast<QKeyEvent *>(event) : nullptr;
             const Placement::Response response =
@@ -603,11 +610,15 @@ protected:
                     : m_placement.mousePress(m_placementClock.elapsed());
             if (response.action == Placement::Action::Place) {
                 const auto direction = response.direction;
+                const bool choosing = m_placement.mode() == Placement::Mode::Choose;
                 // Move once the key event has been dealt with: re-parenting panes underneath a
                 // delivery in progress is what made the drag path crash before.
-                QTimer::singleShot(0, this, [this, direction] { placeNewPane(direction); });
+                QTimer::singleShot(0, this, [this, direction, choosing] {
+                    if (choosing) placeChosen(direction); else placeNewPane(direction);
+                });
                 return true;
             }
+            if (response.action == Placement::Action::Cancel) { endPlacement(); return true; }
             if (response.action == Placement::Action::Dismiss) endPlacement();
         }
         if (headerDrag(object, event)) return true;
@@ -806,6 +817,7 @@ private:
         else if (id == QStringLiteral("pane.splitDown")) { splitToward(relay::panes::Direction::Down); hintPlacement(QStringLiteral("↓")); }
         else if (id == QStringLiteral("pane.splitLeft")) { splitToward(relay::panes::Direction::Left); hintPlacement(QStringLiteral("←")); }
         else if (id == QStringLiteral("pane.splitUp")) { splitToward(relay::panes::Direction::Up); hintPlacement(QStringLiteral("↑")); }
+        else if (id == QStringLiteral("pane.choose")) choosePlacement();   // the chrome's one ⊞ button (#803C)
         else if (id == QStringLiteral("pane.focusLeft")) navigate(relay::panes::Direction::Left);
         else if (id == QStringLiteral("pane.focusRight")) navigate(relay::panes::Direction::Right);
         else if (id == QStringLiteral("pane.focusUp")) navigate(relay::panes::Direction::Up);
@@ -3240,6 +3252,98 @@ private:
         m_placementAnchor = nullptr;
         delete m_placementHint.data();   // a passive label: nothing is in the middle of an event on it
         m_placementHint = nullptr;
+        // The prompt's own button may be the one whose click got us here.
+        if (m_placementPrompt) { m_placementPrompt->hide(); m_placementPrompt->deleteLater(); }
+        m_placementPrompt = nullptr;
+    }
+
+    // ----- the chrome's one "new pane" button: which side? (card #803C) --------------------------
+    //
+    // Owner, 2026-09-18: "only have 1 "new pane" button, not 2. when you press it, give a
+    // notification "use arrow keys (arrow icons?) to place new pane"". Nothing is made until the
+    // answer: an arrow key, or a click on one of the prompt's arrows, splits the active pane on
+    // that side through splitToward(), so left and above insert before it. Esc, any other key, a
+    // click elsewhere or ten seconds pass, and nothing happens.
+    void choosePlacement() {
+        QWidget *anchor = m_activeLeaf;
+        if (!anchor) return;
+        endPlacement();
+        qApp->installEventFilter(this);   // to the front, as armPlacement() does
+        m_placementClock.start();
+        m_placement.arm(0, relay::panes::PlacementWindow::Mode::Choose);
+        m_placementAnchor = anchor;
+        showPlacementPrompt(anchor);
+        m_placementTimer.start(int(relay::panes::PlacementWindow::kChooseTimeoutMs) + 20);
+    }
+
+    void placeChosen(relay::panes::Direction direction) {
+        QPointer<QWidget> anchor(m_placementAnchor);
+        endPlacement();
+        if (!anchor || !pageOf(anchor)) return;
+        setActiveLeaf(anchor);
+        splitToward(direction);
+    }
+
+    // A toast-styled card under the pane's button row, right-aligned beneath the ⊞ that opened
+    // it: the words, the four arrows as buttons (the mouse path), and — the first few times, per
+    // WARP.md's hint rule — the key that makes a pane without asking.
+    void showPlacementPrompt(QWidget *anchor) {
+        auto *prompt = new QFrame(this);
+        prompt->setObjectName(QStringLiteral("placementPrompt"));
+        prompt->setAttribute(Qt::WA_StyledBackground);
+        auto *box = new QVBoxLayout(prompt);
+        box->setContentsMargins(12, 6, 8, 6);
+        box->setSpacing(2);
+        auto *row = new QHBoxLayout;
+        row->setSpacing(2);
+        auto *text = new QLabel(QStringLiteral("Use arrow keys to place the new pane"));
+        text->setObjectName(QStringLiteral("placementPromptText"));
+        row->addWidget(text);
+        row->addSpacing(6);
+        using relay::panes::Direction;
+        struct Arrow { const char *glyph, *name, *tip; Direction direction; };
+        static const Arrow arrows[] = {{"←", "left", "New pane to the left", Direction::Left},
+                                       {"↑", "up", "New pane above", Direction::Up},
+                                       {"→", "right", "New pane to the right", Direction::Right},
+                                       {"↓", "down", "New pane below", Direction::Down}};
+        for (const Arrow &a : arrows) {
+            auto *arrow = new QToolButton;
+            arrow->setObjectName(QStringLiteral("paneChromeButton"));
+            arrow->setText(QString::fromUtf8(a.glyph));
+            arrow->setAutoRaise(true);
+            arrow->setFocusPolicy(Qt::NoFocus);   // the keyboard stays where it was, for the arrow keys
+            arrow->setToolTip(QString::fromUtf8(a.tip));
+            arrow->setProperty("placeDirection", QString::fromLatin1(a.name));
+            const Direction d = a.direction;
+            connect(arrow, &QToolButton::clicked, this, [this, d] {
+                QTimer::singleShot(0, this, [this, d] { placeChosen(d); });
+            });
+            row->addWidget(arrow);
+        }
+        box->addLayout(row);
+        const QString keys = Keymap::instance().shortcutText(QStringLiteral("pane.splitRight"));
+        if (!keys.isEmpty() && relay::ShortcutHints::instance().shouldShow(QStringLiteral("pane.choose.mouse"), 3)) {
+            auto *next = new QLabel(QStringLiteral("Next time: %1, then an arrow").arg(keys));
+            next->setObjectName(QStringLiteral("placementPromptHint"));
+            box->addWidget(next);
+        }
+        prompt->ensurePolished();
+        prompt->adjustSize();
+        m_placementPrompt = prompt;
+        placePlacementPrompt(anchor);
+        prompt->show();
+        prompt->raise();
+    }
+
+    void placePlacementPrompt(QWidget *anchor) {
+        if (!m_placementPrompt || !anchor || !isAncestorOf(anchor)) return;
+        const QRect area(anchor->mapTo(this, QPoint(0, 0)), anchor->size());
+        int top = area.top() + 34;
+        if (auto *chrome = chromeOf(anchor); chrome && chrome->isVisible())
+            top = chrome->mapTo(this, QPoint(0, chrome->height())).y() + 4;
+        const QSize size = m_placementPrompt->size();
+        m_placementPrompt->move(std::clamp(area.right() - size.width() - 6, 0, std::max(0, width() - size.width())),
+                                std::clamp(top, 0, std::max(0, height() - size.height())));
     }
 
     void showPlacementHint(QWidget *pane) {
@@ -4134,6 +4238,7 @@ private:
     QHash<QWidget *, QString> m_tabIconKey;
     QPointer<QWidget> m_placementPane, m_placementAnchor;
     QPointer<QLabel> m_placementHint;
+    QPointer<QFrame> m_placementPrompt;   // the ⊞ button's "which side?" (#803C)
     QPointer<QToolButton> m_newTabButton;
     // The last action run from the keyboard and the key that ran it, so an action can name the
     // combination that reached it. Cleared by whoever reads it; a palette run never sets it.

@@ -297,6 +297,50 @@ private Q_SLOTS:
         QCOMPARE(int(window.mousePress(30).action), int(PlacementWindow::Action::None));
     }
 
+    // The chrome's one "New pane" button (#803C): nothing exists yet, so all four arrows make
+    // the pane, Esc cancels and is consumed, and the window waits long enough for the mouse.
+    void chooseModeTakesAllFourArrows() {
+        for (const auto pair : {std::make_pair(int(Qt::Key_Left), Direction::Left),
+                                std::make_pair(int(Qt::Key_Up), Direction::Up),
+                                std::make_pair(int(Qt::Key_Right), Direction::Right),
+                                std::make_pair(int(Qt::Key_Down), Direction::Down)}) {
+            PlacementWindow window;
+            window.arm(0, PlacementWindow::Mode::Choose);
+            QCOMPARE(int(window.mode()), int(PlacementWindow::Mode::Choose));
+            const auto response = window.keyPress(pair.first, Qt::NoModifier, 5000);
+            QCOMPARE(int(response.action), int(PlacementWindow::Action::Place));
+            QCOMPARE(int(response.direction), int(pair.second));
+            QVERIFY(!window.armed(5000));
+        }
+    }
+
+    void chooseModeEscCancelsAndOtherKeysPassThrough() {
+        PlacementWindow window;
+        window.arm(0, PlacementWindow::Mode::Choose);
+        QCOMPARE(int(window.keyPress(Qt::Key_Escape, Qt::NoModifier, 10).action), int(PlacementWindow::Action::Cancel));
+        QVERIFY(!window.armed(10));
+        window.arm(0, PlacementWindow::Mode::Choose);
+        QCOMPARE(int(window.keyPress(Qt::Key_A, Qt::NoModifier, 10).action), int(PlacementWindow::Action::Dismiss));
+        window.arm(0, PlacementWindow::Mode::Choose);
+        QCOMPARE(int(window.keyPress(Qt::Key_Left, Qt::AltModifier, 10).action), int(PlacementWindow::Action::Dismiss));
+        window.arm(0, PlacementWindow::Mode::Choose);
+        QCOMPARE(int(window.mousePress(10).action), int(PlacementWindow::Action::Dismiss));
+        // The key path is unchanged: Esc there closes the window and is passed on.
+        window.arm(0);
+        QCOMPARE(int(window.keyPress(Qt::Key_Escape, Qt::NoModifier, 10).action), int(PlacementWindow::Action::Dismiss));
+    }
+
+    void chooseModeWaitsLongerThanTheKeyPath() {
+        PlacementWindow window;
+        window.arm(0, PlacementWindow::Mode::Choose);
+        QVERIFY(window.armed(PlacementWindow::kTimeoutMs + 1000));
+        QVERIFY(window.armed(PlacementWindow::kChooseTimeoutMs - 1));
+        QVERIFY(!window.armed(PlacementWindow::kChooseTimeoutMs));
+        // Re-arming for the key path goes back to two seconds.
+        window.arm(0);
+        QVERIFY(!window.armed(PlacementWindow::kTimeoutMs));
+    }
+
     void placementCancelClosesTheWindow() {
         PlacementWindow window;
         window.arm(0);

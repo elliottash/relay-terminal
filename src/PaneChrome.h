@@ -513,9 +513,8 @@ private:
 // ----- pane chrome: button row and drag handle -----------------------------------------------
 // A small overlay in each pane's top-right corner. The three a person reaches for — new pane,
 // move to a tab of its own, close — are on screen in every pane at all times (owner, 2026-09-17:
-// buttons that appear only under the mouse are buttons you have to go looking for). Pointing at
-// the pane lifts the row onto its raised tile and adds the two it was hiding: the drag grip and
-// "new pane below". Dragging the grip moves the pane, as does dragging a Pane's header.
+// buttons that appear only under the mouse are buttons you have to go looking for). There is one
+// new-pane button, which asks for a side (card #803C). Dragging a Pane's header moves the pane.
 class PaneChrome final : public QFrame {
 public:
     std::function<void(const QString &action)> onAction;
@@ -528,8 +527,11 @@ public:
         // toggle. Every button is here at all times: the row no longer grows, lifts onto a tile or
         // rearranges itself under the pointer (owner, 2026-09-18). The drag grip is gone with the
         // hover row — pressing anywhere on the header moves the pane.
-        button(row, QStringLiteral("⬓+"), QStringLiteral("pane.splitDown"), QStringLiteral("New pane below"));
-        button(row, QStringLiteral("◫+"), QStringLiteral("pane.splitRight"), QStringLiteral("New pane to the right"));
+        // One "new pane" button, not one per side (owner, 2026-09-18, card #803C): it asks which
+        // side, and an arrow key or one of the prompt's arrow buttons answers. Its tooltip shows
+        // the key that makes a pane without asking (pane.splitRight, then an arrow re-docks it).
+        button(row, QStringLiteral("⊞"), QStringLiteral("pane.choose"), QStringLiteral("New pane — then an arrow picks the side"))
+            ->setProperty("keysFrom", QStringLiteral("pane.splitRight"));
         button(row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
         button(row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
         // The header gives up exactly this much room for good, so the title and the folder line
@@ -639,7 +641,8 @@ protected:
 public:
     void refreshTooltips() {
         for (auto *b : findChildren<QToolButton *>()) {
-            const QString keys = Keymap::instance().shortcutText(b->property("action").toString());
+            const QString keysFrom = b->property("keysFrom").toString();
+            const QString keys = Keymap::instance().shortcutText(keysFrom.isEmpty() ? b->property("action").toString() : keysFrom);
             b->setToolTip(b->property("label").toString() + (keys.isEmpty() ? QString() : QStringLiteral("  (") + keys + ')'));
         }
     }
