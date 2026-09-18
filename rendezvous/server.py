@@ -148,7 +148,16 @@ class Store:
 
     # ---- rooms -------------------------------------------------------------------------------
 
-    def open_room(self, desktop_id: str, ttl: float = ROOM_TTL) -> str | None:
+    def open_room(self, desktop_id: str, ttl: float = ROOM_TTL) -> tuple[str, float] | None:
+        """Open a room and say how long it really lives.
+
+        A room is **not** consumed by the first connection: ``_client_socket`` looks it up and
+        leaves it, so an invite with more than one use, and an admitted guest who reconnects,
+        both work without a second mechanism here. Single use is a property of the *secret*, not
+        of the room — the hub burns a pairing room the moment a secret is proved (``host.py``),
+        and an invite counts its own uses in ``remote/guests.py``. Nothing changes about what this
+        process can see: a room is an id and a lifetime, and every byte through it is ciphertext.
+        """
         now = time.time()
         recent = self.db.execute(
             "SELECT COUNT(*) AS n FROM rooms WHERE desktop_id = ? AND created > ?",
@@ -156,10 +165,11 @@ class Store:
         if recent >= MAX_ROOMS_PER_HOUR:
             return None
         room = secrets.token_urlsafe(16)
+        lifetime = max(1.0, min(float(ttl), MAX_ROOM_TTL))
         self.db.execute("INSERT INTO rooms (room, desktop_id, created, expires) VALUES (?, ?, ?, ?)",
-                        (room, desktop_id, now, now + max(1.0, min(ttl, MAX_ROOM_TTL))))
+                        (room, desktop_id, now, now + lifetime))
         self.db.commit()
-        return room
+        return room, lifetime
 
     def room_desktop(self, room: str) -> str | None:
         self.expire()
@@ -314,11 +324,18 @@ def build(store: Store, static_root: Path | None = None) -> httpd.Server:
         token = str(fields.get("token", ""))
         if not store.authenticate(desktop_id, token):
             return httpd.Response.error(401, "unknown desktop or bad token.")
-        room = store.open_room(desktop_id, float(fields.get("ttl", ROOM_TTL)))
-        if room is None:
+        try:
+            wanted = float(fields.get("ttl", ROOM_TTL))
+        except (TypeError, ValueError):
+            wanted = ROOM_TTL
+        opened = store.open_room(desktop_id, wanted)
+        if opened is None:
             return httpd.Response.error(429, "too many pairing rooms this hour.")
+        room, lifetime = opened
         store.note("room", desktop_id)
-        return httpd.Response.json({"room": room, "expires_in": ROOM_TTL})
+        # The lifetime actually granted, not the default: an invite may ask for up to a week
+        # (section 10.2) and the desktop sizes its own record from what comes back.
+        return httpd.Response.json({"room": room, "expires_in": lifetime})
 
     @server.route("GET", "/v1/push/key")
     async def push_key(request: ws.Request, body: bytes) -> httpd.Response:

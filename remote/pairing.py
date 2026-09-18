@@ -44,39 +44,62 @@ def pair_url(app_base: str, desktop_public: bytes, secret: bytes, room: str) -> 
             f"#v=1&d={b64(desktop_public)}&s={b64(secret)}&r={room}")
 
 
-def join_url(app_base: str, desktop_public: bytes, secret: bytes, room: str, role: str) -> str:
-    """A multiplayer invite (section 10): the same shape, a different path, and `k` names the
-    role the invite grants. The `k` in the link is a hint for the person scanning; the desktop's
-    own record of the room is what enforcement reads."""
+def invite_url(app_base: str, desktop_public: bytes, secret: bytes, room: str) -> str:
+    """A multiplayer invite (section 10.2): the same shape as a pairing link, a different path,
+    and `i` rather than `s` so a link cannot be fed to the wrong handler by accident.
+
+    The role the invite grants is deliberately **not** in the link. Enforcement reads the invite
+    record on the desktop; a role in the fragment would only be a claim the holder could edit,
+    and a number the person scanning might believe.
+    """
     return (f"{app_base.rstrip('/')}/join"
-            f"#v=1&d={b64(desktop_public)}&s={b64(secret)}&r={room}&k={role}")
+            f"#v=1&d={b64(desktop_public)}&i={b64(secret)}&r={room}")
 
 
-def parse_pair_url(url: str) -> dict:
+def _fragment_fields(url: str, what: str) -> dict:
+    """The fields of a link's fragment, tolerating the escaping QR readers do to it."""
     parts = urlsplit(url)
     if not parts.fragment:
-        raise ValueError("that link carries no pairing fragment.")
+        raise ValueError(f"that link carries no {what} fragment.")
     fragment = parts.fragment
     # Some QR readers and link handlers percent-encode the fragment, which turns the separators
     # into %26 and leaves one field holding the rest of the link.
     if "&" not in fragment and "%26" in fragment.lower():
         fragment = unquote(fragment)
-    fields = {name: values[0] for name, values in parse_qs(fragment).items()}
-    for required in ("v", "d", "s", "r"):
+    return {name: values[0] for name, values in parse_qs(fragment).items()}
+
+
+def _link(url: str, secret_field: str, what: str) -> dict:
+    fields = _fragment_fields(url, what)
+    for required in ("v", "d", secret_field, "r"):
         if required not in fields:
-            raise ValueError(f"the pairing link is missing '{required}'.")
+            raise ValueError(f"the {what} link is missing '{required}'.")
     if fields["v"] != "1":
-        raise ValueError(f"unsupported pairing version {fields['v']}.")
+        raise ValueError(f"unsupported {what} version {fields['v']}.")
     desktop = un64(fields["d"])
     if len(desktop) != 32:
         raise ValueError("the desktop key in the link is not 32 bytes.")
-    return {"desktop_public": desktop, "secret": un64(fields["s"]), "room": fields["r"]}
+    return {"desktop_public": desktop, "secret": un64(fields[secret_field]), "room": fields["r"]}
+
+
+def parse_pair_url(url: str) -> dict:
+    return _link(url, "s", "pairing")
+
+
+def parse_invite_url(url: str) -> dict:
+    """The other half of :func:`invite_url`, tolerant of the same percent-encoding."""
+    return _link(url, "i", "invite")
 
 
 @dataclass
 class Room:
-    """One pairing opportunity. A pair room is single use; an invite room (section 10) admits
-    several joiners while it lives — `uses` counts down and the room dies at zero."""
+    """One pairing opportunity, single use: `uses` counts down and the room dies at zero.
+
+    An invite (section 10) is *not* a room: it lives in ``remote/guests.py`` with its own secret,
+    role, pane scope, use count and expiry, and a rendezvous room is only the address its link
+    points at. Keeping the two apart is what stops a link that admits a guest from also being a
+    link that pairs a device.
+    """
     room: str
     secret: bytes = field(default_factory=lambda: secrets.token_bytes(SECRET_BYTES))
     opened: float = field(default_factory=time.time)
@@ -84,8 +107,6 @@ class Room:
     attempts: int = 0
     spent: bool = False
     uses: int = 1                   # a pair room admits one device, full stop
-    kind: str = "pair"              # "pair" or "invite"
-    role: str = ""                  # the role an invite grants
 
     @property
     def expired(self) -> bool:
@@ -112,7 +133,7 @@ class Room:
 
 
 class RoomBook:
-    """The desktop's open pairing rooms and invites."""
+    """The desktop's open pairing rooms."""
 
     def __init__(self):
         self.rooms: dict[str, Room] = {}
@@ -120,12 +141,6 @@ class RoomBook:
     def open(self, room_id: str, ttl: float = ROOM_TTL) -> Room:
         self.sweep()
         room = Room(room=room_id, ttl=ttl)
-        self.rooms[room_id] = room
-        return room
-
-    def open_invite(self, room_id: str, role: str, ttl: float, uses: int) -> Room:
-        self.sweep()
-        room = Room(room=room_id, ttl=ttl, uses=max(1, uses), kind="invite", role=role)
         self.rooms[room_id] = room
         return room
 
