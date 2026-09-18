@@ -42,9 +42,13 @@ def terminal_size(fd: int = 1) -> tuple[int, int]:
 class Attachment:
     """One local attach to one pane. Only one at a time."""
 
-    def __init__(self, source, pane_id: str):
+    def __init__(self, source, pane_id: str, on_input=None):
         self.source = source
         self.pane_id = pane_id
+        # The owner's physical keystroke takes control back without asking (section 10.3). This
+        # terminal *is* the desktop for `remote.cli share`, so its keys are that keystroke: the
+        # callback is what the GUI sends as `control_take`.
+        self.on_input = on_input
         self.loop = asyncio.get_event_loop()
         self.saved: list | None = None
         self.detached = asyncio.Event()
@@ -113,9 +117,13 @@ class Attachment:
         # Straight to the PTY: the local user is the owner, not a remote device, so none of the
         # take-over rules apply. The password-prompt refusal is about *remote* input.
         pane = self.source.panes.get(self.pane_id)
-        if pane is not None:
-            await self.source._write(pane, {"t": "input",
-                                            "bytes": base64.b64encode(data).decode()})
+        if pane is None:
+            return
+        if self.on_input is not None:
+            with contextlib.suppress(Exception):
+                self.on_input(self.pane_id)
+        await self.source._write(pane, {"t": "input",
+                                        "bytes": base64.b64encode(data).decode()})
 
     def _on_output(self, pane_id: str, data: bytes) -> None:
         if pane_id == self.pane_id and not self.suspended:

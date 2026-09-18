@@ -170,6 +170,64 @@ def make_knock_approver(mode: str, attachment=None):
     return approver
 
 
+def make_prompt_approver(mode: str, attachment=None):
+    """The owner's answer to a guest's prompt, at the terminal (section 10.4).
+
+    The whole text is printed, never a preview: approving a prompt is approving every tool call
+    the agent will make from it, on the owner's keys, so the decision needs the whole thing.
+    """
+    async def approver(request: host_mod.PromptRequest) -> bool:
+        live = attachment[0] if attachment else None
+        if live is not None and not live.detached.is_set():
+            with live.suspend():
+                return await ask(request)
+        return await ask(request)
+
+    async def ask(request: host_mod.PromptRequest) -> bool:
+        print("\n" + "─" * 60)
+        what = f"plan {request.plan_id}" if request.plan_id else "a prompt"
+        print(f"  {request.name} wants to send {what} to the agent in {request.pane}"
+              f"{' (queued)' if request.when == 'queue' else ''}")
+        print("─" * 60)
+        for line in request.text.splitlines() or [""]:
+            print(f"  │ {line}")
+        print("─" * 60)
+        if mode == "auto":
+            print("  --approve auto: sending it to the agent.\n")
+            return True
+        answer = await asyncio.to_thread(input, "  Send this to the agent? [y/N] ")
+        approved = answer.strip().lower() in ("y", "yes")
+        print("  Sent.\n" if approved else "  Refused.\n")
+        return approved
+    return approver
+
+
+def make_control_approver(mode: str, attachment=None):
+    """The owner's answer to "may I type?" (section 10.3). One holder per pane: saying yes takes
+    the keyboard off whoever has it, including this terminal's own attachment."""
+    async def approver(request: host_mod.ControlRequest) -> bool:
+        live = attachment[0] if attachment else None
+        if live is not None and not live.detached.is_set():
+            with live.suspend():
+                return await ask(request)
+        return await ask(request)
+
+    async def ask(request: host_mod.ControlRequest) -> bool:
+        print("\n" + "─" * 60)
+        print(f"  {request.name} is asking for the keyboard in {request.pane}")
+        print("  While they hold it, what they type goes to the shell. Ctrl-\\ and type to take")
+        print("  it back at any time.")
+        print("─" * 60)
+        if mode == "auto":
+            print("  --approve auto: handing it over.\n")
+            return True
+        answer = await asyncio.to_thread(input, "  Let them drive? [y/N] ")
+        granted = answer.strip().lower() in ("y", "yes")
+        print("  They have the keyboard.\n" if granted else "  Refused.\n")
+        return granted
+    return approver
+
+
 async def publish(server, args, directory) -> tuple[str, str, bool]:
     """Work out the base URL a phone can reach, starting the right listener. Returns
     (base, note, tailscale_used)."""
@@ -243,7 +301,17 @@ async def share(args) -> int:
     host = host_mod.Host(identity, devices, source, app_base=base,
                          approver=make_approver(args.approve, args.capability, holder),
                          knock_approver=make_knock_approver(args.approve, holder),
+                         prompt_approver=make_prompt_approver(args.approve, holder),
+                         control_approver=make_control_approver(args.approve, holder),
                          name=args.name)
+    # Who is driving, printed where the owner is looking. It is the same handoff the phones are
+    # told about (section 10.3), so this cannot show something the guests were not.
+    host.on_control(lambda pane, who, name: print(
+        f"\n  [{pane}] the keyboard: {name}"
+        f"{'' if who == 'owner' else ' — type here to take it back'}\n"))
+    host.on_share_state(lambda pane, paused, reason: print(
+        f"\n  [{pane}] guests are {'paused' if paused else 'active again'}"
+        f"{' (you are away)' if reason == 'away' else ''}\n"))
     try:
         await host.register(local)
     except wire.WireError as error:
@@ -275,7 +343,9 @@ async def share(args) -> int:
             print("  (install the python 'qrcode' package to see a scannable code here)")
         print(f"\n  Send this to your guest:\n  {invite_link}\n"
               "  They knock; you answer here. Anyone holding the link can knock, so treat it\n"
-              "  like a door key: revoke it when you are done.\n")
+              "  like a door key: revoke it when you are done.\n"
+              "  An editor's prompts and their requests for the keyboard are asked here too:\n"
+              "  nothing a guest sends runs until you answer.\n")
     interactive = sys.stdin.isatty()
     if interactive:
         print("  Press Enter to attach this terminal to it. Detach with Ctrl-\\.\n")
@@ -284,7 +354,7 @@ async def share(args) -> int:
         print("  stdin is not a terminal, so nothing is attached here; the shell is shared "
               "and driveable from the phone. Ctrl-C to stop.\n")
 
-    attachment = attach_mod.Attachment(source, pane.id)
+    attachment = attach_mod.Attachment(source, pane.id, on_input=host.take_control)
     holder[0] = attachment
     try:
         if interactive:
