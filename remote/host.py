@@ -42,6 +42,8 @@ IDLE_TIMEOUT = 15 * 60
 MAX_VOICE_BYTES = 700_000          # what fits a 1 MiB frame once base64 has had its say
 SECRET_NONCE_TTL = 45.0            # a password nonce is minted to be used now, not remembered
 MAX_SECRET_BYTES = 1024
+MAX_HISTORY_ROWS = 200             # section 6.5: one page, so a phone cannot ask for the world
+DEFAULT_HISTORY_ROWS = 60
 
 # Per-device inbound budget: (messages, seconds). Everything not named gets DEFAULT_LIMIT.
 LIMITS = {
@@ -298,6 +300,9 @@ class Host:
         self.screens = hasattr(self.source, "on_screen")
         if self.screens:
             self.source.on_screen(self._screen_event)
+        # Scrollback is the source's to answer, not the hub's: the bridge and the GUI both hold
+        # the emulator that owns it, and an agent-only source has none. Advertised only when true.
+        self.scrollback = bool(getattr(self.source, "scrollback", False))
 
     # ---- registration and the rendezvous link --------------------------------------------------
 
@@ -554,7 +559,8 @@ class Host:
             "password_entry": device.password_entry,
             "hub_epoch": self.epoch,
             "features": (["panes", "agent", "compose", "voice"]
-                         + (["screen", "takeover"] if self.screens else [])),
+                         + (["screen", "takeover"] if self.screens else [])
+                         + (["history"] if self.scrollback else [])),
             "server_time": time.time(),
         })
         await channel.send(self.stream("panes", limit=64).add(
@@ -785,11 +791,54 @@ class Host:
         pane = self._typing_pane(channel, message)
         await channel.send(self.source.screen_snapshot(pane))
 
-    # -- not in P1 ---------------------------------------------------------------------------------
-
     async def _on_history_get(self, channel: Channel, message: dict) -> None:
-        # Needs a const VtCore::historyLines in both cores; see the design doc section 12.1.
-        raise wire.WireError("not_permitted", "scrollback paging is not implemented yet.")
+        """A page of scrollback (section 6.5). `view` is enough: it is reading, not typing.
+
+        The cursor is absolute. `before_row` is the row the page ends just below, so a phone
+        that holds rows `[R, ...)` asks for `before_row: R` and gets exactly the rows above them,
+        however much the shell printed in between; omitting it asks for the newest page. A
+        newest-relative cursor would shift under live output and leave a hole or a repeat in the
+        middle of what the person is reading.
+
+        Answered off the read loop, like `voice`: a wedged GUI must time out on its own request
+        rather than stop this device's other messages, and two devices paging at once each get
+        their own answer back by id.
+        """
+        pane = self._pane_of(message)
+        if not self.scrollback:
+            raise wire.WireError("not_permitted", "this desktop does not share scrollback.")
+        count = message.get("count", DEFAULT_HISTORY_ROWS)
+        if isinstance(count, bool) or not isinstance(count, int):
+            raise wire.WireError("unknown_type", "history_get needs an integer count.")
+        count = max(1, min(count, MAX_HISTORY_ROWS))
+        before = message.get("before_row", -1)
+        if before is None:
+            before = -1
+        if isinstance(before, bool) or not isinstance(before, int):
+            raise wire.WireError("unknown_type", "before_row must be a scrollback row.")
+        before = min(before, 1 << 31)
+        request_id = message.get("id")
+
+        async def answer() -> None:
+            try:
+                page = await self.source.history(pane, before, count)
+            except wire.WireError as error:
+                await channel.send(wire.error(error.code, error.message, request_id))
+                return
+            except Exception:                       # the phone gets an answer either way
+                log.exception("paging scrollback for %s", pane)
+                await channel.send(wire.error("internal", "that page could not be read.",
+                                              request_id))
+                return
+            await channel.send({"t": "history", "pane": pane, "id": request_id,
+                                "from_row": int(page.get("from_row", 0)),
+                                "total": int(page.get("total", 0)),
+                                "more": bool(page.get("more")),
+                                "lines": page.get("lines") or []})
+
+        self._spawn(answer())
+
+    # -- not in P1 ---------------------------------------------------------------------------------
 
     async def _on_transport_switch(self, channel: Channel, message: dict) -> None:
         """The explicit re-binding of the Noise stream to a new transport (section 2).

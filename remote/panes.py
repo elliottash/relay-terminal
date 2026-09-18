@@ -23,6 +23,11 @@ from . import wire
 class PaneSource:
     """The interface the hub talks to. Every method is desktop-side and trusted."""
 
+    # A source that can page scrollback says so, and the hub then advertises `history` in
+    # `welcome`. An agent-only source has no screen behind it and simply leaves this False, which
+    # is why the feature list is built from the source rather than hard-coded.
+    scrollback = False
+
     def snapshot(self) -> list[dict]:
         """The pane list, already shaped for the `panes` message."""
         raise NotImplementedError
@@ -53,6 +58,21 @@ class PaneSource:
 
     async def transcribe(self, pane: str, audio: bytes, audio_format: str) -> str:
         raise NotImplementedError
+
+    async def history(self, pane: str, before_row: int, count: int) -> dict:
+        """One page of scrollback (docs/REMOTE-PROTOCOL.md section 6.5).
+
+        ``before_row`` is an absolute scrollback row and the page ends just below it — rows
+        ``[before_row - count, before_row)`` — or, when it is negative, the newest ``count`` rows.
+        The answer is ``{"from_row", "total", "more", "lines"}``, where a line is the same
+        ``{row, segs}`` shape the live screen sends, so the client paints history with the run
+        painter it already has.
+
+        Reading history must never move the desktop's own viewport; that rule lives in the engine
+        (``VtCore::historyLines`` is const) and is repeated here because a source is free to
+        implement it some other way.
+        """
+        raise wire.WireError("not_permitted", "this desktop does not share scrollback.")
 
     # ---- password prompts (docs/REMOTE-PROTOCOL.md section 6.7) --------------------------------
     # The hub mints the nonce; these three are what binds it and what eventually writes the line.

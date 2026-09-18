@@ -567,20 +567,32 @@ class HistoryTests(unittest.TestCase):
                             for line in message.get("lines", [])):
                         break
 
+                # `before_row` is the absolute row a page ends just below, so each page is
+                # asked for by the row the last one started at: the pages join exactly and
+                # nothing shifts if the shell prints while the phone is paging.
                 seen: list[str] = []
-                before, pages = 0, 0
+                before, pages = None, 0
                 while True:
-                    await client.send({"t": "history_get", "pane": pane,
-                                       "before_row": before, "count": 40, "id": f"h{pages}"})
+                    request = {"t": "history_get", "pane": pane, "count": 40, "id": f"h{pages}"}
+                    if before is not None:
+                        request["before_row"] = before
+                    await client.send(request)
                     page = await client.expect("history")
+                    self.assertEqual(page["id"], f"h{pages}")
                     lines = ["".join(seg[0] for seg in row["segs"])
                              for row in page["lines"]]
-                    seen.extend(lines)
-                    before += len(lines)
+                    for offset, row in enumerate(page["lines"]):
+                        self.assertEqual(row["row"], page["from_row"] + offset)
+                    if before is not None:
+                        self.assertEqual(page["from_row"] + len(lines), before,
+                                         "the pages must join with no gap and no repeat")
+                    seen[:0] = lines
+                    before = page["from_row"]
                     pages += 1
                     if not page["more"] or pages > 10:
                         break
                 self.assertLessEqual(pages, 10)
+                self.assertEqual(before, 0, "paging to `more: false` must reach the oldest row")
                 # The newest screenful is still on the live screen, not in scrollback, so
                 # paging to `more: false` reaches everything above it — not the last few lines.
                 hist = [line for line in seen if "hist-" in line]

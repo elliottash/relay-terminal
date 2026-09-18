@@ -36,6 +36,10 @@ BRIDGE_NAMES = ("relay-screen-bridge",)
 BRIDGE_PATHS = ("build-engine/engine", "build/engine")
 DEFAULT_ROWS, DEFAULT_COLS = 24, 100
 MAX_SCROLLBACK = 5000
+# A scrollback page is a read of memory the bridge already holds, so this is a wedged-process
+# timeout rather than a work budget. What it must never be is unbounded: a phone is holding a
+# scroll gesture open until the page arrives.
+HISTORY_TIMEOUT = 10.0
 
 
 def find_bridge(root: Path | None = None) -> Path | None:
@@ -100,6 +104,12 @@ class TerminalPane:
         self.updated = time.time()
         self.process: asyncio.subprocess.Process | None = None
         self.driver: str | None = None      # device id currently typing, if any
+        # The bridge's `history` reply carries no request id, so pages are matched by strict
+        # ordering: the lock keeps one request per pane in flight, and the reader hands the next
+        # reply to whoever is waiting. Two devices paging at once queue behind each other rather
+        # than reading each other's pages.
+        self.history_lock = asyncio.Lock()
+        self.history_waiter: asyncio.Future | None = None
 
     @property
     def status(self) -> str:
@@ -124,6 +134,8 @@ class TerminalPane:
 
 class TerminalPaneSource(panes_mod.PaneSource):
     """Real terminals, shared read-only until a `full` device takes over."""
+
+    scrollback = True
 
     def __init__(self, bridge: Path | None = None, *, rows: int = DEFAULT_ROWS,
                  cols: int = DEFAULT_COLS, shell: str | None = None, raw_out: bool = False):
@@ -279,6 +291,12 @@ class TerminalPaneSource(panes_mod.PaneSource):
                 for callback in list(self._raw_callbacks):
                     callback(pane.id, raw)
             return
+        elif kind == "history":
+            waiter = pane.history_waiter
+            pane.history_waiter = None
+            if waiter is not None and not waiter.done():
+                waiter.set_result(message)
+            return
         elif kind in ("bell", "mark"):
             return
         else:
@@ -338,6 +356,36 @@ class TerminalPaneSource(panes_mod.PaneSource):
 
     async def interrupt(self, pane_id: str) -> None:
         await self._write(self.pane(pane_id), {"t": "signal", "name": "int"})
+
+    async def history(self, pane_id: str, before_row: int, count: int) -> dict:
+        """A page of scrollback from the bridge, in the live screen's own row shape.
+
+        The request goes out under the pane's lock and the next `history` line back is its answer;
+        the bridge serves them in order on one pipe, so ordering is the id. The cursor is the
+        absolute `before_row` the protocol carries, which the bridge understands directly.
+        """
+        pane = self.pane(pane_id)
+        if pane.exit_code is not None:
+            raise wire.WireError("busy", "that terminal has exited.")
+        request = {"t": "history", "count": count}
+        if before_row is not None and before_row >= 0:
+            request["before_row"] = before_row
+        async with pane.history_lock:
+            if pane.exit_code is not None:
+                raise wire.WireError("busy", "that terminal has exited.")
+            future = asyncio.get_event_loop().create_future()
+            pane.history_waiter = future
+            try:
+                await self._write(pane, request)
+                page = await asyncio.wait_for(future, HISTORY_TIMEOUT)
+            except asyncio.TimeoutError:
+                raise wire.WireError("unavailable",
+                                     "that terminal did not answer in time.") from None
+            finally:
+                if pane.history_waiter is future:
+                    pane.history_waiter = None
+        return {"from_row": int(page.get("from", 0)), "total": int(page.get("total", 0)),
+                "more": bool(page.get("more")), "lines": page.get("lines") or []}
 
     async def request_snapshot(self, pane_id: str) -> None:
         await self._write(self.pane(pane_id), {"t": "snapshot"})
