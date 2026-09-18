@@ -41,6 +41,8 @@ public:
     bool isRunning() const;
     qint64 shellPid() const;
     qint64 foregroundPid() const;
+    // ICANON/ECHO of the pty, straight from the master fd (Pty::termiosFlags()).
+    Pty::TermiosFlags termiosFlags() const;
     void terminate();
 
     // Geometry. Also resizes the PTY (SIGWINCH).

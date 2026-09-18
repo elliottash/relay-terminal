@@ -35,6 +35,13 @@ public:
         int pixelHeight = 0;
     };
 
+    // The slave's line discipline, read from the master (see termiosFlags()).
+    struct TermiosFlags {
+        bool valid = false;     // false = no terminal, or the query failed
+        bool canonical = false; // ICANON: the tty is cooked; off means Readline or a full-screen app
+        bool echo = false;      // ECHO: the kernel echoes typed characters
+    };
+
     virtual ~Pty() = default;
 
     virtual bool start(const StartOptions &options) = 0;
@@ -46,6 +53,12 @@ public:
     virtual qint64 childPid() const = 0;
     // Process group owning the terminal (tcgetpgrp on the master), -1 if unknown.
     virtual qint64 foregroundPid() const = 0;
+    // ICANON/ECHO of the terminal, one tcgetattr() on the master fd. On Linux a
+    // pty's termios belongs to the line discipline the two ends share, so the
+    // master answers for the slave; no /proc walk and no open()/close() per ask.
+    // Cheap enough for a host that polls it (src/main.cpp asks 12 times a second
+    // in every pane). `valid` is false when there is no terminal.
+    virtual TermiosFlags termiosFlags() const = 0;
     virtual bool isRunning() const = 0;
     // Hang up: SIGHUP to the child's session, as closing a terminal window does.
     virtual void terminate() = 0;

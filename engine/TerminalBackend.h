@@ -38,6 +38,18 @@ public:
         ScrollControl = 1 << 9,    // scrollLines/Pages/ToBottom
         FontZoom = 1 << 10,        // zoom()
         LinkWalk = 1 << 11,        // stepLink(): keyboard walk over the links in the output
+        LineDiscipline = 1 << 12,  // termiosFlags(): ICANON/ECHO of the terminal, cheaply
+    };
+
+    // ICANON/ECHO of the terminal the shell is reading. Together with
+    // foregroundProcessId() this is everything the host needs to know whether the
+    // shell is at a Readline prompt (raw, foreground == shell), running a
+    // full-screen program, or asking for a password (cooked, echo off). Spelt out
+    // here rather than taken from the PTY layer so this header stays engine-neutral.
+    struct TermiosFlags {
+        bool valid = false;     // false = the engine cannot say; ask the operating system instead
+        bool canonical = false; // ICANON
+        bool echo = false;      // ECHO
     };
 
     // A file, folder, URL or card reference found in the output (src/OutputLinks.*).
@@ -62,6 +74,9 @@ public:
     virtual qint64 shellPid() const = 0;
     virtual qint64 foregroundProcessId() const = 0;
     virtual bool isRunning() const = 0;
+    // Needs the LineDiscipline capability. An engine that cannot ask its terminal
+    // answers `valid = false`, and the host falls back to /proc/<pid>/fd/0.
+    virtual TermiosFlags termiosFlags() const { return {}; }
 
     // ---- display
     // Bytes into the terminal emulator as if the program printed them; they

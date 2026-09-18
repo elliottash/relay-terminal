@@ -136,7 +136,7 @@ Documented fallbacks, not implemented: alacritty_terminal (Rust FFI), xterm.js i
 
 | Group | Methods / callbacks |
 |---|---|
-| Process | `startProgram(program, args, cwd, env)`, `sendInput(bytes)`, `sendText(text, asPaste)`, `shellPid()`, `foregroundProcessId()` (`tcgetpgrp` on the master), `isRunning()` |
+| Process | `startProgram(program, args, cwd, env)`, `sendInput(bytes)`, `sendText(text, asPaste)`, `shellPid()`, `foregroundProcessId()` (`tcgetpgrp` on the master), `isRunning()`, `termiosFlags()` (`{valid, canonical, echo}`: one `tcgetattr` on the master, which on Linux reports the slave's line discipline; needs LineDiscipline, `valid = false` otherwise) |
 | Display | `writeToDisplay(bytes)` (inline output, never reaches the program; if the program's output stopped inside an escape sequence or UTF-8 character, the bytes wait until the parser is at ground, at most ~500 ms), `redrawPrompt()` (sends Ctrl+X Ctrl+P by default, Relay's Bash binding), `setRedrawPromptSequence()` |
 | Introspection | `capabilities()`, `screenText()`, `scrollbackText(maxLines)`, `altScreen()`, `rows()`, `columns()`, `title()`, `currentDirectory()` (OSC 7, else `/proc/<pid>/cwd`) |
 | Geometry | `resizeTerminal(rows, cols)`, `widget()` (view + scrollbar), `focusWidget()`, `setTerminalFont()` |
@@ -147,7 +147,13 @@ Documented fallbacks, not implemented: alacritty_terminal (Rust FFI), xterm.js i
 | Callbacks | `onLinkActivated(target, line, column)` (OSC 8 URI, URL, or absolute path with `:line:col`), `onTitleChanged`, `onCwdChanged`, `onAltScreenChanged`, `onBell`, `onPromptMark(kind 'A'..'D', exitCode)`, `onOutput(bytes)` (opt-in via `setOutputCallbackEnabled`), `onFinished(exitCode)` |
 
 Capabilities reported by `VTermBackend`: ScreenText, Scrollback, AltScreenState, LinkClicks,
-Osc8Links, PromptMarks, CwdTracking, DisplayInjection, Search, ScrollControl, LinkWalk.
+Osc8Links, PromptMarks, CwdTracking, DisplayInjection, Search, ScrollControl, LinkWalk,
+LineDiscipline.
+
+`termiosFlags()` is what the host polls to tell a Readline prompt (raw, foreground group ==
+shell) from a full-screen program or a password prompt (cooked, `ECHO` off), twelve times a
+second in every pane; the `/proc/<shell>/fd/0` route it replaces cost an `open`, an `ioctl` and
+a `close` each time. See ARCHITECTURE.md §6.
 
 ## Status, with KonsolePart as the comparison it replaced
 
@@ -182,6 +188,7 @@ GUI scenario (`engine/scripts/gui/scenarios.sh`).
 | Keyboard walk over the links in screen + scrollback (`Ctrl+Shift+L`) | ✅ | ✅ | ❌ (no screen text) | ViewTest::keyboardLinkWalk |
 | OSC 7 cwd, OSC 133 prompt marks + jump to prompt, OSC 9/777 notifications | ✅ | ✅ | 🟡 (cwd via /proc) | CoreTest::osc7*, osc133*, promptJump |
 | Alt-screen state + change callback | ✅ | ✅ | ❌ | CoreTest::altScreen, SessionTest |
+| Line discipline (`ICANON`/`ECHO`) + foreground group off the pty master | ✅ | ✅ | ❌ (no master fd; the host falls back to `/proc`) | PtyTest::lineDisciplineFromTheMaster |
 | Screen text + scrollback text for the agent | ✅ | ✅ | ❌ (KF6 D-Bus: screen only) | SessionTest |
 | Write to display (inline agent output) | ✅ | ✅ | 🟡 (private D-Bus slot) | SessionTest::writeToDisplayNeverReachesProgram |
 | OSC 52 clipboard | ✅ write opt-in, read never | ✅ | 🟡 | CoreTest::osc52ClipboardIsOptIn |

@@ -111,6 +111,12 @@ qint64 VTermBackend::shellPid() const { return m_session->shellPid(); }
 qint64 VTermBackend::foregroundProcessId() const { return m_session->foregroundPid(); }
 bool VTermBackend::isRunning() const { return m_session->isRunning(); }
 
+TerminalBackend::TermiosFlags VTermBackend::termiosFlags() const
+{
+    const Pty::TermiosFlags flags = m_session->termiosFlags();
+    return {flags.valid, flags.canonical, flags.echo};
+}
+
 void VTermBackend::writeToDisplay(const QByteArray &bytes) { m_session->writeToDisplay(bytes); }
 
 void VTermBackend::redrawPrompt()
@@ -122,7 +128,7 @@ void VTermBackend::redrawPrompt()
 int VTermBackend::capabilities() const
 {
     return ScreenText | Scrollback | AltScreenState | LinkClicks | Osc8Links | PromptMarks | CwdTracking | DisplayInjection
-        | Search | ScrollControl | FontZoom | LinkWalk;
+        | Search | ScrollControl | FontZoom | LinkWalk | LineDiscipline;
 }
 
 bool VTermBackend::stepLink(int delta, Link *link, int *index, int *count)

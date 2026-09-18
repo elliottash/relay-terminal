@@ -262,6 +262,23 @@ public:
         return pg > 0 ? pg : -1;
     }
 
+    // tcgetattr() on the master: allowed from any process (unlike tcgetpgrp()'s
+    // controlling-terminal rule for the slave), and it reports the flags the
+    // slave sees, because both ends share one line discipline.
+    TermiosFlags termiosFlags() const override
+    {
+        TermiosFlags flags;
+        if (m_master < 0 || !m_running.load())
+            return flags;
+        struct termios state {};
+        if (::tcgetattr(m_master, &state) != 0)
+            return flags;
+        flags.valid = true;
+        flags.canonical = (state.c_lflag & ICANON) != 0;
+        flags.echo = (state.c_lflag & ECHO) != 0;
+        return flags;
+    }
+
     bool isRunning() const override { return m_running.load(); }
 
     void terminate() override

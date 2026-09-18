@@ -7633,6 +7633,13 @@ private:
         if (!m_backend) return TerminalMode::Unknown;
         const int pid = shellPid();
         if (pid <= 0) return TerminalMode::Unknown;
+        // The engine owns the pty master, and on Linux both ends share one line discipline, so
+        // one ioctl on a descriptor it already holds answers this. Opening /proc/<pid>/fd/0 is
+        // the fallback for an engine that cannot say (TerminalBackend::LineDiscipline).
+        if (const auto flags = m_backend->termiosFlags(); flags.valid) {
+            if (!flags.canonical) return TerminalMode::Raw;
+            return flags.echo ? TerminalMode::Echoing : TerminalMode::Secret;
+        }
         const auto name = QStringLiteral("/proc/%1/fd/0").arg(pid).toLocal8Bit();
         const int fd = ::open(name.constData(), O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
         if (fd < 0) return TerminalMode::Unknown;
@@ -7973,22 +7980,32 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
         m_delegateButton->setVisible(!masked);
     }
 
+    // The shell is sitting in Readline waiting for a line: the tty is raw AND the shell's own
+    // process group is the terminal's foreground group (so no `vim` or `less` has it). This runs
+    // 12 times a second in every pane, so it asks the engine first: one tcgetattr and one
+    // TIOCGPGRP on the pty master it already holds, instead of an open/ioctl/close of
+    // /proc/<pid>/fd/0 plus a parse of /proc/<pid>/stat.
     bool readlineReady() const {
         if (!m_backend) return false;
         const int pid = shellPid();
         if (pid <= 0) return false;
+        if (const auto flags = m_backend->termiosFlags(); flags.valid)
+            return !flags.canonical && foregroundPid() == pid; // forkpty made the shell its own group leader
         const auto name = QStringLiteral("/proc/%1/fd/0").arg(pid).toLocal8Bit();
         const int fd = ::open(name.constData(), O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
         if (fd < 0) return false;
         termios state{};
         const bool raw = ::tcgetattr(fd, &state) == 0 && !(state.c_lflag & ICANON);
         ::close(fd);
-        // tcgetpgrp() fails with ENOTTY on any Linux kernel unless the terminal is the caller's
-        // controlling tty, which it never is for Relay. /proc/<pid>/stat field 8 (tpgid)
-        // reports the same foreground process group without that restriction.
+        // tcgetpgrp() fails with ENOTTY on the SLAVE opened through /proc unless the terminal is
+        // the caller's controlling tty, which it never is for Relay. /proc/<pid>/stat field 8
+        // (tpgid) reports the same foreground process group without that restriction. (The
+        // engine's TIOCGPGRP above is on the MASTER, which carries no such rule.)
         return raw && foregroundGroup(pid) == pid;
     }
 
+    // Foreground process group of the pane's terminal, read from the shell's /proc entry: the
+    // fallback for an engine that cannot answer foregroundPid() or termiosFlags().
     static long foregroundGroup(int pid) {
         QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
         if (!stat.open(QIODevice::ReadOnly)) return -1;

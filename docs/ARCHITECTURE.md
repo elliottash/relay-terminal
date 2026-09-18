@@ -541,12 +541,32 @@ inode), and a pane that is off screen with nothing in flight — a background ta
 400 ms instead (`Pane::tunePoll`); it returns to 80 ms when shown, when it is given a command and
 while its queue has items. Measured idle, eight tabs: 1.80 % of a core before, 0.55 % after.
 
+The same tick also asks whether the shell is ready (`Pane::refreshShellReady` → `readlineReady`),
+and that used to cost a `/proc` walk per pane: `open`/`ioctl(TCGETS)`/`close` on
+`/proc/<shell>/fd/0` plus an open, two `statx` and a read of `/proc/<shell>/stat`. The engine
+already holds the PTY **master**, and on Linux both ends of a pty share one line discipline, so
+`tcgetattr()` on the master reports the slave's `ICANON`/`ECHO`
+(`TerminalBackend::termiosFlags()`, the `LineDiscipline` capability, `Pty::termiosFlags()`), and
+`TIOCGPGRP` on the master — which is not subject to the controlling-terminal rule that makes
+`tcgetpgrp()` on the slave fail with `ENOTTY` — gives the foreground group
+(`foregroundProcessId()`). Both `/proc` routes are kept as the fallback for an engine that
+answers `valid = false`. Measured with `strace -tt` over a 10 s idle window, eight visible
+panes: 13,091 system calls before, 6,300 after. `openat` 2240 → 160 (every
+`/proc/<pid>/fd/0` and `/proc/<pid>/stat` open is gone; what is left is cgroup accounting),
+`close` 2240 → 160, `statx` 2400 → 400, `read` 2420 → 420; `ioctl` 2160 → 3160, the whole poll
+now being 1080 `TCGETS` and 2080 `TIOCGPGRP` on descriptors the engine already holds. Idle CPU,
+eight visible split panes: 1.60 % and 1.65 % of a core before, 1.25 % and 1.30 % after; eight
+tabs, 0.55 % → 0.40 %.
+
 Sending a command (`Pane::runInTerminal`):
 
-1. Readiness: a `ready` event was seen, nothing is loading, and `/proc/<shell>/fd/0` is in
-   noncanonical mode (Readline active; `PROMPT_COMMAND` runs before that), and the shell owns
-   the foreground group (`/proc/<shell>/stat` field `tpgid`; `tcgetpgrp()` fails with
-   `ENOTTY` because the PTY is not Relay's controlling terminal).
+1. Readiness: a `ready` event was seen, nothing is loading, the terminal is in noncanonical mode
+   (Readline active; `PROMPT_COMMAND` runs before that), and the shell owns the foreground
+   group. Both answers come from the PTY master the engine already holds —
+   `TerminalBackend::termiosFlags()` and `foregroundProcessId()`, one `ioctl` each. An engine
+   that cannot answer falls back to `/proc/<shell>/fd/0` for the mode and `/proc/<shell>/stat`
+   field `tpgid` for the group (on the slave, `tcgetpgrp()` fails with `ENOTTY` because the PTY
+   is not Relay's controlling terminal; on the master it does not).
 2. The UTF-8 text is written atomically to `input.txt` (0600).
 3. Only Ctrl+X Ctrl+R is sent to the PTY. `__relay_load` reads the file into `READLINE_LINE`
    and emits `loaded` with the file's SHA-256.

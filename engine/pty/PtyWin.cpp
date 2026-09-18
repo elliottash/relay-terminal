@@ -36,6 +36,7 @@ public:
     void resize(int, int, int, int) override {}
     qint64 childPid() const override { return -1; }
     qint64 foregroundPid() const override { return -1; }
+    TermiosFlags termiosFlags() const override { return {}; } // ConPTY has no line discipline to read
     bool isRunning() const override { return false; }
     void terminate() override {}
 

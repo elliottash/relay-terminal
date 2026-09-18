@@ -153,6 +153,7 @@ QString TerminalSession::errorString() const { return m_error; }
 bool TerminalSession::isRunning() const { return m_pty && m_pty->isRunning(); }
 qint64 TerminalSession::shellPid() const { return m_pty ? m_pty->childPid() : -1; }
 qint64 TerminalSession::foregroundPid() const { return m_pty ? m_pty->foregroundPid() : -1; }
+Pty::TermiosFlags TerminalSession::termiosFlags() const { return m_pty ? m_pty->termiosFlags() : Pty::TermiosFlags{}; }
 
 void TerminalSession::terminate()
 {
