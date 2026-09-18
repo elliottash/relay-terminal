@@ -154,6 +154,57 @@ private slots:
         QCOMPARE(f.lines[0].cells[7].link, uint32_t(0));
     }
 
+    // The view's fold layer finds the row a fold hangs under by asking the core
+    // for every OSC 8 run with the fold prefix, in absolute scrollback rows.
+    void hyperlinkRunsInAbsoluteRows()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 5, 20);
+        auto anchor = [](const char *id, const char *text) {
+            return QByteArray("\x1b]8;;relay://call/p/1/") + id + "\x1b\\" + text + "\x1b]8;;\x1b\\\r\n";
+        };
+        h.feed("first line\r\n");
+        h.feed(anchor("a", "> ran python"));
+        for (int i = 0; i < 6; ++i)
+            h.feed(QByteArray("filler ") + QByteArray::number(i) + "\r\n");
+        h.feed(anchor("b", "> wrote x.py"));
+        h.feed("tail\r\n");
+
+        const std::vector<VtCore::HyperlinkRun> runs = h.vt->hyperlinkRuns(QStringLiteral("relay://call/"));
+        QCOMPARE(int(runs.size()), 2);
+        QCOMPARE(runs[0].uri, QStringLiteral("relay://call/p/1/a"));
+        QCOMPARE(runs[1].uri, QStringLiteral("relay://call/p/1/b"));
+        QCOMPARE(runs[0].startRow, 1);
+        QCOMPARE(runs[0].endRow, 1);
+        QCOMPARE(runs[1].startRow, 8);
+        QCOMPARE(runs[1].endRow, 8);
+        QCOMPARE(runs[0].startCol, 0);
+        QVERIFY(runs[0].endCol >= 11);
+        // The rows are the ones scrollViewportToRow() uses.
+        QCOMPARE(h.vt->historyRows() + h.vt->rows(), 11);
+        // A prefix nothing carries, and the empty prefix, find nothing.
+        QVERIFY(h.vt->hyperlinkRuns(QStringLiteral("relay://other/")).empty());
+        QVERIFY(h.vt->hyperlinkRuns(QString()).empty());
+        QCOMPARE(int(h.vt->hyperlinkRuns(QStringLiteral("relay://call/p/1/b")).size()), 1);
+    }
+
+    // An anchor line longer than the grid soft-wraps; the fold hangs under the
+    // last row of the run, so that is the row the core reports.
+    void aWrappedHyperlinkRunEndsOnItsLastRow()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 5, 20);
+        h.feed("top\r\n");
+        h.feed("\x1b]8;;relay://call/p/1/a\x1b\\"
+               "0123456789012345678901234567890123"
+               "\x1b]8;;\x1b\\\r\n");
+        h.feed("after\r\n");
+        const std::vector<VtCore::HyperlinkRun> runs = h.vt->hyperlinkRuns(QStringLiteral("relay://call/"));
+        QCOMPARE(int(runs.size()), 1);
+        QCOMPARE(runs[0].startRow, 1);
+        QCOMPARE(runs[0].endRow, 2);
+    }
+
     void osc133PromptMarks()
     {
         QFETCH_GLOBAL(QString, core);
