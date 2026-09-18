@@ -254,6 +254,7 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-18-reasoning-panel-shortcut.md`
 - `2026-09-18-subagents-in-one-tabbed-pane-a-tab-per-subagent.md`
 - `2026-09-18-terminal-and-agent-status-icons-with-notificatio.md`
+- `2026-09-18-waiting-for-subagents.md`
 
 - `2026-09-17-agent-delegate-and-take-over.md`
 - `2026-09-17-agent-output-while-program-runs.md`

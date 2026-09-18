@@ -5354,6 +5354,7 @@ private:
             for (const auto &view : std::as_const(m_subagentViews))
                 if (view) if (const auto *row = m_subagents.row(view->agentId())) view->setRow(*row, m_subagents.elapsedNow(*row));
             if (m_modelBox) m_modelBox->setToolTip(modelTooltip(QStringLiteral("Tokens: ") + m_subagents.tokenSplit()));
+            refreshSubagentWait();   // a subagent started or ended (card #V7QD)
         };
         // Only one start and one finish line per subagent reach the terminal, never its tool activity.
         m_subagents.onFinishedCleared = [this] { if (m_subagentTabs) m_subagentTabs->dropEnded(); };
@@ -5372,6 +5373,51 @@ private:
             for (const auto &view : std::as_const(m_subagentViews)) if (view && view->agentId() == id) view->handleEvent(event);
         };
         m_subagents.onStatus = [this](const QString &text) { status(text); };
+    }
+
+    // ----- "waiting for 3 subagents . . ." in the prompt box (card #V7QD) -------------------------
+    // Owner, 2026-09-18: "if an orchestrator terminal is waiting on subagents, play a … waiting for
+    // subagents . . . blinking text in the prompt." It is the prompt box's own placeholder, not a
+    // new widget: a placeholder is read as part of the prompt, and Qt stops drawing it the moment a
+    // character is typed, so a steer is never obstructed. The dots grow on a timer that only runs
+    // while the line is actually on screen. SubagentModel::waitingLine decides *whether* it shows;
+    // everything here is about drawing it.
+    void refreshSubagentWait() {
+        if (!m_editor) return;
+        // An AI ghost suggestion owns the placeholder while it is up (updateGhost). Leave it be;
+        // updateGhost calls this again when it hands the placeholder back.
+        if (m_editor->placeholderText().isEmpty() && !m_savedPlaceholder.isEmpty()) {
+            if (m_waitDots) m_waitDots->stop();
+            return;
+        }
+        // The desktop's "do not blink" (a cursor flash time of 0) is this app's reduce-motion
+        // signal — RichEditor::setCaretColor already takes the caret's blink from it.
+        const bool animate = QApplication::cursorFlashTime() > 0;
+        const QStringList lines = relay::SubagentModel::waitingLines(
+            m_subagents.liveCount(), !m_waitCall.isEmpty(), m_subagents.hasLiveForeground(),
+            m_agentBusy, animate ? m_waitPhase : -1);
+        if (lines.isEmpty()) {
+            if (m_waitDots) m_waitDots->stop();
+            m_waitPhase = 0;
+            if (m_waitShown) {   // only ever put back a placeholder this took away
+                m_waitShown = false;
+                m_editor->setPlaceholders({});
+                m_editor->setAccessibleDescription(QString());
+            }
+            return;
+        }
+        m_waitShown = true;
+        m_editor->setPlaceholders(lines);
+        m_editor->setAccessibleDescription(lines.first().trimmed());
+        // Nothing is drawn over typed text, so the timer has nothing to animate: stop it and let
+        // the next keystroke (updateGhost) start it again once the box is empty.
+        if (!animate || !m_editor->toPlainText().isEmpty()) { if (m_waitDots) m_waitDots->stop(); return; }
+        if (!m_waitDots) {
+            m_waitDots = new QTimer(this);
+            m_waitDots->setInterval(600);   // gentle: four steps, a little over two seconds a cycle
+            connect(m_waitDots, &QTimer::timeout, this, [this] { ++m_waitPhase; refreshSubagentWait(); });
+        }
+        if (!m_waitDots->isActive()) m_waitDots->start();
     }
 
     // The model chip on a subagent row: pick a model, then (with more than one subagent listed)
@@ -6372,6 +6418,13 @@ private:
             }
             m_liveCall = call; m_liveTurn = turn; m_liveLabel = label;
             m_liveTick.invalidate();
+            // agent_wait: the main agent has asked to be blocked until its subagents finish, so
+            // the prompt box says so until the call lands (card #V7QD).
+            if (event.value(QStringLiteral("tool")).toString() == QStringLiteral("agent_wait")) {
+                m_waitCall = call;
+                refreshSubagentWait();
+                tickTurnClock();
+            }
             // Deferred while a program owns the terminal: a pending line can only be replayed in
             // its final form, so nothing is drawn until the result arrives.
             if (shellIdleAtPrompt()) {
@@ -6400,6 +6453,11 @@ private:
             const QString diff = event.value(QStringLiteral("diff")).toString();
             m_toolLines = 0; m_toolPartialLine = false;
             m_liveCall.clear();
+            if (!m_waitCall.isEmpty() && m_waitCall == call) {   // the agent_wait returned (card #V7QD)
+                m_waitCall.clear();
+                refreshSubagentWait();
+                tickTurnClock();
+            }
             if (!shellIdleAtPrompt()) {
                 // Deferred: the finished line, as plain text. It carries no anchor, because a line
                 // replayed by flushInline() cannot be rewritten and nothing would fold under it.
@@ -7169,6 +7227,8 @@ private:
     void startTurnClock() {
         m_turnElapsed.start();
         m_turnStep.clear();
+        m_waitCall.clear();   // a new turn is not blocked on an agent_wait yet (card #V7QD)
+        refreshSubagentWait();
         if (!m_turnClock) {
             m_turnClock = new QTimer(this);
             m_turnClock->setInterval(1000);
@@ -7181,14 +7241,26 @@ private:
     void stopTurnClock() {
         if (m_turnClock) m_turnClock->stop();
         m_turnStep.clear();
+        m_waitCall.clear();      // no turn, no agent_wait (card #V7QD)
         if (m_turnClockLabel) { m_turnClockLabel->hide(); m_turnClockLabel->clear(); }
+        refreshSubagentWait();   // the turn ended; subagents left running keep the line up
     }
 
     void tickTurnClock() {
         if (!m_agentBusy) { stopTurnClock(); return; }
         const qint64 seconds = m_turnElapsed.elapsed() / 1000;
         const QString stop = Keymap::instance().shortcutText(QStringLiteral("agent.stop"));
-        const QString label = QStringLiteral("thinking · %1 s%2 · %3 stops")
+        // Blocked on its subagents, the strip says what it is blocked on rather than "thinking"
+        // (card #V7QD); the prompt box carries the same words, animated.
+        const bool onSubagents = m_subagents.liveCount() > 0
+                                 && (!m_waitCall.isEmpty() || m_subagents.hasLiveForeground());
+        const QString what = onSubagents
+                                 ? QStringLiteral("waiting for %1 subagent%2")
+                                       .arg(m_subagents.liveCount())
+                                       .arg(m_subagents.liveCount() == 1 ? QString() : QStringLiteral("s"))
+                                 : QStringLiteral("thinking");
+        const QString label = QStringLiteral("%1 · %2 s%3 · %4 stops")
+                                  .arg(what)
                                   .arg(seconds)
                                   .arg(m_turnStep.isEmpty() ? QString() : QStringLiteral(" · ") + m_turnStep)
                                   .arg(stop.isEmpty() ? QStringLiteral("Esc") : stop);
@@ -8374,6 +8446,9 @@ private:
             m_editor->setToolTip(QString());
         }
         m_editor->setGhost(remainder);
+        // Typing, clearing the box and the ghost coming and going all change whether the
+        // "waiting for N subagents . . ." placeholder is on screen (card #V7QD).
+        refreshSubagentWait();
     }
 
     // Newest match first: commands run in this directory, then prompt history, then the shell's history file.
@@ -10286,6 +10361,12 @@ private:
     QElapsedTimer m_turnElapsed;
     QString m_turnStep;
     QLabel *m_turnClockLabel = nullptr;   // the turn clock's home in the prompt-box strip
+    // "waiting for 3 subagents . . ." in the prompt box (card #V7QD): the call_id of the main
+    // agent's running agent_wait (empty when none), the dot phase, and the timer that grows them.
+    QString m_waitCall;
+    QTimer *m_waitDots = nullptr;
+    int m_waitPhase = 0;
+    bool m_waitShown = false;             // this pane, not something else, owns the placeholder now
     QList<PendingToast> m_toastQueue;     // toasts waiting behind the one up
     QString m_toastHintId;                // the hint the toast up is, if it is one
     QElapsedTimer m_toastShown;

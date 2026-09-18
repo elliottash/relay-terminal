@@ -140,6 +140,54 @@ private slots:
         QVERIFY(h.model.row(QStringLiteral("a4"))->todoId.isEmpty());
     }
 
+    // Card #V7QD: "waiting for 3 subagents . . ." in the prompt box while the orchestrator is
+    // blocked on its subagents. The rule, the wording and the padding that keeps it still.
+    void waitingForSubagentsLine() {
+        const auto line = [](int live, bool blocked, bool foreground, bool busy, int phase) {
+            return SubagentModel::waitingLine(live, blocked, foreground, busy, phase);
+        };
+        // A busy main agent that merely started background subagents is not waiting on them.
+        QVERIFY(line(3, false, false, true, 3).isEmpty());
+        // Nothing running: nothing to wait for, whatever the main agent is doing.
+        QVERIFY(line(0, true, true, false, 3).isEmpty());
+        // Blocked on agent_wait, blocked on a foreground subagent, or its own step finished.
+        QCOMPARE(line(3, true, false, true, 3), QStringLiteral("waiting for 3 subagents . . ."));
+        QCOMPARE(line(2, false, true, true, 3), QStringLiteral("waiting for 2 subagents . . ."));
+        QCOMPARE(line(2, false, false, false, 3), QStringLiteral("waiting for 2 subagents . . ."));
+        // One subagent reads as one.
+        QCOMPARE(line(1, true, false, true, 3), QStringLiteral("waiting for 1 subagent . . ."));
+        // The dots grow with the phase and wrap, and every phase is the same width, so the line
+        // never jiggles. A negative phase is "no animation": the dots are drawn in full.
+        const QStringList phases{line(1, true, false, true, 0), line(1, true, false, true, 1),
+                                 line(1, true, false, true, 2), line(1, true, false, true, 3)};
+        QCOMPARE(phases.at(0), QStringLiteral("waiting for 1 subagent      "));
+        QCOMPARE(phases.at(1), QStringLiteral("waiting for 1 subagent .    "));
+        QCOMPARE(phases.at(2), QStringLiteral("waiting for 1 subagent . .  "));
+        QCOMPARE(phases.at(3), QStringLiteral("waiting for 1 subagent . . ."));
+        for (const QString &text : phases) QCOMPARE(text.size(), phases.at(3).size());
+        QCOMPARE(line(1, true, false, true, 4), phases.at(0));
+        QCOMPARE(line(1, true, false, true, -1), phases.at(3));
+        // The narrow-pane fallbacks are the same line with the words dropped, longest first.
+        const QStringList lines = SubagentModel::waitingLines(3, true, false, true, 3);
+        QCOMPARE(lines, (QStringList{QStringLiteral("waiting for 3 subagents . . ."),
+                                     QStringLiteral("waiting for 3 . . ."), QStringLiteral("3 . . .")}));
+        QVERIFY(SubagentModel::waitingLines(3, false, false, true, 3).isEmpty());
+    }
+
+    // A live foreground subagent blocks the main turn by itself (protocol § 8).
+    void foregroundSubagentsAreTrackedForTheWaitLine() {
+        Harness h;
+        QVERIFY(!h.model.hasLiveForeground());
+        h.start("a1");                 // background
+        QVERIFY(!h.model.hasLiveForeground());
+        h.start("a2", /*background=*/false);
+        QVERIFY(h.model.hasLiveForeground());
+        QCOMPARE(h.model.liveCount(), 2);
+        h.model.handle(json("{'event':'subagent_finished','id':'a2','outcome':'done','summary':'ok'}"));
+        QVERIFY(!h.model.hasLiveForeground());
+        QCOMPARE(h.model.liveCount(), 1);
+    }
+
     void formatting() {
         QCOMPARE(SubagentModel::formatElapsed(41200), QStringLiteral("0:41"));
         QCOMPARE(SubagentModel::formatElapsed(3723000), QStringLiteral("1:02:03"));

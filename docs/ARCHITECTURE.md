@@ -404,7 +404,17 @@ waiting behind other toasts costs none of its showings. Idle tips work the same 
 Toasts are events and queue: while one is up the next waits, the one up keeps at least 1.5 s (its
 own time if shorter), identical consecutive toasts collapse. The agent turn clock ("thinking ·
 48 s · Esc stops") is state, not a toast: it lives in the strip under the prompt box, left of the
-context chip, while a turn runs. `nextTime(shortcut, what)` builds the
+context chip, while a turn runs. **Waiting on subagents** (card #V7QD): when the pane's main
+("orchestrator") agent is blocked on the subagents it started, the prompt box's own placeholder
+says so — "waiting for 3 subagents . . .", the dots growing every 600 ms — and the turn clock says
+"waiting for 3 subagents · 48 s · Esc stops" instead of "thinking". `SubagentModel::waitingLine`
+holds the rule (subagents are live *and* the main agent's running tool is `agent_wait`, or a live
+subagent is in the foreground so the worker blocks the turn on it, or the main agent's own step has
+finished); `Pane::refreshSubagentWait` draws it through `RichEditor::setPlaceholders`, so Qt stops
+drawing it the instant a steer is typed and the narrow-pane fallbacks come for free. The timer only
+runs while the line is on screen, and a desktop cursor flash time of 0 ("do not blink", the same
+signal `RichEditor::setCaretColor` takes the caret's blink from) draws the dots in full and starts
+no timer at all. `nextTime(shortcut, what)` builds the
 text from the live Keymap, so rebinding changes the hint and unbound actions get none. Current
 triggers: toolbar and palette activations of actions with shortcuts, pane buttons, the tab "+",
 tab close and ⧉ buttons, clicking into another pane, mouse model/effort/mode pickers, clicking

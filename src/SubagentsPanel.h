@@ -68,10 +68,32 @@ public:
     void clearFinished();               // a new user turn
     void clear();                       // worker restarted
     bool mainBusy() const { return m_mainBusy; }
+    // A live subagent the main turn started in the foreground: the worker blocks the turn on it
+    // until it finishes (docs/AGENT-SESSIONS-PROTOCOL.md § 8), so the main agent is waiting.
+    bool hasLiveForeground() const;
     // "main ctx 38k · agents ~1.2k tok"
     QString tokenSplit() const;
     const QJsonArray &definitions() const { return m_definitions; }
     QStringList definitionWarnings() const { return m_definitionWarnings; }
+
+    // ----- the orchestrator waiting on its subagents (card #V7QD) --------------------------------
+    // What the prompt box says while a pane's main ("orchestrator") agent is blocked on the
+    // subagents it started: "waiting for 3 subagents . . .". Empty when nothing is waiting, which
+    // is what puts the ordinary placeholder back.
+    //
+    // The main agent is waiting when subagents are live and any of these holds:
+    //   * `blockedOnWait` — its running tool call is `agent_wait` (it asked to be blocked);
+    //   * a live subagent is in the foreground — the worker blocks the turn on it (§ 8);
+    //   * `mainBusy` is false — its own step is finished and only subagents are still running.
+    // It is *not* waiting while it is busy doing something else, so a turn that spawned background
+    // subagents and went on working says nothing.
+    //
+    // `phase` cycles 0-3 and grows the dots. The line is padded to a constant width, so the
+    // animation never moves the text next to it; `phase < 0` means "no animation", which draws the
+    // dots in full (see Pane::refreshSubagentWait and QApplication::cursorFlashTime).
+    static QString waitingLine(int liveSubagents, bool blockedOnWait, bool liveForeground, bool mainBusy, int phase);
+    // Shorter forms of the same line, longest first, for setPlaceholders() in a narrow pane.
+    static QStringList waitingLines(int liveSubagents, bool blockedOnWait, bool liveForeground, bool mainBusy, int phase);
 
     static QString formatElapsed(qint64 ms);
     static QString formatTokens(qint64 tokens, bool estimated);
