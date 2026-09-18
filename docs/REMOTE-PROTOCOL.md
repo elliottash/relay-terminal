@@ -676,9 +676,8 @@ each, so the refusals are something a reader can find rather than infer. `agent_
 two actions, and they spend the owner's provider key or edit somebody else's queue.
 
 An editor's `keys`, `paste` and `line` are accepted only while that editor holds the pane's control
-token; anyone else's are refused with `not_driving` (10.3). Until control handoff exists nobody but
-the owner ever holds it, so today all three are refused with `not_driving` — which is the honest
-answer rather than a placeholder: a role alone never reaches the keyboard.
+token; anyone else's are refused with `not_driving` (10.3). A role alone never reaches the keyboard:
+`editor` is permission to *ask*, and the owner hands it over one pane at a time.
 
 The desktop-minted password nonce that rides on a `panes` item (6.7) is **stripped** on its way to a
 participant. A guest is never offered the password field, so they are never handed the permit
@@ -690,6 +689,22 @@ turn lifecycle, `status`, `queued`, `queue_changed` and `error`. The agent's wor
 them on the screen, because Relay prints them into the terminal; stored transcripts and tool
 output (`turn_transcript_get`, `tool_output_get`) are refused, since they hold every file the
 agent read.
+
+**Outbound is an allow-list too.** `GUEST_SERVER_TYPES` in `remote/wire.py` names every
+desktop→client **type** a participant may receive, and `Host.guest_view` drops anything else
+before it is encoded. Denied-by-default in the same way `GUEST_TYPES` is, and for a sharper
+reason: a new desktop→client message is added for the owner's own client, so without this a
+`pane_state` or a `queue_edit_text` carrying the owner's models, sessions and queue text would
+reach every guest on that pane the day it landed, rather than the day somebody decided it should.
+Absent on purpose: `paired` and `revoked` (a guest has no device record), `push_state` and
+`transport_switched` (a guest can ask for neither).
+
+**A queue event carries only this guest's own text.** `queued` carries the prompt and
+`queue_changed` a preview of every waiting item, so the rows of a shared queue are filtered per
+recipient: a guest keeps their own rows whole — matched on the `guest:<id>` origin the hub itself
+puts on an approved prompt — and sees everyone else's as a row with no text and an `author`
+(`"you"`, a guest's name, or `"the owner"`). A share with two editors is otherwise a way to read
+what the other one is asking for, and what the owner is.
 
 ### 10.2 Invites and knocking
 
@@ -739,38 +754,81 @@ unknown key still has the handshake refused with no explanation at all.
 
 | Type | Direction | Body |
 |---|---|---|
-| `participants` | desktop → everyone on the pane | `{pane, items: [{id, name, role, driving, you}]}`, sent on join, leave, role change and handoff |
+| `participants` | desktop → everyone on the pane | `{pane, items: [{id, name, role, driving, online, you}]}`, sent on join, leave, role change, removal and every handoff |
 | `control_request` | editor → desktop | `{pane}`, as section 6.6. For a participant it is a request, not a grant |
 | `control_pending` | desktop → that editor | `{pane}` while the owner decides; lapses after 60 s |
 | `control` | desktop → everyone on the pane | `{pane, holder: "owner" \| "agent" \| "participant:<id>", name}` |
+| `control` (refusal) | desktop → the editor who asked | the same, plus `reason: "refused" \| "lapsed"`. A grant needs no private answer: the handoff above already said so, to everybody |
 | `control_release` | holder → desktop | `{pane}`, as section 6.6 |
 
+`online` is whether that participant has a socket open right now: the record outlives the socket
+(10.2), and presence is about the socket. `name` on a `control` is the desktop's own name when the
+holder is the owner, `"the agent"` for the agent, and the guest's name for a guest — never a device
+id, because an owner's own paired phone driving **is** the owner driving.
+
 One driver per pane. It is the same token as the human/agent handoff (`ARCHITECTURE.md` section 9),
-so "the agent is driving" and "alice is driving" are one state. **The owner's physical keystroke
-in the pane always takes control back**, without asking, and the participant is told with
-`control`. Input from anyone who is not the holder is refused with `not_driving`. A participant's
-input is refused at a password prompt exactly as a device's is, and they are never offered the
-password field.
+so "the agent is driving" and "alice is driving" are one state, held in `remote/control.py` and
+spelled three ways from there: the `holder` above, the `control` field of a `panes` item (6.3) and
+the `driving` flag on a `participants` row. Everything that can change it goes through that one
+book — a grant, a release, a revoke, the owner's keystroke, a `full` device typing, the desktop
+handing the program to the agent, a pause, a socket closing, a removal, a demotion, an expiry —
+and each change fans out one `control` and one `participants` to everyone on the pane.
+
+**The owner's physical keystroke in the pane always takes control back**, without asking
+(`control_take`, 10.5), and the participant is told with `control`; anything of theirs already in
+flight is refused with `not_driving` like anyone else's. Input from anyone who is not the holder is
+refused with `not_driving`. A participant's input is refused at a password prompt exactly as a
+device's is — the hub refuses it from the source's own fresh termios read before the source refuses
+it again at the write — and they are never offered the password field or its nonce.
+
+Losing the keyboard is never silent and never sticky: a holder who disconnects, is removed,
+is demoted to viewer, whose record expires, or whose share is paused loses it at once, and the
+pane goes back to the owner rather than to whoever asked first.
+
+**Out of scope for v1, deliberately:** *following* (a guest's viewport tracking the owner's) and
+selection highlights, both of which the design doc sketches. They need a second per-participant
+view state on a stream that today is one screen for everybody, and neither is needed to type or to
+ask; they are not half-built here.
 
 ### 10.4 Guest prompts
 
 An editor sends an ordinary `compose`. The hub does not pass it on: it answers `prompt_pending
-{id}` and asks the owner, who sees the guest's name and the whole text. `prompt_decided {id,
-approved}` follows; an approved prompt goes to the pane's agent (never the router) with origin
-`guest:<participant>`, and its queue row names its author. A pending prompt lapses after 10
-minutes, a guest may have 3 waiting, and `plan_execute` from a guest is treated as a prompt.
+{id, pane}` and asks the owner (`prompt_ask`, 10.5), who sees the guest's name and the whole text —
+never a preview, because approving a prompt is approving every tool call the agent will make from
+it, on the owner's keys. `prompt_decided {id, pane, approved, reason?}` follows, where `reason` is
+`refused`, `lapsed`, `paused` or `removed`.
 
-The owner's other option, *guest prompts run immediately*, is per share and off by default.
+An approved prompt goes to the pane's **agent** — never the router, whatever the text looks like —
+with `origin: "guest:<participant>"`, and the desktop is given the guest's display name beside it
+(`origin_name` on the sidecar's `compose` line, 10.5) so the queue row can say *alice* rather than
+a hex id. That name crosses the GUI↔sidecar line only: no client is ever sent another guest's
+prompt, with or without a name on it (10.1).
+
+A pending prompt lapses after 10 minutes, a guest may have 3 waiting (a fourth is `busy`), and
+`plan_execute` from a guest is treated as a prompt — approved, it runs the plan flow, whose id the
+desktop minted and resolves itself. A prompt whose guest was removed, demoted to viewer, or whose
+share ended while it waited is **dropped**: it never runs, and an answer that arrives afterwards
+does nothing. A prompt sent while the share is paused is refused `paused` rather than parked.
+
+The owner's other option, *guest prompts run immediately*, is per share and off by default
+(`share_options`, 10.5). It skips the question and nothing else: the prompt is still recorded with
+its text (10.6) and still reaches the agent and only the agent.
 
 ### 10.5 The owner's controls (desktop only)
 
 Between the GUI and its sidecar (`remote/gui_host.py`), as line JSON, never on the wire:
 `invite_create {pane, role, expires, uses}` → `invite {id, url, qr}`; `invite_revoke {id}`;
 `knock {participant, name, platform, code, role, pane}` → `knock_answer {participant, admit, role}`;
-`participants {items}`; `control_ask {pane, participant}` → `control_answer {pane, participant,
-grant}`; `control_take {pane}` (the owner's keystroke); `prompt_ask {id, participant, pane, text}` →
+`participants {items}` (each item carries `online` and the panes it is `driving`);
+`control_ask {pane, participant, name}` → `control_answer {pane, participant, grant}`;
+`control_take {pane}` (the owner's keystroke) and `control_revoke {pane}` (the same from the
+sharing panel); `prompt_ask {id, participant, name, pane, text, when, plan}` →
 `prompt_answer {id, approve}`; `role_set {participant, role}`; `participant_remove {participant}`;
-`share_pause {on}`; `share_end`.
+`share_pause {pane?, on}`; `share_options {pane, prompts_immediate, present_only}`; `share_end`.
+The desktop is told of every handoff and every stop with `control {pane, holder, name}` and
+`share_state {pane, paused, reason}` — the same two facts the phones are sent, from the same one
+state, so the desktop's "alice is typing" cannot drift from theirs. A `share_pause` or a
+`share_options` with no `pane` (or `""`) applies to the whole share.
 
 These names are `OWNER_ONLY` in `remote/wire.py`, which is folded into `NEVER_FROM_CLIENT`, so the
 same message arriving over the wire from any device — the owner's own paired phone included — is
@@ -778,17 +836,24 @@ refused `not_permitted` by the check every inbound message already passes throug
 "every type is classified" test covers them.
 
 **Pause** refuses every participant's input and prompts with `paused` while the screen keeps
-streaming. **End** closes every participant session, burns the pane's invites and deletes the
-participant records. Removing one participant does the same for that one, and burns the invite
-they came in on.
+streaming, and a paused holder keeps nothing: control returns to the owner, because a pause that
+left somebody able to type would not be one. Guests are told why typing stopped with
+`share_state {pane, paused, reason}`, `reason` being `owner` (the switch) or `away` (below).
+**End** closes every participant session, burns the pane's invites and deletes the participant
+records; the pane's pause, its switches and its control state go with it. Removing one participant
+does the same for that one, and burns the invite they came in on.
 
 A removed participant's row is kept, marked removed and holding no panes, until its own expiry
 passes — at most the 7 days of the invite — and is then dropped. It grants nothing: every lookup
 returns live records only. It exists so a guest whose phone was asleep when they were removed is
 *told* their access ended, rather than having a socket close on them for no stated reason.
 
-With *guests can act only while I am present* on, the hub treats an inactive desktop window (the
-`window_active` line of section 9) as a pause.
+With *guests can act only while I am present* on (`share_options {present_only}`), the hub treats
+an inactive desktop window as a pause, with `reason: "away"`. It reads the **same** `window_active`
+line section 9's notification presence rule reads — one signal, two readers, passed to the notifier
+by the hub — rather than a second one that could disagree with it. A **20-second grace period**
+applies: alt-tabbing to read a stack trace does not take the keyboard off whoever is typing, and
+only an absence longer than that pauses the share. Coming back lifts it immediately.
 
 **Guest identity without an account, and why v1 has no "Approve always".** Owner decision 4's "Approve always for that guest" binds to
 the **device key pinned at join**, not to a login, because decision 3 allows an invite to be a bare
@@ -813,8 +878,16 @@ device id. It is written **before** the action it records.
 
 The kinds, as written: `invite_create`, `invite_revoke`, `knock`, `knock_refused` (a wrong or spent
 secret), `refused`, `admitted`, `join`, `leave`, `role_set`, `participant_remove`, `share_end`,
-`guest_prompt`, `control_request`. Every one of them carries the participant id, which is minted at
-the knock, so a refusal and an admission name the same person as the join and the leave that follow.
+`guest_prompt` (with the whole text), `prompt_decided` (with `approved` and, when it was not, why),
+`control_request`, `control_grant`, `control_refused`, `control_revoke`, `control_release`,
+`control_take`, `share_pause`, `share_options`, and the input a participant or a device sent:
+`line` with its text, `keys` and `paste` as byte counts. Every one of them carries the participant
+id, which is minted at the knock, so a refusal and an admission name the same person as the join
+and the leave that follow; a device's input names the device id instead, and neither line ever
+carries both.
+
+Raw `keys` are a count and never their bytes for the same reason §6.7 redacts a password: a prompt
+this desktop failed to detect would otherwise be typed into the log in full.
 The one exception to *before* is `admitted`: admission is also where a key that is already a paired
 device is refused, so a line written first would record an admission that did not happen. It is
 written the moment the record exists and before the guest is told anything.
@@ -890,11 +963,19 @@ pinned key, pane scoping and the `viewer`/`editor` roles enforced at every inbou
 fan-out, the `GUEST_EVENTS` allow-list, the owner's controls as desktop-only sidecar lines and as
 `python3 -m remote.cli share --invite`, and the audit lines of 10.6 (`tests/test_remote_guests.py`).
 
-What is **not** built, and is the next piece: presence beyond the initial `participants` list,
-control handoff (10.3) — so an editor's `keys`, `paste` and `line` are refused `not_driving` — guest
-prompt approval (10.4) — so an editor's `compose` is answered `prompt_pending` and parked in a queue
-nothing drains but its ten-minute expiry — `share_pause`, and the desktop UI for any of it.
-The two seams are `Host.ask_owner_about_prompt` and `Host.ask_owner_about_control`.
+**The hub half of 10.3 to 10.6 is built** (2026-09-18, `remote/control.py`, `remote/host.py`,
+`tests/test_remote_control.py`): one control state per pane across the owner's devices, the agent
+and the participants, with `control` and `participants` fanned out on every change; the owner asked
+about a guest's prompt and about the keyboard through two approver seams shaped like the knock's
+(`prompt_ask`/`prompt_answer`, `control_ask`/`control_answer`), answerable from the GUI sidecar or
+from `python3 -m remote.cli share --invite`; the owner's keystroke taking control back
+(`control_take`, and the local attachment's own keys in the CLI); `share_pause` and *only while I
+am present* with its grace period, told to guests as `share_state`; the outbound allow-list of
+10.1; the queue-text filter of 10.1; and the audit kinds of 10.6. Lapses are driven by injected
+clocks, so the ten minutes and the sixty seconds are tested as numbers rather than waited on.
+
+What is **not** built: *following* and selection highlights, which 10.3 puts out of scope for v1
+with a reason. The desktop UI for the owner's side of all this is `src/`'s, against the 10.5 lines.
 
 **The guest's web client is built** (`app/guest.js`, served at `/join`). It is a separate
 session from the owner's phone rather than that one with buttons hidden: `app/app.js` hands
