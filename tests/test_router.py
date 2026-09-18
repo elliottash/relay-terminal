@@ -184,8 +184,66 @@ class ValidityTests(unittest.TestCase):
             result = self.check(text)
             self.assertEqual(result.route, "agent", text)
             self.assertTrue(result.explain_invalid, text)
-        # A syntax error is about a command however it is worded, so it is always explained.
-        self.assertTrue(self.check("don't break the build").explain_invalid)
+        # A syntax error is about a command, so it is explained — unless the only "quote" in the
+        # line is an apostrophe inside a word (card #W954, below).
+        self.assertTrue(self.check("echo 'unfinished").explain_invalid)
+
+    def test_sentence_punctuation_is_not_a_mistyped_command(self):
+        # Card #W954, owner report 2026-09-18: this went to the agent correctly with
+        # "command not found: yeah," under it — the comma made "yeah," look like a name, and #T4JV
+        # counted a name that is not a plain lowercase word as evidence a command was meant.
+        owner = ("yeah, see if there is a clear issue to resolve. if not, lets unblock and start "
+                 "backfilling at full capacity")
+        prose = [owner, "yeah,", "yeah.", "ok.", "ok, go ahead", "okay: do it", "done!", "thanks!",
+                 "great, thanks", "nope, try again", "right...", "wait... what", "hmm…", "yes!",
+                 # capitalised, as phones and habit write it
+                 "Yeah, see if there is a clear issue", "Yeah", "Sure", "Sounds good!", "Continue",
+                 "Resume", "Great, thanks.",
+                 # apostrophes: bash reads a lone one as an unterminated string
+                 "let's unblock and start backfilling", "don't break the build", "it's broken",
+                 "Let's go", "it's fine, isn't it", "don’t break it",
+                 # dashes, and quotes that are not shell quotes
+                 "yeah—do it", "yeah - do it", "ok -- do it", "“yeah” works",
+                 # one-word replies that sit one edit from a command (ok/od, no/nl, cool/col)
+                 "ok", "no", "good", "fine", "cool", "nope", "yep", "hi", "lets go", "ok go"]
+        for text in prose:
+            with self.subTest(text=text):
+                result = self.check(text)
+                self.assertEqual(result.route, "agent", text)
+                self.assertFalse(result.explain_invalid, f"{text!r}: {result.invalid_reason}")
+        # Real slips keep their note, capitalised or not.
+        for text in ["gti status", "pyton -m x", "ls -la | grpe x", "Gti status", "GTI status",
+                     "Docker ps", "Ls", "gti stauts.", "gti --", "kubectl2 get pods",
+                     "echo 'unfinished", 'echo "unfinished']:
+            with self.subTest(text=text):
+                result = self.check(text)
+                self.assertEqual(result.route, "agent", text)
+                self.assertTrue(result.explain_invalid, text)
+        with tempfile.TemporaryDirectory() as d:
+            result = self.check("./run.sh", cwd=d)
+            self.assertEqual((result.route, result.explain_invalid), ("agent", True))
+
+    def test_a_question_word_is_not_a_glob(self):
+        # Card #W954: "really?" and "ready?" were read as a glob in command position, which the
+        # router cannot judge, so they ran in the shell. A `?` glob still counts inside a real one.
+        for text in ["really?", "ready?", "hmm?", "really?!"]:
+            with self.subTest(text=text):
+                result = self.check(text)
+                self.assertEqual(result.route, "agent", text)
+                self.assertFalse(result.explain_invalid, text)
+        self.assertValid("p* --version")
+        self.assertValid("ls -d /us?")
+
+    def test_a_lone_yes_is_a_reply(self):
+        # Card #W954: a lone "yes" ran `yes`, which prints y until interrupted.
+        for text in ["yes", "nice"]:
+            with self.subTest(text=text):
+                result = self.check(text)
+                self.assertEqual(result.route, "agent", text)
+                self.assertTrue(result.agent_signal, text)
+                self.assertFalse(result.explain_invalid, text)
+        self.assertValid("yes | head -3")
+        self.assertValid("nice -n 10 ls")
 
     def test_one_edit_apart(self):
         for typed, command in [("gti", "git"), ("pyton", "python"), ("docekr", "docker"),

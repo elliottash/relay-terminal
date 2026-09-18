@@ -1,0 +1,98 @@
+== PROSE
+agent  NOTE 'yeah, see if there is a clear issue to resolve. if not, lets unblock and start backfilling at full capacity' command not found: yeah,
+agent       'yeah see if there is a clear issue to resolve. if not, lets unblock and start backfilling at full capacity' 
+agent  NOTE 'yeah,'                                                      command not found: yeah,
+agent  NOTE 'yeah.'                                                      command not found: yeah.
+agent  NOTE 'ok.'                                                        command not found: ok.
+agent  NOTE 'ok, go ahead'                                               command not found: ok,
+agent  NOTE 'okay: do it'                                                command not found: okay:
+agent  NOTE 'hmm; not sure'                                              command not found: hmm
+shell       'really?'                                                    
+shell       'ready?'                                                     
+agent  NOTE 'done!'                                                      command not found: done!
+agent  NOTE 'thanks!'                                                    command not found: thanks!
+agent  NOTE 'great, thanks'                                              command not found: great,
+agent  NOTE 'Yeah, see if there is a clear issue'                        command not found: Yeah,
+agent  NOTE 'Yeah'                                                       command not found: Yeah
+agent  NOTE 'Sure'                                                       command not found: Sure
+agent  NOTE 'Hmm, what now'                                              command not found: Hmm,
+agent  NOTE 'nope, try again'                                            command not found: nope,
+agent  NOTE 'cool.'                                                      command not found: cool.
+agent  NOTE 'right...'                                                   command not found: right...
+agent  NOTE 'wait... what'                                               command not found: wait...
+agent  NOTE 'ok...'                                                      command not found: ok...
+agent  NOTE 'hmm…'                                                       command not found: hmm…
+agent  NOTE 'yes!'                                                       command not found: yes!
+agent       'sure thing.'                                                
+agent  NOTE "let's unblock and start backfilling"                        syntax error: unexpected EOF while looking for matching `''
+agent  NOTE "don't break the build"                                      syntax error: unexpected EOF while looking for matching `''
+agent  NOTE 'lets go'                                                    command not found: lets
+agent  NOTE "it's broken"                                                syntax error: unexpected EOF while looking for matching `''
+agent       "what's up"                                                  
+agent  NOTE "Let's go"                                                   syntax error: unexpected EOF while looking for matching `''
+agent       'yeah — do it'                                               
+agent  NOTE 'yeah—do it'                                                 command not found: yeah—do
+agent  NOTE 'ok -- do it'                                                command not found: ok
+agent  NOTE 'yeah - do it'                                               command not found: yeah
+agent  NOTE 'nah, leave it'                                              command not found: nah,
+agent  NOTE '"yeah" is fine'                                             command not found: yeah
+agent  NOTE 'yep: ship it'                                               command not found: yep:
+agent       'sounds good.'                                               
+agent  NOTE 'Sounds good!'                                               command not found: Sounds
+agent  NOTE 'perfect, now commit'                                        command not found: perfect,
+agent  NOTE 'alright, carry on'                                          command not found: alright,
+shell       'hmm?'                                                       
+agent  NOTE 'ok!'                                                        command not found: ok!
+agent  NOTE 'yeah, thanks!'                                              command not found: yeah,
+agent       'awesome'                                                    
+agent  NOTE 'Awesome!'                                                   command not found: Awesome!
+agent  NOTE 'Continue'                                                   command not found: Continue
+agent  NOTE 'Resume'                                                     command not found: Resume
+agent  NOTE 'resume.'                                                    command not found: resume.
+agent  NOTE 'continue.'                                                  command not found: continue.
+agent  NOTE 'ok'                                                         command not found: ok
+agent  NOTE 'no'                                                         command not found: no
+agent  NOTE 'good'                                                       command not found: good
+agent  NOTE 'fine'                                                       command not found: fine
+agent  NOTE 'cool'                                                       command not found: cool
+agent  NOTE 'nope'                                                       command not found: nope
+agent  NOTE 'yep'                                                        command not found: yep
+agent  NOTE 'hi'                                                         command not found: hi
+agent  NOTE 'go'                                                         command not found: go
+agent  NOTE 'stop'                                                       command not found: stop
+shell       'yes'                                                        
+agent  NOTE 'Yes'                                                        command not found: Yes
+shell       'nice'                                                       
+shell       'wait'                                                       
+agent  NOTE 'Wait'                                                       command not found: Wait
+shell       'really?!'                                                   
+agent  NOTE "it's fine, isn't it"                                        command not found: its fine, isnt
+agent  NOTE 'don’t break it'                                             command not found: don’t
+agent  NOTE 'ok go'                                                      command not found: ok
+agent  NOTE 'Great, thanks.'                                             command not found: Great,
+agent  NOTE '“yeah” works'                                               command not found: “yeah”
+== TYPO
+agent  NOTE 'gti status'                                                 command not found: gti
+agent  NOTE 'pyton -m x'                                                 command not found: pyton
+agent  NOTE './run.sh'                                                   no such file: ./run.sh
+agent  NOTE 'ls -la | grpe x'                                            command not found: grpe
+agent  NOTE 'nonexistentcmd123'                                          command not found: nonexistentcmd123
+agent  NOTE 'docekr ps -a'                                               command not found: docekr
+agent  NOTE 'pyton script.py'                                            command not found: pyton
+agent  NOTE 'lls'                                                        command not found: lls
+agent  NOTE 'ls | nonexistentcmd123'                                     command not found: nonexistentcmd123
+agent  NOTE 'gti'                                                        command not found: gti
+agent  NOTE 'Gti status'                                                 command not found: Gti
+agent  NOTE 'kubectl2 get pods'                                          command not found: kubectl2
+agent  NOTE 'pip4 install x'                                             command not found: pip4
+agent  NOTE 'gti, status'                                                command not found: gti,
+agent  NOTE "echo 'unfinished"                                           syntax error: unexpected EOF while looking for matching `''
+agent  NOTE 'echo "unfinished'                                           syntax error: unexpected EOF while looking for matching `"'
+agent  NOTE 'Docker ps'                                                  command not found: Docker
+agent  NOTE 'gti stauts.'                                                command not found: gti
+agent  NOTE 'GTI status'                                                 command not found: GTI
+agent  NOTE 'Ls'                                                         command not found: Ls
+agent  NOTE 'gti --'                                                     command not found: gti
+shell       'yes | head -3'                                              
+agent  NOTE 'Gti'                                                        command not found: Gti
+agent  NOTE 'pyton,'                                                     command not found: pyton,
