@@ -5,7 +5,8 @@
 // terminal title comes from OSC sequences — so every string from the wire goes in through
 // textContent. There is no innerHTML in this file, and the CSP forbids inline script anyway.
 
-import { Rrp, loadDevice, forgetDevice, fingerprint, b64 } from './rrp.js';
+import { Rrp, loadDevice, forgetDevice, fingerprint, b64, un64, storeValue, dropValue }
+  from './rrp.js';
 import { ScreenView, KEYS, controlByte, keyEventBytes } from './screen.js';
 
 const rrp = new Rrp();
@@ -89,6 +90,7 @@ async function afterConnect(record) {
   if (!rrp.session) await rrp.connect(record);
   setStatus('connected', 'ok');
   show('inbox');
+  updateNotifyRow().catch(() => {});
 }
 
 async function connectStored() {
@@ -157,6 +159,111 @@ function renderInbox() {
     list.append(row);
   }
   $('inbox-empty').textContent = panes.length ? '' : 'No panes yet.';
+}
+
+// ---- notifications ------------------------------------------------------------------------------
+// Web Push (docs/REMOTE-PROTOCOL.md section 9). The subscription and the seal key go to the
+// **desktop**, inside the Noise session; the rendezvous only ever posts bytes it cannot read, and
+// the service worker discards any push it cannot open with the seal key. So the worst a hostile
+// rendezvous can do is deliver nothing — never invent a "password prompt".
+//
+// Permission is asked for from this button and never on load: a browser refuses it outside a
+// gesture, and a permission sheet on first open is the thing that gets an app blocked for good.
+
+const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
+function installedApp() {
+  return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+}
+
+function pushUsable() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+async function currentSubscription() {
+  if (!pushUsable()) return null;
+  const registration = await navigator.serviceWorker.getRegistration();
+  return registration ? registration.pushManager.getSubscription() : null;
+}
+
+async function updateNotifyRow() {
+  const button = $('notify');
+  const note = $('notify-note');
+  if (!button) return;
+  if (!pushUsable()) {
+    button.hidden = true;
+    // iOS delivers Web Push only to a PWA on the Home Screen, and simply has no PushManager
+    // otherwise — no error, no prompt — so say what to do instead of failing silently.
+    note.textContent = IOS && !installedApp()
+      ? 'To be notified on iPhone or iPad: tap the Share button, choose “Add to Home Screen”, '
+        + 'and open Relay from there. iOS only delivers notifications to an installed app.'
+      : 'This browser cannot show notifications.';
+    return;
+  }
+  button.hidden = false;
+  const on = Boolean(await currentSubscription());
+  button.textContent = on ? 'Stop notifying this phone' : 'Notify me on this phone';
+  if (on) {
+    note.textContent = 'Your desktop decides what is worth telling you, and a notification never '
+      + 'carries what is on the screen.';
+  } else if (Notification.permission === 'denied') {
+    note.textContent = 'Notifications are blocked for this site in your browser’s settings.';
+  } else {
+    note.textContent = '';
+  }
+}
+
+async function enableNotifications() {
+  const note = $('notify-note');
+  note.textContent = '';
+  // First thing in the gesture: Safari drops the user activation across an await.
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') {
+    note.textContent = 'Notifications are off for this site.';
+    return;
+  }
+  const registration = await navigator.serviceWorker.ready;
+  const reply = await fetch(`${rrp.origin}/v1/push/key`);
+  const { vapid } = await reply.json();
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true, applicationServerKey: un64(vapid),
+  });
+  // The seal key: generated here, kept where the service worker reads it, and sent to the
+  // desktop and nowhere else.
+  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true,
+    ['encrypt', 'decrypt']);
+  await storeValue('push-key', key);
+  await rrp.send({
+    t: 'push_subscribe',
+    endpoint: subscription.endpoint,
+    p256dh: b64(new Uint8Array(subscription.getKey('p256dh'))),
+    auth: b64(new Uint8Array(subscription.getKey('auth'))),
+    key: b64(new Uint8Array(await crypto.subtle.exportKey('raw', key))),
+  });
+  await rrp.once('push_state', 15000);
+}
+
+async function disableNotifications() {
+  const subscription = await currentSubscription();
+  if (subscription) await subscription.unsubscribe();
+  await dropValue('push-key');
+  await rrp.send({ t: 'push_unsubscribe' });
+  await rrp.once('push_state', 15000);
+}
+
+async function toggleNotifications() {
+  const button = $('notify');
+  button.disabled = true;
+  try {
+    if (await currentSubscription()) await disableNotifications();
+    else await enableNotifications();
+  } catch (error) {
+    $('notify-note').textContent = error.message || 'That did not work.';
+  } finally {
+    button.disabled = false;
+    await updateNotifyRow();
+  }
 }
 
 // ---- thread -----------------------------------------------------------------------------------
@@ -1015,6 +1122,7 @@ window.addEventListener('DOMContentLoaded', () => {
   $('screen-wrap').addEventListener('click', () => {
     if (driving && directKeys) $('term-capture').focus();
   });
+  $('notify').addEventListener('click', toggleNotifications);
   $('pair-retry').addEventListener('click', () => location.reload());
   $('forget').addEventListener('click', async () => {
     await forgetDevice();
