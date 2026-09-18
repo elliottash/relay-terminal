@@ -33,9 +33,12 @@ Backend tests by module:
 | `tests/test_keystore.py` | 11 | Preset URL matching, secrets passed on stdin, env var overrides keyring, bad ids and keys, Warp TOML 1.1 tables, Warp default preset, custom preset matched by URL, import success, missing keys and no keys |
 | `tests/test_shell.py` | 8 | Real Bash in a PTY: acknowledged command loading and exit status, cwd/env persistence, multiline Unicode, heredoc, native `read` and interrupt, alias reporting, existing prompt arrays, existing DEBUG trap falls back to native |
 | `tests/test_isolation.py` | 4 | Worker raises its own `oom_score_adj`, never lowers it, starts with the raised score; integration script raises the shell's |
+| `tests/test_aliases.py` | 34 | Aliases: `{{arg}}` substitution and defaults, a value with shell metacharacters staying one literal word (checked against a real interactive bash, not only against our reading), quoted placeholders, prompts substituted as plain text, positional arguments, the card round trip including a default holding commas, braces and backticks, name and kind validation, the `## Parameters` grammar, global vs local resolution and precedence with shadowing, the `.relay/` fallback, an unreadable card becoming a problem, `relay-board.py check` accepting a saved alias, and repeated-command detection |
+| `tests/test_alias_import.py` | 22 | Importing: Warp workflows out of a copied read-only database (with their parameters and an `agent_mode` workflow importing as a prompt), workflow YAML, shell aliases with bash's own quote escape, malformed rows / YAML / alias lines each skipped with a reason, a database that is not one, a symlinked startup file, nothing executed and nothing written by a preview, an apply writing only what was chosen, a name that was not previewed refused, renaming on import, the conflict and warning fields, and this machine's real Warp workflows when Warp is installed |
+| `tests/test_alias_protocol.py` | 18 | The section-19 messages: defining an alias and the list that follows, a bad definition refused with a sentence, delete, the list readable with no provider configured, the palette / `/name` / typed-name paths all expanding the same way, defaults, a metacharacter value quoted before it reaches the GUI, a missing required value, a prompt alias, local beating global, the preview writing nothing and the apply writing what was chosen, an apply without a preview, and the agent's alias suggestion (proposed, rejected, and no repeats meaning no model call) |
 | `tests/test_images.py` | 27 | Image context: attachments loaded as bytes with the type sniffed from them, text attachments unchanged, the per-image cap, multimodal content parts and their base64 data URLs, `relay_*` keys never reaching the wire, an image estimated as a constant, which models read images, the GLM-5.3 → GLM-5.3-Flash swap and the swap back (including after a failed turn), the refusal when nothing can read images, a configured vision model, and the replacement of each image by its description and path once the turn is over |
 | `tests/test_version.py` | 1 | `relay_core.__version__` matches `project(Relay VERSION …)` in `CMakeLists.txt` |
-| **Total** | **127** | |
+| **Total** | **201** | |
 
 Qt tests:
 
@@ -43,6 +46,7 @@ Qt tests:
 |---|---|
 | `tests/editor_test.cpp` | native selection and undo, submission shortcuts and multiline, Shift+click, mouse drag, paste never submits, IME preedit does not submit, history keeps the draft, Up inside multiline text moves the cursor |
 | `tests/filepanes_test.cpp` | explorer navigates in and up, filter, hidden files, Enter opens a file, typing starts the filter, filter then Down+Enter opens the match, preview picks a viewer by type, large text truncated with a notice, missing path returns false |
+| `tests/aliases_test.cpp` | aliases: name and slug rules matching the worker's, a template rendered into composer fields with its defaults, Tab and Shift+Tab walking and wrapping, typing into a field moving the later ones, the values sent to the worker, a field still showing its own name counting as unfilled, reading the values back out of an edited line and refusing a line that was rewritten, a trailing field running to the end, `/name` never shadowing a built-in, a typed name matching only when it is exactly an alias (not a path, a prefix, an assignment or a longer word), a shadowed global alias not being a name, the palette row text, and the fast-path hint |
 | `tests/images_test.cpp` | image context: type sniffed from the bytes (including a mislabelled file), `@` tokens quoted for paths with spaces, capture names stamped and never colliding, PNG writing and the empty-image refusal, what a paste or a drop carries (file URLs used in place, inline data written to the cache), plain text is not an image, the cache sweep takes only old `relay-*` captures, and the 3 MiB cap matches the worker's |
 
 Provider tests use a local mock server and synthetic responses. They do not validate real
@@ -66,6 +70,7 @@ Claude session. They show the feature worked once; they are not independent QA.
 
 | Feature | Evidence folder |
 |---|---|
+| Aliases and workflows: defining one, running it from the palette, `/name` and the typed name, and the import preview against this machine's real Warp workflows | [`qa_evidence/2026-09-17-aliases-and-workflows/`](qa_evidence/2026-09-17-aliases-and-workflows/) |
 | Inline agent output, invalid command to agent, fix loop | [`qa_evidence/2026-09-17-inline-agent-output/`](qa_evidence/2026-09-17-inline-agent-output/) |
 | Transcript panel while a program runs | [`qa_evidence/2026-09-17-agent-output-while-program-runs/`](qa_evidence/2026-09-17-agent-output-while-program-runs/) |
 | Program context sent to the agent | [`qa_evidence/2026-09-17-agent-program-context/`](qa_evidence/2026-09-17-agent-program-context/) |
@@ -146,6 +151,7 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-agent-output-while-program-runs.md`
 - `2026-09-17-agent-program-context.md`
 - `2026-09-17-agent-responses-in-terminal.md`
+- `2026-09-17-aliases-and-workflows.md`
 - `2026-09-17-ctrl-i-input-toggle.md`
 - `2026-09-17-file-explorer-and-preview-panes.md`
 - `2026-09-17-fix-and-rerun-terminal-commands.md`
