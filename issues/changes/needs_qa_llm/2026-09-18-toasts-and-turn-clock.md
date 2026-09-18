@@ -12,7 +12,7 @@ rank: b
 created: '2026-09-18'
 acceptance: 'During an agent turn the "thinking · N s · Esc stops" clock ticks in the strip under the prompt box and is never a toast; a toast raised during the turn stays up for its time; two toasts in a row both appear, one after the other; a shortcut hint counts as shown only when it appears; `relay-hints-tests` passes'
 source: 'found while fixing #Y4GE'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-toasts-and-turn-clock/'], related: [Y4GE], github: null}
+links: {plans: [], commits: [cce9871], evidence: ['docs/qa_evidence/2026-09-18-toasts-and-turn-clock/'], related: [Y4GE], github: null}
 ---
 # The turn clock gets a place of its own; toasts queue; a hint counts when it is seen
 
