@@ -67,7 +67,9 @@ key `agent.subagentPane` (`src/Keymap.h`).
   pane, Down goes on to the jobs list, Up/Esc return. Closing the pane unfolds it.
 - **Tabs follow the list:** a tab closes when its row leaves the list (dismissed with `x`, cleared
   by the next user prompt or New chat, a worker restart); the pane closes with its last tab. The
-  tab's × closes only the tab; the agent keeps running and its row opens it again.
+  other way round (coordinator for the owner's "fix clear gaps", 2026-09-18): the tab's × on a
+  *finished* agent also dismisses its row, so the two agree; on a *running* agent it closes only
+  the tab, the agent keeps running and its row opens the tab again.
 - **Restart:** the pane is saved as `{"subagents": {owner, cwd, current, tabs: [{id, type,
   description, status, text}]}}` — each tab's last 16,000 characters — and relinked to its owner
   by the owner's scrollback id. The agents themselves end with the worker, so a restored tab says
@@ -78,7 +80,8 @@ key `agent.subagentPane` (`src/Keymap.h`).
 
 ## Implementer check (not a QA verdict)
 
-- `ctest`: `subagents` 19 cases, 4 new (click opens and the fold; `onFinishedCleared` is the
+- `ctest`: `subagents`, 5 new cases (a finished tab's × dismisses its row, a running one's does
+  not; click opens and the fold; `onFinishedCleared` is the
   list's rule, not a worker restart; tabs open, switch, follow the list, close; tabs survive a
   restart as text, replace in place, drop at the next prompt), `windowstate` (the new node).
   Every other ctest passed except `backend-and-bash`, whose three failures are Python tests this
@@ -106,7 +109,8 @@ key `agent.subagentPane` (`src/Keymap.h`).
    line) switches to it; "← main agent", Esc and Alt+A switch back to the owner's prompt box.
 5. The tab glyph follows status (○ ● ✓ ✗ ■). `x` on a finished row in the strip — reach the strip
    by closing the pane first — or the next prompt closes that tab; the last one closes the pane.
-6. The tab × closes a tab without stopping the agent; the row reopens it with its snapshot.
+6. The tab × on a running agent closes the tab without stopping it; the row stays and reopens it
+   with its snapshot. The tab × on a finished agent also removes its row from the strip.
 7. Close the pane: the full strip returns. Ctrl+Shift+Z brings the pane back with live tabs.
 8. Quit and restart with the pane open: it comes back beside its pane with the tabs' text, ■
    stopped, message box disabled; the next prompt drops them.

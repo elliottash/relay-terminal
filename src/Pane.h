@@ -1421,6 +1421,12 @@ public:
         tabs->setBackKeys(Keymap::instance().shortcutText(QStringLiteral("agent.subagentPane")));
         QPointer<Pane> self(this);
         tabs->onViewCreated = [self](relay::SubagentTranscriptView *view) { if (self) self->attachSubagentView(view); };
+        // Closing a finished agent's tab dismisses its row too (dismissing a row closes its tab);
+        // a running agent keeps running and keeps its row.
+        tabs->onUserClosed = [self](const QString &id) {
+            if (!self) return;
+            if (const auto *row = self->m_subagents.row(id); row && !row->live()) self->m_subagents.dismiss(id);
+        };
         tabs->onBackClicked = [self] {
             if (self) self->hint(QStringLiteral("subagents.back.mouse"),
                                  relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.subagentPane")),

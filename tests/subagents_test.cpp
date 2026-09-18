@@ -458,6 +458,28 @@ private slots:
         QCOMPARE(empties, 1);
     }
 
+    // Closing a finished agent's tab dismisses its row; a running agent's tab closes alone.
+    void closingAFinishedTabDismissesItsRow() {
+        Harness h;
+        SubagentTabsView tabs;
+        tabs.onUserClosed = [&](const QString &id) {   // what Pane wires
+            if (const auto *row = h.model.row(id); row && !row->live()) h.model.dismiss(id);
+        };
+        h.start("a1"); h.start("a2");
+        tabs.showTab(QStringLiteral("a1")); tabs.showTab(QStringLiteral("a2"));
+        tabs.syncRows(h.model);
+        h.model.handle(json("{'event':'subagent_finished','id':'a2','type':'explore','outcome':'done','tools':1,'tokens':10,'elapsed_ms':1000}"));
+        tabs.syncRows(h.model);
+        tabs.closeTabByUser(QStringLiteral("a2"));
+        QVERIFY(!h.model.row(QStringLiteral("a2")));
+        QCOMPARE(tabs.ids(), QStringList{QStringLiteral("a1")});
+        auto *close = qobject_cast<QToolButton *>(tabs.findChild<QTabBar *>(QStringLiteral("subagentTabBar"))->tabButton(0, QTabBar::RightSide));
+        QVERIFY(close);
+        close->click();                                  // a1 is running: its row stays
+        QVERIFY(h.model.row(QStringLiteral("a1")));
+        QCOMPARE(tabs.count(), 0);
+    }
+
     void tabsSurviveARestartAsText() {
         Harness h;
         QJsonObject saved;

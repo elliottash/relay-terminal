@@ -138,6 +138,8 @@ public:
     std::function<void()> onEmpty;
     // The current tab changed (the pane's title follows it).
     std::function<void()> onTitleChanged;
+    // A tab was closed with its × (before it goes): the owner dismisses a finished agent's row.
+    std::function<void(const QString &id)> onUserClosed;
 
     // Opens (or selects) the tab for `id`; returns its view. `live`: the owner's list has this row,
     // so a restored tab with the same id (an earlier agent) is replaced by a live one.
@@ -148,6 +150,8 @@ public:
     QStringList ids() const;
     int count() const;
     void closeTab(const QString &id);
+    // The tab's ×: onUserClosed, then closeTab.
+    void closeTabByUser(const QString &id);
     // Rows changed: relabel tabs and close the tabs of rows the list no longer has. A tab whose id
     // the model has never had (restored from before a restart) is left alone.
     void syncRows(const SubagentModel &model);

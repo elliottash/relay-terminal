@@ -488,7 +488,7 @@ SubagentTabsView::SubagentTabsView(QWidget *parent) : QWidget(parent) {
         if (hadFocus) view->focusInput();
         if (onTitleChanged) onTitleChanged();
     });
-    connect(m_bar, &QTabBar::tabCloseRequested, this, [this](int index) { closeTab(m_bar->tabData(index).toString()); });
+    connect(m_bar, &QTabBar::tabCloseRequested, this, [this](int index) { closeTabByUser(m_bar->tabData(index).toString()); });
 }
 
 void SubagentTabsView::setBackKeys(const QString &keys) {
@@ -513,8 +513,8 @@ int SubagentTabsView::addTabFor(const QString &id, int at) {
     close->setAutoRaise(true);
     close->setFocusPolicy(Qt::NoFocus);
     close->setCursor(Qt::PointingHandCursor);
-    close->setToolTip(QStringLiteral("Close this tab. The agent keeps running; its row in the list opens it again."));
-    connect(close, &QToolButton::clicked, this, [this, id] { closeTab(id); });
+    close->setToolTip(QStringLiteral("Close this tab. A running agent keeps running and its row opens it again; a finished one is dismissed from the list."));
+    connect(close, &QToolButton::clicked, this, [this, id] { closeTabByUser(id); });
     m_bar->setTabButton(index, QTabBar::RightSide, close);
     return index;
 }
@@ -591,6 +591,13 @@ void SubagentTabsView::closeTab(const QString &id) {
     if (m_bar->count() == 0) { if (onEmpty) onEmpty(); return; }
     if (auto *view = current()) { m_stack->setCurrentWidget(view); if (hadFocus) view->focusInput(); }
     if (onTitleChanged) onTitleChanged();
+}
+
+// The tab's × (not the list's rules): the owner dismisses a finished agent's row, which agrees
+// with dismissing a row closing its tab. A running agent's row stays.
+void SubagentTabsView::closeTabByUser(const QString &id) {
+    if (onUserClosed) onUserClosed(id);
+    closeTab(id);   // already gone if dismissing the row closed it
 }
 
 void SubagentTabsView::syncRows(const SubagentModel &model) {
