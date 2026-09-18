@@ -153,6 +153,25 @@ private slots:
         QCOMPARE(preview.path(), QFileInfo(temp.filePath(QStringLiteral("e.bin"))).absoluteFilePath());
     }
 
+    // Issue #3W58: a .md file opens rendered, and the one thing that leaves the render — a line
+    // number from an output link — says so, so the view button can offer the render back.
+    void markdownOpensRenderedAndALineNumberSaysItLeftIt() {
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("doc.md"));
+        writeFile(path, "# Title\n\nBody\n\n- one\n- two\n");
+        FilePreview preview;
+        QVERIFY(preview.open(path));
+        QCOMPARE(preview.kind(), FilePreview::Kind::Markdown);
+        QVERIFY(!preview.showingSource());
+        preview.goToLine(5);
+        QVERIFY(preview.showingSource());
+        // Reopening the file renders it again; a line of 0 never leaves the render.
+        QVERIFY(preview.open(path));
+        QVERIFY(!preview.showingSource());
+        preview.goToLine(0);
+        QVERIFY(!preview.showingSource());
+    }
+
     void largeTextIsTruncatedWithNotice() {
         QTemporaryDir temp;
         const QString path = temp.filePath(QStringLiteral("big.log"));

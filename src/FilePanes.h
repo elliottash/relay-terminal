@@ -130,6 +130,9 @@ public:
     QString path() const { return m_path; }
     QString title() const;
     Kind kind() const { return m_kind; }
+    // Markdown only: true while the source is on screen rather than the render. A .md file opens
+    // rendered; goToLine() and the view button are the only things that turn this on.
+    bool showingSource() const { return m_kind == Kind::Markdown && m_markdownSource; }
     // Truncation or refusal message, empty when the whole file is shown.
     QString notice() const { return m_notice; }
     // Plain text shown by the Text or Markdown source viewer. Mainly for tests.

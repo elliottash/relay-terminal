@@ -847,7 +847,17 @@ void FilePreview::resizeEvent(QResizeEvent *event) {
 
 void FilePreview::goToLine(int line) {
     if (line <= 0 || (m_kind != Kind::Text && m_kind != Kind::Markdown)) return;
-    if (m_kind == Kind::Markdown) m_stack->setCurrentWidget(m_textView);
+    // A line number counts lines in the source, so a Markdown preview has to leave the rendered
+    // view to point at one. It used to do that without recording the switch, which left the button
+    // still offering "Source" over a pane that was already showing it: Ctrl+clicking `notes.md:9`
+    // in the output gave raw Markdown with no obvious way back (issue #3W58, owner 2026-09-18:
+    // "MD's arent printing markdown"). Go through the same state the button uses, so it reads
+    // "Rendered (MD)" and one click renders the file.
+    if (m_kind == Kind::Markdown && !m_markdownSource) {
+        m_markdownSource = true;
+        m_stack->setCurrentWidget(m_textView);
+        updateModeButton();
+    }
     QTextBlock block = m_textView->document()->findBlockByNumber(line - 1);
     if (!block.isValid()) return;
     QTextCursor cursor(block);

@@ -98,7 +98,6 @@
 | `#VXTF` | [A Markdown preview should label its views "source (MD)" and "rendered (MD)"](changes/2026-09-18-markdown-view-labels-say-md.md) | inbox | agent |  |  |
 | `#S1JP` | [A link clicked inside a file preview replaces the file with no way back](changes/2026-09-18-preview-link-has-no-way-back.md) | inbox | agent |  |  |
 | `#ZW95` | [Tab completion adds a stray "-" after a folder](changes/2026-09-18-tab-completion-adds-a-stray-dash.md) | inbox | agent |  |  |
-| `#3W58` | [Markdown files are not rendered as Markdown](changes/2026-09-18-markdown-files-do-not-render.md) | inbox | agent |  |  |
 | `#GDWE` | [@ file completion runs synchronous git on the GUI thread (multi-second block)](changes/2026-09-17-file-completion-runs-synchronous-git-on-the-gui.md) | ready |  |  | [2](threads/GDWE.md) |
 | `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | ready |  |  | [2](threads/72NR.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | ready |  |  | [2](threads/9MYY.md) |
@@ -119,6 +118,7 @@
 | `#0C7V` | [Single click opens folders in the explorer pane (Dolphin style)](changes/needs_qa_llm/2026-09-17-single-click-folders.md) | needs-qa-llm | agent |  |  |
 | `#SQAM` | [Provider stalls have no visible progress, no retry and no log](changes/needs_qa_llm/2026-09-17-provider-stalls-and-no-logs.md) | needs-qa-llm | agent |  |  |
 | `#FW3Z` | [Cleanup quick wins: dead-code removal, logging for silent failures, stale build dirs, docs index, deploy.sh](changes/needs_qa_llm/2026-09-17-cleanup-quick-wins-dead-code-removal-logging-for.md) | needs-qa-llm |  |  | [3](threads/FW3Z.md) |
+| `#3W58` | [Markdown files are not rendered as Markdown](changes/needs_qa_llm/2026-09-18-markdown-files-do-not-render.md) | needs-qa-llm | agent |  |  |
 
 ## Planning (2)
 
