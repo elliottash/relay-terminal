@@ -41,7 +41,7 @@ private:
     void ensureLineStart() { if (!m_atLineStart) append(QStringLiteral("\n"), Ink::Note); }
     void toolStarted(const QJsonObject &payload);
     void toolResult(const QJsonObject &payload);
-    QString m_id, m_type, m_description, m_activity;
+    QString m_id, m_type, m_description;
     QLabel *m_title = nullptr, *m_status = nullptr;
     QPlainTextEdit *m_log = nullptr;
     QLineEdit *m_input = nullptr;

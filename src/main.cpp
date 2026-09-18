@@ -1483,7 +1483,6 @@ public:
     }
     bool runCommand(const QString &command) { return runInTerminal(command, false, 0); }
     void sendKeybindings() { if (m_configured) send(QJsonObject{{"type", "keybindings"}, {"path", Keymap::instance().path()}, {"actions", Keymap::instance().catalog().value(QStringLiteral("actions"))}}); }
-    void importWarpKeys() { send({{"type", "import_warp"}}); }
 
     // "Navigate here" in the explorer's right-click menu: change this pane's shell into `path`.
     // A quoted cd is run like any other Relay command, so the shell (and its prompt) follow.
@@ -2396,12 +2395,6 @@ private:
         return QString::number(tokens);
     }
 
-    // A 12 px icon in front of a short label, so the strip reads as symbols with numbers.
-    static QString iconText(const QString &icon, const QString &text) {
-        const QString path = relay::theme::themeDataDir() + QStringLiteral("/icons/") + icon + QStringLiteral(".svg");
-        if (!QFileInfo::exists(path)) return text;
-        return QStringLiteral("<img src=\"%1\" width=\"12\" height=\"12\"> %2").arg(path, text.toHtmlEscaped());
-    }
 
     void updateContextLabel() {
         if (!m_ctxLabel) return;
@@ -4136,8 +4129,6 @@ public:
         m_findBar->start(preset);
     }
 
-    void closeFindInView() { if (m_findBar) m_findBar->hide(); }
-
     void rebuildConversationIndex() {
         if (!m_workerReady) { status(QStringLiteral("The agent worker is still starting.")); return; }
         status(QStringLiteral("Rebuilding the conversation index…"));
@@ -4749,12 +4740,6 @@ private:
         updateWorkChip();
     }
 
-    QString requestsShortcutHint() const {
-        const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.requests"));
-        return keys.isEmpty() ? QStringLiteral("Next time: /tasks in the prompt box opens the task list")
-                              : relay::ShortcutHints::nextTime(keys, QStringLiteral("task list"));
-    }
-
     void noteWorkCard(const QString &id) {
         if (id.isEmpty()) return;
         m_workCards.removeAll(id);
@@ -4929,20 +4914,9 @@ public:
         }
     }
     bool limitReached() const { return m_limitReached; }
-    int openRequestCount() const { return m_ledger.openCount(); }
     QString tasksProgress() const { return m_ledger.hasTasks() ? m_ledger.chipText() : QString(); }
 
 private:
-    void reaskRequest(const QString &ledgerId) {
-        const relay::LedgerRequest *request = m_ledger.find(ledgerId);
-        if (!request) return;
-        const QString requestId = QStringLiteral("ask-%1").arg(++m_askSerial);
-        PendingPrompt prompt; prompt.text = request->fullText();
-        m_pendingPrompts.insert(requestId, prompt);
-        send({{"type", "request_reask"}, {"id", requestId}, {"ledger_id", ledgerId}, {"when", "queue"}});
-        toast(QStringLiteral("Re-asked %1 · %2").arg(ledgerId, m_agentBusy ? QStringLiteral("queued") : QStringLiteral("starting")));
-    }
-
     void placeRequestsPanel() {
         if (!m_requestsPanel || !m_terminalHost) return;
         const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
@@ -8246,7 +8220,6 @@ public:
     // ----- pane title (issue JRWQ) --------------------------------------------------------
     // The header shows the session title; the tab label is derived from it (RelayWindow).
     QString paneTitle() const { return m_title; }
-    bool titleIsUser() const { return m_titleUser; }
     // Told when the title changes, so the window can relabel the tab.
     std::function<void()> onTitleChanged;
 
@@ -9282,7 +9255,7 @@ public:
         m_placementTimer.setSingleShot(true);
         connect(&m_placementTimer, &QTimer::timeout, this, [this] { endPlacement(); });
         // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+A).
-        Keymap::instance().listen(this, [this] { syncToolbar(); syncChromeTooltips(); });
+        Keymap::instance().listen(this, [this] { syncChromeTooltips(); });
         // The status bar stays out of the layout until something transient needs it, so the
         // window has no permanent strip under the composer and the terminal never resizes for one.
         statusBar()->setSizeGripEnabled(false);
@@ -9778,37 +9751,6 @@ protected:
     }
 
 private:
-    // ----- toolbar ----------------------------------------------------------------------------
-    // Kept for the palette-driven action list; nothing is shown in a toolbar any more.
-    void buildToolbar() {
-        auto *toolbar = addToolBar(QStringLiteral("Relay"));
-        toolbar->setMovable(false);
-        auto addAction = [this, toolbar](const QString &label, const QString &id) {
-            auto *action = toolbar->addAction(label);
-            connect(action, &QAction::triggered, this, [this, id, label] {
-                runAction(id);
-                hint(QStringLiteral("toolbar.") + id, relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(id), label.toLower()));
-            });
-            m_toolbarActions.append({action, id});
-        };
-        addAction(QStringLiteral("Actions"), QStringLiteral("palette.open"));
-        toolbar->addSeparator();
-        addAction(QStringLiteral("New chat"), QStringLiteral("agent.newChat"));
-        addAction(QStringLiteral("Stop agent"), QStringLiteral("agent.stop"));
-        auto *spacer = new QWidget; spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        toolbar->addWidget(spacer);
-        addAction(QStringLiteral("Provider / BYOK…"), QStringLiteral("agent.provider"));
-        syncToolbar();
-        Keymap::instance().listen(this, [this] { syncToolbar(); });
-    }
-
-    void syncToolbar() {
-        for (const auto &entry : std::as_const(m_toolbarActions)) {
-            const QString shortcut = Keymap::instance().shortcutText(entry.second);
-            entry.first->setToolTip(shortcut.isEmpty() ? entry.first->text() : entry.first->text() + QStringLiteral("  (") + shortcut + ')');
-        }
-    }
-
     // Ctrl+? (or F1): every action and its keys, so the window itself needs no shortcut bar.
 
     void hint(const QString &id, const QString &text, int limit = 3) {
@@ -11345,7 +11287,6 @@ private:
         pane->onStateChanged = [guard] {
             auto *w = windowOf(guard);
             if (!w) return;
-            if (guard == w->m_active) w->syncToolbar();
             w->updateTitles();
         };
         pane->onShellExited = [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, false); };
@@ -11488,7 +11429,6 @@ private:
         // that moves the focus into another pane cannot open a file by accident (issue YZTK).
         for (int i = 0; i < m_tabs->count(); ++i)
             for (Pane *p : panesIn(m_tabs->widget(i))) p->setLinkClicksArmed(p == m_active);
-        syncToolbar();
         updateTitles();
     }
 
@@ -12511,13 +12451,10 @@ private:
         m_manager->remember(item);
     }
 
-    void stopBoardWorker() { if (m_boardWorker) m_boardWorker->stop(); }
-
     WindowManager *m_manager;
     // Switchboard: one worker per window, started on the first Ctrl+Shift+S (protocol 17).
     QPointer<relay::BoardWorker> m_boardWorker;
     QTabWidget *m_tabs = nullptr;
-    QList<QPair<QAction *, QString>> m_toolbarActions;
     QPointer<Pane> m_returnPane;        // where focus was when the Settings pane opened
     QPointer<QWidget> m_returnFocus;
     QPointer<Pane> m_active;

@@ -892,7 +892,6 @@ public:
 
     void focusReply() { m_reply->setFocus(); }
     void focusDocument() { m_doc->setFocus(); }
-    bool replyHasFocus() const { return m_reply->hasFocus(); }
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override
