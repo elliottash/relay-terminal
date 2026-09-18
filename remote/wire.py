@@ -91,6 +91,10 @@ FORWARDED_EVENTS = frozenset({
     "subagent_handoff", "subagent_progress", "subagent_started", "subagent_transcript",
     "suggestion", "thinking_delta", "thinking_done", "todos", "tool_output", "tool_result",
     "tool_started", "transcribed", "turn_summary", "turn_transcript", "usage",
+    # Image context: which model actually served a turn, and why a picture could not be sent.
+    # User-facing like model_changed, not routing internals like route: the owner's decision for
+    # #EM1E is that Relay says when it swaps to a vision model, and a phone is a user surface.
+    "vision_route", "vision_route_ended", "vision_unavailable",
 })
 
 # Never forwarded, with the reason. Key material, provider configuration, desktop-local
