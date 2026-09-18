@@ -71,6 +71,30 @@ private slots:
                                                 QStringLiteral("pane one again")}));
     }
 
+    // The same line twice running is stored once, whoever sent it: a prompt box dedupes against
+    // its own last line and cannot see what another pane, or a paired phone, appended in between.
+    void theSameLineTwiceRunningIsStoredOnce() {
+        QVERIFY(ph::lastEntry(path()).isEmpty());
+        QVERIFY(ph::append(path(), QStringLiteral("run the tests")));
+        QCOMPARE(ph::lastEntry(path()), QStringLiteral("run the tests"));
+        QVERIFY(ph::append(path(), QStringLiteral("run the tests")));
+        QCOMPARE(ph::read(path()), QStringList{QStringLiteral("run the tests")});
+        QVERIFY(ph::append(path(), QStringLiteral("and again")));
+        QVERIFY(ph::append(path(), QStringLiteral("run the tests")));   // not consecutive: kept
+        QCOMPARE(ph::read(path()).size(), 3);
+    }
+
+    // The tail is read without the rest of the file, and a multi-line entry at the end is one
+    // entry, not its last line.
+    void lastEntryReadsAWholeEntry() {
+        const QString multiline = QStringLiteral("first line\nsecond line");
+        QVERIFY(ph::append(path(), QStringLiteral("something before")));
+        QVERIFY(ph::append(path(), multiline));
+        QCOMPARE(ph::lastEntry(path()), multiline);
+        QVERIFY(ph::append(path(), multiline));
+        QCOMPARE(ph::read(path()).size(), 2);
+    }
+
     void trimKeepsTheNewest() {
         for (int i = 0; i < 20; ++i) QVERIFY(ph::append(path(), QStringLiteral("line %1").arg(i)));
         QVERIFY(ph::trim(path(), 5));

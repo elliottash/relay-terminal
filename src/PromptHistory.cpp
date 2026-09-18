@@ -69,6 +69,21 @@ QStringList read(const QString &path, int maxEntries) {
     return entries;
 }
 
+QString lastEntry(const QString &path) {
+    if (path.isEmpty()) return {};
+    QFile file(path);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly)) return {};
+    // Enough for any storable entry: kMaxEntryChars characters, at most four bytes each, plus the
+    // newline before it. Anything longer than that was never written by us.
+    const qint64 window = qint64(kMaxEntryChars) * 4 + 16;
+    if (file.size() > window) file.seek(file.size() - window);
+    QByteArray tail = file.readAll();
+    while (tail.endsWith('\n') || tail.endsWith('\r')) tail.chop(1);
+    const int cut = tail.lastIndexOf('\n');
+    const QString entry = decode(QString::fromUtf8(cut < 0 ? tail : tail.mid(cut + 1)));
+    return storable(entry) ? entry : QString();
+}
+
 bool trim(const QString &path, int maxEntries, QString *error) {
     auto fail = [error](const QString &text) {
         if (error) *error = text;
@@ -99,6 +114,7 @@ bool append(const QString &path, const QString &entry, QString *error) {
     if (error) error->clear();
     if (!storable(entry)) return true;
     if (path.isEmpty()) return fail(QStringLiteral("No writable data directory for the prompt history."));
+    if (lastEntry(path) == entry) return true;   // the same line twice in a row is stored once
     const QString dir = QFileInfo(path).absolutePath();
     if (!QDir().mkpath(dir)) return fail(QStringLiteral("Could not create %1.").arg(dir));
     QFile::setPermissions(dir, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);

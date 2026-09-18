@@ -8146,6 +8146,14 @@ private:
                       const QString &when = QStringLiteral("now"), const QString &originName = QString()) {
         const QString trimmed = text.trimmed();
         if (trimmed.isEmpty()) return;
+        // A line typed on a paired phone, tablet or guest browser is a person's line and is kept
+        // like any other (owner, 2026-09-18: "these should always be saved"). It is written here,
+        // before anything is routed or refused, so a prompt that bounces off an unconfigured agent
+        // is still there to recall — there is no prompt box out there holding on to it. It goes
+        // straight to the file rather than through the composer, whose draft and browse position
+        // belong to whoever is sitting at this desk; every prompt box takes it in on its next Up,
+        // and the file stores the same line once however this one is routed.
+        relay::prompthistory::append(relay::prompthistory::defaultPath(), trimmed);
         const QString who = originName.trimmed().isEmpty()
                                 ? (origin.isEmpty() ? QStringLiteral("a phone") : origin)
                                 : originName.trimmed();

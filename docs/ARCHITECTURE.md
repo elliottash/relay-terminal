@@ -412,6 +412,14 @@ to see what i did before"). It is now a file: `$XDG_DATA_HOME/relay/state/prompt
 - **What never reaches it.** A line written to a running program's stdin and a password are
   refused upstream by `relay::input::retainable` (`src/InputPolicy.h`), and a password never
   enters the composer's document at all — it is typed in the separate masked field.
+- **A line typed away from the desktop counts too** (owner, 2026-09-18: "these should always be
+  saved"). `Pane::submitRemote()` writes a prompt from a paired phone, tablet or guest browser
+  straight to the file — before it is routed, so one that bounces off an unconfigured agent is
+  still recallable, and never through the composer, whose draft and browse position belong to
+  whoever is at the desk. A remote *shell* command was already kept, by the same path as a local
+  one. `append()` stores a line identical to the one already at the end only once, which is what
+  keeps the routed case (written at the door, then remembered again when the command runs) to a
+  single entry — a prompt box can only dedupe against its own last line.
 - **Forgetting it.** The palette action `history.clear` ("Clear prompt history") confirms, deletes
   the file and calls `RichEditor::forgetHistory()`, which drops the copy every open prompt box
   holds — including one part-way through a browse, which would otherwise keep offering what was

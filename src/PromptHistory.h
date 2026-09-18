@@ -49,9 +49,14 @@ bool storable(const QString &entry);
 // list, and a line that cannot be decoded is skipped rather than failing the read.
 QStringList read(const QString &path, int maxEntries = kMaxEntries);
 
+// The last entry in the file, without reading the rest of it; empty when there is none.
+QString lastEntry(const QString &path);
+
 // Append one entry, creating the directory 0700 and the file 0600. False (with *error) when the
 // path is unusable or the write failed; a non-storable entry is a no-op and returns true, because
-// nothing is wrong. Trims the file when it has grown past kTrimBytes.
+// nothing is wrong. An entry identical to the one already at the end is skipped the same way — a
+// prompt box dedupes against its own last line, which cannot see what another pane or a paired
+// phone appended in between. Trims the file when it has grown past kTrimBytes.
 bool append(const QString &path, const QString &entry, QString *error = nullptr);
 
 // Rewrite the file with its newest `maxEntries` entries, atomically and 0600.

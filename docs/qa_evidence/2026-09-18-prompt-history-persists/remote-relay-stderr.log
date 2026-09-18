@@ -1,0 +1,36 @@
+ERROR asyncio Task exception was never retrieved
+future: <Task finished name='Task-32' coro=<Host._run_channel() done, defined at /tmp/claude-1000/-home-elliott-repos-relay-terminal/57c7e964-b063-4d02-9450-043fe4e43873/scratchpad/tree/remote/host.py:651> exception=FileNotFoundError(2, 'No such file or directory')>
+Traceback (most recent call last):
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/57c7e964-b063-4d02-9450-043fe4e43873/scratchpad/tree/remote/host.py", line 661, in _run_channel
+    await self._participant_left(channel)
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/57c7e964-b063-4d02-9450-043fe4e43873/scratchpad/tree/remote/host.py", line 1206, in _participant_left
+    self.audit.record("leave", participant=channel.participant_id)
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/57c7e964-b063-4d02-9450-043fe4e43873/scratchpad/tree/remote/audit.py", line 60, in record
+    handle = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/tmp/tmp.dB12qBrV8C/relay/remote/audit-2026-09.jsonl'
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/57c7e964-b063-4d02-9450-043fe4e43873/scratchpad/tree/remote/gui_host.py", line 913, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/57c7e964-b063-4d02-9450-043fe4e43873/scratchpad/tree/remote/gui_host.py", line 907, in main
+    return asyncio.run(main_async())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/57c7e964-b063-4d02-9450-043fe4e43873/scratchpad/tree/remote/gui_host.py", line 899, in main_async
+    await sidecar.stop()
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/57c7e964-b063-4d02-9450-043fe4e43873/scratchpad/tree/remote/gui_host.py", line 879, in stop
+    self.emit({"t": "stopped"})
+  File "/tmp/claude-1000/-home-elliott-repos-relay-terminal/57c7e964-b063-4d02-9450-043fe4e43873/scratchpad/tree/remote/gui_host.py", line 468, in emit
+    sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
+BrokenPipeError: [Errno 32] Broken pipe

@@ -63,6 +63,18 @@ is tested headless).
   it is the person's text now.
 - **The box that never calls this** — the Switchboard's reply editor — keeps exactly the
   session-only history it had, and writes nothing.
+- **A prompt from a paired device is kept like any other** (owner, 2026-09-18, on the question
+  this card first left open: "these should always be saved"). `Pane::submitRemote()` writes it to
+  the file at the door — before routing, so a prompt that bounces off an unconfigured agent is
+  still there to recall, and whether it ends up at the agent, in the shell or steering a running
+  turn. Not through the composer: the desktop's draft and browse position belong to whoever is
+  sitting there, and every box takes the line in on its next Up. A guest's line counts as much as
+  the owner's phone's; the queue row already says who wrote it. A remote shell command was already
+  kept, by the same path as a locally typed one.
+- **The same line twice running is stored once.** A prompt box dedupes against its own last line,
+  which cannot see what another pane or a phone appended in between, so `append()` checks the end
+  of the file (`lastEntry()`, which reads only the tail). That is also what keeps a routed remote
+  prompt — written at the door, then remembered again when the command runs — to one entry.
 
 `RichEditor`'s in-memory cap goes from 200 to 1,000 when a file is attached, so the list and the
 file agree on how far back Up reaches.
@@ -101,21 +113,20 @@ writes nothing).
 8. **Suggestions still work.** The ghost-text suggestion (Settings › Terminal › "Command
    suggestions from history") still completes from this pane's own commands first, then the prompt
    history, then `$HISTFILE`.
-9. **The Switchboard reply box** (a card's reply editor) still has its own Up/Down history within
+9. **From a phone or a guest.** Pair a device (or run `remote-drive.sh`), send a prompt from it
+   and approve it: the line is in the file and the desktop's next Up offers it, while the desktop's
+   own unfinished draft and browse position are untouched. Send the same line twice: it is stored
+   once. Send one while no provider is configured (the pane says so): it is still in the history.
+10. **The Switchboard reply box** (a card's reply editor) still has its own Up/Down history within
    the session and does not write to the file.
-10. **Tests.** `ctest --test-dir build` (48 groups, `prompthistory` among them) and
+11. **Tests.** `ctest --test-dir build` (48 groups, `prompthistory` among them) and
     `./scripts/test.sh` pass.
-
-## Left for the owner
-
-- **Whose history is a remote submission?** A prompt sent from the phone or a guest's browser
-  goes through `submitAgent(..., fromEditor=false)` and is not remembered — as it was before this
-  change. That is right for a guest, but the owner's own phone is a remote control for their own
-  Relay, and a line typed there arguably belongs in the history the desktop's Up walks. It needs a
-  rule about whose lines count, so it is left as it stands rather than guessed at.
 
 ## Evidence
 
 `docs/qa_evidence/2026-09-18-prompt-history-persists/` — `drive.sh` (Xvfb + xdotool, three Relay
 runs in an isolated `XDG_DATA_HOME`), fourteen screenshots, the store itself as
-`history-file.txt`, and the run log showing the file after each stage.
+`history-file.txt`, and the run log showing the file after each stage. `remote-drive.sh` is the
+second half: a real guest over the remote protocol (the #W5N2 run's `guest.py`, which is
+`remote/client.py`, not the web client) joining a shared pane, sending a prompt, and the desktop's
+Up offering that line afterwards.

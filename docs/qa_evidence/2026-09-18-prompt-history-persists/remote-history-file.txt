@@ -1,0 +1,2 @@
+printf "the desktop typed this one\\n"
+the line alice typed on her phone
