@@ -186,7 +186,12 @@ reduced motion (§6). **Verdict: do, immediately after #1 — they are one widge
 
 ### 3. Engraved column headers and card chips in the Switchboard · **DO**
 
-`BoardPane::buildColumn` (`src/BoardPane.cpp:732`) names `#boardColumnHeader`, and `CardDetail`
+> **Built, and then the layout changed.** The columns became one sectioned list of rows
+> (SWITCHBOARD-DESIGN 4.6, 2026-09-18). The engraved label survives as the section header,
+> painted by `RowDelegate` from the same tokens with a hairline rule above it; the QSS names
+> are now `#boardList`, `#boardListPane` and `#boardCount`.
+
+`BoardPane::buildColumn` (`src/BoardPane.cpp:732`) named `#boardColumnHeader`, and `CardDetail`
 names `#boardCardTitle`, `#boardCardMeta`, `#boardTasks`, `#boardProblems` — **none of which
 `src/Theme.cpp` styles at all today.** The pane currently inherits generic widget chrome. So this
 is not "add ornament", it is "the pane is unstyled and here is the style": enamel headers, a

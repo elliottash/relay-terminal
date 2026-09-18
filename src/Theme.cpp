@@ -546,21 +546,17 @@ QWidget#fileExplorer QToolButton, QWidget#filePreview QToolButton { color: @mute
 QWidget#fileExplorer QToolButton:hover, QWidget#filePreview QToolButton:hover { color: @text; border-color: @border; background: @raised; }
 QToolButton#fileExplorerHidden:checked { color: @accent; border-color: @accentBorder; }
 
-/* Switchboard (src/BoardPane.cpp; docs/SWITCHBOARD-AESTHETIC.md intervention 3): flat @surface
-   columns with engraved (uppercase, mono, letter-spaced) headers on the pane's @bg. The cards
-   themselves are painted by CardDelegate from the same tokens, so they follow a theme switch. */
-QWidget#boardView, QWidget#boardColumns, QScrollArea#boardScroll { background: @bg; }
-QTabBar#boardTabs::tab { padding: 4px 9px; margin: 0 2px 0 0; }
+/* Switchboard (src/BoardPane.cpp; docs/SWITCHBOARD-AESTHETIC.md intervention 3): one list of
+   rows on the pane's @bg, with engraved (uppercase, mono, letter-spaced) section headers. The
+   rows themselves are painted by RowDelegate from the same tokens, so they follow a theme
+   switch; only the chrome around the list is styled here. */
+QWidget#boardView, QWidget#boardListPane { background: @bg; }
+QLabel#boardCount { color: @muted; font-family: "@mono"; font-size: 8pt; padding: 0 2px; }
 QLineEdit#boardFilter { padding: 4px 8px; }
 QToolButton#boardAddButton { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 10px; }
 QToolButton#boardAddButton:hover { border-color: @accent; }
-QFrame#boardColumnFrame { background: @surface; border: 1px solid @border; border-radius: 8px; }
-QLabel#boardColumnHeader { color: @muted; font-family: "@mono"; font-size: 8pt; font-weight: 600; letter-spacing: 1px; }
-QLabel#boardColumnCount { color: @muted; font-family: "@mono"; font-size: 8pt; }
-QToolButton#boardColumnAdd { color: @muted; background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; }
-QToolButton#boardColumnAdd:hover { color: @text; border-color: @border; background: @raised; }
-QListWidget#boardColumn { background: transparent; border: none; }
-QListWidget#boardColumn QScrollBar:vertical { width: 6px; margin: 0; }
+QListWidget#boardList { background: transparent; border: none; }
+QListWidget#boardList QScrollBar:vertical { width: 8px; margin: 0; }
 QLineEdit#boardQuickAdd { background: @raised; border-color: @accentBorder; }
 QLabel#boardProblems { color: @warning; border: 1px solid @warningBorder; border-radius: 6px; padding: 4px 8px; }
 QFrame#boardNotice { background: @raised; border: 1px solid @accentBorder; border-radius: 6px; }

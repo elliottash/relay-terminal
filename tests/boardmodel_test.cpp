@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The Switchboard pane's pure logic: which tab and column a card falls into, the filter
-// language, the ordering and the `#` picker's ranking. No worker, no files, no network.
+// The Switchboard pane's pure logic: which section a card falls into, the filter language, the
+// ordering, the row list the one scrolling view draws, and the `#` picker's ranking. No worker,
+// no files, no network.
 #include "BoardModel.h"
 #include "BoardPane.h"
 
 #include <QJsonArray>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPointer>
@@ -17,6 +19,7 @@
 using relay::board::Card;
 using relay::board::Column;
 using relay::board::Model;
+using relay::board::Row;
 using relay::board::Tab;
 
 namespace {
@@ -54,101 +57,148 @@ QJsonArray rows(const QList<QJsonObject> &items)
     return out;
 }
 
+// The section ids of a model's list, top to bottom.
+QStringList sectionIds(const Model &model)
+{
+    QStringList out;
+    const QList<Column> sections = model.sections();
+    for (const Column &section : sections)
+        out << section.id;
+    return out;
+}
+
+// What the row list says, as readable lines: "# ready 2" for a header, "K7Q2" for a card.
+QStringList sketch(const QList<Row> &rows)
+{
+    QStringList out;
+    for (const Row &row : rows) {
+        if (row.kind == Row::Section)
+            out << QStringLiteral("# %1 %2%3").arg(row.columnId).arg(row.count)
+                       .arg(row.collapsed ? QStringLiteral(" folded") : QString());
+        else
+            out << row.cardId;
+    }
+    return out;
+}
+
+QJsonObject opened(const QList<QJsonObject> &cards)
+{
+    return QJsonObject{{"event", "board"}, {"config", config()}, {"cards", rows(cards)},
+                       {"problems", QJsonArray{}}};
+}
+
+// The pane's one list.
+QListWidget *listOf(relay::BoardView &view)
+{
+    return view.findChild<QListWidget *>(QStringLiteral("boardList"));
+}
+
 }  // namespace
 
 class BoardModelTests : public QObject {
     Q_OBJECT
 
 private slots:
-    void tabsComeFromTheConfigAndMemoryIsAlwaysThere();
-    void columnsFollowTheConfiguredStatuses();
-    void cardsLandInTheColumnOfTheirStatus();
-    void deferredAndDoneHaveTheirOwnTabs();
-    void plansAndMemoriesAreNotWorkCards();
-    void memoryIsGroupedByTopic();
-    void rankOrdersAColumnAndDoneIsNewestFirst();
+    void categoryFoldersComeFromTheConfig();
+    void sectionsAreTheConfiguredStatusesThenTheRest();
+    void cardsLandInTheSectionOfTheirStatus();
+    void closedCardsGoToTheDoneSectionAndParkedOnesToTheirOwn();
+    void plansAndMemoriesKeepTheirOwnStatuses();
+    void rankOrdersASectionAndDoneIsNewestFirst();
     void theFilterLanguageMatchesEveryTerm();
-    void theFilterHidesCardsAndTheCountsFollow();
+    void theFilterHidesEmptySectionsAndUnfoldsTheRest();
     void searchRanksOpenCardsAndExactIdsFirst();
     void upsertAndRemoveKeepTheBoardInStep();
     void statusTitlesAreHumanReadable();
-    void theViewRendersTabsAndColumnsFromAnEvent();
-    void theViewSendsAMoveWhenACardIsDropped();
+    void everyStatusHasAMark();
+    void theRowListIsHeadersThenCards();
     void badgesSayWhatTheCardCarries();
+    void aRowDropsItsLeastImportantBadgesFirst();
+    void cardAgesReadShort();
     void theBodyLosesOnlyAHeadingThatRepeatsTheTitle();
     void threadEntriesSayHowLongAgo();
     void placementNamesTheNeighboursOfTheSlot();
+    void aDropFindsTheSectionItLandedIn();
+    void upAndDownWalkTheCardsAcrossSectionBreaks();
+    void theViewRendersOneListFromAnEvent();
+    void theViewSendsAMoveWhenACardIsDropped();
+    void arrowsFoldASectionAndTheFoldIsSaved();
     void aRefusedWriteIsShownAndAnAcceptedOneCanBeUndone();
-    void aChangeRefillsTheColumnsInPlace();
+    void aChangeRefillsTheListInPlace();
     void theOpenCardRefetchesOnlyForItsOwnChanges();
     void aQuestionTheAgentCannotTakeIsReportedOnTheCard();
+    void quickAddNamesTheSectionItAddsTo();
 };
 
-void BoardModelTests::tabsComeFromTheConfigAndMemoryIsAlwaysThere()
+void BoardModelTests::categoryFoldersComeFromTheConfig()
 {
     Model model;
     model.setConfig(config());
     QStringList ids;
     for (const Tab &tab : model.tabs())
         ids << tab.id;
+    // The pane no longer renders these; they are the folders a card's file can live in.
     QCOMPARE(ids, (QStringList{"features", "bugs", "planning", "deferred", "done", "memory"}));
     QCOMPARE(model.tab(QStringLiteral("planning"))->type, QStringLiteral("plan"));
     QCOMPARE(model.tab(QStringLiteral("planning"))->title, QStringLiteral("Plans"));
-    QCOMPARE(model.tab(QStringLiteral("memory"))->type, QStringLiteral("memory"));
     QVERIFY(model.tab(QStringLiteral("deferred"))->isFilter());
     QVERIFY(!model.tab(QStringLiteral("features"))->isFilter());
 }
 
-void BoardModelTests::columnsFollowTheConfiguredStatuses()
+void BoardModelTests::sectionsAreTheConfiguredStatusesThenTheRest()
 {
     Model model;
     model.setConfig(config());
-    const QList<Column> columns = model.columnsFor(QStringLiteral("features"));
-    QCOMPARE(columns.size(), 7);
-    QCOMPARE(columns.first().id, QStringLiteral("inbox"));
-    QCOMPARE(columns.at(4).statuses,
-             (QStringList{"needs-review", "needs-labels", "needs-ab"}));
-    QCOMPARE(model.dropStatus(QStringLiteral("features"), QStringLiteral("needs-qa")),
-             QStringLiteral("needs-qa-llm"));
-    QCOMPARE(model.dropStatus(QStringLiteral("features"), QStringLiteral("nope")), QString());
+    // No cards yet: the configured lanes, with Done last. The configured `done` column is not a
+    // lane of its own — Done is always the final section.
+    QCOMPARE(sectionIds(model),
+             (QStringList{"inbox", "discussing", "ready", "in-progress", "waiting", "needs-qa",
+                          "done"}));
+    const QList<Column> sections = model.sections();
+    QCOMPARE(sections.at(4).statuses, (QStringList{"needs-review", "needs-labels", "needs-ab"}));
+    QCOMPARE(sections.last().statuses, (QStringList{"done", "dropped"}));
+    QCOMPARE(model.dropStatus(QStringLiteral("needs-qa")), QStringLiteral("needs-qa-llm"));
+    QCOMPARE(model.dropStatus(QStringLiteral("nope")), QString());
 }
 
-void BoardModelTests::cardsLandInTheColumnOfTheirStatus()
+void BoardModelTests::cardsLandInTheSectionOfTheirStatus()
 {
     Model model;
     model.setConfig(config());
     model.reset(rows({row("K7Q2", "inbox", "features"), row("M3XJ", "needs-qa-llm", "features"),
                       row("P9AB", "needs-review", "features"), row("ZZ11", "ready", "bugs")}));
-    QCOMPARE(model.cards(QStringLiteral("features"), QStringLiteral("inbox")).size(), 1);
-    QCOMPARE(model.cards(QStringLiteral("features"), QStringLiteral("needs-qa")).first().id,
-             QStringLiteral("M3XJ"));
-    QCOMPARE(model.cards(QStringLiteral("features"), QStringLiteral("waiting")).first().id,
-             QStringLiteral("P9AB"));
-    QCOMPARE(model.cards(QStringLiteral("bugs"), QStringLiteral("ready")).size(), 1);
-    QCOMPARE(model.cards(QStringLiteral("features"), QStringLiteral("ready")).size(), 0);
-    QCOMPARE(model.count(QStringLiteral("features")), 3);
-    QCOMPARE(model.count(QStringLiteral("bugs")), 1);
+    // One list: a bug and a feature sit in the same section when they share a status.
+    QCOMPARE(model.cards(QStringLiteral("inbox")).size(), 1);
+    QCOMPARE(model.cards(QStringLiteral("needs-qa")).first().id, QStringLiteral("M3XJ"));
+    QCOMPARE(model.cards(QStringLiteral("waiting")).first().id, QStringLiteral("P9AB"));
+    QCOMPARE(model.cards(QStringLiteral("ready")).first().id, QStringLiteral("ZZ11"));
+    QCOMPARE(model.cards(QStringLiteral("discussing")).size(), 0);
+    QCOMPARE(model.openCount(), 4);
+    QCOMPARE(model.sectionOf(Card::fromJson(row("P9AB", "needs-review", "features"))),
+             QStringLiteral("waiting"));
 }
 
-void BoardModelTests::deferredAndDoneHaveTheirOwnTabs()
+void BoardModelTests::closedCardsGoToTheDoneSectionAndParkedOnesToTheirOwn()
 {
     Model model;
     model.setConfig(config());
     model.reset(rows({row("K7Q2", "deferred", "features"), row("M3XJ", "done", "bugs"),
                       row("P9AB", "dropped", "features"), row("R4CD", "ready", "features")}));
-    // A deferred or closed card leaves its category tab.
-    QCOMPARE(model.count(QStringLiteral("features")), 1);
-    QCOMPARE(model.cards(QStringLiteral("features"), QStringLiteral("ready")).first().id,
-             QStringLiteral("R4CD"));
-    // Deferred groups by category; Done is one column.
-    QCOMPARE(model.count(QStringLiteral("deferred")), 1);
-    QCOMPARE(model.cards(QStringLiteral("deferred"), QStringLiteral("features")).first().id,
-             QStringLiteral("K7Q2"));
-    QCOMPARE(model.columnsFor(QStringLiteral("done")).size(), 1);
-    QCOMPARE(model.cards(QStringLiteral("done"), QStringLiteral("done")).size(), 2);
+    // Done is a status, not a place: done and dropped share the last section, and the open count
+    // leaves them out.
+    QCOMPARE(model.openCount(), 2);
+    QCOMPARE(model.cards(relay::board::doneSection()).size(), 2);
+    // Deferred is not a configured lane, so it gets a section of its own before Done.
+    QCOMPARE(sectionIds(model).mid(6), (QStringList{"deferred", "done"}));
+    QCOMPARE(model.cards(QStringLiteral("deferred")).first().id, QStringLiteral("K7Q2"));
+    QCOMPARE(model.cards(QStringLiteral("ready")).first().id, QStringLiteral("R4CD"));
+    // …and `status:done` in the filter box still finds a closed card.
+    model.setFilter(QStringLiteral("status:dropped"));
+    QCOMPARE(model.cards(relay::board::doneSection()).size(), 1);
+    QCOMPARE(model.cards(relay::board::doneSection()).first().id, QStringLiteral("P9AB"));
 }
 
-void BoardModelTests::plansAndMemoriesAreNotWorkCards()
+void BoardModelTests::plansAndMemoriesKeepTheirOwnStatuses()
 {
     Model model;
     model.setConfig(config());
@@ -159,51 +209,22 @@ void BoardModelTests::plansAndMemoriesAreNotWorkCards()
     memory.insert(QStringLiteral("topic"), QStringLiteral("conventions"));
     model.reset(rows({row("K7Q2", "ready", "features"), plan, memory}));
 
-    // A plan never appears on a work board, and a work card never appears among the plans.
-    QCOMPARE(model.count(QStringLiteral("features")), 1);
-    QCOMPARE(model.count(QStringLiteral("planning")), 1);
-    QStringList planColumns;
-    for (const Column &column : model.columnsFor(QStringLiteral("planning")))
-        planColumns << column.id;
-    QCOMPARE(planColumns, (QStringList{"draft", "approved", "executing", "done"}));
-    QCOMPARE(model.cards(QStringLiteral("planning"), QStringLiteral("approved")).first().id,
-             QStringLiteral("PL01"));
-    QCOMPARE(model.cards(QStringLiteral("planning"), QStringLiteral("draft")).size(), 0);
-    QCOMPARE(model.count(QStringLiteral("memory")), 1);
-    QCOMPARE(model.columnOf(QStringLiteral("features"), Card::fromJson(plan)), QString());
+    // Statuses no configured lane collects get a section each, so one list really does hold
+    // every open card whatever its type.
+    QCOMPARE(sectionIds(model).mid(6), (QStringList{"approved", "active", "done"}));
+    QCOMPARE(model.cards(QStringLiteral("approved")).first().id, QStringLiteral("PL01"));
+    QCOMPARE(model.cards(QStringLiteral("active")).first().id, QStringLiteral("ME01"));
+    QCOMPARE(model.openCount(), 3);
 }
 
-void BoardModelTests::memoryIsGroupedByTopic()
-{
-    Model model;
-    model.setConfig(config());
-    QJsonObject one = row("ME01", "active", "memory");
-    one.insert(QStringLiteral("type"), QStringLiteral("memory"));
-    one.insert(QStringLiteral("topic"), QStringLiteral("conventions"));
-    QJsonObject two = row("ME02", "active", "memory");
-    two.insert(QStringLiteral("type"), QStringLiteral("memory"));
-    two.insert(QStringLiteral("topic"), QStringLiteral("environment"));
-    QJsonObject old = row("ME03", "retired", "memory");
-    old.insert(QStringLiteral("type"), QStringLiteral("memory"));
-    model.reset(rows({one, two, old}));
-    QStringList columns;
-    for (const Column &column : model.columnsFor(QStringLiteral("memory")))
-        columns << column.id;
-    QCOMPARE(columns, (QStringList{"topic:conventions", "topic:environment", "retired"}));
-    QCOMPARE(model.cards(QStringLiteral("memory"), QStringLiteral("topic:environment")).first().id,
-             QStringLiteral("ME02"));
-    QCOMPARE(model.cards(QStringLiteral("memory"), QStringLiteral("retired")).first().id,
-             QStringLiteral("ME03"));
-}
-
-void BoardModelTests::rankOrdersAColumnAndDoneIsNewestFirst()
+void BoardModelTests::rankOrdersASectionAndDoneIsNewestFirst()
 {
     Model model;
     model.setConfig(config());
     model.reset(rows({row("AAA1", "ready", "features", "z"), row("BBB2", "ready", "features", "a"),
                       row("CCC3", "ready", "features", "m")}));
     QStringList order;
-    for (const Card &card : model.cards(QStringLiteral("features"), QStringLiteral("ready")))
+    for (const Card &card : model.cards(QStringLiteral("ready")))
         order << card.id;
     QCOMPARE(order, (QStringList{"BBB2", "CCC3", "AAA1"}));
 
@@ -213,7 +234,7 @@ void BoardModelTests::rankOrdersAColumnAndDoneIsNewestFirst()
     newer.insert(QStringLiteral("created"), QStringLiteral("2026-09-17"));
     model.reset(rows({older, newer}));
     QStringList closed;
-    for (const Card &card : model.cards(QStringLiteral("done"), QStringLiteral("done")))
+    for (const Card &card : model.cards(relay::board::doneSection()))
         closed << card.id;
     QCOMPARE(closed, (QStringList{"NEW1", "OLD1"}));
 }
@@ -224,17 +245,25 @@ void BoardModelTests::theFilterLanguageMatchesEveryTerm()
     card.id = QStringLiteral("K7Q2");
     card.title = QStringLiteral("Voice transcription mode");
     card.status = QStringLiteral("ready");
-    card.labels = QStringList{QStringLiteral("voice"), QStringLiteral("mvp")};
+    card.labels = QStringList{QStringLiteral("voice"), QStringLiteral("bug")};
     card.assignee = QStringLiteral("agent");
     card.waitingOn = QStringLiteral("owner");
+    card.tab = QStringLiteral("bugs");
+    card.path = QStringLiteral("issues/changes/2026-09-17-voice.md");
 
     QVERIFY(Model::matches(card, QString()));
     QVERIFY(Model::matches(card, QStringLiteral("  ")));
     QVERIFY(Model::matches(card, QStringLiteral("label:voice")));
     QVERIFY(Model::matches(card, QStringLiteral("label:VOICE")));
-    QVERIFY(!Model::matches(card, QStringLiteral("label:audio")));
+    // "bug" and "feature" are labels like any other (owner decision, 2026-09-18).
+    QVERIFY(Model::matches(card, QStringLiteral("label:bug")));
+    QVERIFY(!Model::matches(card, QStringLiteral("label:feature")));
     QVERIFY(Model::matches(card, QStringLiteral("status:ready")));
     QVERIFY(!Model::matches(card, QStringLiteral("status:inbox")));
+    // The folder on disk, or the board.yaml id that names it: both reach the card.
+    QVERIFY(Model::matches(card, QStringLiteral("folder:changes")));
+    QVERIFY(Model::matches(card, QStringLiteral("folder:bugs")));
+    QVERIFY(!Model::matches(card, QStringLiteral("folder:marketing")));
     QVERIFY(Model::matches(card, QStringLiteral("@agent")));
     QVERIFY(!Model::matches(card, QStringLiteral("@dana")));
     QVERIFY(Model::matches(card, QStringLiteral("waiting:me")));
@@ -248,19 +277,31 @@ void BoardModelTests::theFilterLanguageMatchesEveryTerm()
     QVERIFY(!Model::matches(card, QStringLiteral("label:voice @dana")));
 }
 
-void BoardModelTests::theFilterHidesCardsAndTheCountsFollow()
+void BoardModelTests::theFilterHidesEmptySectionsAndUnfoldsTheRest()
 {
     Model model;
     model.setConfig(config());
     QJsonObject tagged = row("K7Q2", "ready", "features");
     tagged.insert(QStringLiteral("labels"), QJsonArray{QStringLiteral("voice")});
-    model.reset(rows({tagged, row("M3XJ", "ready", "features")}));
-    QCOMPARE(model.count(QStringLiteral("features")), 2);
+    model.reset(rows({tagged, row("M3XJ", "inbox", "features"), row("DN01", "done", "features")}));
+    QCOMPARE(model.openCount(), 2);
+
+    // Unfiltered, every section keeps its header — it is a drop target and it says the lane
+    // exists — and what the pane folded stays folded.
+    const QSet<QString> folded{relay::board::doneSection()};
+    QCOMPARE(sketch(model.rows(folded)),
+             (QStringList{"# inbox 1", "M3XJ", "# discussing 0", "# ready 1", "K7Q2",
+                          "# in-progress 0", "# waiting 0", "# needs-qa 0", "# done 1 folded"}));
+
+    // Filtered, a section with no match gets out of the way, the counts follow, and nothing is
+    // folded: a search that hid its own matches would be a search that does nothing.
     model.setFilter(QStringLiteral("label:voice"));
-    QCOMPARE(model.count(QStringLiteral("features")), 1);
-    QCOMPARE(model.cards(QStringLiteral("features"), QStringLiteral("ready")).size(), 1);
+    QCOMPARE(model.openCount(), 1);
+    QCOMPARE(sketch(model.rows(folded)), (QStringList{"# ready 1", "K7Q2"}));
+    model.setFilter(QStringLiteral("status:done"));
+    QCOMPARE(sketch(model.rows(folded)), (QStringList{"# done 1", "DN01"}));
     model.setFilter(QString());
-    QCOMPARE(model.count(QStringLiteral("features")), 2);
+    QCOMPARE(model.openCount(), 2);
 }
 
 void BoardModelTests::searchRanksOpenCardsAndExactIdsFirst()
@@ -311,51 +352,49 @@ void BoardModelTests::statusTitlesAreHumanReadable()
     QCOMPARE(relay::board::tabTitle(QStringLiteral("features")), QStringLiteral("Features"));
 }
 
-// ---- the widget, driven by protocol events alone ------------------------------------
-
-void BoardModelTests::theViewRendersTabsAndColumnsFromAnEvent()
+void BoardModelTests::everyStatusHasAMark()
 {
-    relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    QJsonObject opened{{"event", "board"}, {"rev", 1}, {"config", config()},
-                       {"cards", rows({row("K7Q2", "inbox", "features"),
-                                       row("M3XJ", "ready", "features")})},
-                       {"problems", QJsonArray{}}};
-    view.handleEvent(opened);
-    QCOMPARE(view.currentTab(), QStringLiteral("features"));
-    QCOMPARE(view.model().total(), 2);
-    QCOMPARE(view.title(), QStringLiteral("Switchboard · 2"));
-    QCOMPARE(view.findChildren<QListWidget *>(QStringLiteral("boardColumn")).size(), 7);
-
-    view.handleEvent(QJsonObject{{"event", "board_changed"},
-                                 {"upserts", rows({row("K7Q2", "ready", "features")})},
-                                 {"removed", QJsonArray{QStringLiteral("M3XJ")}}});
-    QCOMPARE(view.model().total(), 1);
-    QCOMPARE(view.model().card(QStringLiteral("K7Q2"))->status, QStringLiteral("ready"));
+    using relay::board::statusGlyph;
+    // One character each, so every row's title starts at the same x.
+    for (const char *status : {"inbox", "discussing", "ready", "in-progress", "needs-review",
+                               "needs-qa-llm", "needs-qa-human", "deferred", "done", "dropped",
+                               "draft", "approved", "executing", "active", "retired"}) {
+        const QString mark = statusGlyph(QString::fromLatin1(status));
+        QCOMPARE(mark.size(), 1);
+        QVERIFY2(mark != QStringLiteral("·"), status);   // not the fallback
+    }
+    // An unknown status still gets a mark rather than a hole in the row.
+    QCOMPARE(statusGlyph(QStringLiteral("invented")), QStringLiteral("·"));
+    QCOMPARE(statusGlyph(QStringLiteral("done")), QStringLiteral("✓"));
+    QCOMPARE(statusGlyph(QStringLiteral("dropped")), QStringLiteral("✗"));
 }
 
-void BoardModelTests::theViewSendsAMoveWhenACardIsDropped()
+void BoardModelTests::theRowListIsHeadersThenCards()
 {
-    relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    QList<QJsonObject> sent;
-    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
-    view.handleEvent(QJsonObject{{"event", "board"}, {"config", config()},
-                                 {"cards", rows({row("K7Q2", "inbox", "features")})}});
-    view.selectCard(QStringLiteral("K7Q2"));
-    QCOMPARE(view.selectedCard(), QStringLiteral("K7Q2"));
-
-    view.openSelected();
-    QCOMPARE(sent.size(), 1);
-    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_card_get"));
-    QCOMPARE(sent.last().value(QStringLiteral("card")).toString(), QStringLiteral("K7Q2"));
-
-    view.reload();
-    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_open"));
-
-    view.setCurrentTab(QStringLiteral("bugs"));
-    QCOMPARE(view.currentTab(), QStringLiteral("bugs"));
+    Model model;
+    model.setConfig(config());
+    model.reset(rows({row("K7Q2", "needs-qa-llm", "features"),
+                      row("M3XJ", "needs-qa-human", "features", "z"),
+                      row("P9AB", "ready", "features")}));
+    const QList<Row> list = model.rows({});
+    QCOMPARE(sketch(list).mid(0, 2), (QStringList{"# inbox 0", "# discussing 0"}));
+    const int at = relay::board::rowOfSection(list, QStringLiteral("needs-qa"));
+    QVERIFY(at > 0);
+    QCOMPARE(list.at(at).count, 2);
+    QCOMPARE(list.at(at).title, QStringLiteral("Needs QA"));
+    // A section that collects several statuses names each card's exact one; a single-status
+    // section has nothing to repeat.
+    QVERIFY(list.at(at + 1).showStatus);
+    QVERIFY(!list.at(relay::board::rowOfCard(list, QStringLiteral("P9AB"))).showStatus);
+    QCOMPARE(relay::board::cardsInSection(list, QStringLiteral("needs-qa")),
+             (QStringList{"K7Q2", "M3XJ"}));
+    QCOMPARE(relay::board::rowOfCard(list, QStringLiteral("nope")), -1);
+    // A folded section keeps its header and its count, and drops its cards.
+    const QList<Row> folded = model.rows({QStringLiteral("needs-qa")});
+    QCOMPARE(folded.at(relay::board::rowOfSection(folded, QStringLiteral("needs-qa"))).count, 2);
+    QVERIFY(folded.at(relay::board::rowOfSection(folded, QStringLiteral("needs-qa"))).collapsed);
+    QCOMPARE(relay::board::rowOfCard(folded, QStringLiteral("K7Q2")), -1);
 }
-
-// ---- the card face and the detail view's helpers ----------------------------------------
 
 void BoardModelTests::badgesSayWhatTheCardCarries()
 {
@@ -370,12 +409,64 @@ void BoardModelTests::badgesSayWhatTheCardCarries()
     QStringList texts;
     for (const auto &badge : all)
         texts << badge.text;
-    // The status says only what the column header does not ("Needs QA" → "human QA").
+    // The status says only what the section header does not ("Needs QA" → "human QA").
     QCOMPARE(texts, (QStringList{"human QA", "voice", "✦ agent", "waiting: owner", "☑ 3/3", "✎ 4"}));
     QCOMPARE(all.at(4).kind, relay::board::Badge::TasksDone);
     QCOMPARE(all.at(3).kind, relay::board::Badge::Waiting);
-    // In a column of one status, and on a plain card, there is nothing to repeat.
+    // In a section of one status, and on a plain card, there is nothing to repeat.
     QVERIFY(relay::board::badges(Card::fromJson(row("M3XJ", "ready", "features")), false).isEmpty());
+
+    // A row adds how old the card is, at the quiet end.
+    card.created = QStringLiteral("2026-09-15");
+    const QList<relay::board::Badge> onARow =
+        relay::board::rowBadges(card, true, QDate(2026, 9, 18));
+    QCOMPARE(onARow.size(), all.size() + 1);
+    QCOMPARE(onARow.last().kind, relay::board::Badge::Age);
+    QCOMPARE(onARow.last().text, QStringLiteral("3 d"));
+}
+
+void BoardModelTests::aRowDropsItsLeastImportantBadgesFirst()
+{
+    using relay::board::Badge;
+    using relay::board::fitBadges;
+    const QList<QPair<Badge, int>> measured{
+        {Badge{Badge::Label, QStringLiteral("voice")}, 40},
+        {Badge{Badge::Waiting, QStringLiteral("waiting: owner")}, 80},
+        {Badge{Badge::Tasks, QStringLiteral("☑ 1/3")}, 40},
+        {Badge{Badge::Age, QStringLiteral("3 d")}, 30}};
+    const auto kept = [&](int available) {
+        QStringList out;
+        for (const Badge &badge : fitBadges(measured, available, 5))
+            out << badge.text;
+        return out;
+    };
+    // Everything fits: 40+80+40+30 plus three 5px gaps.
+    QCOMPARE(kept(205), (QStringList{"voice", "waiting: owner", "☑ 1/3", "3 d"}));
+    // Squeezed, the label goes first, then the age, then the tasks; `waiting:` is the last to go,
+    // because it is why the row is being read.
+    QCOMPARE(kept(160), (QStringList{"waiting: owner", "☑ 1/3", "3 d"}));
+    QCOMPARE(kept(130), (QStringList{"waiting: owner", "☑ 1/3"}));
+    QCOMPARE(kept(90), (QStringList{"waiting: owner"}));
+    QCOMPARE(kept(10), QStringList());
+    QVERIFY(fitBadges({}, 100, 5).isEmpty());
+    QVERIFY(relay::board::badgeDropOrder(Badge::Label)
+            < relay::board::badgeDropOrder(Badge::Waiting));
+}
+
+void BoardModelTests::cardAgesReadShort()
+{
+    using relay::board::cardAge;
+    const QDate today(2026, 9, 18);
+    QCOMPARE(cardAge(QStringLiteral("2026-09-18"), today), QStringLiteral("today"));
+    QCOMPARE(cardAge(QStringLiteral("2026-09-17"), today), QStringLiteral("1 d"));
+    QCOMPARE(cardAge(QStringLiteral("2026-09-05"), today), QStringLiteral("13 d"));
+    QCOMPARE(cardAge(QStringLiteral("2026-09-01"), today), QStringLiteral("2 w"));
+    QCOMPARE(cardAge(QStringLiteral("2026-05-01"), today), QStringLiteral("4 mo"));
+    QCOMPARE(cardAge(QStringLiteral("2023-09-18"), today), QStringLiteral("3 y"));
+    // A timestamp is accepted; a card with no `created`, or an unreadable one, shows no age.
+    QCOMPARE(cardAge(QStringLiteral("2026-09-17T10:00:00Z"), today), QStringLiteral("1 d"));
+    QVERIFY(cardAge(QString(), today).isEmpty());
+    QVERIFY(cardAge(QStringLiteral("last tuesday"), today).isEmpty());
 }
 
 void BoardModelTests::theBodyLosesOnlyAHeadingThatRepeatsTheTitle()
@@ -406,27 +497,139 @@ void BoardModelTests::threadEntriesSayHowLongAgo()
 void BoardModelTests::placementNamesTheNeighboursOfTheSlot()
 {
     using relay::board::placement;
-    const QStringList column{"A", "B", "C"};
+    const QStringList section{"A", "B", "C"};
     // Moving B to the top: before A, after nothing.
-    QCOMPARE(placement(column, "B", 0), qMakePair(QString("A"), QString()));
+    QCOMPARE(placement(section, "B", 0), qMakePair(QString("A"), QString()));
     // Moving B to the bottom: after C.
-    QCOMPARE(placement(column, "B", 2), qMakePair(QString(), QString("C")));
-    // A card from another column dropped between A and B.
-    QCOMPARE(placement(column, "X", 1), qMakePair(QString("B"), QString("A")));
-    // Into an empty column: no neighbours; a slot past the end is the end.
+    QCOMPARE(placement(section, "B", 2), qMakePair(QString(), QString("C")));
+    // A card from another section dropped between A and B.
+    QCOMPARE(placement(section, "X", 1), qMakePair(QString("B"), QString("A")));
+    // Into an empty section: no neighbours; a slot past the end is the end.
     QCOMPARE(placement({}, "X", 0), qMakePair(QString(), QString()));
-    QCOMPARE(placement(column, "X", 99), qMakePair(QString(), QString("C")));
+    QCOMPARE(placement(section, "X", 99), qMakePair(QString(), QString("C")));
+}
+
+void BoardModelTests::aDropFindsTheSectionItLandedIn()
+{
+    using relay::board::dropTarget;
+    // # ready / A / B / # waiting / C / # done (folded)
+    QList<Row> list;
+    list << Row{Row::Section, "ready", "Ready", {}, 2, false, false};
+    list << Row{Row::Card, "ready", {}, "A", 0, false, false};
+    list << Row{Row::Card, "ready", {}, "B", 0, false, false};
+    list << Row{Row::Section, "waiting", "Waiting", {}, 1, false, false};
+    list << Row{Row::Card, "waiting", {}, "C", 0, false, false};
+    list << Row{Row::Section, "done", "Done", {}, 7, true, false};
+
+    QCOMPARE(dropTarget(list, 0), qMakePair(QString("ready"), 0));   // above the first header
+    QCOMPARE(dropTarget(list, 1), qMakePair(QString("ready"), 0));   // just under it
+    QCOMPARE(dropTarget(list, 2), qMakePair(QString("ready"), 1));   // between A and B
+    // The line just above the Waiting header is the bottom of Ready, not the top of Waiting.
+    QCOMPARE(dropTarget(list, 3), qMakePair(QString("ready"), 2));
+    QCOMPARE(dropTarget(list, 4), qMakePair(QString("waiting"), 0));
+    QCOMPARE(dropTarget(list, 5), qMakePair(QString("waiting"), 1));
+    // Dropped on a header (the view passes its index + 1), even a folded one: into it, at the top.
+    QCOMPARE(dropTarget(list, 6), qMakePair(QString("done"), 0));
+    QCOMPARE(dropTarget(list, 99), qMakePair(QString("done"), 0));
+    QCOMPARE(dropTarget({}, 0), qMakePair(QString(), 0));
+}
+
+void BoardModelTests::upAndDownWalkTheCardsAcrossSectionBreaks()
+{
+    using relay::board::stepRow;
+    QList<Row> list;
+    list << Row{Row::Section, "ready", "Ready", {}, 1, false, false};
+    list << Row{Row::Card, "ready", {}, "A", 0, false, false};
+    list << Row{Row::Section, "waiting", "Waiting", {}, 1, false, false};
+    list << Row{Row::Card, "waiting", {}, "B", 0, false, false};
+
+    QCOMPARE(stepRow(list, -1, 1), 1);        // from nowhere: the first card
+    QCOMPARE(stepRow(list, 1, 1), 3);         // over the Waiting header in one press
+    QCOMPARE(stepRow(list, 3, 1), -1);        // the end stays the end
+    QCOMPARE(stepRow(list, 3, -1), 1);
+    QCOMPARE(stepRow(list, 1, -1), -1);
+    QCOMPARE(stepRow(list, int(list.size()), -1), 3);
+    QCOMPARE(stepRow(list, 1, 0), 1);
+}
+
+// ---- the widget, driven by protocol events alone ------------------------------------
+
+void BoardModelTests::theViewRendersOneListFromAnEvent()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "ready", "features"),
+                             row("DN01", "done", "features")}));
+    QCOMPARE(view.model().total(), 3);
+    // The title carries the open count, not every card ever filed: done is a status.
+    QCOMPARE(view.title(), QStringLiteral("Switchboard · 2 open"));
+    // One list, not seven columns.
+    QCOMPARE(view.findChildren<QListWidget *>(QStringLiteral("boardList")).size(), 1);
+    QVERIFY(!view.findChild<QListWidget *>(QStringLiteral("boardColumn")));
+    // Done folds itself: its header is there with the count, its card is not.
+    QCOMPARE(sketch(view.rows()),
+             (QStringList{"# inbox 1", "K7Q2", "# discussing 0", "# ready 1", "M3XJ",
+                          "# in-progress 0", "# waiting 0", "# needs-qa 0", "# done 1 folded"}));
+    QCOMPARE(listOf(view)->count(), view.rows().size());
+
+    view.handleEvent(QJsonObject{{"event", "board_changed"},
+                                 {"upserts", rows({row("K7Q2", "ready", "features")})},
+                                 {"removed", QJsonArray{QStringLiteral("M3XJ")}}});
+    QCOMPARE(view.model().total(), 2);
+    QCOMPARE(view.model().card(QStringLiteral("K7Q2"))->status, QStringLiteral("ready"));
+    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
+             (QStringList{"K7Q2"}));
+}
+
+void BoardModelTests::theViewSendsAMoveWhenACardIsDropped()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    view.selectCard(QStringLiteral("K7Q2"));
+    QCOMPARE(view.selectedCard(), QStringLiteral("K7Q2"));
+
+    view.openSelected();
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_card_get"));
+    QCOMPARE(sent.last().value(QStringLiteral("card")).toString(), QStringLiteral("K7Q2"));
+
+    view.reload();
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_open"));
+}
+
+void BoardModelTests::arrowsFoldASectionAndTheFoldIsSaved()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.handleEvent(opened({row("K7Q2", "ready", "features"), row("M3XJ", "inbox", "features")}));
+    view.selectCard(QStringLiteral("K7Q2"));
+    QListWidget *list = listOf(view);
+    QVERIFY(list);
+
+    // Left folds the section the selection is in and stands on the nearest card still on screen.
+    QTest::keyClick(list, Qt::Key_Left);
+    QCOMPARE(relay::board::rowOfCard(view.rows(), QStringLiteral("K7Q2")), -1);
+    QVERIFY(view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("ready"))).collapsed);
+    QCOMPARE(view.selectedCard(), QStringLiteral("M3XJ"));
+    // Right puts it back and stands on its first card again.
+    QTest::keyClick(list, Qt::Key_Right);
+    QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("K7Q2")) >= 0);
+    QCOMPARE(view.selectedCard(), QStringLiteral("K7Q2"));
+
+    // The folds go into the layout node and come back from it.
+    view.toggleSection(QStringLiteral("inbox"));
+    QStringList folded;
+    for (const QJsonValue &value : view.collapsedSections())
+        folded << value.toString();
+    QCOMPARE(folded, (QStringList{"deferred", "done", "inbox"}));
+    view.setCollapsedSections(QJsonArray{QStringLiteral("ready")});
+    QVERIFY(view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("ready"))).collapsed);
+    QVERIFY(!view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("inbox"))).collapsed);
+    // A restored pane keeps exactly what the window remembered — Done is not re-folded under it.
+    QVERIFY(!view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("done"))).collapsed);
 }
 
 // ---- the view's answers to the worker ------------------------------------------------------
-
-namespace {
-QJsonObject opened(const QList<QJsonObject> &cards)
-{
-    return QJsonObject{{"event", "board"}, {"config", config()}, {"cards", rows(cards)},
-                       {"problems", QJsonArray{}}};
-}
-}  // namespace
 
 void BoardModelTests::aRefusedWriteIsShownAndAnAcceptedOneCanBeUndone()
 {
@@ -435,13 +638,10 @@ void BoardModelTests::aRefusedWriteIsShownAndAnAcceptedOneCanBeUndone()
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "in-progress", "features")}));
     view.selectCard(QStringLiteral("K7Q2"));
-    QListWidget *list = nullptr;
-    for (QListWidget *candidate : view.findChildren<QListWidget *>(QStringLiteral("boardColumn")))
-        if (candidate->count() == 1)
-            list = candidate;
+    QListWidget *list = listOf(view);
     QVERIFY(list);
 
-    // Alt+Shift+Right: to the next column. The request carries an id this view recognises.
+    // Alt+Shift+Right: to the next status, which is the section below.
     QTest::keyClick(list, Qt::Key_Right, Qt::AltModifier | Qt::ShiftModifier);
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_move"));
     QCOMPARE(sent.last().value("status").toString(), QStringLiteral("needs-review"));
@@ -466,25 +666,25 @@ void BoardModelTests::aRefusedWriteIsShownAndAnAcceptedOneCanBeUndone()
     QCOMPARE(sent.last().value("write_id").toString(), QStringLiteral("w-42"));
 }
 
-void BoardModelTests::aChangeRefillsTheColumnsInPlace()
+void BoardModelTests::aChangeRefillsTheListInPlace()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
     view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "ready", "features")}));
-    const QList<QListWidget *> before = view.findChildren<QListWidget *>(QStringLiteral("boardColumn"));
-    QCOMPARE(before.size(), 7);
-    QPointer<QListWidget> inbox = before.first();
+    QPointer<QListWidget> list = listOf(view);
+    QVERIFY(list);
+    const int rowsBefore = view.rows().size();
 
-    // A card moving inside the same tab refills the lists; the widgets (and so their scroll
-    // positions, focus and an open quick-add field) survive.
+    // A card moving refills the one list; the widget (and so its scroll position, its focus and
+    // an open quick-add field) survives.
     view.handleEvent(QJsonObject{{"event", "board_changed"}, {"upserts", rows({row("K7Q2", "ready", "features")})},
                                  {"removed", QJsonArray{}}});
-    QVERIFY(inbox);
-    QCOMPARE(view.findChildren<QListWidget *>(QStringLiteral("boardColumn")).size(), 7);
-    int cards = 0;
-    for (QListWidget *list : view.findChildren<QListWidget *>(QStringLiteral("boardColumn")))
-        cards += list->count();
-    QCOMPARE(cards, 2);
-    QCOMPARE(inbox->count(), 0);
+    QVERIFY(list);
+    QCOMPARE(listOf(view), list.data());
+    QCOMPARE(view.rows().size(), rowsBefore);
+    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("inbox")), QStringList());
+    QCOMPARE(relay::board::cardsInSection(view.rows(), QStringLiteral("ready")),
+             (QStringList{"K7Q2", "M3XJ"}));
+    QCOMPARE(list->count(), view.rows().size());
 }
 
 void BoardModelTests::theOpenCardRefetchesOnlyForItsOwnChanges()
@@ -541,6 +741,41 @@ void BoardModelTests::aQuestionTheAgentCannotTakeIsReportedOnTheCard()
     QVERIFY(!error->isHidden());
     QVERIFY(error->text().contains(QStringLiteral("Configure a provider first.")));
     QVERIFY(view.notice().isEmpty());   // on the card, not over the board
+}
+
+void BoardModelTests::quickAddNamesTheSectionItAddsTo()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "ready", "features")}));
+    auto *field = view.findChild<QLineEdit *>(QStringLiteral("boardQuickAdd"));
+    auto *strip = view.findChild<QWidget *>(QStringLiteral("boardQuickAddRow"));
+    QVERIFY(field);
+    QVERIFY(strip);
+    QVERIFY(strip->isHidden());
+
+    // `n` with a card selected adds into that card's section, and says so.
+    view.selectCard(QStringLiteral("K7Q2"));
+    view.quickAdd();
+    QVERIFY(!strip->isHidden());
+    QCOMPARE(field->placeholderText(), QStringLiteral("New card in Ready — Enter adds, Esc closes"));
+    field->setText(QStringLiteral("clickable paths in the output"));
+    QTest::keyClick(field, Qt::Key_Return);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_create"));
+    QCOMPARE(sent.last().value("status").toString(), QStringLiteral("ready"));
+    QCOMPARE(sent.last().value("text").toString(), QStringLiteral("clickable paths in the output"));
+    // With no tabs a new card is filed in the board's first category folder; `m` re-files it.
+    QCOMPARE(sent.last().value("tab").toString(), QStringLiteral("features"));
+    // The field stays open for the next card, and Esc closes it.
+    QVERIFY(!strip->isHidden());
+    QVERIFY(field->text().isEmpty());
+    QTest::keyClick(field, Qt::Key_Escape);
+    QVERIFY(strip->isHidden());
+
+    // Nothing is created straight into Done: `n` there falls back to the first section.
+    view.quickAddIn(relay::board::doneSection());
+    QCOMPARE(field->placeholderText(), QStringLiteral("New card in Inbox — Enter adds, Esc closes"));
 }
 
 QTEST_MAIN(BoardModelTests)

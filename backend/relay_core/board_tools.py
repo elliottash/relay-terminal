@@ -512,12 +512,22 @@ class BoardTools:
         return category
 
     def _row(self, card: B.Card, thread_counts: dict[str, int]) -> dict:
+        # The full row of protocol 19.2. `created`, the task counts and `milestone` were promised
+        # there but never sent, so the pane's age and `☑ done/total` badges had nothing to draw
+        # (found while rebuilding the pane as rows, 2026-09-18).
+        tasks = card.tasks()
         return {"id": card.id, "title": card.title, "type": card.type, "status": card.status,
                 "tab": self._tab_of(card), "labels": list(card.front.get("labels") or []),
                 "assignee": card.front.get("assignee"), "waiting_on": card.front.get("waiting_on"),
                 "rank": card.rank, "private": card.private,
                 "path": str(card.path.relative_to(self.board.repo)) if card.path else None,
-                "thread_entries": thread_counts.get(card.id or "", 0)}
+                "thread_entries": thread_counts.get(card.id or "", 0),
+                "created": str(card.front.get("created") or ""),
+                "milestone": card.front.get("milestone"),
+                "topic": card.front.get("topic"),
+                "implemented_by": card.front.get("implemented_by"),
+                "tasks_total": len(tasks),
+                "tasks_done": sum(1 for task in tasks if task.done)}
 
     def _thread_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
