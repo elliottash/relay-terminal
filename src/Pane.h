@@ -3224,6 +3224,11 @@ private:
         if (!voiceKeyStored()) {
             refuse(QStringLiteral("The desktop has no OpenRouter key for transcription.")); return;
         }
+        // The worker does the transcribing. Without one the request would be dropped on the floor
+        // and the phone would sit through the whole timeout to learn nothing.
+        if (m_worker.state() == QProcess::NotRunning) {
+            refuse(QStringLiteral("This pane has no agent running to transcribe with.")); return;
+        }
         if (audio.isEmpty()) { refuse(QStringLiteral("That clip was empty.")); return; }
         // The extension is chosen here from a fixed table, never taken from the wire: the
         // worker's reader picks its handling from it, and the name is this machine's to make.

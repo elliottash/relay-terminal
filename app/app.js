@@ -794,8 +794,9 @@ async function startVoice() {
   });
   recorder.start();
   // A clip has to fit one frame, so the recorder stops itself rather than the person finding out
-  // afterwards that nothing was sent.
-  setTimeout(() => { if (recorder) stopVoice(); }, VOICE_MAX_MS);
+  // afterwards that nothing was sent. Tied to this recorder, so a later one is not cut short.
+  const started = recorder;
+  setTimeout(() => { if (recorder === started) stopVoice(); }, VOICE_MAX_MS);
   updateVoiceUi();
   voiceNote('Listening… tap the microphone again to transcribe.');
 }
