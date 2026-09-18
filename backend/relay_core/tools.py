@@ -7,7 +7,8 @@ an OS sandbox: a shell command has the invoking user's permissions.
 With `host` (card #S5SH) run_command and the file tools work on the ssh host the user's terminal is
 logged into instead, over the user's own connection. There is no workspace there: what takes its
 place is remote_path() here and the scripts in relay_core/remote_files.py — the same secret-file
-guard, no `..`, no symlinks, and the remote home (or the directory the user's shell is in).
+guard and no `..` for everything, no symlinks, and for a write (only) the remote home or the
+directory the user's shell is in. A read goes anywhere the user's own account can read.
 """
 from __future__ import annotations
 
@@ -58,9 +59,10 @@ def remote_path(name: str) -> str:
 
     It is absolute, `~/…`, or relative to the remote shell's directory. What is checked here is what
     can be checked here: `..` is refused outright, as it is locally, so the path the host sees reads
-    as what it is, and the secret-file guard is the same one the workspace uses. The other half of
-    the rule — inside the user's home on the host, or the directory their shell is in — is checked on
-    the host, where `$HOME` is known (relay_core/remote_files.py)."""
+    as what it is, and the secret-file guard is the same one the workspace uses — on a read as much
+    as on a write, because it is about credentials, not about how far the agent may reach. Where the
+    two differ is containment, which only a write has and which is checked on the host, where
+    `$HOME` is known (relay_core/remote_files.py)."""
     if not name.strip():
         raise ValueError("A path on the host is required.")
     if any(character in name for character in "\n\r"):
@@ -112,15 +114,21 @@ HOST_PROPERTY = {"type": "string", "description":
                  "Run on the ssh host the user's terminal is logged into (the Relay context names it), over "
                  "the user's own connection, instead of on this machine. cwd is then a path on that host "
                  "(default: the remote shell's directory). Omit to run locally."}
-HOST_FILE_PROPERTY = {"type": "string", "description":
-                      "Work on the file on the ssh host the user's terminal is logged into (the Relay context "
-                      "names it), over the user's own connection, instead of on this machine. path is then a "
-                      "path on that host: absolute, or relative to the remote shell's directory, and inside "
-                      "the user's home there (or that directory). Omit for this machine."}
+HOST_READ_PROPERTY = {"type": "string", "description":
+                      "Read from the ssh host the user's terminal is logged into (the Relay context names it), "
+                      "over the user's own connection, instead of from this machine. path is then a path on "
+                      "that host: absolute, ~/…, or relative to the remote shell's directory. Anything the "
+                      "user's own account can read there, you can read. Omit for this machine."}
+HOST_WRITE_PROPERTY = {"type": "string", "description":
+                       "Write the file on the ssh host the user's terminal is logged into (the Relay context "
+                       "names it), over the user's own connection, instead of on this machine. path is then a "
+                       "path on that host: absolute, ~/…, or relative to the remote shell's directory, and — "
+                       "unlike a read — it must be inside the user's home there or the directory their shell "
+                       "is in. Omit for this machine."}
 #: The tools that take `host`, and the property each one is offered with.
-HOST_TOOLS = {"run_command": HOST_PROPERTY, "read_file": HOST_FILE_PROPERTY,
-              "list_directory": HOST_FILE_PROPERTY, "write_file": HOST_FILE_PROPERTY,
-              "edit_file": HOST_FILE_PROPERTY}
+HOST_TOOLS = {"run_command": HOST_PROPERTY, "read_file": HOST_READ_PROPERTY,
+              "list_directory": HOST_READ_PROPERTY, "write_file": HOST_WRITE_PROPERTY,
+              "edit_file": HOST_WRITE_PROPERTY}
 
 
 def with_host(tool: dict) -> dict:
@@ -476,8 +484,12 @@ class ToolExecutor:
         return _as_text(data)
 
     def _remote_before(self, session: dict, path: str) -> tuple[bytes, bool]:
-        """What a write or an edit is about to replace, and whether the file is there at all."""
-        script = remote_files.read_script(path, session.get("cwd") or None, cap=MAX_FILE + 1, optional=True)
+        """What a write or an edit is about to replace, and whether the file is there at all.
+
+        Contained like the write it belongs to, so a write outside the remote home is refused by the
+        first call rather than after reading the file it may not touch."""
+        script = remote_files.read_script(path, session.get("cwd") or None, cap=MAX_FILE + 1, optional=True,
+                                          contain=True)
         cwd = session.get("cwd") or None
         if self.cancel.is_set():
             raise Cancelled("Stopped.")

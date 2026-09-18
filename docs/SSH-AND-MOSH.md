@@ -246,19 +246,27 @@ builder inside `sh -c`, so a login shell that is bash, zsh, dash or ksh means th
   There is no checkpoint/undo for a remote write (Relay's checkpoints are workspace files).
 
 **The rule that replaces the workspace.** Locally the file tools are confined to the workspace and
-refuse secret-looking paths. On the host there is no workspace, so rather than dropping the
-protection:
+refuse secret-looking paths. On the host there is no workspace, and a read and a write do not
+deserve the same rule (owner, 2026-09-18, after watching `/etc/nginx/nginx.conf` be refused: "i
+agree, the agent can read anything"):
 
-- the **same secret-file guard** applies (`.ssh`, `.gnupg`, `.git`, `.env`/`.env.*`, `id_rsa`,
-  `id_ed25519`, `*.pem`, `*.key`), and `..` is refused, both checked here before any ssh runs;
-- the path must be **inside the user's home on the host, or under `remote_session.cwd`** (the
-  directory their own shell is in — a deploy in `/srv` is what they are logged in to work on).
-  `$HOME` is only known on the host, so this is the opening of every script: the path with `~`
-  expanded and made absolute against the remote `$PWD`, then a `case` that exits 78 otherwise;
-- **symlinks are not followed**, as locally. The containment check is textual, so a directory
-  symlink inside the home that points elsewhere is not caught: this is a guard against accidents,
-  like the workspace check, not a sandbox. The user's own permissions still bound everything, and
-  nothing runs as root over this connection.
+- the **same secret-file guard** applies to both (`.ssh`, `.gnupg`, `.git`, `.env`/`.env.*`,
+  `id_rsa`, `id_ed25519`, `*.pem`, `*.key`), and `..` is refused, both checked here before any ssh
+  runs. That rule is about credentials, not about how far the agent may reach;
+- **a read goes anywhere**: `read_file` and `list_directory` with `host` read whatever the user's own
+  account can read — `/etc`, `/var/log`, a colleague's checkout. A read is already bounded by the
+  remote user's permissions, and `run_command host` with `cat` could fetch the same bytes, so
+  fencing `read_file` alone only made the tools inconsistent with each other;
+- **a write stays inside the user's home on the host, or under `remote_session.cwd`** (the directory
+  their own shell is in — a deploy in `/srv` is what they are logged in to work on). A write is the
+  one that can damage a machine nobody asked the agent to touch, and there is no undo for it. `$HOME`
+  is only known on the host, so a write's script opens with the path `~`-expanded and made absolute
+  against the remote `$PWD`, then a `case` that exits 78 otherwise; the read a write does first, to
+  build its diff, is fenced with it, so a refused write reads nothing;
+- **symlinks are not followed**, as locally. The write's containment check is textual, so a directory
+  symlink inside the home that points elsewhere is not caught: this is a guard against damage nobody
+  asked for, like the workspace check, not a sandbox. The user's own permissions still bound
+  everything, and nothing runs as root over this connection.
 
 Searching stays with `run_command host` (`grep`, `find`, `ls`): there is no local `glob`/`grep`
 tool to give a `host` to, and the context note says so. Every remote file result carries `host`, and

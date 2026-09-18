@@ -2571,19 +2571,27 @@ the file and compares its SHA-256 first, so "File changed while the write was pr
 same thing on the host. Remote writes are not checkpointed (checkpoints are workspace files), and
 there is no undo for them.
 
-**The path rule on a host**, which replaces the workspace check and is part of the contract:
+**The path rule on a host**, which replaces the workspace check and is part of the contract. A read
+and a write are governed differently (owner, 2026-09-18: "i agree, the agent can read anything"):
 
-- the workspace secret-file guard applies unchanged (`.ssh`, `.gnupg`, `.git`, `.env`/`.env.*`,
-  `id_rsa`, `id_ed25519`, `*.pem`, `*.key`), and `..` is refused; both are checked in the backend
-  before any ssh runs;
-- the path must resolve inside the remote account's home directory, or under `remote_session.cwd`
-  when the GUI sent one (the directory the user's own shell is in). `$HOME` is known only on the
-  host, so the script checks it there and exits 78, which the backend turns into a refusal naming
-  both allowed roots. `~/…` is expanded against that same `$HOME`;
-- symlinks are not followed, here as locally. The containment check is textual: a directory symlink
+- the workspace secret-file guard applies unchanged to **both** (`.ssh`, `.gnupg`, `.git`,
+  `.env`/`.env.*`, `id_rsa`, `id_ed25519`, `*.pem`, `*.key`), and `..` is refused; both are checked
+  in the backend before any ssh runs. That rule is about credentials, not about reach;
+- **`read_file` and `list_directory` are not contained**: any path the user's own account can read
+  on that host — `/etc/nginx/nginx.conf`, `/var/log`, another project's tree — is readable. A read is
+  already bounded by the remote user's permissions, and `run_command` with `host` could `cat` the
+  same bytes, so containing only the read tool made the surface inconsistent without protecting
+  anything;
+- **`write_file` and `edit_file` are contained**: the path must resolve inside the remote account's
+  home directory, or under `remote_session.cwd` when the GUI sent one (the directory the user's own
+  shell is in). `$HOME` is known only on the host, so the script checks it there and exits 78, which
+  the backend turns into a refusal naming both allowed roots and saying reads are not limited. The
+  read a write does first (its before-picture) is contained with it, so a refused write reads
+  nothing. `~/…` is expanded against that same `$HOME`;
+- symlinks are not followed, here as locally. The write containment is textual: a directory symlink
   inside the home that points elsewhere is not caught. This is the same class of guard as the
-  workspace check — against accidents, not an OS sandbox — and the user's own permissions still
-  bound every call.
+  workspace check — against damage nobody asked for, not an OS sandbox — and the user's own
+  permissions still bound every call.
 
 Results carry `host` (`read_file`: `path`, `content`, `sha256`, `host`; `list_directory`:
 `entries`, `truncated`, `host`, with the same 200-entry cap and `file`/`directory`/`symlink` types;

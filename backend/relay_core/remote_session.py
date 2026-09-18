@@ -102,11 +102,14 @@ def context_note(session: dict, *, delegated: bool = False) -> str:
             f"read_file, list_directory, write_file and edit_file take the same host: \"{host}\", and then work "
             f"on {host} over that connection — read, write and edit files there as you would here, and prefer "
             f"them to cat and heredocs over run_command. path is then a path on {host}: absolute, ~/…, or "
-            f"relative to " + (f"`{cwd}`" if cwd else "the remote home directory") + ". It must be inside the "
-            f"user's home on {host}" + (f" or under `{cwd}`" if cwd else "") + " — there is no workspace there "
-            "to confine you — and the usual secret-file guard (.ssh, .env, keys, .git) applies. Nothing is "
-            f"installed on {host}, and there is no undo for a write there. Search with run_command host "
-            "(grep, find, ls).")
+            f"relative to " + (f"`{cwd}`" if cwd else "the remote home directory") + ". Search with run_command "
+            "host (grep, find, ls).")
+        lines.append(
+            f"You may read any path on {host} the user's own account can read (/etc, /var/log, another "
+            f"project's directory). Writing is narrower: write_file and edit_file only work inside the user's "
+            f"home on {host}" + (f" or under `{cwd}`" if cwd else "") + ", so ask the user for a change outside "
+            "that. Either way Relay refuses secret-looking paths (.ssh, .gnupg, .env, keys) and does not "
+            f"follow symlinks. Nothing is installed on {host}, and there is no undo for a write there.")
     else:
         lines.append(
             f"Relay cannot share this {program} connection (no connection-sharing socket answers), so "

@@ -88,8 +88,9 @@ main, Options › Terminal › SSH sessions on "Enhance automatically" unless a 
 11. At the remote prompt, ask the agent to read and then change a file in the remote home (e.g. add a
     line to `~/notes.md`): the lines read "read notes.md on \<host\>" and "edited notes.md on
     \<host\>", the fold shows a real diff of the remote file, the file on the host changes and keeps
-    its mode, and no `.relay-new.*` file is left beside it. Ask it for `/etc/hosts` and for
-    `~/.ssh/config`: both are refused in words the model can act on, and nothing is read.
+    its mode, and no `.relay-new.*` file is left beside it. Ask it to read `/etc/nginx/nginx.conf`
+    (or any file outside the home): it reads it. Ask it to *change* that file, and to read
+    `~/.ssh/config`: both are refused in words the model can act on, and nothing is written.
 12. Files on the host (§ 9). On the host, make a file of your own (`printf 'one\ntwo\n' >/tmp/t.conf;
     chmod 640 /tmp/t.conf`) and `ls /tmp/t.conf`. Hover the path it printed: it underlines about a
     fifth of a second later (it is a link because the host said so — a path that exists only here is

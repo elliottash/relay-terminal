@@ -11,13 +11,20 @@ Everything here is a small POSIX shell script handed to the host through the sam
 same thing under a login shell that is bash, zsh, dash or ksh. The scripts use only `cat`, `head`,
 `printf`, `dirname`, `chmod`, `cp`, `mv` and `rm`; a host missing one of them says so in the error.
 
-Three rules the scripts keep, because the host has no workspace to confine the agent to:
+The rules the scripts keep, because the host has no workspace to confine the agent to:
 
-- **Inside the user's home, or the directory their shell is in.** Every script opens with the same
-  lines: the path with `~` expanded and made absolute against the remote `$PWD`, then a `case` that
-  exits 78 unless it is `$HOME`, under `$HOME`, or under `remote_session.cwd`. `$HOME` is only known
-  on the host, so the rule is checked there; the secret-name rule and `..` are refused here in
-  Python (relay_core/tools.remote_path), before any ssh runs.
+- **A read goes anywhere; a write stays inside the user's home, or the directory their shell is in.**
+  Owner, 2026-09-18, after seeing `/etc/nginx/nginx.conf` refused: "i agree, the agent can read
+  anything." A read is already bounded by the remote user's own permissions, and `run_command host`
+  with `cat` could read the same bytes, so fencing read_file only made the tools inconsistent. A
+  write is the one that can damage a machine nobody asked the agent to touch, so write_file and
+  edit_file keep the fence (and so does the read a write does first, to build its diff). Every
+  script opens with the path, `~` expanded and made absolute against the remote `$PWD`; a write's
+  adds a `case` that exits 78 unless that is `$HOME`, under `$HOME`, or under `remote_session.cwd`.
+  `$HOME` is only known on the host, so the rule is checked there.
+- **No credentials, read or written.** The secret-name rule (`.ssh`, `.gnupg`, `.env`, keys) and
+  `..` are refused for both, here in Python (relay_core/tools.remote_path), before any ssh runs:
+  that rule is about credentials, not about containment, and the local tools keep it too.
 - **No symlinks**, as the local tools refuse them: reading or writing through one exits 77. The
   containment check is textual, so a *directory* symlink inside the home that points elsewhere is
   not caught — this is a guard against accidents, like the local workspace check, not a sandbox.
@@ -49,24 +56,32 @@ SYMLINK = 77
 WRONG_TYPE = 79
 
 
-def _guard(path: str, cwd: str | None) -> str:
-    """The head of every script: `$p`, absolute on the host, inside the home or the shell's cwd."""
+def _guard(path: str, cwd: str | None, *, contain: bool) -> str:
+    """The head of every script: `$p`, made absolute on the host.
+
+    `contain` adds the write rule — inside the remote home, or the directory the user's shell is in.
+    A read is not contained (owner, 2026-09-18: "i agree, the agent can read anything"); see the
+    module docstring for why the two differ."""
+    head = (f"p={shlex.quote(path)}\n"
+            # `~/x` is a path models write; the remote shell never expands it here (the path is
+            # quoted), so the script does, against the host's own home.
+            'case $p in "~") p=$HOME ;; "~/"*) p=$HOME/${p#"~/"} ;; esac\n'
+            'case $p in /*) ;; *) p=${PWD:-$(pwd)}/$p ;; esac\n')
+    if not contain:
+        return head
     roots = ['"$HOME"/*|"$HOME"']
     if cwd:
         quoted = shlex.quote(cwd)
         roots.append(f"{quoted}/*|{quoted}")
-    return (f"p={shlex.quote(path)}\n"
-            # `~/x` is a path models write; the remote shell never expands it here (the path is
-            # quoted), so the script does, against the home the rule is about anyway.
-            'case $p in "~") p=$HOME ;; "~/"*) p=$HOME/${p#"~/"} ;; esac\n'
-            'case $p in /*) ;; *) p=${PWD:-$(pwd)}/$p ;; esac\n'
-            f"case $p in {'|'.join(roots)}) ;; *) exit {OUTSIDE} ;; esac\n")
+    return head + f"case $p in {'|'.join(roots)}) ;; *) exit {OUTSIDE} ;; esac\n"
 
 
-def read_script(path: str, cwd: str | None, *, cap: int, optional: bool = False) -> str:
+def read_script(path: str, cwd: str | None, *, cap: int, optional: bool = False,
+                contain: bool = False) -> str:
     """`cat` the file, capped at `cap` bytes. `optional`: a missing file is exit 66 (and a missing
-    parent directory 68) rather than an error — what a write's before-picture needs."""
-    body = _guard(path, cwd)
+    parent directory 68) rather than an error — what a write's before-picture needs, which is also
+    the one read that is contained, since it is a write that is about to happen."""
+    body = _guard(path, cwd, contain=contain)
     if optional:
         body += ('if [ ! -e "$p" ] && [ ! -L "$p" ]; then\n'
                  '  d=$(dirname -- "$p")\n'
@@ -85,7 +100,7 @@ def read_script(path: str, cwd: str | None, *, cap: int, optional: bool = False)
 def list_script(path: str, cwd: str | None, *, limit: int = LIST_LIMIT) -> str:
     """Name and kind of every entry, NUL-separated so a newline in a name cannot lie. One more than
     the limit is read, so the caller can say `truncated` exactly as the local tool does."""
-    return (_guard(path, cwd)
+    return (_guard(path, cwd, contain=False)
             + f'[ -e "$p" ] || exit {MISSING}\n'
             + f'[ -d "$p" ] || exit {WRONG_TYPE}\n'
             + f'cd -- "$p" || exit {UNREADABLE}\n'
@@ -104,7 +119,7 @@ def list_script(path: str, cwd: str | None, *, limit: int = LIST_LIMIT) -> str:
 def write_script(path: str, cwd: str | None) -> str:
     """Read the new content from stdin into a temp file beside the target, with the target's mode,
     and `mv` it into place. The file is never seen half written, and never truncated on failure."""
-    return (_guard(path, cwd)
+    return (_guard(path, cwd, contain=True)
             + 'd=$(dirname -- "$p")\n'
             + f'[ -d "$d" ] || exit {NO_PARENT}\n'
             + f'[ -L "$p" ] && exit {SYMLINK}\n'
@@ -151,10 +166,10 @@ def output(proc: subprocess.CompletedProcess, session: dict, path: str, *,
     first = detail[0][:200] if detail else ""
     if code == OUTSIDE:
         where = f", and outside `{cwd}` (the directory their shell is in)" if cwd else ""
-        raise ValueError(f"`{path}` is outside the home directory of the user's account on {host}{where}. "
-                         "On a host the file tools stay inside the user's home directory and the directory "
-                         "their shell is in — there is no workspace there to confine them. Ask the user to "
-                         "look at a path outside it, or read it with run_command host if they agree.")
+        raise ValueError(f"`{path}` is outside the home directory of the user's account on {host}{where}, and "
+                         f"writing there is refused: on a host Relay only writes inside the user's home and "
+                         f"the directory their shell is in. You may read anywhere on {host}; to change this "
+                         "file, ask the user to do it, or to move their shell to that directory.")
     if code == MISSING:
         raise ValueError(f"No such file or directory on {host}: `{path}`. List the directory first "
                          "(list_directory with host), or check the path with the user.")

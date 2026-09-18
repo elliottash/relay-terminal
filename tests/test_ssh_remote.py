@@ -317,7 +317,7 @@ class RemoteFileToolTests(unittest.TestCase):
         # A relative path: the script is run in the remote shell's directory, inside `sh -c`.
         self.assertIn(f"[cd {self.home} || exit 1\nsh -c '", printed)
         self.assertIn('cat -- "$p" | head -c 131073', printed)
-        self.assertIn("exit 78", printed)
+        self.assertNotIn("exit 78", printed)   # a read is not fenced to the remote home
 
     def test_an_absolute_path_needs_no_cd(self):
         self.fake_ssh("echo")
@@ -478,26 +478,51 @@ class RemoteFileToolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "path on the host is required"):
             self.call("read_file", path="   ")
 
-    def test_outside_the_home_is_refused_unless_the_shell_is_there(self):
+    def test_a_read_goes_anywhere_the_users_account_can_read(self):
+        # Owner, 2026-09-18: "i agree, the agent can read anything." A read outside the remote home
+        # is a read the user could do themselves, and run_command host could cat it anyway.
         (self.elsewhere / "app.conf").write_text("listen 80\n")
-        with self.assertRaisesRegex(ValueError, "outside the home directory"):
-            self.call("read_file", path=str(self.elsewhere / "app.conf"))
-        # The user's shell is in /srv: their own working directory is theirs to work in.
-        self.use({**self.session, "cwd": str(self.elsewhere)})
-        self.assertEqual(self.call("read_file", path="app.conf")["content"], "listen 80\n")
         self.assertEqual(self.call("read_file", path=str(self.elsewhere / "app.conf"))["content"],
                          "listen 80\n")
-        # The home is still allowed while the shell is elsewhere; /etc is still not.
-        (self.home / "notes.md").write_text("n\n")
-        self.assertEqual(self.call("read_file", path=str(self.home / "notes.md"))["content"], "n\n")
-        with self.assertRaisesRegex(ValueError, "outside the home directory"):
-            self.call("write_file", path="/etc/hosts", content="x")
+        self.assertEqual([e["name"] for e in self.call("list_directory",
+                                                       path=str(self.elsewhere))["entries"]], ["app.conf"])
+        # Unreadable is the host's own answer, not a rule of Relay's.
+        (self.elsewhere / "app.conf").chmod(0o000)
+        try:
+            with self.assertRaisesRegex(ValueError, "cannot be read"):
+                self.call("read_file", path=str(self.elsewhere / "app.conf"))
+        finally:
+            (self.elsewhere / "app.conf").chmod(0o644)
+
+    def test_a_write_stays_in_the_home_or_the_shells_directory(self):
+        (self.elsewhere / "app.conf").write_text("listen 80\n")
+        with self.assertRaisesRegex(ValueError, "writing there is refused"):
+            self.call("write_file", path=str(self.elsewhere / "app.conf"), content="listen 8080\n")
+        with self.assertRaisesRegex(ValueError, "You may read anywhere on filly"):
+            self.call("edit_file", path=str(self.elsewhere / "app.conf"), old_string="80",
+                      new_string="8080")
         self.assertEqual((self.elsewhere / "app.conf").read_text(), "listen 80\n")
+        self.assertFalse(list(self.elsewhere.glob("*.relay-new.*")))
+        # The user's shell is in /srv: their own working directory is theirs to work in.
+        self.use({**self.session, "cwd": str(self.elsewhere)})
+        self.call("edit_file", path="app.conf", old_string="80", new_string="8080")
+        self.assertEqual((self.elsewhere / "app.conf").read_text(), "listen 8080\n")
+        # The home is still writable while the shell is elsewhere; /etc is still not.
+        self.call("write_file", path=str(self.home / "notes.md"), content="n\n")
+        self.assertEqual((self.home / "notes.md").read_text(), "n\n")
+        with self.assertRaisesRegex(ValueError, "writing there is refused"):
+            self.call("write_file", path="/etc/hosts", content="x")
 
     def test_the_rule_is_checked_on_the_host_where_home_is_known(self):
-        # The refusal is the script's, not this machine's idea of a home directory.
-        script = remote_files.read_script("/etc/hosts", None, cap=10)
-        self.assertIn('case $p in "$HOME"/*|"$HOME") ;; *) exit 78 ;; esac', script)
+        # The refusal is the script's, not this machine's idea of a home directory — and only a
+        # write carries it.
+        fence = 'case $p in "$HOME"/*|"$HOME") ;; *) exit 78 ;; esac'
+        self.assertIn(fence, remote_files.write_script("/etc/hosts", None))
+        self.assertNotIn(fence, remote_files.read_script("/etc/hosts", None, cap=10))
+        self.assertNotIn(fence, remote_files.list_script("/etc", None))
+        # The read a write does first to build its diff is fenced with the write.
+        self.assertIn(fence, remote_files.read_script("/etc/hosts", None, cap=10, optional=True,
+                                                      contain=True))
 
     # ----- refusals, the schema and the labels -------------------------------------------
 
@@ -593,7 +618,10 @@ class RemoteFileToolTests(unittest.TestCase):
     def test_the_note_offers_the_file_tools(self):
         note = format_context({"foreground_program": "ssh filly", "remote_session": SESSION})
         self.assertIn("read_file, list_directory, write_file and edit_file take the same host", note)
-        self.assertIn("inside the user's home", note)
+        # Read and write are described as the different rules they are.
+        self.assertIn("You may read any path on filly the user's own account can read", note)
+        self.assertIn("Writing is narrower", note)
+        self.assertIn("inside the user's home on filly", note)
         self.assertNotIn("Read files on filly with run_command", note)
 
 
