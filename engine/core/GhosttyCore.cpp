@@ -719,6 +719,149 @@ QStringList GhosttyCore::historyText(int maxLines) const
     return d->rangeText(GHOSTTY_POINT_TAG_HISTORY, std::max(0, h - maxLines), h - 1);
 }
 
+// Styled scrollback, in the same Line the viewport frame carries.
+//
+// The render state only ever describes the viewport, so history is read
+// through grid refs (GHOSTTY_POINT_TAG_HISTORY, y = 0 the oldest line, the
+// coordinates historyText() uses): one ref per cell, giving the cell, its
+// grapheme cluster, its style and its OSC 8 URI. That is an FFI call or three
+// per cell, which is why this is a paging call — at most a couple of hundred
+// rows — and never a per-frame one.
+//
+// Nothing here writes: no scroll, no render-state update, no selection. The
+// only state that moves is the link-id table, exactly as updateFrame() grows
+// it, so an id in a history row means the same URI as one on the screen.
+int GhosttyCore::historyLines(int fromRow, int count, std::vector<Line> *out) const
+{
+    if (out)
+        out->clear();
+    const int total = historyRows();
+    const int from = std::max(0, std::min(fromRow, total));
+    const int want = std::max(0, std::min(count, total - from));
+    if (!out || want == 0)
+        return from;
+
+    // The live palette, OSC 4 overrides included — the same table the render
+    // state resolves the screen's indexed colours with, so a line keeps its
+    // colour when it scrolls off the screen into history.
+    GhosttyColorRgb palette[256];
+    const bool havePalette =
+        ghostty_terminal_get(d->t, GHOSTTY_TERMINAL_DATA_COLOR_PALETTE, palette) == GHOSTTY_SUCCESS;
+    const auto paletteColor = [&](int index) -> uint32_t {
+        // Without the table there is nothing to resolve against; send the index
+        // itself rather than a made-up colour (CellColor carries both kinds).
+        return havePalette ? packRgb(palette[index & 0xFF]) : CellColor::indexed(uint8_t(index));
+    };
+
+    out->resize(size_t(want));
+    std::vector<uint32_t> cps;
+    std::string uri;
+    for (int i = 0; i < want; ++i) {
+        Line &line = (*out)[size_t(i)];
+        const int y = from + i;
+        GhosttyGridRef rowRef;
+        if (!d->gridRef(GHOSTTY_POINT_TAG_HISTORY, 0, y, &rowRef))
+            continue;
+        GhosttyRow raw = 0;
+        if (ghostty_grid_ref_row(&rowRef, &raw) == GHOSTTY_SUCCESS) {
+            bool cont = false;
+            ghostty_row_get(raw, GHOSTTY_ROW_DATA_WRAP_CONTINUATION, &cont);
+            line.continuation = cont;
+            GhosttyRowSemanticPrompt sp = GHOSTTY_ROW_SEMANTIC_NONE;
+            ghostty_row_get(raw, GHOSTTY_ROW_DATA_SEMANTIC_PROMPT, &sp);
+            if (sp == GHOSTTY_ROW_SEMANTIC_PROMPT)
+                line.marks |= MarkPromptStart;
+        }
+        line.wrapColumns = uint16_t(d->colsN);
+        line.cells.resize(size_t(d->colsN));
+        for (int x = 0; x < d->colsN; ++x) {
+            GhosttyGridRef ref = rowRef;
+            if (x > 0 && !d->gridRef(GHOSTTY_POINT_TAG_HISTORY, x, y, &ref))
+                break;
+            GhosttyCell rawCell = 0;
+            if (ghostty_grid_ref_cell(&ref, &rawCell) != GHOSTTY_SUCCESS)
+                break;
+            Cell &c = line.cells[size_t(x)];
+
+            GhosttyCellWide wide = GHOSTTY_CELL_WIDE_NARROW;
+            ghostty_cell_get(rawCell, GHOSTTY_CELL_DATA_WIDE, &wide);
+            if (wide == GHOSTTY_CELL_WIDE_SPACER_TAIL) {
+                c.ch = kWideTail;
+                c.width = 0;
+            } else {
+                c.width = wide == GHOSTTY_CELL_WIDE_WIDE ? 2 : 1;
+                size_t glen = 0;
+                cps.resize(8);
+                GhosttyResult r = ghostty_grid_ref_graphemes(&ref, cps.data(), cps.size(), &glen);
+                if (r == GHOSTTY_OUT_OF_SPACE && glen > 0 && glen < (1u << 16)) {
+                    cps.resize(glen);
+                    r = ghostty_grid_ref_graphemes(&ref, cps.data(), cps.size(), &glen);
+                }
+                if (r == GHOSTTY_SUCCESS && glen == 1) {
+                    c.ch = cps[0];
+                } else if (r == GHOSTTY_SUCCESS && glen > 1) {
+                    std::u32string cluster(cps.begin(), cps.begin() + long(glen));
+                    line.appendCluster(&c, cluster.data(), int(cluster.size()));
+                }
+            }
+
+            GhosttyStyle st = GHOSTTY_INIT_SIZED(GhosttyStyle);
+            bool styled = false;
+            ghostty_cell_get(rawCell, GHOSTTY_CELL_DATA_HAS_STYLING, &styled);
+            if (styled && ghostty_grid_ref_style(&ref, &st) == GHOSTTY_SUCCESS) {
+                if (st.fg_color.tag == GHOSTTY_STYLE_COLOR_PALETTE) {
+                    int index = st.fg_color.value.palette;
+                    if (st.bold && index < 8)
+                        index += 8; // bold is bright, as updateFrame() resolves it
+                    c.fg = paletteColor(index);
+                } else if (st.fg_color.tag == GHOSTTY_STYLE_COLOR_RGB) {
+                    c.fg = packRgb(st.fg_color.value.rgb);
+                }
+                uint16_t a = 0;
+                if (st.bold) a |= AttrBold;
+                if (st.italic) a |= AttrItalic;
+                if (st.faint) a |= AttrFaint;
+                if (st.blink) a |= AttrBlink;
+                if (st.inverse) a |= AttrReverse;
+                if (st.invisible) a |= AttrConceal;
+                if (st.strikethrough) a |= AttrStrike;
+                if (st.underline == GHOSTTY_SGR_UNDERLINE_DOUBLE) a |= AttrDoubleUnderline;
+                else if (st.underline == GHOSTTY_SGR_UNDERLINE_CURLY) a |= AttrCurlyUnderline;
+                else if (st.underline != GHOSTTY_SGR_UNDERLINE_NONE) a |= AttrUnderline;
+                c.attrs |= a;
+            }
+            // The background has the three sources the render state flattens:
+            // a text-less cell carrying a colour, or the style's own.
+            GhosttyCellContentTag content = GHOSTTY_CELL_CONTENT_CODEPOINT;
+            ghostty_cell_get(rawCell, GHOSTTY_CELL_DATA_CONTENT_TAG, &content);
+            if (content == GHOSTTY_CELL_CONTENT_BG_COLOR_RGB) {
+                GhosttyColorRgb rgb{0, 0, 0};
+                if (ghostty_cell_get(rawCell, GHOSTTY_CELL_DATA_COLOR_RGB, &rgb) == GHOSTTY_SUCCESS)
+                    c.bg = packRgb(rgb);
+            } else if (content == GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE) {
+                GhosttyColorPaletteIndex index = 0;
+                if (ghostty_cell_get(rawCell, GHOSTTY_CELL_DATA_COLOR_PALETTE, &index) == GHOSTTY_SUCCESS)
+                    c.bg = paletteColor(index);
+            } else if (st.bg_color.tag == GHOSTTY_STYLE_COLOR_RGB) {
+                c.bg = packRgb(st.bg_color.value.rgb);
+            } else if (st.bg_color.tag == GHOSTTY_STYLE_COLOR_PALETTE) {
+                c.bg = paletteColor(st.bg_color.value.palette);
+            }
+
+            bool hasLink = false;
+            ghostty_cell_get(rawCell, GHOSTTY_CELL_DATA_HAS_HYPERLINK, &hasLink);
+            if (hasLink && Impl::hyperlinkUri(ref, &uri))
+                c.link = d->internLink(uri);
+        }
+        // Trailing blanks are noise on the wire; the libvterm core's scrollback
+        // is trimmed the same way, so both cores hand the serializer the same
+        // shape and a row may be shorter than columns().
+        while (!line.cells.empty() && line.cells.back().isBlank() && line.cells.back().attrs == 0)
+            line.cells.pop_back();
+    }
+    return from;
+}
+
 bool GhosttyCore::altScreen() const { return d->alt; }
 
 MouseTracking GhosttyCore::mouseTracking() const

@@ -295,6 +295,129 @@ private slots:
         QCOMPARE(h.vt->historyRows(), 0);
     }
 
+    // Scrollback reaches a phone styled (docs/REMOTE-PROTOCOL.md section 6.5):
+    // historyLines() hands back the same Line the viewport frame carries, so
+    // one serializer does the live screen and history alike.
+    void styledHistoryLines()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 4, 20);
+        h.vt->setColors(0xd8d8d8, 0x1c1e24, nullptr);
+        h.feed("\x1b[1;4;38;2;10;20;30mbold\x1b[0m plain\r\n");
+        h.feed("\x1b[48;2;4;5;6mBG\x1b[0m ok\r\n");
+        h.feed(QStringLiteral("wide 漢 end\r\n").toUtf8());
+        h.feed("0123456789abcdefghijklmno\r\n"); // 25 columns over a 20-column grid: soft-wraps
+        for (int i = 0; i < 6; ++i)
+            h.feed("filler\r\n");
+
+        const int total = h.vt->historyRows();
+        QVERIFY2(total >= 8, qPrintable(QString::number(total)));
+        std::vector<Line> lines;
+        QCOMPARE(h.vt->historyLines(0, total, &lines), 0);
+        QCOMPARE(int(lines.size()), total);
+
+        QStringList texts;
+        for (const Line &line : lines)
+            texts << line.text();
+        const auto rowOf = [&texts](const QString &prefix) {
+            for (int i = 0; i < texts.size(); ++i)
+                if (texts[i].startsWith(prefix))
+                    return i;
+            return -1;
+        };
+        // The same rows, the same text, as the plain-text reader sees them.
+        QCOMPARE(h.vt->historyText(total), texts);
+
+        const int styled = rowOf(QStringLiteral("bold"));
+        QVERIFY2(styled >= 0, qPrintable(texts.join(QLatin1Char('|'))));
+        const Line &bold = lines[size_t(styled)];
+        QCOMPARE(bold.text(), QStringLiteral("bold plain"));
+        QVERIFY(bold.cells[0].attrs & AttrBold);
+        QVERIFY(bold.cells[0].attrs & AttrUnderline);
+        QCOMPARE(bold.cells[0].fg, CellColor::rgb(10, 20, 30));
+        QCOMPARE(CellColor::kind(bold.cells[5].fg), CellColor::Default); // after the reset
+        QVERIFY(!(bold.cells[5].attrs & AttrBold));
+
+        const int background = rowOf(QStringLiteral("BG"));
+        QVERIFY(background >= 0);
+        QCOMPARE(lines[size_t(background)].cells[0].bg, CellColor::rgb(4, 5, 6));
+        QCOMPARE(CellColor::kind(lines[size_t(background)].cells[4].bg), CellColor::Default);
+
+        // A double-width glyph keeps its width and its tail cell, so the
+        // serializer can drop the tail and still line the row up.
+        const int wide = rowOf(QStringLiteral("wide"));
+        QVERIFY(wide >= 0);
+        const Line &w = lines[size_t(wide)];
+        QCOMPARE(w.cells[5].width, uint8_t(2));
+        QCOMPARE(w.cellText(w.cells[5]), QStringLiteral("漢"));
+        QCOMPARE(w.cells[6].ch, kWideTail);
+
+        // A soft-wrapped line is two rows, the second flagged as a continuation.
+        const int wrapped = rowOf(QStringLiteral("0123456789abcdefghij"));
+        QVERIFY(wrapped >= 0);
+        QVERIFY(wrapped + 1 < int(lines.size()));
+        QCOMPARE(lines[size_t(wrapped + 1)].text(), QStringLiteral("klmno"));
+        QVERIFY(!lines[size_t(wrapped)].continuation);
+        QVERIFY(lines[size_t(wrapped + 1)].continuation);
+
+        // Trailing blanks are trimmed, so a row is usually shorter than the grid.
+        QVERIFY(int(lines[size_t(wrapped + 1)].cells.size()) < h.vt->columns());
+        // Viewport decorations belong to a frame, never to a history page.
+        for (const Line &line : lines) {
+            QCOMPARE(line.selectionStart, int16_t(-1));
+            QCOMPARE(line.selectionEnd, int16_t(-1));
+            QVERIFY(line.highlights.empty());
+        }
+    }
+
+    // A phone paging history must not drag the desktop user's own screen: the
+    // call clamps, and moves nothing.
+    void historyLinesClampAndTouchNothing()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 3, 10);
+        for (int i = 1; i <= 20; ++i)
+            h.feed(QByteArray::number(i) + "\r\n");
+        const int total = h.vt->historyRows();
+        QVERIFY(total >= 10);
+
+        std::vector<Line> lines;
+        // A page from the middle.
+        QCOMPARE(h.vt->historyLines(2, 3, &lines), 2);
+        QCOMPARE(int(lines.size()), 3);
+        QCOMPARE(lines[0].text(), QStringLiteral("3"));
+        QCOMPARE(lines[2].text(), QStringLiteral("5"));
+        // Before the oldest line: clamped to 0, and the count with it.
+        QCOMPARE(h.vt->historyLines(-5, 4, &lines), 0);
+        QCOMPARE(int(lines.size()), 4);
+        QCOMPARE(lines[0].text(), QStringLiteral("1"));
+        // Past the newest scrollback line: what exists, then nothing.
+        QCOMPARE(h.vt->historyLines(total - 1, 50, &lines), total - 1);
+        QCOMPARE(int(lines.size()), 1);
+        QCOMPARE(h.vt->historyLines(total, 10, &lines), total);
+        QVERIFY(lines.empty());
+        QCOMPARE(h.vt->historyLines(total + 100, 10, &lines), total);
+        QVERIFY(lines.empty());
+        QCOMPARE(h.vt->historyLines(0, 0, &lines), 0);
+        QVERIFY(lines.empty());
+
+        // Scrolled back, the viewport stays exactly where the user left it and
+        // the scrollback is neither grown nor trimmed by reading it.
+        h.vt->scrollViewport(-4);
+        const int top = h.vt->viewportTop();
+        ViewportFrame before = h.frame();
+        QVERIFY(!h.vt->updateFrame(&before, false)); // settled: nothing left to report
+        QCOMPARE(h.vt->historyLines(0, total, &lines), 0);
+        QCOMPARE(h.vt->viewportTop(), top);
+        QCOMPARE(h.vt->historyRows(), total);
+        QVERIFY(!h.vt->viewportAtBottom());
+        QVERIFY2(!h.vt->updateFrame(&before, false), "historyLines() must not dirty the frame");
+        const ViewportFrame after = h.frame();
+        QCOMPARE(after.viewportTop, top);
+        QCOMPARE(after.lines[0].text(), before.lines[0].text());
+        QVERIFY(!h.vt->hasSelection());
+    }
+
     void reflowOnResize()
     {
         QFETCH_GLOBAL(QString, core);

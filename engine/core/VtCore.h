@@ -74,6 +74,26 @@ public:
     // ---- introspection (host / agent)
     virtual QString screenText() const = 0;                 // active screen, '\n'-joined, trailing blanks trimmed
     virtual QStringList historyText(int maxLines) const = 0; // scrollback above the active screen, oldest first
+
+    // Styled scrollback, oldest first: the `count` rows starting at absolute
+    // row `fromRow` (0 = the oldest line — the coordinates historyRows() and
+    // scrollViewportToRow() use), written into *out (cleared first) as the same
+    // Line the viewport frame carries, so one serializer handles the live
+    // screen and history alike. Rows >= historyRows() are the active screen and are never
+    // returned; the range is clamped to [0, historyRows()) and the return value
+    // is the absolute row of out->front() — the clamped `fromRow`, which a
+    // caller reports as its `from`.
+    //
+    // A row keeps its cells' colours, attributes, grapheme clusters, wide-cell
+    // tails, OSC 8 link ids, soft-wrap flag and OSC 133 marks. It is trimmed of
+    // trailing blanks, so it is usually shorter than columns() and may be
+    // empty. Viewport decorations (selection, search highlights) are not set.
+    //
+    // **const in the strong sense: it must never move the viewport, consume the
+    // dirty state or disturb selection or search.** The GUI's own view shares
+    // this core, and a phone paging history must not scroll the owner's screen
+    // (docs/REMOTE-PROTOCOL.md section 6.5).
+    virtual int historyLines(int fromRow, int count, std::vector<Line> *out) const = 0;
     virtual bool altScreen() const = 0;
     virtual MouseTracking mouseTracking() const = 0;
     virtual bool mouseSgrPixels() const { return false; }

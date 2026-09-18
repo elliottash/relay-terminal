@@ -969,6 +969,32 @@ QStringList LibVtermCore::historyText(int maxLines) const
     return out;
 }
 
+// Styled scrollback. The ring already holds converted Lines — the same type and
+// the same cells updateFrame() hands the view, colours resolved to RGB and
+// clusters interned — so this is a clamp and a copy, with nothing read from
+// libvterm and nothing written back: the viewport, the dirty state, the
+// selection and the search are all untouched.
+int LibVtermCore::historyLines(int fromRow, int count, std::vector<Line> *out) const
+{
+    if (out)
+        out->clear();
+    const int total = int(d->count);
+    const int from = std::max(0, std::min(fromRow, total));
+    const int want = std::max(0, std::min(count, total - from));
+    if (!out)
+        return from;
+    out->reserve(size_t(want));
+    for (int i = 0; i < want; ++i) {
+        // The ring never carries viewport decorations (decorate() only ever
+        // writes them onto a frame's copy), but say so rather than assume it.
+        Line line = d->ringAt(size_t(from + i));
+        line.selectionStart = line.selectionEnd = -1;
+        line.highlights.clear();
+        out->push_back(std::move(line));
+    }
+    return from;
+}
+
 bool LibVtermCore::altScreen() const { return d->alt; }
 
 MouseTracking LibVtermCore::mouseTracking() const

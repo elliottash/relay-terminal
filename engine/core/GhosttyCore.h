@@ -25,6 +25,7 @@ public:
 
     QString screenText() const override;
     QStringList historyText(int maxLines) const override;
+    int historyLines(int fromRow, int count, std::vector<Line> *out) const override;
     bool altScreen() const override;
     MouseTracking mouseTracking() const override;
     bool mouseSgrPixels() const override;
