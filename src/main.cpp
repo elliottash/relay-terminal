@@ -32,7 +32,9 @@
 #include "Aliases.h"        // aliases: saved commands and prompts, their fields and invocations
 #include "MarkdownAnsi.h"   // agent replies in the terminal: Markdown rendered as it streams
 #include <iterator>
+#include <QAbstractButton>
 #include <QAbstractItemView>
+#include <QAbstractScrollArea>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -351,7 +353,7 @@ private:
         add("palette.open", "palette", "Open the Relay actions palette", {QStringLiteral("Ctrl+Shift+A")});
         // One key opens and closes the explorer (issue #D60R). Ctrl+B is VS Code's sidebar key and
         // is free in all four Relay presets; Ctrl+Shift+B is the twin a program cannot swallow.
-        add("files.explorer", "pane", "Open or close this pane's folder in an explorer pane",
+        add("files.explorer", "pane", "File explorer: open or close this pane's folder in an explorer pane",
             {QStringLiteral("Ctrl+B"), QStringLiteral("Ctrl+Shift+B")});
         add("files.open", "pane", "Open a file in a preview pane", {});
         add("board.open", "pane", "Switchboard: cards, threads and plans", {QStringLiteral("Ctrl+Shift+S")});
@@ -1869,11 +1871,15 @@ private:
             auto *mouse = static_cast<QMouseEvent *>(event);
             if (mouse->button() != Qt::LeftButton || !onHeader(object)) return false;
             if (m_titleEdit && m_titleEdit->isVisible()) return false;   // renaming: the mouse is the caret's
-            m_headerPressAt = mouse->globalPos();
-            m_headerPressOn = qobject_cast<QWidget *>(object);
-            qDebug("RELAYDBG press on %s", qPrintable(object->objectName().isEmpty() ? QString::fromLatin1(object->metaObject()->className()) : object->objectName()));
-            m_headerPressed = true;
-            m_headerDragging = false;
+            // One press arrives here more than once: the label under the mouse ignores it, and Qt
+            // re-sends it to the header behind, through this same application-wide filter. The
+            // first arrival is the innermost widget, which is the one the click belongs to.
+            if (!m_headerPressed) {
+                m_headerPressAt = mouse->globalPos();
+                m_headerPressOn = qobject_cast<QWidget *>(object);
+                m_headerPressed = true;
+                m_headerDragging = false;
+            }
             return false;
         }
         case QEvent::MouseMove: {
@@ -1896,8 +1902,6 @@ private:
             // it opens the explorer, and closes it again when that is already this folder (#D60R).
             // Handled here because the press is what decides who gets the release, and since the
             // header became a drag handle that is no longer the label itself.
-            qDebug("RELAYDBG release pressOn=%p cwd=%p in=%d", (void*)m_headerPressOn.data(), (void*)m_cwdLabel,
-                   m_cwdLabel ? int(m_cwdLabel->rect().contains(m_cwdLabel->mapFromGlobal(mouse->globalPos()))) : -1);
             if (m_headerPressOn == m_cwdLabel && m_cwdLabel
                 && m_cwdLabel->rect().contains(m_cwdLabel->mapFromGlobal(mouse->globalPos()))) {
                 if (onToggleExplorer) onToggleExplorer(m_cwd);
@@ -1952,7 +1956,8 @@ private:
         headerRow->setSpacing(8);
         m_titleLabel = new QLabel; m_titleLabel->setTextFormat(Qt::PlainText);
         m_titleLabel->setObjectName(QStringLiteral("paneTitle"));
-        m_titleLabel->setCursor(Qt::IBeamCursor);
+        // No caret here: the title is dragged far more often than it is renamed, so it inherits
+        // the header's open hand. Double click still renames it, as the tooltip says.
         // The text is elided in updateHeader(), so the label asks for exactly what it shows.
         m_titleLabel->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
         m_titleLabel->installEventFilter(this);
@@ -4426,6 +4431,9 @@ public:
             row(keys.shortcutText(QStringLiteral("input.toggle")), QStringLiteral("switch terminal / agent"));
             row(keys.shortcutText(QStringLiteral("palette.open")), QStringLiteral("actions palette"));
             row(keys.shortcutText(QStringLiteral("board.open")), QStringLiteral("Switchboard: cards and threads"));
+            // The explorer is one of the keys people reach for most and it was only in the full
+            // list (owner, 2026-09-17). One key opens and closes it, which the wording has to say.
+            row(keys.shortcutText(QStringLiteral("files.explorer")), QStringLiteral("file explorer (again to close)"));
             row(keys.shortcutText(QStringLiteral("agent.requests")).isEmpty() ? QStringLiteral("/tasks")
                                                                              : keys.shortcutText(QStringLiteral("agent.requests")),
                 QStringLiteral("tasks in this session"));
@@ -8971,6 +8979,7 @@ protected:
             if (response.action == Placement::Action::Dismiss) endPlacement();
         }
         if (headerDrag(object, event)) return true;
+        if (toolHeaderDrag(object, event)) return true;
         if (event->type() == QEvent::Resize && object == centralWidget()) placeSidebar();
         if (event->type() == QEvent::Resize && isLeaf(qobject_cast<QWidget *>(object)))
             if (auto *chrome = chromeOf(static_cast<QWidget *>(object))) chrome->place();
@@ -11741,6 +11750,78 @@ private:
         return {leaf, Edge::Bottom};
     }
 
+    // ----- dragging a tool pane by its header -----------------------------------------------
+    // Terminal panes carry their own handle (Pane::headerDragEvent, which knows exactly which
+    // widgets its header is made of). The explorer, a file preview, a plan and the Switchboard do
+    // not, so they get the same gesture from here: a press in the top strip of the pane, on
+    // something that is not itself a control, starts the drag. Controls — the buttons in those
+    // headers, the pane's own chrome, a filter box, a list, the Switchboard's tabs — are left
+    // alone, so nothing a click used to do has changed.
+    static constexpr int kToolHeaderStrip = 34;
+
+    bool toolHeaderDrag(QObject *object, QEvent *event) {
+        const QEvent::Type type = event->type();
+        if (type != QEvent::MouseButtonPress && type != QEvent::MouseMove
+            && type != QEvent::MouseButtonRelease && type != QEvent::KeyPress) return false;
+        switch (type) {
+        case QEvent::MouseButtonPress: {
+            auto *mouse = static_cast<QMouseEvent *>(event);
+            if (mouse->button() != Qt::LeftButton || m_toolPressed) return false;
+            auto *widget = qobject_cast<QWidget *>(object);
+            if (!widget || widget->window() != this) return false;
+            QWidget *leaf = leafOf(widget);
+            if (!leaf || dynamic_cast<Pane *>(leaf)) return false;
+            const QPoint local = leaf->mapFromGlobal(mouse->globalPos());
+            if (!leaf->rect().contains(local) || local.y() >= kToolHeaderStrip) return false;
+            for (QWidget *w = widget; w && w != leaf; w = w->parentWidget())
+                if (qobject_cast<QAbstractButton *>(w) || qobject_cast<QLineEdit *>(w)
+                    || qobject_cast<QComboBox *>(w) || qobject_cast<QAbstractItemView *>(w)
+                    || qobject_cast<QTabBar *>(w) || qobject_cast<QAbstractScrollArea *>(w)
+                    || dynamic_cast<PaneChrome *>(w)) return false;
+            m_toolPressAt = mouse->globalPos();
+            m_toolLeaf = leaf;
+            m_toolPressed = true;
+            m_toolDragging = false;
+            return false;
+        }
+        case QEvent::MouseMove: {
+            if (!m_toolPressed || !m_toolLeaf) return false;
+            auto *mouse = static_cast<QMouseEvent *>(event);
+            if (!m_toolDragging) {
+                if ((mouse->globalPos() - m_toolPressAt).manhattanLength() < QApplication::startDragDistance()) return false;
+                m_toolDragging = true;
+                QApplication::setOverrideCursor(Qt::ClosedHandCursor);
+            }
+            dragPaneMove(m_toolLeaf, mouse->globalPos());
+            return true;
+        }
+        case QEvent::MouseButtonRelease: {
+            if (!m_toolPressed) return false;
+            m_toolPressed = false;
+            if (!m_toolDragging) return false;
+            endToolHeaderDrag(static_cast<QMouseEvent *>(event)->globalPos(), true);
+            return true;
+        }
+        case QEvent::KeyPress:
+            if (m_toolDragging && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
+                m_toolPressed = false;
+                endToolHeaderDrag(QCursor::pos(), false);
+                return true;
+            }
+            return false;
+        default: break;
+        }
+        return false;
+    }
+
+    void endToolHeaderDrag(const QPoint &global, bool drop) {
+        m_toolDragging = false;
+        QApplication::restoreOverrideCursor();
+        QWidget *leaf = m_toolLeaf;
+        m_toolLeaf = nullptr;
+        if (leaf) dragPaneEnd(leaf, global, drop);
+    }
+
     void dragPaneMove(QWidget *dragged, const QPoint &global) {
         const auto target = dropTarget(dragged, global);
         if (!target.first) { if (m_dropZone) m_dropZone->hide(); return; }
@@ -12075,6 +12156,11 @@ private:
     QPointer<QWidget> m_activeLeaf;
     QPointer<QWidget> m_hoverLeaf, m_wantedHoverLeaf;   // shown now, and what showChromeFor was last asked for
     bool m_updatingChrome = false;
+    // Dragging a tool pane (explorer, preview, plan, Switchboard) by its header: the pane being
+    // moved, where the press landed, and whether it has gone far enough to be a drag.
+    QPointer<QWidget> m_toolLeaf;
+    QPoint m_toolPressAt;
+    bool m_toolPressed = false, m_toolDragging = false;
     // "New pane, then ← ↑ ↓ places it" (issue #78BN): the open window, the pane it made, the pane
     // it was split from, and the transient hint over the new pane.
     relay::panes::PlacementWindow m_placement;
