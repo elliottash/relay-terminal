@@ -28,6 +28,34 @@ What this means in practice:
 - Subagents work in this checkout too. Give them a narrow, named area of the code so two of them
   cannot land in the same function, and tell them not to commit anything they did not write.
 
+## How to commit here without reverting someone else
+
+On 2026-09-18 alone, five commits silently undid other sessions' work: each was built from an index
+or a base that was older than `main`, so it wrote files back to their old contents. The working tree
+still had the new code, so nobody noticed until a clean export failed to build. Commit this way:
+
+1. **Never commit from the shared index**, and never `git add` into it. Use a private one:
+   `export GIT_INDEX_FILE=<scratch file>; BASE=$(git rev-parse HEAD); git read-tree $BASE`.
+2. **Add only your changes** to it. A file only you changed: `git add <path>`. A file that also
+   holds another session's uncommitted edits: build the file as `BASE`'s version plus your hunks,
+   `git hash-object -w` it and `git update-index --cacheinfo`. Do not use hunk-filtered
+   `git apply --cached --unidiff-zero`, which can put insertions on the wrong line without an error.
+3. **Build and test the exact tree** you are committing, not the working tree:
+   `git checkout-index -a --prefix=<scratch dir>/`, then configure, build and `ctest` there. The
+   working tree holds everyone's uncommitted code and proves nothing about your commit.
+4. **Compare-and-swap onto `main`:** `NEW=$(git commit-tree $(git write-tree) -p $BASE -m ...)`, then
+   `git update-ref refs/heads/main $NEW $BASE`. If `main` moved, this fails; rebuild on the new
+   HEAD and retry. Never "just re-add" the files you built earlier on top of a newer base.
+5. **Reset the shared index for your paths** afterwards: `unset GIT_INDEX_FILE; git reset -q HEAD --
+   <your paths>`. Skipping this leaves the shared index at your old blobs, and the next plain
+   `git commit` by anyone reverts your commit.
+
+If `git diff --cached --stat` in the shared index ever shows files you did not stage, do not commit
+over them. Check whether each staged blob is an older version from history
+(`git log --format=%h -- <file>`, then compare `git rev-parse :<file>` against `<commit>:<file>`).
+If it is, unstaging it with `git reset -q HEAD -- <file>` loses nothing, so do that and tell the
+session that owns it.
+
 ## Fix clear gaps; do not list them
 
 Owner's rule, 2026-09-18: **when you find a clear gap in your own work, fix it rather than list
