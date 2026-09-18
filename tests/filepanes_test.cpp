@@ -8,6 +8,7 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTextBrowser>
 #include <QToolButton>
 #include <QTreeView>
 
@@ -192,6 +193,39 @@ private slots:
         QCOMPARE(mode->text(), QStringLiteral("Rendered (MD)"));
         QVERIFY(preview.open(temp.filePath(QStringLiteral("shot.png"))));
         QCOMPARE(mode->text(), QStringLiteral("100%"));
+    }
+
+    // Issue S1JP: a link inside a rendered Markdown preview is handed to the host for a pane of
+    // its own. The preview never loads it, so the file that carried the link is still there.
+    void aLinkInsideAPreviewIsHandedToTheHost() {
+        QTemporaryDir temp;
+        const QString from = temp.filePath(QStringLiteral("from.md"));
+        const QString to = temp.filePath(QStringLiteral("to.md"));
+        writeFile(from, "# From\n\n[to](to.md) and [gone](missing.md)\n");
+        writeFile(to, "# To\n");
+
+        FilePreview preview;
+        QStringList opened;
+        preview.onOpenLink = [&opened](const QString &path) { opened << path; };
+        QVERIFY(preview.open(from));
+
+        auto *browser = preview.findChild<QTextBrowser *>(QStringLiteral("filePreviewMarkdown"));
+        QVERIFY(browser);
+        Q_EMIT browser->anchorClicked(QUrl(QStringLiteral("to.md")));
+        QCOMPARE(opened, QStringList{QFileInfo(to).absoluteFilePath()});
+        // The pane stayed on the file that carried the link, rendered.
+        QCOMPARE(preview.path(), QFileInfo(from).absoluteFilePath());
+        QCOMPARE(preview.kind(), FilePreview::Kind::Markdown);
+        QVERIFY(!preview.showingSource());
+
+        // A link that resolves nowhere says so instead of opening a pane.
+        Q_EMIT browser->anchorClicked(QUrl(QStringLiteral("missing.md")));
+        QCOMPARE(opened.size(), 1);
+        QVERIFY(preview.notice().contains(QStringLiteral("missing.md")));
+
+        // A `#section` link stays inside the document.
+        Q_EMIT browser->anchorClicked(QUrl(QStringLiteral("#from")));
+        QCOMPARE(opened.size(), 1);
     }
 
     void largeTextIsTruncatedWithNotice() {

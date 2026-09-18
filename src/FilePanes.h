@@ -6,6 +6,7 @@
 #include <QString>
 #include <QStringList>
 #include <QTimer>
+#include <QUrl>
 #include <QWidget>
 #include <functional>
 
@@ -151,11 +152,16 @@ public:
     static constexpr qint64 kMaxImageBytes = 64 * 1024 * 1024;
 
     std::function<void(const QString &)> onTitleChanged;
+    // A link to a local file or folder was clicked in the rendered Markdown. The preview never
+    // follows it itself (issue S1JP): the host opens a pane for it and this one keeps its file.
+    // Without a host, the link is handed to the desktop instead.
+    std::function<void(const QString &)> onOpenLink;
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
 
 private:
+    void followLink(const QUrl &url);
     void showText(const QString &path, qint64 size);
     void showMarkdown(const QString &path, qint64 size);
     bool showImage(const QString &path, qint64 size);

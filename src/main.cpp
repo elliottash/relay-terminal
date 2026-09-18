@@ -8865,8 +8865,10 @@ public:
     QWidget *activeLeaf() const { return m_activeLeaf; }
 
     // Open a folder in an explorer pane or a file in a preview pane, next to `anchor`. An existing
-    // explorer or preview in the same tab is reused, the way editors reuse a preview tab.
-    void openPath(const QString &path, int line, QWidget *anchor) {
+    // explorer or preview in the same tab is reused, the way editors reuse a preview tab — unless
+    // `newPane`, which a link followed from inside a preview passes so the file that carried the
+    // link keeps its pane (issue S1JP).
+    void openPath(const QString &path, int line, QWidget *anchor, bool newPane = false) {
         const QFileInfo info(path);
         if (!info.exists()) { notice(QStringLiteral("No such file or folder: ") + path, 6000); return; }
         if (!anchor || !isLeaf(anchor) || anchor->window() != this) anchor = m_activeLeaf;
@@ -8875,14 +8877,23 @@ public:
         m_tabs->setCurrentWidget(page);
         const auto kind = info.isDir() ? ToolPane::Kind::Explorer : ToolPane::Kind::Preview;
         ToolPane *target = nullptr;
-        for (QWidget *leaf : leavesIn(page))
-            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == kind) target = tool;
+        for (QWidget *leaf : leavesIn(page)) {
+            auto *tool = dynamic_cast<ToolPane *>(leaf);
+            if (!tool || tool->kind() != kind) continue;
+            // A followed link wants its own pane, but not a second pane on a file one of them is
+            // already showing: clicking back and forth between two documents would otherwise pile
+            // up panes. So `newPane` reuses only an exact match, and never the anchor itself.
+            if (!newPane) target = tool;
+            else if (tool != anchor && tool->path() == info.absoluteFilePath()) target = tool;
+        }
         if (target) {
             if (kind == ToolPane::Kind::Explorer) target->explorer()->setRoot(info.absoluteFilePath());
             else target->preview()->open(info.absoluteFilePath());
         } else {
             // A preview opens beside an explorer when there is one, otherwise beside the anchor.
-            if (kind == ToolPane::Kind::Preview)
+            // A link followed from a preview opens beside that preview instead, so the two files
+            // sit side by side and the reader can see where they came from.
+            if (kind == ToolPane::Kind::Preview && !newPane)
                 for (QWidget *leaf : leavesIn(page))
                     if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Explorer) anchor = tool;
             target = createToolPane(kind, info.absoluteFilePath());
@@ -10984,6 +10995,8 @@ private:
             explorer->onCloseRequested = [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, true); };
         } else if (tool->preview()) {
             tool->preview()->onTitleChanged = [guard](const QString &) { if (auto *w = windowOf(guard)) w->updateTitles(); };
+            // A link inside the preview opens its own pane beside this one (issue S1JP).
+            tool->preview()->onOpenLink = [guard](const QString &file) { if (auto *w = windowOf(guard)) w->openPath(file, 0, guard, true); };
         } else {
             tool->plan()->onTitleChanged = [guard](const QString &) { if (auto *w = windowOf(guard)) w->updateTitles(); };
         }

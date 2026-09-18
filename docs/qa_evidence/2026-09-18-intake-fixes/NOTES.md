@@ -31,3 +31,12 @@ Both Markdown paths were exercised before anything was changed.
 | `vxtf-before-source-unlabelled-and-under-the-pane-buttons.png` | The header before: "Source", and half of it under the pane's ⬓+ ◫+ ⇱ × row, which swallowed the click. |
 | `vxtf-after-source-md-clear-of-the-pane-buttons.png` | "Source (MD)" on the rendered view, clear of the pane buttons; the explorer's folder line is inset too. |
 | `vxtf-after-rendered-md.png` | After clicking it: the source, and the button now offers "Rendered (MD)". |
+
+## #S1JP — a link inside a preview opens a new pane
+
+| Shot | What it shows |
+|---|---|
+| `s1jp-before-link-replaced-the-file-header-still-says-readme.png` | `notes.md` clicked inside the `README.md` preview: the QTextBrowser loaded it in place, and the header still reads "README.md". `FilePreview::open()` never ran, so Reload and ↗ still pointed at the old file. |
+| `s1jp-after-link-opens-its-own-pane-beside-the-original.png` | The same click after the fix: `notes.md` in its own pane beside the README preview, which still holds its file, rendered. The tab reads "w2; README.md; notes.md · 4". |
+| `s1jp-after-back-link-focuses-the-pane-already-open.png` | The "README" link inside `notes.md`: focus moves to the pane already showing it. Still four panes — clicking back and forth does not pile them up. |
+| `s1jp-after-a-txt-link-gets-the-text-viewer.png` | A link to `plain.txt`: its own pane with the monospace text viewer, not plain text dumped into the Markdown view. |

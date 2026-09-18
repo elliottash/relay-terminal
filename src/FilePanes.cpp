@@ -594,7 +594,13 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
 
     m_markdownView = new QTextBrowser;
     m_markdownView->setObjectName(QStringLiteral("filePreviewMarkdown"));
-    m_markdownView->setOpenExternalLinks(true);
+    // A link in the rendered Markdown used to be followed by the QTextBrowser itself, which
+    // replaced the file in place — the header still named the old one, and Reload and ↗ still
+    // acted on it, with no way back (issue S1JP, owner 2026-09-18: "if you click on another link
+    // there, it should open a new pane"). The browser now never navigates; followLink() decides.
+    m_markdownView->setOpenLinks(false);
+    m_markdownView->setOpenExternalLinks(false);
+    connect(m_markdownView, &QTextBrowser::anchorClicked, this, [this](const QUrl &url) { followLink(url); });
     m_stack->addWidget(m_markdownView);
 
     m_imageArea = new QScrollArea;
@@ -844,6 +850,27 @@ void FilePreview::updateModeButton() {
     } else {
         m_mode->hide();
     }
+}
+
+// Where a link inside the rendered Markdown goes (issue S1JP). A `#section` link scrolls this
+// document, a local file or folder is handed to the host for a pane of its own, and anything else
+// (http, mailto) goes to the desktop. Nothing loads into this pane, so the file that carried the
+// link is still there when the reader comes back to it.
+void FilePreview::followLink(const QUrl &url) {
+    if (url.isEmpty()) return;
+    if (url.path().isEmpty() && url.hasFragment()) { m_markdownView->scrollToAnchor(url.fragment()); return; }
+    const QUrl resolved = m_markdownView->document()->baseUrl().resolved(url);
+    if (resolved.isLocalFile()) {
+        const QString target = resolved.toLocalFile();
+        if (QFileInfo::exists(target)) {
+            if (onOpenLink) onOpenLink(target);
+            else QDesktopServices::openUrl(QUrl::fromLocalFile(target));
+            return;
+        }
+        setNotice(QStringLiteral("That link points at %1, which is not there.").arg(target));
+        return;
+    }
+    QDesktopServices::openUrl(resolved);
 }
 
 void FilePreview::setHeaderRightInset(int pixels) {
