@@ -1,0 +1,64 @@
+host spark-dcc9 · 2026-09-18 17:30 · tmux 3.4 · zsh 5.9 (aarch64-unknown-linux-gnu)
+
+=== tmux 3.x, allow-passthrough off =============================================
+  pane 200 columns, the line takes 11 rows: RELAY_R=11
+  the shell's own bytes, as tmux received them:
+      wrapped 7;file://: yes  b'\x1bPtmux;\x1b\x1b]7;file://sp'
+      wrapped 133;A: yes  b'\x1bPtmux;\x1b\x1b]133;A\x07\x1b'
+      wrapped 133;C: yes  b'\x1bPtmux;\x1b\x1b]133;C\x07\x1b'
+      wrapped 133;D;0: yes  b'\x1bPtmux;\x1b\x1b]133;D;0\x07\x1b'
+      the one-line hint: yes  b'relay: tmux needs "set -g allow-passthrough on" for prompt marks\r\n'
+  what the client's terminal (Relay's pane) got:
+      b'\x1b]7;file://': NO
+      b'\x1b]133;A\x07': NO
+      b'\x1b]133;D;0\x07': NO
+  the pane, after the erase — the typed line is gone, the line before it is not:
+    |RP> echo an earlier command
+    |an earlier command
+    |relay: tmux needs "set -g allow-passthrough on" for prompt marks
+    |RP> cd /tmp
+    |RP>
+
+=== tmux 3.x, allow-passthrough on ==============================================
+  pane 200 columns, the line takes 11 rows: RELAY_R=11
+  the shell's own bytes, as tmux received them:
+      wrapped 7;file://: yes  b'\x1bPtmux;\x1b\x1b]7;file://sp'
+      wrapped 133;A: yes  b'\x1bPtmux;\x1b\x1b]133;A\x07\x1b'
+      wrapped 133;C: yes  b'\x1bPtmux;\x1b\x1b]133;C\x07\x1b'
+      wrapped 133;D;0: yes  b'\x1bPtmux;\x1b\x1b]133;D;0\x07\x1b'
+      the one-line hint: NO
+  what the client's terminal (Relay's pane) got:
+      b'\x1b]7;file://': yes  b'\x1b]7;file://sp'
+      b'\x1b]133;A\x07': yes  b'\x1b]133;A\x07\x1b('
+      b'\x1b]133;D;0\x07': yes  b'\x1b]133;D;0\x07\x1b('
+  the pane, after the erase — the typed line is gone, the line before it is not:
+    |RP> echo an earlier command
+    |an earlier command
+    |RP> cd /tmp
+    |RP>
+
+=== GNU screen ==================================================================
+  what the terminal outside screen got (screen unwrapped the DCS and passed it on):
+      b'\x1b]7;file://spark-dcc9': yes  b'\x1b]7;file://spark-dcc9/h'
+      b'\x1b]133;A\x07': yes  b'\x1b]133;A\x07RP'
+      b'\x1b]133;D;0\x07': yes  b'\x1b]133;D;0\x07\x1b]'
+      the tmux hint (must not show here): NO
+
+=== tmux started after the script loaded ========================================
+  the shell tmux started, which never ran our script:
+    |bash-5.2$
+    |RP> 
+  (no 'command not found': PROMPT_COMMAND kept its value and lost its export)
+
+=== ssh -t localhost zsh -i =====================================================
+  typed:  RELAY_R=3 eval "$(printf %s 'H4sIAAAAAAACA5VX63LaRhT+z1OcyiICbHGxO+OpGD… (2080 bytes)
+      the erase: yes  b'\x1b[3A\r\x1b[J\x1b]'
+      OSC 7 with this host's name: yes  b'\x1b]7;file://spark-dcc9/h'
+      A and B around the prompt: yes  b'\x1b]133;A\x07RP> \x1b]133;B\x07\x1b['
+      C when a command starts: yes  b'\x1b]133;C\x07\x1b['
+      D with the status: yes  b'\x1b]133;D;6\x07\x1b]'
+    |"^X^P" __relay_r_redraw
+    |[1] [unset] __relay_r_pc
+  ([1] = HIST_IGNORE_SPACE is set, [unset] = RELAY_R did not stay behind)
+
+done

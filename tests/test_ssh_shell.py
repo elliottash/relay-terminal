@@ -15,6 +15,7 @@ import select
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import tempfile
 import termios
@@ -203,6 +204,9 @@ class PtyShell:
 
     def __init__(self, argv, env):
         master, slave = pty.openpty()
+        # Wide enough that the bootstrap line, a couple of thousand characters, fits on the screen
+        # the line editor redraws: a narrow one still runs it, but rewrites the echo as it scrolls.
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
         self.proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave, env=env,
                                      start_new_session=True, preexec_fn=_controlling_tty)
         os.close(slave)
@@ -254,7 +258,31 @@ def osc(body):
     return b"\x1b]" + body + b"\x07"
 
 
+def dcs(body, tmux=True):
+    """The same OSC as a terminal multiplexer passes through: tmux doubles every ESC."""
+    return (b"\x1bPtmux;\x1b" if tmux else b"\x1bP") + osc(body) + b"\x1b\\"
+
+
+TMUX_HINT = b'relay: tmux needs "set -g allow-passthrough on" for prompt marks'
+
+
+def ssh_to_localhost():
+    """`ssh localhost` with a key and no prompt, or "" when this machine cannot ssh to itself."""
+    ssh = real_ssh()
+    if not ssh:
+        return ""
+    try:
+        done = subprocess.run([ssh, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+                               "-o", "ConnectTimeout=5", "localhost", "true"],
+                              capture_output=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return ssh if done.returncode == 0 else ""
+
+
 class RemoteScriptTests(unittest.TestCase):
+    PROMPT = PtyShell.PROMPT
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="relay-remote-test-")
         self.home = Path(self.temp.name)
@@ -282,6 +310,7 @@ class RemoteScriptTests(unittest.TestCase):
         self.assertIn(osc(b"133;A") + b"RP> " + osc(b"133;B"), out)
         self.assertNotIn(b"133;D", out)  # the typed line is not a command the user ran
         self.assertNotIn(b"unbound", out)
+        self.assertNotIn(b"\x1bP", out)  # no multiplexer: nothing is wrapped in a DCS
 
         out = s.run("(exit 3)")
         self.assertIn(osc(b"133;C"), out)
@@ -348,6 +377,7 @@ class RemoteScriptTests(unittest.TestCase):
         self.assertIn(b"\x1b]7;file://" + self.hostname + b"/", out)
         self.assertIn(osc(b"133;A") + b"RP> " + osc(b"133;B"), out)
         self.assertNotIn(b"133;D", out)
+        self.assertNotIn(b"\x1bP", out)
         out = s.run("(exit 4)")
         self.assertIn(osc(b"133;C"), out)
         self.assertIn(osc(b"133;D;4"), out)
@@ -361,6 +391,154 @@ class RemoteScriptTests(unittest.TestCase):
         self.assertEqual(out.count(b'"^X^P" __relay_r_redraw'), 2)
         s.run(typed_line(1))
         self.assertIn(b"[unset] user_hook __relay_r_pc\r", s.run("echo \"[${RELAY_R-unset}] $precmd_functions\""))
+
+    def test_exported_prompt_command_does_not_follow_a_later_tmux(self):
+        # A tmux started after the script loaded runs a shell that never saw __relay_r_pc: an
+        # exported PROMPT_COMMAND naming it would print "command not found" at every prompt there.
+        s = self.bash()
+        s.run("export PROMPT_COMMAND='user_pc=1'")
+        s.run(typed_line(2))
+        out = s.run("declare -p PROMPT_COMMAND; env | grep -c '^PROMPT_COMMAND' || true")
+        self.assertIn(b"__relay_r_pc", out)
+        self.assertNotIn(b"declare -x PROMPT_COMMAND", out)
+        self.assertIn(b"\n0", out.replace(b"\r", b""))
+        out = s.run("env | sort")
+        self.assertEqual([], [n for n in ("__relay_r", "__relay_r_h", "__relay_r_e") if
+                              f"\n{n}=".encode() in out])
+
+    def test_zsh_over_ssh(self):
+        """The real thing: zsh on the other side of ssh, given the line the GUI types."""
+        ssh = ssh_to_localhost()
+        if not ssh or not shutil.which("zsh"):
+            self.skipTest("no zsh, or this machine cannot ssh to itself without a password")
+        zdot = self.home / "zdot"
+        zdot.mkdir()
+        (zdot / ".zshrc").write_text(f"PS1='RP> '\nHISTFILE={self.home}/zhist\n")
+        os.chmod(self.home, 0o755)  # the remote side is this machine, but reached as a login
+        s = PtyShell([ssh, "-t", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+                      "localhost", f"ZDOTDIR={zdot} zsh -i"], self.env)
+        self.addCleanup(s.close)
+        out = s.run(typed_line(3))
+        self.assertIn(b"\x1b[3A\r\x1b[J", out)
+        self.assertIn(b"\x1b]7;file://" + self.hostname + b"/", out)
+        self.assertIn(osc(b"133;A") + b"RP> " + osc(b"133;B"), out)
+        self.assertNotIn(b"\x1bP", out)  # no multiplexer in between: nothing is wrapped
+        out = s.run("(exit 6)")
+        self.assertIn(osc(b"133;C"), out)
+        self.assertIn(osc(b"133;D;6"), out)
+        self.assertIn(b"\x1b]7;file://" + self.hostname + b"/tmp\x07", s.run("cd /tmp"))
+        out = s.run("bindkey '^X^P'; bindkey -M viins '^X^P';"
+                    " echo \"[$(setopt | grep -c histignorespace)] [${RELAY_R-unset}]"
+                    " $precmd_functions\"")
+        self.assertEqual(out.count(b'"^X^P" __relay_r_redraw'), 2)
+        self.assertIn(b"[1] [unset] __relay_r_pc", out)
+
+    def multiplexed(self, **env):
+        """An interactive bash that believes it is inside tmux or screen."""
+        s = PtyShell(["bash", "--noprofile", "--norc", "-i"], dict(self.env, **env))
+        self.addCleanup(s.close)
+        return s
+
+    def test_tmux_wraps_every_sequence_and_asks_for_passthrough(self):
+        # $TMUX set, no server behind it: `tmux show` cannot say the option is on, so the hint shows.
+        s = self.multiplexed(TMUX=f"{self.home}/no-such-tmux,1,0")
+        out = s.run(typed_line(2))
+        self.assertIn(b"\x1b[2A\r\x1b[J", out)  # the erase is a CSI tmux understands: not wrapped
+        self.assertIn(dcs(b"133;A") + b"RP> " + dcs(b"133;B"), out)
+        self.assertIn(b"\x1bPtmux;\x1b\x1b]7;file://" + self.hostname + b"/", out)
+        self.assertEqual(out.count(TMUX_HINT), 1)
+        naked = out.replace(b"\x1bPtmux;\x1b\x1b]", b"")  # what was sent without a wrapper
+        self.assertNotIn(b"\x1b]133;", naked)
+        self.assertNotIn(b"\x1b]7;", naked)
+        out = s.run("(exit 5)")
+        self.assertIn(dcs(b"133;C"), out)
+        self.assertIn(dcs(b"133;D;5"), out)
+        self.assertNotIn(TMUX_HINT, s.run(typed_line(1)))  # once per login, not once per eval
+
+    def test_zsh_in_tmux(self):
+        if not shutil.which("zsh"):
+            self.skipTest("zsh is not installed")
+        zdot = self.home / "ztmux"
+        zdot.mkdir()
+        (zdot / ".zshrc").write_text("PS1='RP> '\n")
+        env = dict(self.env, ZDOTDIR=str(zdot), TMUX=f"{self.home}/no-such-tmux,1,0")
+        env.pop("PS1")
+        s = PtyShell(["zsh", "-i"], env)
+        self.addCleanup(s.close)
+        out = s.run(typed_line(2))
+        self.assertIn(dcs(b"133;A") + b"RP> " + dcs(b"133;B"), out)
+        self.assertIn(b"\x1bPtmux;\x1b\x1b]7;file://" + self.hostname + b"/", out)
+        self.assertEqual(out.count(TMUX_HINT), 1)
+        out = s.run("(exit 4)")
+        self.assertIn(dcs(b"133;C"), out)
+        self.assertIn(dcs(b"133;D;4"), out)
+
+    def test_screen_wraps_without_doubling_and_skips_a_long_path(self):
+        s = self.multiplexed(STY="4242.pts-3.host")
+        out = s.run(typed_line(2))
+        self.assertIn(dcs(b"133;A", tmux=False) + b"RP> " + dcs(b"133;B", tmux=False), out)
+        self.assertIn(b"\x1bP\x1b]7;file://" + self.hostname + b"/", out)
+        self.assertNotIn(b"\x1b\x1b", out)  # screen takes the sequence as it is
+        self.assertNotIn(TMUX_HINT, out)
+        deep = self.home / ("d" * 60) / ("e" * 60) / ("f" * 60)
+        deep.mkdir(parents=True)
+        out = s.run(f"cd '{deep}'")
+        self.assertIn(dcs(b"133;D;0", tmux=False), out)
+        self.assertNotIn(b"]7;file://", out)  # past screen's string limit: skipped, not truncated
+        self.assertIn(dcs(b"7;file://" + self.hostname + b"/tmp", tmux=False), s.run("cd /tmp"))
+
+    def test_screen_seen_in_term_alone(self):
+        out = self.multiplexed(TERM="screen-256color").run(typed_line(2))
+        self.assertIn(b"\x1bP\x1b]7;file://" + self.hostname + b"/", out)
+        self.assertNotIn(TMUX_HINT, out)
+
+    def test_inside_a_real_tmux(self):
+        if not shutil.which("tmux"):
+            self.skipTest("tmux is not installed")
+        for passthrough in ("on", "off"):
+            with self.subTest(allow_passthrough=passthrough):
+                self.real_tmux(passthrough)
+
+    def real_tmux(self, passthrough):
+        """A real tmux: the shell's own bytes (pipe-pane) against what the client's terminal sees."""
+        tmux = shutil.which("tmux")
+        socket_name = f"relay-test-{os.getpid()}-{passthrough}"
+        raw = self.home / f"pane-{passthrough}.raw"
+
+        def run_tmux(*args):
+            subprocess.run([tmux, "-L", socket_name, *args], env=self.env, check=True,
+                           capture_output=True, timeout=20)
+        run_tmux("-f", "/dev/null", "new-session", "-d", "-x", "80", "-y", "24",
+                 "bash", "--noprofile", "--norc", "-i")
+        self.addCleanup(lambda: subprocess.run([tmux, "-L", socket_name, "kill-server"],
+                                               capture_output=True, timeout=20))
+        run_tmux("set", "-g", "status", "off")
+        run_tmux("set", "-g", "allow-passthrough", passthrough)
+        run_tmux("pipe-pane", "-o", f"cat >>'{raw}'")
+        s = PtyShell([tmux, "-L", socket_name, "attach"], self.env)
+        self.addCleanup(s.close)
+        os.write(s.master, typed_line(2).encode() + b"\r")
+        time.sleep(0.5)
+        os.write(s.master, b"printf 'RE%sY\\n' AD\r")
+        s.read(lambda: b"READY" in s.output, timeout=10)
+        # And on to the prompt after it, so the command's D mark and the new A/B have been drawn.
+        s.read(lambda: self.PROMPT in s.output[s.output.index(b"READY") + 5:], timeout=10)
+
+        pane = raw.read_bytes()  # what the shell wrote into the tmux pane
+        self.assertIn(dcs(b"133;A") + b"RP> " + dcs(b"133;B"), pane)
+        self.assertIn(b"\x1bPtmux;\x1b\x1b]7;file://" + self.hostname + b"/", pane)
+        self.assertIn(dcs(b"133;C"), pane)
+        self.assertIn(dcs(b"133;D;0"), pane)
+        if passthrough == "on":
+            self.assertNotIn(TMUX_HINT, pane)
+            # tmux unwrapped it and passed it on, which is all Relay ever sees.
+            self.assertIn(osc(b"133;A"), s.output)
+            self.assertIn(osc(b"133;D;0"), s.output)
+            self.assertIn(b"\x1b]7;file://" + self.hostname + b"/", s.output)
+        else:
+            self.assertIn(TMUX_HINT, pane)  # and the user is told what to set
+            self.assertNotIn(b"]133;", s.output)  # dropped: no mark reaches Relay
+            self.assertNotIn(b"]7;file://", s.output)
 
     def test_other_shells_do_nothing(self):
         script = REMOTE.read_text()
@@ -384,8 +562,10 @@ class RemoteScriptTests(unittest.TestCase):
             self.assertNotIn("\x1b", result.stderr)
 
     def test_small_enough_to_type(self):
-        self.assertLess(len(REMOTE.read_bytes()), 2560)
-        self.assertLess(len(typed_line(10)), 2048)
+        # What matters is the line typed into the remote shell: it goes in one write, and a tty's
+        # input buffer holds 4 KB. The script's own size only bounds that.
+        self.assertLess(len(REMOTE.read_bytes()), 3840)
+        self.assertLess(len(typed_line(10)), 2400)
 
 
 if __name__ == "__main__":

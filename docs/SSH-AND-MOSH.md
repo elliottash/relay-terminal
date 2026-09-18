@@ -89,12 +89,48 @@ non-interactive one. A second eval in the same shell only erases its own line. I
 line is also taken out of the history if it got in; zsh decides that when the line is read, so the
 line stays in a zsh history that did not already have `HIST_IGNORE_SPACE`.
 
+**Inside a remote tmux or screen** none of this would reach Relay: a multiplexer passes on only
+what it understands itself. At load the script looks at `$TMUX`, then at `$STY` and a `screen*`
+`TERM`, and decides once — a prefix and a suffix, so the prompt pays nothing per redraw — how to
+wrap everything it sends:
+
+- tmux: `\033Ptmux;` … `\033\\`, with every ESC of the inner sequence doubled. Everything the
+  script sends is one ESC and an OSC ending in BEL, so the doubling is one more ESC in the prefix:
+  `ESC P t m u x ; ESC` `ESC ] 1 3 3 ; A BEL` `ESC \`.
+- screen: `\033P` … `\033\\`, no doubling. screen's string buffer is finite, so an OSC 7 whose
+  body would pass 200 bytes (a deep remote directory) is skipped rather than sent cut in half; the
+  next `cd` into a shorter path sends one again.
+
+tmux forwards a wrapped sequence only with **`set -g allow-passthrough on`** in the user's tmux
+(3.3 and later; off by default in 3.4). Without it the sequence is dropped, exactly as the
+unwrapped one was — nothing is worse, but nothing works — so when `tmux show -gv allow-passthrough`
+does not say it is on, the script prints one line at load, under the erase:
+
+    relay: tmux needs "set -g allow-passthrough on" for prompt marks
+
+Once per login, never when the option is on, and never under screen, which needs no option.
+
+OSC 7 still carries the host's own name inside tmux, which is what Relay wants. The erase is
+ordinary CSI, which tmux understands and applies to its pane: the typed line disappears there as it
+does without tmux, as long as the tmux pane is as wide as Relay's — `RELAY_R` counts rows at
+Relay's width, so in a pane narrowed by a tmux split part of the echoed line stays on screen, once,
+at the top of the login. A tmux started *after* the login was enhanced runs a shell that never saw
+the script and gets nothing from it: the functions and variables are not exported, and a
+`PROMPT_COMMAND` the user had exported keeps its value but loses its export, since in that new
+shell it would name a function that does not exist. `tmux -CC` control mode is still not handled
+(section 9).
+
 For the GUI: the payload must be gzip (RFC 1952), not `qCompress`'s zlib with a length prefix —
 `relay::remote::gzip` takes the raw deflate out of `qCompress` and puts gzip's header and CRC-32
 around it (`tests/remotesession_test.cpp` decodes it with the real `gzip`) — and base64 on one line
 without wrapping; `base64 -d` needs macOS 13
-or later there (older macOS spells it `-D`). About 2.5 KB of script becomes about 1.5 KB typed.
-`tests/test_ssh_shell.py` types exactly this line into bash and zsh on a pty.
+or later there (older macOS spells it `-D`). About 3.5 KB of script becomes about 2 KB typed, in one
+write into a pty that holds 4 KB. `tests/test_ssh_shell.py` types exactly this line into bash and
+zsh on a pty, into a bash and a zsh that believe they are in tmux or screen, and into a bash inside
+a real tmux with `allow-passthrough` both on and off, reading the pane's own bytes back with
+`tmux pipe-pane`; it also types it into a real zsh over `ssh -t localhost`, which
+`docs/qa_evidence/2026-09-18-ssh-and-mosh-sessions/tmux-zsh-check.py` repeats by hand, with the
+screen each case leaves behind.
 
 When: `ssh/enhance` = `auto` → at the first remote prompt of each login, unless the host is in
 `ssh/hosts_never`. `ask` → a banner offers "Enhance" for this login (hosts in `ssh/hosts_always` are
@@ -167,6 +203,50 @@ reusing the user's login. Any other host is refused with a message the model can
 prompt tells the model that plain `run_command` runs on the local machine and `host` runs on the
 machine the user's terminal is on. `cwd` defaults to the remote cwd when known, else the remote home.
 
+**The file tools take the same `host`** (owner, 2026-09-18: the agent should edit files on the host
+as comfortably as locally, with nothing installed there). `read_file`, `list_directory`,
+`write_file` and `edit_file` are offered with `host` for the same turns `run_command` is, validate
+it the same way, and refuse with the same actionable messages; `path` is then a path on the host.
+Each one is a small POSIX script (`backend/relay_core/remote_files.py`) sent through the same argv
+builder inside `sh -c`, so a login shell that is bash, zsh, dash or ksh means the same thing by it:
+
+- **read**: `cat -- "$p" | head -c 131073`, then the local tool's own refusals — over 128 KiB, a
+  NUL byte, not UTF-8, not a regular file, a symlink. There are no line ranges because the local
+  `read_file` has none.
+- **list**: a `for` loop over `*` and `.*` printing `type\0name\0`, one entry past the local cap of
+  200, so `truncated` means what it does locally. NUL separators: a newline in a name cannot lie.
+- **write and edit**: the new content goes over ssh's **stdin** — never in the argv, where its size
+  and its quoting would both be a problem — into `"$p".relay-new.$$` beside the target, which takes
+  the target's mode (`chmod --reference`, falling back to `cp -p` on a host whose `chmod` is not
+  GNU's), and `mv` puts it in place. A half-written file is never visible, and a failed write leaves
+  the original untouched. Parent directories are not created, exactly as locally.
+- **edit** does its matching here, in Python, with the same `_edited()` the local `edit_file` uses:
+  the file is read over the connection, matched, and written back. "old_string must be unique",
+  "not found in the file", `replace_all` and every message are therefore identical to the local
+  tool's, and the user sees a real diff of the remote file before the write. The write re-reads the
+  file and compares its SHA-256 first, so a file that changed under the diff is not overwritten.
+  There is no checkpoint/undo for a remote write (Relay's checkpoints are workspace files).
+
+**The rule that replaces the workspace.** Locally the file tools are confined to the workspace and
+refuse secret-looking paths. On the host there is no workspace, so rather than dropping the
+protection:
+
+- the **same secret-file guard** applies (`.ssh`, `.gnupg`, `.git`, `.env`/`.env.*`, `id_rsa`,
+  `id_ed25519`, `*.pem`, `*.key`), and `..` is refused, both checked here before any ssh runs;
+- the path must be **inside the user's home on the host, or under `remote_session.cwd`** (the
+  directory their own shell is in — a deploy in `/srv` is what they are logged in to work on).
+  `$HOME` is only known on the host, so this is the opening of every script: the path with `~`
+  expanded and made absolute against the remote `$PWD`, then a `case` that exits 78 otherwise;
+- **symlinks are not followed**, as locally. The containment check is textual, so a directory
+  symlink inside the home that points elsewhere is not caught: this is a guard against accidents,
+  like the workspace check, not a sandbox. The user's own permissions still bound everything, and
+  nothing runs as root over this connection.
+
+Searching stays with `run_command host` (`grep`, `find`, `ls`): there is no local `glob`/`grep`
+tool to give a `host` to, and the context note says so. Every remote file result carries `host`, and
+the tool-call line reads "read nginx.conf on filly", "wrote app.conf on filly" (card #TK9C) — and
+clicking it folds the detail open rather than opening a local file of the same name.
+
 ### 8. Getting there, and elsewhere
 
 - **Connect to a host** (palette, `ssh/` hosts): every concrete `Host` in `~/.ssh/config` and its
@@ -178,8 +258,10 @@ machine the user's terminal is on. `cwd` defaults to the remote cwd when known, 
 
 ### 9. Not done, on purpose
 
-- No `tmux -CC` integration and no remote helper binary (Warp's SSH extension, VS Code server):
-  heavy, per-architecture, and Warp's own tmux experiment was removed after it broke users' tmux.
+- No `tmux -CC` control-mode integration and no remote helper binary (Warp's SSH extension, VS Code
+  server): heavy, per-architecture, and Warp's own tmux experiment was removed after it broke users'
+  tmux. A plain remote tmux or screen is served by the DCS wrapping of section 3 instead, which
+  installs nothing and asks the user for one line of tmux configuration.
 - No OSC passthrough under mosh: mosh drops unknown sequences upstream.
 - Remote file clicks open nothing (rather than the wrong local file); fetching them over the shared
   connection (kitty's `remote_file`) is a follow-up.

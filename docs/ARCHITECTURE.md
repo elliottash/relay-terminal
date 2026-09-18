@@ -1782,8 +1782,10 @@ Over ssh (card #S5SH, [SSH-AND-MOSH.md](SSH-AND-MOSH.md)) two more shell files t
 decide it, so the pane's agent can run commands over the user's login. `shell/remote-integration.sh`
 is what the GUI types into the remote bash or zsh once per login, as one gzip+base64 line with a
 leading space: OSC 7 with the remote hostname, OSC 133 A/B/C/D, history-ignore-space and the
-`Ctrl+X Ctrl+P` redraw binding; on any other shell it does nothing. Both are tested in
-`tests/test_ssh_shell.py`.
+`Ctrl+X Ctrl+P` redraw binding; on any other shell it does nothing. Inside a remote tmux or screen
+it wraps every sequence it sends in that multiplexer's DCS passthrough, decided once at load, and
+tells the user in one line when tmux lacks `set -g allow-passthrough on`. Both are tested in
+`tests/test_ssh_shell.py`, in real bash and zsh on a pty, in a real tmux and over ssh.
 
 Status and the remaining parity gaps: [ENGINE.md](ENGINE.md) and
 `issues/features/needs_qa_llm/2026-09-17-engine-integration.md`.
