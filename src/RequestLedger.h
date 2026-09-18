@@ -16,6 +16,15 @@ namespace relay {
 struct LedgerTodo {
     QString id, text, status, note;
     QStringList requestIds;
+    // The subagent working (or that worked) on this todo, e.g. "a2", and whether it is running now:
+    // while it runs the todo's status follows it (card #QHR1).
+    QString subagent;
+    bool subagentRunning = false;
+    // A todo the user can hand to a subagent from the task list: not completed or cancelled (a
+    // deferred or blocked one may be retried) and not already with a running subagent.
+    bool delegable() const {
+        return !subagentRunning && (open() || status == QStringLiteral("deferred") || status == QStringLiteral("blocked"));
+    }
     bool open() const { return status == QStringLiteral("pending") || status == QStringLiteral("in_progress"); }
 };
 

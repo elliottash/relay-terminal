@@ -17,6 +17,9 @@ namespace relay {
 
 struct SubagentRow {
     QString id, type, description, model, effort;
+    // The main agent's todo this subagent works on ("T3"), or empty (card #QHR1). The description
+    // then starts with "T3 · ", so the strip, the tab and the ✦ lines all say which task it is.
+    QString todoId;
     QString status = QStringLiteral("waiting");   // waiting | running | done | failed | stopped
     QString lastActivity, summary, handoff;
     QStringList warnings;

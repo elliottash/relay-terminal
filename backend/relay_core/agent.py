@@ -341,6 +341,46 @@ class Agent:
             self.emit(self.requests.event(self.todos.items))
             self.emit(self.todos.event(None))
 
+    # ----- todos worked by subagents (card #QHR1) ------------------------------------------------
+    def todo_for_subagent(self, todo_id) -> dict:
+        """The todo a new subagent may take (a copy), or ValueError with a model-readable reason."""
+        if not self._todos_enabled():
+            raise ValueError("todo_id needs the todo list, which is off in this pane.")
+        return self.todos.check_delegable(todo_id)
+
+    def todo_subagent_task(self, todo_id) -> dict:
+        """`agent` arguments for handing a todo to a subagent from the task list (todo_subagent command).
+
+        The subagent sees nothing of this conversation, so the task carries the todo and the verbatim
+        text of each request it serves."""
+        todo = self.todo_for_subagent(todo_id)
+        lines = [f"Your task is todo {todo['id']} of the user's task list: {todo['text']}"]
+        if todo.get("note"):
+            lines.append(f"Note on it so far: {todo['note']}")
+        for rid in todo["request_ids"][:5]:
+            request = self.requests.find(rid)
+            if request and request.get("text"):
+                lines.append(f"\nThe user's message it comes from ({rid}), verbatim:\n{request['text'][:8000]}")
+        lines.append("\nThe user handed this todo to you from Relay's task list. Do it, then reply with a concise "
+                     "report of what you did and anything left open.")
+        return {"description": " ".join(todo["text"].split())[:60] or todo["id"], "prompt": "\n".join(lines),
+                "subagent_type": "general", "background": True}
+
+    def todo_subagent_event(self, kind: str, todo_id: str | None, agent_id: str,
+                            outcome: str | None = None, error: str | None = None) -> None:
+        """A subagent linked to a todo started ("started") or ended ("finished"): the todo follows it.
+        Called from subagent threads; the list and the ledger have their own locks."""
+        if kind == "started" and todo_id:
+            changed = self.todos.subagent_started(todo_id, agent_id)
+        elif kind == "finished":
+            changed = self.todos.subagent_finished(agent_id, outcome or "failed", error)
+        else:
+            return
+        if changed:
+            self.requests.apply_todos(self.todos.items)
+            if self._announce and self.track_requests:
+                self.emit(self.todos.event(None))
+
     def set_options(self, request: dict) -> dict:
         """set_agent_options: turn limits and request tracking switches; applies from the next step."""
         for key, value in validate_turn_options(request).items():
@@ -1000,8 +1040,10 @@ class Agent:
                     steered = self.steer_source()
                     if steered:
                         add(self._steer_message(steered, ctx, turn))
-                if self._todos_enabled() and ctx["since_todos"] >= STALE_TODO_STEPS and self.todos.open_items():
-                    add({"role": "user", "content": todo_tool.reminder_text(self.todos.open_items(), ctx["since_todos"]),
+                if (self._todos_enabled() and ctx["since_todos"] >= STALE_TODO_STEPS
+                        and self.todos.open_items(include_delegated=False)):
+                    add({"role": "user", "content": todo_tool.reminder_text(self.todos.open_items(include_delegated=False),
+                                                                             ctx["since_todos"]),
                          "relay_kind": "note"})
                     ctx["since_todos"] = 0
                 # A turn that has done real work without ever writing a list gets one nudge: the
@@ -1344,7 +1386,8 @@ class Agent:
             return []
         turn_ids = set(ctx["requests"])
         # Todos of earlier, unfinished requests (e.g. an interrupted turn) do not hold this turn open.
-        todos = [t for t in self.todos.open_items()
+        # A todo a subagent is running is being done; its result arrives in a later step or turn.
+        todos = [t for t in self.todos.open_items(include_delegated=False)
                  if set(t["request_ids"]) & turn_ids or (ctx["todos_touched"] and not t["request_ids"])]
         linked = {rid for t in todos for rid in t["request_ids"]}
         out = []
@@ -1472,8 +1515,9 @@ class Agent:
             ctx["todos_touched"] = True
             ctx["since_todos"] = 0
             self.requests.apply_todos(items)
-            self.emit(self.todos.event(ctx["turn_id"]))
-            return {"ok": True, "items": items, "open": len(self.todos.open_items())}
+            event = self.todos.event(ctx["turn_id"])
+            self.emit(event)
+            return {"ok": True, "items": event["items"], "open": event["open"]}
         if prepared.name == "write_plan":
             if self.cancel_event.is_set():
                 raise Cancelled("Stopped.")

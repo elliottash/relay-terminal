@@ -96,12 +96,13 @@ Verify against provider docs before shipping; keep the table in `backend/relay_c
 
 ## 8. Subagents
 
-- Main-agent tool `agent {description, prompt, subagent_type, background: bool, model?, effort?}`; `agent_message {id, text}`; `agent_wait {id?}`. Several `agent` calls in one response run concurrently (max 4). Subagents cannot spawn subagents.
+- Main-agent tool `agent {description, prompt, subagent_type, background: bool, model?, effort?, todo_id?}`; `agent_message {id, text}`; `agent_wait {id?}`. Several `agent` calls in one response run concurrently (max 4). Subagents cannot spawn subagents.
 - Events: `subagent_started {id, type, description, background, model}`, `subagent_progress {id, status: "running"|"waiting"|"done"|"failed"|"stopped", tools, tokens, elapsed_ms, last_activity}`, `subagent_finished {id, outcome, summary}`.
 - `agent_subscribe {id, on: bool}` → while on, the worker also sends `subagent_event {id, event: {...}}` wrapping that subagent's delta/tool_started/tool_output/tool_result events.
 - `agent_message {id, text}` (user → subagent), `agent_stop {id | "all"}`.
 - `agent_set_model {id | "all", model}` moves one subagent, or every listed one, to another model (`model` as in the `agent` tool: `inherit`, a preset id or an alias). The worker emits `subagent_model {id, model, applies: "now"|"next_step", warnings?}` for each: a running subagent switches before its next model call, a waiting or finished one at once.
 - Background completion: the result is delivered to the main agent before its next model call; if the main agent is idle, the worker enqueues a main turn "Background agent <id> finished: <summary>" (owner decision 4).
+- Todos worked by subagents (card #QHR1, section 12.4): `todo_id` links the new subagent to a todo; `subagent_started` (also a resumed one) and `agents_status` items then carry `todo_id`. `todo_subagent {id?, todo_id, subagent_type?}` (GUI → worker) hands a todo that is not completed or cancelled (a deferred or blocked one may be retried) to a new **background** subagent (type `general` unless given) whose task is the todo text plus the verbatim text of each request it serves; the worker answers `todo_subagent {id, todo_id, agent_id}` after the usual `subagent_started`, or `error {id, text}` (unknown, completed or cancelled todo, todo already with a running subagent, not configured). The main agent reads a Relay-context note "The user handed todo T3 to background subagent a2 …" before its next model call; the note never starts a turn by itself.
 
 ## 9. Suggestions
 
@@ -388,15 +389,30 @@ were never delivered are not part of a fork.
 ### 12.4 Todos (`update_todos` tool)
 
 Model tool (build and plan mode, main agent only, when `todo_tool` is on):
-`update_todos {items: [{id?, text (≤500), status: pending|in_progress|completed|cancelled|deferred|blocked, request_ids?: ["R3"], note? (≤500)}]}`
+`update_todos {items: [{id?, text (≤500), status: pending|in_progress|completed|cancelled|deferred|blocked, request_ids?: ["R3"], note? (≤500), subagent? (read-only, ignored)}]}`
 Each call replaces the whole list (≤50 items). At most one `in_progress`; `cancelled`/`deferred`/`blocked` need a
 `note`; unknown request ids are refused. Ids are `T<n>`: a known id is kept, anything else gets a new id. A new todo
 without `request_ids` is linked to the request that opened the current turn; a resent todo without them keeps its
 links. Invalid calls return `{error}` to the model and change nothing. The tool result is
 `{ok: true, items, open}`; `tool_started.preview` is `UPDATE TODOS` plus one line per item.
 
-**Event** `todos {id?, turn_id (null outside a turn), items: [{id, text, status, request_ids, note}], open}` after every
-successful update, and after `reset`, `load_state`, `resume` and a conversation `rewind`.
+**Event** `todos {id?, turn_id (null outside a turn), items: [{id, text, status, request_ids, note, subagent, subagent_running}], open}` after every
+successful update, after a linked subagent starts or ends, and after `reset`, `load_state`, `resume` and a conversation `rewind`.
+The update_todos tool result carries the same items.
+
+**Todos and subagents (card #QHR1, 2026-09-18).** A todo can be handed to a subagent: by the model (`agent` with
+`todo_id`, section 8) or by the user (`todo_subagent`). `subagent` is then that subagent's id (`"a2"`, kept after it
+ends as a record of who did it) and `subagent_running` says whether it runs now. While it runs the todo is
+*delegated*: its status is `in_progress`; `update_todos` keeps a delegated todo's status and note whatever the model
+sends; it does not count towards the one-`in_progress` rule (so a main agent can work one todo while subagents work
+others); and the completion check and the stale reminder skip it, so the main turn may end while it runs. When the
+run ends the todo takes the outcome: `done` → `completed`, `failed` → `blocked` with note "Subagent a2 failed: <error>",
+`stopped` → `pending` with note "Subagent a2 was stopped before it finished." Linked requests follow as usual
+(`apply_todos`). The background result handed to the main agent adds "It worked on todo T3; Relay has marked that
+todo completed." A subagent that is resumed with a message takes its todo back to `in_progress` unless another
+subagent has it. `agent` with a `todo_id` that is unknown, completed, cancelled or already delegated is refused. The link is saved;
+a saved todo that was still delegated loads as `pending` with a note (no subagent of a saved session runs), and a
+rewind keeps the links of subagents still running.
 **Command** `todos {id?}` → `todos {id, turn_id: null, …}`.
 
 The system prompt gains the todo rules (one todo per ask when a message has several asks or a message arrives

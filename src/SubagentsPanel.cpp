@@ -12,6 +12,10 @@ namespace relay {
 
 namespace {
 QString str(const QJsonObject &o, const char *key) { return o.value(QLatin1String(key)).toString(); }
+// "T3 · write the docs" for a subagent working on todo T3 (card #QHR1).
+QString withTodo(const QString &todoId, const QString &description) {
+    return todoId.isEmpty() ? description : todoId + QStringLiteral(" · ") + description;
+}
 
 // Read at paint time so a theme switch recolours the list (issue 0JA7).
 inline const QColor &kDone() { return theme::Success; }
@@ -130,7 +134,8 @@ bool SubagentModel::handle(const QJsonObject &event) {
     if (type == QStringLiteral("subagent_started")) {
         if (id.isEmpty()) return true;
         SubagentRow &row = ensure(id);
-        row.type = str(event, "type"); row.description = str(event, "description");
+        row.type = str(event, "type"); row.todoId = str(event, "todo_id");
+        row.description = withTodo(row.todoId, str(event, "description"));
         row.background = event.value(QStringLiteral("background")).toBool();
         row.model = str(event, "model"); row.effort = str(event, "effort");
         row.resumed = event.value(QStringLiteral("resumed")).toBool();
@@ -214,7 +219,8 @@ bool SubagentModel::handle(const QJsonObject &event) {
         for (const auto &value : event.value(QStringLiteral("items")).toArray()) {
             const QJsonObject item = value.toObject();
             SubagentRow &row = ensure(str(item, "id"));
-            row.type = str(item, "type"); row.description = str(item, "description");
+            row.type = str(item, "type"); row.todoId = str(item, "todo_id");
+            row.description = withTodo(row.todoId, str(item, "description"));
             row.background = item.value(QStringLiteral("background")).toBool(); row.model = str(item, "model");
             row.status = str(item, "status"); row.lastActivity = str(item, "last_activity");
             row.tools = item.value(QStringLiteral("tools")).toInt(); row.tokens = qint64(item.value(QStringLiteral("tokens")).toDouble());

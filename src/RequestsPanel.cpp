@@ -5,6 +5,7 @@
 #include <QHeaderView>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QMenu>
 #include <QScrollArea>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -44,6 +45,7 @@ QColor statusColor(const QString &status) {
 
 QString rowText(const LedgerTodo &todo) {
     QString line = QStringLiteral("%1  %2  %3").arg(RequestLedgerModel::todoGlyph(todo.status), todo.id, clean(todo.text).simplified());
+    if (!todo.subagent.isEmpty()) line += QStringLiteral("  ✦ ") + todo.subagent;
     if (!todo.note.isEmpty()) line += QStringLiteral(" — ") + clean(todo.note).simplified();
     return line;
 }
@@ -65,7 +67,7 @@ RequestsPanel::RequestsPanel(RequestLedgerModel *model, QWidget *parent) : QWidg
     connect(close, &QToolButton::clicked, this, [this] { if (onClose) onClose(); });
     header->addWidget(close);
     layout->addLayout(header);
-    m_keys = new QLabel(QStringLiteral("↑↓ select · Enter fold Earlier · Esc close"));
+    m_keys = new QLabel(QStringLiteral("↑↓ select · Enter open its subagent / fold Earlier · S run as subagent · Esc close"));
     m_keys->setObjectName(QStringLiteral("panelKeys"));
     m_keys->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     layout->addWidget(m_keys);
@@ -80,6 +82,12 @@ RequestsPanel::RequestsPanel(RequestLedgerModel *model, QWidget *parent) : QWidg
     m_tree->setFrameShape(QFrame::NoFrame);
     m_tree->installEventFilter(this);
     connect(m_tree, &QTreeWidget::currentItemChanged, this, [this] { if (!m_rebuilding) updateDetail(); });
+    m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_tree, &QTreeWidget::customContextMenuRequested, this, &RequestsPanel::showRowMenu);
+    connect(m_tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
+        const LedgerTodo *todo = item ? todoFor(item->data(0, kIdRole).toString()) : nullptr;
+        if (todo && !todo->subagent.isEmpty() && onOpenSubagent) onOpenSubagent(todo->subagent, true);
+    });
     layout->addWidget(m_tree, 3);
     m_detail = new QLabel;
     m_detail->setObjectName(QStringLiteral("requestDetail"));
@@ -107,6 +115,33 @@ void forEachRow(QTreeWidgetItem *item, const std::function<void(QTreeWidgetItem 
 QString RequestsPanel::selectedId() const {
     QTreeWidgetItem *item = m_tree->currentItem();
     return item ? item->data(0, kIdRole).toString() : QString();
+}
+
+const LedgerTodo *RequestsPanel::todoFor(const QString &todoId) const {
+    if (todoId.isEmpty()) return nullptr;
+    for (const auto &todo : m_todos) if (todo.id == todoId) return &todo;
+    return nullptr;
+}
+
+void RequestsPanel::showRowMenu(const QPoint &pos) {
+    QTreeWidgetItem *item = m_tree->itemAt(pos);
+    const LedgerTodo *todo = item ? todoFor(item->data(0, kIdRole).toString()) : nullptr;
+    if (!todo) return;
+    m_tree->setCurrentItem(item);
+    const QString id = todo->id, subagent = todo->subagent;
+    QMenu menu(this);
+    menu.setToolTipsVisible(true);
+    if (!subagent.isEmpty())
+        menu.addAction(QStringLiteral("Open subagent %1").arg(subagent), this, [this, subagent] {
+            if (onOpenSubagent) onOpenSubagent(subagent, true);
+        });
+    QAction *run = menu.addAction(QStringLiteral("Run as subagent"), this, [this, id] { if (onRunAsSubagent) onRunAsSubagent(id, true); });
+    run->setShortcut(QKeySequence(Qt::Key_S));
+    run->setEnabled(todo->delegable());
+    if (!todo->delegable())
+        run->setToolTip(todo->subagentRunning ? QStringLiteral("Subagent %1 is working on it").arg(subagent)
+                                              : QStringLiteral("A completed or cancelled task cannot go to a subagent"));
+    menu.exec(m_tree->viewport()->mapToGlobal(pos));
 }
 
 QTreeWidgetItem *RequestsPanel::rowFor(const QString &todoId) const {
@@ -143,10 +178,14 @@ void RequestsPanel::refresh() {
         row->setForeground(0, statusColor(todo.status));
         QString tip = QStringLiteral("%1 · %2\n\n%3").arg(todo.id, RequestLedgerModel::statusLabel(todo.status), clean(todo.text));
         if (!todo.note.isEmpty()) tip += QStringLiteral("\n\n") + clean(todo.note);
+        if (!todo.subagent.isEmpty())
+            tip += QStringLiteral("\n\n✦ subagent %1%2 · Enter or double-click opens it").arg(
+                todo.subagent, todo.subagentRunning ? QStringLiteral(" is working on it") : QString());
         row->setToolTip(0, tip);
     };
 
-    const QList<LedgerTodo> todos = m_model->allTodos();
+    m_todos = m_model->allTodos();
+    const QList<LedgerTodo> &todos = m_todos;
     for (const auto &todo : todos)
         if (batch.value(todo.id, current) == current) addTodo(nullptr, todo);
     QTreeWidgetItem *earlier = nullptr;
@@ -193,10 +232,13 @@ void RequestsPanel::updateDetail() {
                               : QString());
         return;
     }
-    for (const auto &todo : m_model->allTodos()) {
+    for (const auto &todo : std::as_const(m_todos)) {
         if (todo.id != id) continue;
         QStringList lines;
         lines << QStringLiteral("%1 · %2").arg(todo.id, RequestLedgerModel::statusLabel(todo.status));
+        if (todo.subagentRunning) lines << QStringLiteral("✦ Subagent %1 is working on it · Enter opens its tab").arg(todo.subagent);
+        else if (!todo.subagent.isEmpty()) lines << QStringLiteral("✦ Worked on by subagent %1 · Enter opens its tab").arg(todo.subagent);
+        if (todo.delegable()) lines << QStringLiteral("S hands it to a new subagent");
         if (!todo.note.isEmpty()) lines << QStringLiteral("Note: ") + todo.note;
         lines << QString() << todo.text;
         m_detail->setText(clean(lines.join('\n')));
@@ -212,8 +254,19 @@ bool RequestsPanel::eventFilter(QObject *watched, QEvent *event) {
     if (mods) return false;
     switch (key->key()) {
     case Qt::Key_Escape: if (onClose) onClose(); return true;
+    case Qt::Key_S: {
+        const LedgerTodo *todo = todoFor(selectedId());
+        if (todo && todo->delegable() && onRunAsSubagent) onRunAsSubagent(todo->id, false);
+        return true;
+    }
     case Qt::Key_Return: case Qt::Key_Enter: case Qt::Key_Space: {
         QTreeWidgetItem *item = m_tree->currentItem();
+        if (key->key() != Qt::Key_Space)
+            if (const LedgerTodo *todo = item ? todoFor(item->data(0, kIdRole).toString()) : nullptr;
+                todo && !todo->subagent.isEmpty()) {
+                if (onOpenSubagent) onOpenSubagent(todo->subagent, false);
+                return true;
+            }
         while (item && item->childCount() == 0 && item->parent()) item = item->parent();
         if (item && item->childCount() > 0) { item->setExpanded(!item->isExpanded()); m_tree->setCurrentItem(item); }
         return true;

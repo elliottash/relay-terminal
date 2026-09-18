@@ -1296,8 +1296,17 @@ whenever the model wrote no todo list**, which the prompt tells it to skip for a
 `✦ Tasks …` line printed on `done`/`cancelled`/`error` (skipped for a list of one completed task, so
 also skipped when there is no list). `RequestsPanel` floats over the right of the terminal and lists
 the current batch's todos, then a folded `Earlier · c/t (…)` row; the selected task's full text,
-status and note show below. It has no actions: marking done, cancelling, reopening and re-asking
-were request operations and went with the ledger. `request_set`, `request_get` and `request_reask`
+status and note show below. Marking done, cancelling, reopening and re-asking were request
+operations and went with the ledger. **Tasks and subagents** (card #QHR1, protocol 12.4): a todo a
+subagent has shows `✦ a2` on its row and in the detail; Enter or a double click opens that
+subagent's tab (`Pane::openSubagent`), and S or the row's context menu "Run as subagent" sends
+`todo_subagent` for a todo that is not completed or cancelled (deferred and blocked ones can be
+retried) and not already with a running subagent. The worker starts a
+background `general` subagent on the todo and the verbatim requests it serves; the todo then
+follows the subagent (in_progress, then completed / blocked / pending; while it runs the task counts
+as active, not unfinished, after the main turn ends) and the subagent's strip row,
+tab and ✦ lines read "T3 · …" (`SubagentRow::todoId`). The mouse paths show the hints
+`tasks.subagent.open.mouse` (→ Enter) and `tasks.subagent.run.mouse` (→ S). `request_set`, `request_get` and `request_reask`
 remain in the protocol and in the worker, unused by the GUI. Toggle: `agent.requests` (Ctrl+Shift+K
 in the Relay preset; unbound in the Warp, VS Code and Konsole presets, where the key clears blocks,
 deletes a line, or clears scrollback), `/tasks`, `/requests`, `/todos`, the chip. `openItemsLine()`

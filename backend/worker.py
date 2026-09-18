@@ -286,6 +286,19 @@ def main():
             elif kind == "agent_message":
                 result = subagents.send_message(request.get("id"), request.get("text"), origin="user")
                 emit({"event": "agent_message_delivered", **result})
+            elif kind == "todo_subagent":
+                # The user hands one of the agent's todos to a background subagent (card #QHR1).
+                agent = turns.agent
+                if agent is None or subagents.catalog is None:
+                    raise ValueError("Configure a provider and workspace first.")
+                todo_id = request.get("todo_id")
+                args = {**agent.todo_subagent_task(todo_id), "todo_id": todo_id}
+                if isinstance(request.get("subagent_type"), str) and request["subagent_type"].strip():
+                    args["subagent_type"] = request["subagent_type"].strip()
+                sub = subagents.spawn(args)
+                subagents.notify_main(f"The user handed todo {todo_id} to background subagent {sub.id} from the task "
+                                      "list. Do not work on it yourself; its result will be delivered to you.")
+                emit({"event": "todo_subagent", "id": request.get("id"), "todo_id": todo_id, "agent_id": sub.id})
             elif kind == "agent_stop":
                 target = request.get("id")
                 emit({"event": "agent_stopped", "ids": subagents.stop("all" if target in (None, "all") else target)})

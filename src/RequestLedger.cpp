@@ -123,6 +123,8 @@ bool RequestLedgerModel::handle(const QJsonObject &event) {
             todo.status = item.value(QStringLiteral("status")).toString(QStringLiteral("pending"));
             todo.note = item.value(QStringLiteral("note")).toString();
             todo.requestIds = strings(item.value(QStringLiteral("request_ids")));
+            todo.subagent = item.value(QStringLiteral("subagent")).toString();
+            todo.subagentRunning = !todo.subagent.isEmpty() && item.value(QStringLiteral("subagent_running")).toBool();
             m_todos << todo;
         }
         m_openTodos = 0;
@@ -179,8 +181,8 @@ bool RequestLedgerModel::turnRunning() const {
 // those never reach tasks() and exist only so the batch walk below can tell one turn's list from the
 // next (a turn with no todos still closes a batch). Outcome rules (the owner's mapping):
 //   todo completed → Completed; blocked → Failed; deferred → Deferred; cancelled → Cancelled.
-//   todo pending/in_progress → Active while a turn runs or a linked request still waits in the queue,
-//     else Unfinished (its turn ended: error, cancel, step limit, or the completion check gave up).
+//   todo pending/in_progress → Active while a turn runs, a linked request still waits in the queue or a
+//     subagent is running it, else Unfinished (its turn ended: error, cancel, step limit, or the completion check gave up).
 //     When every linked request was marked done (or cancelled) by the user, it follows the request.
 //   request without todos: done → Completed; cancelled/cancelled_by_user → Cancelled; blocked →
 //     Failed; deferred → Deferred; in_progress → Active; open → Active while queued (not delivered,
@@ -231,7 +233,8 @@ QList<TaskItem> RequestLedgerModel::deriveAll() const {
                 else if (request->status == QStringLiteral("open") && (!request->delivered || request->waiting)) queued = true;
             }
             if (known > 0 && userDone + userCancelled == known) task.outcome = userCancelled ? TaskOutcome::Cancelled : TaskOutcome::Completed;
-            else if (running || queued) task.outcome = TaskOutcome::Active;
+            // A todo a subagent is running is being worked on after the main turn ended (card #QHR1).
+            else if (running || queued || todo.subagentRunning) task.outcome = TaskOutcome::Active;
             else task.outcome = TaskOutcome::Unfinished;
         }
         out << task;

@@ -4494,7 +4494,6 @@ private:
             {QStringLiteral("rewind-code"), QString(), QStringLiteral("Restore files the agent changed since an earlier turn")},
             {QStringLiteral("fork"), QString(), QStringLiteral("Continue this conversation in a new pane")},
             {QStringLiteral("resume"), QStringLiteral("[words]"), QStringLiteral("Sessions: resume, search, subagent threads (same as /conversations)")},
-            {QStringLiteral("sessions"), QStringLiteral("[words]"), QStringLiteral("Sessions: the same pane as /resume, under the name on its header")},
             {QStringLiteral("conversations"), QStringLiteral("[words]"), QStringLiteral("Sessions: search every session and Relay's terminal history")},
             {QStringLiteral("status"), QString(), QStringLiteral("Conversation info: model, tokens, file and history with subagent threads (the ⓘ button)")},
             {QStringLiteral("info"), QString(), QStringLiteral("Conversation info (same as /status)")},
@@ -4805,7 +4804,7 @@ private:
         } else if (name == QStringLiteral("rewind")) openRewind();
         else if (name == QStringLiteral("rewind-code")) openRewind(QStringLiteral("code"));
         else if (name == QStringLiteral("fork")) requestFork();
-        else if (name == QStringLiteral("resume") || name == QStringLiteral("sessions")) {
+        else if (name == QStringLiteral("resume")) {
             openResume(args);
             if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.resume")); !keys.isEmpty())
                 hint(QStringLiteral("resume.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("sessions")));
@@ -5310,6 +5309,18 @@ public:
             auto *panel = new relay::RequestsPanel(&m_ledger, this);
             m_requestsPanel = panel;
             panel->onClose = [this] { closeRequests(); };
+            // Tasks and subagents (card #QHR1): open a task's subagent, or hand a task to a new one.
+            panel->onOpenSubagent = [this](const QString &id, bool mouse) {
+                openSubagent(id);
+                if (mouse) hint(QStringLiteral("tasks.subagent.open.mouse"),
+                                relay::ShortcutHints::nextTime(QStringLiteral("Enter"), QStringLiteral("on a task opens its subagent")));
+            };
+            panel->onRunAsSubagent = [this](const QString &todoId, bool mouse) {
+                send({{"type", "todo_subagent"}, {"id", QStringLiteral("req-%1").arg(++m_requestId)}, {"todo_id", todoId}});
+                status(QStringLiteral("Handing %1 to a subagent…").arg(todoId));
+                if (mouse) hint(QStringLiteral("tasks.subagent.run.mouse"),
+                                relay::ShortcutHints::nextTime(QStringLiteral("S"), QStringLiteral("on a task runs it as a subagent")));
+            };
         }
         send({{"type", "requests"}, {"id", QStringLiteral("req-%1").arg(++m_requestId)}});
         send({{"type", "todos"}, {"id", QStringLiteral("req-%1").arg(++m_requestId)}});
@@ -5388,6 +5399,11 @@ private:
                     if (!m_agentBusy && !moreTurnsPending()) closeInline();
                 }
             }
+            return true;
+        }
+        if (type == QStringLiteral("todo_subagent")) {   // the worker started a subagent for a task (card #QHR1)
+            status(QStringLiteral("%1 is with subagent %2 · Enter on it in the task list opens it")
+                       .arg(event.value(QStringLiteral("todo_id")).toString(), event.value(QStringLiteral("agent_id")).toString()));
             return true;
         }
         if (type == QStringLiteral("completion_check")) {

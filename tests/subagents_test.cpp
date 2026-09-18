@@ -126,6 +126,20 @@ private slots:
         QVERIFY(h.inlineLines.last().startsWith(QStringLiteral("✦ explore a1 resumed")));
     }
 
+    // A subagent working on a todo says which one, in the strip, its tab and the ✦ line (card #QHR1).
+    void todoSubagentNamesItsTask() {
+        Harness h;
+        h.model.handle(json("{'event':'subagent_started','id':'a2','type':'general','description':'write the docs','background':true,'todo_id':'T3'}"));
+        QCOMPARE(h.model.row(QStringLiteral("a2"))->todoId, QStringLiteral("T3"));
+        QCOMPARE(h.model.row(QStringLiteral("a2"))->description, QStringLiteral("T3 · write the docs"));
+        QVERIFY2(h.inlineLines.last().endsWith(QStringLiteral("· T3 · write the docs")), qPrintable(h.inlineLines.last()));
+        h.model.handle(json("{'event':'agents_status','items':[{'id':'a2','type':'general','description':'write the docs','todo_id':'T3','status':'running'}]}"));
+        QCOMPARE(h.model.row(QStringLiteral("a2"))->description, QStringLiteral("T3 · write the docs"));
+        h.model.handle(json("{'event':'subagent_started','id':'a4','type':'general','description':'plain','background':true}"));
+        QCOMPARE(h.model.row(QStringLiteral("a4"))->description, QStringLiteral("plain"));
+        QVERIFY(h.model.row(QStringLiteral("a4"))->todoId.isEmpty());
+    }
+
     void formatting() {
         QCOMPARE(SubagentModel::formatElapsed(41200), QStringLiteral("0:41"));
         QCOMPARE(SubagentModel::formatElapsed(3723000), QStringLiteral("1:02:03"));

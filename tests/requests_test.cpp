@@ -385,6 +385,62 @@ private slots:
         QVERIFY(closed);
     }
 
+    // Tasks and subagents (card #QHR1): the row names the subagent; Enter opens it, S hands an open
+    // task to a new one, and neither works where it makes no sense.
+    void panelMapsTasksToSubagents() {
+        RequestLedgerModel model;
+        model.handle(json(kRequests));
+        model.handle(json(R"({'event':'todos','turn_id':'q1','open':2,'items':[
+            {'id':'T1','text':'fix parser','status':'completed','request_ids':['R1'],'note':null,'subagent':'a1','subagent_running':false},
+            {'id':'T2','text':'update README','status':'in_progress','request_ids':['R2'],'note':null,'subagent':'a2','subagent_running':true},
+            {'id':'T3','text':'tidy imports','status':'pending','request_ids':[],'note':null,'subagent':null,'subagent_running':false}]})"));
+        QCOMPARE(model.todos().at(1).subagent, QStringLiteral("a2"));
+        QVERIFY(model.todos().at(1).subagentRunning);
+        QVERIFY(!model.todos().at(1).delegable());
+        QVERIFY(model.todos().at(2).delegable());
+        QVERIFY(!model.todos().at(0).delegable());   // completed
+        QVERIFY((relay::LedgerTodo{QStringLiteral("T9"), QString(), QStringLiteral("blocked"), QString(), {}, QString(), false}).delegable());
+        QVERIFY(!(relay::LedgerTodo{QStringLiteral("T9"), QString(), QStringLiteral("cancelled"), QString(), {}, QString(), false}).delegable());
+        RequestsPanel panel(&model);
+        QStringList opened, handed;
+        panel.onOpenSubagent = [&](const QString &id, bool mouse) { QVERIFY(!mouse); opened << id; };
+        panel.onRunAsSubagent = [&](const QString &id, bool mouse) { QVERIFY(!mouse); handed << id; };
+        panel.resize(500, 400);
+        panel.show();
+        panel.enter();
+        auto *tree = panel.findChild<QTreeWidget *>(QStringLiteral("requestsList"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("◐  T2  update README  ✦ a2"));
+        QCOMPARE(tree->topLevelItem(2)->text(0), QStringLiteral("○  T3  tidy imports"));
+        auto *detail = panel.findChild<QLabel *>(QStringLiteral("requestDetail"));
+        QCOMPARE(panel.selectedId(), QStringLiteral("T2"));
+        QVERIFY2(detail->text().contains(QStringLiteral("Subagent a2 is working on it")), qPrintable(detail->text()));
+        QTest::keyClick(tree, Qt::Key_Return);                  // opens a2
+        QTest::keyClick(tree, Qt::Key_S);                       // T2 is already with a2: nothing
+        panel.select(QStringLiteral("T3"));
+        QVERIFY2(detail->text().contains(QStringLiteral("S hands it to a new subagent")), qPrintable(detail->text()));
+        QTest::keyClick(tree, Qt::Key_Return);                  // no subagent: nothing to open
+        QTest::keyClick(tree, Qt::Key_S);                       // hands T3 over
+        panel.select(QStringLiteral("T1"));
+        QVERIFY(detail->text().contains(QStringLiteral("Worked on by subagent a1")));
+        QTest::keyClick(tree, Qt::Key_S);                       // completed: nothing
+        QTest::keyClick(tree, Qt::Key_Enter);                   // a finished subagent still opens
+        QCOMPARE(opened, (QStringList{QStringLiteral("a2"), QStringLiteral("a1")}));
+        QCOMPARE(handed, QStringList{QStringLiteral("T3")});
+        // After the turn: the task a subagent is running is still active, not unfinished.
+        model.handle(json(R"({'event':'requests','total':1,'open':1,'items':[
+            {'id':'R1','text_preview':'fix the parser','status':'open','delivered':true,'turn_id':'q1','requires_completion':true},
+            {'id':'R2','text_preview':'also update the docs','status':'open','delivered':true,'turn_id':'q1','requires_completion':true}]})"));
+        QVERIFY(!model.turnRunning());
+        for (const auto &task : model.tasks()) {
+            if (task.key == QStringLiteral("T2")) QCOMPARE(task.outcome, relay::TaskOutcome::Active);
+            if (task.key == QStringLiteral("T3")) QCOMPARE(task.outcome, relay::TaskOutcome::Unfinished);
+        }
+        // An older worker without the fields: no subagent, and every open task can be handed over.
+        model.handle(json(kTodos));
+        QVERIFY(model.todos().at(2).subagent.isEmpty());
+        QVERIFY(model.todos().at(2).delegable());
+    }
+
     // With no todos the panel says so instead of listing what the user typed.
     void panelWithoutATaskList() {
         RequestLedgerModel model;
