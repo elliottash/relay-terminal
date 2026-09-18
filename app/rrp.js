@@ -28,6 +28,39 @@ export function fingerprint(bytes) {
   });
 }
 
+// A pairing or invite fragment, in whatever shape it reached this device. `secretField` is the
+// only difference between the two links, and each caller brings its own two sentences, because
+// "scan the QR code again" and "ask whoever invited you" are different things to do.
+function parseLinkFragment(fragment, secretField, incomplete, damagedText) {
+  let raw = String(fragment).replace(/^#/, '');
+  // Some QR readers and link handlers percent-encode the fragment, which turns the separators
+  // into %26 and leaves one field called `v` holding the whole rest of the link. Undo that
+  // before parsing rather than reporting a missing field the user cannot do anything about.
+  if (!raw.includes('&') && /%26/i.test(raw)) {
+    try {
+      raw = decodeURIComponent(raw);
+    } catch {
+      /* keep the original and let the checks below report it */
+    }
+  }
+  const fields = new URLSearchParams(raw);
+  for (const required of ['v', 'd', secretField, 'r']) {
+    if (!fields.get(required)) throw new Error(incomplete);
+  }
+  if (fields.get('v') !== '1') throw new Error('This link needs a newer version of the app.');
+  const damaged = new Error(damagedText);
+  let desktopPublic;
+  let secret;
+  try {
+    desktopPublic = un64(fields.get('d'));
+    secret = un64(fields.get(secretField));
+  } catch {
+    throw damaged;              // not base64: the link was mangled, not merely truncated
+  }
+  if (desktopPublic.length !== 32 || secret.length < 16) throw damaged;
+  return { desktopPublic, secret, room: fields.get('r') };
+}
+
 // ---- stored identity --------------------------------------------------------------------------
 // The private key is generated non-extractable and kept as a CryptoKey, so it is never in reach of
 // script that can read it — including a later, hostile version of this app.
@@ -68,8 +101,25 @@ async function dbDelete(key) {
   });
 }
 
+// A paired-device record and a guest record (section 10.2) sit side by side under different keys,
+// and neither loader will ever return the other's row. The shapes differ on purpose — a device has
+// a `deviceId` and a `capability`, a guest a `participant` and a `role`, and there is no field
+// leading from one to the other — so one browser can be the owner of one desktop and somebody's
+// guest on another without either flow reading, overwriting or promoting the wrong record. It is
+// the client-side half of the rule `remote/guests.py` makes structural on the desktop.
+const isDeviceRecord = (record) =>
+  !!record && typeof record.deviceId === 'string' && record.participant === undefined;
+const isGuestRecord = (record) =>
+  !!record && typeof record.participant === 'string' && record.deviceId === undefined;
+
 export async function loadDevice() {
-  return (await dbGet('paired')) || null;
+  const record = await dbGet('paired');
+  return isDeviceRecord(record) ? record : null;
+}
+
+export async function loadGuest() {
+  const record = await dbGet('guest');
+  return isGuestRecord(record) ? record : null;
 }
 
 // Any value beside the device record — today, the push seal key the service worker shares.
@@ -86,11 +136,21 @@ export async function dropValue(key) {
 }
 
 export async function saveDevice(record) {
+  if (!isDeviceRecord(record)) throw new Error('that is not a device record.');
   await dbPut('paired', record);
 }
 
 export async function forgetDevice() {
   await dbDelete('paired');
+}
+
+export async function saveGuest(record) {
+  if (!isGuestRecord(record)) throw new Error('that is not a guest record.');
+  await dbPut('guest', record);
+}
+
+export async function forgetGuest() {
+  await dbDelete('guest');
 }
 
 // ---- the session ------------------------------------------------------------------------------
@@ -119,37 +179,21 @@ export class Rrp extends EventTarget {
   // -- pairing ----------------------------------------------------------------------------------
 
   static parsePairFragment(fragment) {
-    let raw = fragment.replace(/^#/, '');
-    // Some QR readers and link handlers percent-encode the fragment, which turns the separators
-    // into %26 and leaves one field called `v` holding the whole rest of the link. Undo that
-    // before parsing rather than reporting a missing field the user cannot do anything about.
-    if (!raw.includes('&') && /%26/i.test(raw)) {
-      try {
-        raw = decodeURIComponent(raw);
-      } catch {
-        /* keep the original and let the checks below report it */
-      }
-    }
-    const fields = new URLSearchParams(raw);
-    for (const required of ['v', 'd', 's', 'r']) {
-      if (!fields.get(required)) {
-        throw new Error('That pairing link is incomplete — part of it was lost on the way here. '
-          + 'Scan the QR code on your desktop again.');
-      }
-    }
-    if (fields.get('v') !== '1') throw new Error('This link needs a newer version of the app.');
-    const damaged = new Error('That pairing link is damaged — scan the QR code on your desktop '
-      + 'again.');
-    let desktopPublic;
-    let secret;
-    try {
-      desktopPublic = un64(fields.get('d'));
-      secret = un64(fields.get('s'));
-    } catch {
-      throw damaged;            // not base64: the link was mangled, not merely truncated
-    }
-    if (desktopPublic.length !== 32 || secret.length < 16) throw damaged;
-    return { desktopPublic, secret, room: fields.get('r') };
+    return parseLinkFragment(fragment, 's',
+      'That pairing link is incomplete — part of it was lost on the way here. '
+        + 'Scan the QR code on your desktop again.',
+      'That pairing link is damaged — scan the QR code on your desktop again.');
+  }
+
+  // An invite link (section 10.2) has the same shape and a different secret field: `i`, not `s`,
+  // so a link that admits a guest can never be fed to the pairing handler by accident. The role
+  // is deliberately not in it — enforcement reads the invite record on the desktop, and a role in
+  // the fragment would only be a claim its holder could edit.
+  static parseInviteFragment(fragment) {
+    return parseLinkFragment(fragment, 'i',
+      'That invitation link is incomplete — part of it was lost on the way here. '
+        + 'Ask whoever invited you to send it again.',
+      'That invitation link is damaged. Ask whoever invited you to send it again.');
   }
 
   async pair(link, { name, platform }) {
@@ -177,6 +221,68 @@ export class Rrp extends EventTarget {
     this.close();
     this.session = null;
     return record;
+  }
+
+  // -- multiplayer: knocking with an invite link (section 10.2) ---------------------------------
+
+  // Follow an invite: join its room, knock, and wait for the owner to answer. What comes back is
+  // a **guest** record — a participant id and a role, no device id and no capability — because a
+  // participant is not a device and this channel can never produce one (`pair_prove` on an invite
+  // room is refused by the hub).
+  async knock(link, { name, platform }) {
+    const pair = await crypto.subtle.generateKey({ name: 'X25519' }, false, ['deriveBits']);
+    const guestPublic = await exportPublic(pair.publicKey);
+    await this.#open(`${this.socketBase}/v1/connect?room=${encodeURIComponent(link.room)}`);
+    await this.#handshake(pair.privateKey, guestPublic, link.desktopPublic);
+
+    this.send({ t: 'knock', invite: b64(link.secret), name, platform });
+    const waiting = await this.once('knock_pending', 30000);
+    // The five digits come out of the handshake hash, which neither side chose alone, so both
+    // ends derive the same code independently. A desktop that sends a different one is not the
+    // desktop this session is with, and there would be nothing useful to compare on two screens.
+    if (waiting.code !== this.authCode) {
+      this.close();
+      throw new Error('That invitation could not be verified. Ask whoever invited you for a '
+        + 'fresh link.');
+    }
+    this.emit('authcode', { code: this.authCode });
+    // The hub gives up on an unanswered knock after two minutes (KNOCK_TIMEOUT) and answers
+    // `error not_admitted`, which `once` turns into a rejection carrying that code.
+    const admitted = await this.once('admitted', 150000);
+    const record = {
+      desktopPublic: link.desktopPublic,
+      devicePrivate: pair.privateKey,
+      devicePublic: guestPublic,
+      participant: admitted.participant,
+      role: admitted.role,
+      panes: Array.isArray(admitted.panes) ? admitted.panes : [],
+      expires: Number(admitted.expires) || 0,
+      desktopId: admitted.desktop?.id || '',
+      desktopName: admitted.desktop_name || admitted.desktop?.name || 'their desktop',
+      guestName: name,
+      joinedAt: Date.now(),
+    };
+    await saveGuest(record);
+    this.record = record;
+    // Unlike pairing, the channel stays: the hub follows `admitted` with this guest's scoped
+    // `panes` and the `participants` list, on this session.
+    return record;
+  }
+
+  // Come back as an admitted participant. The channel id is the participant id, never a device
+  // id, and the `welcome` that answers carries a role and no capability.
+  async rejoin(record) {
+    this.record = record;
+    this.closing = false;
+    const url = `${this.socketBase}/v1/connect?desktop=${encodeURIComponent(record.desktopId)}`
+      + `&device=${encodeURIComponent(record.participant)}`;
+    await this.#open(url);
+    await this.#handshake(record.devicePrivate, record.devicePublic, record.desktopPublic);
+    this.send({ t: 'hello', client: 'relay-web/1', proto: 1 });
+    const welcome = await this.once('welcome');
+    if (this.hubEpoch && this.hubEpoch !== welcome.hub_epoch) this.streams.clear();
+    this.hubEpoch = welcome.hub_epoch;
+    return welcome;
   }
 
   // -- connecting -------------------------------------------------------------------------------
@@ -307,7 +413,12 @@ export class Rrp extends EventTarget {
       const onMessage = (event) => { done(); resolve(event.detail); };
       const onError = (event) => {
         done();
-        reject(new Error(event.detail.message || 'the desktop refused that.'));
+        const failure = new Error(event.detail.message || 'the desktop refused that.');
+        // The code as well as the sentence: a refused knock (`not_admitted`) and a knock that
+        // never got an answer read the same to `catch` otherwise, and they are different things
+        // to tell someone.
+        failure.code = event.detail.code || '';
+        reject(failure);
       };
       this.addEventListener(kind, onMessage, { once: true });
       this.addEventListener('error', onError, { once: true });

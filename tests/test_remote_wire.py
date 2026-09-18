@@ -249,6 +249,73 @@ class BrowserPairLinkTests(unittest.TestCase):
             self.assertIn("again", result["error"].lower(), fragment)
 
 
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class BrowserInviteLinkTests(unittest.TestCase):
+    """app/rrp.js parsing the invite links a guest actually receives (section 10.2).
+
+    The desktop's own parser is ``pairing.parse_invite_url``; these are the browser's, on the same
+    links, because the guest client is the only thing that ever reads the fragment of a real one.
+    """
+
+    def parse(self, fragments: list[str]) -> list[dict]:
+        done = subprocess.run(
+            [shutil.which("node"), str(Path(__file__).resolve().parent / "join_link_peer.mjs"),
+             json.dumps(fragments)], capture_output=True, text=True,
+            cwd=str(Path(__file__).resolve().parent.parent))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def invite(self, room="room-9"):
+        return pairing.invite_url("https://app.example", b"\x33" * 32, b"\x44" * 16, room)
+
+    def test_a_plain_invite_link_parses(self):
+        result = self.parse(["#" + self.invite().split("#", 1)[1]])[0]
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["room"], "room-9")
+        self.assertEqual(result["desktop"], pairing.b64(b"\x33" * 32))
+        self.assertEqual(result["secret"], pairing.b64(b"\x44" * 16))
+        # The browser agrees with the desktop's own parser, field for field.
+        desktop_side = pairing.parse_invite_url(self.invite())
+        self.assertEqual(result["desktop"], pairing.b64(desktop_side["desktop_public"]))
+        self.assertEqual(result["secret"], pairing.b64(desktop_side["secret"]))
+
+    def test_percent_encoded_separators_still_parse(self):
+        """A link pasted through something that escaped the fragment still opens."""
+        fragment = self.invite().split("#", 1)[1].replace("&", "%26")
+        result = self.parse(["#" + fragment])[0]
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["room"], "room-9")
+        self.assertEqual(result["secret"], pairing.b64(b"\x44" * 16))
+
+    def test_an_invite_link_is_not_a_pairing_link(self):
+        """`i` and `s` are different fields on purpose: neither link parses as the other kind."""
+        invite = "#" + self.invite().split("#", 1)[1]
+        pair = "#" + pairing.pair_url("https://app.example", b"\x33" * 32, b"\x44" * 16,
+                                      "room-9").split("#", 1)[1]
+        self.assertFalse(self.parse([invite])[0]["asPairing"])
+        result = self.parse([pair])[0]
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["asPairing"])
+
+    def test_a_damaged_invite_says_what_to_do(self):
+        secret = pairing.b64(b"\x44" * 16)
+        for fragment in ("#v=1", "#v=1&d=" + pairing.b64(b"\x33" * 32), "#",
+                         f"#v=1&d=short&i={secret}&r=room-9",
+                         f"#v=1&d={pairing.b64(b'3' * 31)}&i={secret}&r=room-9",
+                         f"#v=1&d={pairing.b64(b'\x33' * 32)}&i={pairing.b64(b'x' * 8)}&r=room-9"):
+            result = self.parse([fragment])[0]
+            self.assertFalse(result["ok"], fragment)
+            # Never a stack trace, and always something the reader can act on.
+            self.assertIn("invit", result["error"].lower(), fragment)
+            self.assertIn("again", result["error"].lower(), fragment)
+
+    def test_a_newer_version_says_so_rather_than_looking_broken(self):
+        result = self.parse(["#v=2&d=" + pairing.b64(b"\x33" * 32)
+                             + "&i=" + pairing.b64(b"\x44" * 16) + "&r=room-9"])[0]
+        self.assertFalse(result["ok"])
+        self.assertIn("newer version", result["error"])
+
+
 class LabelTests(unittest.TestCase):
     def test_device_names_are_stripped(self):
         from remote.identity import clean_label
