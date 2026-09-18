@@ -715,13 +715,20 @@ class Host:
                               if nonce.expires > now}
         for item in items:
             pane = item.get("id", "")
-            if item.get("status") != "password":
+            state = self.source.secret_state(pane) if item.get("status") == "password" else None
+            if state is None:
+                # The prompt this pane's permit was minted for has ended. **Burn it**, and move
+                # the generation on, so that the next prompt from the same process gets a permit
+                # of its own: section 6.7 binds the nonce to a prompt generation, and a permit
+                # that outlives its prompt binds only the pane. The attack is two prompts from one
+                # process — ssh asking for a key passphrase and then for a password — where the
+                # phone is still holding the first one's permit and would answer the second on the
+                # strength of a decision the person made about the first.
+                if self.secret_nonces.pop(pane, None) is not None:
+                    self._prompt_generation[pane] = self._prompt_generation.get(pane, 0) + 1
                 continue
-            state = self.source.secret_state(pane)
             generation = self._prompt_generation.get(pane, 0)
             nonce = self.secret_nonces.get(pane)
-            if state is None:
-                continue                     # the source cannot vouch for the prompt: no nonce
             if nonce and nonce.generation == generation and nonce.foreground_pid == \
                     state.get("foreground_pid", 0) and nonce.expires > now:
                 item["secret_nonce"] = nonce.value
@@ -850,10 +857,17 @@ class Host:
                 return other.name if other is not None else "a guest"
             return "the owner"
 
+        # The fields that hold what somebody typed, whichever event they arrive on. `queued` used
+        # to have its own shorter list than the rows below, which made the rule depend on which
+        # field the producer happened to use: `backend/relay_core/queue.py` puts the words in
+        # `preview` on a row and the demo source puts them in `text` on a `queued`, and a
+        # producer that put a `preview` on a `queued` would have handed every guest the owner's
+        # prompt. One list, applied in both places.
+        words = ("text", "prompt", "preview", "label")
         if name == "queued":
             if event.get("origin") == mine:
                 return {**event, "author": "you"}
-            out = {key: value for key, value in event.items() if key not in ("text", "prompt")}
+            out = {key: value for key, value in event.items() if key not in words}
             out["author"] = author(event.get("origin"))
             return out
         out = dict(event)
@@ -869,8 +883,7 @@ class Host:
                 if origin == mine:
                     kept.append({**row, "author": "you"})
                     continue
-                kept.append({key: value for key, value in row.items()
-                             if key not in ("preview", "text", "prompt")}
+                kept.append({key: value for key, value in row.items() if key not in words}
                             | {"author": author(origin)})
             out[field] = kept
         return out
@@ -1362,6 +1375,18 @@ class Host:
             raise wire.WireError("not_permitted", "that pairing code is wrong or spent.")
         self.rooms.burn(channel.room)
 
+        if self.guests.by_key(channel.client_static) is not None:
+            # The other half of `GuestStore.admit`'s refusal, and section 10.2's "a key is a
+            # device *or* a participant and never both". Only one direction was enforced: admit
+            # refuses a key the device store knows, but nothing stopped a key the **guest** store
+            # knows from being paired — and since the handshake looks devices up first, the next
+            # connection would then be that guest holding a capability rather than a role. A
+            # guest watching a shared pane can see the pairing QR the moment the owner opens it,
+            # which is all this needs to be reachable rather than theoretical.
+            raise wire.WireError("not_permitted",
+                                 "that key is already a guest here; remove them from the share "
+                                 "before pairing this device.")
+
         code = auth_code(channel.session.handshake_hash)
         request = PairRequest(name=identity_mod.clean_label(message.get("name", "")),
                               platform=identity_mod.clean_label(message.get("platform", ""), 24),
@@ -1764,9 +1789,14 @@ class Host:
         await self.source.agent_stop(self._pane_of(message))
 
     async def _on_queue_remove(self, channel: Channel, message: dict) -> None:
-        item = message.get("item_id")
-        await self.source.queue_remove(self._pane_of(message),
-                                       item if isinstance(item, str) else "")
+        # Three spellings of one id, because section 16 renamed it: `row` is what `pane_state`
+        # calls a queue row and what `app/pane.js` sends, `item`/`item_id` are what the older
+        # composer sent. Reading only `item_id` meant the phone's Remove button asked the desktop
+        # to withdraw the empty string — the row stayed, and nothing said why. Whichever arrives,
+        # it is an id this desktop minted and the GUI resolves it against its own table.
+        item = next((message[name] for name in ("row", "item_id", "item")
+                     if isinstance(message.get(name), str) and message[name]), "")
+        await self.source.queue_remove(self._pane_of(message), item)
 
     async def _on_recap_request(self, channel: Channel, message: dict) -> None:
         await self.source.recap_request(self._pane_of(message))

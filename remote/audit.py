@@ -53,6 +53,11 @@ class AuditLog:
         path = self.path_for(time.strftime("%Y-%m"))
         line = json.dumps({"at": round(time.time(), 3), "kind": kind, **fields},
                           separators=(",", ":"), ensure_ascii=False)
-        with open(path, "a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
+        # 0600 from the moment the file exists, rather than chmod-ed once the first line is in
+        # it: between the two the file is whatever the umask says, and the first line of an audit
+        # log is a pairing or a knock. `remote/guests.py` opens `guests.json` the same way and
+        # for the same reason. The chmod stays for a file this process did not create.
+        handle = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        with os.fdopen(handle, "a", encoding="utf-8") as out:
+            out.write(line + "\n")
         path.chmod(0o600)

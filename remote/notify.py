@@ -30,8 +30,10 @@ handed an opaque endpoint and ciphertext, and a 404 or 410 from the push service
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import time
+from urllib.parse import urlsplit
 
 from . import identity as identity_mod, push, wire
 
@@ -53,17 +55,51 @@ KINDS = ("agent_finished", "waiting_input", "password", "failed", "plan")
 DEFAULT_KINDS = KINDS            # all five on: a notification you did not want is one tap to turn off
 
 
+def clean_endpoint(value) -> str:
+    """The endpoint a phone says its push service gave it, or a WireError saying why not.
+
+    Section 9.1 checks `https://`, a length and no whitespace. That is not enough on its own:
+    the endpoint is a URL the **phone** chooses and the **rendezvous** then makes an
+    authenticated POST to, with a body the phone also had a hand in. A `view` device — the
+    weakest capability there is — could therefore aim the one process on the hosted side that
+    has a network at `https://169.254.169.254/` or at anything else behind it.
+
+    The rendezvous refuses a host that is not a push service (``rendezvous/server.py``), which is
+    the boundary that matters because anyone may register a desktop there. This is the earlier,
+    cheaper half: a literal address in a range that cannot be a public push service is refused
+    here, where the phone gets told, rather than silently stored and refused at delivery. A
+    hostname is left alone — resolving it here would mean a DNS lookup on the hub's event loop,
+    and a name that resolves inside is the rendezvous's business, not this process's.
+    """
+    if not isinstance(value, str) or not value.startswith("https://"):
+        raise wire.WireError("unknown_type", "the push endpoint must be an https URL.")
+    if len(value) > MAX_ENDPOINT or any(character.isspace() for character in value):
+        raise wire.WireError("unknown_type", "that push endpoint is not a URL.")
+    parts = urlsplit(value)
+    if parts.username is not None or parts.password is not None or "@" in (parts.netloc or ""):
+        # `https://fcm.googleapis.com@127.0.0.1/x` is a request to 127.0.0.1 that reads like one
+        # to Google, and the only reason to write one is to be misread.
+        raise wire.WireError("unknown_type", "a push endpoint carries no credentials.")
+    host = (parts.hostname or "").strip("[]")
+    if not host:
+        raise wire.WireError("unknown_type", "that push endpoint names no host.")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return value                     # a name; the rendezvous decides whether it is a service
+    if not address.is_global or address.is_multicast:
+        raise wire.WireError("unknown_type",
+                             "that push endpoint is not a push service on the internet.")
+    return value
+
+
 def clean_subscription(message: dict) -> dict:
     """The stored form of a ``push_subscribe``, or a WireError naming what is wrong.
 
     Everything is checked: a phone is not trusted to send a sane endpoint, and the two content
     keys and the seal key have exactly one right size each.
     """
-    endpoint = message.get("endpoint")
-    if not isinstance(endpoint, str) or not endpoint.startswith("https://"):
-        raise wire.WireError("unknown_type", "the push endpoint must be an https URL.")
-    if len(endpoint) > MAX_ENDPOINT or any(character.isspace() for character in endpoint):
-        raise wire.WireError("unknown_type", "that push endpoint is not a URL.")
+    endpoint = clean_endpoint(message.get("endpoint"))
     p256dh = wire.decode_bytes(message.get("p256dh"), 200, "p256dh")
     if len(p256dh) != P256DH_BYTES or p256dh[0] != 0x04:
         raise wire.WireError("unknown_type", "p256dh must be an uncompressed P-256 point.")

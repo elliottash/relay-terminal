@@ -21,12 +21,14 @@ import base64
 import hmac
 import json
 import logging
+import os
 import secrets
 import sqlite3
 import sys
 import time
 from hashlib import sha256
 from pathlib import Path
+from urllib.parse import urlsplit
 
 if __package__ in (None, ""):                      # running the file directly
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -40,8 +42,59 @@ MAX_ROOM_TTL = 7 * 86400    # an invite may live up to a week (section 10)
 METADATA_DAYS = 7
 MAX_ROOMS_PER_HOUR = 20
 MAX_CHANNELS_PER_DESKTOP = 32
+# Section 8 wants the concurrent-socket limit counted **per device**, so that "anyone who learns a
+# `desktop_id` [cannot] open every slot and keep the owner's own phone out". Per-device connect
+# tokens do not exist yet — they would have to be minted here and delivered inside the pairing
+# session — so until they do, the budget is also capped per peer address. It does not make the
+# per-device rule true; it means one address cannot be the whole of the denial.
+MAX_CHANNELS_PER_PEER = 8
 MAX_PUSH_PER_HOUR = 600
 CHALLENGE_TTL = 120
+
+# Where `/v1/push/send` may post. A Web Push endpoint comes from the browser's own push service,
+# and there are five of them; everything else is a URL somebody chose, and this process is the one
+# with a network on the hosted side. Without this the route is a request-forgery proxy: a paired
+# `view` phone sends `push_subscribe {endpoint: "https://169.254.169.254/…"}`, the desktop stores
+# it, and the rendezvous makes the request. `RELAY_PUSH_HOSTS` adds to the list, comma separated,
+# for a self-hoster running their own push service — and for the tests, which deliver to loopback.
+PUSH_SERVICE_HOSTS = (
+    "fcm.googleapis.com",                       # Chrome and every Chromium browser
+    "android.googleapis.com",                   # the older FCM host, still in circulation
+    "updates.push.services.mozilla.com",        # Firefox
+    "push.services.mozilla.com",
+    "web.push.apple.com",                       # Safari, iOS and macOS
+    "push.apple.com",
+    "notify.windows.com",                       # Edge / WNS
+)
+
+
+def push_hosts() -> tuple[str, ...]:
+    extra = tuple(host.strip().lower() for host in os.environ.get("RELAY_PUSH_HOSTS", "").split(",")
+                  if host.strip())
+    return PUSH_SERVICE_HOSTS + extra
+
+
+def push_endpoint_host(endpoint: str) -> str:
+    """The host of a push endpoint, or "" when it is not one this server will post to.
+
+    A name is matched against the push services rather than resolved, so there is no DNS lookup
+    to race: a rebind between the check and the request would otherwise put the whole check back
+    where it started.
+    """
+    if not endpoint.startswith("https://") or len(endpoint) > 2048:
+        return ""
+    if any(character.isspace() for character in endpoint):
+        return ""
+    parts = urlsplit(endpoint)
+    if parts.username is not None or parts.password is not None or "@" in (parts.netloc or ""):
+        return ""
+    host = (parts.hostname or "").lower()
+    if not host:
+        return ""
+    for allowed in push_hosts():
+        if host == allowed or host.endswith("." + allowed):
+            return host
+    return ""
 
 
 def derive_desktop_id(static_pubkey_b64: str) -> str:
@@ -248,6 +301,11 @@ class Store:
         self.db.commit()
 
 
+def peer_address(socket: ws.WebSocket) -> str:
+    """The address half of a socket's peer, without the port."""
+    return (socket.peer or "").rsplit(":", 1)[0]
+
+
 class Hub:
     """The live desktop sockets and the client channels attached to each."""
 
@@ -268,8 +326,19 @@ class Hub:
         return list(self.channels.pop(desktop_id, {}).values())
 
     def add_channel(self, desktop_id: str, channel: bytes, socket: ws.WebSocket) -> bool:
+        """Take a slot, if there is one for this desktop **and** one for this address.
+
+        `/v1/connect` for a client carries no credential — the desktop is the thing that
+        authenticates, at the handshake — so the budget is all that stands between a stranger who
+        knows a `desktop_id` and the owner's own phone being unable to get a socket. A per-address
+        share of it means that stranger needs a distributed attack rather than a loop.
+        """
         channels = self.channels.setdefault(desktop_id, {})
         if len(channels) >= MAX_CHANNELS_PER_DESKTOP:
+            return False
+        peer = peer_address(socket)
+        if peer and sum(1 for other in channels.values()
+                        if peer_address(other) == peer) >= MAX_CHANNELS_PER_PEER:
             return False
         channels[channel] = socket
         return True
@@ -367,6 +436,11 @@ def build(store: Store, static_root: Path | None = None) -> httpd.Server:
         endpoint = str(fields.get("endpoint", ""))
         if not endpoint.startswith("https://") or len(endpoint) > 2048:
             return httpd.Response.error(400, "endpoint must be an https URL.")
+        if not push_endpoint_host(endpoint):
+            # Not a push service, so not somewhere this process posts to. The desktop refuses the
+            # same subscription when the phone offers it; this is the refusal that binds, because
+            # registering a desktop here proves possession of a key and nothing else.
+            return httpd.Response.error(400, "that endpoint is not a Web Push service.")
         ciphertext = str(fields.get("ciphertext", ""))
         try:
             payload = base64.b64decode(ciphertext, validate=True)
@@ -400,6 +474,10 @@ def build(store: Store, static_root: Path | None = None) -> httpd.Server:
                     "TTL": str(ttl),
                     "Urgency": urgency,
                     "Content-Type": "application/octet-stream",
+                    # RFC 8291 section 4: an aes128gcm payload says so, or the push service has
+                    # no way to know what it is holding and answers 400. Invisible to a test that
+                    # only talks to a service written alongside it, fatal on a real phone.
+                    "Content-Encoding": "aes128gcm",
                 })
             try:
                 with urllib.request.urlopen(request, timeout=10) as response:

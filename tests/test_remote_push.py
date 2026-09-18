@@ -22,6 +22,7 @@ import asyncio
 import base64
 import contextlib
 import json
+import os
 import shutil
 import ssl
 import subprocess
@@ -829,6 +830,11 @@ class FakePushService:
             return httpd.Response(status=self.status, body=b"", content_type="text/plain")
 
         await self.server.start("127.0.0.1", 0, ssl_context=devtls.context(self.directory))
+        # The rendezvous posts only to a Web Push service (rendezvous/server.py), which a
+        # loopback address is not: `RELAY_PUSH_HOSTS` is the hook a self-hoster with their own
+        # push service uses, and it is what makes this stand-in reachable.
+        self._hosts = os.environ.get("RELAY_PUSH_HOSTS")
+        os.environ["RELAY_PUSH_HOSTS"] = "127.0.0.1"
         self.endpoint = f"https://127.0.0.1:{self.server.port}/subscription/one"
         # The certificate is the dev one, made for a LAN address, so the delivery side of this
         # process is told not to check it: what is under test is the bytes, not the PKI. urllib
@@ -840,6 +846,10 @@ class FakePushService:
 
     async def __aexit__(self, *exc):
         urllib.request.install_opener(None)
+        if self._hosts is None:
+            os.environ.pop("RELAY_PUSH_HOSTS", None)
+        else:
+            os.environ["RELAY_PUSH_HOSTS"] = self._hosts
         await self.server.close()
 
 

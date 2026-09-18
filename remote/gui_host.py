@@ -369,16 +369,20 @@ class GuiPaneSource(panes_mod.PaneSource):
     def voice_reply(self, message: dict) -> None:
         """The GUI's answer to a `voice` line: `ok` with the text, or the worker's error.
 
-        Matched on the id this process minted. A reply with no id belongs to the oldest clip
-        still waiting on that pane; an id we no longer know is dropped rather than handed to
-        someone else's clip.
+        Matched on the id this process minted, so two clips in flight cannot be answered with
+        each other's text. An answer with no id is an older GUI's spelling, and it is taken only
+        when exactly one clip is waiting on that pane: guessing between two would hand one
+        person's phone a recording of somebody else talking, which is the one mistake a
+        transcript must not make. With two waiting, the unaddressed answer is dropped and both
+        clips time out, which the phone shows as an error.
         """
         request = message.get("id")
         if isinstance(request, str) and request:
             entry = self._voice.get(request)
         else:
             pane = message.get("pane")
-            entry = next((item for item in self._voice.values() if item[0] == pane), None)
+            waiting = [item for item in self._voice.values() if item[0] == pane]
+            entry = waiting[0] if len(waiting) == 1 else None
         if entry is None:
             return
         _, future = entry
