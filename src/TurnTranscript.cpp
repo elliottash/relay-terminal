@@ -69,7 +69,7 @@ void TurnTranscriptView::setSummary(const QJsonObject &summary) {
         if (tool.contains(QStringLiteral("exit_code"))) line += QStringLiteral("  · exit %1").arg(tool.value(QStringLiteral("exit_code")).toInt());
         auto *row = new QTreeWidgetItem(m_tools, {line});
         row->setData(0, Qt::UserRole, tool.value(QStringLiteral("call_id")).toString());
-        row->setForeground(0, ok ? relay::theme::Text : QColor(0xf0, 0x71, 0x78));
+        row->setForeground(0, ok ? relay::theme::Text : relay::theme::SyntaxUnknown);
         row->setToolTip(0, QStringLiteral("Enter or double-click opens the full output"));
         if (preview.contains(QLatin1Char('\n')) || preview.size() > 120) {
             // Expanding a row shows the whole preview (command, path or diff).

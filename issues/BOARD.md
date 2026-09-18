@@ -16,7 +16,6 @@
 | `#FW77` | [Relay as a pure terminal (TUI) app](features/2026-09-17-terminal-only-tui-relay.md) | ready |  |  |  |
 | `#P4GP` | [Website and beta release](features/2026-09-17-website-and-beta-release.md) | ready |  |  |  |
 | `#05J2` | [Export settings, and an optional sync across machines](features/2026-09-17-settings-export-and-sync.md) | ready |  |  |  |
-| `#0JA7` | [Colour themes](features/2026-09-17-color-themes.md) | ready |  |  |  |
 | `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | ready |  |  |  |
 | `#W5N2` | [Remote access from a phone and multiplayer shared terminals](features/2026-09-17-remote-phone-and-multiplayer.md) | in-progress |  |  |  |
 | `#C1HH` | [Agent drives interactive programs in the visible pane, with take-over](features/needs_qa_llm/2026-09-17-agent-delegate-and-take-over.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
@@ -72,6 +71,7 @@
 | `#23XM` | [Switchboard phase 0: card format, tasks, threads and `relay-board` tooling](features/needs_qa_llm/2026-09-17-switchboard-phase0.md) | needs-qa-llm | Claude Opus 5 (1M context), 2026-09-17 |  |  |
 | `#QVVA` | [Thinking stream, "✦ thought for N s", "✦ N tool calls" links and the relay:// handler](features/needs_qa_llm/2026-09-17-thinking-and-tool-call-summaries.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17 |  |  |
 | `#80FZ` | [Windows, tabs and panes with Chrome-style shortcuts](features/needs_qa_llm/2026-09-17-windows-tabs-panes.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
+| `#0JA7` | [Colour themes](features/needs_qa_llm/2026-09-17-color-themes.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, color-themes worktree), 2026-09-17 |  |  |
 | `#D60R` | [File explorer: right-click menu, navigate here, and a toggle shortcut](features/needs_qa_llm/2026-09-17-explorer-right-click-and-toggle.md) | needs-qa-llm | agent |  |  |
 | `#K13B` | [Update the website for the new engine and features](features/needs_qa_llm/2026-09-17-website-update-engine-features.md) | needs-qa-llm | Claude Opus 5 (1M context), 2026-09-17 |  |  |
 | `#JRWQ` | [The pane header is an agent-written summary of the session](features/needs_qa_llm/2026-09-17-pane-title-summary.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, pane-title worktree), 2026-09-17 |  |  |

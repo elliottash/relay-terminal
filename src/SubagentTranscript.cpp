@@ -32,9 +32,8 @@ QString sanitize(const QString &text) {
 SubagentTranscriptView::SubagentTranscriptView(const QString &id, QWidget *parent) : QWidget(parent), m_id(id) {
     setObjectName(QStringLiteral("subagentTranscript"));
     setAttribute(Qt::WA_StyledBackground);
-    // Opaque: the view also floats over a narrow pane's terminal.
-    setStyleSheet(QStringLiteral("QWidget#subagentTranscript { background: %1; border: 1px solid %2; border-radius: 8px; }")
-                      .arg(theme::Background.name(), theme::Border.name()));
+    // Opaque: the view also floats over a narrow pane's terminal. The frame is in the
+    // application stylesheet (QWidget#subagentTranscript) so a theme switch restyles it.
     auto *layout = new QVBoxLayout(this); layout->setContentsMargins(10, 8, 8, 8); layout->setSpacing(6);
     auto *header = new QHBoxLayout;
     m_title = new QLabel; m_title->setTextFormat(Qt::PlainText);
@@ -49,7 +48,7 @@ SubagentTranscriptView::SubagentTranscriptView(const QString &id, QWidget *paren
     layout->addLayout(header);
     m_status = new QLabel; m_status->setTextFormat(Qt::PlainText);
     m_status->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    QPalette muted = m_status->palette(); muted.setColor(QPalette::WindowText, theme::TextMuted); m_status->setPalette(muted);
+    m_status->setObjectName(QStringLiteral("panelKeys"));
     layout->addWidget(m_status);
     m_log = new QPlainTextEdit;
     m_log->setObjectName(QStringLiteral("transcriptView"));

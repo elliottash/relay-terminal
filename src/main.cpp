@@ -583,7 +583,7 @@ public:
         if (option.state & QStyle::State_Selected) painter->fillRect(r, relay::theme::SurfaceRaised.lighter(135));
         const bool agent = index.data(Qt::UserRole + 1).toBool();
         painter->setFont(option.font);
-        painter->setPen(agent ? relay::theme::Accent : QColor(0xe5, 0xc0, 0x7b));
+        painter->setPen(agent ? relay::theme::Accent : relay::theme::Warning);
         painter->drawText(QRect(r.left() + 4, r.top(), 18, r.height()), Qt::AlignCenter, agent ? QStringLiteral("✦") : QStringLiteral("$"));
         painter->setPen(relay::theme::Text);
         const QString text = option.fontMetrics.elidedText(index.data(Qt::DisplayRole).toString().simplified(), Qt::ElideRight, std::max(20, r.width() - 54));
@@ -8060,7 +8060,7 @@ protected:
         const bool closing = m_glyph == Glyph::Close;
         if (hovered) {
             painter.setPen(Qt::NoPen);
-            painter.setBrush(closing ? QColor(0xc0, 0x39, 0x2b) : relay::theme::SurfaceRaised);
+            painter.setBrush(closing ? relay::theme::Error.darker(130) : relay::theme::SurfaceRaised);
             const qreal radius = std::min(width(), height()) * 5.0 / kSize;
             painter.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), radius, radius);
         }
@@ -9292,6 +9292,50 @@ private:
                                   QStringLiteral("Forget the saved layout; the next start opens one new window"),
                                   QStringLiteral("Forget"), [this] { startFreshWindowSet(); });
         sections << general;
+
+        // Colour themes (issue 0JA7). One theme file carries the UI tokens and the 16-colour
+        // terminal palette, so the picker restyles the chrome, both terminal engines and the
+        // prompt box's syntax colours at once. The actions palette renders these rows too.
+        relay::SettingsSection appearance;
+        appearance.id = QStringLiteral("appearance");
+        appearance.title = QStringLiteral("Appearance");
+        appearance.blurb = QStringLiteral("One file per theme. Built-in themes ship with Relay; your own go in "
+                                          "~/.config/relay/themes as <name>.toml — copy a built-in one and edit it.");
+        {
+            QStringList ids, labels;
+            for (const relay::theme::ThemeChoice &choice : relay::theme::availableThemes()) {
+                ids << choice.id;
+                labels << (choice.builtin ? choice.name : choice.name + QStringLiteral(" (yours)"));
+            }
+            appearance.rows << choiceRow(QStringLiteral("option:theme"), QStringLiteral("Theme"),
+                                         QStringLiteral("Applies at once: the app, the terminal palette and the "
+                                                        "prompt box's colours"),
+                                         ids, labels, relay::theme::activeThemeId(), [this](const QString &id) {
+                if (!relay::theme::setActiveTheme(id)) {
+                    notice(QStringLiteral("That theme could not be read."), 6000);
+                    return;
+                }
+                notice(QStringLiteral("Theme: %1.").arg(relay::theme::active().name), 4000);
+            });
+        }
+        appearance.rows << buttonRow(QStringLiteral("theme.reload"), QStringLiteral("Reload themes"),
+                                     QStringLiteral("Pick up a theme file you added or edited"),
+                                     QStringLiteral("Reload"), [this] {
+            relay::theme::refreshThemes();
+            relay::theme::setActiveTheme(relay::theme::activeThemeId());
+            if (m_settings) m_settings->rebuild();
+            notice(QStringLiteral("Themes reloaded. A theme added while Relay runs reaches new terminal panes; "
+                                  "restart to give it to the ones already open."), 8000);
+        });
+        appearance.rows << buttonRow(QStringLiteral("theme.folder"), QStringLiteral("Your themes folder"),
+                                     QStringLiteral("~/.config/relay/themes"), QStringLiteral("Open…"), [this] {
+            const QString dir = QDir(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation))
+                                    .absoluteFilePath(QStringLiteral("relay/themes"));
+            QDir().mkpath(dir);
+            QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+            notice(dir, 8000);
+        });
+        sections << appearance;
 
         relay::SettingsSection models;
         models.id = QStringLiteral("models");

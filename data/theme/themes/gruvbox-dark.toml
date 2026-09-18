@@ -1,0 +1,48 @@
+# Gruvbox Dark (Pavel Pertsev's palette, https://github.com/morhetz/gruvbox).
+# Retro warm greys; the accent is gruvbox's bright blue so it stays legible on bg0.
+
+[theme]
+name = "Gruvbox Dark"
+variant = "dark"
+description = "Pavel Pertsev's gruvbox: warm dark greys, muted primaries."
+
+[ui]
+background = "#282828"
+surface = "#32302f"
+surface_raised = "#3c3836"
+border = "#504945"
+border_strong = "#7c6f64"
+text = "#ebdbb2"
+text_muted = "#a89984"
+accent = "#83a598"
+accent_text = "#1d2021"
+accent_hover = "#9cb8ac"
+selection = "#45403d"
+disabled = "#6d6259"
+success = "#b8bb26"
+warning = "#fabd2f"
+error = "#fb4934"
+shell = "#83a598"
+agent = "#d3869b"
+
+[syntax]
+command = "#83a598"
+unknown = "#fb4934"
+flag = "#fabd2f"
+string = "#b8bb26"
+path = "#8ec07c"
+operator = "#928374"
+variable = "#d3869b"
+agent = "#d3869b"
+token = "#83a598"
+
+[terminal]
+background = "#282828"
+foreground = "#ebdbb2"
+cursor = "#ebdbb2"
+background_intense = "#3c3836"
+foreground_intense = "#fbf1c7"
+palette = [
+  "#282828", "#cc241d", "#98971a", "#d79921", "#458588", "#b16286", "#689d6a", "#a89984",
+  "#928374", "#fb4934", "#b8bb26", "#fabd2f", "#83a598", "#d3869b", "#8ec07c", "#ebdbb2",
+]

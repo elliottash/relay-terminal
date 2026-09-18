@@ -20,6 +20,9 @@ public:
 
     // Re-read Relay's terminal settings (copy on select) into the view.
     void applySettings();
+    // Re-read the selected theme's colours into the view. Connected to the theme notifier, so a
+    // theme switch recolours a running engine pane without a new pane (issue 0JA7).
+    void applyThemeColors();
 
 private:
     void applyRelayProfile();

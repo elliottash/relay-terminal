@@ -1190,14 +1190,48 @@ deadline that ends a turn whose model has gone quiet (docs/AGENT-SESSIONS-PROTOC
 
 ## 14. Theme
 
-`src/Theme.{h,cpp}`: Fusion style, a dark `QPalette`, and one stylesheet built from color
-tokens. `polishWindow()` tags unnamed widgets.
+One file per theme, in TOML, is the single source of truth for colour: the UI tokens the
+stylesheet is built from, the composer's syntax colours and the 16-colour ANSI terminal palette,
+all in one place (issue `0JA7`).
 
-The terminal uses `data/theme/konsole/Relay.profile` and `RelayDark.colorscheme`. KonsolePart
-has no API to select a profile, so Relay prepends `data/theme` to `XDG_CONFIG_DIRS` and
-`XDG_DATA_DIRS` before `QApplication` starts; `relayrc` sets `DefaultProfile=Relay.profile`.
-Both variables are restored before each shell starts, so user programs see their original
-paths. Nothing is written to `~/.config` or `~/.local/share/konsole`.
+| Piece | Where |
+|---|---|
+| Built-in themes | `data/theme/themes/*.toml` — `relay-dark`, `relay-light`, `solarized-dark`, `gruvbox-dark` |
+| User themes | `~/.config/relay/themes/*.toml`; a file of the same id replaces the built-in one |
+| Reader, token contract, discovery, generated Konsole files | `src/ThemeFile.{h,cpp}` (`relay-theme`, `tests/theme_test.cpp`) |
+| Live palette, stylesheet, the switch | `src/Theme.{h,cpp}` |
+| Picker | Settings › Appearance (built in `src/main.cpp`; the actions palette renders the same row) |
+
+A theme file has `[theme]` (name, variant `dark`/`light`, description), `[ui]`, `[syntax]`,
+`[terminal]` (background, foreground, cursor and a 16-entry `palette`) and `[flags]`. Missing
+tokens fall back to Relay Dark, so a short user theme still renders; unknown tables, keys and
+flags are kept in `ThemeSpec::extra`/`flags` rather than rejected, so a later token or per-theme
+boolean needs no format change.
+
+**The tokens are variables, not constants.** `relay::theme::Background`, `Text`, `Accent`,
+`Success`, `Warning`, `Error`, `Shell`, `Agent` and the `Syntax*` colours are assigned by
+`setActiveTheme()`, so painting code that reads them at paint time (`ChromeButton`,
+`SubagentsPanel`, `RequestsPanel`, the turn transcript, `InputHighlighter`) follows along.
+`setActiveTheme()` rebuilds the `QPalette` and the stylesheet, regenerates the terminal schemes,
+re-polishes every window and emits `theme::notifier()->themeChanged()`. Anything that *caches* a
+colour — a per-widget stylesheet, a palette copied onto a label — has to move into the global
+stylesheet or rebuild on that signal. Setting: `theme/name`.
+
+`polishWindow()` still tags unnamed widgets by object name.
+
+**The terminal.** The Konsole colour scheme is generated, never checked in. Before
+`QApplication` starts, `exposeKonsoleProfile()` writes one `.colorscheme` and one `.profile` per
+known theme into `$XDG_CACHE_HOME/relay/theme/konsole/`, plus a `relayrc` naming the chosen one,
+and prepends that directory and `data/theme` to `XDG_CONFIG_DIRS` and `XDG_DATA_DIRS`.
+`data/theme/konsole/Relay.profile` is the base the generated profiles are built from, so the
+font, margins, scrollback and link settings stay in one place. Every theme is written up front
+because Konsole builds its profile list once: on a switch `KonsoleBackend::applyTheme()` only has
+to name the right profile through the Session object's scriptable `setProfile()`, and the pane
+recolours in place. `EngineBackend::applyThemeColors()` reads the active `ThemeSpec` straight into
+the view. Both are connected to `themeChanged()`, so neither engine needs a new pane. A theme file
+*added* while Relay is running reaches new panes only after a restart ("Reload themes" says so).
+Both XDG variables are restored before each shell starts, so user programs see their original
+paths, and nothing is written to `~/.config` or `~/.local/share/konsole`.
 
 ## 15. Packaging layout
 
@@ -1208,7 +1242,7 @@ Installed tree (`CMakeLists.txt` `install()`):
 | `bin/relay` | the application |
 | `share/relay/backend/`, `share/relay/shell/` | worker, `relay_core`, Bash integration |
 | `share/relay/scripts/` | `relay-open`, `relay-agent.py` |
-| `share/relay/theme/` | `relayrc`, Konsole profile and color scheme, icons used by the stylesheet |
+| `share/relay/theme/` | `themes/*.toml` (the built-in colour themes), `relayrc`, the base Konsole profile, icons used by the stylesheet |
 | `share/applications/org.relayterminal.Relay.desktop` | desktop entry |
 | `share/metainfo/org.relayterminal.Relay.metainfo.xml` | AppStream metadata |
 | `share/icons/hicolor/…` | PNG and SVG icons |
@@ -1310,7 +1344,8 @@ Other limits:
 | `src/RichEditor.*` | composer editor |
 | `src/FilePanes.*` | explorer and preview widgets |
 | `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Switchboard: card rows, tabs, columns, filters; the pane and card detail; the per-window Switchboard worker |
-| `src/Theme.*` | palette, stylesheet, Konsole profile exposure |
+| `src/Theme.*` | live tokens, palette, stylesheet, the theme switch, generated Konsole profiles |
+| `src/ThemeFile.*` | the theme file format: reader, token contract, discovery, generated colour scheme |
 | `src/Hints.*` | shortcut hint limits and idle tips |
 | `src/OutputLinks.*` | which spans of terminal output are files, folders or URLs, what they resolve to, and the keyboard cursor over them |
 | `src/Notifications.*` | notification centre behind the header bell |
@@ -1333,7 +1368,7 @@ Other limits:
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |
 | `shell/relay-integration.bash`, `.zsh` | opt-in OSC 7 / OSC 133 marks |
 | `engine/` | Relay's terminal engine: cores, PTY, session, view, `TerminalBackend.h` |
-| `data/` | theme, Konsole profile, icons |
+| `data/` | colour themes, base Konsole profile, icons |
 | `packaging/`, `.github/workflows/`, `site/` | packages, CI, release, website |
 | `tests/` | Python backend and PTY tests, Qt editor and file pane tests |
 | `issues/` | file-based tracker, and the Switchboard's storage (`board.yaml`, cards, `threads/`) |

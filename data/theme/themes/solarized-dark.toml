@@ -1,0 +1,48 @@
+# Solarized Dark (Ethan Schoonover's palette, https://ethanschoonover.com/solarized/).
+# The ANSI palette is Solarized's own mapping; the UI tokens are Relay's chrome drawn in base03.
+
+[theme]
+name = "Solarized Dark"
+variant = "dark"
+description = "Ethan Schoonover's Solarized, dark background, cyan accent."
+
+[ui]
+background = "#002b36"
+surface = "#073642"
+surface_raised = "#0b4553"
+border = "#144e5c"
+border_strong = "#586e75"
+text = "#93a1a1"
+text_muted = "#657b83"
+accent = "#2aa198"
+accent_text = "#002b36"
+accent_hover = "#3fb9af"
+selection = "#11555a"
+disabled = "#48626a"
+success = "#859900"
+warning = "#b58900"
+error = "#dc322f"
+shell = "#2aa198"
+agent = "#6c71c4"
+
+[syntax]
+command = "#2aa198"
+unknown = "#dc322f"
+flag = "#b58900"
+string = "#859900"
+path = "#268bd2"
+operator = "#586e75"
+variable = "#6c71c4"
+agent = "#6c71c4"
+token = "#2aa198"
+
+[terminal]
+background = "#002b36"
+foreground = "#839496"
+cursor = "#93a1a1"
+background_intense = "#073642"
+foreground_intense = "#fdf6e3"
+palette = [
+  "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+  "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
+]
