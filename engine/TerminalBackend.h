@@ -100,6 +100,11 @@ public:
     virtual void scrollLines(int lines) = 0; // negative = back into history
     virtual void scrollPages(int pages) = 0;
     virtual void scrollToBottom() = 0;
+    // True when the view is showing the newest output rather than sitting back in the history. The
+    // host asks before it resizes the terminal (the thinking and queue bubbles are rows of the
+    // pane's column now, src/main.cpp) so it can put the view back at the bottom where it already
+    // was. An engine that cannot say answers yes, which is what an unscrolled terminal answers.
+    virtual bool viewportAtBottom() const { return true; }
     virtual bool scrollToPrompt(int direction) = 0;
 
     // ---- search

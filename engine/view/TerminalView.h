@@ -58,6 +58,7 @@ public:
     void scrollToBottom();
     void scrollToRow(int row); // row from the top of the scrollback
     bool scrollToPrompt(int direction);
+    bool viewportAtBottom() const; // showing the newest output rather than sitting back in history
 
     // ---- clipboard and selection
     void copySelection();                 // to the clipboard

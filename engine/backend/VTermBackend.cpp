@@ -260,6 +260,11 @@ void VTermBackend::scrollToBottom()
         m_view->scrollToBottom();
 }
 
+bool VTermBackend::viewportAtBottom() const
+{
+    return !m_view || m_view->viewportAtBottom();
+}
+
 bool VTermBackend::scrollToPrompt(int direction)
 {
     return m_view && m_view->scrollToPrompt(direction);

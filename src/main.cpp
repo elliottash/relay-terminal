@@ -2144,13 +2144,20 @@ private:
         m_help = nullptr;
         buildTranscript();
         layout->addWidget(m_transcript);
-        // The queue strip floats over the bottom of the terminal instead of taking layout space:
-        // resizing the terminal would make the shell redraw its prompt mid-output.
+        // The queue strip is a row of the pane's own column, directly under the terminal, and not
+        // an overlay floating over it any more: it takes real layout space so the terminal host
+        // shrinks and the shell reflows into what is left (owner report, 2026-09-18: "the terminal
+        // needs to move up, rather than being covered up"). The width policy is the prompt box's,
+        // and for the same reason: a queued line is wider than a pane in a three-pane split, and a
+        // minimum that wide would move this pane's minimum and make the splitter redistribute
+        // every pane in the row (#G152). placeQueueStrip() sets the height it asks for.
         m_queueStrip = new QFrame(this);
         m_queueStrip->setObjectName(QStringLiteral("queueStrip"));
         m_queueStrip->setAttribute(Qt::WA_StyledBackground);
+        m_queueStrip->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         auto *queueLayout = new QVBoxLayout(m_queueStrip); queueLayout->setContentsMargins(10, 6, 6, 6); queueLayout->setSpacing(2);
         m_queueStrip->hide();
+        layout->insertWidget(layout->indexOf(m_terminalHost) + 1, m_queueStrip);
         // A full-screen program (vim, htop) or an ssh session owns the screen. Relay no longer
         // switches to native input by itself; this button, or Ctrl+H, hands the keyboard over.
         // Both buttons live in one floating banner over the top of the terminal, next to the
@@ -2525,21 +2532,28 @@ private:
         return false;
     }
 
-    // Reasoning streams into a panel floating over the bottom of the terminal. It must not take
-    // layout space: resizing the terminal makes the idle shell redraw its prompt mid-output.
+    // Reasoning streams into a panel between the terminal and the queue strip. It is a row of the
+    // pane's column, not an overlay: it takes real layout space, so the terminal host above it
+    // shrinks and the shell reflows into what is left instead of losing its last lines behind the
+    // panel (owner report, 2026-09-18: "the terminal needs to move up, rather than being covered
+    // up"). placeThinking() sets the height, and every show or hide runs through keepPaneSizes().
     void appendThinking(const QString &text) {
         if (text.isEmpty()) return;
         if (!m_thinking) {
             m_thinking = new QFrame(this);
             m_thinking->setObjectName(QStringLiteral("thinkingOverlay"));
             m_thinking->setAttribute(Qt::WA_StyledBackground);
+            // Ignored width for the same reason as the prompt box's: a line of reasoning is wider
+            // than a pane in a three-pane split, and a minimum that wide would move this pane's
+            // minimum and make the splitter redistribute the whole row (#G152).
+            m_thinking->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
             auto *box = new QVBoxLayout(m_thinking); box->setContentsMargins(10, 4, 6, 6); box->setSpacing(2);
             auto *header = new QHBoxLayout;
             m_thinkingHeader = new QLabel; m_thinkingHeader->setObjectName(QStringLiteral("transcriptHeader"));
             header->addWidget(m_thinkingHeader, 1);
             auto *close = new QToolButton; close->setText(QStringLiteral("×")); close->setAutoRaise(true); close->setFocusPolicy(Qt::NoFocus);
             close->setToolTip(QStringLiteral("Hide for this turn (Actions › Agent options › Show thinking turns it off)"));
-            connect(close, &QToolButton::clicked, this, [this] { m_thinkingDismissed = true; m_thinking->hide(); });
+            connect(close, &QToolButton::clicked, this, [this] { m_thinkingDismissed = true; hideBubble(m_thinking); });
             auto *expand = new QToolButton; expand->setAutoRaise(true); expand->setFocusPolicy(Qt::NoFocus);
             expand->setText(QStringLiteral("▴"));
             expand->setToolTip(QStringLiteral("Show more of the reasoning"));
@@ -2560,6 +2574,9 @@ private:
             m_thinkingView->setMaximumBlockCount(400);
             box->addWidget(m_thinkingView, 1);
             m_thinking->hide();
+            // Above the queue strip and below the terminal: the order the two had as overlays.
+            if (auto *column = qobject_cast<QVBoxLayout *>(layout()))
+                column->insertWidget(column->indexOf(m_terminalHost) + 1, m_thinking);
         }
         if (!m_thinkingShown) {
             m_thinkingShown = true;
@@ -2572,27 +2589,92 @@ private:
         QTextCharFormat format; format.setForeground(relay::theme::TextMuted); format.setFontItalic(true);
         cursor.insertText(sanitize(text), format);
         m_thinkingView->verticalScrollBar()->setValue(m_thinkingView->verticalScrollBar()->maximum());
-        if (!m_thinkingDismissed && !m_thinking->isVisible()) { m_thinking->show(); placeThinking(); }
+        if (!m_thinkingDismissed && !m_thinking->isVisible()) { showBubble(m_thinking); placeThinking(); }
     }
 
+    // The height the reasoning panel asks the pane's column for. It is a row now rather than an
+    // overlay, so this is what moves the terminal up instead of covering it (owner report,
+    // 2026-09-18: "the terminal needs to move up, rather than being covered up"); the two heights
+    // the ▴ button switches between are the ones it always had.
     void placeThinking() {
         if (!m_thinking || !m_thinking->isVisible() || !m_terminalHost) return;
-        const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
-        // Compact by default: the overlay floats over the terminal, so it must cover as little
-        // output as possible. The ▴ button expands it when the reasoning is worth reading.
+        // Compact by default: the panel takes the terminal's space now, so it must take as little
+        // as it can. The ▴ button expands it when the reasoning is worth reading.
         const int lineHeight = std::max(14, m_thinkingView->fontMetrics().height());
-        const int wanted = m_thinkingExpanded ? host.height() / 3 : lineHeight * 2 + 30;
-        const int height = std::min(m_thinkingExpanded ? 220 : 90, std::max(wanted, lineHeight + 30));
-        int bottom = host.bottom() - 6;
-        if (m_queueStrip && m_queueStrip->isVisible()) bottom = m_queueStrip->geometry().top() - 4;
-        m_thinking->setGeometry(host.left() + 8, bottom - height, host.width() - 16, height);
-        m_thinking->raise();
+        const int span = bubbleSpan();
+        const int wanted = m_thinkingExpanded ? span / 3 : lineHeight * 2 + 30;
+        int height = std::min(m_thinkingExpanded ? 220 : 90, std::max(wanted, lineHeight + 30));
+        // Never more than half of what it shares with the terminal: in a pane squeezed down to a
+        // few rows the terminal keeps the other half rather than vanishing under the panel.
+        height = std::min(height, std::max(lineHeight + 30, span / 2));
+        setBubbleHeight(m_thinking, height);
     }
 
     void endThinking() {
         if (!m_thinkingShown) return;
         m_thinkingShown = false;
-        if (m_thinking) m_thinking->hide();
+        if (m_thinking) hideBubble(m_thinking);
+    }
+
+    // ----- the two bubbles that share the terminal's column -------------------------------------
+    //
+    // The reasoning panel and the queue strip are rows between the terminal host and the prompt
+    // box, so showing one moves the terminal up instead of covering its last lines (owner report,
+    // 2026-09-18). Their height is part of this pane's minimum height, and a splitter that cannot
+    // satisfy every minimum redistributes all of its panes as soon as one minimum moves (#G152),
+    // so every show, hide and height change runs with the enclosing splitters' sizes held.
+
+    // The height the terminal and whichever bubbles are up share. Heights are measured against
+    // this rather than against the terminal host alone, so showing a bubble does not shrink the
+    // number the next call sizes it from and leave the two chasing each other.
+    int bubbleSpan() const {
+        int span = m_terminalHost ? m_terminalHost->height() : 0;
+        const int spacing = layout() ? layout()->spacing() : 0;
+        if (m_thinking && m_thinking->isVisible()) span += m_thinking->height() + spacing;
+        if (m_queueStrip && m_queueStrip->isVisible()) span += m_queueStrip->height() + spacing;
+        return span;
+    }
+
+    void showBubble(QWidget *bubble) {
+        if (!bubble || bubble->isVisible()) return;
+        const bool bottom = terminalAtBottom();
+        keepPaneSizes([bubble] { bubble->show(); });
+        pinTerminalBottom(bottom);
+    }
+
+    void hideBubble(QWidget *bubble) {
+        if (!bubble || bubble->isHidden()) return;
+        const bool bottom = terminalAtBottom();
+        keepPaneSizes([bubble] { bubble->hide(); });
+        pinTerminalBottom(bottom);
+    }
+
+    // A bubble asks for its height as a maximum over a token minimum, never as a fixed height: a
+    // row's minimum is part of this pane's minimum, and a fixed one made a pane in a three-high
+    // stack overflow its own column, with the queue strip drawn through the prompt box. As a
+    // maximum the bubble is squeezed along with the terminal and the prompt box when the pane is
+    // too short for all three, and takes exactly what it asked for whenever there is room.
+    static constexpr int kBubbleFloor = 24;   // a sliver stays, so the bubble never vanishes silently
+    void setBubbleHeight(QWidget *bubble, int height) {
+        height = std::max(0, height);
+        const int floor = std::min(height, kBubbleFloor);
+        if (!bubble || (bubble->maximumHeight() == height && bubble->minimumHeight() == floor)) return;
+        const bool bottom = terminalAtBottom();
+        keepPaneSizes([bubble, height, floor] { bubble->setMinimumHeight(floor); bubble->setMaximumHeight(height); });
+        pinTerminalBottom(bottom);
+    }
+
+    bool terminalAtBottom() const {
+        return !m_backend || !(m_backend->capabilities() & relay::TerminalBackend::ScrollControl)
+               || m_backend->viewportAtBottom();
+    }
+
+    // A terminal that was showing the newest output still shows it after a bubble resized it. The
+    // view batches its grid change onto the next turn of the event loop, so the pin is queued
+    // behind it; a reader who had scrolled back into the history is left where they were.
+    void pinTerminalBottom(bool wasAtBottom) {
+        if (!wasAtBottom || !m_backend || !(m_backend->capabilities() & relay::TerminalBackend::ScrollControl)) return;
+        QTimer::singleShot(0, this, [this] { if (m_backend) m_backend->scrollToBottom(); });
     }
 
     // One inline line that is also a terminal hyperlink (OSC 8) to relay://turn/<pane>/<turn>.
@@ -7168,8 +7250,11 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
         return requestId;
     }
 
-    // The queue strip over the bottom of the terminal: what is running, then queued terminal
-    // commands ($, amber) and agent prompts (✦, cyan) in order. Rows drag to reorder; × removes.
+    // The queue strip under the terminal: what is running, then queued terminal commands ($,
+    // amber) and agent prompts (✦, cyan) in order. Rows drag to reorder; × removes. It is a row of
+    // the pane's column rather than an overlay, so showing it moves the terminal up instead of
+    // covering its last lines (owner report, 2026-09-18), and the show runs through
+    // keepPaneSizes() because the row's height is part of this pane's minimum height (#G152).
     void rebuildQueueStrip() {
         if (!m_queueStrip) return;
         const bool visible = !m_entries.isEmpty() || m_entriesPaused || !m_steering.isEmpty();
@@ -7181,7 +7266,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
             }
             delete item;
         }
-        m_queueStrip->setVisible(visible);
+        if (visible) showBubble(m_queueStrip); else hideBubble(m_queueStrip);
         if (!visible) return;
         auto *header = new QHBoxLayout;
         auto *title = new QLabel(m_entriesPaused ? QStringLiteral("QUEUE · PAUSED") : QStringLiteral("QUEUE"));
@@ -7251,13 +7336,14 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
         QTimer::singleShot(0, this, [this] { placeQueueStrip(); });
     }
 
+    // The height the queue strip asks the pane's column for: what its rows need, still capped at
+    // half of what it shares with the terminal. A row now rather than an overlay, so this is what
+    // moves the terminal up instead of covering it (owner report, 2026-09-18: "the terminal needs
+    // to move up, rather than being covered up").
     void placeQueueStrip() {
         QTimer::singleShot(0, this, [this] { placeThinking(); });
         if (!m_queueStrip || !m_queueStrip->isVisible() || !m_terminalHost) return;
-        const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
-        const int height = std::min(m_queueStrip->sizeHint().height(), host.height() / 2);
-        m_queueStrip->setGeometry(host.left() + 8, host.bottom() - height - 6, host.width() - 16, height);
-        m_queueStrip->raise();
+        setBubbleHeight(m_queueStrip, std::min(m_queueStrip->sizeHint().height(), bubbleSpan() / 2));
     }
 
     // The "Take control (Ctrl+H)" button floats over the top-right of the terminal, so it does

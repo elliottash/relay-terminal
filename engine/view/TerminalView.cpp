@@ -1485,6 +1485,11 @@ void TerminalView::scrollToRow(int row)
     scheduleFrame();
 }
 
+bool TerminalView::viewportAtBottom() const
+{
+    return m_session->withCore([](VtCore &c) { return c.viewportAtBottom(); });
+}
+
 bool TerminalView::scrollToPrompt(int direction)
 {
     const bool ok = m_session->withCore([&](VtCore &c) { return c.scrollToPrompt(direction); });
