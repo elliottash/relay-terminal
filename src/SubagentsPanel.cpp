@@ -48,28 +48,6 @@ bool SubagentModel::hasLiveForeground() const {
     return std::any_of(m_rows.cbegin(), m_rows.cend(), [](const SubagentRow &r) { return r.live() && !r.background; });
 }
 
-// ----- the orchestrator waiting on its subagents (card #V7QD) ---------------------------------
-QString SubagentModel::waitingLine(int liveSubagents, bool blockedOnWait, bool liveForeground, bool mainBusy, int phase) {
-    if (liveSubagents <= 0 || !(blockedOnWait || liveForeground || !mainBusy)) return {};
-    // ". . ." grown one character at a time and padded back out, so nothing beside it shifts.
-    static const QString dots = QStringLiteral(". . .");
-    const int shown = phase < 0 ? dots.size() : QList<int>{0, 1, 3, 5}.value(phase % 4);
-    return QStringLiteral("waiting for %1 subagent%2 %3")
-        .arg(liveSubagents)
-        .arg(liveSubagents == 1 ? QString() : QStringLiteral("s"), dots.left(shown).leftJustified(dots.size()));
-}
-
-QStringList SubagentModel::waitingLines(int liveSubagents, bool blockedOnWait, bool liveForeground, bool mainBusy, int phase) {
-    const QString full = waitingLine(liveSubagents, blockedOnWait, liveForeground, mainBusy, phase);
-    if (full.isEmpty()) return {};
-    static const QString dots = QStringLiteral(". . .");
-    const int shown = phase < 0 ? dots.size() : QList<int>{0, 1, 3, 5}.value(phase % 4);
-    const QString tail = dots.left(shown).leftJustified(dots.size());
-    // A narrow pane drops the words rather than wrapping: "waiting for 3 . . ." then "3 . . .".
-    return {full, QStringLiteral("waiting for %1 %2").arg(liveSubagents).arg(tail),
-            QStringLiteral("%1 %2").arg(liveSubagents).arg(tail)};
-}
-
 qint64 SubagentModel::elapsedNow(const SubagentRow &row) const {
     if (!row.live() || row.reportedAt <= 0) return row.elapsedMs;
     return row.elapsedMs + std::max<qint64>(0, clock() - row.reportedAt);

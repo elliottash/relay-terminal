@@ -75,6 +75,50 @@ bool endsWithQuestion(const QString &reply) {
     return false;
 }
 
+// ----- what the pane is waiting for (cards #V7QD, #KP4M) ----------------------------------------
+namespace {
+// ". . ." grown one character at a time and padded back out, so nothing beside it shifts.
+QString waitingDots(int phase) {
+    static const QString dots = QStringLiteral(". . .");
+    const int shown = phase < 0 ? dots.size() : QList<int>{0, 1, 3, 5}.value(phase % 4);
+    return dots.left(shown).leftJustified(dots.size());
+}
+
+QString countOf(int n, const QString &noun) {
+    return QStringLiteral("%1 %2%3").arg(n).arg(noun, n == 1 ? QString() : QStringLiteral("s"));
+}
+}  // namespace
+
+QString waitingSubject(const Waiting &waiting) {
+    QStringList parts;
+    if (waiting.subagents > 0 && (waiting.onSubagents || !waiting.mainBusy))
+        parts << countOf(waiting.subagents, QStringLiteral("subagent"));
+    if (waiting.jobs > 0 && (waiting.onJobs || !waiting.mainBusy))
+        parts << countOf(waiting.jobs, QStringLiteral("job"));
+    return parts.join(QStringLiteral(", "));
+}
+
+bool isWaiting(const Waiting &waiting) { return !waitingSubject(waiting).isEmpty(); }
+
+QString waitingLine(const Waiting &waiting, int phase) {
+    const QString subject = waitingSubject(waiting);
+    if (subject.isEmpty()) return {};
+    return QStringLiteral("waiting for %1 %2").arg(subject, waitingDots(phase));
+}
+
+QStringList waitingLines(const Waiting &waiting, int phase) {
+    const QString subject = waitingSubject(waiting);
+    if (subject.isEmpty()) return {};
+    const QString dots = waitingDots(phase);
+    // The narrowest rung still has to mean something: with one kind the count alone does ("2 . . ."
+    // beside a turn clock that spells it out), but "2, 1 . . ." would not, so that says "waiting".
+    const QString shortest = subject.contains(QLatin1Char(','))
+                                 ? QStringLiteral("waiting %1").arg(dots)
+                                 : QStringLiteral("%1 %2").arg(subject.section(QLatin1Char(' '), 0, 0), dots);
+    return {QStringLiteral("waiting for %1 %2").arg(subject, dots),
+            QStringLiteral("%1 %2").arg(subject, dots), shortest};
+}
+
 bool isRemoteProgram(const QString &programName) {
     static const QSet<QString> names{QStringLiteral("ssh"), QStringLiteral("mosh"), QStringLiteral("mosh-client"),
                                      QStringLiteral("telnet"), QStringLiteral("autossh")};

@@ -405,14 +405,19 @@ waiting behind other toasts costs none of its showings. Idle tips work the same 
 Toasts are events and queue: while one is up the next waits, the one up keeps at least 1.5 s (its
 own time if shorter), identical consecutive toasts collapse. The agent turn clock ("thinking ·
 48 s · Esc stops") is state, not a toast: it lives in the strip under the prompt box, left of the
-context chip, while a turn runs. **Waiting on subagents** (card #V7QD): when the pane's main
-("orchestrator") agent is blocked on the subagents it started, the prompt box's own placeholder
-says so — "waiting for 3 subagents . . .", the dots growing every 600 ms — and the turn clock says
-"waiting for 3 subagents · 48 s · Esc stops" instead of "thinking". `SubagentModel::waitingLine`
-holds the rule (subagents are live *and* the main agent's running tool is `agent_wait`, or a live
-subagent is in the foreground so the worker blocks the turn on it, or the main agent's own step has
-finished); `Pane::refreshSubagentWait` draws it through `RichEditor::setPlaceholders`, so Qt stops
-drawing it the instant a steer is typed and the narrow-pane fallbacks come for free. The timer only
+context chip, while a turn runs. **Waiting on background work** (cards #V7QD and #KP4M): when the
+pane's main ("orchestrator") agent is blocked on the subagents or the jobs it started, the prompt
+box's own placeholder says so — "waiting for 2 subagents, 1 job . . .", the dots growing every
+600 ms — and the turn clock says "waiting for 2 subagents, 1 job · 48 s · Esc stops" instead of
+"thinking". `relay::panestatus::waitingLines` (`src/PaneStatus.{h,cpp}`, beside the pane states,
+because it belongs to neither model) holds the rule: a kind counts when some of it is live *and*
+either the main agent is explicitly blocked on it — `agent_wait`, a live foreground subagent, or a
+`command_output` call, which waits on a job — or no turn of its own is running. Only the kinds
+actually waited on are named, so a turn blocked on `agent_wait` while a background job also runs
+says "waiting for 2 subagents". A turn that started background work and carried on working says
+nothing, or the line would be up for most of every turn. `Pane::refreshBackgroundWait` draws it
+through `RichEditor::setPlaceholders`, so Qt stops drawing it the instant a steer is typed and the
+narrow-pane rungs ("2 subagents, 1 job . . .", then "waiting . . .") come for free. The timer only
 runs while the line is on screen, and a desktop cursor flash time of 0 ("do not blink", the same
 signal `RichEditor::setCaretColor` takes the caret's blink from) draws the dots in full and starts
 no timer at all. `nextTime(shortcut, what)` builds the

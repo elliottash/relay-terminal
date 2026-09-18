@@ -62,6 +62,37 @@ State resolve(const Facts &facts, quint64 seenSerial);
 // Markdown emphasis and closing quotes or brackets, ends in "?".
 bool endsWithQuestion(const QString &reply);
 
+// ----- what the pane is waiting for (cards #V7QD, #KP4M) ----------------------------------------
+// The line the prompt box shows while a pane's main ("orchestrator") agent is blocked on the
+// background work it started: "waiting for 2 subagents, 1 job . . .". It lives here, beside the
+// pane states, rather than on either model: it is a pure rule about what the pane is doing, and it
+// is fed counts and flags by both `relay::SubagentModel` and `relay::JobsModel`.
+//
+// Each kind is waited on when some of it is live *and* either the main agent is explicitly blocked
+// on that kind, or no turn of its own is running (its step is finished and only the background work
+// is left). A turn that started background work and carried on working says nothing — otherwise the
+// line would be up for most of every turn.
+struct Waiting {
+    int subagents = 0;         // live subagents (waiting or running)
+    int jobs = 0;              // running jobs the model was handed back
+    bool onSubagents = false;  // blocked on them: an `agent_wait` call, or a live foreground subagent
+    bool onJobs = false;       // blocked on them: a `command_output` call, which waits on a job
+    bool mainBusy = false;     // a turn of this pane's own agent is running
+};
+
+// "2 subagents, 1 job" — only the kinds actually waited on. Empty when nothing is.
+QString waitingSubject(const Waiting &waiting);
+bool isWaiting(const Waiting &waiting);
+
+// "waiting for 2 subagents, 1 job . . .", the dots growing with `phase` (0-3) and the line padded to
+// a constant width so the animation never moves the text next to it. `phase < 0` means "no
+// animation", which draws the dots in full (see Pane::refreshBackgroundWait and
+// QApplication::cursorFlashTime). Empty when nothing is waited on.
+QString waitingLine(const Waiting &waiting, int phase);
+// The same line and its shorter forms, longest first, for RichEditor::setPlaceholders in a narrow
+// pane: the full line, then without "waiting for", then the bare counts (one kind) or "waiting".
+QStringList waitingLines(const Waiting &waiting, int phase);
+
 // ----- remote sessions --------------------------------------------------------------------------
 bool isRemoteProgram(const QString &programName);
 // The destination in a remote program's command line, as the user wrote it: "ssh -p 2222 me@box

@@ -51,6 +51,57 @@ private Q_SLOTS:
         QCOMPARE(stateName(State::NeedsYou), QStringLiteral("needs-you"));
     }
 
+    // Cards #V7QD and #KP4M: "waiting for 2 subagents, 1 job . . ." in the prompt box. The rule,
+    // the wording of the mixed case, and the padding that keeps the line still while it animates.
+    void whatThePaneIsWaitingFor() {
+        Waiting w;
+        QVERIFY(!isWaiting(w));                       // nothing running, nothing to say
+        w.subagents = 3; w.mainBusy = true;
+        QVERIFY(!isWaiting(w));                       // busy doing something else, not waiting
+        QVERIFY(waitingLine(w, 3).isEmpty());
+        w.onSubagents = true;                         // an agent_wait, or a foreground subagent
+        QCOMPARE(waitingLine(w, 3), QStringLiteral("waiting for 3 subagents . . ."));
+        w = Waiting{}; w.jobs = 2; w.mainBusy = true;
+        QVERIFY(!isWaiting(w));
+        w.onJobs = true;                              // a command_output waiting on a job
+        QCOMPARE(waitingLine(w, 3), QStringLiteral("waiting for 2 jobs . . ."));
+        // The turn ended: whatever is still running is what it waits for, blocked or not.
+        w = Waiting{}; w.subagents = 1; w.jobs = 1;
+        QCOMPARE(waitingLine(w, 3), QStringLiteral("waiting for 1 subagent, 1 job . . ."));
+        // Blocked on one kind while the other merely runs: only what blocks it is named.
+        w = Waiting{}; w.subagents = 2; w.jobs = 4; w.mainBusy = true; w.onJobs = true;
+        QCOMPARE(waitingLine(w, 3), QStringLiteral("waiting for 4 jobs . . ."));
+        w.onSubagents = true;
+        QCOMPARE(waitingLine(w, 3), QStringLiteral("waiting for 2 subagents, 4 jobs . . ."));
+
+        // The dots grow with the phase and wrap, and every phase is the same width, so the line
+        // never jiggles. A negative phase is "no animation": the dots are drawn in full.
+        Waiting one; one.jobs = 1; one.onJobs = true; one.mainBusy = true;
+        const QStringList phases{waitingLine(one, 0), waitingLine(one, 1), waitingLine(one, 2), waitingLine(one, 3)};
+        QCOMPARE(phases.at(0), QStringLiteral("waiting for 1 job      "));
+        QCOMPARE(phases.at(1), QStringLiteral("waiting for 1 job .    "));
+        QCOMPARE(phases.at(2), QStringLiteral("waiting for 1 job . .  "));
+        QCOMPARE(phases.at(3), QStringLiteral("waiting for 1 job . . ."));
+        for (const QString &text : phases) QCOMPARE(text.size(), phases.at(3).size());
+        QCOMPARE(waitingLine(one, 4), phases.at(0));
+        QCOMPARE(waitingLine(one, -1), phases.at(3));
+
+        // The narrow-pane rungs, longest first. One kind keeps its count; the mixed line cannot be
+        // cut to "2, 4", so its last rung says "waiting".
+        Waiting jobs; jobs.jobs = 2; jobs.onJobs = true; jobs.mainBusy = true;
+        QCOMPARE(waitingLines(jobs, 3), (QStringList{QStringLiteral("waiting for 2 jobs . . ."),
+                                                     QStringLiteral("2 jobs . . ."), QStringLiteral("2 . . .")}));
+        Waiting subs; subs.subagents = 3; subs.onSubagents = true; subs.mainBusy = true;
+        QCOMPARE(waitingLines(subs, 3), (QStringList{QStringLiteral("waiting for 3 subagents . . ."),
+                                                     QStringLiteral("3 subagents . . ."), QStringLiteral("3 . . .")}));
+        Waiting both; both.subagents = 2; both.jobs = 1;
+        QCOMPARE(waitingLines(both, 3), (QStringList{QStringLiteral("waiting for 2 subagents, 1 job . . ."),
+                                                     QStringLiteral("2 subagents, 1 job . . ."),
+                                                     QStringLiteral("waiting . . .")}));
+        QVERIFY(waitingLines(Waiting{}, 3).isEmpty());
+        QVERIFY(waitingSubject(Waiting{}).isEmpty());
+    }
+
     void factsBecomeOneState() {
         Facts f;
         QCOMPARE(resolve(f, 0), State::Idle);
