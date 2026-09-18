@@ -327,7 +327,16 @@ QLineEdit#paneTitleEdit { background: @surface; color: @text; border: 1px solid 
 QPushButton { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 5px 14px; }
 QPushButton:hover { border-color: @muted; }
 QPushButton:pressed { background: @surface; }
-QPushButton:default, QPushButton#primary { background: @accent; color: @accentText; border-color: @accent; font-weight: 600; }
+/* Never put font-weight (or any other metric) on :default, :hover or another pseudo-state:
+   QStyleSheetStyle folds a rule's font into the widget's font only when the rule has no
+   pseudo-state, so the button would paint bold while sizeHint() still measured the label at
+   regular weight — the label then runs past its own edge ("Add / replace…" in the API keys
+   modal, owner report 2026-09-18). Inside a dialog push buttons are autoDefault, so :default
+   follows the focus and any label could hit it. The accent fill carries the emphasis instead;
+   #primary is an id selector with no pseudo-state, so its bold does reach the size hint.
+   tests/buttonfit_test.cpp renders every label and fails on a clipped one. */
+QPushButton:default { background: @accent; color: @accentText; border-color: @accent; }
+QPushButton#primary { background: @accent; color: @accentText; border-color: @accent; font-weight: 600; }
 QPushButton:default:hover, QPushButton#primary:hover { background: @accentHover; }
 QPushButton:disabled { color: @disabled; border-color: @surface; }
 

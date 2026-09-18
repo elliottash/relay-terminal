@@ -355,6 +355,14 @@ if(BUILD_TESTING)
     # The test also reads the shipped theme files, so it runs from the source tree.
     set_tests_properties(theme PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # Renders every button label in the live stylesheet and fails on one that paints past its edge.
+    add_executable(relay-buttonfit-tests tests/buttonfit_test.cpp)
+    target_link_libraries(relay-buttonfit-tests PRIVATE relay-highlight ${RELAY_QT}::Test)
+    target_compile_definitions(relay-buttonfit-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME buttonfit COMMAND relay-buttonfit-tests)
+    # Reads the shipped theme files (and the sources it scans) from the source tree.
+    set_tests_properties(buttonfit PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-titles-tests tests/panetitles_test.cpp)
     target_link_libraries(relay-titles-tests PRIVATE relay-titles ${RELAY_QT}::Test)
     add_test(NAME titles COMMAND relay-titles-tests)

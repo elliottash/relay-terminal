@@ -1,0 +1,158 @@
+********* Start testing of ButtonFitTest *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : ButtonFitTest::initTestCase()
+PASS   : ButtonFitTest::detectsClipping()
+PASS   : ButtonFitTest::labelsFitTheirButtons(Cancel [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Cancel [:default]) 'natural >= roomy - 1' returned FALSE. (“Cancel” (:default) is clipped: the label paints 56px wide given room but only 53px at the button's own width of 83px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Cancel [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Not now [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Not now [:default]) 'natural >= roomy - 1' returned FALSE. (“Not now” (:default) is clipped: the label paints 72px wide given room but only 69px at the button's own width of 99px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Not now [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Save [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Save [:default]) 'natural >= roomy - 1' returned FALSE. (“Save” (:default) is clipped: the label paints 40px wide given room but only 38px at the button's own width of 68px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Save [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Comment [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Comment [:default]) 'natural >= roomy - 1' returned FALSE. (“Comment” (:default) is clipped: the label paints 84px wide given room but only 79px at the button's own width of 109px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Comment [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Ask the agent [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Ask the agent [:default]) 'natural >= roomy - 1' returned FALSE. (“Ask the agent” (:default) is clipped: the label paints 119px wide given room but only 110px at the button's own width of 140px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Ask the agent [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Resume here [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Resume here [:default]) 'natural >= roomy - 1' returned FALSE. (“Resume here” (:default) is clipped: the label paints 111px wide given room but only 105px at the button's own width of 135px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Resume here [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Open in new pane [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Open in new pane [:default]) 'natural >= roomy - 1' returned FALSE. (“Open in new pane” (:default) is clipped: the label paints 154px wide given room but only 146px at the button's own width of 176px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Open in new pane [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Rename… [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Rename… [:default]) 'natural >= roomy - 1' returned FALSE. (“Rename…” (:default) is clipped: the label paints 84px wide given room but only 80px at the button's own width of 110px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Rename… [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Pin [plain])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Pin [:default])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Pin [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Delete… [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Delete… [:default]) 'natural >= roomy - 1' returned FALSE. (“Delete…” (:default) is clipped: the label paints 70px wide given room but only 66px at the button's own width of 96px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Delete… [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Close [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Close [:default]) 'natural >= roomy - 1' returned FALSE. (“Close” (:default) is clipped: the label paints 46px wide given room but only 44px at the button's own width of 74px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Close [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(In conversation [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(In conversation [:default]) 'natural >= roomy - 1' returned FALSE. (“In conversation” (:default) is clipped: the label paints 133px wide given room but only 124px at the button's own width of 154px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(In conversation [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Open externally [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Open externally [:default]) 'natural >= roomy - 1' returned FALSE. (“Open externally” (:default) is clipped: the label paints 137px wide given room but only 127px at the button's own width of 157px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Open externally [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Execute [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Execute [:default]) 'natural >= roomy - 1' returned FALSE. (“Execute” (:default) is clipped: the label paints 66px wide given room but only 63px at the button's own width of 93px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Execute [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Execute in fresh context [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Execute in fresh context [:default]) 'natural >= roomy - 1' returned FALSE. (“Execute in fresh context” (:default) is clipped: the label paints 204px wide given room but only 191px at the button's own width of 221px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Execute in fresh context [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Keep planning [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Keep planning [:default]) 'natural >= roomy - 1' returned FALSE. (“Keep planning” (:default) is clipped: the label paints 122px wide given room but only 116px at the button's own width of 146px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Keep planning [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Add / replace… [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Add / replace… [:default]) 'natural >= roomy - 1' returned FALSE. (“Add / replace…” (:default) is clipped: the label paints 126px wide given room but only 119px at the button's own width of 149px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Add / replace… [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Remove [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Remove [:default]) 'natural >= roomy - 1' returned FALSE. (“Remove” (:default) is clipped: the label paints 68px wide given room but only 65px at the button's own width of 95px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Remove [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Test [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Test [:default]) 'natural >= roomy - 1' returned FALSE. (“Test” (:default) is clipped: the label paints 35px wide given room but only 33px at the button's own width of 63px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Test [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Get a key… [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Get a key… [:default]) 'natural >= roomy - 1' returned FALSE. (“Get a key…” (:default) is clipped: the label paints 93px wide given room but only 87px at the button's own width of 117px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Get a key… [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Import from Warp [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Import from Warp [:default]) 'natural >= roomy - 1' returned FALSE. (“Import from Warp” (:default) is clipped: the label paints 155px wide given room but only 146px at the button's own width of 176px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Import from Warp [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Import from Claude Code / Codex [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Import from Claude Code / Codex [:default]) 'natural >= roomy - 1' returned FALSE. (“Import from Claude Code / Codex” (:default) is clipped: the label paints 283px wide given room but only 269px at the button's own width of 299px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Import from Claude Code / Codex [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(API keys… [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(API keys… [:default]) 'natural >= roomy - 1' returned FALSE. (“API keys…” (:default) is clipped: the label paints 87px wide given room but only 80px at the button's own width of 110px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(API keys… [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Model… [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Model… [:default]) 'natural >= roomy - 1' returned FALSE. (“Model…” (:default) is clipped: the label paints 66px wide given room but only 64px at the button's own width of 94px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Model… [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Refuse [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Refuse [:default]) 'natural >= roomy - 1' returned FALSE. (“Refuse” (:default) is clipped: the label paints 57px wide given room but only 55px at the button's own width of 85px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Refuse [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Allow viewing [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Allow viewing [:default]) 'natural >= roomy - 1' returned FALSE. (“Allow viewing” (:default) is clipped: the label paints 118px wide given room but only 109px at the button's own width of 139px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Allow viewing [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Allow typing [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Allow typing [:default]) 'natural >= roomy - 1' returned FALSE. (“Allow typing” (:default) is clipped: the label paints 107px wide given room but only 98px at the button's own width of 128px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Allow typing [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Revoke selected [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Revoke selected [:default]) 'natural >= roomy - 1' returned FALSE. (“Revoke selected” (:default) is clipped: the label paints 136px wide given room but only 128px at the button's own width of 158px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Revoke selected [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Stop sharing [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Stop sharing [:default]) 'natural >= roomy - 1' returned FALSE. (“Stop sharing” (:default) is clipped: the label paints 107px wide given room but only 102px at the button's own width of 132px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Stop sharing [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Refine selected [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Refine selected [:default]) 'natural >= roomy - 1' returned FALSE. (“Refine selected” (:default) is clipped: the label paints 129px wide given room but only 121px at the button's own width of 151px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Refine selected [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Import from repository… [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Import from repository… [:default]) 'natural >= roomy - 1' returned FALSE. (“Import from repository…” (:default) is clipped: the label paints 211px wide given room but only 198px at the button's own width of 228px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Import from repository… [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Check for updates [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Check for updates [:default]) 'natural >= roomy - 1' returned FALSE. (“Check for updates” (:default) is clipped: the label paints 155px wide given room but only 145px at the button's own width of 175px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Check for updates [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Reload [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Reload [:default]) 'natural >= roomy - 1' returned FALSE. (“Reload” (:default) is clipped: the label paints 57px wide given room but only 55px at the button's own width of 85px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Reload [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Open output [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Open output [:default]) 'natural >= roomy - 1' returned FALSE. (“Open output” (:default) is clipped: the label paints 109px wide given room but only 103px at the button's own width of 133px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Open output [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Choose… [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Choose… [:default]) 'natural >= roomy - 1' returned FALSE. (“Choose…” (:default) is clipped: the label paints 76px wide given room but only 73px at the button's own width of 103px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Choose… [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Import keys from Warp [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Import keys from Warp [:default]) 'natural >= roomy - 1' returned FALSE. (“Import keys from Warp” (:default) is clipped: the label paints 198px wide given room but only 185px at the button's own width of 215px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Import keys from Warp [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(Import from Claude Code / Codex [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(Import from Claude Code / Codex [:default]) 'natural >= roomy - 1' returned FALSE. (“Import from Claude Code / Codex” (:default) is clipped: the label paints 283px wide given room but only 269px at the button's own width of 299px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(Import from Claude Code / Codex [#primary])
+PASS   : ButtonFitTest::labelsFitTheirButtons(OpenRouter · DeepSeek V4.1 Flash [plain])
+FAIL!  : ButtonFitTest::labelsFitTheirButtons(OpenRouter · DeepSeek V4.1 Flash [:default]) 'natural >= roomy - 1' returned FALSE. (“OpenRouter · DeepSeek V4.1 Flash” (:default) is clipped: the label paints 289px wide given room but only 276px at the button's own width of 306px)
+   Loc: [/home/elliott/repos/relay-terminal/tests/buttonfit_test.cpp(165)]
+PASS   : ButtonFitTest::labelsFitTheirButtons(OpenRouter · DeepSeek V4.1 Flash [#primary])
+PASS   : ButtonFitTest::cleanupTestCase()
+Totals: 80 passed, 37 failed, 0 skipped, 0 blacklisted, 56ms
+********* Finished testing of ButtonFitTest *********
