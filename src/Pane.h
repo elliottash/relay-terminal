@@ -5914,9 +5914,14 @@ private:
                 QSettings().value(QStringLiteral("terminal/shell_integration"), false).toBool() ? "1" : "0");
         // The ssh and mosh wrappers (shell/integration.bash, card #S5SH) share the login's
         // connection through a socket here, so the agent can reuse it. Off in Options › Terminal.
-        const bool wrapSsh = QSettings().value(QStringLiteral("ssh/enhance"), QStringLiteral("auto")).toString() != QStringLiteral("off")
-                             && QDir().mkpath(sshSocketDir())
-                             && QFile::setPermissions(sshSocketDir(), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        const bool wanted = QSettings().value(QStringLiteral("ssh/enhance"), QStringLiteral("auto")).toString() != QStringLiteral("off");
+        QString why;
+        const bool wrapSsh = wanted && sshSocketDirReady(&why);
+        if (wanted && !wrapSsh) {
+            // Silence here reads later as "the agent cannot reach the host" with no reason given.
+            relay::log::error(QStringLiteral("ssh_share_off pane=%1 reason=%2").arg(paneLogId(), why));
+            m_sshShareProblem = why;
+        }
         qputenv("RELAY_SSH_WRAP", wrapSsh ? "1" : "0");
         qputenv("RELAY_SSH_DIR", sshSocketDir().toUtf8());
         m_backendOwned.reset(relay::createTerminalBackend(m_engineCore, m_terminalHost));
@@ -9204,7 +9209,29 @@ private:
     // Short on purpose: a socket path is limited to 107 bytes and %C adds 40.
     static QString sshSocketDir() {
         const QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
-        return (runtime.isEmpty() ? QDir::tempPath() : runtime) + QStringLiteral("/relay-ssh");
+        if (!runtime.isEmpty()) return runtime + QStringLiteral("/relay-ssh");
+        // No runtime directory: the fallback lives in a shared temporary directory, so its name
+        // carries the user id and its owner and mode are checked before anything is put in it.
+        return QDir::tempPath() + QStringLiteral("/relay-ssh-%1").arg(::getuid());
+    }
+
+    // The directory holds the control sockets of the user's own logins: another account owning it,
+    // or a mode that lets anyone in, means no sharing rather than sharing through someone's
+    // directory. Returns false without creating anything when it cannot be made safe.
+    static bool sshSocketDirReady(QString *why) {
+        const QString path = sshSocketDir();
+        const QFileInfo before(path);
+        if (before.exists() && !before.isDir()) { *why = QStringLiteral("%1 is not a directory").arg(path); return false; }
+        if (!QDir().mkpath(path)) { *why = QStringLiteral("%1 could not be created").arg(path); return false; }
+        if (!QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner)) {
+            *why = QStringLiteral("%1 could not be made private (owned by someone else?)").arg(path);
+            return false;
+        }
+        struct stat info {};
+        if (::stat(path.toLocal8Bit().constData(), &info) != 0) { *why = QStringLiteral("%1 could not be read").arg(path); return false; }
+        if (info.st_uid != ::getuid()) { *why = QStringLiteral("%1 belongs to another user").arg(path); return false; }
+        if (info.st_mode & (S_IRWXG | S_IRWXO)) { *why = QStringLiteral("%1 is open to other users").arg(path); return false; }
+        return true;
     }
 
     // The foreground program's arguments, unjoined (foregroundCommandLine() joins them with spaces).
@@ -9257,6 +9284,12 @@ private:
             m_login.resolved = m_login.where.ok;
             relay::log::info(QStringLiteral("login_resolved pane=%1 shared=%2")
                                  .arg(paneLogId()).arg(loginReachable() ? 1 : 0));
+            // Sharing is what lets the agent work on the host. When Relay knows why it is off,
+            // the pane says so once per login instead of leaving the agent to report a dead end.
+            if (!loginReachable() && !m_sshShareProblem.isEmpty() && !m_login.warnedShare) {
+                m_login.warnedShare = true;
+                status(QStringLiteral("The agent cannot reach %1: %2").arg(loginHost(), m_sshShareProblem));
+            }
             changed();
         });
         connect(dump, &QProcess::errorOccurred, dump, &QObject::deleteLater);
@@ -10587,6 +10620,7 @@ private:
     QString m_captureCommand, m_captureCwd;
     qint64 m_captureAt = 0;
     bool m_capturing = false;
+    QString m_sshShareProblem;   // why this pane's shells cannot share an ssh connection, if so
     char m_lastPromptMark = 0;      // OSC 133 A/B/C/D, engine panes with the shell integration
     int m_lastMarkExitCode = -1;
     relay::TerminalBackend::Link m_walkLink;   // the link Ctrl+Shift+L is sitting on
@@ -10605,6 +10639,7 @@ private:
         bool bootstrapped = false;   // Relay typed shell/remote-integration.sh for this login
         bool offered = false;        // the "Enhance this ssh session" banner is up
         bool greeted = false;        // the "Logged in to …" toast was shown
+        bool warnedShare = false;    // the pane has said why the agent cannot reach this host
         int promptTicks = 0;         // polls in a row the screen showed a shell prompt
         bool atPrompt = false;
         QString promptRow;           // the prompt, as inline output found it; printed back after

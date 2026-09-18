@@ -2355,11 +2355,13 @@ private:
         pane->setProperty("relaySshHintHost", QVariant());
         const qint64 age = QDateTime::currentMSecsSinceEpoch() - at;
         if (host.isEmpty()) {
-            // Connect has no default key; without one there is nothing faster to teach.
+            // Connect has no default key: then the faster path is the Actions list itself, which
+            // also offers the hosts of ~/.ssh/config and the ones used lately (card #S5SH).
             if (age > kSshNewTabHintMs) return;
             const QString keys = Keymap::instance().shortcutText(QStringLiteral("ssh.connect"));
-            if (!keys.isEmpty())
-                hint(QStringLiteral("ssh.connect.typed"), relay::ShortcutHints::nextTime(keys, QStringLiteral("connect to a host in a new tab")));
+            hint(QStringLiteral("ssh.connect.typed"),
+                 keys.isEmpty() ? QStringLiteral("Next time: Actions › Connect to host… lists your saved and recent hosts")
+                                : relay::ShortcutHints::nextTime(keys, QStringLiteral("connect to a host in a new tab")));
             return;
         }
         if (age > kSshSplitHintMs || relay::panestatus::remoteHost(remoteLine) != host) return;
