@@ -147,11 +147,20 @@ target_include_directories(relay-voice PUBLIC src)
 target_link_libraries(relay-voice PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-voice PRIVATE -Wall -Wextra -Wpedantic)
 
+# Colour themes (issue 0JA7): reading a theme file (TOML) into a ThemeSpec, the tokens a theme
+# must carry, discovery across the built-in and the user folder, and the Konsole colour scheme and
+# profile generated from it. Plain Qt Gui so every rule can be tested without a window;
+# src/Theme.cpp turns the result into the live palette, stylesheet and terminal colours.
+add_library(relay-theme STATIC src/ThemeFile.cpp src/ThemeFile.h)
+target_include_directories(relay-theme PUBLIC src)
+target_link_libraries(relay-theme PUBLIC ${RELAY_QT}::Gui)
+target_compile_options(relay-theme PRIVATE -Wall -Wextra -Wpedantic)
+
 # Prompt-box colouring: shell syntax when the line is going to the shell, plain text for an agent
 # prompt, and the caret colour that shows which (owner design, 2026-09-17).
 add_library(relay-highlight STATIC src/ShellHighlighter.cpp src/ShellHighlighter.h src/Theme.cpp src/Theme.h)
 target_include_directories(relay-highlight PUBLIC src)
-target_link_libraries(relay-highlight PUBLIC ${RELAY_QT}::Gui ${RELAY_QT}::Widgets)
+target_link_libraries(relay-highlight PUBLIC ${RELAY_QT}::Gui ${RELAY_QT}::Widgets relay-theme)
 target_compile_options(relay-highlight PRIVATE -Wall -Wextra -Wpedantic)
 
 add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
@@ -244,6 +253,12 @@ if(BUILD_TESTING)
     target_link_libraries(relay-notifications-tests PRIVATE relay-notifications ${RELAY_QT}::Test)
     add_test(NAME notifications COMMAND relay-notifications-tests)
     set_tests_properties(notifications PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-theme-tests tests/theme_test.cpp)
+    target_link_libraries(relay-theme-tests PRIVATE relay-theme ${RELAY_QT}::Test)
+    add_test(NAME theme COMMAND relay-theme-tests)
+    # The test also reads the shipped theme files, so it runs from the source tree.
+    set_tests_properties(theme PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-titles-tests tests/panetitles_test.cpp)
     target_link_libraries(relay-titles-tests PRIVATE relay-titles ${RELAY_QT}::Test)
     add_test(NAME titles COMMAND relay-titles-tests)

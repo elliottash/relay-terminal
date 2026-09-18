@@ -1,0 +1,52 @@
+# Relay Light (issue 0JA7): the same layout on paper instead of ink.
+#
+# Every token the dark theme sets is set here too, including the semantic ones, because a light
+# surface needs darker greens, yellows and reds to stay readable.
+
+[theme]
+name = "Relay Light"
+variant = "light"
+description = "Paper chrome, deep teal accent; the same shapes as Relay Dark."
+
+[ui]
+background = "#fbfbfd"
+surface = "#f2f3f7"
+surface_raised = "#e8eaf0"
+border = "#d3d7e0"
+# The focused pane's outline: darker than the resting border, still not the accent.
+border_strong = "#98a0b0"
+text = "#1a1d24"
+text_muted = "#5c6472"
+accent = "#0a7ea4"
+accent_text = "#ffffff"
+accent_hover = "#0993bf"
+selection = "#0a6d8c"
+disabled = "#a8aebb"
+success = "#1f7a3d"
+warning = "#8a5d00"
+error = "#c0273a"
+shell = "#0a7ea4"
+agent = "#6c3fc9"
+
+[syntax]
+command = "#0a7ea4"
+unknown = "#c0273a"
+flag = "#8a5d00"
+string = "#1f7a3d"
+path = "#0f6f68"
+operator = "#6a7382"
+variable = "#6c3fc9"
+agent = "#6c3fc9"
+token = "#0a7ea4"
+
+[terminal]
+background = "#fbfbfd"
+foreground = "#24292f"
+cursor = "#0a7ea4"
+background_intense = "#ffffff"
+foreground_intense = "#0b0d10"
+# On a light surface the "bright" half is darker, not lighter, or bold text disappears.
+palette = [
+  "#3b414b", "#cf222e", "#116329", "#7d4e00", "#0550ae", "#8250df", "#137b7f", "#6e7781",
+  "#24292f", "#a40e26", "#0e6027", "#633c01", "#0349b4", "#6639ba", "#0f5d61", "#1f2328",
+]
