@@ -55,6 +55,14 @@ QByteArray gzip(const QByteArray &data);
 // the script can erase them and the session looks as if the prompt was simply redrawn.
 QString bootstrapLine(const QByteArray &script, int promptColumn, int columns);
 
+// The prompt a remote shell last drew, kept from the bytes it sent, so Relay can put it back
+// after printing over it (a remote line editor without Relay's integration cannot be asked to
+// redraw itself). Everything but text and colour is dropped: SGR ("\033[…m") is kept, every other
+// escape, control byte and OSC is not, so what goes back is what the prompt looked like and
+// nothing that could move the cursor or drive the terminal. `columns` receives how many columns
+// the kept text occupies, which the caller compares with where the cursor really is.
+QByteArray promptEcho(const QByteArray &raw, int *columns = nullptr);
+
 // Rows a line of `length` characters takes when it starts at `column` of a `columns`-wide
 // terminal, counting the row it starts on.
 int rowsFor(int column, int length, int columns);

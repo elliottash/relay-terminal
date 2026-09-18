@@ -126,10 +126,15 @@ password prompt: what is typed goes to ssh, never to the router or the model, an
 `printInline` treats "remote shell at its prompt" like "local shell idle at its prompt": it erases
 the prompt row, prints, and on close asks the remote shell to redraw (`Ctrl+X Ctrl+P` when the
 integration is live), or re-prints the prompt row's text it saved before erasing. Resize is held for
-the program while the block is open, as for the local shell. The saved row is padded to the cursor
-column (the screen's text drops the blank after `$`) and printed plain, so a coloured prompt comes
-back uncoloured until the next command redraws it; with the integration the remote shell redraws its
-own prompt and nothing is lost.
+the program while the block is open, as for the local shell.
+
+Without the integration the prompt comes back in its own colours: Relay keeps the bytes the host
+wrote since its last newline (the pane's `onOutput`, only while a login runs), and
+`relay::remote::promptEcho` strips them to text and SGR — every other escape, OSC and control byte
+is dropped, so nothing the host sent can drive the terminal when it is printed back. Those bytes are
+used only when the text in them ends exactly where the cursor is; a prompt drawn with cursor moves
+(zsh's right-hand prompt) falls back to the screen's own text, padded to the cursor column, which is
+plain but always the right width.
 
 Anything printed while the remote side is busy (a command running on the host) still goes to the
 side panel and into the terminal at the next remote prompt, not only when ssh exits.

@@ -15,6 +15,7 @@ pane and engine edits, 2026-09-18, by Claude Opus 5 (session relay-terminal-be).
 | `implementer-07` | The 7 characters reached the host (`got-7-chars`). `hunter2` appears in neither the model requests nor the logs (`grep -c hunter2 requests.jsonl` → 0). |
 | `implementer-08` | `mosh localhost` (the driver with `mosh` for `ssh`): the chip names the host, and the prompt box typed `echo …; hostname` into the session. Before the follow-up the alternate screen hid the login entirely and the line was queued locally, and the chip read "ControlMaster=auto". |
 | `implementer-09` | Under mosh the agent's `run_command` ran on the host over the connection mosh's ssh left behind (`ran … on localhost · exit 0`); the reply stays in the side panel by design. |
+| `implementer-10` | The same "ask" run after the colour follow-up: the prompt under the reply is bold green and blue again, as the host drew it (in `implementer-05` it came back plain). |
 
 The `implementer-connect-*`, `-options-ssh` and `-split-same-host` shots and `drive-connect.sh` are the
 window half (Connect to host, Split on the same host, Options).

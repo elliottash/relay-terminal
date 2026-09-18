@@ -172,6 +172,38 @@ QByteArray gzip(const QByteArray &data) {
     return out;
 }
 
+QByteArray promptEcho(const QByteArray &raw, int *columns) {
+    QByteArray out;
+    int width = 0;
+    for (int i = 0; i < raw.size(); ++i) {
+        const char c = raw[i];
+        if (c == 0x1b) {
+            // A CSI sequence: keep it only when it ends in 'm' (colour and attributes).
+            if (i + 1 < raw.size() && raw[i + 1] == '[') {
+                int j = i + 2;
+                while (j < raw.size() && uchar(raw[j]) >= 0x20 && uchar(raw[j]) < 0x40) ++j;
+                if (j < raw.size() && raw[j] == 'm') out += raw.mid(i, j - i + 1);
+                i = j < raw.size() ? j : raw.size();
+                continue;
+            }
+            // OSC: to BEL or ST. Anything else: the escape and its one final byte.
+            if (i + 1 < raw.size() && raw[i + 1] == ']') {
+                int j = i + 2;
+                while (j < raw.size() && raw[j] != '\a' && !(raw[j] == 0x1b && j + 1 < raw.size() && raw[j + 1] == '\\')) ++j;
+                i = j < raw.size() && raw[j] == 0x1b ? j + 1 : j;
+                continue;
+            }
+            ++i;
+            continue;
+        }
+        if (uchar(c) < 0x20 || c == 0x7f) continue;   // tabs and backspaces would move the cursor
+        out += c;
+        if ((uchar(c) & 0xc0) != 0x80) ++width;       // one column per character, not per UTF-8 byte
+    }
+    if (columns) *columns = width;
+    return out;
+}
+
 int rowsFor(int column, int length, int columns) {
     if (columns <= 0) return 1;
     const int end = std::max(0, column) + std::max(1, length);

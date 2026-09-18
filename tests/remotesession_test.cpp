@@ -81,6 +81,23 @@ private slots:
         QCOMPARE(rowsFor(5, 10, 0), 1);
     }
 
+    void promptEchoKeepsColourAndNothingElse() {
+        int columns = -1;
+        // A coloured bash prompt as the host drew it, with its OSC 133 marks and a title change.
+        const QByteArray raw = "\x1b]0;elliott@filly\a\x1b]133;A\a\x1b[01;32melliott@filly\x1b[00m:"
+                               "\x1b[01;34m~/src\x1b[00m$ \x1b]133;B\a";
+        const QByteArray kept = promptEcho(raw, &columns);
+        QCOMPARE(kept, QByteArray("\x1b[01;32melliott@filly\x1b[00m:\x1b[01;34m~/src\x1b[00m$ "));
+        QCOMPARE(columns, QByteArray("elliott@filly:~/src$ ").size());
+        QVERIFY(!kept.contains("133"));
+        // Cursor moves, erases and other controls are dropped; their text is not.
+        QCOMPARE(promptEcho("\x1b[2K\r\x1b[5Cabc\x1b[K\tdef\x08"), QByteArray("abcdef"));
+        // A zsh prompt with a multi-byte character counts one column for it, not three.
+        promptEcho(QString::fromUtf8("➜  code ").toUtf8(), &columns);
+        QCOMPARE(columns, 8);
+        QCOMPARE(promptEcho(""), QByteArray());
+    }
+
     void bootstrapDecodes() {
         const QByteArray script = "echo relay-bootstrap-ok \"$RELAY_R\"\n";
         const QString line = bootstrapLine(script, 18, 80);

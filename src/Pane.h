@@ -4575,7 +4575,7 @@ private:
 
     void finishCommandCapture(int exitStatus) {
         if (m_captureCommand.isEmpty()) return;
-        if (m_capturing && m_backend) m_backend->setOutputCallbackEnabled(false);
+        if (m_capturing && m_backend && !m_login.active) m_backend->setOutputCallbackEnabled(false);
         m_capturing = false;
         QJsonObject item{{QStringLiteral("command"), m_captureCommand},
                          {QStringLiteral("exit_status"), exitStatus},
@@ -5844,6 +5844,14 @@ private:
         // Only enabled between "command loaded" and "shell ready", so it costs nothing otherwise.
         m_backend->setOutputCallbackEnabled(false);
         m_backend->onOutput = [this](const QByteArray &bytes) {
+            // While a login runs, keep the row the host is writing. At its prompt that row is the
+            // prompt, and Relay prints it back in its own colours after printing over it (#S5SH).
+            if (m_login.active) {
+                for (const char c : bytes) {
+                    if (c == '\n' || c == '\r') m_login.line.clear();
+                    else if (m_login.line.size() < 8192) m_login.line += c;
+                }
+            }
             if (!m_capturing || m_capture.size() >= kCommandCaptureCap) return;
             m_capture.append(bytes.left(kCommandCaptureCap - m_capture.size()));
         };
@@ -7509,10 +7517,17 @@ private:
             // A remote prompt without Relay's integration cannot be asked to redraw itself: keep
             // its text, and print it back when the block closes (card #S5SH).
             m_login.promptRow.clear();
+            m_login.promptBytes.clear();
             if (loginAtPrompt() && !m_login.integration) {
                 const QPoint cursor = m_backend->cursorPosition();
-                // The screen's text drops trailing blanks; the cursor column puts back the one after "$".
-                if (cursor.y() >= 0)
+                // The bytes the host drew the prompt with, so it comes back in its own colours. They
+                // are only used when the text in them ends exactly where the cursor is: a prompt drawn
+                // with cursor moves (a zsh right-hand prompt) would come back the wrong width, and the
+                // screen's own text, padded to the cursor, is the safe answer then.
+                int width = 0;
+                const QByteArray echo = relay::remote::promptEcho(m_login.line, &width);
+                if (cursor.x() > 0 && width == cursor.x()) m_login.promptBytes = echo;
+                else if (cursor.y() >= 0)
                     m_login.promptRow = m_backend->screenText().split('\n').value(cursor.y()).left(cursor.x()).leftJustified(cursor.x(), ' ');
             }
             // Erase the idle prompt line; closeInline() asks Readline to redraw it afterwards.
@@ -7589,8 +7604,9 @@ private:
             // The remote shell: the integration binds the same keys there; without it the prompt
             // is printed back as it was, and the remote line editor never knew it was gone.
             if (m_login.integration) sendShellInput(QStringLiteral("\x18\x10"));
+            else if (!m_login.promptBytes.isEmpty()) writeTerminal(m_login.promptBytes + "\x1b[0m");
             else if (!m_login.promptRow.isEmpty()) writeTerminal(sanitize(m_login.promptRow).toUtf8());
-            m_login.promptRow.clear();
+            m_login.promptRow.clear(); m_login.promptBytes.clear();
         }
     }
 
@@ -8840,6 +8856,7 @@ private:
         m_login = RemoteLogin();
         m_login.active = true;
         m_login.program = program;
+        if (m_backend) m_backend->setOutputCallbackEnabled(true);   // the prompt row, for printing it back
         m_login.group = foregroundPid();
         const QStringList argv = foregroundArgv();
         const QStringList args = relay::remote::dumpArguments(argv, sshSocketDir());
@@ -8868,6 +8885,7 @@ private:
         if (!m_login.active) return;
         relay::log::info(QStringLiteral("login_end pane=%1").arg(paneLogId()));
         if (m_login.offered) hideBanner();
+        if (m_backend && !m_capturing) m_backend->setOutputCallbackEnabled(false);
         m_login = RemoteLogin();
         changed();
     }
@@ -10113,6 +10131,8 @@ private:
         int promptTicks = 0;         // polls in a row the screen showed a shell prompt
         bool atPrompt = false;
         QString promptRow;           // the prompt, as inline output found it; printed back after
+        QByteArray line;             // what the host has written since its last newline: the prompt
+        QByteArray promptBytes;      // that prompt, text and colour only (relay::remote::promptEcho)
     } m_login;
     // prompt-box-only input: masked prompt box at a password prompt, and the take-control button
     QLineEdit *m_secretEdit = nullptr;
