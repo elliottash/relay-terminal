@@ -140,6 +140,10 @@ public:
     void setProject(const QString &project);
     void setOpenSessions(const QStringList &sessionIds);
     void setClosedSessions(const QHash<QString, QPair<QString, qint64>> &closed);
+    // "closed 5 min ago" is a clock, not a stamp: the pane re-reads it on a timer while anything
+    // is in the closed list, so a row that said "closed just now" catches up without the list
+    // being rebuilt or the worker asked again. Public so a test can tick it by hand.
+    void refreshClosedAges();
 
     void focusSearch();
     QString query() const;
@@ -231,7 +235,7 @@ private:
     QString m_previewFor, m_previewHtml;      // the side preview as last filled, and for which row
     int m_nextOffset = -1, m_matches = 0, m_sessions = 0, m_threadCount = 0;
     double m_elapsed = 0;
-    QTimer *m_debounce = nullptr;
+    QTimer *m_debounce = nullptr, *m_ages = nullptr;
     bool m_filling = false, m_sortChosen = false, m_batchRunning = false;
 };
 

@@ -27,6 +27,9 @@ disabled = "#a8aebb"
 success = "#1e763b"
 warning = "#8a5d00"
 error = "#c0273a"
+# Actions (owner, 2026-09-18). A burnt orange deep enough for paper: 4.96:1 on the darkest ground
+# it is painted on, dE 29.9 from the red and 26.6 from the ochre warning.
+action = "#a8450c"
 shell = "#097193"
 agent = "#6c3fc9"
 

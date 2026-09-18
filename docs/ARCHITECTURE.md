@@ -427,7 +427,7 @@ tab close and ⧉ buttons, clicking into another pane, mouse model/effort/mode p
 the directory line (`@`), the queue × (on a steer row → ↑ then Shift+Delete), dragging a queued row
 (→ ↑ then Ctrl+↑↓; dropped above the steers → Ctrl+↑ sends it at the next tool call), `/shell ` and `/agent ` (`!`, `*`), `/help` (→ `?` in an
 empty prompt box), palette rewinds, pane
-drags, the first `relay://` link, a click on the pane's ⓘ button (→ `/status`), the Tasks chip and `/tasks`, `/requests`, `/todos` (→ `agent.requests`, Ctrl+Shift+K), Continue
+drags, the first `relay://` link, a click on the pane's ⓘ button (→ `agent.info`, Alt+I; → `/status` only while nothing is bound), the Tasks chip and `/tasks`, `/requests`, `/todos` (→ `agent.requests`, Ctrl+Shift+K), Continue
 from the link or palette (→ `/continue` or `agent.continue`), wrong-mode submissions (section 5,
 "Wrong-mode hints": a request that failed in terminal mode or a failing shell command in agent
 mode → `input.toggle`, with the mode chip flashing), dropping an image on the prompt box (→ the
@@ -486,11 +486,18 @@ Default window shortcuts:
 | Focus neighbor pane | Alt+Arrows | Native input toggle (same hand-over as Ctrl+H) | F12 |
 | Toggle terminal/agent input | Ctrl+I | Restart stopped shell/agent | Ctrl+Shift+R |
 | Interrupt agent with prompt | Ctrl+Alt+Enter | Step through links in the output | Ctrl+Shift+L |
+| Conversation info (the ⓘ view) | Alt+I | Subagents / Flash / Reasoning panes | Alt+A / Alt+F / Alt+R |
 
 The session manager (`/resume`, `agent.resume`) is Ctrl+Shift+Y, Warp's key for its conversations menu. Options and
 resume have no plain-Ctrl twin (owner, 2026-09-18): Ctrl+O and Ctrl+Y belong to the shell.
 
-Unbound by default: `conversations.open`, `agent.info` (the ⓘ view; `/status`), `files.open`, `terminal.interrupt`, `agent.newChat`,
+The ⓘ view (`agent.info`, `/status`, `/info`) is **Alt+I** (owner, 2026-09-18). Alt+I is the mnemonic
+and it is free: no preset table binds any Alt+letter, so all four presets inherit it (the konsole
+preset's Ctrl+Alt+I and VS Code's Ctrl+Shift+Alt+I are different combinations), and Readline leaves
+M-i unbound, so a shell keeps the key. Like Alt+A and Alt+R it steps aside for a program that owns
+the keyboard.
+
+Unbound by default: `conversations.open`, `files.open`, `terminal.interrupt`, `agent.newChat`,
 `agent.stop`, `agent.clearQueue`, `agent.resumeQueue`, `agent.provider`, `input.mode*`,
 `keybindings.edit`, `keybindings.reload`.
 
@@ -1167,8 +1174,8 @@ closed sessions (the window feeds the manager what is open and what was closed t
 or for every session in a scope, always goes through the pane's worker and never starts on its own.
 
 The **ⓘ pane** is `src/SessionInfo.{h,cpp}` (`relay::sessioninfo::InfoView`, `ToolPane` kind
-`Info`, `paneType` `info`): opened by the painted ⓘ button in an agent pane's header row
-(`agent.info`) or `/status`, beside that pane, one per pane. It renders the worker's
+`Info`, `paneType` `info`): opened by **Alt+I** (`agent.info`), the painted ⓘ button in an agent
+pane's header row, `/status` or `/info`, beside that pane, one per pane. It renders the worker's
 `session_info` (protocol section 25): model and provider, context, provider-reported tokens and
 cost, the session file, times, turns, instructions, and the history — the turns in order with each
 subagent thread as a link at the turn that started it. A thread link shows that thread's own

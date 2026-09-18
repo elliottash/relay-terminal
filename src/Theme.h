@@ -40,6 +40,10 @@ inline QColor AccentText{0x06, 0x1a, 0x22};
 inline QColor Success{0x7e, 0xc8, 0x8c};
 inline QColor Warning{0xe5, 0xc0, 0x7b};
 inline QColor Error{0xe0, 0x6c, 0x75};
+// The Actions pane: its header band, its glyph and the title-bar button that opens it (owner,
+// 2026-09-18, "make actions red-orange"). A fifth meaning hue between `Warning` and `Error`; a
+// theme file that omits `[ui] action` gets one derived from its own `error` (src/Theme.cpp).
+inline QColor Action{0xe5, 0x84, 0x4f};
 // The two input destinations: the mode chip, the caret and the prefix chips.
 inline QColor Shell{0x3e, 0xc5, 0xf0};
 inline QColor Agent{0xb4, 0x8e, 0xf7};

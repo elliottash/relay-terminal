@@ -274,18 +274,22 @@ TypeStyle typeStyle(const QString &paneType, ColourMode mode, const Tokens &toke
         kind.label.replace(QLatin1Char('-'), QLatin1Char(' '));
         if (!kind.label.isEmpty()) kind.label[0] = kind.label.at(0).toUpper();
     }
-    // By type: brass for the Switchboard (docs/SWITCHBOARD-AESTHETIC.md), green for Options and
-    // Actions (one Settings pane until 2026-09-18, so one tint; the glyph tells them apart), the
-    // terminal's own blue for Sessions (they are the terminals' conversations), violet for
-    // everything the agent does. A fifth hue would have to come from outside the theme's own
-    // colours. By group: every tool pane brass, every agent pane violet.
+    // By type: brass for the Switchboard (docs/SWITCHBOARD-AESTHETIC.md), green for Options,
+    // red-orange for Actions, the terminal's own blue for Sessions (they are the terminals'
+    // conversations), violet for everything the agent does. Options and Actions were one Settings
+    // pane until 2026-09-18 and shared the green, telling themselves apart by the glyph alone;
+    // the owner's answer that day was "make actions red-orange", so the fifth hue is a token of
+    // its own (`[ui] action`) rather than something borrowed. It is the neighbour of the red an
+    // ssh pane is banded in, on purpose — see remoteStyle() for what keeps the two apart.
+    // By group: every tool pane brass, every agent pane violet.
     // Off: the band stays, because it is the pane's header and its name (the Options pane draws
     // no title of its own), but in the theme's neutral ink rather than a hue.
     QColor hue;
     if (mode == ColourMode::Off) hue = tokens.muted;
     else if (kind.group == QStringLiteral("agents")) hue = tokens.agent;
     else if (mode == ColourMode::ByGroup) hue = tokens.warning;
-    else if (kind.glyph == Glyph::Options || kind.glyph == Glyph::Actions) hue = tokens.success;
+    else if (kind.glyph == Glyph::Actions) hue = tokens.action;
+    else if (kind.glyph == Glyph::Options) hue = tokens.success;
     else if (kind.type == QStringLiteral("sessions")) hue = tokens.shell;
     else hue = tokens.warning;
     TypeStyle style = tinted(hue, tokens, mode == ColourMode::Off ? 0.06 : tintStrength(tokens));
@@ -296,7 +300,11 @@ TypeStyle typeStyle(const QString &paneType, ColourMode mode, const Tokens &toke
 }
 
 TypeStyle remoteStyle(const Tokens &tokens) {
-    // Stronger than a type tint, and in the one hue no pane type uses: this is where your typing goes.
+    // Stronger than a type tint: this is where your typing goes. Since 2026-09-18 the Actions pane
+    // is a red-orange next door to it, so the red alone no longer carries the signal — and never
+    // had to. This band is half again as strong, its hairline is near-solid rather than a 45 %
+    // mix, PaneChrome hatches it with a texture no pane type uses, it carries the ⇄ glyph and the
+    // host's name, and it appears on a *terminal*, which otherwise has no band at all.
     TypeStyle style = tinted(tokens.error, tokens, isLight(tokens.background) ? 0.13 : 0.18);
     style.line = mix(tokens.error, tokens.background, 0.8);
     style.glyph = Glyph::Remote;
@@ -311,6 +319,39 @@ TypeStyle phoneStyle(const Tokens &tokens) {
     style.label = QStringLiteral("Phone");
     return style;
 }
+
+const QList<ToolButton> &toolButtons() {
+    // The order they sit in, left to right, after the bell: the gear stays last (owner, 2026-09-18).
+    // The tooltip says what the click will do, so it flips while the pane is open.
+    static const QList<ToolButton> list{
+        {QStringLiteral("actions"), QStringLiteral("palette.open"),
+         QStringLiteral("Actions: everything you can do now"), QStringLiteral("Close Actions"),
+         QStringLiteral("actions")},
+        {QStringLiteral("sessions"), QStringLiteral("agent.resume"),
+         QStringLiteral("Sessions: resume and search"), QStringLiteral("Close Sessions"),
+         QStringLiteral("sessions")},
+        {QStringLiteral("board"), QStringLiteral("board.open"),
+         QStringLiteral("Switchboard: cards, threads and plans"), QStringLiteral("Close the Switchboard"),
+         QStringLiteral("the Switchboard")},
+        {QStringLiteral("options"), QStringLiteral("app.settings"),
+         QStringLiteral("Options"), QStringLiteral("Close Options"), QStringLiteral("options")},
+    };
+    return list;
+}
+
+OpenButtonStyle openButtonStyle(const TypeStyle &band, bool hovered) {
+    // A 26 px button needs more of the hue than a full-width band to say the same thing, and with
+    // pane colours off the band's 6 % neutral tint would say nothing at all up here. So the ground
+    // is the band's own, moved towards the band's hairline: the same colour, more of it. Hovering a
+    // lit button moves it further, so open and open+hover are never the same chip.
+    OpenButtonStyle style;
+    style.fill = mix(band.line, band.fill, hovered ? 0.34 : 0.18);
+    style.line = band.line;
+    style.ink = atLeast(band.ink, style.fill, 3.0);
+    return style;
+}
+
+QColor focusRing(const QColor &ground, const Tokens &tokens) { return atLeast(tokens.text, ground, 3.0); }
 
 QColor stateInk(State state, const Tokens &t) {
     switch (state) {

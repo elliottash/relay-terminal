@@ -61,6 +61,17 @@ public:
         : ChromeButton(Glyph::Gear, parent, size) { m_paneGlyph = paneGlyph; }
 
     void setGlyph(Glyph glyph) { if (m_glyph == glyph) return; m_glyph = glyph; update(); }
+
+    // ----- lit while its pane is open (owner, 2026-09-18) --------------------------------------
+    // "the sessions / actions / switchboard / options buttons at the top right should be
+    // highlighted when they are open (using the header colors). click again to close those panes."
+    // The pane type is the whole link: the button's ground and its glyph come from that type's own
+    // header band (relay::panestatus::openButtonStyle), read at paint time, so a theme switch, a
+    // retinted pane type or "appearance/pane_colours" needs nothing but a repaint. The window says
+    // which buttons are lit (RelayWindow::syncChromeButtons).
+    void setPaneType(const QString &paneType) { if (m_paneType == paneType) return; m_paneType = paneType; update(); }
+    void setOpen(bool open) { if (m_open == open) return; m_open = open; update(); }
+    bool isOpen() const { return m_open; }
     // Unseen notifications, drawn as a dot on the bell. 0 hides it.
     void setBadge(int count) { if (m_badge == count) return; m_badge = count; update(); }
 
@@ -72,16 +83,40 @@ protected:
         painter.setRenderHint(QPainter::Antialiasing);
         const bool hovered = underMouse() && isEnabled();
         const bool closing = m_glyph == Glyph::Close;
-        if (hovered) {
+        const qreal radius = std::min(width(), height()) * 5.0 / kSize;
+        const QRectF body = QRectF(rect()).adjusted(1, 1, -1, -1);
+        namespace ps = relay::panestatus;
+        const ps::Tokens tokens = relay::chrome::tokens();
+        const bool lit = m_open && !m_paneType.isEmpty();
+        const ps::OpenButtonStyle open =
+            lit ? ps::openButtonStyle(ps::typeStyle(m_paneType, relay::chrome::colourMode(), tokens), hovered)
+                : ps::OpenButtonStyle{};
+        // The ground the glyph and the focus ring end up on, for their contrast floors (§14).
+        QColor ground = relay::theme::Background;
+        if (lit) {
+            painter.setPen(QPen(open.line, 1));
+            painter.setBrush(open.fill);
+            painter.drawRoundedRect(body, radius, radius);
+            ground = open.fill;
+        } else if (hovered) {
             painter.setPen(Qt::NoPen);
             painter.setBrush(closing ? relay::theme::Error.darker(130) : relay::theme::SurfaceRaised);
-            const qreal radius = std::min(width(), height()) * 5.0 / kSize;
-            painter.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), radius, radius);
+            painter.drawRoundedRect(body, radius, radius);
+            ground = closing ? relay::theme::Error.darker(130) : relay::theme::SurfaceRaised;
+        }
+        // The keyboard-focus ring, outside whatever ground the button ended up with. These buttons
+        // are Qt::NoFocus on purpose — the title bar must never take Tab from the terminal — so it
+        // shows only when something puts the focus here deliberately.
+        if (hasFocus()) {
+            painter.setPen(QPen(ps::focusRing(ground, tokens), 1.4));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRoundedRect(QRectF(rect()).adjusted(0.7, 0.7, -0.7, -0.7), radius + 0.6, radius + 0.6);
         }
         // A dimmed button keeps its space in the layout but shows nothing, so a row of tabs is
         // not a row of crosses; pointing at the tab (or selecting it) brings the cross back.
         if (m_dim && !hovered) return;
         QColor ink = hovered ? (closing ? QColor(Qt::white) : relay::theme::Text) : relay::theme::TextMuted;
+        if (lit) ink = open.ink;
         if (!isEnabled()) ink = relay::theme::TextMuted.darker(150);
         // Every glyph is drawn for a 26 px button and scaled from there, so a smaller button
         // (the tab's close cross) keeps the same proportions and the same apparent weight.
@@ -190,8 +225,10 @@ public:
 private:
     Glyph m_glyph;
     relay::panestatus::Glyph m_paneGlyph = relay::panestatus::Glyph::None;
+    QString m_paneType;       // the tool pane this button opens, when it opens one
     int m_badge = 0;
     bool m_dim = false;
+    bool m_open = false;      // that pane is open in the window's current tab
 };
 
 // The list behind the bell: newest first, one row per notification, click to go back to the pane

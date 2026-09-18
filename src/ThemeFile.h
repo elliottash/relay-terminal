@@ -88,7 +88,9 @@ QStringList syntaxTokenNames();
 QMap<QString, QStringList> parseToml(const QString &text, QString *error = nullptr);
 
 // Parse a theme file. `id` is the file stem. Missing tokens are reported through *error and taken
-// from `fallback`, so a slightly wrong user theme still renders.
+// from `fallback`, so a slightly wrong user theme still renders. One exception: `[ui] action`, the
+// Actions pane's red-orange, is turned out of the theme's own `error` at that red's luminance
+// rather than inherited, because another theme's orange need not be legible on this one's ground.
 ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fallback, QString *error = nullptr);
 
 // True when every required token and all 16 ANSI colours are present.

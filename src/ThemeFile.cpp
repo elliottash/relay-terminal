@@ -28,7 +28,10 @@ const QStringList &optionalUi() {
         // semantic colours the stylesheet uses for state (done / warning / failed) and for the
         // two input destinations, so a light theme can darken them
         QStringLiteral("success"), QStringLiteral("warning"), QStringLiteral("error"),
-        QStringLiteral("shell"), QStringLiteral("agent")};
+        QStringLiteral("shell"), QStringLiteral("agent"),
+        // The Actions pane's red-orange (owner, 2026-09-18). Unlike the rest of this list, a theme
+        // that is silent about it does not inherit Relay Dark's: see redOrangeFrom() below.
+        QStringLiteral("action")};
     return names;
 }
 
@@ -89,6 +92,34 @@ QColor mix(const QColor &a, const QColor &b, double weightOfA) {
     return QColor(int(std::lround(a.red() * w + b.red() * (1 - w))),
                   int(std::lround(a.green() * w + b.green() * (1 - w))),
                   int(std::lround(a.blue() * w + b.blue() * (1 - w))));
+}
+
+double relativeLuminance(const QColor &c) {
+    const auto channel = [](int v) {
+        const double s = v / 255.0;
+        return s <= 0.03928 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * channel(c.red()) + 0.7152 * channel(c.green()) + 0.0722 * channel(c.blue());
+}
+
+// The Actions pane's red-orange for a theme file that does not name one. This is the one `[ui]`
+// token that is not simply inherited from the fallback theme: an orange picked for Relay Dark's
+// near-black chrome is under 2:1 on a light theme's paper, and the Actions band would be the one
+// piece of chrome a user theme could not make legible. So it is turned out of that theme's own
+// red instead — the hue moved to a red-orange, then the lightness walked back until the relative
+// luminance matches the red's exactly, which hands it every contrast `error` already passed (at
+// an unchanged HSL lightness an orange is the brighter of the two, and on paper that costs
+// contrast). Saturation has a floor so a theme whose red is nearly grey still gets a colour.
+QColor redOrangeFrom(const QColor &red) {
+    const QColor hsl = red.toHsl();
+    const int saturation = qMax(hsl.hslSaturation(), 150);
+    const double want = relativeLuminance(red);
+    QColor best = QColor::fromHsl(20, saturation, hsl.lightness()).toRgb();
+    for (int lightness = 0; lightness <= 255; ++lightness) {
+        const QColor tried = QColor::fromHsl(20, saturation, lightness).toRgb();
+        if (std::abs(relativeLuminance(tried) - want) < std::abs(relativeLuminance(best) - want)) best = tried;
+    }
+    return best;
 }
 
 }  // namespace
@@ -193,6 +224,7 @@ const ThemeSpec &builtinDark() {
             {QStringLiteral("success"), QColor(0x7e, 0xc8, 0x8c)},
             {QStringLiteral("warning"), QColor(0xe5, 0xc0, 0x7b)},
             {QStringLiteral("error"), QColor(0xe0, 0x6c, 0x75)},
+            {QStringLiteral("action"), QColor(0xe5, 0x84, 0x4f)},
             {QStringLiteral("shell"), QColor(0x3e, 0xc5, 0xf0)},
             {QStringLiteral("agent"), QColor(0xb4, 0x8e, 0xf7)},
         };
@@ -255,6 +287,14 @@ ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fa
     };
     readColors(QStringLiteral("ui"), uiTokenNames(), fallback.ui, spec.ui);
     readColors(QStringLiteral("syntax"), syntaxTokenNames(), fallback.syntax, spec.syntax);
+    // `ui.action` is derived from this theme's own red rather than inherited (redOrangeFrom).
+    {
+        bool named = false;
+        const QString raw = scalar(QStringLiteral("ui.action"));
+        if (!raw.isEmpty()) parseColor(raw, &named);
+        const auto red = spec.ui.constFind(QStringLiteral("error"));
+        if (!named && red != spec.ui.constEnd()) spec.ui.insert(QStringLiteral("action"), redOrangeFrom(*red));
+    }
 
     const auto readOne = [&](const QString &key, const QColor &fallbackColor) {
         const QString raw = scalar(key);

@@ -256,6 +256,8 @@ void adoptTokens(const ThemeSpec &spec) {
     Success = ui("success", Success);
     Warning = ui("warning", Warning);
     Error = ui("error", Error);
+    // Always present: parseTheme() turns one out of the theme's own red when the file is silent.
+    Action = ui("action", Action);
     Shell = ui("shell", Accent);
     Agent = ui("agent", Agent);
 

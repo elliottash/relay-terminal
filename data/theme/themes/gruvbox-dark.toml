@@ -24,6 +24,9 @@ disabled = "#6d6259"
 success = "#b8bb26"
 warning = "#fabd2f"
 error = "#fc7f70"
+# Actions (owner, 2026-09-18). Upstream Gruvbox's own bright orange, so the port keeps its palette:
+# 4.59:1 at worst, dE 39.4 from the red and 35.5 from the yellow.
+action = "#fe8019"
 shell = "#8cab9f"
 agent = "#d791a4"
 

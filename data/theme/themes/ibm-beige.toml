@@ -41,6 +41,12 @@ disabled = "#8a8271"
 success = "#135427"
 warning = "#684800"
 error = "#931c17"
+# Actions (owner, 2026-09-18). A terracotta, derived for the beige ground like the three above it:
+# 4.75:1 on the case beige, and the tightest separation of any theme — dE 21.0 from the brick red
+# and 21.2 from the ochre, because on paper a deep red, a deep orange and a deep ochre are close
+# neighbours. That is the same order of separation this theme's greyed destination pair settled on
+# (dE 20.3), and the band carries the bolt glyph and the word "Actions" besides.
+action = "#803700"
 # The owner's call for this theme: "terminal is dark gray-blue and agent is dark gray-violet" —
 # a slate and a pewter rather than a teal and a purple, so the pair sits with the plastic instead
 # of looking like a web app dropped into a 1992 case. Their first version (#354a59 / #4c4460) was

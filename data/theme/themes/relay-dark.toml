@@ -27,6 +27,11 @@ disabled = "#5d6169"
 success = "#7ec88c"
 warning = "#e5c07b"
 error = "#e06c75"
+# The Actions pane's band, glyph and title-bar button (owner, 2026-09-18: "make actions
+# red-orange"). A fifth meaning hue, sitting between the amber `warning` the Switchboard uses and
+# the red `error` an ssh pane is banded in, and CIELAB dE 30.9 / 32.3 from them. A theme that
+# leaves it out gets its own `error` turned to a red-orange at the same luminance.
+action = "#e5844f"
 # The two input destinations; the mode chip, the caret and the prefix chips take these.
 shell = "#3ec5f0"
 agent = "#b48ef7"

@@ -306,7 +306,17 @@ private:
         // Ctrl+Shift+Y is Warp's key for its conversations menu (owner, 2026-09-18). No plain
         // Ctrl+Y twin: that is yank in the shell.
         add("agent.resume", "agent", "Sessions: resume a saved session, search, subagent threads (/resume)", {QStringLiteral("Ctrl+Shift+Y")});
-        add("agent.info", "agent", "Conversation info: model, tokens, file and history with subagent threads (/status, the ⓘ button)", {});
+        // The ⓘ view from the keyboard (owner, 2026-09-18: "the (i) view hotkey could be alt+i or
+        // alt+1?"). Alt+I, because it says what it opens, and it is free: Relay's only other
+        // Alt+letters are Alt+A (subagents), Alt+F (Flash) and Alt+R (reasoning); no preset table
+        // binds an Alt+letter at all, so all four presets inherit this default (the konsole
+        // preset's Ctrl+Alt+I and VS Code's Ctrl+Shift+Alt+I are different combinations and do not
+        // collide); and Readline leaves M-i unbound, so a shell keeps the key — `\ei` has no
+        // binding and `\eI` is only do-lowercase-version of it. No Ctrl+Shift twin: Ctrl+Shift+I is
+        // input.toggle's, and like Alt+A and Alt+R this key steps aside for a program that has the
+        // keyboard (actsInsidePrograms).
+        add("agent.info", "agent", "Conversation info: model, tokens, file and history with subagent threads (/status, the ⓘ button)",
+            {QStringLiteral("Alt+I")});
         // Conversation list with full-text search, and find-in-view for this pane.
         add("conversations.open", "agent", "Sessions: search every saved session and Relay's terminal history (/conversations)", {});
         add("find.inView", "agent", "Find in this pane: the conversation and the terminal scrollback (from the prompt box)",

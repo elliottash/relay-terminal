@@ -539,6 +539,49 @@ private slots:
         QVERIFY(said);
     }
 
+    // "closed N min ago" is a clock. It has to keep up while the pane sits open, and go when the
+    // item is reopened or falls off the end of the list — without asking the worker again.
+    void theClosedTagAgesAndThenGoes() {
+        SessionManager manager;
+        int queries = 0;
+        manager.onQuery = [&queries](const QJsonObject &) { ++queries; };
+        // Just under the minute, so the wait below carries it over into "1 min ago".
+        const qint64 closedAt = QDateTime::currentMSecsSinceEpoch() - 59'000;
+        manager.setClosedSessions({{QStringLiteral("a"), {QStringLiteral("closed-3"), closedAt}}});
+        manager.show();
+        manager.setResults({{QStringLiteral("items"),
+                             QJsonArray{sessionItem(QStringLiteral("a"), QStringLiteral("Was in a pane"))}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QTreeWidgetItem *row = rowTitled(tree, QStringLiteral("Was in a pane"));
+        QVERIFY(row);
+        QVERIFY(row->data(0, kBadgeRole).toStringList().contains(QStringLiteral("closed just now")));
+        const int asked = queries;
+
+        // The timer runs while there is something closed to say it about. Tick it by hand rather
+        // than waiting out its interval: what is under test is what the tick does.
+        QTest::qWait(1500);
+        manager.refreshClosedAges();
+        QVERIFY(row->data(0, kBadgeRole).toStringList().contains(QStringLiteral("closed 1 min ago")));
+        QCOMPARE(queries, asked);   // redrawn from what is already here
+
+        // Resumed in a pane meanwhile: "open" wins, because that is what Enter will do.
+        manager.setOpenSessions({QStringLiteral("a")});
+        row = rowTitled(tree, QStringLiteral("Was in a pane"));
+        QVERIFY(row && row->data(0, kBadgeRole).toStringList().contains(QStringLiteral("open")));
+        QVERIFY(!row->data(0, kBadgeRole).toStringList().contains(QStringLiteral("closed 1 min ago")));
+        manager.setOpenSessions({});
+
+        // Reopened or pushed off the end of the 25: the tag goes, and so does "Reopen where it was".
+        auto *reopen = manager.findChild<QPushButton *>(QStringLiteral("reopenClosed"));
+        QVERIFY(reopen && reopen->isVisible());
+        manager.setClosedSessions({});
+        row = rowTitled(tree, QStringLiteral("Was in a pane"));
+        QVERIFY(row);
+        for (const QString &tag : row->data(0, kBadgeRole).toStringList())
+            QVERIFY(!tag.startsWith(QStringLiteral("closed ")));
+        QVERIFY(!reopen->isVisible());
+    }
+
     void unfoldAsksOnceAndFillsFromTheOverview() {
         SessionManager manager;
         manager.onQuery = [](const QJsonObject &) {};

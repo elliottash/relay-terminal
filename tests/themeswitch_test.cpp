@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The live end of the theme (src/Theme.cpp): what the running application does with the id in
+// `theme/name`, as opposed to what the reader does with a file (tests/theme_test.cpp).
+//
+// It exists for one question the owner's 2026-09-18 decision raised — "remove the solarized dark
+// theme" — which is what happens to somebody who had already chosen it. The answer has to be that
+// Relay comes up on Relay Dark with a whole palette, not on an empty one: `resolveTheme()` falls
+// back to `relay-dark`, and then to the compiled-in theme if even that is missing. Nothing checked
+// that before, because nothing had ever removed a theme.
+#include "Theme.h"
+#include "ThemeFile.h"
+
+#include <QApplication>
+#include <QDir>
+#include <QSettings>
+#include <QTemporaryDir>
+#include <QTest>
+
+using namespace relay::theme;
+
+class ThemeSwitchTest : public QObject {
+    Q_OBJECT
+
+private Q_SLOTS:
+    void initTestCase() {
+        QVERIFY(m_config.isValid());
+        // Never the real profile: this writes theme/name.
+        qputenv("XDG_CONFIG_HOME", m_config.path().toLocal8Bit());
+        qputenv("RELAY_THEME_DIR", QByteArray(RELAY_SOURCE_DIR "/data/theme"));
+        // The setting a user who had chosen Solarized Dark is still carrying.
+        QSettings settings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("RelayTerminal"),
+                           QStringLiteral("relay"));
+        settings.setValue(QStringLiteral("theme/name"), QStringLiteral("solarized-dark"));
+        settings.sync();
+        QCOMPARE(settings.value(QStringLiteral("theme/name")).toString(), QStringLiteral("solarized-dark"));
+    }
+
+    void theThemeItAsksForIsGone() {
+        for (const ThemeChoice &choice : availableThemes())
+            QVERIFY2(choice.id != QStringLiteral("solarized-dark"), "solarized-dark is still on offer");
+        QVERIFY(availableThemes().size() >= 5);
+        // Choosing it by id is refused rather than half-applied.
+        QVERIFY(!setActiveTheme(QStringLiteral("solarized-dark")));
+    }
+
+    // The thing that must not happen: a start-up that leaves the tokens, the palette and the
+    // stylesheet on whatever they happened to hold.
+    void aStaleThemeNameStartsOnRelayDark() {
+        auto *app = qobject_cast<QApplication *>(QCoreApplication::instance());
+        QVERIFY(app);
+        applyTheme(*app);
+        QCOMPARE(activeThemeId(), QStringLiteral("relay-dark"));
+        QCOMPARE(active().name, QStringLiteral("Relay Dark"));
+        QVERIFY(isComplete(active()));
+        // A whole palette, not an empty one: the tokens are Relay Dark's own values.
+        QCOMPARE(Background.name(), QStringLiteral("#0f1115"));
+        QCOMPARE(Text.name(), QStringLiteral("#e6e8ec"));
+        QCOMPARE(Action.name(), QStringLiteral("#e5844f"));
+        QCOMPARE(app->palette().color(QPalette::Window).name(), Background.name());
+        QCOMPARE(app->palette().color(QPalette::WindowText).name(), Text.name());
+        QVERIFY(app->styleSheet().size() > 1000);
+        QVERIFY(!app->styleSheet().contains(QStringLiteral("@bg")));   // every token was substituted
+        // The fallback is not written back: the setting is still the user's own until they pick
+        // again, so a theme folder that returns (a user theme of that id) is picked up as before.
+        QSettings settings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("RelayTerminal"),
+                           QStringLiteral("relay"));
+        QCOMPARE(settings.value(QStringLiteral("theme/name")).toString(), QStringLiteral("solarized-dark"));
+    }
+
+    // Owner, 2026-09-18: "make actions red-orange". The Actions colour is a live token like the
+    // rest — it follows a theme switch, so the band, the glyph and the title-bar button that read
+    // it at paint time follow too.
+    void theActionsColourFollowsTheTheme() {
+        QVERIFY(setActiveTheme(QStringLiteral("relay-dark")));
+        QCOMPARE(Action.name(), QStringLiteral("#e5844f"));
+        QVERIFY(setActiveTheme(QStringLiteral("ibm-beige")));
+        QCOMPARE(Action.name(), QStringLiteral("#803700"));
+        QVERIFY(setActiveTheme(QStringLiteral("dark-copper")));
+        QCOMPARE(Action.name(), QStringLiteral("#e56a30"));
+        QVERIFY(setActiveTheme(QStringLiteral("relay-dark")));
+    }
+
+    // A user theme in ~/.config/relay/themes that says nothing about Actions still gets a
+    // red-orange, and one made out of its own red rather than Relay Dark's.
+    void aUserThemeWithoutAnActionColourStillGetsOne() {
+        const QString dir = m_config.path() + QStringLiteral("/relay/themes");
+        QVERIFY(QDir().mkpath(dir));
+        QFile file(dir + QStringLiteral("/paper.toml"));
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
+        file.write(
+            "[theme]\nname = \"Paper\"\nvariant = \"light\"\n"
+            "[ui]\nbackground = \"#ffffff\"\nsurface = \"#f4f4f4\"\nsurface_raised = \"#e8e8e8\"\n"
+            "border = \"#cccccc\"\nborder_strong = \"#888888\"\ntext = \"#111111\"\n"
+            "text_muted = \"#555555\"\naccent = \"#005577\"\naccent_text = \"#ffffff\"\nerror = \"#a11020\"\n");
+        file.close();
+        refreshThemes();
+        QVERIFY(setActiveTheme(QStringLiteral("paper")));
+        QVERIFY(Action.isValid());
+        QVERIFY2(Action != QColor(QStringLiteral("#e5844f")), qPrintable(Action.name()));
+        const int hue = Action.toHsv().hsvHue();
+        QVERIFY2(hue >= 12 && hue <= 30, qPrintable(QStringLiteral("%1 is at hue %2").arg(Action.name()).arg(hue)));
+        QVERIFY(setActiveTheme(QStringLiteral("relay-dark")));
+    }
+
+private:
+    QTemporaryDir m_config;
+};
+
+QTEST_MAIN(ThemeSwitchTest)
+#include "themeswitch_test.moc"

@@ -110,8 +110,10 @@ QStringList colourModeLabels();
 enum class Glyph { None, Switchboard, Options, Actions, Sessions, Subagent, Turn, Tool, Remote, Phone };
 
 // The theme colours the tints are made from; the caller fills it from the live theme.
+// `action` is the Actions pane's red-orange (owner, 2026-09-18); every theme file names it, and
+// src/Theme.cpp derives one for a user theme that does not.
 struct Tokens {
-    QColor background, text, muted, shell, agent, success, warning, error;
+    QColor background, text, muted, shell, agent, success, warning, error, action;
 };
 
 struct TypeStyle {
@@ -133,6 +135,36 @@ TypeStyle typeStyle(const QString &paneType, ColourMode mode, const Tokens &toke
 TypeStyle remoteStyle(const Tokens &tokens);
 // The chip that says a phone is watching or driving the pane (Relay's "remote share").
 TypeStyle phoneStyle(const Tokens &tokens);
+
+// ----- the title-bar buttons that open a tool pane (owner, 2026-09-18) --------------------------
+// "the sessions / actions / switchboard / options buttons at the top right should be highlighted
+// when they are open (using the header colors). click again to close those panes."
+//
+// One table for the four of them, so a button's glyph, its light, its tooltip and what its second
+// click closes cannot drift apart: each names the pane type it owns, and everything else is read
+// from that type's own style.
+struct ToolButton {
+    QString paneType;    // the pane this button owns, spelled as the `paneType` property does
+    QString action;      // the action that opens it (a Keymap action id)
+    QString label;       // the tooltip while that pane is closed
+    QString openLabel;   // ... and while it is open, because the next click will close it
+    QString what;        // the noun the shortcut hint uses ("the Switchboard")
+};
+const QList<ToolButton> &toolButtons();
+
+// How one of those buttons is painted while its pane is open: the pane's own header band, firmed
+// up for a 26 px button. `band` is typeStyle() for that pane type under the live colour mode, so
+// "pane colours off" arrives here as a neutral band and still comes out unmistakable — which panes
+// are open is information, not decoration.
+struct OpenButtonStyle {
+    QColor fill;   // the ground behind the glyph
+    QColor line;   // its hairline, the band's own
+    QColor ink;    // the glyph, at least 3:1 on fill
+};
+OpenButtonStyle openButtonStyle(const TypeStyle &band, bool hovered);
+
+// The keyboard-focus ring on a header button, on whatever ground that button ended up with.
+QColor focusRing(const QColor &ground, const Tokens &tokens);
 // The colour a state glyph is drawn in.
 QColor stateInk(State state, const Tokens &tokens);
 

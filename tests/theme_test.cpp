@@ -155,7 +155,7 @@ private Q_SLOTS:
                                      QStringLiteral("surface_raised"), QStringLiteral("border"),
                                      QStringLiteral("border_strong"), QStringLiteral("text"),
                                      QStringLiteral("text_muted"), QStringLiteral("accent"),
-                                     QStringLiteral("accent_text")})
+                                     QStringLiteral("accent_text"), QStringLiteral("action")})
             QCOMPARE(spec.uiColor(token).name(), fallback.uiColor(token).name());
         for (const QString &token : syntaxTokenNames())
             QCOMPARE(spec.syntaxColor(token).name(), fallback.syntaxColor(token).name());
@@ -320,7 +320,7 @@ private Q_SLOTS:
             pairs << Pair{ui(dest), ui("background"), 4.5, dest};
             for (const QColor &face : raisedFaces) pairs << Pair{ui(dest), face, 4.5, dest};
         }
-        for (const char *state : {"success", "warning", "error"}) {
+        for (const char *state : {"success", "warning", "error", "action"}) {
             pairs << Pair{ui(state), ui("background"), 4.5, state};
             for (const QColor &face : raisedFaces) pairs << Pair{ui(state), face, 4.5, state};
         }
@@ -356,14 +356,15 @@ private Q_SLOTS:
     // terminal's ground too; the composer's syntax colours are read on surface and surface_raised.
     void everyShippedThemeKeepsItsTextLegible() {
         const auto files = discoverThemeFiles({QStringLiteral("data/theme/themes")});
-        QVERIFY(files.size() >= 6);
+        QVERIFY(files.size() >= 5);   // six until Solarized Dark was dropped (owner, 2026-09-18)
         for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
             const ThemeSpec spec = shipped(it.key());
             const auto ui = [&spec](const char *t) { return spec.uiColor(QString::fromLatin1(t)); };
             const QList<QPair<const char *, QColor>> grounds{
                 {"background", ui("background")}, {"surface", ui("surface")}, {"surface_raised", ui("surface_raised")}};
             QList<std::tuple<QString, QColor, QString, QColor>> pairs;
-            for (const char *fg : {"text", "text_muted", "accent", "shell", "agent", "success", "warning", "error"})
+            for (const char *fg : {"text", "text_muted", "accent", "shell", "agent", "success", "warning", "error",
+                                   "action"})
                 for (const auto &ground : grounds)
                     pairs.append({QString::fromLatin1(fg), ui(fg), QString::fromLatin1(ground.first), ground.second});
             QList<QColor> terminal{spec.terminalBackground};
@@ -442,10 +443,83 @@ private Q_SLOTS:
         QVERIFY(!copper.flag(QStringLiteral("bevel")));
         QVERIFY(!copper.flag(QStringLiteral("square")));
         for (const QString &id : {QStringLiteral("relay-dark"), QStringLiteral("relay-light"),
-                                  QStringLiteral("gruvbox-dark"), QStringLiteral("solarized-dark")}) {
+                                  QStringLiteral("gruvbox-dark")}) {
             const ThemeSpec spec = shipped(id);
             QVERIFY2(!spec.flag(QStringLiteral("bevel")) && !spec.flag(QStringLiteral("square")), qPrintable(id));
         }
+    }
+
+    // Owner, 2026-09-18: "remove the solarized dark theme". Its palette could not reach 4.5:1
+    // without being lightened away from Schoonover's original (card #N50J), and the answer was to
+    // drop it rather than exempt it. Nothing may ship it back in under the same id: a settings file
+    // that still names it falls back to Relay Dark (src/Theme.cpp resolveTheme, and the live check
+    // in tests/themeswitch_test.cpp), which only works while the id is genuinely absent.
+    void solarizedDarkIsGone() {
+        const auto files = discoverThemeFiles({QStringLiteral("data/theme/themes")});
+        QVERIFY2(!files.contains(QStringLiteral("solarized-dark")), "data/theme/themes/solarized-dark.toml is back");
+        QVERIFY(files.contains(QStringLiteral("relay-dark")));
+        // The theme a stale setting lands on has to be whole, or the fallback is an empty palette.
+        QVERIFY(isComplete(shipped(QStringLiteral("relay-dark"))));
+    }
+
+    // Owner, 2026-09-18: "make actions red-orange". The Actions pane's band, glyph and title-bar
+    // button take `[ui] action`, a fifth meaning hue. It has to be a red-orange — not the red an
+    // ssh pane is banded in, and not the amber the Switchboard uses — in every shipped theme, and
+    // legible as text like every other meaning colour (everyShippedThemeKeepsItsTextLegible covers
+    // the contrast; this covers that it is a distinct colour).
+    void actionsAreARedOrangeOfTheirOwn() {
+        const auto files = discoverThemeFiles({QStringLiteral("data/theme/themes")});
+        QVERIFY(!files.isEmpty());
+        for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
+            const ThemeSpec spec = shipped(it.key());
+            const auto ui = [&spec](const char *t) { return spec.uiColor(QString::fromLatin1(t)); };
+            const QColor action = ui("action");
+            QVERIFY2(action.isValid(), qPrintable(it.key()));
+            // Red-orange: past the reds, well short of the yellows. Hue is the one thing a name
+            // like "red-orange" pins down, so it is asserted rather than left to the eye.
+            const int hue = action.toHsv().hsvHue();
+            QVERIFY2(hue >= 12 && hue <= 30,
+                     qPrintable(QStringLiteral("%1: action %2 is at hue %3, not a red-orange (12-30)")
+                                    .arg(it.key(), action.name()).arg(hue)));
+            // Clear of the two hues it stands between, by the same CIELAB margin the destination
+            // pair and the copper accent are held to.
+            for (const char *other : {"error", "warning"}) {
+                const double d = deltaE(action, ui(other));
+                QVERIFY2(d >= 20.0, qPrintable(QStringLiteral("%1: action %2 vs %3 %4 is dE %5 < 20")
+                                                   .arg(it.key(), action.name(), QString::fromLatin1(other),
+                                                        ui(other).name())
+                                                   .arg(d, 0, 'f', 1)));
+            }
+        }
+        // Dark Copper's accent is itself an orange, so there the red-orange has a third neighbour.
+        const ThemeSpec copper = shipped(QStringLiteral("dark-copper"));
+        QVERIFY(deltaE(copper.uiColor(QStringLiteral("action")), copper.uiColor(QStringLiteral("accent"))) >= 20.0);
+    }
+
+    // A user theme that says nothing about Actions must not inherit Relay Dark's orange: on paper
+    // it would be under 2:1. It gets one turned out of its own red, at that red's luminance, so it
+    // is legible exactly where the red is.
+    void aThemeThatNamesNoActionColourGetsOneFromItsOwnRed() {
+        QString error;
+        const ThemeSpec paper = parseTheme(QStringLiteral("[theme]\nname = \"Paper\"\nvariant = \"light\"\n"
+                                                          "[ui]\nbackground = \"#ffffff\"\nerror = \"#a11020\"\n"),
+                                           QStringLiteral("paper"), builtinDark(), &error);
+        const QColor red = paper.uiColor(QStringLiteral("error"));
+        const QColor action = paper.uiColor(QStringLiteral("action"));
+        QCOMPARE(red.name(), QStringLiteral("#a11020"));
+        QVERIFY2(action != builtinDark().uiColor(QStringLiteral("action")), qPrintable(action.name()));
+        const int hue = action.toHsv().hsvHue();
+        QVERIFY2(hue >= 12 && hue <= 30, qPrintable(QStringLiteral("%1 is at hue %2").arg(action.name()).arg(hue)));
+        // Same luminance as the red it came from, so every ground the red cleared, it clears.
+        const QColor white(QStringLiteral("#ffffff"));
+        QVERIFY2(std::abs(contrast(action, white) - contrast(red, white)) < 0.15,
+                 qPrintable(QStringLiteral("action %1 is %2:1 on white, the red %3 is %4:1")
+                                .arg(action.name()).arg(contrast(action, white), 0, 'f', 2)
+                                .arg(red.name()).arg(contrast(red, white), 0, 'f', 2)));
+        // A theme that does name one keeps it, untouched.
+        const ThemeSpec named = parseTheme(QStringLiteral("[theme]\nname = \"Named\"\n[ui]\naction = \"#ff5522\"\n"),
+                                           QStringLiteral("named"), builtinDark(), &error);
+        QCOMPARE(named.uiColor(QStringLiteral("action")).name(), QStringLiteral("#ff5522"));
     }
 };
 

@@ -381,7 +381,8 @@ InfoView::InfoView(QWidget *parent) : QWidget(parent) {
     m_body->installEventFilter(this);
     connect(m_body, &QTextBrowser::anchorClicked, this, [this](const QUrl &url) { linkActivated(url); });
     layout->addWidget(m_body, 1);
-    auto *hint = new QLabel(QStringLiteral("Links open subagent threads · Alt+Left back · F5 refresh · Esc closes · /status opens this"));
+    // Alt+I is the fast path since 2026-09-18; /status and /info still open it (docs/ARCHITECTURE.md).
+    auto *hint = new QLabel(QStringLiteral("Links open subagent threads · Alt+Left back · F5 refresh · Esc closes · Alt+I opens this"));
     hint->setObjectName(QStringLiteral("dialogHint"));
     layout->addWidget(hint);
     updateHeader();

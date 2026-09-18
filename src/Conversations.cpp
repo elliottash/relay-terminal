@@ -731,6 +731,13 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_debounce->setInterval(120);
     connect(m_debounce, &QTimer::timeout, this, &SessionManager::requery);
 
+    // The "closed N min ago" tag ages while the pane sits open. It ticks well inside the minute
+    // the wording turns on, and only while something is in the closed list; the list changing
+    // (an item reopened or pushed off the end) comes separately, through setClosedSessions.
+    m_ages = new QTimer(this);
+    m_ages->setInterval(20'000);
+    connect(m_ages, &QTimer::timeout, this, &SessionManager::refreshClosedAges);
+
     connect(m_search, &QLineEdit::textChanged, this, [this](const QString &text) {
         // Searching wants the best match first, listing wants the newest — until the user picks a
         // sort by hand, after which their choice stands whatever they type.
@@ -1664,7 +1671,35 @@ void SessionManager::setOpenSessions(const QStringList &sessionIds) {
 void SessionManager::setClosedSessions(const QHash<QString, QPair<QString, qint64>> &closed) {
     if (m_closed == closed) return;
     m_closed = closed;
+    // Reopened or pushed off the end of the 25: the tag goes and "Reopen where it was" goes with
+    // it. Nothing needs asking again — the rows are redrawn from what is already here.
+    if (m_closed.isEmpty()) m_ages->stop();
+    else if (!m_ages->isActive()) m_ages->start();
     if (!m_items.isEmpty()) rebuildTree(selectedId());
+    else updateButtons();
+}
+
+// One pass over the rows of conversations that are in the closed list, re-reading the clock. The
+// whole tag list is rebuilt rather than the words patched, so "open" still wins over "closed …"
+// for a conversation someone has meanwhile resumed in a pane.
+void SessionManager::refreshClosedAges() {
+    if (m_closed.isEmpty() || !m_tree) return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    bool redraw = false;
+    for (auto it = m_closed.cbegin(); it != m_closed.cend(); ++it) {
+        const QString text = closedAgo(it->second, now);
+        const bool open = m_openSessions.contains(it.key());
+        for (QTreeWidgetItem *row : m_rows.values(it.key())) {
+            if (!row || row->data(0, kKindRole).toString() != QLatin1String("session")) continue;
+            const QJsonObject item =
+                QJsonDocument::fromJson(row->data(0, kItemRole).toString().toUtf8()).object();
+            const QStringList tags = badges(item, open, text);
+            if (row->data(0, kBadgeRole).toStringList() == tags) continue;
+            row->setData(0, kBadgeRole, tags);
+            redraw = true;
+        }
+    }
+    if (redraw) m_tree->viewport()->update();
 }
 
 // What the box understands, in the box's own words. A popup rather than a dialog: it is a reminder,

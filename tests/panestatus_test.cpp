@@ -9,6 +9,9 @@
 #include <QFile>
 #include <QTest>
 
+#include <array>
+#include <cmath>
+
 using namespace relay::panestatus;
 
 namespace {
@@ -22,7 +25,26 @@ Tokens tokensOf(const relay::theme::ThemeSpec &spec) {
     t.success = spec.uiColor(QStringLiteral("success"));
     t.warning = spec.uiColor(QStringLiteral("warning"));
     t.error = spec.uiColor(QStringLiteral("error"));
+    t.action = spec.uiColor(QStringLiteral("action"));
     return t;
+}
+
+// CIELAB dE76, the same arithmetic tests/theme_test.cpp measures the token palette with.
+double deltaE(const QColor &a, const QColor &b) {
+    const auto lab = [](const QColor &c) {
+        const auto lin = [](int v) {
+            const double s = v / 255.0;
+            return s <= 0.04045 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4);
+        };
+        const double r = lin(c.red()), g = lin(c.green()), bl = lin(c.blue());
+        const double x = (0.4124 * r + 0.3576 * g + 0.1805 * bl) / 0.95047;
+        const double y = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+        const double z = (0.0193 * r + 0.1192 * g + 0.9505 * bl) / 1.08883;
+        const auto f = [](double t) { return t > 0.008856 ? std::cbrt(t) : 7.787 * t + 16.0 / 116.0; };
+        return std::array<double, 3>{116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))};
+    };
+    const auto p = lab(a), q = lab(b);
+    return std::sqrt(std::pow(p[0] - q[0], 2) + std::pow(p[1] - q[1], 2) + std::pow(p[2] - q[2], 2));
 }
 
 QList<relay::theme::ThemeSpec> shippedThemes() {
@@ -203,18 +225,26 @@ private Q_SLOTS:
 
     void byTypeDiffersByGroupShares() {
         const Tokens t = tokensOf(relay::theme::builtinDark());
-        // Options and Actions were one Settings pane until 2026-09-18 and share a tint by type.
-        const QStringList tools{QStringLiteral("board"), QStringLiteral("options"), QStringLiteral("sessions")};
+        // Owner, 2026-09-18: "make actions red-orange". Options and Actions were one Settings pane
+        // until that day and shared the green, telling themselves apart by the glyph alone; Actions
+        // now has a hue of its own, so by type the four tool panes are four colours.
+        const QStringList tools{QStringLiteral("board"), QStringLiteral("options"), QStringLiteral("actions"),
+                                QStringLiteral("sessions")};
         QSet<QRgb> byType, byGroup;
         for (const QString &type : tools) {
             byType.insert(typeStyle(type, ColourMode::ByType, t).fill.rgb());
             byGroup.insert(typeStyle(type, ColourMode::ByGroup, t).fill.rgb());
         }
-        QCOMPARE(byType.size(), 3);
+        QCOMPARE(byType.size(), 4);
         QCOMPARE(byGroup.size(), 1);
-        QCOMPARE(typeStyle(QStringLiteral("actions"), ColourMode::ByType, t).fill, typeStyle(QStringLiteral("options"), ColourMode::ByType, t).fill);
+        QCOMPARE(typeStyle(QStringLiteral("actions"), ColourMode::ByType, t).ink, t.action);
+        QVERIFY(typeStyle(QStringLiteral("actions"), ColourMode::ByType, t).fill != typeStyle(QStringLiteral("options"), ColourMode::ByType, t).fill);
         QVERIFY(typeStyle(QStringLiteral("actions"), ColourMode::ByType, t).glyph != typeStyle(QStringLiteral("options"), ColourMode::ByType, t).glyph);
+        // "By group" is unchanged: every tool pane still shares the tools tint.
         QCOMPARE(typeStyle(QStringLiteral("actions"), ColourMode::ByGroup, t).fill.rgb(), *byGroup.cbegin());
+        // ... and "off" still flattens it with the rest.
+        QCOMPARE(typeStyle(QStringLiteral("actions"), ColourMode::Off, t).fill,
+                 typeStyle(QStringLiteral("options"), ColourMode::Off, t).fill);
         // Today's Settings pane is styled as Options until the split lands.
         QCOMPARE(typeStyle(QStringLiteral("settings"), ColourMode::ByType, t).glyph, Glyph::Options);
         const QColor agents = typeStyle(QStringLiteral("subagent"), ColourMode::ByGroup, t).fill;
@@ -243,6 +273,137 @@ private Q_SLOTS:
                 QVERIFY2(contrast(s.fill, t.background) < 1.6, where.constData());
             }
         }
+    }
+
+    // Owner, 2026-09-18: "make actions red-orange". That puts a pane type next door to the ssh
+    // band, which is red and is a safety signal — the one band that must never be mistaken for
+    // something ordinary. Four things keep them apart, and this is what says so: the hue itself
+    // (CIELAB dE 20 or better, the margin the themes hold their other colour pairs to), the
+    // strength of the band, the weight of its hairline, and the glyph. The texture is a fifth:
+    // PaneChrome hatches the remote band and nothing else, which is why the *fills* are allowed to
+    // be the near neighbours that any pair of low-strength tints on one background must be.
+    void actionsAreNotAnSshPane() {
+        for (const auto &spec : shippedThemes()) {
+            const Tokens t = tokensOf(spec);
+            const TypeStyle actions = typeStyle(QStringLiteral("actions"), ColourMode::ByType, t);
+            const TypeStyle remote = remoteStyle(t);
+            const QByteArray id = spec.id.toUtf8();
+            QVERIFY2(deltaE(actions.ink, remote.ink) >= 20.0,
+                     qPrintable(QStringLiteral("%1: the Actions glyph %2 and the ssh glyph %3 are only dE %4 apart")
+                                    .arg(spec.id, actions.ink.name(), remote.ink.name())
+                                    .arg(deltaE(actions.ink, remote.ink), 0, 'f', 1)));
+            // The remote band is the firmer of the two, in fill and in hairline.
+            QVERIFY2(contrast(remote.fill, t.background) > contrast(actions.fill, t.background), id.constData());
+            QVERIFY2(contrast(remote.line, t.background) > contrast(actions.line, t.background), id.constData());
+            QCOMPARE(actions.glyph, Glyph::Actions);
+            QCOMPARE(remote.glyph, Glyph::Remote);
+            // ... and it says so whatever the colour setting is, because it ignores the setting.
+            for (ColourMode mode : {ColourMode::ByType, ColourMode::ByGroup, ColourMode::Off})
+                QVERIFY2(typeStyle(QStringLiteral("actions"), mode, t).fill != remote.fill, id.constData());
+        }
+    }
+
+    // The Actions hue is the theme's, never a constant: a hard-coded orange is the bug the
+    // "Legible text" rules were written against (docs/ARCHITECTURE.md §14).
+    void everyShippedThemePicksItsOwnActionsHue() {
+        QSet<QRgb> inks;
+        const auto themes = shippedThemes();
+        QVERIFY(themes.size() >= 5);
+        for (const auto &spec : themes) {
+            const Tokens t = tokensOf(spec);
+            QVERIFY2(t.action.isValid(), spec.id.toUtf8().constData());
+            QCOMPARE(typeStyle(QStringLiteral("actions"), ColourMode::ByType, t).ink, t.action);
+            inks.insert(t.action.rgb());
+        }
+        QCOMPARE(inks.size(), themes.size());
+    }
+
+    // ----- the title-bar buttons that open a tool pane (owner, 2026-09-18) ---------------------
+    // "the sessions / actions / switchboard / options buttons at the top right should be
+    // highlighted when they are open (using the header colors). click again to close those panes."
+    void everyToolButtonOwnsOnePaneType() {
+        const Tokens t = tokensOf(relay::theme::builtinDark());
+        const QList<ToolButton> buttons = toolButtons();
+        QCOMPARE(buttons.size(), 4);
+        QSet<QString> types, actions;
+        QSet<int> glyphs;
+        for (const ToolButton &spec : buttons) {
+            const QByteArray where = spec.paneType.toUtf8();
+            types.insert(spec.paneType);
+            actions.insert(spec.action);
+            // The button wears the band's glyph, so the pane type has to be one that gets a band.
+            const TypeStyle band = typeStyle(spec.paneType, ColourMode::ByType, t);
+            QVERIFY2(band.band, where.constData());
+            QVERIFY2(band.glyph != Glyph::None && band.glyph != Glyph::Tool, where.constData());
+            glyphs.insert(int(band.glyph));
+            // The tooltip says what the click will do, and says it differently once it is open.
+            QVERIFY2(!spec.label.isEmpty() && !spec.what.isEmpty(), where.constData());
+            QVERIFY2(spec.openLabel.startsWith(QStringLiteral("Close ")), where.constData());
+            QVERIFY2(spec.openLabel != spec.label, where.constData());
+        }
+        QCOMPARE(types.size(), buttons.size());     // one pane type each
+        QCOMPARE(actions.size(), buttons.size());   // one action each
+        QCOMPARE(glyphs.size(), buttons.size());    // and four glyphs you can tell apart
+        QVERIFY(types.contains(QStringLiteral("actions")));
+        QVERIFY(types.contains(QStringLiteral("sessions")));
+        QVERIFY(types.contains(QStringLiteral("board")));
+        QVERIFY(types.contains(QStringLiteral("options")));
+    }
+
+    // A lit button is the pane's own band, firmed up for a 26 px button: legible with colours on,
+    // and still unmistakable with them off, because which panes are open is information.
+    void aLitButtonIsLegibleAndUnmistakable() {
+        const auto themes = shippedThemes();
+        QVERIFY(themes.size() >= 5);
+        for (const auto &spec : themes) {
+            const Tokens t = tokensOf(spec);
+            for (const ToolButton &button : toolButtons())
+                for (ColourMode mode : {ColourMode::ByType, ColourMode::ByGroup, ColourMode::Off}) {
+                    const TypeStyle band = typeStyle(button.paneType, mode, t);
+                    const OpenButtonStyle open = openButtonStyle(band, false);
+                    const OpenButtonStyle hover = openButtonStyle(band, true);
+                    const QByteArray where = (spec.id + QLatin1Char(' ') + button.paneType
+                                              + QLatin1Char(' ') + colourModeId(mode)).toUtf8();
+                    // §14: the glyph keeps its 3:1 on whatever ground it lands on.
+                    QVERIFY2(contrast(open.ink, open.fill) >= 3.0, where.constData());
+                    QVERIFY2(contrast(hover.ink, hover.fill) >= 3.0, where.constData());
+                    // Lit reads against the title bar, which is the theme's background, in every
+                    // mode — including "off", where the band itself would be too faint to see.
+                    QVERIFY2(contrast(open.fill, t.background) >= 1.12, where.constData());
+                    QVERIFY2(contrast(open.line, t.background) >= 1.5, where.constData());
+                    // ... without becoming a block of colour in the title bar.
+                    QVERIFY2(contrast(open.fill, t.background) < 2.6, where.constData());
+                    // Open and open+hover are different chips, and hover is the firmer one.
+                    QVERIFY2(hover.fill != open.fill, where.constData());
+                    QVERIFY2(contrast(hover.fill, t.background) > contrast(open.fill, t.background), where.constData());
+                    // The keyboard-focus ring is visible on both of them, and on the plain bar.
+                    QVERIFY2(contrast(focusRing(open.fill, t), open.fill) >= 3.0, where.constData());
+                    QVERIFY2(contrast(focusRing(t.background, t), t.background) >= 3.0, where.constData());
+                }
+        }
+    }
+
+    // With pane colours off every lit button looks the same, because the bands do; with them on,
+    // two buttons share a ground exactly when their panes' bands share one. The light says "open",
+    // the colour says which pane, and a retinted pane type moves the button with it.
+    void litFollowsThePaneColourSetting() {
+        const Tokens t = tokensOf(relay::theme::builtinDark());
+        const QList<ToolButton> buttons = toolButtons();
+        QSet<QRgb> off;
+        for (const ToolButton &button : buttons)
+            off.insert(openButtonStyle(typeStyle(button.paneType, ColourMode::Off, t), false).fill.rgb());
+        QCOMPARE(off.size(), 1);
+        for (ColourMode mode : {ColourMode::ByType, ColourMode::ByGroup})
+            for (const ToolButton &a : buttons)
+                for (const ToolButton &b : buttons) {
+                    const TypeStyle bandA = typeStyle(a.paneType, mode, t), bandB = typeStyle(b.paneType, mode, t);
+                    const QByteArray where = (a.paneType + QLatin1Char('/') + b.paneType).toUtf8();
+                    QVERIFY2((openButtonStyle(bandA, false).fill == openButtonStyle(bandB, false).fill)
+                                 == (bandA.fill == bandB.fill), where.constData());
+                }
+        // A hue is a hue: lit-with-colours is never the neutral of lit-with-colours-off.
+        for (const ToolButton &button : buttons)
+            QVERIFY(openButtonStyle(typeStyle(button.paneType, ColourMode::ByType, t), false).fill.rgb() != *off.cbegin());
     }
 };
 

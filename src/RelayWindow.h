@@ -305,7 +305,7 @@ public:
                     [this] { refreshSharingPanes(true); });
         }
         // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+A).
-        Keymap::instance().listen(this, [this] { syncChromeTooltips(); });
+        Keymap::instance().listen(this, [this] { syncChromeButtons(); });
         // The status bar stays out of the layout until something transient needs it, so the
         // window has no permanent strip under the composer and the terminal never resizes for one.
         statusBar()->setSizeGripEnabled(false);
@@ -970,12 +970,10 @@ private:
         }
         else if (id == QStringLiteral("agent.fork")) pane->requestFork();
         else if (id == QStringLiteral("agent.resume")) pane->openResume();
-        else if (id == QStringLiteral("agent.info")) {
-            // The ⓘ button and the Actions pane both land here: the fast path is /status.
-            pane->openInfo();
-            if (Keymap::instance().shortcutText(id).isEmpty())
-                hint(QStringLiteral("info.click"), QStringLiteral("Next time: /status in the prompt box"));
-        }
+        // The key (Alt+I), the ⓘ button, the Actions pane and /status all land here. Nothing is
+        // taught from here: this is also the keyboard path, and the two slow paths teach the key
+        // themselves (the button below in syncChrome, the Actions pane through runFromSettings).
+        else if (id == QStringLiteral("agent.info")) pane->openInfo();
         else if (id == QStringLiteral("conversations.open")) pane->openConversations();
         else if (id == QStringLiteral("find.inView")) pane->openFindInView();
         else if (id == QStringLiteral("agent.recap")) pane->requestRecap();
@@ -1464,6 +1462,8 @@ private:
                                                   [](const QString &id) {
                 QSettings().setValue(QStringLiteral("appearance/pane_colours"), id);
                 PaneChrome::refreshAll();
+                // The title-bar buttons wear the same tints while their pane is open.
+                refreshChromeButtonsEverywhere();
             });
             colours.aliases = QStringLiteral("color colors colour header tint band pane type group");
             appearance.rows << colours;
@@ -3431,6 +3431,9 @@ private:
                                      + QStringLiteral("\n\nDouble click the tab to rename · /rename-tab"));
         }
         syncChrome();
+        // Which tool panes this tab holds decides which title-bar buttons are lit, and this runs
+        // after every open, close, split, move, restore, tab change and Settings mode swap.
+        syncChromeButtons();
         QString where = m_activeLeaf ? leafCwd(m_activeLeaf) : QString();
         if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data())) where = tool->path();
         setWindowTitle(where.isEmpty() ? QStringLiteral("Relay") : QStringLiteral("Relay — ") + where);
@@ -3699,27 +3702,18 @@ private:
         connect(m_bell, &QToolButton::clicked, this, [this] { toggleNotifications(); });
         rightRow->addWidget(m_bell);
         rightRow->addSpacing(6);
-        // The tool panes, one button each, ending in the gear (owner, 2026-09-18). A button runs
-        // the pane's own action, so it opens and closes exactly as the key does, and the hint
-        // after a click teaches that key.
-        const auto toolButton = [this, rightRow](relay::panestatus::Glyph glyph, const QString &action, const QString &what) {
-            auto *button = new ChromeButton(glyph);
-            connect(button, &QToolButton::clicked, this, [this, action, what] {
-                runAction(action);
-                hint(QStringLiteral("chrome.") + action, relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(action), what));
-            });
+        // The tool panes, one button each, ending in the gear (owner, 2026-09-18). The table is
+        // relay::panestatus::toolButtons(), so a button's glyph, its light, its tooltip and what its
+        // second click closes all come from the one pane type it owns. Each wears its pane's own
+        // header band while that pane is open, and closes it when clicked again.
+        for (const relay::panestatus::ToolButton &spec : relay::panestatus::toolButtons()) {
+            auto *button = new ChromeButton(relay::panestatus::typeStyle(spec.paneType, relay::panestatus::ColourMode::ByType,
+                                                                        relay::chrome::tokens()).glyph);
+            button->setPaneType(spec.paneType);
+            connect(button, &QToolButton::clicked, this, [this, spec] { runToolButton(spec); });
             rightRow->addWidget(button);
-            return button;
-        };
-        m_actionsButton = toolButton(relay::panestatus::Glyph::Actions, QStringLiteral("palette.open"), QStringLiteral("actions"));
-        m_sessionsButton = toolButton(relay::panestatus::Glyph::Sessions, QStringLiteral("agent.resume"), QStringLiteral("sessions"));
-        m_boardButton = toolButton(relay::panestatus::Glyph::Switchboard, QStringLiteral("board.open"), QStringLiteral("the Switchboard"));
-        m_settingsButton = new ChromeButton(ChromeButton::Glyph::Gear);
-        connect(m_settingsButton, &QToolButton::clicked, this, [this] {
-            toggleSettingsPane(false);
-            hint(QStringLiteral("chrome.settings"), relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("app.settings")), QStringLiteral("options")));
-        });
-        rightRow->addWidget(m_settingsButton);
+            m_toolButtons.insert(spec.paneType, button);
+        }
         if (!m_nativeFrame) {
             rightRow->addSpacing(8);
             m_minimize = new ChromeButton(ChromeButton::Glyph::Minimize);
@@ -3741,20 +3735,90 @@ private:
         connect(&relay::NotificationCenter::instance(), &relay::NotificationCenter::changed, this, [this] { updateBell(); });
         updateBell();
         updateChromeState();
-        syncChromeTooltips();
+        syncChromeButtons();
     }
 
-    void syncChromeTooltips() {
-        if (!m_settingsButton) return;
-        const auto tip = [](ChromeButton *button, const QString &label, const QString &action) {
-            if (!button) return;
-            const QString keys = Keymap::instance().shortcutText(action);
+    // ----- the title-bar tool buttons: lit while their pane is open (owner, 2026-09-18) ----------
+    // "the sessions / actions / switchboard / options buttons at the top right should be
+    // highlighted when they are open (using the header colors). click again to close those panes."
+    //
+    // **Open means: the tab in front of this window holds a pane of that type.** Every one of these
+    // openers works in the current tab and nowhere else (openSettingsPane, openSessionsFor,
+    // toggleBoardPane), so the light and the click can never disagree about what they are talking
+    // about; another tab, and another window, light their own buttons from their own panes.
+    //
+    // **Which pane, when a tab somehow holds two of a type** — a restored Switchboard dropped
+    // beside one that was already there: the focused one if that is of the type, otherwise the
+    // first in the tab's pane order, which is the pane the opener itself would have reused. The
+    // Settings pane is one pane in two modes, and its `paneType` follows the mode, so Actions and
+    // Options are never both lit.
+    static QString paneTypeOf(QWidget *leaf) {
+        if (!leaf) return {};
+        const QString set = leaf->property("paneType").toString();
+        if (!set.isEmpty()) return set;
+        // A pane that has not been polished yet has not been given its default type.
+        auto *tool = dynamic_cast<ToolPane *>(leaf);
+        return tool ? tool->defaultPaneType() : QString();
+    }
+
+    ToolPane *openToolPane(const QString &paneType) const {
+        QWidget *page = m_tabs->currentWidget();
+        if (!page || paneType.isEmpty()) return nullptr;
+        if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data());
+            tool && pageOf(tool) == page && paneTypeOf(tool) == paneType) return tool;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && paneTypeOf(tool) == paneType) return tool;
+        return nullptr;
+    }
+
+    // A click: the first opens the pane, the second closes it. The hint that teaches the key only
+    // goes with the click that opened it, because that is the click the key would have replaced.
+    void runToolButton(const relay::panestatus::ToolButton &spec) {
+        if (ToolPane *open = openToolPane(spec.paneType)) { closeToolPane(open); return; }
+        runAction(spec.action);
+        hint(QStringLiteral("chrome.") + spec.action,
+             relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(spec.action), spec.what));
+    }
+
+    // Closing goes through the pane's own close path, so whatever that path does still happens: the
+    // Settings pane puts the focus back where it came from, the session manager hands it to the
+    // pane it was bound to, and anything else takes the route the pane's × takes. A toggle must
+    // never close the window, so the last pane of the last tab gets a terminal beside it first —
+    // which is what Esc in the Settings pane has always done.
+    void closeToolPane(ToolPane *tool) {
+        if (!tool) return;
+        if (tool->settings()) { closeSettingsPane(tool); return; }
+        QWidget *page = pageOf(tool);
+        if (page && leavesIn(page).size() <= 1 && m_tabs->count() <= 1) {
+            try { insertBeside(tool, createPane(paneNode(m_manager->workspace())), Qt::Horizontal, true); }
+            catch (const std::exception &error) { notice(QString::fromUtf8(error.what())); }
+        }
+        if (tool->kind() == ToolPane::Kind::Sessions) { closeSessionsPane(tool, m_active); return; }
+        setActiveLeaf(tool);
+        runAction(QStringLiteral("pane.close"));
+    }
+
+    // The lights and the tooltips, from whatever this window's current tab holds right now. Called
+    // from updateTitles(), which every open, close, split, move, tab change, restore and mode swap
+    // already ends in, and from the keymap listener when the keys change under the tooltips.
+    void syncChromeButtons() {
+        for (const relay::panestatus::ToolButton &spec : relay::panestatus::toolButtons()) {
+            ChromeButton *button = m_toolButtons.value(spec.paneType);
+            if (!button) continue;
+            const bool open = openToolPane(spec.paneType) != nullptr;
+            button->setOpen(open);
+            const QString label = open ? spec.openLabel : spec.label;
+            const QString keys = Keymap::instance().shortcutText(spec.action);
             button->setToolTip(keys.isEmpty() ? label : QStringLiteral("%1  (%2)").arg(label, keys));
-        };
-        tip(m_actionsButton, QStringLiteral("Actions: everything you can do now"), QStringLiteral("palette.open"));
-        tip(m_sessionsButton, QStringLiteral("Sessions: resume and search"), QStringLiteral("agent.resume"));
-        tip(m_boardButton, QStringLiteral("Switchboard: cards, threads and plans"), QStringLiteral("board.open"));
-        tip(m_settingsButton, QStringLiteral("Options"), QStringLiteral("app.settings"));
+            button->update();   // the tint follows the theme and "appearance/pane_colours"
+        }
+    }
+
+    // The buttons wear the pane bands' colours, so "appearance/pane_colours" and a theme change
+    // have to reach them in every window, exactly as PaneChrome::refreshAll() reaches the panes.
+    static void refreshChromeButtonsEverywhere() {
+        for (QWidget *top : QApplication::topLevelWidgets())
+            if (auto *w = dynamic_cast<RelayWindow *>(top)) w->syncChromeButtons();
     }
 
     void updateBell() {
@@ -3960,12 +4024,20 @@ private:
                             auto *info = new relay::sessioninfo::InfoButton;
                             info->setObjectName(QStringLiteral("paneChromeButton"));
                             info->setProperty("action", QStringLiteral("agent.info"));
-                            info->setProperty("label", QStringLiteral("Conversation info (/status)"));
+                            // PaneChrome::refreshTooltips appends the live key, so the tooltip
+                            // reads "Conversation info  (Alt+I)" and follows a rebinding.
+                            info->setProperty("label", QStringLiteral("Conversation info"));
                             QObject::connect(info, &QToolButton::clicked, chrome, [guard] {
                                 auto *w = windowOf(guard);
                                 if (!w) return;
                                 w->setActiveLeaf(guard);
+                                // The button is the slow path: it teaches the key it is bound to,
+                                // and falls back to /status only while nothing is bound.
+                                const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.info"));
                                 w->runAction(QStringLiteral("agent.info"));
+                                w->hint(QStringLiteral("info.click"),
+                                        keys.isEmpty() ? QStringLiteral("Next time: /status in the prompt box")
+                                                       : relay::ShortcutHints::nextTime(keys, QStringLiteral("conversation info")));
                             });
                             row->insertWidget(0, info);
                         }
@@ -4552,7 +4624,9 @@ private:
     // Window header (see buildWindowChrome). m_nativeFrame: this window kept the system title bar.
     static constexpr int kFrameMargin = 5;
     bool m_nativeFrame = false;
-    QPointer<ChromeButton> m_bell, m_actionsButton, m_sessionsButton, m_boardButton, m_settingsButton, m_minimize, m_maximize, m_close;
+    QPointer<ChromeButton> m_bell, m_minimize, m_maximize, m_close;
+    // The tool-pane buttons, by the pane type each owns (relay::panestatus::toolButtons()).
+    QHash<QString, QPointer<ChromeButton>> m_toolButtons;
     QPointer<NotificationsPopup> m_notifications;
     Qt::Edges m_manualEdges;
     QPoint m_manualFrom;

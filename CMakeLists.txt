@@ -502,6 +502,13 @@ if(BUILD_TESTING)
     add_executable(relay-theme-tests tests/theme_test.cpp)
     target_link_libraries(relay-theme-tests PRIVATE relay-theme ${RELAY_QT}::Test)
     add_test(NAME theme COMMAND relay-theme-tests)
+
+    # The running application's end of the theme: what `theme/name` does when the theme it names is
+    # gone (Solarized Dark was removed 2026-09-18), which needs Theme.cpp — relay-highlight carries it.
+    add_executable(relay-themeswitch-tests tests/themeswitch_test.cpp)
+    target_link_libraries(relay-themeswitch-tests PRIVATE relay-highlight ${RELAY_QT}::Test ${RELAY_QT}::Widgets)
+    target_compile_definitions(relay-themeswitch-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME themeswitch COMMAND relay-themeswitch-tests)
     # The test also reads the shipped theme files, so it runs from the source tree.
     set_tests_properties(theme PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
