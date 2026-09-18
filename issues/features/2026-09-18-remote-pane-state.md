@@ -68,6 +68,9 @@ sessions in the actual relay terminal app on my laptop. sphinxpad should be reac
       tablet and laptop sizes in `docs/qa_evidence/2026-09-18-web-pane-view/`
 - [x] `docs/REMOTE-PROTOCOL.md` section 16 (the normative contract) and the `docs/ROADMAP.md`
       non-goal reworded: the browser shows a desktop pane, never a shell of its own
+- [x] Relay on the owner's laptop (sphinxpad): built, installed into his launcher, running;
+      `docs/qa_evidence/2026-09-18-sphinxpad-lan/README.md` holds what LAN testing on the four
+      devices needs, and recommends Tailscale's certificate (both machines are already on it)
 - [ ] Relay-to-Relay: the owner's laptop pairs as a full device and its Relay draws a remote pane
       from the same `pane_state` plus screen frames (after #W5N2's transport work settles)
 
