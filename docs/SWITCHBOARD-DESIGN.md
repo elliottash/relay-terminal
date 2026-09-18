@@ -106,7 +106,7 @@ A QA reopen is not a status: the card returns to Ready with label `reopened` and
 Top: tab bar with counts, filter field, label chips, Mine / Agent / Waiting-on-me toggles. Body: horizontally scrolling
 columns; a card shows `#ID`, title (2 lines), labels, assignee (✦ = agent), `waiting_on` badge, thread count and an
 unread dot (tracked locally in QSettings, not git). Drag between columns (status + folder move) or onto a tab (category
-move). Quick add: `+` or `n` opens a growing field; Enter creates the card with the text verbatim as `## Request`.
+move). Quick add: `+` or `n` opens a growing field; Enter creates the card with the text verbatim as `## Issue`.
 
 ### 4.3 Card detail
 
@@ -163,7 +163,8 @@ Evidence: `docs/qa_evidence/2026-09-17-switchboard-ux/`.
   take (no key) is reported on the card; the question is already in the thread. The header has **#ID → prompt** and
   **Open file**; links in the body open the file they name.
 - **Not built** from 4.2–4.4: label chips and Mine/Agent/Waiting toggles (the filter language covers them), the
-  unread dot, `e` edit, `l`/`a`, `?`, Shift+Enter "own pane", thinking/tool collapse in the thread, tickable tasks.
+  unread dot, `l`/`a`, `?`, Shift+Enter "own pane", thinking/tool collapse in the thread, tickable tasks.
+  (`e` edit was not built either until 2026-09-18; see 4.8.)
 
 ### 4.6 One list, sectioned by status — no tabs (owner decision, 2026-09-18)
 
@@ -180,6 +181,7 @@ has no tabs at all. So:
 
 - **One view.** The pane is one list of every card that is not done or dropped. There is no tab
   row; the counts live in the pane's title (`Switchboard · 84 open`) and beside the filter box.
+  *(4.7: that filter box moved out of the pane's header and became the top of the list page.)*
 - **`bug` and `feature` are labels**, like `voice` or `design`: a badge on the row and
   `label:bug` in the filter box. Not tabs, not folders-as-tabs, not a card type. The front
   matter's `type` (work/plan/memory) and the folder layout on disk are unchanged; the UI is simply
@@ -197,6 +199,8 @@ do not collect (a plan's Draft/Approved/Executing, a memory's Active, a Deferred
 So one list really does hold every open card whatever its type. A header carries the status name
 and its count, folds on a click (or Left/Right), and has a `+` on hover that adds into it; which
 sections are folded is saved with the window's layout (`{"board": {"workspace", "collapsed"}}`).
+A checkbox at the top of the page (4.7) takes a whole section off the list, which is a different
+thing from folding it.
 
 **A row.** Status glyph, title (elided), `#ID`, then labels / `✦ agent` or assignee /
 `waiting: …` / `☑ done/total` / `✎ thread` / age, right-aligned. The title is owed 45% of the row
@@ -223,6 +227,37 @@ left out, the counts follow, and nothing is folded while a filter is active — 
 its own matches would be a search that does nothing. The tokens are `label:`, `status:`,
 `folder:`, `@assignee`, `waiting:`, `#ID` and words.
 
+### 4.7 The tools are the top of the list page, not the pane's header (owner, 2026-09-18)
+
+> Owner: "put 'new card' and filter at the top of the main org page, not in the pane header. they
+> shouldn't show when you are clicked on a card. when you are clicked on a card the header should
+> say '← back to board'." And: "at the top of the base page, there should be filter checkboxes at
+> the top for the different sections." Evidence:
+> `docs/qa_evidence/2026-09-18-board-list-page-tools/`.
+
+- **The header holds one thing, and only sometimes.** `#boardHead` is hidden while the list is on
+  screen. A card open in a pane narrow enough to stack (< 900 px, where the card takes the whole
+  pane) puts **← Back to board** there, which does what Esc does and hints Esc when it is clicked.
+  Nothing else is ever in that row.
+- **The list's tools belong to the list page.** The count, the filter box, **+ New card** and
+  **Clean up** are `#boardListTools`, the first widget *inside* `#boardListPane`. They are
+  therefore present exactly when the list is, and an open card that has the pane to itself does
+  not carry the list's controls at its head. In a wide pane, where the list stays beside the card,
+  its tools stay with it — they are the list's, not the window's.
+- **A checkbox per section**, under that row, ticked by default, engraved in the same uppercase
+  mono as the section headers they switch. Unticking one takes the section off the page — header,
+  cards and count — and it composes with the text filter rather than being overridden by it.
+  Unticked is *not* folded: a folded section is a header with its cards put away and its cards
+  still counted; an unticked one is not on the page. The count label says so
+  (`62 of 84 open`), and the tooltip gives the number each box is holding. They wrap onto further
+  lines in a narrow pane, so eight or nine sections fit at ~350 px.
+- **Both sets are saved with the window's layout**, side by side:
+  `{"board": {"workspace", "collapsed", "hidden"}}` (`BoardView::collapsedSections()` and
+  `hiddenSections()`).
+- **Clean up** (`#boardCleanup`) hands the board to the agent to tidy: merge or split sections and
+  cards, review statuses. The button and its room are built; the backend message is not, and
+  `BoardView::requestCleanup()` says so until it is.
+
 **Quick add** is a field over the list rather than inside a section: with one long list, a field
 at a section's head would be scrolled out of sight as often as not. It names the section it adds
 to, Enter adds and keeps it open for the next card, Esc or losing the focus while empty closes it.
@@ -244,6 +279,40 @@ Ctrl+Shift+Enter comments, Ask/Stop).
 **Found on the way.** The worker's row never carried `created`, `tasks_done`, `tasks_total`,
 `milestone`, `topic` or `implemented_by`, although protocol 19.2 promises them, so the pane's age
 and `☑ done/total` badges had nothing to draw. `board_tools._row` now sends the full row.
+
+### 4.8 A card's own words are editable, and they are the Issue (owner, 2026-09-18)
+
+Owner: *"after adding a card, i couldn't edit the title or the task. i'm not sure about 'request'
+there, let's call it issue."* Both halves of that. Evidence:
+`docs/qa_evidence/2026-09-18-edit-card-title-and-issue/`.
+
+**Editing was never built.** 4.3 planned `e` (a `PlanEditor`, Ctrl+S) and 4.5 listed it under "not
+built"; the card detail was a label and a read-only `QTextBrowser`, so a card added by quick add
+could only be changed by opening its file. The *worker* could already do it — `board_update`
+(protocol 19.3) with `board_update_card`'s `title` and `replace_section`, hash-checked, with the
+old text kept in the thread (decision 12.3) — so this is a pane that never asked.
+
+- **What is edited:** the title and the `## Issue` section, together and in one write, because
+  they are one thought. Other sections (Tasks, Decisions, a QA checklist) belong to the agent and
+  to the QA lane; they are still edited in the file.
+- **How it starts:** the **Edit** button on the card, a click on the title, a double-click in the
+  text, or `e` (on the list it opens the card and starts editing). The shortcut hint fires on the
+  three slow paths, per the WARP rule.
+- **How it ends:** Enter in the title or Ctrl+Enter in the text saves (Enter there is a newline —
+  the reply box's Enter-sends is for one thought, not a paragraph); **Save** does the same; Esc or
+  **Cancel** puts the card back exactly as it was and writes nothing. Saving with nothing changed
+  writes nothing either.
+- **While editing** the card is not swapped for another one by the selection, the reply box stands
+  down, and the document is the editor — a card is being read or being written, never both.
+- **A file that changed under the edit** is never silently overwritten: the save carries the hash
+  the card was read at, so the worker refuses it (`board_conflict`), the pane re-reads the card,
+  keeps what was typed and says that a second Save writes over the new version. The thread keeps
+  the old text either way, so even that is reversible.
+
+**Request became Issue.** `## Issue` is the section's name everywhere new text is written: quick
+add, `board_create_card`, and any `replace_section` naming either spelling. Readers accept both
+(`relay_core.board.ISSUE_HEADINGS`), so the ~96 cards already filed keep saying `## Request` until
+something edits them — there is no rewriting commit, and `check` does not care which a card says.
 
 ## 5. Referencing cards from the terminal
 
@@ -296,7 +365,7 @@ and `☑ done/total` badges had nothing to draw. `board_tools._row` now sends th
 
 ### 6.3 Guardrails
 
-- No delete tool: closing is `done`/`dropped` with a reason. Owner text (`## Request`, owner thread entries) is
+- No delete tool: closing is `done`/`dropped` with a reason. Owner text (`## Issue`, owner thread entries) is
   hash-recorded and edits to it are refused. Every agent write appends a thread event (actor, model, pane, turn id).
 - Limits: 5 creates and 20 other writes per turn, 30 creates per hour per workspace; beyond them `board_rate_limited`
   and the agent summarizes in chat. Writes are atomic and hash-checked like `write_file`.
@@ -399,7 +468,7 @@ links: {plans: [.relay/plans/2026-09-17-1410-voice-mode.md], commits: [], eviden
 ---
 # Voice transcription mode (microphone button, hold Right Alt)
 
-## Request
+## Issue
 add voice transcribe mode (microphone icon). and hold right alt to transcribe. (like warp)
 
 ## Decisions

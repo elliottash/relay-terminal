@@ -308,6 +308,8 @@ mode → `input.toggle`, with the mode chip flashing), dropping an image on the 
 paste shortcut) and "Screenshot this pane" from the palette (→ `agent.screenshotPane`,
 Ctrl+Shift+G), running an alias from the palette (→ `/name`, and for a command the name typed in
 terminal mode), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
+starting a card edit in the Switchboard with the Edit button, a click on the title or a
+double-click in the text (→ `e`),
 and rotating idle tips 4 s after a finished agent turn with an
 from the link or palette (→ `/continue` or `agent.continue`), the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule

@@ -5,12 +5,14 @@
 #include "BoardModel.h"
 #include "BoardPane.h"
 
+#include <QCheckBox>
 #include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPointer>
+#include <QToolButton>
 #include <QTimeZone>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -87,6 +89,18 @@ QJsonObject opened(const QList<QJsonObject> &cards)
                        {"problems", QJsonArray{}}};
 }
 
+// A `board_card` event: what the worker hands over when a card is opened, including the hash an
+// edit is written against and the `## Issue` text an edit starts from (protocol 19.2).
+QJsonObject card(const QString &id, const QString &title, const QString &issue, const QString &hash)
+{
+    return QJsonObject{{"event", "board_card"}, {"card_id", id}, {"title", title},
+                       {"status", "inbox"}, {"tab", "features"}, {"hash", hash},
+                       {"path", QStringLiteral("issues/features/") + id + ".md"},
+                       {"body", QStringLiteral("# %1\n\n## Issue\n%2\n").arg(title, issue)},
+                       {"issue", issue}, {"issue_heading", "Issue"},
+                       {"thread", QJsonArray{}}, {"thread_total", 0}};
+}
+
 // The pane's one list.
 QListWidget *listOf(relay::BoardView &view)
 {
@@ -123,11 +137,15 @@ private slots:
     void theViewRendersOneListFromAnEvent();
     void theViewSendsAMoveWhenACardIsDropped();
     void arrowsFoldASectionAndTheFoldIsSaved();
+    void aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo();
+    void theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack();
     void aRefusedWriteIsShownAndAnAcceptedOneCanBeUndone();
     void aChangeRefillsTheListInPlace();
     void theOpenCardRefetchesOnlyForItsOwnChanges();
     void aQuestionTheAgentCannotTakeIsReportedOnTheCard();
     void quickAddNamesTheSectionItAddsTo();
+    void theTitleAndTheIssueAreEditedOnTheCardAndSavedThroughTheWorker();
+    void anEditIsKeptWhenTheCardChangedUnderIt();
 };
 
 void BoardModelTests::categoryFoldersComeFromTheConfig()
@@ -629,6 +647,112 @@ void BoardModelTests::arrowsFoldASectionAndTheFoldIsSaved()
     QVERIFY(!view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("done"))).collapsed);
 }
 
+// A checkbox at the top of the list page per section, all ticked until one is unticked; unticked
+// takes the section off the page entirely, composes with the text filter, and is remembered the
+// same way the folds are (owner, 2026-09-18).
+void BoardModelTests::aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.handleEvent(opened({row("K7Q2", "ready", "features"), row("M3XJ", "inbox", "features"),
+                             row("N4YK", "inbox", "features", "j"),
+                             row("DN01", "done", "features")}));
+
+    // One box per section the model has, in order, every one ticked.
+    const QList<QCheckBox *> boxes = view.findChildren<QCheckBox *>(
+        QStringLiteral("boardSectionCheck"));
+    QCOMPARE(boxes.size(), sectionIds(view.model()).size());
+    for (QCheckBox *box : boxes)
+        QVERIFY2(box->isChecked(), qPrintable(box->text()));
+
+    QLabel *count = view.findChild<QLabel *>(QStringLiteral("boardCount"));
+    QVERIFY(count);
+    QCOMPARE(count->text(), QStringLiteral("3 open"));
+
+    // Unticking Inbox takes its header and both its cards away; the count says how many of the
+    // open cards are left, so the number on screen is never a lie.
+    QCheckBox *inbox = nullptr;
+    for (QCheckBox *box : boxes)
+        if (box->text() == QStringLiteral("INBOX"))
+            inbox = box;
+    QVERIFY(inbox);
+    inbox->setChecked(false);
+    QCOMPARE(relay::board::rowOfSection(view.rows(), QStringLiteral("inbox")), -1);
+    QCOMPARE(relay::board::rowOfCard(view.rows(), QStringLiteral("M3XJ")), -1);
+    QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("K7Q2")) >= 0);
+    QCOMPARE(count->text(), QStringLiteral("1 of 3 open"));
+
+    // It composes with the text filter rather than replacing it: a search that would match a
+    // card in a hidden section still does not put that section back.
+    QLineEdit *filter = view.findChild<QLineEdit *>(QStringLiteral("boardFilter"));
+    QVERIFY(filter);
+    filter->setText(QStringLiteral("card"));
+    QCOMPARE(relay::board::rowOfCard(view.rows(), QStringLiteral("M3XJ")), -1);
+    QCOMPARE(relay::board::rowOfCard(view.rows(), QStringLiteral("N4YK")), -1);
+    QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("K7Q2")) >= 0);
+    filter->clear();
+
+    // Unticked is not folded: the model counts them apart, and the layout node carries both.
+    QStringList hidden;
+    for (const QJsonValue &value : view.hiddenSections())
+        hidden << value.toString();
+    QCOMPARE(hidden, (QStringList{"inbox"}));
+    QCOMPARE(view.model().hiddenCount({QStringLiteral("inbox")}), 2);
+    QCOMPARE(view.model().hiddenCount({}), 0);
+    QVERIFY(!view.collapsedSections().contains(QJsonValue(QStringLiteral("inbox"))));
+
+    // Restored from the layout node: the boxes follow, and so does the list.
+    view.setHiddenSections(QJsonArray{QStringLiteral("ready")});
+    QVERIFY(inbox->isChecked());
+    QCOMPARE(relay::board::rowOfSection(view.rows(), QStringLiteral("ready")), -1);
+    QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("M3XJ")) >= 0);
+}
+
+// The filter and "+ New card" are the top of the list page, not of the pane's header; the header
+// is the way back and shows only while a card is open (owner, 2026-09-18).
+void BoardModelTests::theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.resize(500, 600);          // narrow enough that an open card takes the whole pane
+    view.handleEvent(opened({row("K7Q2", "ready", "features")}));
+
+    QWidget *head = view.findChild<QWidget *>(QStringLiteral("boardHead"));
+    QWidget *tools = view.findChild<QWidget *>(QStringLiteral("boardListTools"));
+    QWidget *listPane = view.findChild<QWidget *>(QStringLiteral("boardListPane"));
+    auto *back = view.findChild<QToolButton *>(QStringLiteral("boardBack"));
+    QVERIFY(head && tools && listPane && back);
+    // The tools belong to the list page, so they travel with it.
+    QVERIFY(tools->isAncestorOf(view.findChild<QLineEdit *>(QStringLiteral("boardFilter"))));
+    QVERIFY(listPane->isAncestorOf(tools));
+    QVERIFY(view.findChild<QToolButton *>(QStringLiteral("boardAddButton")));
+    QVERIFY(view.findChild<QToolButton *>(QStringLiteral("boardCleanup")));
+    QVERIFY(head->isHidden());
+
+    // With a card open in a narrow pane the list is gone, tools and all, and the header says the
+    // one thing there is to say.
+    view.handleEvent(QJsonObject{{"event", "board_card"}, {"card_id", "K7Q2"}, {"title", "K7Q2 card"},
+                                 {"status", "ready"}, {"tab", "features"}, {"body", "text"},
+                                 {"thread", QJsonArray{}}, {"thread_total", 0}});
+    QVERIFY(view.detailOpen());
+    QVERIFY(!head->isHidden());
+    QCOMPARE(back->text(), QStringLiteral("←  Back to board"));
+    QVERIFY(listPane->isHidden());
+
+    // Clicking it goes back, the same place Esc goes, and hints that Esc was the fast way.
+    QString hinted;
+    view.onHint = [&hinted](const QString &, const QString &keys) { hinted = keys; };
+    back->click();
+    QVERIFY(!view.detailOpen());
+    QVERIFY(head->isHidden());
+    QVERIFY(!listPane->isHidden());
+    QCOMPARE(hinted, QStringLiteral("Esc"));
+
+    // "Clean up" has its room and says what it will do; the backend is not there yet.
+    QString status;
+    view.onStatus = [&status](const QString &text) { status = text; };
+    view.findChild<QToolButton *>(QStringLiteral("boardCleanup"))->click();
+    QCOMPARE(status, QStringLiteral("Board cleanup is not wired yet."));
+}
+
 // ---- the view's answers to the worker ------------------------------------------------------
 
 void BoardModelTests::aRefusedWriteIsShownAndAnAcceptedOneCanBeUndone()
@@ -776,6 +900,103 @@ void BoardModelTests::quickAddNamesTheSectionItAddsTo()
     // Nothing is created straight into Done: `n` there falls back to the first section.
     view.quickAddIn(relay::board::doneSection());
     QCOMPARE(field->placeholderText(), QStringLiteral("New card in Inbox — Enter adds, Esc closes"));
+}
+
+// Owner, 2026-09-18: "after adding a card, i couldn't edit the title or the task." Both are
+// edited on the card itself and written by the worker, never by the pane.
+void BoardModelTests::theTitleAndTheIssueAreEditedOnTheCardAndSavedThroughTheWorker()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    view.handleEvent(card("K7Q2", QStringLiteral("K7Q2 card"), QStringLiteral("clicking a path"),
+                          QString(64, QLatin1Char('a'))));
+    view.selectCard(QStringLiteral("K7Q2"));
+
+    auto *title = view.findChild<QLineEdit *>(QStringLiteral("boardCardTitleEdit"));
+    auto *issue = view.findChild<QPlainTextEdit *>(QStringLiteral("boardIssueEditor"));
+    QVERIFY(title);
+    QVERIFY(issue);
+    QVERIFY(title->isHidden());     // a card is read until it is edited
+
+    // `e` turns the title and the card's own words into fields, seeded from the file.
+    view.editSelected();
+    QVERIFY(!title->isHidden());
+    QCOMPARE(title->text(), QStringLiteral("K7Q2 card"));
+    QCOMPARE(issue->toPlainText(), QStringLiteral("clicking a path"));
+
+    // Esc leaves the card exactly as it was, and writes nothing.
+    sent.clear();
+    title->setText(QStringLiteral("typed then dropped"));
+    QTest::keyClick(title, Qt::Key_Escape);
+    QVERIFY(title->isHidden());
+    QVERIFY(sent.isEmpty());
+
+    // Ctrl+Enter in the text saves both in one hash-checked write.
+    view.editSelected();
+    title->setText(QStringLiteral("Clickable paths in the output"));
+    issue->setPlainText(QStringLiteral("clicking a path should open it"));
+    QTest::keyClick(issue, Qt::Key_Return, Qt::ControlModifier);
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_update"));
+    QCOMPARE(sent.last().value("card").toString(), QStringLiteral("K7Q2"));
+    QCOMPARE(sent.last().value("base_hash").toString(), QString(64, QLatin1Char('a')));
+    const QJsonObject patch = sent.last().value("patch").toObject();
+    QCOMPARE(patch.value("title").toString(), QStringLiteral("Clickable paths in the output"));
+    // The section the owner's words live in is `## Issue` (it was `## Request` until 2026-09-18).
+    QCOMPARE(patch.value("replace_section").toObject().value("heading").toString(),
+             QStringLiteral("Issue"));
+    QCOMPARE(patch.value("replace_section").toObject().value("text").toString(),
+             QStringLiteral("clicking a path should open it"));
+
+    // The card goes back to being read once the worker has written it, and says so.
+    view.handleEvent(QJsonObject{{"event", "board_written"}, {"id", sent.last().value("id")},
+                                 {"kind", "board_update"}, {"card_id", "K7Q2"},
+                                 {"write_id", "w-1"}});
+    QVERIFY(title->isHidden());
+    QVERIFY(view.notice().contains(QStringLiteral("Saved #K7Q2")));
+}
+
+void BoardModelTests::anEditIsKeptWhenTheCardChangedUnderIt()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    view.handleEvent(card("K7Q2", QStringLiteral("K7Q2 card"), QStringLiteral("the ask"),
+                          QString(64, QLatin1Char('a'))));
+    view.selectCard(QStringLiteral("K7Q2"));
+    view.editSelected();
+    auto *issue = view.findChild<QPlainTextEdit *>(QStringLiteral("boardIssueEditor"));
+    auto *error = view.findChild<QLabel *>(QStringLiteral("boardCardError"));
+    QVERIFY(issue);
+    QVERIFY(error);
+    issue->setPlainText(QStringLiteral("the ask, in better words"));
+
+    // Someone else wrote the file meanwhile: the write is refused, nothing typed is lost, and
+    // the card is read again so a second Save goes against the version that is there now.
+    sent.clear();
+    QTest::keyClick(issue, Qt::Key_Return, Qt::ControlModifier);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_update"));
+    const QString requestId = sent.last().value("id").toString();
+    sent.clear();
+    view.handleEvent(QJsonObject{{"event", "error"}, {"id", requestId}, {"code", "board_conflict"},
+                                 {"text", "#K7Q2 changed since you read it"},
+                                 {"current_hash", QString(64, QLatin1Char('b'))}});
+    QCOMPARE(issue->toPlainText(), QStringLiteral("the ask, in better words"));
+    QVERIFY(!error->isHidden());
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_card_get"));
+
+    // The re-read hands over the new hash and the version on disk, and still keeps the text.
+    view.handleEvent(card("K7Q2", QStringLiteral("K7Q2 card"), QStringLiteral("someone else's words"),
+                          QString(64, QLatin1Char('b'))));
+    QCOMPARE(issue->toPlainText(), QStringLiteral("the ask, in better words"));
+    QVERIFY(!error->isHidden());
+    sent.clear();
+    QTest::keyClick(issue, Qt::Key_Return, Qt::ControlModifier);
+    QCOMPARE(sent.last().value("base_hash").toString(), QString(64, QLatin1Char('b')));
 }
 
 QTEST_MAIN(BoardModelTests)

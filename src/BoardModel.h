@@ -57,6 +57,12 @@ struct Tab {
 QString statusTitle(const QString &status);
 QString tabTitle(const QString &id);
 
+// The `## ` section holding what the card is about, in the words of whoever asked for it. It
+// was called "Request" until 2026-09-18 (owner: "i'm not sure about 'request' there, let's call
+// it issue"); the worker reads both spellings and settles a card on this one when it writes it,
+// so no existing card file has to be rewritten.
+QString issueHeading();
+
 // The mark at the head of a card row (design 4.6): one character that says the status at a
 // glance, so a row is readable without reading its section header. Open shapes are early
 // states, solid ones are committed, a check or a cross is closed.
@@ -164,13 +170,19 @@ public:
     // Which section this card belongs in, or empty when no section collects its status.
     QString sectionOf(const Card &card) const;
     int openCount() const;                               // filtered, not done or dropped
+    // How many open cards the section checkboxes are keeping out of the list: filtered, not
+    // closed, and in a section `hidden` names. `openCount() - hiddenCount()` is what is on
+    // screen, so the count label can say "62 of 84 open" without counting rows twice.
+    int hiddenCount(const QSet<QString> &hidden) const;
     int total() const { return m_cards.size(); }
     QStringList allLabels() const;
     QStringList allIds() const;
     // The rows of the list: a header per section, then its cards unless the section is in
     // `collapsed`. A section with no matches is left out while a filter is active, and nothing
     // is folded then — a search that hid its own matches would be a search that does nothing.
-    QList<Row> rows(const QSet<QString> &collapsed) const;
+    // A section in `hidden` (its checkbox at the top of the list page is unticked) is left out
+    // header and all, whether or not a filter is active: the two compose.
+    QList<Row> rows(const QSet<QString> &collapsed, const QSet<QString> &hidden = {}) const;
 
     // ---- filtering
     void setFilter(const QString &text);

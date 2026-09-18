@@ -120,6 +120,11 @@ QString tabTitle(const QString &id)
     return text;
 }
 
+QString issueHeading()
+{
+    return QStringLiteral("Issue");
+}
+
 QString statusGlyph(const QString &status)
 {
     static const QMap<QString, QString> marks{
@@ -620,7 +625,25 @@ int Model::openCount() const
     return total;
 }
 
-QList<Row> Model::rows(const QSet<QString> &collapsed) const
+// Open cards a section checkbox is keeping out of the list. Only open ones, so that the count
+// label's "62 of 84 open" subtracts exactly: closed cards are not in the 84 either.
+int Model::hiddenCount(const QSet<QString> &hidden) const
+{
+    if (hidden.isEmpty())
+        return 0;
+    const QMap<QString, QString> index = sectionIndex(sections());
+    int total = 0;
+    for (const Card &card : m_cards) {
+        if (card.closed() || !matches(card, m_filter))
+            continue;
+        const QString section = index.value(card.status);
+        if (!section.isEmpty() && hidden.contains(section))
+            ++total;
+    }
+    return total;
+}
+
+QList<Row> Model::rows(const QSet<QString> &collapsed, const QSet<QString> &hidden) const
 {
     const bool filtered = !m_filter.trimmed().isEmpty();
     const QList<Column> list = sections();
@@ -636,6 +659,8 @@ QList<Row> Model::rows(const QSet<QString> &collapsed) const
     }
     QList<Row> out;
     for (const Column &column : list) {
+        if (hidden.contains(column.id))
+            continue;      // its checkbox is unticked: the section is not on the page at all
         const QList<Card> cards = sorted(grouped.value(column.id), column.id == doneSection());
         if (filtered && cards.isEmpty())
             continue;      // a section with nothing to show gets out of the way

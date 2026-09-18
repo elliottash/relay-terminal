@@ -2,6 +2,7 @@
 #include "BoardPane.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
 #include <QDesktopServices>
@@ -22,7 +23,9 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QPainter>
+#include <QPlainTextEdit>
 #include <QPainterPath>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -398,6 +401,70 @@ private:
     QListWidget *m_list;
 };
 
+// The section checkboxes at the top of the list page have to wrap: a pane can be ~350 px wide and
+// there are eight or nine of them. Qt ships no flow layout, so this is the minimal one — pack
+// left to right, break when the next item would not fit, and report the height that takes.
+class FlowLayout final : public QLayout {
+public:
+    FlowLayout(QWidget *parent, int horizontal, int vertical)
+        : QLayout(parent), m_h(horizontal), m_v(vertical) {}
+    ~FlowLayout() override
+    {
+        while (QLayoutItem *item = takeAt(0))
+            delete item;
+    }
+
+    void addItem(QLayoutItem *item) override { m_items.append(item); }
+    int count() const override { return int(m_items.size()); }
+    QLayoutItem *itemAt(int index) const override { return m_items.value(index); }
+    QLayoutItem *takeAt(int index) override
+    {
+        return index >= 0 && index < m_items.size() ? m_items.takeAt(index) : nullptr;
+    }
+    Qt::Orientations expandingDirections() const override { return {}; }
+    bool hasHeightForWidth() const override { return true; }
+    int heightForWidth(int width) const override { return place(QRect(0, 0, width, 0), true); }
+    void setGeometry(const QRect &rect) override
+    {
+        QLayout::setGeometry(rect);
+        place(rect, false);
+    }
+    QSize sizeHint() const override { return minimumSize(); }
+    QSize minimumSize() const override
+    {
+        QSize size;
+        for (const QLayoutItem *item : m_items)
+            size = size.expandedTo(item->minimumSize());
+        const QMargins margins = contentsMargins();
+        return size + QSize(margins.left() + margins.right(), margins.top() + margins.bottom());
+    }
+
+private:
+    int place(const QRect &rect, bool measureOnly) const
+    {
+        const QMargins margins = contentsMargins();
+        const QRect area = rect.adjusted(margins.left(), margins.top(), -margins.right(),
+                                         -margins.bottom());
+        int x = area.x(), y = area.y(), lineHeight = 0;
+        for (QLayoutItem *item : m_items) {
+            const QSize hint = item->sizeHint();
+            if (x + hint.width() > area.right() + 1 && lineHeight > 0) {
+                x = area.x();
+                y += lineHeight + m_v;
+                lineHeight = 0;
+            }
+            if (!measureOnly)
+                item->setGeometry(QRect(QPoint(x, y), hint));
+            x += hint.width() + m_h;
+            lineHeight = qMax(lineHeight, hint.height());
+        }
+        return y + lineHeight - rect.y() + margins.bottom();
+    }
+
+    QList<QLayoutItem *> m_items;
+    int m_h, m_v;
+};
+
 }  // namespace
 
 // The one list: section headers and cards in a single vertical scroll. It reports a drop instead
@@ -667,10 +734,13 @@ public:
         m_ref->setObjectName(QStringLiteral("boardCardRef"));
         top->addWidget(m_ref);
         top->addStretch();
+        m_edit = textButton(QStringLiteral("Edit"),
+                            QStringLiteral("Edit the title and the issue text (e)"));
         m_toPrompt = textButton(QStringLiteral("#ID → prompt"),
                                 QStringLiteral("Insert this card's #ID in the terminal's prompt (t)"));
         m_openFile = textButton(QStringLiteral("Open file"),
                                 QStringLiteral("Open the card's Markdown file in a pane (o)"));
+        top->addWidget(m_edit);
         top->addWidget(m_toPrompt);
         top->addWidget(m_openFile);
         m_close = new QToolButton(this);
@@ -684,7 +754,18 @@ public:
         m_title = new QLabel(this);
         m_title->setWordWrap(true);
         m_title->setObjectName(QStringLiteral("boardCardTitle"));
+        m_title->setCursor(Qt::IBeamCursor);
+        m_title->setToolTip(QStringLiteral("Click to edit the title (e)"));
+        m_title->installEventFilter(this);
         layout->addWidget(m_title);
+        // The same line, as a field: editing swaps the two so the title never jumps.
+        m_titleEdit = new QLineEdit(this);
+        m_titleEdit->setObjectName(QStringLiteral("boardCardTitleEdit"));
+        m_titleEdit->setPlaceholderText(QStringLiteral("Title — one line"));
+        m_titleEdit->setToolTip(QStringLiteral("Enter saves, Esc cancels"));
+        m_titleEdit->installEventFilter(this);
+        m_titleEdit->hide();
+        layout->addWidget(m_titleEdit);
 
         auto *pickers = new QHBoxLayout;
         pickers->setSpacing(6);
@@ -712,7 +793,39 @@ public:
         m_doc->setObjectName(QStringLiteral("boardCardDocument"));
         m_doc->setOpenLinks(false);      // a relative link would otherwise replace the card
         m_doc->document()->setDocumentMargin(12);
+        m_doc->installEventFilter(this);
+        m_doc->viewport()->installEventFilter(this);
         layout->addWidget(m_doc, 1);
+
+        // Editing the card's own words (`## Issue`). It takes the document's place rather than
+        // opening beside it, so the card is either being read or being written, never both.
+        m_editFrame = new QFrame(this);
+        m_editFrame->setObjectName(QStringLiteral("boardEdit"));
+        auto *editLayout = new QVBoxLayout(m_editFrame);
+        editLayout->setContentsMargins(8, 6, 8, 6);
+        editLayout->setSpacing(4);
+        auto *editHint = new QLabel(QStringLiteral("Issue — Ctrl+Enter saves, Esc cancels"), m_editFrame);
+        editHint->setObjectName(QStringLiteral("boardEditHint"));
+        editLayout->addWidget(editHint);
+        m_issueEdit = new QPlainTextEdit(m_editFrame);
+        m_issueEdit->setObjectName(QStringLiteral("boardIssueEditor"));
+        m_issueEdit->setPlaceholderText(QStringLiteral("What the card is about, in your own words"));
+        m_issueEdit->installEventFilter(this);
+        editLayout->addWidget(m_issueEdit, 1);
+        auto *editButtons = new QHBoxLayout;
+        editButtons->setSpacing(6);
+        editButtons->addStretch(1);
+        m_cancelEdit = new QPushButton(QStringLiteral("Cancel"), m_editFrame);
+        m_cancelEdit->setObjectName(QStringLiteral("boardReplyButton"));
+        m_cancelEdit->setToolTip(QStringLiteral("Leave the card as it is (Esc)"));
+        m_saveEdit = new QPushButton(QStringLiteral("Save"), m_editFrame);
+        m_saveEdit->setObjectName(QStringLiteral("primary"));
+        m_saveEdit->setToolTip(QStringLiteral("Write the title and the issue to the card file (Ctrl+Enter)"));
+        editButtons->addWidget(m_cancelEdit);
+        editButtons->addWidget(m_saveEdit);
+        editLayout->addLayout(editButtons);
+        m_editFrame->hide();
+        layout->addWidget(m_editFrame, 1);
 
         m_error = new QLabel(this);
         m_error->setObjectName(QStringLiteral("boardCardError"));
@@ -721,6 +834,7 @@ public:
         layout->addWidget(m_error);
 
         auto *reply = new QFrame(this);
+        m_replyFrame = reply;
         reply->setObjectName(QStringLiteral("boardReply"));
         auto *replyLayout = new QVBoxLayout(reply);
         replyLayout->setContentsMargins(8, 6, 8, 6);
@@ -760,6 +874,13 @@ public:
             submit(true);
         });
         connect(m_comment, &QPushButton::clicked, this, [this] { submit(false); });
+        connect(m_edit, &QToolButton::clicked, this, [this] {
+            if (onEditHint)
+                onEditHint();
+            beginEdit(false);
+        });
+        connect(m_saveEdit, &QPushButton::clicked, this, [this] { saveEdit(); });
+        connect(m_cancelEdit, &QPushButton::clicked, this, [this] { cancelEdit(); });
         connect(m_close, &QToolButton::clicked, this, [this] { if (onClose) onClose(); });
         connect(m_toPrompt, &QToolButton::clicked, this, [this] { if (onToPrompt) onToPrompt(); });
         connect(m_openFile, &QToolButton::clicked, this, [this] { if (onOpenPath) onOpenPath(m_path); });
@@ -794,9 +915,14 @@ public:
     std::function<void(const QString &what, const QString &value)> onMove;
     // A path relative to the workspace (the card file) or to the card (a link in its body).
     std::function<void(const QString &path)> onOpenPath;
+    // A `board_update` patch and the hash the edit started from, so the worker can refuse a
+    // write over a file that changed meanwhile. The GUI never writes the file itself.
+    std::function<void(const QJsonObject &patch, const QString &baseHash)> onEdit;
+    std::function<void()> onEditHint;        // the Edit button was clicked, not the key
 
     QString cardId() const { return m_id; }
     QString path() const { return m_path; }
+    bool editing() const { return m_editing; }
 
     void setChoices(const QStringList &statuses, const QList<QPair<QString, QString>> &tabs)
     {
@@ -828,6 +954,21 @@ public:
         m_path = card.value(QStringLiteral("path")).toString();
         const QJsonObject front = card.value(QStringLiteral("front")).toObject();
         const QString title = card.value(QStringLiteral("title")).toString();
+        // What an edit writes over, and what it would have to be saved against. A card read
+        // again while it is being edited (the file changed under us, or our own write was
+        // refused) hands the editor a new hash and says so, rather than throwing the text away.
+        const QString hash = card.value(QStringLiteral("hash")).toString();
+        const QString issue = card.value(QStringLiteral("issue")).toString();
+        if (m_editing && sameCard && (title != m_title->text() || issue != m_issue))
+            showError(QStringLiteral("This card changed on disk while you were editing it. "
+                                     "Save writes your text over that version (the thread keeps "
+                                     "the old one); Esc drops your edit."));
+        m_hash = hash;
+        m_issue = issue;
+        if (!m_editing || !sameCard) {
+            m_issueEdit->setPlainText(issue);
+            m_titleEdit->setText(title);
+        }
         m_ref->setText(QStringLiteral("#") + m_id);
         m_title->setText(title);
         const int status = m_status->findData(card.value(QStringLiteral("status")).toString());
@@ -893,6 +1034,84 @@ public:
     void focusReply() { m_reply->setFocus(); }
     void focusDocument() { m_doc->setFocus(); }
 
+    // ---- editing the card's own words (the title and `## Issue`)
+    //
+    // Both at once and in one write, because they are one thought: the card says what the issue
+    // is, and its title is that in a line. The document becomes the editor, the reply box stands
+    // down, and Save sends one `board_update` patch hash-checked against the file we read.
+    void beginEdit(bool titleFirst)
+    {
+        if (m_id.isEmpty())
+            return;
+        if (!m_editing) {
+            m_editing = true;
+            m_titleEdit->setText(m_title->text());
+            m_issueEdit->setPlainText(m_issue);
+            m_title->hide();
+            m_titleEdit->show();
+            m_doc->hide();
+            m_editFrame->show();
+            m_replyFrame->hide();
+            m_edit->setEnabled(false);
+            m_error->hide();
+        }
+        if (titleFirst) {
+            m_titleEdit->setFocus();
+            m_titleEdit->selectAll();
+        } else {
+            m_issueEdit->setFocus();
+            m_issueEdit->moveCursor(QTextCursor::End);
+        }
+    }
+
+    // Leave edit mode: after a save the worker took, or on Esc / Cancel.
+    void endEdit()
+    {
+        if (!m_editing)
+            return;
+        m_editing = false;
+        m_titleEdit->hide();
+        m_title->show();
+        m_editFrame->hide();
+        m_doc->show();
+        m_replyFrame->show();
+        m_edit->setEnabled(true);
+        m_error->hide();
+        m_doc->setFocus();
+    }
+
+    void cancelEdit()
+    {
+        m_titleEdit->setText(m_title->text());
+        m_issueEdit->setPlainText(m_issue);
+        endEdit();
+    }
+
+    void saveEdit()
+    {
+        if (!m_editing || !onEdit)
+            return;
+        const QString title = m_titleEdit->text().trimmed();
+        const QString issue = m_issueEdit->toPlainText().trimmed();
+        if (title.isEmpty()) {
+            showError(QStringLiteral("A card needs a title."));
+            m_titleEdit->setFocus();
+            return;
+        }
+        QJsonObject patch;
+        if (title != m_title->text())
+            patch.insert(QStringLiteral("title"), title);
+        if (issue != m_issue.trimmed())
+            patch.insert(QStringLiteral("replace_section"),
+                         QJsonObject{{QStringLiteral("heading"), board::issueHeading()},
+                                     {QStringLiteral("text"), issue}});
+        if (patch.isEmpty()) {          // nothing was changed: the same as cancelling
+            endEdit();
+            return;
+        }
+        onEdit(patch, m_hash);
+    }
+
 protected:
     bool eventFilter(QObject *object, QEvent *event) override
     {
@@ -901,6 +1120,51 @@ protected:
             if (onEscape)
                 onEscape();
             return true;
+        }
+        // Click the title, or double-click the text, to edit them; `e` on the document does the
+        // same from the keyboard. Esc anywhere in the editor leaves the card as it was.
+        if (object == m_title && event->type() == QEvent::MouseButtonRelease && !m_editing
+            && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
+            if (onEditHint)
+                onEditHint();
+            beginEdit(true);
+            return true;
+        }
+        // `m_doc` is still null while the widgets above it are being built and their first
+        // show() runs through this filter.
+        if (m_doc && object == m_doc->viewport() && event->type() == QEvent::MouseButtonDblClick
+            && !m_editing && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
+            if (onEditHint)
+                onEditHint();
+            beginEdit(false);
+            return true;
+        }
+        if (event->type() == QEvent::KeyPress) {
+            auto *key = static_cast<QKeyEvent *>(event);
+            const auto mods = key->modifiers() & ~Qt::KeypadModifier;
+            const bool enter = key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter;
+            if (object == m_doc && !m_editing && mods == Qt::NoModifier
+                && key->text() == QStringLiteral("e")) {
+                beginEdit(false);
+                return true;
+            }
+            if (m_editing && (object == m_titleEdit || object == m_issueEdit)) {
+                if (key->key() == Qt::Key_Escape) {
+                    cancelEdit();
+                    return true;
+                }
+                // One line saves on Enter, as the quick-add field does; the issue text needs
+                // Enter for its own newlines, so there it is Ctrl+Enter.
+                if (enter && (mods == Qt::ControlModifier
+                              || (object == m_titleEdit && mods == Qt::NoModifier))) {
+                    saveEdit();
+                    return true;
+                }
+                if (object == m_titleEdit && key->key() == Qt::Key_Down && mods == Qt::NoModifier) {
+                    m_issueEdit->setFocus();
+                    return true;
+                }
+            }
         }
         return QWidget::eventFilter(object, event);
     }
@@ -1126,16 +1390,23 @@ private:
 
     QLabel *m_ref = nullptr, *m_title = nullptr, *m_meta = nullptr, *m_error = nullptr;
     QComboBox *m_status = nullptr, *m_tab = nullptr;
-    QToolButton *m_close = nullptr, *m_toPrompt = nullptr, *m_openFile = nullptr;
+    QToolButton *m_close = nullptr, *m_toPrompt = nullptr, *m_openFile = nullptr, *m_edit = nullptr;
     QTextBrowser *m_doc = nullptr;
     RichEditor *m_reply = nullptr;
     QPushButton *m_ask = nullptr, *m_comment = nullptr;
+    QFrame *m_replyFrame = nullptr, *m_editFrame = nullptr;
+    QLineEdit *m_titleEdit = nullptr;
+    QPlainTextEdit *m_issueEdit = nullptr;
+    QPushButton *m_saveEdit = nullptr, *m_cancelEdit = nullptr;
     QTimer *m_render = nullptr;
     QList<QJsonObject> m_entries;
     QHash<QString, QString> m_drafts;
     QString m_body, m_streaming, m_id, m_path;
+    // The card as the worker last handed it over: the hash an edit is written against, and the
+    // `## Issue` text an edit starts from and is compared with.
+    QString m_hash, m_issue;
     int m_threadTotal = 0;
-    bool m_loading = false, m_busy = false;
+    bool m_loading = false, m_busy = false, m_editing = false;
 };
 
 // ------------------------------------------------------------------------ the view
@@ -1155,35 +1426,35 @@ BoardView::BoardView(const QString &workspace, QWidget *parent)
 
 void BoardView::buildChrome(QVBoxLayout *layout)
 {
-    // One row of chrome. There are no tabs (owner decision, 2026-09-18): the pane is one list of
-    // everything that is not done, and the filter box is how it is sliced. The counts live in
-    // the pane's title and on the section headers.
-    auto *head = new QWidget(this);
-    head->setObjectName(QStringLiteral("boardHead"));
-    auto *headLayout = new QVBoxLayout(head);
+    // The pane's header row. There are no tabs (owner decision, 2026-09-18) and, since
+    // 2026-09-18, no tools either: the filter, "+ New card" and the section checkboxes are the
+    // top of the *list page* (buildListTools), so a card that is open is not also looking at the
+    // list's controls. All this row ever holds is the way back, and it is hidden while the list
+    // is on screen.
+    m_head = new QWidget(this);
+    m_head->setObjectName(QStringLiteral("boardHead"));
+    auto *headLayout = new QVBoxLayout(m_head);
     headLayout->setContentsMargins(8, 5, 8, 6);
     headLayout->setSpacing(6);
     m_tools = new QHBoxLayout;
     m_tools->setContentsMargins(0, 0, 0, 0);
     m_tools->setSpacing(6);
-    m_count = new QLabel(head);
-    m_count->setObjectName(QStringLiteral("boardCount"));
-    m_tools->addWidget(m_count);
-    m_filter = new QLineEdit(head);
-    m_filter->setObjectName(QStringLiteral("boardFilter"));
-    m_filter->setPlaceholderText(QStringLiteral("Filter  —  words, label:bug, status:done, "
-                                                "folder:changes, @agent, waiting:me"));
-    m_filter->setClearButtonEnabled(true);
-    m_tools->addWidget(m_filter, 1);
-    auto *add = new QToolButton(head);
-    add->setObjectName(QStringLiteral("boardAddButton"));
-    add->setText(QStringLiteral("+  New card"));
-    add->setToolTip(QStringLiteral("New card in the focused section (n)"));
-    add->setCursor(Qt::PointingHandCursor);
-    add->setFocusPolicy(Qt::NoFocus);
-    m_tools->addWidget(add);
+    m_back = new QToolButton(m_head);
+    m_back->setObjectName(QStringLiteral("boardBack"));
+    m_back->setText(QStringLiteral("←  Back to board"));
+    m_back->setToolTip(QStringLiteral("Close the card and go back to the list (Esc)"));
+    m_back->setCursor(Qt::PointingHandCursor);
+    m_back->setFocusPolicy(Qt::NoFocus);
+    m_tools->addWidget(m_back);
+    m_tools->addStretch(1);
     headLayout->addLayout(m_tools);
-    layout->addWidget(head);
+    m_head->hide();                 // shown only while a card is open
+    layout->addWidget(m_head);
+    connect(m_back, &QToolButton::clicked, this, [this] {
+        if (onHint)
+            onHint(QStringLiteral("board.back"), QStringLiteral("Esc"));
+        closeDetail();
+    });
 
     m_problems = new QLabel(this);
     m_problems->setMinimumWidth(1);   // one line, clipped in a narrow pane; the tooltip has it all
@@ -1194,10 +1465,9 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         if (onOpenFile && !path.isEmpty())
             onOpenFile(QDir(m_workspace).absoluteFilePath(path));
     });
-    auto *problemsRow = new QHBoxLayout;
-    problemsRow->setContentsMargins(8, 0, 8, 6);
-    problemsRow->addWidget(m_problems);
-    layout->addLayout(problemsRow);
+    // It is added to the list page's tools below, not here: with the pane's header empty while the
+    // list is up, a problems line at this level would be the topmost row and the pane's hover
+    // buttons would sit on its text.
 
     m_notice = new QFrame(this);
     m_notice->setObjectName(QStringLiteral("boardNotice"));
@@ -1236,9 +1506,11 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_listPane = new QWidget(m_splitter);
     m_listPane->setObjectName(QStringLiteral("boardListPane"));
     m_listPane->setMinimumWidth(240);
+    m_listPane->installEventFilter(this);   // its width decides whether the tools row wraps
     auto *listLayout = new QVBoxLayout(m_listPane);
     listLayout->setContentsMargins(0, 0, 0, 0);
     listLayout->setSpacing(0);
+    buildListTools(listLayout);
     buildQuickAdd(listLayout);
     m_list = new RowList(&m_rows, m_listPane);
     auto *delegate = new RowDelegate(&m_model, &m_rows, m_list);
@@ -1336,17 +1608,6 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_dragScroll->setInterval(30);
     connect(m_dragScroll, &QTimer::timeout, this, [this] { autoScrollDuringDrag(); });
 
-    connect(m_filter, &QLineEdit::textChanged, this, [this](const QString &text) {
-        m_model.setFilter(text);
-        rebuild();
-    });
-    connect(add, &QToolButton::clicked, this, [this] {
-        if (onHint)
-            onHint(QStringLiteral("board.quickAdd"), QStringLiteral("n"));
-        quickAdd();
-    });
-    m_filter->installEventFilter(this);
-
     updateDetailLayout();   // the key line's first text
     m_detail->onClose = [this] { closeDetail(); };
     m_detail->onEscape = [this] {
@@ -1404,6 +1665,184 @@ void BoardView::buildChrome(QVBoxLayout *layout)
               {QStringLiteral("card"), card}, {what, value},
               {QStringLiteral("reason"), QStringLiteral("changed in the Switchboard")}});
     };
+    m_detail->onEdit = [this](const QJsonObject &patch, const QString &baseHash) {
+        saveCardEdit(patch, baseHash);
+    };
+    m_detail->onEditHint = [this] {
+        if (onHint)
+            onHint(QStringLiteral("board.edit"), QStringLiteral("e"));
+    };
+}
+
+// The top of the list page (owner, 2026-09-18: "put 'new card' and filter at the top of the main
+// org page, not in the pane header ... they shouldn't show when you are clicked on a card"). It
+// lives inside the list pane, so it is there exactly when the list is: an open card that has the
+// pane to itself sees the way back instead, and never the list's tools.
+void BoardView::buildListTools(QVBoxLayout *layout)
+{
+    auto *tools = new QWidget(m_listPane);
+    tools->setObjectName(QStringLiteral("boardListTools"));
+    // The checkbox row below wraps, and height-for-width only reaches it if every widget between
+    // it and the list pane's layout passes the question on.
+    QSizePolicy wrapping(QSizePolicy::Preferred, QSizePolicy::Minimum);
+    wrapping.setHeightForWidth(true);
+    tools->setSizePolicy(wrapping);
+    auto *toolsLayout = new QVBoxLayout(tools);
+    toolsLayout->setContentsMargins(8, 5, 8, 6);
+    toolsLayout->setSpacing(5);
+
+    m_listTools = new QHBoxLayout;
+    m_listTools->setContentsMargins(0, 0, 0, 0);
+    m_listTools->setSpacing(6);
+    m_count = new QLabel(tools);
+    m_count->setObjectName(QStringLiteral("boardCount"));
+    m_listTools->addWidget(m_count);
+    m_filter = new QLineEdit(tools);
+    m_filter->setObjectName(QStringLiteral("boardFilter"));
+    m_filter->setPlaceholderText(QStringLiteral("Filter  —  words, label:bug, status:done, "
+                                                "folder:changes, @agent, waiting:me"));
+    m_filter->setClearButtonEnabled(true);
+    m_filter->setMinimumWidth(60);      // it gives way to the buttons rather than pushing them out
+    m_listTools->addWidget(m_filter, 1);
+    m_add = new QToolButton(tools);
+    m_add->setObjectName(QStringLiteral("boardAddButton"));
+    m_add->setText(QStringLiteral("+  New card"));
+    m_add->setToolTip(QStringLiteral("New card in the focused section (n)"));
+    m_add->setCursor(Qt::PointingHandCursor);
+    m_add->setFocusPolicy(Qt::NoFocus);
+    // Fixed, not the tool button's default: left to shrink, a QToolButton elides its own label to
+    // "…" long before the filter box has given up any of its room.
+    m_add->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    m_listTools->addWidget(m_add);
+    m_cleanup = new QToolButton(tools);
+    m_cleanup->setObjectName(QStringLiteral("boardCleanup"));
+    m_cleanup->setText(QStringLiteral("Clean up"));
+    m_cleanup->setToolTip(QStringLiteral("Have the agent tidy the board: merge or split sections "
+                                         "and cards, review statuses"));
+    m_cleanup->setCursor(Qt::PointingHandCursor);
+    m_cleanup->setFocusPolicy(Qt::NoFocus);
+    m_cleanup->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    m_listTools->addWidget(m_cleanup);
+    toolsLayout->addLayout(m_listTools);
+
+    // Where those two go when the pane is too narrow to hold them beside the filter: the pane's
+    // hover buttons keep their room at the right of the top row whatever happens, and at ~350 px
+    // that leaves the filter nothing. Right-aligned, so the row still reads as the tools' end.
+    m_toolsWrapRow = new QWidget(tools);
+    m_toolsWrap = new QHBoxLayout(m_toolsWrapRow);
+    m_toolsWrap->setContentsMargins(0, 0, 0, 0);
+    m_toolsWrap->setSpacing(6);
+    m_toolsWrap->addStretch(1);
+    m_toolsWrapRow->hide();
+    toolsLayout->addWidget(m_toolsWrapRow);
+
+    // One checkbox per section, all ticked until one is unticked. They wrap onto a second line
+    // rather than running off a ~350 px pane, which is why this is a flow layout and not a row.
+    m_checks = new QWidget(tools);
+    m_checks->setObjectName(QStringLiteral("boardSectionChecks"));
+    QSizePolicy policy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+    policy.setHeightForWidth(true);     // so the QVBoxLayout gives the wrapped rows their height
+    m_checks->setSizePolicy(policy);
+    auto *flow = new FlowLayout(m_checks, 10, 3);
+    flow->setContentsMargins(0, 0, 0, 0);
+    m_checksLayout = flow;
+    toolsLayout->addWidget(m_checks);
+
+    // The format problems belong to the list page too — they are about the cards it is showing —
+    // and here they are under the tools rather than above them, where the pane's hover buttons
+    // would cover the file name that fixes them.
+    toolsLayout->addWidget(m_problems);
+
+    layout->addWidget(tools);
+
+    connect(m_filter, &QLineEdit::textChanged, this, [this](const QString &text) {
+        m_model.setFilter(text);
+        rebuild();
+    });
+    connect(m_add, &QToolButton::clicked, this, [this] {
+        if (onHint)
+            onHint(QStringLiteral("board.quickAdd"), QStringLiteral("n"));
+        quickAdd();
+    });
+    connect(m_cleanup, &QToolButton::clicked, this, [this] { requestCleanup(); });
+    m_filter->installEventFilter(this);
+}
+
+// The pane's hover buttons take their room out of whichever row is on top for good, and in a
+// ~350 px pane that leaves the filter box nothing. Rather than let two QToolButtons elide to a
+// pair of identical "…", they drop to a line of their own under the filter.
+void BoardView::layoutListTools()
+{
+    if (!m_toolsWrap || !m_add || !m_cleanup)
+        return;
+    const int inset = m_head && m_head->isHidden() ? m_rightInset : 0;
+    const int room = m_listPane->width() - 16 - inset;
+    // The filter is owed a legible width before either button may sit beside it.
+    const int need = m_count->sizeHint().width() + 150 + m_add->sizeHint().width()
+                     + m_cleanup->sizeHint().width() + 18;
+    const bool wrap = room < need;
+    if (wrap == m_toolsWrapped)
+        return;
+    m_toolsWrapped = wrap;
+    QHBoxLayout *from = wrap ? m_listTools : m_toolsWrap;
+    QHBoxLayout *to = wrap ? m_toolsWrap : m_listTools;
+    for (QToolButton *button : {m_add, m_cleanup}) {
+        from->removeWidget(button);
+        to->addWidget(button);
+    }
+    m_toolsWrapRow->setVisible(wrap);
+}
+
+// The boxes follow the sections the model has right now — board.yaml's columns, whatever extra
+// statuses the cards carry, and Done — rather than a hard-coded list. Rebuilt only when that set
+// changes, so ticking one does not delete the box under the pointer.
+void BoardView::syncSectionChecks()
+{
+    const QList<board::Column> sections = m_model.sections();
+    QStringList ids;
+    for (const board::Column &section : sections)
+        ids << section.id;
+    if (ids == m_checkIds)
+        return;
+    m_checkIds = ids;
+    while (QLayoutItem *item = m_checksLayout->takeAt(0)) {
+        delete item->widget();
+        delete item;
+    }
+    for (const board::Column &section : sections) {
+        auto *box = new QCheckBox(section.title.toUpper(), m_checks);
+        box->setObjectName(QStringLiteral("boardSectionCheck"));
+        box->setChecked(!m_hidden.contains(section.id));
+        box->setCursor(Qt::PointingHandCursor);
+        box->setFocusPolicy(Qt::NoFocus);
+        const QString id = section.id;
+        connect(box, &QCheckBox::toggled, this, [this, id](bool on) {
+            if (on)
+                m_hidden.remove(id);
+            else
+                m_hidden.insert(id);
+            rebuild();
+            // The selection may have been in what just went away: stand on the first card left.
+            if (board::rowOfCard(m_rows, m_selected) < 0) {
+                const int first = board::stepRow(m_rows, -1, 1);
+                m_selected = first >= 0 ? m_rows.at(first).cardId : QString();
+            }
+        });
+        m_checksLayout->addWidget(box);
+    }
+    m_checks->setVisible(!sections.isEmpty());
+}
+
+// The pane's hover buttons float over the top right of the pane, so whichever row is actually on
+// top has to give up that much room — the header while a card is open, the list's tools otherwise.
+void BoardView::applyRightInset()
+{
+    const bool head = m_head && !m_head->isHidden();
+    if (m_tools)
+        m_tools->setContentsMargins(0, 0, head ? m_rightInset : 0, 0);
+    if (m_listTools)
+        m_listTools->setContentsMargins(0, 0, head ? 0 : m_rightInset, 0);
+    layoutListTools();
 }
 
 // The quick-add field, built once and shown when a card is added. It lines up with the rows
@@ -1504,7 +1943,8 @@ QString BoardView::title() const
 
 void BoardView::setHeaderRightInset(int pixels)
 {
-    m_tools->setContentsMargins(0, 0, pixels, 0);
+    m_rightInset = pixels;
+    applyRightInset();
 }
 
 QString BoardView::notice() const
@@ -1613,9 +2053,15 @@ void BoardView::handleEvent(const QJsonObject &event)
         if (!wasOpen)
             m_detailSized = false;
         updateDetailLayout();
-        if (m_replyOnOpen) {
+        if (m_editOnOpen) {
+            m_editOnOpen = false;
+            m_detail->beginEdit(false);
+        } else if (m_replyOnOpen) {
             m_replyOnOpen = false;
             m_detail->focusReply();
+        } else if (m_detail->editing()) {
+            // A re-read while the card is being edited (its file changed, or a save was refused)
+            // leaves the fields, and the focus, exactly where they were.
         } else if (m_listPane->isHidden() && !m_detail->isAncestorOf(QApplication::focusWidget())) {
             m_detail->focusDocument();   // the list it came from is hidden in a narrow pane
         }
@@ -1641,6 +2087,10 @@ void BoardView::handleEvent(const QJsonObject &event)
         }
         if (kind == QStringLiteral("board_comment"))
             return;              // the thread itself shows it
+        // The edit is written: the card goes back to being read (the new text arrives with the
+        // re-read that `board_changed` asks for).
+        if (kind == QStringLiteral("board_update") && card == m_detail->cardId())
+            m_detail->endEdit();
         m_lastWrite = writeId;
         if (!note.isEmpty())
             showNotice(note, false, writeId);
@@ -1673,6 +2123,19 @@ void BoardView::handleEvent(const QJsonObject &event)
     if (type == QStringLiteral("error") && mine) {
         m_pendingNotes.remove(requestId);
         const QString text = event.value(QStringLiteral("text")).toString();
+        // The card was written by someone else between the read and the save. Nothing was
+        // overwritten and nothing typed is lost: read the card again (which brings the new hash
+        // and says what changed) and leave the text in the editor for a second Save.
+        if (event.value(QStringLiteral("code")).toString() == QStringLiteral("board_conflict")
+            && m_detail->editing()) {
+            m_detail->showError(QStringLiteral("#%1 changed on disk, so nothing was written. Your "
+                                               "text is still here: Save again to write it over "
+                                               "that version, or Esc to drop it.")
+                                    .arg(m_detail->cardId()));
+            send({{QStringLiteral("type"), QStringLiteral("board_card_get")},
+                  {QStringLiteral("card"), m_detail->cardId()}});
+            return;
+        }
         if (!m_askCard.isEmpty()) {
             // A question the agent could not take (no provider key, say): the question itself is
             // already in the thread, so say that under it rather than over the board.
@@ -1721,22 +2184,51 @@ void BoardView::showProblems(const QJsonArray &problems)
 
 // ------------------------------------------------------------------------ rendering
 
-// "84 open" at the left of the filter row, with what the filter is hiding when one is set. The
-// pane's own title carries the same number, so the count is never only inside the list.
+// "84 open" at the left of the filter row, with what the filter is hiding when one is set, and
+// "62 of 84 open" when a section checkbox is keeping cards off the page. The pane's own title
+// carries the board's own number, so the count is never only inside the list.
 void BoardView::updateCounts()
 {
     const int open = m_model.openCount();
+    const int hidden = m_model.hiddenCount(m_hidden);
     QString text = QStringLiteral("%1 open").arg(open);
     if (!m_model.filter().trimmed().isEmpty()) {
+        // With a filter set, what the rows say is the honest number: it counts the closed cards
+        // a `status:done` search turns up, which "open" never does.
         int matched = 0;
         for (const board::Row &row : std::as_const(m_rows))
             if (row.kind == board::Row::Card)
                 ++matched;
         text = QStringLiteral("%1 shown").arg(matched);
+    } else if (hidden > 0) {
+        text = QStringLiteral("%1 of %2 open").arg(open - hidden).arg(open);
     }
     m_count->setText(text);
-    m_count->setToolTip(QStringLiteral("%1 card%2 on the board in all").arg(m_model.total())
-                            .arg(m_model.total() == 1 ? QString() : QStringLiteral("s")));
+    QString tip = QStringLiteral("%1 card%2 on the board in all").arg(m_model.total())
+                      .arg(m_model.total() == 1 ? QString() : QStringLiteral("s"));
+    if (hidden > 0)
+        tip += QStringLiteral("\n%1 open card%2 hidden by the section checkboxes")
+                   .arg(hidden).arg(hidden == 1 ? QString() : QStringLiteral("s"));
+    m_count->setToolTip(tip);
+
+    // Each box says how many cards its section holds right now, so unticking one is a decision
+    // taken with the number in view rather than after the fact.
+    for (int i = 0; i < m_checkIds.size() && i < m_checksLayout->count(); ++i) {
+        auto *box = qobject_cast<QCheckBox *>(m_checksLayout->itemAt(i)->widget());
+        if (!box)
+            continue;
+        const QString id = m_checkIds.at(i);
+        const int header = board::rowOfSection(m_rows, id);
+        const QString title = sectionTitle(id);
+        if (m_hidden.contains(id))
+            box->setToolTip(QStringLiteral("%1 — hidden; tick to put the section back").arg(title));
+        else if (header >= 0)
+            box->setToolTip(QStringLiteral("%1 · %2 card%3 — untick to hide the section")
+                                .arg(title).arg(m_rows.at(header).count)
+                                .arg(m_rows.at(header).count == 1 ? QString() : QStringLiteral("s")));
+        else
+            box->setToolTip(QStringLiteral("%1 — nothing matches the filter").arg(title));
+    }
 }
 
 QStringList BoardView::columnIds() const
@@ -1810,10 +2302,13 @@ void BoardView::refill()
         m_collapsed.insert(board::doneSection());
         m_collapsed.insert(QStringLiteral("deferred"));
     }
-    m_rows = m_model.rows(m_collapsed);
+    m_rows = m_model.rows(m_collapsed, m_hidden);
 
     if (!m_model.filter().trimmed().isEmpty())
         m_list->placeholder = QStringLiteral("No card matches this filter.\nEsc clears it.");
+    else if (!m_hidden.isEmpty() && m_model.openCount() > 0)
+        m_list->placeholder = QStringLiteral("Every section is hidden.\nTick one at the top to see "
+                                             "its cards.");
     else
         m_list->placeholder = QStringLiteral("Nothing open.\nPress n to add a card.");
 
@@ -1862,6 +2357,7 @@ void BoardView::rebuild()
         return;
     }
     m_rebuildPending = false;
+    syncSectionChecks();   // before the refill: the boxes decide which sections it puts in
     refill();
     updateCounts();
 
@@ -1923,6 +2419,34 @@ void BoardView::setCollapsedSections(const QJsonArray &state)
         rebuild();
 }
 
+// The same shape and the same home in the layout node as the folded set, one key over. Unticked
+// is not folded: a folded section is a header with its cards put away, an unticked one is not on
+// the page at all and its cards are out of the count.
+QJsonArray BoardView::hiddenSections() const
+{
+    QStringList ids(m_hidden.begin(), m_hidden.end());
+    ids.sort();
+    return QJsonArray::fromStringList(ids);
+}
+
+void BoardView::setHiddenSections(const QJsonArray &state)
+{
+    m_hidden.clear();
+    for (const QJsonValue &value : state)
+        if (!value.toString().isEmpty())
+            m_hidden.insert(value.toString());
+    // The boxes exist only once the sections do; syncSectionChecks reads m_hidden when it builds
+    // them, and this keeps any that are already up in step.
+    for (int i = 0; i < m_checkIds.size() && m_checksLayout && i < m_checksLayout->count(); ++i) {
+        if (auto *box = qobject_cast<QCheckBox *>(m_checksLayout->itemAt(i)->widget())) {
+            const QSignalBlocker block(box);
+            box->setChecked(!m_hidden.contains(m_checkIds.at(i)));
+        }
+    }
+    if (m_open)
+        rebuild();
+}
+
 void BoardView::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
@@ -1937,17 +2461,23 @@ void BoardView::updateDetailLayout()
     // The key line says what the keys do in what is on screen: the list, or a card that has the
     // pane to itself.
     static const QString boardKeys = QStringLiteral(
-        "<b>Enter</b> open &nbsp; <b>n</b> new &nbsp; <b>←/→</b> fold section &nbsp; "
+        "<b>Enter</b> open &nbsp; <b>e</b> edit &nbsp; <b>n</b> new &nbsp; <b>←/→</b> fold section &nbsp; "
         "<b>Alt+Shift+↑↓</b> reorder &nbsp; <b>Alt+Shift+←→</b> status &nbsp; <b>m</b> move "
         "&nbsp; <b>/</b> filter &nbsp; <b>t</b> #ID to prompt &nbsp; <b>y</b> copy &nbsp; "
         "<b>o</b> file &nbsp; <b>Ctrl+Z</b> undo");
     static const QString cardKeys = QStringLiteral(
-        "<b>Esc</b> back to the board &nbsp; <b>Tab</b> reply &nbsp; <b>Enter</b> asks the agent &nbsp; "
-        "<b>Ctrl+Shift+Enter</b> comments only &nbsp; <b>Shift+Enter</b> new line");
+        "<b>Esc</b> back to the board &nbsp; <b>e</b> edit the title and issue &nbsp; <b>Tab</b> reply "
+        "&nbsp; <b>Enter</b> asks the agent &nbsp; <b>Ctrl+Shift+Enter</b> comments only &nbsp; "
+        "<b>Shift+Enter</b> new line");
     const bool stacked = width() < kStackedWidth;
     const QString keys = detailOpen() && stacked ? cardKeys : boardKeys;
     if (m_keys->text() != keys)
         m_keys->setText(keys);
+    // The header exists only while a card is open, and then it says one thing: the way back.
+    if (m_head->isHidden() == detailOpen()) {
+        m_head->setVisible(detailOpen());
+        applyRightInset();
+    }
     if (!detailOpen()) {
         m_listPane->setVisible(true);
         return;
@@ -2066,8 +2596,44 @@ void BoardView::openSelected()
         updateDetailLayout();
         return;
     }
+    // A card being edited is not swapped for another one under the typing: the selection may
+    // move on the list, but the open card stays until the edit is saved or dropped.
+    if (detailOpen() && m_detail->editing())
+        return;
     send({{QStringLiteral("type"), QStringLiteral("board_card_get")},
           {QStringLiteral("card"), m_selected}});
+}
+
+// `e`, the Edit button, a click on the title or a double-click in the text: the card's own words
+// become fields, and Save sends one `board_update` for the title and the `## Issue` text
+// together (protocol 19.3). The GUI never writes the file; the worker does, hash-checked against
+// the version this card was read at, so an edit made elsewhere meanwhile is never lost silently.
+void BoardView::editSelected()
+{
+    if (detailOpen() && (m_selected.isEmpty() || m_detail->cardId() == m_selected)) {
+        m_detail->beginEdit(false);
+        return;
+    }
+    if (m_selected.isEmpty())
+        return;
+    m_editOnOpen = true;
+    openSelected();
+}
+
+void BoardView::saveCardEdit(const QJsonObject &patch, const QString &baseHash)
+{
+    const QString card = m_detail->cardId();
+    if (card.isEmpty() || patch.isEmpty())
+        return;
+    if (baseHash.isEmpty()) {
+        showNotice(QStringLiteral("#%1 cannot be saved: reopen the card and try again.").arg(card), true);
+        return;
+    }
+    const QString id = nextRequestId();
+    m_pendingNotes.insert(id, QStringLiteral("Saved #%1").arg(card));
+    send({{QStringLiteral("type"), QStringLiteral("board_update")}, {QStringLiteral("id"), id},
+          {QStringLiteral("card"), card}, {QStringLiteral("base_hash"), baseHash},
+          {QStringLiteral("patch"), patch}});
 }
 
 void BoardView::closeDetail()
@@ -2080,6 +2646,10 @@ void BoardView::closeDetail()
 
 void BoardView::focusFilter()
 {
+    // The filter is the list page's, so `/` from a card that has the pane to itself goes back to
+    // the board first rather than typing into a box nobody can see.
+    if (m_listPane->isHidden())
+        closeDetail();
     m_filter->setFocus();
     m_filter->selectAll();
 }
@@ -2258,6 +2828,12 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
         focusFilter();
         return true;
     }
+    // `e` edits the open card wherever the keyboard is inside the pane — the rows, the card's
+    // document, or the pane itself when an open card left the focus nowhere in particular.
+    if (text == QStringLiteral("e") && (detailOpen() || !m_selected.isEmpty())) {
+        editSelected();
+        return true;
+    }
     if (key->key() == Qt::Key_Escape && detailOpen()) {
         closeDetail();
         return true;
@@ -2288,6 +2864,12 @@ void BoardView::autoScrollDuringDrag()
 
 bool BoardView::eventFilter(QObject *object, QEvent *event)
 {
+    // The list pane's width, not the view's, decides whether the tools row wraps: with a card
+    // open beside it, the list has only its half of the splitter.
+    if (object == m_listPane && event->type() == QEvent::Resize) {
+        layoutListTools();
+        return false;
+    }
     // An empty quick-add field that loses the focus has been abandoned; one with text in it is
     // waiting for the person to come back to it. Enter leaves it open and focused either way.
     if (object == m_quickAdd && event->type() == QEvent::FocusOut) {
@@ -2426,6 +3008,20 @@ int BoardView::rowHeight() const
     if (at >= 0 && at < m_list->count())
         return qMax(16, m_list->visualItemRect(m_list->item(at)).height());
     return qMax(16, QFontMetrics(m_list->font()).height() + 10);
+}
+
+// "Clean up": hand the board to the agent to tidy — merge or split sections and cards, review
+// statuses. The button and its room at the top of the list page are here now; the backend message
+// that would carry the request does not exist yet, so this says so rather than sending nothing.
+// Kept last in the file, and small, so wiring it is one isolated edit.
+void BoardView::requestCleanup()
+{
+    static const QString notYet = QStringLiteral("Board cleanup is not wired yet.");
+    if (onStatus)
+        onStatus(notYet);
+    // …and on the board itself: this window's status bar is not shown, so onStatus alone would
+    // make the button look broken rather than unfinished.
+    showNotice(notYet, false);
 }
 
 }  // namespace relay

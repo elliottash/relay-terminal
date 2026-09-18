@@ -68,13 +68,24 @@ public:
     // rebuild below replaces.
     void toggleSection(QString columnId);
 
+    // Which sections the checkboxes at the top of the list page are keeping off it:
+    // `["deferred", "done"]`, same shape and same home in the layout node as the folded set
+    // above. Unchecked, not folded: the section is not on the page at all and its cards are out
+    // of the counts. Saved and restored with the rest of the window's state.
+    QJsonArray hiddenSections() const;
+    void setHiddenSections(const QJsonArray &state);
+
     // ---- actions, also reachable from the palette and the keymap
     void quickAdd();
     void quickAddIn(const QString &columnId);
     void openSelected();
+    void editSelected();             // `e`: edit the open card's title and issue text
     void closeDetail();
     bool detailOpen() const;
     void focusFilter();
+    // "Clean up": hands the board to the agent to tidy — merge or split sections and cards,
+    // review statuses. The backend message does not exist yet, so for now it only says so.
+    void requestCleanup();
     void moveSelected();            // the `m` popup
     void undoLast();                // Ctrl+Z: board_undo of this pane's last write
     void copyReference();
@@ -98,13 +109,26 @@ protected:
 
 private:
     void buildChrome(QVBoxLayout *layout);
+    // The top of the list page: the count, the filter, "+ New card", "Clean up", and under them
+    // one checkbox per section. They belong to the list, not to the pane's header, so an open
+    // card is not looking at the list's tools (owner, 2026-09-18).
+    void buildListTools(QVBoxLayout *layout);
     void buildQuickAdd(QVBoxLayout *layout);
     void closeQuickAdd();
+    // One checkbox per section the model has right now, rebuilt only when that set changes.
+    void syncSectionChecks();
+    void applyRightInset();         // keeps the pane's hover buttons off whichever row is on top
+    // The pane's hover buttons take their room out of the top row for good, so in a narrow pane
+    // the two buttons drop to a line of their own rather than eliding to "…".
+    void layoutListTools();
     void updateCounts();
     void refill();
     void moveCard(const QString &id, const QString &columnId, const QString &beforeId,
                   const QString &afterId);
     void moveToTab(const QString &id, const QString &tabId);
+    // One `board_update` for what the card detail's editor changed, against the hash the card
+    // was read at. The worker writes the file; a stale hash comes back as `board_conflict`.
+    void saveCardEdit(const QJsonObject &patch, const QString &baseHash);
     void send(QJsonObject message);
     QString nextRequestId();
     void showNotice(const QString &text, bool error, const QString &undoWriteId = QString());
@@ -134,7 +158,21 @@ private:
     QString m_selected, m_askCard;
     bool m_open = false;
 
-    QHBoxLayout *m_tools = nullptr;     // the count, the filter and "+ New card"
+    // The pane's header row. It holds nothing at all while the list is on screen — the list's
+    // own tools sit at the top of the list page — and one "← Back to board" control while a
+    // card is open (owner, 2026-09-18).
+    QWidget *m_head = nullptr;
+    QHBoxLayout *m_tools = nullptr;     // the header row's layout, for the hover-button inset
+    QToolButton *m_back = nullptr;
+    QHBoxLayout *m_listTools = nullptr; // the count, the filter, "+ New card" and "Clean up"
+    QWidget *m_toolsWrapRow = nullptr;  // where those two buttons go when the row is too narrow
+    QHBoxLayout *m_toolsWrap = nullptr;
+    QToolButton *m_add = nullptr, *m_cleanup = nullptr;
+    bool m_toolsWrapped = false;
+    QWidget *m_checks = nullptr;        // the section checkboxes, wrapping in a narrow pane
+    QLayout *m_checksLayout = nullptr;
+    QStringList m_checkIds;             // the sections the boxes stand for, in order
+    int m_rightInset = 0;
     QLabel *m_count = nullptr;
     QLineEdit *m_filter = nullptr;
     QLabel *m_problems = nullptr;
@@ -155,6 +193,7 @@ private:
     // list's entry i. The delegate and the drop logic read it; nothing else holds card data.
     QList<board::Row> m_rows;
     QSet<QString> m_collapsed;          // the folded sections
+    QSet<QString> m_hidden;             // the sections whose checkbox is unticked
     // Done and Deferred fold themselves the first time the list is drawn, unless the window's
     // saved state has already said which sections are folded.
     bool m_collapsedSeeded = false;
@@ -169,6 +208,7 @@ private:
     bool m_dragActive = false, m_rebuildPending = false;
     bool m_detailSized = false;     // the split was sized for the open card already
     bool m_replyOnOpen = false;     // `c` before the card arrived: focus its reply box then
+    bool m_editOnOpen = false;      // `e` before the card arrived: start editing it then
     QTimer *m_follow = nullptr;     // the open card follows the selection, debounced
     QTimer *m_dragScroll = nullptr; // scrolls the list while a card is dragged near an edge
     // The cards are files: a write from a pane agent, a collaborator's `git pull` or an editor

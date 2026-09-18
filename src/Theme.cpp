@@ -569,8 +569,19 @@ QToolButton#fileExplorerHidden:checked { color: @accent; border-color: @accentBo
 QWidget#boardView, QWidget#boardListPane { background: @bg; }
 QLabel#boardCount { color: @muted; font-family: "@mono"; font-size: 8pt; padding: 0 2px; }
 QLineEdit#boardFilter { padding: 4px 8px; }
-QToolButton#boardAddButton { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 10px; }
-QToolButton#boardAddButton:hover { border-color: @accent; }
+QToolButton#boardAddButton, QToolButton#boardCleanup { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 10px; }
+QToolButton#boardAddButton:hover, QToolButton#boardCleanup:hover { border-color: @accent; }
+QToolButton#boardCleanup { color: @muted; }
+/* The list page's own tools (the count, the filter, the buttons, the section checkboxes) sit on
+   a hairline over the rows; the pane's header carries nothing but the way back from a card. */
+QWidget#boardListTools { background: @bg; border-bottom: 1px solid @border; }
+QToolButton#boardBack { color: @muted; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 4px 8px; }
+QToolButton#boardBack:hover { color: @text; border-color: @border; background: @raised; }
+/* Engraved, like the section headers they switch on and off (SWITCHBOARD-AESTHETIC 3.1). The
+   font is set here and in no pseudo-state rule, so sizeHint() measures what actually paints. */
+QCheckBox#boardSectionCheck { color: @muted; font-family: "@mono"; font-size: 8pt; spacing: 5px; padding: 0; }
+QCheckBox#boardSectionCheck:!checked { color: @disabled; }
+QCheckBox#boardSectionCheck::indicator { width: 11px; height: 11px; border-radius: 3px; }
 QListWidget#boardList { background: transparent; border: none; }
 QListWidget#boardList QScrollBar:vertical { width: 8px; margin: 0; }
 QLineEdit#boardQuickAdd { background: @raised; border-color: @accentBorder; }
@@ -586,6 +597,11 @@ QLabel#boardKeys { color: @muted; font-size: 8pt; padding: 4px 10px; border-top:
 QWidget#boardDetail { background: @bg; }
 QLabel#boardCardRef { color: @muted; font-family: "@mono"; }
 QLabel#boardCardTitle { color: @text; font-size: 12pt; font-weight: 600; }
+/* Editing the card's own words: the title in place, and `## Issue` where the document was. */
+QLineEdit#boardCardTitleEdit { color: @text; font-size: 12pt; font-weight: 600; background: @surface; border: 1px solid @accentBorder; border-radius: 6px; padding: 2px 6px; }
+QFrame#boardEdit { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
+QLabel#boardEditHint { color: @muted; font-size: 8pt; }
+QPlainTextEdit#boardIssueEditor { background: transparent; border: none; padding: 2px; }
 QToolButton#boardCardClose { color: @muted; background: transparent; border: 1px solid transparent; border-radius: 4px; font-size: 12pt; padding: 0 6px; }
 QToolButton#boardCardClose:hover { color: @text; border-color: @border; background: @raised; }
 QComboBox#boardPicker { padding: 2px 26px 2px 8px; min-height: 18px; }

@@ -8724,9 +8724,11 @@ public:
         return name.isEmpty() ? path() : name;
     }
     QJsonObject node() const {
-        // The rows board has no tabs to remember; what it keeps is which sections are collapsed.
+        // The rows board has no tabs to remember; what it keeps is which sections are collapsed and
+        // which are unticked in the section checkboxes.
         if (m_board) return {{"board", QJsonObject{{"workspace", m_board->workspace()},
-                                                   {"collapsed", m_board->collapsedSections()}}}};
+                                                   {"collapsed", m_board->collapsedSections()},
+                                                   {"hidden", m_board->hiddenSections()}}}};
         if (m_subagent || m_turn || m_settingsView) return {};
         if (m_plan) return {{"plan", QJsonObject{{"path", path()}}}};
         return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};
@@ -11173,9 +11175,11 @@ public:
         boardWorker()->start(configure);
     }
 
-    ToolPane *createBoardPane(const QString &workspace, const QJsonArray &collapsed = {}) {
+    ToolPane *createBoardPane(const QString &workspace, const QJsonArray &collapsed = {},
+                              const QJsonArray &hidden = {}) {
         auto *view = new relay::BoardView(workspace);
         if (!collapsed.isEmpty()) view->setCollapsedSections(collapsed);
+        if (!hidden.isEmpty()) view->setHiddenSections(hidden);
         auto *tool = new ToolPane(view, workspace);
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
@@ -11374,7 +11378,8 @@ private:
             const QJsonObject board = node.value(QStringLiteral("board")).toObject();
             const QString workspace = board.value(QStringLiteral("workspace")).toString();
             if (QFileInfo::exists(workspace + QStringLiteral("/issues/board.yaml")))
-                return createBoardPane(workspace, board.value(QStringLiteral("collapsed")).toArray());
+                return createBoardPane(workspace, board.value(QStringLiteral("collapsed")).toArray(),
+                                       board.value(QStringLiteral("hidden")).toArray());
             return createPane({{"cwd", m_manager->workspace()}, {"workspace", m_manager->workspace()}});
         }
         if (node.contains(QStringLiteral("plan"))) {
