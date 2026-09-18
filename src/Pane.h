@@ -4442,7 +4442,7 @@ private:
         if (event.value(QStringLiteral("running")).toBool()) preview += QStringLiteral("\n(still running: this is its output so far)");
         if (event.value(QStringLiteral("truncated")).toBool())
             preview += QStringLiteral("\n(%1 earlier bytes not shown)").arg(qint64(event.value(QStringLiteral("omitted_bytes")).toDouble()));
-        openToolOutput({{"name", "job"}, {"call_id", event.value(QStringLiteral("job_id"))}, {"preview", preview}, {"result", result}});
+        openToolOutput({{"name", "command"}, {"call_id", event.value(QStringLiteral("job_id"))}, {"preview", preview}, {"result", result}});
     }
 
     // ----- request ledger UI (protocol section 12) ----------------------------------------------

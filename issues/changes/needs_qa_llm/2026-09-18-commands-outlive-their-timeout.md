@@ -38,10 +38,28 @@ a request for 180 s was an error line and a wasted turn.
 - The pane prints `▸ still running as job-N` and `■ stopped job-N`. System prompt and tool
   descriptions explain the jobs; protocol in `docs/AGENT-SESSIONS-PROTOCOL.md`.
 
-## Not done
+## The jobs list (same day, owner: "add this suggestion")
 
-No panel lists running jobs: the user sees them only in the turn's tool lines. A server the agent
-leaves running lasts until the conversation ends.
+A job the model was handed back is listed under the prompt box, beneath the running-agents list
+(`src/JobsPanel.{h,cpp}`: `JobsModel` + `JobsPanel`, in the `relay-subagents` library). It takes
+layout space like that list — the terminal gives up a row or two, nothing is covered — and hides
+when empty. Down from the prompt (or past the last agent) enters it; Enter opens the job's output
+in a file pane (`command-job-N.log`, the newest 256 KiB, without moving the model's read position);
+x or Delete stops a running job or dismisses a finished one; Esc or Up leaves. Clicking the ×
+shows a "Next time" hint. Finished rows stay until dismissed or the next prompt; a job that ends
+by itself says so in the status bar. Commands that finish inside their own call never appear.
+
+Worker: `jobs` events on every change; `jobs_list`, `job_output_get` → `job_output`, `job_stop`
+(`observe_protocol.py`). `jobs` is forwarded to phones like `tool_result`; `job_output` is
+withheld. Also fixed on the way: the job table kept every finished job (every command is a job)
+with up to 1 MiB each; it now remembers the 16 most recent.
+
+Tests: `tests/test_jobs.py` (23), `tests/jobs_test.cpp` (model, keys, the ×). Live, glm-5.3: the
+agent started `python3 -m http.server 8766` and left it; the list showed `job-1 … running`
+(`jobs-list-running.png`); Down, Enter opened its output; Down, x stopped it
+(`jobs-list-stopped-with-x.png`) and nothing listened on 8766 afterwards.
+
+A subagent's commands are not listed: they end with its run, which the running-agents list shows.
 
 ## QA checklist
 
@@ -49,3 +67,5 @@ leaves running lasts until the conversation ends.
 - [ ] Ask for a dev server, a curl against it, then stop: nothing left listening.
 - [ ] Start a background job, then /new: the process is gone.
 - [ ] Stop during a long foreground command ends that command.
+- [ ] A background job appears under the prompt; Down, Enter shows its output; x stops it.
+- [ ] Click the × on a running job: it stops, and the "Next time" hint appears once.
