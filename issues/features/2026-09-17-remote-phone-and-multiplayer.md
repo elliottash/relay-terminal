@@ -98,14 +98,17 @@ running the suites shows, not what the commit messages say. The remote suites ru
 
 **Half-built: finish these first**
 
-1. **Notifications.** The two ends exist and nothing connects them. Built: RFC 8291 encryption,
-   the inner seal and VAPID signing (`remote/push.py`); `/v1/push/key` and a `/v1/push/send` that
-   really delivers (`rendezvous/server.py`); a service worker that opens the seal and discards
-   what it cannot open (`app/sw.js`); `DeviceStore.set_push`. Missing: the web client never calls
-   `pushManager.subscribe` and never sends the subscription; there is no `push_subscribe` message
-   in `remote/wire.py`; the hub never decides to send a push (no triggers, no presence rule, no
-   per-pane cooldown, no constructed bodies, section 9); the GUI does not tell the sidecar whether
-   its window is active. `remote/push.py` has **no tests**.
+1. **Notifications — done (2026-09-18).** The two ends are connected: `push_subscribe` /
+   `push_unsubscribe` inside the Noise session (`remote/wire.py`, `remote/host.py`), the hub's
+   decisions in `remote/notify.py` (five triggers, the presence rule, a per-pane cooldown,
+   constructed bodies), a `window_active` line from `src/RemoteShare.cpp` through the sidecar, and
+   a "Notify me on this phone" row in the app that asks permission from a tap and says what to do
+   on an iOS device that is not installed. `remote/push.py` now has tests, and they found two bugs
+   a real phone would have hit: the RFC 8291 key order was reversed and the aes128gcm padding
+   delimiter was missing. `tests/test_remote_push.py` is 52 tests; section 9 of the protocol has
+   the message shapes. **Not yet tried on a real phone** — that needs item 7, because a push
+   service has to be able to reach the rendezvous. There is no per-trigger switch in the sharing
+   dialog yet; that is a surface decision (section 9, last paragraph).
 2. **Scrollback paging.** `ScreenBridge` answers a `history` request, but from
    `VtCore::historyText`, which is plain text, and the owner's decision was styled history. The hub
    refuses `history_get`; `HistoryTests` fails against that refusal. Needs a const, styled
