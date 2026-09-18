@@ -46,7 +46,7 @@ QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state)
     add("paste", QStringLiteral("Paste"));
     add("selectAll", QStringLiteral("Select all"));
 
-    if (!state.link.isEmpty() || !state.filePath.isEmpty()) {
+    if (!state.link.isEmpty() || !state.filePath.isEmpty() || !state.cardId.isEmpty()) {
         separate();
         if (!state.link.isEmpty()) {
             add("openLink", QStringLiteral("Open link"));
@@ -54,6 +54,16 @@ QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state)
         }
         if (!state.filePath.isEmpty())
             add("openFile", QStringLiteral("Open “%1”").arg(state.filePath.section(QLatin1Char('/'), -1)));
+        // A `#K7Q2` reference: the card it names, the reference itself, and the reference in the
+        // prompt box — the same three things the Switchboard's own card detail offers (`t`, `y`).
+        if (!state.cardId.isEmpty()) {
+            const QString reference = QStringLiteral("#") + state.cardId;
+            add("openCard", state.cardTitle.isEmpty()
+                    ? QStringLiteral("Open %1").arg(reference)
+                    : QStringLiteral("Open %1 “%2”").arg(reference, state.cardTitle));
+            add("copyCard", QStringLiteral("Copy %1").arg(reference));
+            add("cardToPrompt", QStringLiteral("%1 → prompt").arg(reference));
+        }
     }
 
     separate();

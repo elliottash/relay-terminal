@@ -55,6 +55,8 @@ struct TerminalMenuState {
     bool canZoom = false;            // the engine can change its font size
     QString link;                    // the URL under the pointer, empty when there is none
     QString filePath;                // an existing path under the pointer, empty when there is none
+    QString cardId;                  // a `#K7Q2` card reference under the pointer ("K7Q2"), or empty
+    QString cardTitle;               // what the board calls that card, when it knows a title
     bool hasTurn = false;            // the pane has a finished agent turn to open
     bool canTakeControl = false;     // the terminal is running, so the keyboard can be handed over
     bool canClosePane = true;

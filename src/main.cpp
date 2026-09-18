@@ -31,6 +31,7 @@
 #include "Images.h"         // image context: paste, drop, `@path` and "Screenshot this pane"
 #include "Aliases.h"        // aliases: saved commands and prompts, their fields and invocations
 #include "MarkdownAnsi.h"   // agent replies in the terminal: Markdown rendered as it streams
+#include "OutputLinks.h"    // what a link in the output is; `relay://card/<id>` for a `#K7Q2`
 #include <iterator>
 #include <QAbstractButton>
 #include <QAbstractItemView>
@@ -1314,6 +1315,12 @@ public:
                 onOpenTurn(QUrl::fromPercentEncoding(parts.at(1).toUtf8()));
                 return;
             }
+            // A `#K7Q2` in the output (Switchboard design section 5): the Switchboard opens in
+            // this tab if it is not there yet, and the card opens in it.
+            if (url.host() == QStringLiteral("card") && parts.size() == 1 && onOpenCard) {
+                onOpenCard(parts.at(0).toUpper());
+                return;
+            }
             return;
         }
         if (target.contains(QStringLiteral("://")) || target.startsWith(QStringLiteral("mailto:"))) {
@@ -1340,11 +1347,13 @@ public:
         int index = 0, count = 0;
         if (!m_backend->stepLink(delta, &link, &index, &count)) {
             m_walkLink = {};
-            status(QStringLiteral("No files, folders or links in this pane's output."));
+            status(QStringLiteral("No files, folders, links or cards in this pane's output."));
             return;
         }
         m_walkLink = link;
-        const QString where = link.line > 0 ? QStringLiteral("%1:%2").arg(link.target).arg(link.line) : link.target;
+        const QString where = !link.card.isEmpty() ? cardReferenceLabel(link.card, link.cardTitle)
+            : link.line > 0 ? QStringLiteral("%1:%2").arg(link.target).arg(link.line)
+                            : link.target;
         status(QStringLiteral("%1 of %2 · %3 · Enter opens, Esc leaves").arg(index + 1).arg(count).arg(where));
     }
     void openOutputLink() {
@@ -1423,7 +1432,12 @@ public:
             // backend wants it in widget()'s own coordinates, so it is mapped through the screen.
             const QPoint at = m_terminal ? m_terminal->mapFromGlobal(global) : QPoint();
             const QString target = m_terminal ? m_backend->linkAt(at, &line, &column) : QString();
-            if (target.startsWith(QStringLiteral("http://")) || target.startsWith(QStringLiteral("https://"))
+            // A card reference resolves to relay://card/<id> (src/OutputLinks.*), so it is read
+            // back out of the target the way a URL or a path is; it is never also a file.
+            state.cardId = relay::links::cardIdOf(target);
+            if (!state.cardId.isEmpty()) {
+                if (const relay::board::Card *card = m_cardIndex.card(state.cardId)) state.cardTitle = card->title;
+            } else if (target.startsWith(QStringLiteral("http://")) || target.startsWith(QStringLiteral("https://"))
                 || target.startsWith(QStringLiteral("mailto:")) || target.startsWith(QStringLiteral("file://")))
                 state.link = target;
             else if (!target.isEmpty() && QFileInfo::exists(target)) {
@@ -1441,8 +1455,8 @@ public:
             if (const QString keys = terminalMenuShortcut(item.id); !keys.isEmpty())
                 action->setShortcut(QKeySequence(keys));
             const QString id = item.id;
-            const QString link = state.link, file = state.filePath;
-            connect(action, &QAction::triggered, this, [this, id, link, file] { runTerminalMenuAction(id, link, file); });
+            const QString link = state.link, file = state.filePath, card = state.cardId;
+            connect(action, &QAction::triggered, this, [this, id, link, file, card] { runTerminalMenuAction(id, link, file, card); });
         }
         menu->popup(global);
     }
@@ -1461,7 +1475,7 @@ public:
         return action.isEmpty() ? QString() : Keymap::instance().keysFor(action).value(0);
     }
 
-    void runTerminalMenuAction(const QString &id, const QString &link, const QString &file) {
+    void runTerminalMenuAction(const QString &id, const QString &link, const QString &file, const QString &card) {
         if (id == QStringLiteral("turn")) { if (onOpenTurn) onOpenTurn(m_lastTurnId); return; }
         if (id == QStringLiteral("takeControl")) { takeControl(); return; }
         if (id == QStringLiteral("tasks")) { toggleRequests(); return; }
@@ -1469,6 +1483,15 @@ public:
         if (id == QStringLiteral("openLink")) { QDesktopServices::openUrl(QUrl(link)); return; }
         if (id == QStringLiteral("copyLink")) { QApplication::clipboard()->setText(link); return; }
         if (id == QStringLiteral("openFile")) { if (onOpenPath) onOpenPath(file, m_menuFileLine); return; }
+        // A `#K7Q2` under the pointer: open the card, copy the reference, or put it in the prompt
+        // box — the same three the Switchboard's card detail offers.
+        if (id == QStringLiteral("openCard")) { if (onOpenCard) onOpenCard(card); return; }
+        if (id == QStringLiteral("copyCard")) {
+            QApplication::clipboard()->setText(QStringLiteral("#") + card);
+            status(QStringLiteral("Copied #") + card);
+            return;
+        }
+        if (id == QStringLiteral("cardToPrompt")) { insertInComposer(QStringLiteral("#") + card + ' '); return; }
         if (!m_backend) return;
         if (id == QStringLiteral("copy")) { if (!copySelection()) status(QStringLiteral("Nothing is selected.")); return; }
         if (id == QStringLiteral("paste")) { m_backend->paste(); return; }
@@ -4792,6 +4815,9 @@ private:
             Q_UNUSED(column);
             openOutputTarget(target, line, true);
         };
+        // `#K7Q2` in the output is a card link when this pane's Switchboard index knows the id
+        // (design section 5); the engine asks, the pane answers from the rows it has seen.
+        m_backend->setCardLookup([this](const QString &id, QString *title) { return lookupOutputCard(id, title); });
         // The Bash integration changes to this pane's directory after loading the user's
         // configuration, so a shell started elsewhere still lands where the pane says.
         qputenv("RELAY_START_DIR", m_cwd.toUtf8());
@@ -6778,6 +6804,27 @@ private:
         send({{QStringLiteral("type"), QStringLiteral("board_open")}});
     }
 
+    // "#K7Q2" or "#K7Q2 · Voice transcription": how a reference reads in a tooltip or a status
+    // line, with the title only when the board knows one.
+    static QString cardReferenceLabel(const QString &id, const QString &title) {
+        return title.isEmpty() ? QStringLiteral("#") + id : QStringLiteral("#%1 · %2").arg(id, title);
+    }
+
+    // Which `#K7Q2` in this pane's *output* is a link, and what it is called: the engine's link
+    // scanner asks this (`relay::links::CardLookup`, src/OutputLinks.h) and leaves every id the
+    // board does not know as plain text, so an `#ABCD` nobody filed stays text.
+    //
+    // The index arrives only when something asks for it, and a pane whose agent never typed `#`
+    // has never asked — so the first reference-shaped span in its output asks now and links from
+    // the next hover on, rather than never (2026-09-18).
+    bool lookupOutputCard(const QString &id, QString *title) {
+        if (m_cardIndex.total() == 0) requestCardIndex();
+        const relay::board::Card *card = m_cardIndex.card(id);
+        if (!card) return false;
+        if (title) *title = card->title;
+        return true;
+    }
+
     // `#K7Q2` tokens that name a card travel with an agent prompt (protocol 17.6).
     QJsonArray cardsFor(const QString &text) const {
         static const QRegularExpression token(QStringLiteral("(?:^|\\s)#([0-9A-Za-z]{4})\\b"));
@@ -6799,6 +6846,10 @@ private:
         const QString summary = event.value(QStringLiteral("summary")).toString();
         if (id.isEmpty()) return;
         m_cardIndexAsked = false;   // the rows changed; refresh the picker on its next use
+        // A pane with no rows at all asks for them now, so the `◆ #K7Q2` line it is about to
+        // print is a link straight away rather than text until someone opens the picker. Once
+        // it has rows, `board_changed` keeps them current and no snapshot is needed.
+        if (m_cardIndex.total() == 0) requestCardIndex();
         noteWorkCard(id);
         const QString line = QStringLiteral("◆ #%1 · %2").arg(id, summary);
         status(line);
@@ -10827,6 +10878,26 @@ public:
         tool->board()->openSelected();
         setActiveLeaf(tool);
         focusLeaf(tool);
+        // A Switchboard this call just opened has no rows yet, so openSelected() had nothing to
+        // open and only the selection survives (the pane restores it when the rows land). Keep
+        // asking while they arrive, so one click on a `#K7Q2` in the output really does end on
+        // the card and not merely near it (2026-09-18).
+        if (!tool->board()->model().card(id)) waitForBoardCard(tool, id, 0);
+    }
+
+    // Retries openSelected() every 250 ms for up to 6 s, which covers the worker's first answer
+    // on a large tree. It stops as soon as a card detail is open, so a card the *user* opened in
+    // the meantime is never yanked out from under them.
+    void waitForBoardCard(ToolPane *tool, const QString &id, int attempt) {
+        if (attempt >= 24) return;
+        QPointer<ToolPane> guard(tool);
+        QTimer::singleShot(250, this, [this, guard, id, attempt] {
+            ToolPane *pane = guard.data();
+            if (!pane || !pane->board() || pane->board()->detailOpen()) return;
+            if (!pane->board()->model().card(id)) { waitForBoardCard(pane, id, attempt + 1); return; }
+            pane->board()->selectCard(id);
+            pane->board()->openSelected();
+        });
     }
 
     // The nearest ancestor of the anchor pane's directory that has a Switchboard.

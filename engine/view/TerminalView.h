@@ -93,17 +93,25 @@ public:
 
     // ---- links in the output (issues YZTK and GWXM)
     //
-    // A link the view found: an OSC 8 hyperlink, a URL, or a file or folder that exists.
+    // A link the view found: an OSC 8 hyperlink, a URL, a file or folder that exists, or a
+    // `#K7Q2` reference to a Switchboard card the host's board knows.
     // The recognition and resolution rules live in src/OutputLinks.* and are tested there.
     struct Link {
-        QString target;         // an absolute path, or the URL as written
+        QString target;         // an absolute path, the URL as written, or relay://card/<id>
         QString text;           // the output text it was found as
+        QString card;           // a card reference: its id, upper-cased; empty for every other link
+        QString cardTitle;      // what the host's board calls that card, when it knows a title
         bool url = false;       // open in a browser rather than a Relay pane
         bool directory = false; // a folder: the explorer pane, not the preview
         int line = -1;
         int column = -1;
         bool valid() const { return !target.isEmpty(); }
     };
+
+    // `#K7Q2` in the output is a card link only when the host's Switchboard index knows the id
+    // (Switchboard design section 5); with no lookup set — a pane that has seen no board, or the
+    // engine on its own — card references stay plain text.
+    void setCardLookup(relay::links::CardLookup lookup);
 
     // The link under a point in the widget, if any (the context menu and the host use it).
     Link linkAtPoint(const QPoint &pos);
@@ -266,6 +274,7 @@ private:
     // Keyboard walk over the links (Ctrl+Shift+L)
     std::vector<WalkLink> m_linkWalk;
     relay::links::Cursor m_linkCursor;
+    relay::links::CardLookup m_cardLookup;
 
     QString m_preedit;
     bool m_flash = false;

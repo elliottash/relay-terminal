@@ -10,6 +10,25 @@
 namespace relay::links {
 namespace {
 
+const QLatin1String kCardScheme("relay://card/");
+
+// A Switchboard card reference: `#K7Q2` (design section 5).
+//
+// Four Crockford-base32 characters, which is what backend/relay_core/board.py mints — no I, L,
+// O or U, so barely any English word can be read as an id and a `#word` comment costs nothing
+// to reject. `#` must open a word, so a shell comment (`# note`), `sha#K7Q2` and a fragment
+// inside a URL (claimed before this runs) are left alone, and the four characters must be the
+// whole word, so `#K7Q2X` is not a reference. An all-digit `#1234` is refused too: the ids
+// avoid it so GitHub does not autolink them, and a bare issue number in output is not ours.
+// An item id (`#K7Q2.a3`, tasks design) links as far as its card — the `.a3` stays text.
+// Whether the id is *real* is resolve()'s business, not this one's.
+const QRegularExpression &cardExpression()
+{
+    static const QRegularExpression re(
+        QStringLiteral("(?:^|(?<=[\\s\"'`([{<,;]))#([0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{4})(?![0-9A-Za-z_#])"));
+    return re;
+}
+
 // Where a bare token ends. Matches the word boundaries the terminal view uses for
 // double-click, so hover, click and the keyboard walk all cover the same text.
 bool isBoundary(QChar ch)
@@ -108,6 +127,13 @@ Probe systemProbe()
     };
 }
 
+QString cardTarget(const QString &id) { return kCardScheme + id; }
+
+QString cardIdOf(const QString &target)
+{
+    return target.startsWith(kCardScheme) ? target.mid(kCardScheme.size()) : QString();
+}
+
 bool splitLocation(const QString &token, QString *path, int *line, int *column)
 {
     *line = -1;
@@ -160,7 +186,31 @@ QVector<Candidate> candidates(const QString &text)
         claim.take(c.start, c.length);
     }
 
-    // 2. Python tracebacks and unittest output: File "/path/x.py", line 12, in <module>
+    // 2. Card references: `#K7Q2` in a recap, in the agent's prose, or in a board-activity
+    //    line (design section 5). Claimed before the path stages so the bare-token pass cannot
+    //    read the span as a relative path, which also means an unknown id is left as plain text
+    //    rather than probed as a file called `#ABCD`.
+    static const QRegularExpression allDigits(QStringLiteral("^[0-9]+$"));
+    for (auto it = cardExpression().globalMatch(text); it.hasNext();) {
+        const QRegularExpressionMatch m = it.next();
+        const QString id = m.captured(1).toUpper();
+        if (allDigits.match(id).hasMatch())
+            continue;
+        const int at = m.capturedStart(1) - 1; // the `#`
+        const int length = id.size() + 1;
+        if (!claim.free(at, length))
+            continue;
+        Candidate c;
+        c.start = at;
+        c.length = length;
+        c.kind = Kind::Card;
+        c.text = text.mid(at, length); // as written, so the underline sits under the same text
+        c.path = id;
+        out.append(c);
+        claim.take(at, length);
+    }
+
+    // 3. Python tracebacks and unittest output: File "/path/x.py", line 12, in <module>
     static const QRegularExpression pyRe(
         QStringLiteral("\\bFile \"([^\"\\n]+)\", line (\\d+)|\\bFile '([^'\\n]+)', line (\\d+)"));
     for (auto it = pyRe.globalMatch(text); it.hasNext();) {
@@ -172,7 +222,7 @@ QVector<Candidate> candidates(const QString &text)
         addPath(out, claim, at, path.size(), path, path, line, -1, true);
     }
 
-    // 3. tsc, MSVC and Qt Creator style: src/app.ts(12,5): error TS2304
+    // 4. tsc, MSVC and Qt Creator style: src/app.ts(12,5): error TS2304
     static const QRegularExpression parenRe(QStringLiteral("([^\\s\"'`()\\[\\]{}<>|,]+)\\((\\d+)(?:,(\\d+))?\\)"));
     for (auto it = parenRe.globalMatch(text); it.hasNext();) {
         const QRegularExpressionMatch m = it.next();
@@ -180,7 +230,7 @@ QVector<Candidate> candidates(const QString &text)
                 m.captured(2).toInt(), m.captured(3).isEmpty() ? -1 : m.captured(3).toInt(), false);
     }
 
-    // 4. Quoted paths, including names with spaces (`ls` quotes those, so does pytest).
+    // 5. Quoted paths, including names with spaces (`ls` quotes those, so does pytest).
     static const QRegularExpression quotedRe(QStringLiteral("\"([^\"\\n]+)\"|'([^'\\n]+)'"));
     for (auto it = quotedRe.globalMatch(text); it.hasNext();) {
         const QRegularExpressionMatch m = it.next();
@@ -205,7 +255,7 @@ QVector<Candidate> candidates(const QString &text)
         addPath(out, claim, at, length, inner, path, line, column, true);
     }
 
-    // 5. Bare tokens: ls output, gcc/clang/cargo `file:line:column`, pytest node ids,
+    // 6. Bare tokens: ls output, gcc/clang/cargo `file:line:column`, pytest node ids,
     //    stack frames inside parentheses (the brackets are boundaries).
     int i = 0;
     while (i < text.size()) {
@@ -234,13 +284,25 @@ QVector<Candidate> candidates(const QString &text)
     return out;
 }
 
-Target resolve(const Candidate &candidate, const QString &cwd, const QString &home, const Probe &probe)
+Target resolve(const Candidate &candidate, const QString &cwd, const QString &home, const Probe &probe,
+               const CardLookup &cards)
 {
     Target target;
     target.kind = candidate.kind;
     if (candidate.kind == Kind::Url) {
         target.valid = true;
         target.target = candidate.text;
+        return target;
+    }
+    if (candidate.kind == Kind::Card) {
+        // Only ids the caller's board knows become links; everything else stays the text the
+        // program printed, which is what keeps `#ABCD` and shell comments inert.
+        QString title;
+        if (!cards || !cards(candidate.path, &title))
+            return target;
+        target.valid = true;
+        target.target = cardTarget(candidate.path);
+        target.label = title;
         return target;
     }
     struct Attempt {
@@ -290,11 +352,12 @@ Target resolve(const Candidate &candidate, const QString &cwd, const QString &ho
     return target;
 }
 
-QVector<Found> scan(const QString &text, const QString &cwd, const QString &home, const Probe &probe)
+QVector<Found> scan(const QString &text, const QString &cwd, const QString &home, const Probe &probe,
+                    const CardLookup &cards)
 {
     QVector<Found> found;
     for (const Candidate &candidate : candidates(text)) {
-        const Target target = resolve(candidate, cwd, home, probe);
+        const Target target = resolve(candidate, cwd, home, probe, cards);
         if (target.valid)
             found.append({candidate, target});
     }

@@ -708,6 +708,7 @@ Ways to open a path:
 | `relay open PATH` in a pane shell | shell function → `scripts/relay-open` → socket request `{path, line, token}`; the token selects the pane |
 | Click or Ctrl+click a path in an engine pane's output | `relay::links` (`src/OutputLinks.*`) → `TerminalView::linkActivated` → `Pane::openOutputTarget` |
 | `Ctrl+Shift+L` then Enter (engine panes) | the keyboard walk over the same links |
+| Click a `#K7Q2` in an engine pane's output | the same path, with `relay://card/<id>` as the target → `RelayWindow::openBoardCard` |
 
 ### Clickable paths in terminal output
 
@@ -722,11 +723,21 @@ shell integration is on, else `/proc/<pid>/cwd`) and asks the probe: **a path th
 exist is not a link**. `--flags`, bare numbers, version strings and `FOO=bar` are rejected
 before the probe.
 
+`candidates()` also finds `#K7Q2` card references (Switchboard design section 5): four
+Crockford-base32 characters with at least one letter, opening a word, the whole word. Those are
+resolved against a `CardLookup` the host hands in rather than against the filesystem —
+`Pane::lookupOutputCard` answers from the pane's `relay::board::Model` — so, exactly as with a
+missing path, **an id the pane's board does not know is not a link**, and a `#` comment in shell
+output never becomes one. The target is `relay://card/<id>`, which `Pane::openOutputTarget`
+already routes like the other `relay://` links.
+
 The Relay engine uses it in `engine/view/TerminalView.cpp` for the hover underline and tooltip,
 plain click (only in the active pane, so the click that moves the focus cannot open a file),
-Ctrl+click, the right-click menu ("Open …", "Open in the system editor", "Copy path") and the
-ordered link list behind `Ctrl+Shift+L`. `Pane::openOutputTarget` routes the result: a folder to
-an explorer pane, a file to a preview pane at `line`, a URL to `QDesktopServices`.
+Ctrl+click, the right-click menu ("Open …", "Open in the system editor", "Copy path"; on a card
+"Open #K7Q2 …", "Copy #K7Q2", "#K7Q2 → prompt") and the ordered link list behind
+`Ctrl+Shift+L`. `Pane::openOutputTarget` routes the result: a folder to an explorer pane, a file
+to a preview pane at `line`, a URL to `QDesktopServices`, a card to this tab's Switchboard
+(opening the pane first when the tab has none), selected and scrolled into view.
 
 `relay-open` falls back to `xdg-open` when Relay is not reachable.
 
@@ -1316,7 +1327,7 @@ of the platform and of the engine itself.
 | `src/Theme.*` | live tokens, palette, stylesheet, the theme switch |
 | `src/ThemeFile.*` | the theme file format: reader, token contract, discovery, generated colour scheme |
 | `src/Hints.*` | shortcut hint limits and idle tips |
-| `src/OutputLinks.*` | which spans of terminal output are files, folders or URLs, what they resolve to, and the keyboard cursor over them |
+| `src/OutputLinks.*` | which spans of terminal output are files, folders, URLs or `#K7Q2` card references, what they resolve to, and the keyboard cursor over them |
 | `src/Notifications.*` | notification centre behind the header bell |
 | `src/TurnTranscript.*` | turn details pane (tool calls, transcript) |
 | `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |

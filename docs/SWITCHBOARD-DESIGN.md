@@ -160,6 +160,12 @@ Evidence: `docs/qa_evidence/2026-09-17-switchboard-ux/`.
 - **Picker.** In agent or auto mode, `#` at the start or after a space, followed by a character, opens a card picker
   like the `@` file picker (fuzzy on id and title, open cards first); Enter inserts `#K7Q2 `. In terminal mode `#` stays
   a Bash comment. A resolved `#ID` forces the agent route (the `!` prefix still forces terminal).
+- **Links in the output.** A `#K7Q2` the agent prints — in a recap, in its prose, or in a
+  board-activity line — is a link like a path or a URL is (`src/OutputLinks.*`): hovering
+  underlines it and shows `#K7Q2 · <title>`, clicking opens the Switchboard in that tab and the
+  card in it, `Ctrl+Shift+L` walks it with the other links, and right-clicking offers the card,
+  `#K7Q2` to the clipboard, and `#K7Q2` to the prompt box. Only ids the pane's board knows link;
+  an unfiled `#ABCD` and a `#` comment stay text.
 - **Attach.** `ask` gains `cards: [{id}]`; the worker prepends a labelled block (front matter, body capped at 16 KiB,
   last 10 thread entries plus summary, file paths), like `attachments`.
 - **Post back.** A turn with an attached card appends a thread event with no model call (`↗ discussed in terminal ·

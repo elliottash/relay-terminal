@@ -135,6 +135,8 @@ bool VTermBackend::stepLink(int delta, Link *link, int *index, int *count)
     if (link) {
         link->target = found.target;
         link->text = found.text;
+        link->card = found.card;
+        link->cardTitle = found.cardTitle;
         link->url = found.url;
         link->directory = found.directory;
         link->line = found.line;
@@ -159,6 +161,12 @@ void VTermBackend::setPlainClickOpensLinks(bool on)
 {
     if (m_view)
         m_view->setPlainClickOpensLinks(on);
+}
+
+void VTermBackend::setCardLookup(std::function<bool(const QString &id, QString *title)> lookup)
+{
+    if (m_view)
+        m_view->setCardLookup(std::move(lookup));
 }
 
 QString VTermBackend::screenText() const { return m_session->screenText(); }
