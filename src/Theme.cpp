@@ -542,11 +542,17 @@ QGroupBox::title { color: @muted; subcontrol-origin: margin; left: 8px; padding:
    its own outline, and QTabWidget would otherwise trace a box around the corner widgets. */
 QTabWidget::pane { border: none; }
 QTabBar { background: @bg; }
-QTabBar::tab { background: transparent; color: @muted; padding: 5px 8px; margin: 3px 1px 0 1px;
+QTabBar::tab { background: transparent; padding: 5px 8px; margin: 3px 1px 0 1px;
                border: none; border-bottom: 2px solid transparent;
                border-top-left-radius: 6px; border-top-right-radius: 6px; }
-QTabBar::tab:hover { color: @text; background: @surface; }
-QTabBar::tab:selected { color: @text; background: @surface; border-bottom: 2px solid @accent; }
+QTabBar::tab:hover { background: @surface; }
+QTabBar::tab:selected { background: @surface; border-bottom: 2px solid @accent; }
+/* Text colour only on the tab bars that do not colour their own tabs: the subagent pane's tabs say
+   each subagent's state in their text colour (QTabBar::setTabTextColor), which a `color` here
+   would override (#XM0T). */
+QTabWidget > QTabBar::tab, QTabBar#settingsTabs::tab { color: @muted; }
+QTabWidget > QTabBar::tab:hover, QTabBar#settingsTabs::tab:hover,
+QTabWidget > QTabBar::tab:selected, QTabBar#settingsTabs::tab:selected { color: @text; }
 
 /* File panes */
 QWidget#fileExplorer, QWidget#filePreview { background: @bg; }

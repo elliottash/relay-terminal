@@ -604,12 +604,16 @@ public:
                                          .arg(remoteCommand, host.isEmpty() ? QStringLiteral("another machine") : host));
             m_remoteChip->setVisible(remote);
             m_backdrop->setVisible(remote);
-            if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->setProperty("remoteSession", remote ? host : QString());
+            if (auto *pane = dynamic_cast<Pane *>(parentWidget())) {
+                pane->setProperty("remoteSession", remote ? host : QString());
+                pane->updateHeader();   // the title gives the chip its room
+            }
             placeBackdrop();
         }
         if (phone != m_phone) {
             m_phone = phone;
             m_phoneChip->setVisible(phone);
+            if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->updateHeader();
         }
     }
 
@@ -732,7 +736,8 @@ private:
             const int text = std::min(220, QFontMetrics(bold).horizontalAdvance(m_text));
             return {7 + 12 + 5 + text + 8, 18};
         }
-        QSize minimumSizeHint() const override { return {7 + 12 + 8, 18}; }
+        // The host stays readable in a narrow pane: the title gives way first (Pane::updateHeader).
+        QSize minimumSizeHint() const override { return {std::min(sizeHint().width(), 150), 18}; }
     protected:
         void paintEvent(QPaintEvent *) override {
             const relay::panestatus::Tokens t = relay::chrome::tokens();

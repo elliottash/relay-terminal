@@ -9238,9 +9238,14 @@ public:
         const QString shown = m_title.isEmpty() ? QFileInfo(m_cwd).fileName() : m_title;
         const QFontMetrics metrics(m_titleLabel->font());
         // The title takes what the directory, the badge and the hover button row leave.
-        const int taken = (m_cwdLabel ? m_cwdLabel->sizeHint().width() : 0)
-                          + (m_titleAuto && m_titleAuto->isVisible() ? m_titleAuto->sizeHint().width() : 0)
-                          + (m_headerLayout ? m_headerLayout->contentsMargins().right() : 0) + 32;
+        int taken = (m_cwdLabel ? m_cwdLabel->sizeHint().width() : 0)
+                    + (m_titleAuto && m_titleAuto->isVisible() ? m_titleAuto->sizeHint().width() : 0)
+                    + (m_headerLayout ? m_headerLayout->contentsMargins().right() : 0) + 32;
+        // What PaneChrome put in the row too: the state glyph and the ssh / phone chips (#XM0T, #SPBN).
+        for (int i = 0; m_headerLayout && i < m_headerLayout->count(); ++i)
+            if (QWidget *w = m_headerLayout->itemAt(i)->widget(); w && !w->isHidden() && w != m_titleLabel
+                && w != m_titleEdit && w != m_titleAuto && w != m_cwdLabel)
+                taken += w->sizeHint().width() + m_headerLayout->spacing();
         const int room = std::max(80, (m_headerWidget ? m_headerWidget->width() : width()) - taken);
         m_titleLabel->setText(metrics.elidedText(shown, Qt::ElideRight, room));
         m_titleLabel->setToolTip(headerTooltip());

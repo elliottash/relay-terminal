@@ -226,12 +226,14 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-windows-tabs-panes.md`
 - `2026-09-17-wrong-mode-hints.md`
 - `2026-09-18-agent-hands-commands-to-the-terminal.md`
+- `2026-09-18-distinct-headers-or-colors-for-each-pane-type.md`
 - `2026-09-18-edit-file-tool.md`
 - `2026-09-18-light-and-dark-commands.md`
 - `2026-09-18-local-models.md`
 - `2026-09-18-open-external-in-the-right-click-menu.md`
 - `2026-09-18-reasoning-panel-shortcut.md`
 - `2026-09-18-subagents-in-one-tabbed-pane-a-tab-per-subagent.md`
+- `2026-09-18-terminal-and-agent-status-icons-with-notificatio.md`
 
 - `2026-09-17-agent-delegate-and-take-over.md`
 - `2026-09-17-agent-output-while-program-runs.md`
