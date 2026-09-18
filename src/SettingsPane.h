@@ -53,7 +53,7 @@ namespace relay {
 // One row of a settings section. The caller supplies the reader (the current value fields) and
 // the writer, so QSettings stays the single source of truth.
 struct SettingRow {
-    enum Kind { Toggle, Choice, Text, Number, Button, Info, Heading };
+    enum Kind { Toggle, Choice, Text, Number, Button, Buttons, Info, Heading };
     Kind kind = Toggle;
     QString id;                 // stable identity: keeps focus and scroll across rebuilds
     QString label, detail;
@@ -70,6 +70,11 @@ struct SettingRow {
     std::function<void(int)> onNumber;
     QString buttonText;                                     // Button
     std::function<void()> run;
+    // Buttons: several on one row, left to right, for a row that stands for a thing rather than a
+    // value — one saved local model server with Test · Refresh · Remove (card #24XJ). The callback
+    // gets the index pressed; Enter on the row presses the first.
+    QStringList buttonTexts;
+    std::function<void(int index)> onButton;
 };
 
 struct SettingsSection {
@@ -103,6 +108,10 @@ public:
     std::function<void()> onClose;                          // Esc on an empty search, the pane's own key
     std::function<void(const ActionItem &)> onRun;          // an action was chosen; the caller runs it
     std::function<void()> onModeChanged;                    // the pane's title follows the mode
+    // A section's tab came to the front (once per arrival, not on every rebuild). A section whose
+    // rows cost something to fill — Local models probes loopback ports — reads this instead of
+    // polling on a timer.
+    std::function<void(const QString &sectionId)> onSectionShown;
 
     Mode mode() const { return m_mode; }
     // Swap in place: the search is cleared, the catalogs re-read, the first page shown.
@@ -153,6 +162,7 @@ private:
     void setCurrent(int index, bool scroll);
     void switchTab(int delta);
     void closeRequested();
+    void announceTab();
     QScrollArea *currentScroll() const;
     void runAction(const ActionItem &item);
 
@@ -167,6 +177,7 @@ private:
     QHBoxLayout *m_header = nullptr;
     QStringList m_tabIds;
     QString m_wantedTab;
+    QString m_shownTab;             // the last tab onSectionShown was told about
     QList<SettingsSection> m_sectionCache;   // the catalogs as of the last build()
     QList<ActionItem> m_actionCache;
     QHash<QWidget *, QList<Row>> m_pageRows; // every page's rows, so a tab switch needs no rebuild

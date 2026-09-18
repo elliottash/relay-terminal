@@ -71,3 +71,71 @@ These are implementer checks, not QA. The keyring was off throughout, so "no key
 property of this sandbox rather than of a machine that has keys; the Kimi key was a fake string and
 was never used for a request; and only one local server (llama.cpp) was exercised — Ollama, LM
 Studio and vLLM rows go through the same code but were not run.
+
+---
+
+# Settings section: what the implementer ran (GUI), 2026-09-18
+
+Implementer: Claude Opus 5 (1M context) subagent, a later pass on the same card `#24XJ`. Appended,
+not a rewrite: everything above is the first GUI pass (the dropdown, the two modals, a turn on the
+local model). This part is only the new **Settings › Local models** section, which replaces
+`scripts/relay-local.py` as the way in.
+
+## What changed
+
+- `src/LocalModelsSettings.{h,cpp}` (new, library `relay-localmodels`): the section. It owns no
+  widgets — it holds what the worker last said and turns it into a `SettingsSection`, so the
+  Options pane's row model stays the only way rows are drawn and the whole thing is testable
+  headlessly. It speaks protocol 23 (`local_endpoints`, `local_probe`, `local_endpoint_save`,
+  `local_endpoint_delete`) plus `test_key` for a `local:` preset, keyed by request id
+  (`lm-endpoints`, `lm-ep:<id>`, `lm-find:<port>`, `lm-addr`, `lm-save:<id>`, `lm-find-save`,
+  `lm-addr-save`) so every answer finds its own row.
+- `src/SettingsPane.{h,cpp}`: one new row kind, `Buttons` (several buttons on one row, for a row
+  that stands for a thing rather than a value — Test · Refresh · Remove), and `onSectionShown`,
+  which fires once when a section's tab comes to the front. That is what the probing hangs off:
+  a probe wakes a sleeping server, so it happens on arrival and on an explicit Refresh or Find
+  servers, never on a timer.
+- `src/RelayWindow.h`: the section is pushed right after Models; the controller's `send` goes
+  through the active pane (`Pane::sendLocalModelRequest`) — the same worker connection the keys
+  dialog uses, not a second one — and a save or a delete asks every pane in the window for
+  `presets` again, which is what puts the row into or out of each pane's model dropdown. The
+  action `agent.localModelSetup` hands the active pane one prompt.
+- `src/Pane.h`: the four `local_*` events, a `key_tested` whose preset starts `local:`, and an
+  `error` carrying an `lm-` request id go to `onLocalModelEvent` instead of the transcript;
+  `askAgent()`, `sendLocalModelRequest()` and `refreshPresets()` are the three things the window
+  needs from a pane.
+- `src/Keymap.h`: `agent.localModelSetup`, with no default shortcut — it is a once-per-machine
+  errand and Options › Local models is the way in. No shortcut hint was added: WARP.md's rule is
+  for a feature that *has* a fast path, and this one has none.
+
+## The run
+
+`drive-settings.sh` in this folder, driven step by step so each shot could be looked at before the
+next keystroke. One Xvfb display, `build/relay`, `xdotool` and ImageMagick `import`, profile fully
+isolated (`HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR`,
+`TMPDIR`, `RELAY_KEYRING=off`) and `RELAY_LOCAL_MODELS` pointing at a path that did not exist, so
+the section started genuinely empty. No `RELAY_*_API_KEY`. The owner's two servers were used as
+they were found and neither was started, stopped or reconfigured.
+
+| Shot | What it shows |
+|---|---|
+| `implementer-settings-a-empty-section.png` | the Options pane with a **Local models** tab between Models and Terminal: "No local endpoints yet. Find a server below, or add one by address.", then Find servers, Add by address and "Set up a model with the agent…". |
+| `implementer-settings-b-find-servers.png` | Find servers: **Ollama · http://127.0.0.1:11434/v1 — muse-glimmer:latest · 131,072 tokens · ready** and **llama.cpp · http://127.0.0.1:8080/v1 — bonsai-2-27b · 131,072 tokens · ready**, each with Save, and "Nothing on 8000, 1234." The four probes went out only because the button was pressed. |
+| `implementer-settings-c-saved-row.png` | Save on the llama.cpp row (`local_endpoint_save` with `detect: true`): the endpoint row reads **llama.cpp · bonsai-2-27b · 131,072 tokens · ready** with Test · Refresh · Remove, the two toggles under it, and the pane's model chip has already become `bonsai-2-27b · local` — the save asked every pane for `presets` again. |
+| `implementer-settings-d-test.png` | Test: **"Test: answered in 48738 ms."** llama-server had gone to sleep, so the 48 s is the reload; `test_key` waits a model load out, unlike a probe. |
+| `implementer-settings-e-model-dropdown.png` | the pane's model dropdown: **bonsai-2-27b · local**, then the Main / Flash / Local agent rows. |
+| `implementer-settings-f-removed.png` | Remove: the section is empty again, the registry file holds `"endpoints": []`, and the composer's chip is back to "No stored keys". |
+| `implementer-settings-g-add-by-address-and-toggles.png` | Add by address: `http://127.0.0.1:11434` → Detect → **Ollama · muse-glimmer:latest · 131,072 tokens · ready** → Save, then both per-endpoint toggles on. The registry afterwards: `tool_text_recovery: true`, `tool_arguments_as_object: true` — the rows are drawn from the endpoint the worker echoes back, so a key the registry drops shows as a toggle that goes back to off. |
+| `implementer-settings-h-setup-with-agent.png` | "Ask the agent…": the pane received `Load the local-model-setup skill and set up a local model on this machine for me.` as an ordinary agent request (violet ✦ line, "Settings · Local models" under it) and the agent answered `loaded skill local-model-setup · 176 lines · 6 files`. |
+
+`relay-stderr-settings.log` is that Relay's stderr; it is empty.
+
+## What was not proved here
+
+Implementer checks, not QA. `tool_arguments_as_object` was already in the backend when this ran, so
+the "a toggle the registry does not know goes back to off" path was exercised only by the unit test,
+not on screen. Only llama.cpp and Ollama were exercised — LM Studio and vLLM go through the same
+code and were not running. The "not running" status word and the error sentence under a down
+endpoint were seen in the unit test and in Find servers' silent ports, not on a saved row whose
+server was stopped (stopping the owner's servers was out of bounds). Nothing here says whether the
+section behaves with two Relay windows open.

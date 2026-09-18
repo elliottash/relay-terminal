@@ -279,6 +279,10 @@ private:
         add("agent.provider", "agent", "Provider and API keys (advanced endpoint settings)", {});
         add("agent.modelKeys", "agent", "API keys for model providers", {});
         add("agent.modelRoles", "agent", "Model roles: default provider and the Main / Flash / Lite models", {});
+        // Settings › Local models (card #24XJ): the agent reads the local-model-setup skill and
+        // serves a model on this machine. No default shortcut — it is a once-per-machine errand,
+        // and Options › Local models is the way in.
+        add("agent.localModelSetup", "agent", "Set up a local model with the agent (local-model-setup skill)", {});
         // O for options (owner, 2026-09-18). No plain Ctrl+O twin: one key per surface, and Ctrl+Shift
         // is the one a program cannot swallow. Ctrl+, stays as the key other apps taught.
         add("app.settings", "window", "Options: what persists, a tab per section (again to close it)",

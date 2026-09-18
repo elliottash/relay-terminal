@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SettingsPane.h"
+#include "LocalModelsSettings.h"
 
 #include <QApplication>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QPushButton>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QLabel>
@@ -157,6 +162,75 @@ QList<ActionItem> actions(State *state) {
 
 void press(QWidget *target, int key, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
     QTest::keyClick(target, Qt::Key(key), modifiers);
+}
+
+// ----- Settings › Local models (card #24XJ) ------------------------------------------------------
+// The section has no widgets of its own: it answers the worker's events with rows, so a test drives
+// it with the payloads of protocol section 23 and reads the rows back.
+using relay::LocalModelsSettings;
+
+// Every message the section sent, and the callbacks it fired.
+struct Wire {
+    QList<QJsonObject> sent;
+    int changed = 0, presets = 0, setups = 0;
+    bool ready = true;
+
+    void attach(LocalModelsSettings *local) {
+        local->send = [this](const QJsonObject &request) {
+            if (!ready) return false;
+            sent.append(request);
+            return true;
+        };
+        local->onChanged = [this] { ++changed; };
+        local->onPresetsChanged = [this] { ++presets; };
+        local->onSetupWithAgent = [this] { ++setups; };
+    }
+    QJsonObject last(const QString &type) const {
+        for (int i = sent.size() - 1; i >= 0; --i)
+            if (sent.at(i).value(QStringLiteral("type")).toString() == type) return sent.at(i);
+        return {};
+    }
+    QStringList idsOf(const QString &type) const {
+        QStringList ids;
+        for (const QJsonObject &request : sent)
+            if (request.value(QStringLiteral("type")).toString() == type)
+                ids << request.value(QStringLiteral("id")).toString();
+        return ids;
+    }
+};
+
+// A copy, not a pointer: a section is built fresh on every call and nothing here outlives it.
+// An empty id means the section has no such row.
+SettingRow rowById(const SettingsSection &section, const QString &id) {
+    for (const SettingRow &row : section.rows)
+        if (row.id == id) return row;
+    return {};
+}
+
+bool hasRow(const SettingsSection &section, const QString &id) { return !rowById(section, id).id.isEmpty(); }
+
+QJsonObject bonsai() {
+    return QJsonObject{{"id", "local:bonsai"}, {"label", "bonsai-2-27b"}, {"base_url", "http://127.0.0.1:8080/v1"},
+                       {"model", "bonsai-2-27b"}, {"server", "llamacpp"}, {"context_window", 131072},
+                       {"local", true}, {"group", "local"}, {"tools", true}, {"thinking", true},
+                       {"first_token_timeout", 300}, {"parallel_tool_calls", false},
+                       {"tool_text_recovery", false}};
+}
+
+QJsonObject endpointsEvent() {
+    return QJsonObject{{"event", "local_endpoints"}, {"id", "lm-endpoints"}, {"items", QJsonArray{bonsai()}}};
+}
+
+QJsonObject probedEvent(const QString &id, const QString &base, const QString &state,
+                        const QStringList &models, const QString &error = QString()) {
+    QJsonArray rows;
+    for (const QString &model : models)
+        rows.append(QJsonObject{{"id", model}, {"context_window", 131072}, {"tools", true}, {"thinking", true}});
+    QJsonObject event{{"event", "local_probed"}, {"id", id}, {"base_url", base},
+                      {"ok", state != QStringLiteral("down")}, {"server", "llamacpp"}, {"state", state},
+                      {"context_window", 131072}, {"models", rows}};
+    if (!error.isEmpty()) event.insert(QStringLiteral("error"), error);
+    return event;
 }
 
 }  // namespace
@@ -463,6 +537,278 @@ private slots:
         QCOMPARE(SettingsPane::fuzzyScore(QStringLiteral("reset"), QStringLiteral("Reasoning effort › low")), 0);
         QCOMPARE(SettingsPane::fuzzyScore(QStringLiteral("theme"), QStringLiteral("Cards, threads, plans and project memory")), 0);
         QVERIFY(SettingsPane::fuzzyScore(QStringLiteral("nwpn"), QStringLiteral("New pane to the right")) > 0);
+    }
+
+    // ----- Settings › Local models (card #24XJ) -------------------------------------------------
+
+    // The placement is one line of RelayWindow::settingsSections(), which needs a whole window to
+    // run; read it as text, the way tests/test_presets.py reads the preset mirror.
+    void localModelsComeRightAfterModels() {
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
+        const QString text = QString::fromUtf8(source.readAll());
+        const int models = text.indexOf(QStringLiteral("sections << models;"));
+        QVERIFY2(models > 0, "the Models section is gone");
+        const int next = text.indexOf(QStringLiteral("sections << "), models + 12);
+        QVERIFY(next > models);
+        QVERIFY2(text.mid(next).startsWith(QStringLiteral("sections << localModels().section()")),
+                 qPrintable(text.mid(next, 60)));
+    }
+
+    // Nothing is probed until the section is put in front, and then once per endpoint.
+    void theSectionProbesOnlyWhenItIsShown() {
+        State state;
+        LocalModelsSettings local;
+        Wire wire;
+        wire.attach(&local);
+        SettingsPane pane(SettingsPane::Mode::Options, [&] {
+            QList<SettingsSection> sections = catalog(&state);
+            sections << local.section();
+            return sections;
+        }, [&] { return actions(&state); });
+        pane.onSectionShown = [&](const QString &id) { if (id == LocalModelsSettings::sectionId()) local.refresh(); };
+        QVERIFY(pane.tabIds().contains(LocalModelsSettings::sectionId()));
+        QVERIFY(wire.sent.isEmpty());                 // General is the tab on screen
+        pane.showTab(LocalModelsSettings::sectionId());
+        QCOMPARE(wire.idsOf(QStringLiteral("local_endpoints")), QStringList{QStringLiteral("lm-endpoints")});
+        local.handleEvent(endpointsEvent());
+        QCOMPARE(wire.idsOf(QStringLiteral("local_probe")), QStringList{QStringLiteral("lm-ep:local:bonsai")});
+        // Every control asks the pane to rebuild; that must not knock on the port again.
+        pane.rebuild();
+        pane.showTab(QStringLiteral("general"));
+        pane.showTab(LocalModelsSettings::sectionId());
+        QCOMPARE(wire.idsOf(QStringLiteral("local_probe")).size(), 1);
+    }
+
+    void anEndpointRowCarriesItsModelWindowAndState() {
+        LocalModelsSettings local;
+        Wire wire;
+        wire.attach(&local);
+        local.handleEvent(endpointsEvent());
+        const SettingRow row = rowById(local.section(), QStringLiteral("local:bonsai"));
+        QVERIFY(!row.id.isEmpty());
+        QCOMPARE(row.kind, SettingRow::Buttons);
+        QCOMPARE(row.label, QStringLiteral("bonsai-2-27b"));
+        QCOMPARE(row.buttonTexts, (QStringList{QStringLiteral("Test"), QStringLiteral("Refresh"), QStringLiteral("Remove")}));
+        QVERIFY2(row.detail.contains(QStringLiteral("131,072 tokens")), qPrintable(row.detail));
+        QVERIFY(row.detail.contains(QStringLiteral("llama.cpp")));
+        QVERIFY(row.detail.contains(QStringLiteral("bonsai-2-27b")));
+        // No probe has answered yet, so the status word says so rather than inventing one.
+        QVERIFY2(row.detail.endsWith(QStringLiteral("checking…")), qPrintable(row.detail));
+    }
+
+    void theStatusWordFollowsTheProbe() {
+        LocalModelsSettings local;
+        Wire wire;
+        wire.attach(&local);
+        local.handleEvent(endpointsEvent());
+        const QList<QPair<QString, QString>> cases{{QStringLiteral("ready"), QStringLiteral("ready")},
+                                                   {QStringLiteral("loading"), QStringLiteral("loading")},
+                                                   {QStringLiteral("sleeping"), QStringLiteral("sleeping")},
+                                                   {QStringLiteral("down"), QStringLiteral("not running")}};
+        for (const auto &pair : cases) {
+            local.handleEvent(probedEvent(QStringLiteral("lm-ep:local:bonsai"), QStringLiteral("http://127.0.0.1:8080/v1"),
+                                          pair.first, {QStringLiteral("bonsai-2-27b")},
+                                          pair.first == QStringLiteral("down")
+                                              ? QStringLiteral("Nothing is listening on 127.0.0.1:8080. Start it with llama-server … --jinja")
+                                              : QString()));
+            const SettingsSection section = local.section();
+            const SettingRow row = rowById(section, QStringLiteral("local:bonsai"));
+            QVERIFY(!row.id.isEmpty());
+            QVERIFY2(row.detail.endsWith(pair.second), qPrintable(row.detail + QStringLiteral(" != ") + pair.second));
+            // Down: the worker's sentence, which already names the command that starts the server.
+            const SettingRow error = rowById(section, QStringLiteral("local:bonsai/error"));
+            if (pair.first == QStringLiteral("down")) {
+                QVERIFY(!error.id.isEmpty());
+                QVERIFY(error.label.contains(QStringLiteral("llama-server")));
+            } else {
+                QVERIFY(error.id.isEmpty());
+            }
+        }
+    }
+
+    void theRowsActionsReachTheWorker() {
+        LocalModelsSettings local;
+        Wire wire;
+        wire.attach(&local);
+        local.handleEvent(endpointsEvent());
+        const SettingRow row = rowById(local.section(), QStringLiteral("local:bonsai"));
+        QVERIFY(!row.id.isEmpty() && row.onButton);
+        row.onButton(0);                                   // Test
+        QCOMPARE(wire.last(QStringLiteral("test_key")).value(QStringLiteral("preset")).toString(),
+                 QStringLiteral("local:bonsai"));
+        local.handleEvent({{"event", "key_tested"}, {"preset", "local:bonsai"}, {"ok", true}, {"elapsed_ms", 812}});
+        QVERIFY2(local.noteFor(QStringLiteral("local:bonsai")).contains(QStringLiteral("812 ms")),
+                 qPrintable(local.noteFor(QStringLiteral("local:bonsai"))));
+        QVERIFY(hasRow(local.section(), QStringLiteral("local:bonsai/note")));
+
+        row.onButton(1);                                   // Refresh: the window is re-read
+        const QJsonObject refresh = wire.last(QStringLiteral("local_endpoint_save"));
+        QVERIFY(refresh.value(QStringLiteral("detect")).toBool());
+        QCOMPARE(refresh.value(QStringLiteral("endpoint")).toObject().value(QStringLiteral("id")).toString(),
+                 QStringLiteral("local:bonsai"));
+
+        row.onButton(2);                                   // Remove
+        const QJsonObject remove = wire.last(QStringLiteral("local_endpoint_delete"));
+        QCOMPARE(remove.value(QStringLiteral("endpoint_id")).toString(), QStringLiteral("local:bonsai"));
+        const int before = wire.presets;
+        local.handleEvent({{"event", "local_endpoint_deleted"}, {"endpoint_id", "local:bonsai"}, {"removed", true}});
+        QCOMPARE(wire.presets, before + 1);                 // every pane re-reads `presets`
+        QVERIFY(local.endpoints().isEmpty());
+    }
+
+    void theRecoveryToggleSavesTheFlagAndReadsBackWhatWasStored() {
+        LocalModelsSettings local;
+        Wire wire;
+        wire.attach(&local);
+        local.handleEvent(endpointsEvent());
+        const SettingRow recovery = rowById(local.section(), QStringLiteral("local:bonsai/tool_text_recovery"));
+        QVERIFY(!recovery.id.isEmpty() && recovery.onToggle);
+        QCOMPARE(recovery.kind, SettingRow::Toggle);
+        QVERIFY(!recovery.checked);                        // off by default
+        QVERIFY2(recovery.detail.startsWith(QStringLiteral("Runs a command out of the model's text.")),
+                 qPrintable(recovery.detail));
+        recovery.onToggle(true);
+        const QJsonObject save = wire.last(QStringLiteral("local_endpoint_save"));
+        QVERIFY(!save.contains(QStringLiteral("detect")));
+        QVERIFY(save.value(QStringLiteral("endpoint")).toObject().value(QStringLiteral("tool_text_recovery")).toBool());
+        QJsonObject stored = bonsai();
+        stored.insert(QStringLiteral("tool_text_recovery"), true);
+        local.handleEvent({{"event", "local_endpoint_saved"}, {"id", "lm-save:local:bonsai"}, {"endpoint", stored}});
+        QVERIFY(rowById(local.section(), QStringLiteral("local:bonsai/tool_text_recovery")).checked);
+
+        // The sibling field. The registry keeps the keys it knows and drops the rest, so a toggle
+        // the backend has not learnt yet goes back to off: the row is drawn from what came back.
+        const SettingRow objects = rowById(local.section(), QStringLiteral("local:bonsai/tool_arguments_as_object"));
+        QVERIFY(!objects.id.isEmpty() && objects.onToggle);
+        QVERIFY(!objects.checked);
+        objects.onToggle(true);
+        QVERIFY(wire.last(QStringLiteral("local_endpoint_save")).value(QStringLiteral("endpoint")).toObject()
+                    .value(QStringLiteral("tool_arguments_as_object")).toBool());
+        local.handleEvent({{"event", "local_endpoint_saved"}, {"id", "lm-save:local:bonsai"}, {"endpoint", stored}});
+        QVERIFY(!rowById(local.section(), QStringLiteral("local:bonsai/tool_arguments_as_object")).checked);
+    }
+
+    void findServersKnocksOnFourPortsAndOffersToSaveWhatAnswered() {
+        LocalModelsSettings local;
+        Wire wire;
+        wire.attach(&local);
+        const SettingRow find = rowById(local.section(), QStringLiteral("local:find"));
+        QVERIFY(!find.id.isEmpty() && find.run);
+        find.run();
+        QCOMPARE(wire.idsOf(QStringLiteral("local_probe")),
+                 (QStringList{QStringLiteral("lm-find:11434"), QStringLiteral("lm-find:1234"),
+                              QStringLiteral("lm-find:8080"), QStringLiteral("lm-find:8000")}));
+        local.handleEvent(probedEvent(QStringLiteral("lm-find:8080"), QStringLiteral("http://127.0.0.1:8080/v1"),
+                                      QStringLiteral("sleeping"), {QStringLiteral("bonsai-2-27b")}));
+        local.handleEvent(probedEvent(QStringLiteral("lm-find:1234"), QStringLiteral("http://127.0.0.1:1234/v1"),
+                                      QStringLiteral("down"), {}, QStringLiteral("Nothing is listening.")));
+        const SettingsSection section = local.section();
+        const SettingRow found = rowById(section, QStringLiteral("found:0"));
+        QVERIFY(!found.id.isEmpty());
+        QVERIFY(found.label.contains(QStringLiteral("http://127.0.0.1:8080/v1")));
+        QVERIFY2(found.detail.contains(QStringLiteral("131,072 tokens")), qPrintable(found.detail));
+        QVERIFY(found.detail.endsWith(QStringLiteral("sleeping")));
+        QCOMPARE(found.buttonTexts, QStringList{QStringLiteral("Save")});
+        QVERIFY(hasRow(section, QStringLiteral("local:find/silent")));
+        found.onButton(0);
+        const QJsonObject save = wire.last(QStringLiteral("local_endpoint_save"));
+        QCOMPARE(save.value(QStringLiteral("id")).toString(), QStringLiteral("lm-find-save"));
+        QVERIFY(save.value(QStringLiteral("detect")).toBool());
+        const QJsonObject endpoint = save.value(QStringLiteral("endpoint")).toObject();
+        QCOMPARE(endpoint.value(QStringLiteral("model")).toString(), QStringLiteral("bonsai-2-27b"));
+        QCOMPARE(endpoint.value(QStringLiteral("base_url")).toString(), QStringLiteral("http://127.0.0.1:8080/v1"));
+        const int before = wire.presets;
+        local.handleEvent({{"event", "local_endpoint_saved"}, {"id", "lm-find-save"}, {"endpoint", bonsai()},
+                           {"probe", probedEvent(QString(), QStringLiteral("http://127.0.0.1:8080/v1"),
+                                                 QStringLiteral("ready"), {QStringLiteral("bonsai-2-27b")})}});
+        QCOMPARE(wire.presets, before + 1);
+        QCOMPARE(local.endpoints().size(), 1);
+        QVERIFY(!hasRow(local.section(), QStringLiteral("found:0")));      // the offer is spent
+        QVERIFY(rowById(local.section(), QStringLiteral("local:bonsai")).detail.endsWith(QStringLiteral("ready")));
+    }
+
+    void aServerWithSeveralModelsAsksWhichOneFirst() {
+        LocalModelsSettings local;
+        Wire wire;
+        wire.attach(&local);
+        rowById(local.section(), QStringLiteral("local:find")).run();
+        local.handleEvent(probedEvent(QStringLiteral("lm-find:11434"), QStringLiteral("http://127.0.0.1:11434/v1"),
+                                      QStringLiteral("ready"),
+                                      {QStringLiteral("muse-glimmer:latest"), QStringLiteral("qwen3:8b")}));
+        const SettingRow choice = rowById(local.section(), QStringLiteral("found:0/model"));
+        QVERIFY(!choice.id.isEmpty() && choice.onChoose);
+        QCOMPARE(choice.kind, SettingRow::Choice);
+        QCOMPARE(choice.current, QStringLiteral("muse-glimmer:latest"));
+        choice.onChoose(QStringLiteral("qwen3:8b"));
+        rowById(local.section(), QStringLiteral("found:0")).onButton(0);
+        QCOMPARE(wire.last(QStringLiteral("local_endpoint_save")).value(QStringLiteral("endpoint")).toObject()
+                     .value(QStringLiteral("model")).toString(), QStringLiteral("qwen3:8b"));
+    }
+
+    void addByAddressDetectsThenSaves() {
+        LocalModelsSettings local;
+        Wire wire;
+        wire.attach(&local);
+        const SettingRow address = rowById(local.section(), QStringLiteral("local:address"));
+        QVERIFY(!address.id.isEmpty() && address.onText);
+        address.onText(QStringLiteral("http://127.0.0.1:8080"));
+        rowById(local.section(), QStringLiteral("local:detect")).run();
+        const QJsonObject probe = wire.last(QStringLiteral("local_probe"));
+        QCOMPARE(probe.value(QStringLiteral("id")).toString(), QStringLiteral("lm-addr"));
+        QCOMPARE(probe.value(QStringLiteral("base_url")).toString(), QStringLiteral("http://127.0.0.1:8080"));
+        local.handleEvent(probedEvent(QStringLiteral("lm-addr"), QStringLiteral("http://127.0.0.1:8080/v1"),
+                                      QStringLiteral("ready"), {QStringLiteral("bonsai-2-27b")}));
+        const SettingRow save = rowById(local.section(), QStringLiteral("local:address/save"));
+        QVERIFY(!save.id.isEmpty());
+        QVERIFY(save.detail.contains(QStringLiteral("131,072 tokens")));
+        save.onButton(0);
+        QCOMPARE(wire.last(QStringLiteral("local_endpoint_save")).value(QStringLiteral("id")).toString(),
+                 QStringLiteral("lm-addr-save"));
+        // A detect that finds nothing says so in place, and offers nothing to save.
+        local.handleEvent({{"event", "error"}, {"id", "lm-addr-save"}, {"text", "Nothing to detect at that address."}});
+        QVERIFY(hasRow(local.section(), QStringLiteral("local:address/note")));
+    }
+
+    void theSetupButtonHandsThePromptToTheAgent() {
+        LocalModelsSettings local;
+        Wire wire;
+        wire.attach(&local);
+        const SettingRow row = rowById(local.section(), QStringLiteral("agent.localModelSetup"));
+        QVERIFY(!row.id.isEmpty() && row.run);
+        row.run();
+        QCOMPARE(wire.setups, 1);
+        QVERIFY(wire.sent.isEmpty());       // it is a prompt, not a worker message
+    }
+
+    // The new row kind draws one button per entry and Enter presses the first.
+    void aButtonsRowDrawsEveryButton() {
+        State state;
+        LocalModelsSettings local;
+        Wire wire;
+        wire.attach(&local);
+        local.handleEvent(endpointsEvent());
+        SettingsPane pane(SettingsPane::Mode::Options, [&] {
+            QList<SettingsSection> sections = catalog(&state);
+            sections << local.section();
+            return sections;
+        }, [&] { return actions(&state); });
+        pane.show();
+        pane.showTab(LocalModelsSettings::sectionId());
+        QVERIFY(pane.visibleRowIds().contains(QStringLiteral("local:bonsai")));
+        QWidget *line = nullptr;
+        for (QWidget *candidate : pane.findChildren<QWidget *>(QStringLiteral("settingsRow")))
+            if (candidate->property("rowId").toString() == QLatin1String("local:bonsai")) line = candidate;
+        QVERIFY(line);
+        const auto buttons = line->findChildren<QPushButton *>();
+        QCOMPARE(buttons.size(), 3);
+        QCOMPARE(buttons.at(0)->text(), QStringLiteral("Test"));
+        QCOMPARE(buttons.at(2)->text(), QStringLiteral("Remove"));
+        const int sent = wire.sent.size();
+        buttons.at(2)->click();
+        QCOMPARE(wire.sent.size(), sent + 1);
+        QCOMPARE(wire.last(QStringLiteral("local_endpoint_delete")).value(QStringLiteral("endpoint_id")).toString(),
+                 QStringLiteral("local:bonsai"));
     }
 };
 

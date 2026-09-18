@@ -2384,6 +2384,12 @@ private:
             // A fold asked for a call the worker no longer has ("Unknown turn_id (only the last 50
             // turns are kept)"): the fold says so, in one row, rather than staying empty (#TK9C).
             if (handleFoldError(id, event.value(QStringLiteral("text")).toString())) return true;
+            // A local-model save that found nothing to detect (card #24XJ): the Settings pane's
+            // section says so under the row that asked, never in the transcript.
+            if (id.startsWith(QStringLiteral("lm-"))) {
+                if (onLocalModelEvent) onLocalModelEvent(event);
+                return true;
+            }
             // The ⓘ view's requests (protocol 25): the view says what went wrong, in place.
             if (id.startsWith(QStringLiteral("info-"))) {
                 if (m_infoView) m_infoView->setError(id, event.value(QStringLiteral("text")).toString());
@@ -2465,6 +2471,14 @@ private:
         }
         if (type == QStringLiteral("route_assisted")) {
             onRouteAssisted(event);
+            return true;
+        }
+        // Settings › Local models (card #24XJ, protocol 23). A local endpoint has no key and no row
+        // in the keys dialog, so its test result goes to the Settings pane's section instead.
+        if (type.startsWith(QStringLiteral("local_"))
+            || (type == QStringLiteral("key_tested")
+                && event.value(QStringLiteral("preset")).toString().startsWith(QStringLiteral("local:")))) {
+            if (onLocalModelEvent) onLocalModelEvent(event);
             return true;
         }
         if (type == QStringLiteral("key_tested") || type == QStringLiteral("key_removed")
@@ -6874,6 +6888,28 @@ public:
         m_boardTask = text; m_boardTaskCard = cardId;
         if (m_configured) runBoardTask();
         else status(QStringLiteral("#%1 is handed to this pane; the agent starts on it when it is ready.").arg(cardId));
+    }
+
+    // One prompt from somewhere that is not the prompt box — Settings › Local models › "Set up a
+    // model with the agent…" (card #24XJ). It joins this pane's queue like anything else typed.
+    void askAgent(const QString &text, const QString &why = QString()) {
+        submitAgent(text, false, why);
+    }
+
+    // Settings › Local models talks to this pane's worker, the same connection the keys dialog
+    // uses and never a second one: the four `local_*` messages of protocol 23 and `test_key` for a
+    // `local:` preset go out here, and every answer comes back through onLocalModelEvent. False
+    // means the worker is still starting and nothing was sent.
+    std::function<void(const QJsonObject &event)> onLocalModelEvent;
+    bool sendLocalModelRequest(const QJsonObject &request) {
+        if (!m_workerReady) return false;
+        send(request);
+        return true;
+    }
+    // A local endpoint was saved or removed: this pane re-reads `presets`, which is what puts the
+    // row into (or out of) its model dropdown.
+    void refreshPresets() {
+        if (m_workerReady) send({{"type", "presets"}});
     }
 
     // Toasts are events ("12 characters copied", "Withdrawn · the agent never saw it", a shortcut

@@ -121,6 +121,7 @@ SettingsPane::SettingsPane(Mode mode, std::function<QList<SettingsSection>()> se
             m_rows = m_pageRows.value(m_pages->widget(index));
             setCurrent(-1, false);
         }
+        announceTab();
     });
     connect(m_search, &QLineEdit::textChanged, this, [this] {
         const QString needle = m_search->text().trimmed();
@@ -270,6 +271,15 @@ void SettingsPane::build() {
     } else {
         buildResults(needle);
     }
+    announceTab();
+}
+
+// Once per arrival, so a rebuild (any control writing its value) never fires it again.
+void SettingsPane::announceTab() {
+    const QString id = currentTab();
+    if (id.isEmpty() || id == m_shownTab) return;
+    m_shownTab = id;
+    if (onSectionShown) onSectionShown(id);
 }
 
 void SettingsPane::buildPage(QWidget *page, const SettingsSection &section) {
@@ -429,6 +439,21 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
         });
         entry.activate = [button] { button->click(); };
         box->addWidget(button);
+        break;
+    }
+    case SettingRow::Buttons: {
+        QPushButton *first = nullptr;
+        for (int i = 0; i < row.buttonTexts.size(); ++i) {
+            auto *button = new QPushButton(row.buttonTexts.at(i));
+            button->setFocusPolicy(Qt::TabFocus);
+            connect(button, &QPushButton::clicked, this, [fn = row.onButton, after, i] {
+                if (fn) fn(i);
+                after();
+            });
+            if (!first) first = button;
+            box->addWidget(button);
+        }
+        if (first) entry.activate = [first] { first->click(); };
         break;
     }
     case SettingRow::Info:

@@ -7,6 +7,17 @@ address. No key, no account, nothing leaves the machine. Card `#24XJ`; code in
 
 ## Use one
 
+In the GUI: **Options › Local models** (Ctrl+Shift+O, then the tab after Models). *Find servers*
+knocks on the four loopback ports and offers a Save for each one that answered; *Add by address*
+takes a URL, detects what it serves and saves that. A saved endpoint is one row with its model, its
+window and a status word (ready · sleeping · loading · not running, with the command that starts
+the server when it is down), and Test · Refresh · Remove beside it — Refresh re-reads the window
+after the server was restarted with a different `-c`. Probing happens when the section is opened
+and when Find or Refresh is pressed, never on a timer: a probe wakes a sleeping server. There is
+also "Set up a model with the agent…", which hands the pane's agent the `local-model-setup` skill.
+
+The same things from the terminal:
+
 ```sh
 scripts/relay-local.py scan                       # what is serving on 11434, 1234, 8080, 8000
 scripts/relay-local.py add --base-url http://127.0.0.1:8080 --id bonsai --label "Bonsai 2 27B" --detect

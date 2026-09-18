@@ -25,6 +25,7 @@
 #include "SshConfig.h"
 #include "TurnTranscript.h"
 #include "SettingsPane.h"
+#include "LocalModelsSettings.h"
 #include "SubagentTranscript.h"
 #include "SubagentsPanel.h"
 #include "Logging.h"
@@ -999,6 +1000,14 @@ private:
             hint(QStringLiteral("model.roles.slow"),
                  QStringLiteral("Tip: the gear at the bottom of the model box opens this too"));
         }
+        // Settings › Local models › "Set up a model with the agent…" (card #24XJ). The agent pane
+        // comes to the front and is handed one prompt; the skill it names does the rest.
+        else if (id == QStringLiteral("agent.localModelSetup")) {
+            setActive(pane);
+            focusLeaf(pane);
+            pane->askAgent(QStringLiteral("Load the local-model-setup skill and set up a local model on this machine for me."),
+                           QStringLiteral("Settings · Local models"));
+        }
         else if (id == QStringLiteral("input.modeAuto")) pane->setMode(QStringLiteral("auto"));
         else if (id == QStringLiteral("input.modeTerminal")) pane->setMode(QStringLiteral("shell"));
         else if (id == QStringLiteral("input.modeAgent")) pane->setMode(QStringLiteral("agent"));
@@ -1041,6 +1050,12 @@ private:
             markSettingsPaneType(guard);
             guard->update();
             if (auto *w = windowOf(guard)) w->updateTitles();
+        };
+        // Local models probes loopback ports, which wakes a sleeping server, so it happens when the
+        // section is put in front and on an explicit Refresh — never on a timer (card #24XJ).
+        view->onSectionShown = [guard](const QString &sectionId) {
+            auto *w = windowOf(guard);
+            if (w && sectionId == relay::LocalModelsSettings::sectionId()) w->localModels().refresh();
         };
         view->onClose = [guard] { if (auto *w = windowOf(guard)) w->closeSettingsPane(guard); };
         view->onRun = [guard](const relay::ActionItem &item) { if (auto *w = windowOf(guard)) w->runFromSettings(guard, item); };
@@ -1163,6 +1178,28 @@ private:
         for (int i = 0; i < m_tabs->count(); ++i)
             if (ToolPane *tool = settingsPaneIn(m_tabs->widget(i))) tool->settings()->rebuild();
     }
+
+    // Settings › Local models (card #24XJ). One per window: the rows are a section of the Options
+    // pane, the messages go out through whichever pane is active — the same worker connection the
+    // keys dialog uses — and the answers come back through Pane::onLocalModelEvent.
+    relay::LocalModelsSettings &localModels() {
+        if (!m_localModels.send) {
+            m_localModels.send = [this](const QJsonObject &request) {
+                return m_active && m_active->sendLocalModelRequest(request);
+            };
+            m_localModels.onChanged = [this] { refreshSettingsPanes(); };
+            // A saved or removed endpoint changes what every pane may switch to, and each pane has
+            // its own worker, so each is asked for `presets` again — what the keys dialog does for
+            // a key, for every pane rather than one.
+            m_localModels.onPresetsChanged = [this] {
+                for (Pane *pane : allPanes()) pane->refreshPresets();
+                refreshSettingsPanes();
+            };
+            m_localModels.onSetupWithAgent = [this] { runAction(QStringLiteral("agent.localModelSetup")); };
+        }
+        return m_localModels;
+    }
+    relay::LocalModelsSettings m_localModels;
 
     PaletteItem actionItem(const QString &section, const QString &label, const QString &detail, const QString &action, bool checked = false) {
         PaletteItem item;
@@ -1453,6 +1490,10 @@ private:
                                  QStringLiteral("Base URL, model id, extra request JSON and the agent workspace"),
                                  QStringLiteral("Open…"), [this] { runAction(QStringLiteral("agent.provider")); });
         sections << models;
+
+        // Right after Models, because a local endpoint is one more thing the model dropdown can
+        // offer — it just has no key, so it is not in the API keys dialog (card #24XJ).
+        sections << localModels().section();
 
         relay::SettingsSection terminal;
         terminal.id = QStringLiteral("terminal");
@@ -3098,6 +3139,11 @@ private:
         pane->onOpenTurn = [guard](const QString &turnId) { if (auto *w = windowOf(guard)) w->openTurnPane(guard, turnId); };
         // The share chip, once this pane is shared: who is here and what is waiting (#W5N2).
         pane->onOpenSharing = [guard] { if (auto *w = windowOf(guard)) w->openSharingPane(guard, true); };
+        // Protocol 23's four `local_*` events, and a `test_key` for a `local:` preset, belong to
+        // Settings › Local models rather than to this pane's transcript (card #24XJ).
+        pane->onLocalModelEvent = [guard](const QJsonObject &event) {
+            if (auto *w = windowOf(guard)) w->localModels().handleEvent(event);
+        };
         // A tool-call line whose diff is too big to read inline (#TK9C).
         pane->onOpenDiff = [guard](const QString &title, const QString &unifiedDiff) {
             if (auto *w = windowOf(guard)) w->openDiffPane(guard, title, unifiedDiff);
