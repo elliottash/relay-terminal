@@ -37,6 +37,25 @@ WATCHDOG_TICK = 0.5
 ENV_TIMEOUT = "RELAY_PROVIDER_TIMEOUT"
 ENV_MIN, ENV_MAX = 5.0, 900.0
 
+# The only hosts plain HTTP may go to, and so the only hosts a model server needs no key on
+# (localmodels.py). One definition: the transport's guard and the keyless rule cannot drift apart.
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def loopback_http(base_url) -> bool:
+    """Whether a base URL is plain HTTP to this machine: the one shape that is a local model server.
+
+    Deliberately not "any URL without a key": a mistyped https endpoint must keep failing with
+    "No stored key", never go out unauthenticated.
+    """
+    if not isinstance(base_url, str):
+        return False
+    try:
+        url = urllib.parse.urlsplit(base_url.strip())
+        return url.scheme == "http" and url.hostname in LOCAL_HOSTS
+    except ValueError:
+        return False
+
 
 def env_stall_timeout() -> float | None:
     """The RELAY_PROVIDER_TIMEOUT override in seconds, clamped to 5-900, or None when unset/invalid."""
@@ -203,6 +222,43 @@ def wire_messages(messages: list[dict]) -> list[dict]:
 class ProviderError(RuntimeError):
     pass
 
+
+def repair_tool_calls(calls) -> list:
+    """The tool-call envelope quirks local servers are known for, made conformant.
+
+    llama.cpp has returned ``arguments`` as a JSON object instead of a string (its issue 20198),
+    Ollama's /v1 has omitted ``id`` and ``type``, and ids have repeated across calls. A hosted
+    provider doing any of this is still an error (``_normalize``); only a local endpoint is repaired.
+    Anything that is not one of these stays as it is, and ``_normalize`` refuses it as before.
+    """
+    if not isinstance(calls, list):
+        return calls
+    repaired, seen = [], set()
+    for index, call in enumerate(calls):
+        if not isinstance(call, dict):
+            repaired.append(call)
+            continue
+        call = dict(call)
+        func = dict(call["function"]) if isinstance(call.get("function"), dict) else call.get("function")
+        if isinstance(func, dict):
+            arguments = func.get("arguments")
+            if isinstance(arguments, (dict, list)):
+                func["arguments"] = json.dumps(arguments, ensure_ascii=False)
+            elif arguments is None or arguments == "":
+                func["arguments"] = "{}"
+            call["function"] = func
+        if call.get("type") is None:
+            call["type"] = "function"
+        call_id = call.get("id")
+        if not isinstance(call_id, str) or not call_id or call_id in seen:
+            call_id = f"call_{index}"
+            while call_id in seen:
+                call_id += "_"
+        call["id"] = call_id
+        seen.add(call_id)
+        repaired.append(call)
+    return repaired
+
 class ProviderStalled(ProviderError):
     """Nothing usable arrived from the provider for ``seconds``; the socket was closed.
 
@@ -236,12 +292,19 @@ class ProviderConfig:
     api_key: str = field(repr=False)
     extra: dict = field(default_factory=dict)
     max_tokens: int = 32768
+    # A model server on this machine (localmodels.py). Everything the transport does differently
+    # for one is behind this flag, so a hosted provider's request and its failures are unchanged.
+    local: bool = False
+    first_token_timeout: float | None = None   # a cold load plus a long prefill is silent for minutes
+    parallel_tool_calls: bool = False
+    tool_text_recovery: bool = False           # off unless the endpoint asks (localtext.py)
+    context_window: int | None = None          # the served window, for the overflow message only
 
     def validate(self) -> None:
         url = urllib.parse.urlsplit(self.base_url)
         if url.scheme not in {"https", "http"} or not url.hostname or url.username or url.password or url.query or url.fragment:
             raise ValueError("Base URL must be an HTTPS URL without credentials, query, or fragment.")
-        if url.scheme == "http" and url.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        if url.scheme == "http" and url.hostname not in LOCAL_HOSTS:
             raise ValueError("Unencrypted HTTP is only allowed for a loopback/local model server.")
         if not self.model.strip():
             raise ValueError("A model ID is required.")
@@ -254,6 +317,10 @@ class ProviderConfig:
             raise ValueError("Extra parameters may only contain thinking, reasoning, reasoning_effort, temperature, and top_p.")
         if not 256 <= self.max_tokens <= 32768:
             raise ValueError("Output token limit must be between 256 and 32768.")
+        if self.local and not loopback_http(self.base_url):
+            raise ValueError("Only plain HTTP to a loopback host is a local model server.")
+        if self.first_token_timeout is not None:
+            validate_stall_timeout(self.first_token_timeout)
 
 class ChatProvider:
     def __init__(self, config: ProviderConfig, stall_timeout: float = DEFAULT_STALL_TIMEOUT):
@@ -267,7 +334,21 @@ class ChatProvider:
         self._stalled = False
         self._produced = False
         self._progress = 0.0
+        self._streaming = False     # a usable chunk has arrived: the idle deadline applies from here
         self._lock = threading.Lock()
+
+    @property
+    def first_token_timeout(self) -> float:
+        """How long the first usable chunk may take. The idle deadline for a hosted provider; for a
+        local server the longer budget of its endpoint, because loading the weights and reading a
+        long prompt produce no bytes at all. opencode, Codex and Qwen Code all allow 300 s here."""
+        if self.config.local and self.config.first_token_timeout:
+            return max(self.stall_timeout, float(self.config.first_token_timeout))
+        return self.stall_timeout
+
+    @property
+    def deadline(self) -> float:
+        return self.stall_timeout if self._streaming else self.first_token_timeout
 
     @property
     def stall_timeout(self) -> float:
@@ -283,7 +364,7 @@ class ChatProvider:
         than the idle deadline: "Provider connection failed (TimeoutError)" before any output was
         exactly that case (owner reports, 2026-09-17).
         """
-        return max(CONNECT_TIMEOUT, self.stall_timeout)
+        return max(CONNECT_TIMEOUT, self.first_token_timeout)
 
     def set_stall_timeout(self, seconds) -> float:
         self._stall_timeout = validate_stall_timeout(seconds)
@@ -338,8 +419,10 @@ class ChatProvider:
                 "Check endpoint, model access, key, quota, and parameters.")
 
     # ----- idle deadline -------------------------------------------------------------
-    def _note_progress(self) -> None:
+    def _note_progress(self, usable: bool = False) -> None:
         self._progress = time.monotonic()
+        if usable:
+            self._streaming = True
 
     def _watch_for_stall(self, response, cancel: threading.Event) -> threading.Event:
         """Close ``response`` when nothing usable has arrived for ``stall_timeout`` seconds.
@@ -356,7 +439,7 @@ class ChatProvider:
             while not finished.wait(tick):
                 if cancel.is_set():
                     return
-                if time.monotonic() - self._progress >= self.stall_timeout:
+                if time.monotonic() - self._progress >= self.deadline:
                     self._stalled = True
                     hard_close(response)
                     return
@@ -366,7 +449,7 @@ class ChatProvider:
 
     def _maybe_stalled(self, cancel: threading.Event) -> None:
         if self._stalled and not cancel.is_set():
-            raise ProviderStalled(self.stall_timeout, self._produced) from None
+            raise ProviderStalled(self.deadline, self._produced) from None
 
     def complete(self, messages: list[dict], tools: list[dict],
                  emit: Callable[[dict], None], cancel: threading.Event) -> dict:
@@ -375,12 +458,19 @@ class ChatProvider:
         started = time.monotonic()
         self._stalled = False
         self._produced = False
+        self._streaming = False
         self._note_progress()
         payload = {"model": self.config.model, "messages": wire_messages(messages),
                    "stream": True, "max_tokens": self.config.max_tokens, **self.config.extra}
         if tools:
             # Side calls (summaries, recaps, suggestions) send no tools; some APIs reject "tools": [].
             payload["tools"] = tools
+        if self.config.local:
+            # llama.cpp and Ollama stream no usage unless asked, and without it the context tracker
+            # estimates at four characters a token: tolerable at 1M, not at 32K.
+            payload["stream_options"] = {"include_usage": True}
+            if tools and not self.config.parallel_tool_calls:
+                payload["parallel_tool_calls"] = False
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         if len(data) > MAX_RESPONSE:
             if has_images(messages):
@@ -396,7 +486,7 @@ class ChatProvider:
         watchdog = None
         try:
             # DNS, TLS and the headers; every streamed chunk after them is covered by the watchdog.
-            response = opener.open(request, timeout=self.open_timeout)
+            response = self._open(opener, request, emit, cancel, started)
             with self._lock:
                 self._response = response
                 self._last_response = response
@@ -406,7 +496,7 @@ class ChatProvider:
             sock = _socket_of(response)
             if sock is not None:
                 try:
-                    sock.settimeout(self.stall_timeout * 2 + WATCHDOG_TICK)
+                    sock.settimeout(max(self.stall_timeout, self.first_token_timeout) * 2 + WATCHDOG_TICK)
                 except (OSError, ValueError):
                     pass
             watchdog = self._watch_for_stall(response, cancel)
@@ -425,6 +515,8 @@ class ChatProvider:
                     if isinstance(obj.get("usage"), dict):
                         emit({"event": "usage", "usage": obj["usage"]})
                     message = choices[0].get("message", {})
+                    if self.config.local:
+                        message = self._tidy_local(message, tools, choices[0].get("finish_reason"))
                     thinking = _reasoning_text(message)
                     if thinking:
                         emit({"event": "thinking_delta", "text": thinking})
@@ -432,14 +524,16 @@ class ChatProvider:
                     if message.get("content"):
                         emit({"event": "delta", "text": message["content"]})
                     return self._normalize(message)
-                return self._stream(response, emit, cancel, started)
+                return self._stream(response, emit, cancel, started, tools)
         except urllib.error.HTTPError as exc:
+            # A local server's 400 says why (the prompt no longer fits); read it before the close.
+            reason = self._local_http_reason(exc)
             # The error carries the response, so it also carries the socket: close it here rather
             # than leaving it to the garbage collector.
             if getattr(exc, "fp", None) is not None:
                 hard_close(exc.fp)
             # Providers can echo submitted secrets/prompts in error bodies. Do not log them.
-            raise ProviderError(self.http_message(exc.code)) from None
+            raise ProviderError(reason or self.http_message(exc.code)) from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             # The watchdog's hard close surfaces here; report the stall, not a generic failure.
             self._maybe_stalled(cancel)
@@ -449,8 +543,12 @@ class ChatProvider:
                 # Either the socket-timeout backstop fired before the watchdog tick, or no response
                 # arrived at all. Both are a stall the agent may retry, not a broken base URL.
                 streaming = watchdog is not None
-                raise ProviderStalled(self.stall_timeout if streaming else self.open_timeout,
+                raise ProviderStalled(self.deadline if streaming else self.open_timeout,
                                       self._produced, "stream" if streaming else "connect") from None
+            if self.config.local:
+                # Nothing is listening: say what would be, the way Codex does for Ollama.
+                from .localmodels import start_hint
+                raise ProviderError(start_hint(self.config.base_url)) from None
             raise ProviderError(f"Provider connection failed ({type(exc).__name__}). Check connectivity and the base URL.") from None
         except AttributeError:
             # cancel() closes the response from another thread; http.client then reads from fp=None.
@@ -471,6 +569,70 @@ class ChatProvider:
             # A turn must never leave a connection behind, whatever ended it (issue SQAM).
             if response is not None and not response_closed(response):
                 hard_close(response)
+
+    # ----- a model server on this machine ------------------------------------------------------
+    LOADING_RETRY_S = 2.0
+    _OVERFLOW = ("exceeds the available context size", "exceed_context_size", "context size",
+                 "context length", "context window", "maximum context", "too many tokens")
+
+    def _open(self, opener, request, emit, cancel: threading.Event, started: float):
+        """Open the response. A local server that answers 503 is still loading its weights
+        (llama-server says so on every route until they are in): wait inside the first-token
+        budget instead of failing a turn that would have worked ten seconds later."""
+        announced = False
+        while True:
+            try:
+                return opener.open(request, timeout=self.open_timeout)
+            except urllib.error.HTTPError as exc:
+                waited = time.monotonic() - started
+                if not (self.config.local and exc.code == 503) or cancel.is_set() \
+                        or waited + self.LOADING_RETRY_S >= self.first_token_timeout:
+                    raise
+                if getattr(exc, "fp", None) is not None:
+                    hard_close(exc.fp)
+                if not announced:
+                    emit({"event": "status", "text": "The local server is loading its model…"})
+                    announced = True
+                self._note_progress()
+                if cancel.wait(self.LOADING_RETRY_S):
+                    raise Cancelled("Stopped.") from None
+
+    def _local_http_reason(self, exc) -> str | None:
+        """A sentence for a local server's 4xx, or None. Only a *recognised* phrase survives: the
+        body quotes the request it was sent, so it is matched, never shown."""
+        if not self.config.local or exc.code not in (400, 413, 422, 500):
+            return None
+        try:
+            body = exc.read(4096).decode("utf-8", "replace").lower()
+        except (OSError, ValueError, AttributeError):
+            return None
+        if not any(phrase in body for phrase in self._OVERFLOW):
+            return None
+        window = f" ({self.config.context_window:,} tokens)" if self.config.context_window else ""
+        return (f"The conversation no longer fits the context the local server was started with{window}. "
+                "Use /compact or start a new conversation; to make room for good, restart the server "
+                "with a larger context (llama-server -c, OLLAMA_CONTEXT_LENGTH) and probe it again.")
+
+    def _tidy_local(self, message: dict, tools: list[dict] | None, finish_reason) -> dict:
+        """What a hosted provider does before Relay sees a reply, done here for a local one:
+        envelope quirks repaired, reasoning tags moved out of the answer, and (only when the
+        endpoint asked for it) tool calls that were written as text recovered."""
+        from . import localtext
+        message = dict(message)
+        if message.get("tool_calls"):
+            message["tool_calls"] = repair_tool_calls(message["tool_calls"])
+        content = message.get("content")
+        if isinstance(content, str) and content:
+            answer, reasoning = localtext.split_reasoning(content)
+            if reasoning:
+                message["content"] = answer
+                message["reasoning_content"] = ((message.get("reasoning_content") or "") + reasoning)
+        if self.config.tool_text_recovery and not message.get("tool_calls") and finish_reason in (None, "stop"):
+            recovered = localtext.recover_tool_calls(message.get("content") or "", tools or [])
+            if recovered:
+                message["tool_calls"] = recovered
+                message["content"] = ""
+        return message
 
     @staticmethod
     def _normalize(message: dict) -> dict:
@@ -497,7 +659,8 @@ class ChatProvider:
             normalized["tool_calls"] = calls
         return normalized
 
-    def _stream(self, response, emit, cancel, started: float | None = None) -> dict:
+    def _stream(self, response, emit, cancel, started: float | None = None,
+                tools: list[dict] | None = None) -> dict:
         """started: when the request was sent. thinking_done.elapsed_ms counts from then, because some
         providers (GLM) buffer reasoning and deliver it in one burst just before the answer."""
         message = {"content": "", "reasoning_content": ""}
@@ -512,6 +675,11 @@ class ChatProvider:
         thinking_started = None
         thinking_closed = False
         thinking_chars = 0
+        # A local model may write its reasoning into the answer as <think> tags (localtext.py).
+        splitter = None
+        if self.config.local:
+            from .localtext import ThinkSplitter
+            splitter = ThinkSplitter()
 
         def finish_thinking():
             nonlocal thinking_closed
@@ -541,7 +709,7 @@ class ChatProvider:
             event = "\n".join(event_lines)
             event_lines.clear()
             if event == "[DONE]":
-                self._note_progress()
+                self._note_progress(True)
                 got_done = True
                 break
             obj = json.loads(event)
@@ -549,7 +717,7 @@ class ChatProvider:
                 raise ProviderError("Provider reported a streaming error. No partial tool call was executed.")
             if isinstance(obj.get("usage"), dict):
                 usage = obj["usage"]
-                self._note_progress()
+                self._note_progress(True)
             choices = obj.get("choices", [])
             if not choices:
                 # An empty-choices event is a keepalive: it does not reset the idle deadline.
@@ -558,18 +726,26 @@ class ChatProvider:
             # Kimi reports usage inside the final choice unless stream_options is sent.
             if isinstance(choice.get("usage"), dict) and usage is None:
                 usage = choice["usage"]
-                self._note_progress()
+                self._note_progress(True)
             if choice.get("finish_reason"):
-                self._note_progress()
+                self._note_progress(True)
             finish_reason = choice.get("finish_reason") or finish_reason
             delta = choice.get("delta", {})
+            if splitter is not None and isinstance(delta.get("content"), str) and delta["content"]:
+                # Reasoning tags become reasoning_content here, so everything below treats a local
+                # model's thinking exactly as it treats a hosted one's.
+                parts = splitter.feed(delta["content"])
+                delta = {**delta, "content": "".join(t for k, t in parts if k == "content")}
+                tagged = "".join(t for k, t in parts if k == "thinking")
+                if tagged:
+                    delta["reasoning_content"] = (delta.get("reasoning_content") or "") + tagged
             if isinstance(delta.get("reasoning"), str) and delta["reasoning"]:
                 message["reasoning"] = message.get("reasoning", "") + delta["reasoning"]
             if isinstance(delta.get("reasoning_content"), str):
                 message["reasoning_content"] += delta["reasoning_content"]
             thinking = _reasoning_text(delta)
             if thinking:
-                self._note_progress()   # reasoning is progress, but it is not an answer yet
+                self._note_progress(True)   # reasoning is progress, but it is not an answer yet
                 if not reasoning_announced:
                     emit({"event": "status", "text": "Model is reasoning…"})
                     reasoning_announced = True
@@ -584,12 +760,12 @@ class ChatProvider:
                 if delta["content"]:
                     # An answer has begun: a retry would repeat text the user can already see.
                     self._produced = True
-                    self._note_progress()
+                    self._note_progress(True)
                 message["content"] += delta["content"]
                 emit({"event": "delta", "text": delta["content"]})
             for chunk in delta.get("tool_calls", []):
                 self._produced = True
-                self._note_progress()
+                self._note_progress(True)
                 index = chunk.get("index")
                 if not isinstance(index, int) or not 0 <= index < 16:
                     raise ProviderError("Invalid tool-call index.")
@@ -599,6 +775,13 @@ class ChatProvider:
                 func = chunk.get("function", {})
                 call["function"]["name"] += func.get("name") or ""
                 call["function"]["arguments"] += func.get("arguments") or ""
+        if splitter is not None:
+            for kind, text in splitter.flush():
+                if kind == "content":
+                    message["content"] += text
+                    emit({"event": "delta", "text": text})
+                else:
+                    message["reasoning_content"] += text
         if thinking_started is not None and not thinking_closed:
             finish_thinking()
         if cancel.is_set():
@@ -611,4 +794,6 @@ class ChatProvider:
             emit({"event": "usage", "usage": usage})
         if calls:
             message["tool_calls"] = [calls[i] for i in sorted(calls)]
+        if self.config.local:
+            message = self._tidy_local(message, tools, finish_reason)
         return self._normalize(message)

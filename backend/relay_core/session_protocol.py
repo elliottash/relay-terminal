@@ -14,8 +14,8 @@ import threading
 import uuid
 from urllib.parse import urlsplit
 
-from . import (alias_import, aliases, attachments, conv_index, instructions, keystore, logs,
-               planning, suggestions, titles)
+from . import (alias_import, aliases, attachments, conv_index, instructions, keystore, localmodels,
+               logs, planning, suggestions, titles)
 from .agent import validate_turn_options
 from .requests import check_ledger_id
 from .context import validate_threshold, validate_window
@@ -44,6 +44,8 @@ def provider_name(preset_id: str, base_url: str = "") -> str:
     """How to name a provider in an error a person reads: its preset label, else its host."""
     if preset_id in PRESETS:
         return f"{PRESETS[preset_id].label} ({preset_id})"
+    if localmodels.find(preset_id) is not None:
+        return f"{localmodels.find(preset_id).label} ({preset_id})"
     host = urlsplit(base_url).hostname if base_url else ""
     return host or "this provider"
 
@@ -63,12 +65,24 @@ def provider_config(request: dict) -> ProviderConfig:
         raise ValueError("API key must be text.")
     named = request.get("preset")
     preset = PRESETS.get(named) if isinstance(named, str) else None
+    if preset is None and localmodels.is_local_id(named):
+        # A model server on this machine (protocol 23): the registry supplies URL and model.
+        endpoint = localmodels.find(named)
+        if endpoint is None:
+            raise ValueError(f"No local endpoint {named!r} is saved. Add it with scripts/relay-local.py add, "
+                             "or pick another model.")
+        preset = endpoint.as_preset()
     base_url = str(request.get("base_url") or "") or (preset.base_url if preset else "")
     model = str(request.get("model") or "") or (preset.model if preset else "")
     extra = request.get("extra")
     if extra is None:
         extra = dict(preset.extra) if preset else {}
-    if not api_key and request.get("use_stored_key"):
+    # Plain HTTP to a loopback host is a local model server: no key exists, none is looked up and
+    # none is sent, whatever the request carried. Anything else keeps the rule below.
+    local = localmodels.provider_fields(preset.id if preset else None, base_url, model)
+    if local:
+        api_key = ""
+    elif not api_key and request.get("use_stored_key"):
         # The key never crosses the frontend pipe in this path.
         preset_id = preset.id if preset else ""
         if not preset_id:
@@ -79,7 +93,8 @@ def provider_config(request: dict) -> ProviderConfig:
         if not api_key:
             raise ValueError(f"No stored key for {provider_name(preset_id, base_url)}. "
                              "Import from Warp or enter a key.")
-    config = ProviderConfig(base_url, model, api_key, extra, request.get("max_tokens", 32768))
+    config = ProviderConfig(base_url, model, api_key, extra,
+                            localmodels.clamp_max_tokens(request.get("max_tokens", 32768), local), **local)
     config.validate()
     return config
 

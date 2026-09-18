@@ -160,6 +160,13 @@ WITHHELD_EVENTS: dict[str, str] = {
     "alias_deleted": "local file paths",
     "alias_import_preview": "unreviewed text read from Warp's database and shell startup files",
     "alias_imported": "local file paths",
+    # Model servers on the desktop (protocol 23, card #24XJ). What serves on the desktop's loopback
+    # ports, under which model ids, is provider configuration, and saving or deleting an endpoint
+    # is desktop administration. Same call as `presets`.
+    "local_probed": "provider configuration and loopback URLs",
+    "local_endpoints": "provider configuration and loopback URLs",
+    "local_endpoint_saved": "provider configuration and loopback URLs",
+    "local_endpoint_deleted": "desktop-local administration",
 }
 
 # Every event name backend/relay_core and backend/worker.py emit today. The test that compares this

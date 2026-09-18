@@ -69,9 +69,9 @@ def model_supports_vision(model) -> bool:
 
 
 # Keys-modal grouping (GUI only; the backend never treats groups differently).
-GROUPS = ("subscription", "aggregator", "payg")
+GROUPS = ("subscription", "aggregator", "payg", "local")
 GROUP_LABELS = {"subscription": "Subscriptions", "aggregator": "Aggregator",
-                "payg": "Pay-as-you-go"}
+                "payg": "Pay-as-you-go", "local": "On this machine"}
 
 
 @dataclass(frozen=True)
@@ -90,6 +90,10 @@ class Preset:
     # tier were pinned to K3. `plan` tells two presets of the same provider apart when both are listed.
     provider: str = ""
     plan: str = ""
+    # A model server on this machine (localmodels.py): no key, plain HTTP to a loopback host. Never
+    # set on an entry of PRESETS; localmodels.LocalEndpoint.as_preset() is the only producer.
+    local: bool = False
+    server: str = ""           # llamacpp | ollama | lmstudio | vllm | openai-compatible
 
     @property
     def vision(self) -> bool:
@@ -101,7 +105,8 @@ class Preset:
                 "model": self.model, "extra": dict(self.extra), "context_window": self.context_window,
                 "efforts": distinct_efforts(self.effort_style), "group": self.group,
                 "key_url": self.key_url, "note": self.note, "vision": self.vision,
-                "provider": self.provider or self.label.split(" · ")[0], "plan": self.plan}
+                "provider": self.provider or self.label.split(" · ")[0], "plan": self.plan,
+                "local": self.local, "server": self.server}
 
 
 GLM_EXTRA = {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
@@ -240,7 +245,9 @@ def provider_tier_model(preset_id: str, tier: str) -> tuple[str, dict]:
         entry = tier_default(preset_id, candidate)
         if entry is not None and entry[0] == preset_id:
             return entry[1], dict(entry[2])
-    preset = PRESETS[preset_id]
+    preset = PRESETS.get(preset_id) or _local(preset_id)   # a local server has one model for every tier
+    if preset is None:
+        raise KeyError(preset_id)
     return preset.model, dict(preset.extra)
 
 
@@ -263,10 +270,20 @@ def match_preset(base_url: str, model: str = "") -> Preset | None:
     return candidates[0] if candidates else None
 
 
+def _local(preset_id, base_url: str = "", model: str = "") -> Preset | None:
+    """A saved model server on this machine, as a Preset. Imported late: localmodels imports this
+    module, and only a loopback URL or a `local:` id ever gets as far as reading its file."""
+    from . import localmodels
+    endpoint = localmodels.resolve(preset_id, base_url, model)
+    return endpoint.as_preset() if endpoint is not None else None
+
+
 def resolve_preset(preset_id, base_url: str = "", model: str = "") -> Preset | None:
     if isinstance(preset_id, str) and preset_id in PRESETS:
         return PRESETS[preset_id]
-    return match_preset(base_url or "", model or "")
+    # Built-in endpoints first; match_preset itself stays cloud-only, because the key import and the
+    # keyring use the id it returns and a `local:` id is not a keyring name.
+    return match_preset(base_url or "", model or "") or _local(preset_id, base_url or "", model or "")
 
 
 def distinct_efforts(style: str) -> list[str]:

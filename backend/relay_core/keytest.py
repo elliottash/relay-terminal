@@ -12,6 +12,7 @@ from __future__ import annotations
 import threading
 import time
 
+from . import localmodels
 from .presets import PRESETS, apply_effort
 from .provider import ChatProvider, ProviderConfig
 
@@ -29,8 +30,22 @@ TIMEOUT_S = 30
 _TRUNCATED = "truncated or filtered"
 
 
+def _preset(preset_id: str):
+    """A built-in preset, or a saved model server on this machine in the same shape (protocol 23)."""
+    if preset_id in PRESETS:
+        return PRESETS[preset_id]
+    endpoint = localmodels.find(preset_id)
+    return endpoint.as_preset() if endpoint is not None else None
+
+
 def _provider(preset_id: str, key: str) -> ChatProvider:
-    preset = PRESETS[preset_id]
+    preset = _preset(preset_id)
+    if preset.local:
+        # No key and no effort knob. The test still means what it says on the button: this server
+        # is reachable and answers. It waits out a cold model load, which a probe does not.
+        fields = localmodels.provider_fields(preset_id, preset.base_url, preset.model)
+        return ChatProvider(ProviderConfig(preset.base_url, preset.model, "", dict(preset.extra),
+                                           localmodels.clamp_max_tokens(MAX_TOKENS, fields), **fields))
     # Ask for the least thinking this provider allows: the test is about reachability, not quality.
     extra, _ = apply_effort(dict(preset.extra), preset.effort_style, "low")
     return ChatProvider(ProviderConfig(preset.base_url, preset.model, key, extra, MAX_TOKENS))
@@ -39,7 +54,7 @@ def _provider(preset_id: str, key: str) -> ChatProvider:
 def check(preset_id: str, key: str, factory=_provider) -> dict:
     """Run the call. Returns the body of a ``key_tested`` event; never raises for provider trouble."""
     from . import sidecall
-    preset = PRESETS[preset_id]
+    preset = _preset(preset_id)
     started = time.monotonic()
     result = {"preset": preset_id, "model": preset.model}
     try:
@@ -64,10 +79,11 @@ def check(preset_id: str, key: str, factory=_provider) -> dict:
 def run(preset_id: str, emit, request_id=None, lookup=None, factory=_provider) -> threading.Thread:
     """Test a stored key on a background thread and emit exactly one ``key_tested`` event."""
     from . import keystore
-    if preset_id not in PRESETS:
+    preset = _preset(preset_id) if isinstance(preset_id, str) else None
+    if preset is None:
         raise ValueError("Unknown provider preset.")
-    key = (lookup or keystore.lookup)(preset_id)
-    if not key:
+    key = "" if preset.local else (lookup or keystore.lookup)(preset_id)
+    if not key and not preset.local:
         emit({"event": "key_tested", "id": request_id, "preset": preset_id, "ok": False,
               "model": PRESETS[preset_id].model, "elapsed_ms": 0,
               "error": "No key is stored for this provider."})

@@ -19,6 +19,18 @@ from .presets import (PRESETS, TIER_LABELS, TIERS, apply_effort, effort_style, m
                       provider_tier_model, tier_default, tier_fallbacks, validate_effort,
                       validate_tier)
 from .provider import ProviderConfig
+from . import localmodels
+
+
+def _preset(preset_id):
+    """A built-in preset, or a saved model server on this machine (localmodels.py) in the same shape."""
+    if not preset_id:
+        return None
+    found = PRESETS.get(preset_id)
+    if found is None and localmodels.is_local_id(preset_id):
+        endpoint = localmodels.find(preset_id)
+        found = endpoint.as_preset() if endpoint is not None else None
+    return found
 
 # Protocol names. "switchboard" is stored and resolved even though the Switchboard itself is not
 # built yet (owner decision 2026-09-17); "route_assist" keeps its own fast default.
@@ -160,7 +172,7 @@ def validate_roles(raw) -> dict[str, dict]:
         preset = value.get("preset")
         if preset is not None:
             preset = _text(preset, f"{name}.preset", 64)
-            if preset and preset not in PRESETS:
+            if preset and _preset(preset) is None:
                 raise ValueError(f"roles.{name}: unknown preset {preset!r}.")
             if preset:
                 entry["preset"] = preset
@@ -208,7 +220,7 @@ def validate_tiers(raw) -> dict[str, dict]:
         entry: dict = {}
         if value.get("preset") is not None:
             preset = _text(value["preset"], f"{name}.preset", 64)
-            if preset and preset not in PRESETS:
+            if preset and _preset(preset) is None:
                 raise ValueError(f"tiers.{name}: unknown preset {preset!r}.")
             if preset:
                 entry["preset"] = preset
@@ -270,7 +282,7 @@ class RoleResolver:
         from . import keystore
         self.main_config = main_config
         main = match_preset(main_config.base_url, main_config.model)
-        self.main_preset_id = main_preset_id if main_preset_id in PRESETS else (main.id if main else None)
+        self.main_preset_id = main_preset_id if _preset(main_preset_id) else (main.id if main else None)
         self.roles = dict(roles or {})
         self.tiers = dict(tiers or {})
         self.key_lookup = key_lookup or keystore.lookup
@@ -287,6 +299,8 @@ class RoleResolver:
     def _key_for(self, preset_id: str | None) -> str:
         if preset_id and preset_id == self.main_preset_id and self.main_config.api_key:
             return self.main_config.api_key
+        if localmodels.is_local_id(preset_id):
+            return ""           # a `local:` id is not a keyring name, and keystore refuses it
         return self.key_lookup(preset_id) if preset_id else ""
 
     def has_key(self, preset_id: str) -> bool:
@@ -295,22 +309,26 @@ class RoleResolver:
     def _build(self, role: str, preset_id: str | None, base_url: str, model: str, extra: dict,
                effort: str | None, source: str, tier: str | None = None) -> Resolved:
         key = self._key_for(preset_id)
-        if not key:
+        # A model server on this machine has no key and needs none. The test is the URL (plain HTTP
+        # to a loopback host), never the missing key: an https endpoint without one still falls back.
+        local = localmodels.provider_fields(preset_id, base_url, model)
+        if not key and not local:
             where = preset_id or base_url
             return self._main(role, "fallback",
                               f"{LABELS[role]}: no stored key for {where}; using the main agent.")
-        preset = PRESETS.get(preset_id) if preset_id else None
+        preset = _preset(preset_id)
         extra = copy.deepcopy(extra or {})
         if effort is not None:
             extra, _ = apply_effort(extra, effort_style(preset, extra, base_url), effort)
-        config = ProviderConfig(base_url, model, key, extra, self.main_config.max_tokens)
+        config = ProviderConfig(base_url, model, "" if local else key, extra,
+                                localmodels.clamp_max_tokens(self.main_config.max_tokens, local), **local)
         config.validate()
         return Resolved(role, config, preset_id, effort, source, tier=tier)
 
     def _configured(self, role: str, entry: dict) -> Resolved:
         if entry.get("tier"):
             return self._tier(role, entry["tier"], "configured", entry.get("effort"))
-        preset = PRESETS.get(entry.get("preset") or "")
+        preset = _preset(entry.get("preset"))
         base_url = entry.get("base_url") or (preset.base_url if preset else "")
         model = entry.get("model") or (preset.model if preset else "")
         extra = entry.get("extra") if entry.get("extra") is not None else (dict(preset.extra) if preset else {})
@@ -323,7 +341,7 @@ class RoleResolver:
         otherwise the default provider's built-in tier. None when the provider has no tier table."""
         override = self.tiers.get(tier)
         if override:
-            preset = PRESETS.get(override.get("preset") or "")
+            preset = _preset(override.get("preset"))
             base_url = override.get("base_url") or (preset.base_url if preset else "")
             model = override.get("model") or ""
             extra = override["extra"] if override.get("extra") is not None else None
@@ -416,7 +434,7 @@ class RoleResolver:
         """Follow a set_model switch: per-provider defaults are recomputed for the new main model."""
         self.main_config = main_config
         match = match_preset(main_config.base_url, main_config.model)
-        self.main_preset_id = main_preset_id if main_preset_id in PRESETS else (match.id if match else None)
+        self.main_preset_id = main_preset_id if _preset(main_preset_id) else (match.id if match else None)
         self.main_effort = main_effort
         self._cache.clear()
         self.warnings.clear()

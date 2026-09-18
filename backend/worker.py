@@ -9,8 +9,8 @@ import sys
 import threading
 import urllib.parse
 
-from relay_core import (__version__, board_protocol, keystore, keytest, logs, observe_protocol,
-                        roles as model_roles, session_protocol, skills, voice)
+from relay_core import (__version__, board_protocol, keystore, keytest, localmodels, logs,
+                        observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import agents_defs
 from relay_core.subagents import SubagentFactory, SubagentManager
@@ -196,7 +196,13 @@ def main():
                 emit({"event": "presets", "id": request.get("id"), "warp_default": keystore.warp_default_preset(),
                       "tier_defaults": model_roles.tier_catalog(), "role_actions": model_roles.action_catalog(),
                       "presets": [{**p.to_dict(), "has_stored_key": bool(sources[p.id]),
-                                   "key_source": sources[p.id]} for p in PRESETS.values()]})
+                                   "key_source": sources[p.id]} for p in PRESETS.values()]
+                      # Model servers on this machine (protocol 23): no key to store, so
+                      # has_stored_key stays false and `local` is what makes the row usable.
+                      + [{**e.to_dict(), "has_stored_key": False, "key_source": "local"}
+                         for e in localmodels.catalog().values()]})
+            elif kind in localmodels.TYPES:
+                localmodels.handle(request, emit)
             elif kind == "store_key":
                 keystore.store(request.get("preset", ""), request.get("api_key", ""))
                 emit({"event": "key_stored", "id": request.get("id"), "preset": request.get("preset")})
