@@ -365,7 +365,6 @@ private:
         // every preset (docs/KEYBINDING-PRESETS.md), so all four keep the Relay default.
         add("links.step", "terminal", "Step through files, folders and links in the output (Enter opens, Esc leaves)",
             {QStringLiteral("Ctrl+Shift+L")});
-        add("agent.newChat", "agent", "Start a new agent conversation", {});
         add("agent.clearQueue", "agent", "Clear queued agent prompts", {});
         add("agent.resumeQueue", "agent", "Resume the paused agent queue", {});
         add("agent.stop", "agent", "Stop the agent turn", {});
