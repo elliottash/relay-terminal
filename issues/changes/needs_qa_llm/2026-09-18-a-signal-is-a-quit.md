@@ -44,10 +44,23 @@ Two causes, one behind the other:
   every signal before `exec` (`engine/pty/PtyUnix.cpp`).
 - `WindowManager::~WindowManager()` deletes the windows a quit left open.
 
-Not done: a sweep of directories left by a crash or SIGKILL. It needs an owner mark in each
-directory (a pid file) to tell a dead Relay's from a live one's; worth a card of its own.
+- **The sweep for what a crash leaves.** A quit is now clean, but `kill -KILL`, an OOM kill and a
+  segfault still leak a directory, so each one carries an owner file: `owner` (0600, written
+  atomically the moment the directory is made) holding the pid *and* that process's `starttime`
+  from `/proc/<pid>/stat` — pids are recycled, and a bare pid would spare a stranger's directory
+  for ever. Three seconds after startup, `relay::runtimedirs::sweep()` (src/RuntimeDirs.h) walks
+  `$TMPDIR`: an owner that is gone → removed; an owner still running → kept, so a second Relay
+  never touches the first's; no owner file at all (an older build's, or a mark a millisecond from
+  being written) → kept for a week, because an older build may still be running with an idle pane. It looks only at names `QTemporaryDir` itself could have made
+  (`relay-XXXXXX`, `relay-open-XXXXXX`), only at real directories that are not symlinks, owned by
+  this uid, mode 0700, canonically inside `$TMPDIR` — `/tmp` also holds `relay-qa-*` and
+  `relay-*-shots` that are none of Relay's business. It never follows a symlink while removing, and
+  stops after 400 directories or 1.5 s so a `/tmp` with thousands of leftovers cannot slow a start.
+  One log line, `runtime_sweep removed=… kept_alive=… kept_young=… errors=…`, and only when
+  something was removed or failed.
 
-Files: `src/main.cpp`. No protocol change.
+Files: `src/main.cpp`, `src/RuntimeDirs.cpp/.h`, `tests/runtimedirs_test.cpp`, `CMakeLists.txt`.
+No protocol change.
 
 ## QA checklist
 
@@ -64,3 +77,15 @@ Files: `src/main.cpp`. No protocol change.
    the way out (the destructor meets an empty list).
 6. **Shells still get their signals.** In a pane, `sleep 100` then Ctrl+C interrupts it;
    `kill -TERM $$` from a pane ends that shell only.
+7. **Every directory is marked.** With Relay running, each `$TMPDIR/relay-XXXXXX` and
+   `$TMPDIR/relay-open-XXXXXX` holds an `owner` file, mode `-rw-------`, naming that Relay's pid
+   and a non-zero `starttime`.
+8. **SIGKILL, then restart.** `kill -KILL <relay pid>` leaves the directories behind; start Relay
+   again and within ~5 s they are gone, the new run's are there instead, and `relay.log` has one
+   `runtime_sweep removed=2 …` line. (Use an isolated `TMPDIR`; the sweep follows it.)
+9. **Two Relays at once.** With one running, start a second on the same `TMPDIR`: after its sweep
+   both sets of directories are still there — the second must never delete the first's, and
+   neither may delete its own. Quit both: `TMPDIR` is empty.
+10. **Bystanders.** A `relay-qa-something`, a `relay-abc`, a `relay-XXXXXX`-shaped directory that
+    is mode 0755 or another user's, and a symlink named `relay-aaaaaa` pointing somewhere else are
+    all untouched by a sweep, however old.

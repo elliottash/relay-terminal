@@ -108,6 +108,13 @@ target_include_directories(relay-windowstate PUBLIC src)
 target_link_libraries(relay-windowstate PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-windowstate PRIVATE -Wall -Wextra -Wpedantic)
 
+# Private runtime directories (/tmp/relay-XXXXXX, /tmp/relay-open-XXXXXX): the owner mark that says
+# which Relay is using one, and the startup sweep that removes the ones a crash left behind.
+add_library(relay-runtimedirs STATIC src/RuntimeDirs.cpp src/RuntimeDirs.h)
+target_include_directories(relay-runtimedirs PUBLIC src)
+target_link_libraries(relay-runtimedirs PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-runtimedirs PRIVATE -Wall -Wextra -Wpedantic)
+
 # Request ledger UI: model for requests/todos events and the expanded request list (plain Qt).
 add_library(relay-completion STATIC src/Completion.cpp src/Completion.h)
 target_include_directories(relay-completion PUBLIC src)
@@ -256,7 +263,7 @@ if(RELAY_BUILD_APP)
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
-    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-slash relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-slash relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -311,6 +318,9 @@ if(BUILD_TESTING)
     add_executable(relay-windowstate-tests tests/windowstate_test.cpp)
     target_link_libraries(relay-windowstate-tests PRIVATE relay-windowstate ${RELAY_QT}::Test)
     add_test(NAME windowstate COMMAND relay-windowstate-tests)
+    add_executable(relay-runtimedirs-tests tests/runtimedirs_test.cpp)
+    target_link_libraries(relay-runtimedirs-tests PRIVATE relay-runtimedirs ${RELAY_QT}::Test)
+    add_test(NAME runtimedirs COMMAND relay-runtimedirs-tests)
     add_executable(relay-slash-tests tests/slashcommands_test.cpp)
     target_link_libraries(relay-slash-tests PRIVATE relay-slash ${RELAY_QT}::Test)
     add_test(NAME slash COMMAND relay-slash-tests)

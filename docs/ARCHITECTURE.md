@@ -77,6 +77,22 @@ Startup (`main()` in `src/main.cpp`):
 Options: `--workspace/-w PATH` (initial terminal directory and agent workspace) and
 `--clean-shell` (skip `~/.bashrc`).
 
+**The private runtime directories, and who cleans them up** (`src/RuntimeDirs.h`). Both directories
+above are `QTemporaryDir`s, so an ordinary quit — including SIGTERM, SIGINT and SIGHUP since
+0f49c89 — removes them. A crash or `kill -KILL` does not, and the owner's `/tmp` had 876 leftovers
+(#9JYK). Each directory therefore carries an **owner file** (`owner`, 0600, written atomically as
+soon as the directory is made): `pid` plus the process's `starttime` from `/proc/<pid>/stat`,
+because pids are recycled and a bare pid would spare a stranger's directory for ever. Three seconds
+after startup — never before the first window — `relay::runtimedirs::sweep()` walks `$TMPDIR` and
+removes a directory whose owner is gone, keeps one whose owner still runs (so a second Relay never
+touches the first's), and gives a directory with no owner file at all — an older build's, or one
+whose mark is a millisecond from being written — a week's grace (an older build may still be
+running, and an idle pane does not touch its directory). It considers only names
+`QTemporaryDir` itself could have produced (`relay-XXXXXX`, `relay-open-XXXXXX`), only real
+directories that are not symlinks, owned by this uid, mode 0700, directly inside `$TMPDIR`; it
+never follows a symlink while removing; and it stops after 400 directories or 1.5 s. Counts are
+logged as `runtime_sweep` only when something was removed or failed.
+
 ## 3. Windows, tabs and panes
 
 | Class | Role |
@@ -1439,6 +1455,7 @@ of the platform and of the engine itself.
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `src/Conversations.*` | conversation list with search (`/conversations`) and the Ctrl+F find bar |
 | `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |
+| `src/RuntimeDirs.*` | the private `$TMPDIR/relay-XXXXXX` directories: the pid+starttime owner mark, and the startup sweep of the ones a crash left behind (section 2) |
 | `src/PaneTitles.*` | pane titles and the tab labels made from them: tidying a title, the offline "same work" rule, joining and shortening |
 | `src/InputPolicy.*` | who may type where: the prompt-box-only rules, passwords, and whether the agent may type into the program |
 | `src/ScreenPrompt.*` | the screen-text classifier: is the foreground program waiting for input, and for what (section 9.1) |

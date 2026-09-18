@@ -27,8 +27,12 @@
 #include "TerminalBackends.h"
 #include "TerminalBackend.h"
 #include "WindowState.h"   // saved window layout ("reopen where I left off")
+#include "RuntimeDirs.h"   // /tmp/relay-XXXXXX: the owner mark, and the sweep for what a crash left
 #include "RemoteShare.h"    // sharing a pane with a phone (docs/REMOTE-PROTOCOL.md)
 #include "backend/VTermBackend.h"  // the engine can hand over a frame to a program
+#include "core/VtCore.h"           // const scrollback access, for a phone's history pages
+#include "session/TerminalSession.h"
+#include "view/TerminalView.h"
 #include "Voice.h"          // voice transcription: capture, the hold key, the transcript
 #include "Images.h"         // image context: paste, drop, `@path` and "Screenshot this pane"
 #include "Aliases.h"        // aliases: saved commands and prompts, their fields and invocations
@@ -647,6 +651,9 @@ public:
         if (m_python.isEmpty()) throw std::runtime_error("Python 3 is required.");
         if (!m_runtime.isValid()) throw std::runtime_error("Could not create a private shell runtime directory.");
         QFile::setPermissions(m_runtime.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        // Say who is using it, so another Relay's startup sweep can tell this directory from one a
+        // crash left behind (src/RuntimeDirs.h).
+        relay::runtimedirs::markOwned(m_runtime.path());
         m_token = QUuid::createUuid().toString(QUuid::WithoutBraces);
         // The saved scrollback is filed under the pane's token unless a restore hands it the id
         // its saved text already has (initRestore).
@@ -8884,6 +8891,7 @@ public:
         // `relay open PATH` in Relay shells reaches this process through a private local socket. The directory is created mode 0700.
         if (m_socketDir.isValid()) {
             QFile::setPermissions(m_socketDir.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+            relay::runtimedirs::markOwned(m_socketDir.path());   // whose socket directory this is
             const QString address = m_socketDir.filePath(QStringLiteral("open.sock"));
             if (m_server.listen(address)) {
                 qputenv("RELAY_OPEN_SOCKET", address.toUtf8());
@@ -12971,6 +12979,15 @@ int main(int argc, char **argv) {
             manager.saveLayoutNow();
         });
         QTimer::singleShot(1500, &app, [] { registerUrlHandler(); });
+        // A crash or `kill -KILL` leaves this Relay's /tmp/relay-XXXXXX directories behind; the
+        // owner's /tmp had 876 of them (#9JYK). Sweep the ones whose Relay is gone, well after the
+        // first window is up so nothing waits on /tmp, and only say so when something happened.
+        QTimer::singleShot(3000, &app, [] {
+            const auto swept = relay::runtimedirs::sweep();
+            if (swept.removed > 0 || swept.errors > 0)
+                relay::log::info(QStringLiteral("runtime_sweep removed=%1 kept_alive=%2 kept_young=%3 errors=%4")
+                                     .arg(swept.removed).arg(swept.keptAlive).arg(swept.keptYoung).arg(swept.errors));
+        });
         // "Reopen where I left off": on by default, unless --fresh or an explicit --workspace asks
         // for a new window. A fresh profile, an unreadable file or a second Relay opens one window.
         const bool startFresh = parser.isSet(fresh) || parser.isSet(workspace);
