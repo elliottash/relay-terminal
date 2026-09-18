@@ -816,8 +816,12 @@ protected:
 private:
     // Ctrl+? (or F1): every action and its keys, so the window itself needs no shortcut bar.
 
+    // On the active pane a hint joins that pane's toast queue and counts as shown only when it
+    // appears (Pane::hint). Without a pane it goes straight to the status bar, shown at once.
     void hint(const QString &id, const QString &text, int limit = 3) {
-        if (text.isEmpty() || !relay::ShortcutHints::instance().shouldShow(id, limit)) return;
+        if (text.isEmpty()) return;
+        if (m_active) { m_active->hint(id, text, limit); return; }
+        if (!relay::ShortcutHints::instance().shouldShow(id, limit)) return;
         notice(text, 5000);
     }
 

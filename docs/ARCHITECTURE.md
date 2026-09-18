@@ -398,7 +398,16 @@ nothing is re-run.
 `src/Hints.*` (`relay::ShortcutHints`) decides whether a hint may show: on by default
 (`hints/enabled`, toggles in Agent options and the Shortcuts section), at most `limit` (3) times
 per id, a per-id cooldown (600 s) and a global gap of 20 s, counts in QSettings `hints/`.
-`Pane::hint()` and `RelayWindow::hint()` show a 5 s toast; `nextTime(shortcut, what)` builds the
+`mayShow()` only asks; `recordShown()` counts a showing and starts the cooldown and the gap;
+`shouldShow()` is both at once, for a hint drawn the moment it is allowed (the placement prompt).
+`Pane::hint()` (and `RelayWindow::hint()`, which hands it to the active pane) queues a 5 s toast
+and records the hint only when that toast actually appears, asking the gates again then, so a hint
+waiting behind other toasts costs none of its showings. Idle tips work the same way
+(`nextIdleTip()` picks, the pane records on display, and only into a pane with no toast up).
+Toasts are events and queue: while one is up the next waits, the one up keeps at least 1.5 s (its
+own time if shorter), identical consecutive toasts collapse. The agent turn clock ("thinking ·
+48 s · Esc stops") is state, not a toast: it lives in the strip under the prompt box, left of the
+context chip, while a turn runs. `nextTime(shortcut, what)` builds the
 text from the live Keymap, so rebinding changes the hint and unbound actions get none. Current
 triggers: toolbar and palette activations of actions with shortcuts, pane buttons, the tab "+",
 tab close and ⧉ buttons, clicking into another pane, mouse model/effort/mode pickers, clicking

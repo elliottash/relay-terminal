@@ -2035,6 +2035,16 @@ private:
     }
 
     void buildSessionControls(QHBoxLayout *row) {
+        // The turn clock (toasts-and-turn-clock): "thinking · 48 s · Esc stops" lives here, in the
+        // strip under the prompt box, for as long as a turn runs. It is state, not an event, so it
+        // never goes through toast() and never covers one. Shown and hidden by the turn clock.
+        m_turnClockLabel = new QLabel;
+        m_turnClockLabel->setObjectName(QStringLiteral("stripChipLabel"));
+        m_turnClockLabel->setAccessibleName(QStringLiteral("Agent turn time"));
+        m_turnClockLabel->setTextFormat(Qt::PlainText);
+        m_turnClockLabel->setMinimumWidth(1);   // a narrow pane clips it rather than growing for it
+        m_turnClockLabel->hide();
+        row->addWidget(m_turnClockLabel);
         m_planChip = new QLabel(QStringLiteral("PLAN"));
         m_planChip->setObjectName(QStringLiteral("planChip"));
         m_planChip->setToolTip(QStringLiteral("Plan mode: the agent investigates and writes a plan (Shift+Tab to leave)"));
@@ -6464,14 +6474,20 @@ private:
 
     // A small notice over the bottom-right of the terminal that fades after a moment.
     // Shortcut hints (Superhuman-style); see Hints.h and docs/ARCHITECTURE.md "Shortcut hints".
-    // Returns whether it was shown, so a caller can tie another visual (the mode chip flash) to
-    // the same gates: per-hint limit, cooldown and the global "Shortcut hints" setting.
+    // Returns whether it was queued, so a caller can tie another visual (the mode chip flash) to
+    // the same gates: per-hint limit, cooldown and the global "Shortcut hints" setting. The hint
+    // waits its turn behind other toasts and counts as shown only when it appears (showNextToast);
+    // the gates are asked again then, so two hints queued together still keep the global gap.
+    // Public: RelayWindow::hint() puts window-level hints on the active pane this way too.
+public:
     bool hint(const QString &id, const QString &text, int limit = 3) {
         if (text.isEmpty()) return false;
-        if (!relay::ShortcutHints::instance().shouldShow(id, limit)) return false;
-        toast(text, 5000);
+        if (!relay::ShortcutHints::instance().mayShow(id, limit)) return false;
+        if (toastHintPending(id)) return false;   // already waiting or up: one showing, not a pile
+        enqueueToast({text, 5000, id, limit, kHintCooldownSeconds});
         return true;
     }
+private:
 
     // Wrong-mode hints (2026-09-17): a submission that errored and clearly belongs in the other
     // input mode. The mode chip flashes in the suggested mode's colour and a hint names
@@ -6526,8 +6542,12 @@ private:
             {QStringLiteral("idle.prefix"), QStringLiteral("Tip: start with ! for the terminal or * for the agent")},
             {QStringLiteral("idle.board"), QStringLiteral("Tip: %1 opens the Switchboard; # references a card").arg(key("board.open"))},
         };
+        // A tip is the least urgent toast there is: it waits for a quiet pane rather than a queue.
+        if (m_toastQueue.size() || (m_toast && m_toast->isVisible())) return;
         const auto tip = relay::ShortcutHints::instance().nextIdleTip(tips);
-        if (!tip.text.isEmpty()) toast(tip.text, 6000);
+        if (!tip.text.isEmpty())
+            enqueueToast({tip.text, 6000, tip.id, relay::ShortcutHints::kIdleTipLimit,
+                          relay::ShortcutHints::kIdleTipCooldownSeconds});
     }
 
     void setPrefixMode(const QString &mode) {
@@ -6557,19 +6577,13 @@ public:
         else status(QStringLiteral("#%1 is handed to this pane; the agent starts on it when it is ready.").arg(cardId));
     }
 
+    // Toasts are events ("12 characters copied", "Withdrawn · the agent never saw it", a shortcut
+    // hint) and queue rather than replace each other: while one is up the next waits, and the one
+    // up is cut to at least kToastMinMs (or its own time, if shorter) so the wait stays short. An
+    // identical toast right behind the last one collapses into it. Ongoing state (the turn clock)
+    // has a home of its own in the prompt-box strip and never comes through here.
     void toast(const QString &text, int milliseconds = 1600) {
-        if (!m_toast) {
-            m_toast = new QLabel(this);
-            m_toast->setObjectName(QStringLiteral("toast"));
-            m_toast->setAttribute(Qt::WA_TransparentForMouseEvents);
-            m_toastTimer.setSingleShot(true);
-            connect(&m_toastTimer, &QTimer::timeout, m_toast, &QLabel::hide);
-        }
-        m_toast->setText(text);
-        m_toast->adjustSize();
-        m_toast->show();
-        placeToast();
-        m_toastTimer.start(milliseconds);
+        enqueueToast({text, milliseconds, QString(), 0, 0});
     }
 
     // The toast sits at the terminal host's bottom-right corner. Re-anchored while it is up so a
@@ -6581,6 +6595,83 @@ public:
         m_toast->move(corner.x() - m_toast->width() - 16, corner.y() - m_toast->height() - 12);
         m_toast->raise();
     }
+
+private:
+    struct PendingToast {
+        QString text;
+        int milliseconds = 1600;
+        QString hintId;          // a shortcut hint: gated again and counted when it appears
+        int hintLimit = 0, hintCooldown = 0;
+    };
+    static constexpr int kToastMinMs = 1500;           // each toast's least time up while others wait
+    static constexpr int kHintCooldownSeconds = 600;   // ShortcutHints::shouldShow's default
+
+    bool toastUp() const { return m_toast && m_toast->isVisible() && m_toastTimer.isActive(); }
+
+    bool toastHintPending(const QString &id) const {
+        if (toastUp() && m_toastHintId == id) return true;
+        for (const PendingToast &queued : m_toastQueue) if (queued.hintId == id) return true;
+        return false;
+    }
+
+    void enqueueToast(const PendingToast &next) {
+        if (next.text.isEmpty()) return;
+        if (!m_toast) {
+            m_toast = new QLabel(this);
+            m_toast->setObjectName(QStringLiteral("toast"));
+            m_toast->setAttribute(Qt::WA_TransparentForMouseEvents);
+            m_toastTimer.setSingleShot(true);
+            connect(&m_toastTimer, &QTimer::timeout, this, [this] { showNextToast(); });
+        }
+        // The same words again, straight after themselves: one toast, up for the longer time.
+        if (!m_toastQueue.isEmpty()) {
+            PendingToast &last = m_toastQueue.last();
+            if (last.text == next.text) { last.milliseconds = std::max(last.milliseconds, next.milliseconds); return; }
+        } else if (toastUp() && m_toast->text() == next.text) {
+            const int shown = int(m_toastShown.elapsed());
+            if (next.milliseconds > m_toastTimer.remainingTime()) {
+                m_toastMs = shown + next.milliseconds;
+                m_toastTimer.start(next.milliseconds);
+            }
+            return;
+        }
+        m_toastQueue.append(next);
+        if (toastUp()) shortenToastForQueue();
+        else showNextToast();
+    }
+
+    // Someone is waiting: the toast up keeps at least kToastMinMs (its own time, if shorter).
+    void shortenToastForQueue() {
+        const qint64 least = std::min<qint64>(m_toastMs, kToastMinMs);
+        const int left = int(std::max<qint64>(0, least - m_toastShown.elapsed()));
+        if (left < m_toastTimer.remainingTime()) m_toastTimer.start(left);
+    }
+
+    void showNextToast() {
+        while (!m_toastQueue.isEmpty()) {
+            const PendingToast next = m_toastQueue.takeFirst();
+            if (!next.hintId.isEmpty()) {
+                // A hint is counted now that it reaches the screen, not when it was asked for. The
+                // gates are asked again: another hint may have appeared while this one waited.
+                auto &hints = relay::ShortcutHints::instance();
+                if (!hints.mayShow(next.hintId, next.hintLimit, next.hintCooldown)) continue;
+                hints.recordShown(next.hintId);
+            }
+            m_toastHintId = next.hintId;
+            m_toast->setText(next.text);
+            m_toast->adjustSize();
+            m_toast->show();
+            placeToast();
+            m_toastShown.start();
+            m_toastMs = next.milliseconds;
+            m_toastTimer.start(next.milliseconds);
+            if (!m_toastQueue.isEmpty()) shortenToastForQueue();
+            return;
+        }
+        m_toastHintId.clear();
+        if (m_toast) m_toast->hide();
+    }
+public:
 private:
 
     // Scroll the terminal's scrollback by one page (the engine's viewport).
@@ -6670,8 +6761,9 @@ private:
                           : notable ? relay::log::Level::Info : relay::log::Level::Debug, line);
     }
 
-    // "thinking · 48 s · Esc stops" in the status line, and in the thinking overlay's header when
-    // it is open, so a silent turn is never indistinguishable from a hung one.
+    // "thinking · 48 s · Esc stops" in the prompt-box strip (m_turnClockLabel), and in the thinking
+    // overlay's header when it is open, so a silent turn is never indistinguishable from a hung
+    // one. Not a toast: a clock that re-toasted every second covered every real toast in a turn.
     void startTurnClock() {
         m_turnElapsed.start();
         m_turnStep.clear();
@@ -6687,6 +6779,7 @@ private:
     void stopTurnClock() {
         if (m_turnClock) m_turnClock->stop();
         m_turnStep.clear();
+        if (m_turnClockLabel) { m_turnClockLabel->hide(); m_turnClockLabel->clear(); }
     }
 
     void tickTurnClock() {
@@ -6697,7 +6790,12 @@ private:
                                   .arg(seconds)
                                   .arg(m_turnStep.isEmpty() ? QString() : QStringLiteral(" · ") + m_turnStep)
                                   .arg(stop.isEmpty() ? QStringLiteral("Esc") : stop);
-        status(label);
+        if (m_turnClockLabel) {
+            m_turnClockLabel->setText(label);
+            m_turnClockLabel->setToolTip(QStringLiteral("The agent has been on this turn for %1 s. %2 stops it.")
+                                             .arg(seconds).arg(stop.isEmpty() ? QStringLiteral("Esc") : stop));
+            m_turnClockLabel->show();
+        }
         if (m_thinkingShown && m_thinkingHeader)
             m_thinkingHeader->setText(QStringLiteral("Thinking… · %1 · %2 s")
                                           .arg(m_model.isEmpty() ? QStringLiteral("agent") : m_model).arg(seconds));
@@ -9547,6 +9645,11 @@ private:
     QTimer *m_turnClock = nullptr;
     QElapsedTimer m_turnElapsed;
     QString m_turnStep;
+    QLabel *m_turnClockLabel = nullptr;   // the turn clock's home in the prompt-box strip
+    QList<PendingToast> m_toastQueue;     // toasts waiting behind the one up
+    QString m_toastHintId;                // the hint the toast up is, if it is one
+    QElapsedTimer m_toastShown;
+    int m_toastMs = 0;
     QTimer m_escTimer;
     // sudo & co. in the foreground
     QLabel *m_opaqueHint = nullptr;

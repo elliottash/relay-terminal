@@ -18,9 +18,16 @@ public:
     bool enabled() const;
     void setEnabled(bool on);
 
-    // True when the hint `id` may be shown now; records the showing. `limit` is the total number of
-    // times this hint is ever shown; `cooldownSeconds` the minimum gap between two showings of it.
-    // A global gap keeps hints from stacking up.
+    // True when the hint `id` may be shown now. `limit` is the total number of times this hint is
+    // ever shown; `cooldownSeconds` the minimum gap between two showings of it. A global gap keeps
+    // hints from stacking up. Records nothing: a hint counts as shown only when recordShown() says
+    // it reached the screen, so one that waits behind other toasts, or never appears, costs nothing.
+    bool mayShow(const QString &id, int limit = 3, int cooldownSeconds = 600) const;
+    // The hint `id` is on screen now: count it, and start its cooldown and the global gap.
+    void recordShown(const QString &id);
+    // mayShow() and, when it passes, recordShown() at once: for a hint drawn the moment it is
+    // allowed (the placement prompt's "Next time" line). Toast hints go through Pane::hint(),
+    // which records when the queued toast actually appears.
     bool shouldShow(const QString &id, int limit = 3, int cooldownSeconds = 600);
 
     // How many times `id` has been shown.
@@ -30,11 +37,15 @@ public:
     // "Next time: Ctrl+T" or "Next time: Ctrl+T · new tab"; empty when the shortcut is unbound.
     static QString nextTime(const QString &shortcut, const QString &what = QString());
 
-    // Idle tips rotated after a finished agent turn when the prompt box sits empty.
+    // Idle tips rotated after a finished agent turn when the prompt box sits empty. Picks the next
+    // tip that mayShow() (limit 3, cooldown kIdleTipCooldownSeconds) and advances the rotation;
+    // the caller calls recordShown(tip.id) once the tip is on screen.
     struct Tip { QString id, text; };
     Tip nextIdleTip(const QList<Tip> &tips);
 
     static constexpr int kGlobalGapSeconds = 20;
+    static constexpr int kIdleTipLimit = 3;
+    static constexpr int kIdleTipCooldownSeconds = 1800;
 };
 
 }  // namespace relay

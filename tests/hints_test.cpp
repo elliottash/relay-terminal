@@ -56,10 +56,36 @@ private Q_SLOTS:
         QCOMPARE(ShortcutHints::nextTime(QStringLiteral("Ctrl+T"), QStringLiteral("new tab")), QStringLiteral("Next time: Ctrl+T · new tab"));
         auto &hints = ShortcutHints::instance();
         const QList<ShortcutHints::Tip> tips{{QStringLiteral("t1"), QStringLiteral("one")}, {QStringLiteral("t2"), QStringLiteral("two")}};
-        QCOMPARE(hints.nextIdleTip(tips).id, QStringLiteral("t1"));
+        const auto first = hints.nextIdleTip(tips);
+        QCOMPARE(first.id, QStringLiteral("t1"));
+        hints.recordShown(first.id);                              // the caller put it on screen
         QVERIFY(hints.nextIdleTip(tips).id.isEmpty());            // global gap
         age(2000);
         QCOMPARE(hints.nextIdleTip(tips).id, QStringLiteral("t2"));
+    }
+
+    // A hint counts as shown only when it reaches the screen: asking costs nothing, however often.
+    void checkingRecordsNothing() {
+        auto &hints = ShortcutHints::instance();
+        for (int i = 0; i < 5; ++i) QVERIFY(hints.mayShow(QStringLiteral("a"), 2, 60));
+        QCOMPARE(hints.shownCount(QStringLiteral("a")), 0);
+        QVERIFY(hints.mayShow(QStringLiteral("b")));              // no global gap started either
+        hints.recordShown(QStringLiteral("a"));
+        QCOMPARE(hints.shownCount(QStringLiteral("a")), 1);
+        QVERIFY(!hints.mayShow(QStringLiteral("b")));             // now the global gap holds
+        QVERIFY(!hints.mayShow(QStringLiteral("a"), 2, 60));
+        age(ShortcutHints::kGlobalGapSeconds + 1);
+        QVERIFY(!hints.mayShow(QStringLiteral("a"), 2, 60));      // per-hint cooldown
+        QVERIFY(hints.mayShow(QStringLiteral("b")));
+        age(61);
+        hints.recordShown(QStringLiteral("a"));
+        age(1000);
+        QVERIFY(!hints.mayShow(QStringLiteral("a"), 2, 60));      // limit reached
+        // A tip picked but never drawn leaves the next pick free.
+        const QList<ShortcutHints::Tip> tips{{QStringLiteral("t1"), QStringLiteral("one")}};
+        QCOMPARE(hints.nextIdleTip(tips).id, QStringLiteral("t1"));
+        QCOMPARE(hints.nextIdleTip(tips).id, QStringLiteral("t1"));
+        QCOMPARE(hints.shownCount(QStringLiteral("t1")), 0);
     }
 };
 
