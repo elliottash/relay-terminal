@@ -14,7 +14,7 @@ from relay_core import (__version__, board_protocol, keystore, keytest, logs, ob
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import agents_defs
 from relay_core.subagents import SubagentFactory, SubagentManager
-from relay_core.keybindings import KeybindingCatalog, KeybindingError
+from relay_core.keybindings import KeybindingCatalog
 from relay_core.presets import PRESETS
 from relay_core.queue import TurnSupervisor
 from relay_core.router import classify

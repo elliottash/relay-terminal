@@ -50,7 +50,6 @@ CARRY_OPEN_REQUEST_TOKENS = 30_000
 CARRY_USER_WINDOW_DIVISOR = 16      # small windows: at most 1/16 of the window for recent user messages
 CARRY_OPEN_WINDOW_DIVISOR = 12      # and 1/12 for open requests in full
 DONE_REQUEST_CAP = 400
-TAGS_NOT_TURN_START = ("steer", "note", "summary", "carried")
 
 
 def validate_threshold(value) -> float:

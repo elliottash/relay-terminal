@@ -8,10 +8,9 @@ desktop whose static key is not the one it pinned at pairing, with no "trust thi
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from . import noise, pairing, wire, ws
 

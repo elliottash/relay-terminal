@@ -87,8 +87,6 @@ END;
 """
 
 KINDS = ("prompt", "reply", "tool_call", "tool_output", "command", "command_output")
-KIND_LABEL = {"prompt": "You", "reply": "Agent", "tool_call": "Tool", "tool_output": "Tool output",
-              "command": "Command", "command_output": "Command output"}
 
 
 # ----- paths ---------------------------------------------------------------------------------

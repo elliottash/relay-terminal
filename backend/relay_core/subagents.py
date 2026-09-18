@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from .agent import CONTEXT_CLOSE, CONTEXT_OPEN, Agent
-from .agents_defs import EFFORTS, MAX_STEPS, AgentCatalog, AgentDefinition
+from .agents_defs import DEFAULT_ALIASES, EFFORTS, MAX_STEPS, AgentCatalog, AgentDefinition
 from .presets import PRESETS, apply_effort, match_preset
 from .provider import Cancelled, ProviderConfig
 from .roles import ROLES, canonical_role
@@ -109,8 +109,7 @@ class SubagentFactory:
         self.roles = roles
         self.key_lookup = key_lookup
         self.user_aliases = {str(k).lower(): str(v) for k, v in (aliases or {}).items()}
-        self.aliases = {"haiku": "inherit", "sonnet": "inherit", "opus": "inherit", "flash": "inherit",
-                        **self.user_aliases}
+        self.aliases = {**DEFAULT_ALIASES, **self.user_aliases}
         self.provider_factory = provider_factory
 
     def base(self) -> tuple[ProviderConfig, str | None]:

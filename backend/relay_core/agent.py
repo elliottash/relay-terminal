@@ -1090,9 +1090,6 @@ class Agent:
         if delivered and self.inbox is not None:
             self.inbox.restore(delivered)
 
-    def _turn_start(self, turn: dict) -> int:
-        return turn["locations"].get(str(self.epoch), len(self.messages))
-
     def _prepare(self, name: str, args) -> Prepared:
         if self.board is not None and self.board.handles(name):
             if not isinstance(args, dict):

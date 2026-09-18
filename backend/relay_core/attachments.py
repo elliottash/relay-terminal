@@ -28,8 +28,6 @@ IMAGE_MAGIC: tuple[tuple[bytes, str], ...] = (
     (b"GIF87a", "image/gif"),
     (b"GIF89a", "image/gif"),
 )
-IMAGE_EXTENSIONS = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                    ".webp": "image/webp", ".gif": "image/gif"}
 
 
 def sniff_image(head: bytes, path: str | Path = "") -> str | None:
@@ -40,15 +38,6 @@ def sniff_image(head: bytes, path: str | Path = "") -> str | None:
     if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
         return "image/webp"
     return None
-
-
-def is_image_file(path: str | Path) -> bool:
-    """Whether a path on disk holds an image Relay can attach. Used by the `@file` path."""
-    try:
-        with open(path, "rb") as handle:
-            return sniff_image(handle.read(16), path) is not None
-    except OSError:
-        return False
 
 
 def load(attachments, workspace: str | Path) -> list[dict]:
