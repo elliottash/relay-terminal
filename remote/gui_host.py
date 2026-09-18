@@ -16,6 +16,9 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"address","value":"192.168.1.9"}                    serve the QR on another address
     {"t":"revoke","device":"..."}   {"t":"devices"}   {"t":"stop"}
     {"t":"password_entry","device":"...","allow":true}   per-device switch (section 6.7)
+    {"t":"window_active","active":true}   Relay's own window is (or is not) the focused one:
+                                          the presence rule, so no push arrives while you are
+                                          looking at the desktop (section 9)
     {"t":"transcribed","pane":"p1","id":"v1","ok":true,"text":"..."}   the answer to a `voice`
                                                             (`ok:false` carries `error` instead)
 
@@ -322,6 +325,10 @@ class Sidecar:
         self.serving: asyncio.Task | None = None
         self.asks: dict[int, asyncio.Future] = {}
         self.next_ask = 0
+        # The presence rule (section 9). Until the GUI says otherwise this process assumes the
+        # window is not the focused one, which is the safe default: a missed push is worse than
+        # one you did not need.
+        self.window_active = False
 
     # ---- stdio ---------------------------------------------------------------------------------
 
@@ -377,6 +384,10 @@ class Sidecar:
         elif kind == "revoke":
             if self.devices and self.devices.revoke(message.get("device", "")):
                 self.report_devices()
+        elif kind == "window_active":
+            self.window_active = bool(message.get("active"))
+            if self.host is not None:
+                self.host.notifier.window_active(self.window_active)
         elif kind == "password_entry":
             if self.devices:
                 self.devices.set_password_entry(message.get("device", ""),
@@ -416,6 +427,7 @@ class Sidecar:
 
         self.host = host_mod.Host(self.identity, self.devices, self.source, app_base=self.base,
                                   approver=self.ask, name=message.get("name", "this desktop"))
+        self.host.notifier.window_active(self.window_active)
         await self.host.register(local)
         self.serving = asyncio.create_task(self.host.serve())
         for _ in range(100):

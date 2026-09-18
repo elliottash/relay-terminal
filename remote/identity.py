@@ -263,6 +263,9 @@ class DeviceStore:
         if device is None:
             return False
         device.revoked = True
+        # A revoked device stops being notified at once: the subscription is the last thing that
+        # could still reach a phone the owner has just taken off this desktop (section 9).
+        device.push = None
         self.save()
         self._notify(device_id)
         return True

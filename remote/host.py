@@ -30,8 +30,8 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Awaitable, Callable
 
-from . import audit as audit_mod, envelope, identity as identity_mod, noise, pairing, \
-    panes as panes_mod, wire, ws
+from . import audit as audit_mod, envelope, identity as identity_mod, noise, notify as notify_mod, \
+    pairing, panes as panes_mod, push as push_mod, wire, ws
 
 log = logging.getLogger("relay.host")
 
@@ -53,6 +53,8 @@ LIMITS = {
     "plan_execute": (10, 60),
     "pair_prove": (5, 60),
     "secret_input": (10, 60),        # section 6.7: rate-limited so a full device cannot brute-force
+    "push_subscribe": (10, 60),      # a phone subscribes once and then only when the key rotates
+    "push_unsubscribe": (10, 60),
 }
 DEFAULT_LIMIT = (240, 60)
 
@@ -275,6 +277,9 @@ class Host:
         self.name = name
         self.limiter = Limiter()
         self.audit = audit_mod.AuditLog(devices.directory)   # beside devices.json, 0700/0600
+        # Notifications live in remote/notify.py; everything below the "---- push" line is the
+        # seam between it and the hub (docs/REMOTE-PROTOCOL.md section 9).
+        self.notifier = notify_mod.Notifier(devices, self.push_send, spawn=self._spawn)
         self.secret_nonces: dict[str, SecretNonce] = {}
         self._prompt_generation: dict[str, int] = {}
         self.rooms = pairing.RoomBook()
@@ -431,6 +436,7 @@ class Host:
     def _panes_changed(self) -> None:
         message = self.stream("panes", limit=64).add({"t": "panes", "items": self._items()})
         self._fan_out(message, needed=wire.VIEW)
+        self.notifier.on_panes(message["items"])
 
     def _items(self) -> list[dict]:
         """The pane list, with a password nonce minted for any pane at a prompt (section 6.7).
@@ -474,6 +480,7 @@ class Host:
 
     def _agent_event(self, pane: str, event: dict) -> None:
         name = event.get("event", "")
+        self.notifier.on_agent(pane, event)
         if not wire.may_forward(name):
             return                      # denied by default; see remote/wire.py
         message = self.stream(f"agent:{pane}").add(
@@ -838,3 +845,39 @@ class Host:
                 raw[index] = 0
         await channel.send({"t": "agent", "pane": pane,
                             "event": {"event": "status", "text": "Password sent."}})
+
+    # ---- push ------------------------------------------------------------------------------------
+    # Section 9. The decisions — which events are worth a buzz, the presence rule, the per-pane
+    # cooldown and what a body may say — are in remote/notify.py; what is here is the wire: two
+    # client messages, and the one call that hands the rendezvous an endpoint and ciphertext.
+
+    async def _on_push_subscribe(self, channel: Channel, message: dict) -> None:
+        """A phone's Web Push subscription, which never goes near the rendezvous.
+
+        ``endpoint``, ``p256dh`` and ``auth`` are the subscription the browser was given; ``key``
+        is the per-device seal key the service worker keeps in IndexedDB. Together they are enough
+        to construct a notification this phone will show, which is exactly why the rendezvous is
+        told none of it (docs/REMOTE-PROTOCOL.md section 8).
+        """
+        if channel.device_id is None:
+            raise wire.WireError("not_permitted", "pair first.")
+        subscription = notify_mod.clean_subscription(message)
+        self.devices.set_push(channel.device_id, subscription)
+        self.audit.record("push_subscribe", device=channel.device_id)
+        await channel.send({"t": "push_state", "subscribed": True, "id": message.get("id")})
+
+    async def _on_push_unsubscribe(self, channel: Channel, message: dict) -> None:
+        if channel.device_id is None:
+            raise wire.WireError("not_permitted", "pair first.")
+        self.devices.set_push(channel.device_id, None)
+        self.audit.record("push_unsubscribe", device=channel.device_id)
+        await channel.send({"t": "push_state", "subscribed": False, "id": message.get("id")})
+
+    async def push_send(self, endpoint: str, payload: bytes) -> dict:
+        """Post one encrypted payload through the rendezvous, which cannot read it."""
+        if not self.rendezvous or not self.token:
+            raise wire.WireError("internal", "this hub is not registered with a rendezvous.")
+        return await self._post("/v1/push/send", {
+            "desktop_id": self.identity.desktop_id, "token": self.token,
+            "endpoint": endpoint, "ciphertext": base64.b64encode(payload).decode(),
+            "ttl": push_mod.PUSH_TTL, "urgency": "normal"})

@@ -52,6 +52,10 @@ CLIENT_TYPES: dict[str, str | None] = {
     "tool_output_get": VIEW,
     "history_get": VIEW,
     "screen_get": VIEW,
+    # Notifications (section 9). Any paired device may ask to be told; the subscription and the
+    # seal key travel inside the Noise session and are never seen by the rendezvous.
+    "push_subscribe": VIEW,
+    "push_unsubscribe": VIEW,
     "compose": AGENT,
     "agent_stop": AGENT,
     "queue_remove": AGENT,
@@ -80,6 +84,7 @@ NEVER_FROM_CLIENT = frozenset({
 SERVER_TYPES = frozenset({
     "welcome", "error", "ping", "pong", "bye", "paired", "revoked", "resumed",
     "transport_switched", "panes", "agent", "screen_snapshot", "screen_diff", "history",
+    "push_state",
 })
 
 # ---- worker events --------------------------------------------------------------------------
@@ -149,6 +154,8 @@ WITHHELD_EVENTS: dict[str, str] = {
     "job_output": "reply to the desktop's own request (up to 256 KiB of command output)",
     "conversation_pinned": "desktop-local administration",
     "conversation_renamed": "desktop-local administration",
+    # The ⓘ view (protocol 24): session file paths, instruction paths and the whole history.
+    "session_info": "reply to the desktop's own request; local file paths",
     "reset": "desktop-local administration",
     "rewound": "desktop-local administration",
     "fork_state": "opaque conversation state",
