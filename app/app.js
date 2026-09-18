@@ -8,6 +8,11 @@
 import { Rrp, loadDevice, forgetDevice, fingerprint, b64, un64, storedValue, storeValue,
   dropValue } from './rrp.js';
 import { ScreenView, KEYS, controlByte, keyEventBytes } from './screen.js';
+// A guest invited to one pane of somebody else's desktop is a different session, not this one
+// with buttons hidden (docs/REMOTE-PROTOCOL.md section 10). Their client takes the page over and
+// nothing below is wired for them; their record is stored apart from this one's, so a person can
+// be the owner of one desktop and a guest of another in the same browser.
+import { guestRoute, startGuest, startGuestIfInvited } from './guest.js';
 
 const rrp = new Rrp();
 let panes = [];
@@ -98,6 +103,9 @@ async function afterConnect(record) {
 async function connectStored() {
   const record = await loadDevice();
   if (!record) {
+    // No desktop of your own here. A guest record from an invitation is still somebody's live
+    // session, and the app's start_url is '/', so it is checked before offering to pair.
+    if (await startGuestIfInvited()) return;
     show('welcome');
     return;
   }
@@ -1166,6 +1174,14 @@ document.addEventListener('visibilitychange', () => {
 });
 
 window.addEventListener('DOMContentLoaded', () => {
+  // An invite link lands on /join, and that is where a guest's session stays. Handing the page
+  // over here, before anything else is wired, is what makes "a guest never even constructs those
+  // handlers" true rather than a claim about a stylesheet: the composer's routing, the password
+  // field, the microphone, notifications and the unpair button below are never connected at all.
+  if (guestRoute()) {
+    startGuest();
+    return;
+  }
   $('composer-send').addEventListener('click', sendPrompt);
   $('composer-mic').addEventListener('click', toggleVoice);
   $('composer-text').addEventListener('keydown', (event) => {

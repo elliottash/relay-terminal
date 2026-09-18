@@ -115,6 +115,94 @@
       <button type="button" id="composer-send">Send</button>
     </div>
   </section>
+
+  <!-- ---- a guest, invited to one pane (docs/REMOTE-PROTOCOL.md section 10) ------------------
+       Screens of their own, never the owner's with parts switched off. There is no password
+       field here, no microphone, no notification row, no list of the desktop's other panes and
+       no device controls: app/guest.js builds only what is below, and wires the editor's half of
+       it only once the session's role says `editor`. -->
+
+  <section class="screen" id="screen-join" hidden>
+    <div class="pad">
+      <h1>You have been invited</h1>
+      <p>Someone is sharing one pane of <strong>a Relay desktop</strong> — their terminal, on
+        their computer — with you.</p>
+      <dl class="facts">
+        <dt>Their key</dt><dd id="join-fingerprint" class="mono">…</dd>
+      </dl>
+      <label class="field-label" for="join-name">Your name</label>
+      <input id="join-name" type="text" autocomplete="nickname" autocapitalize="words"
+             autocorrect="off" spellcheck="false" maxlength="40" placeholder="Sam">
+      <p class="muted small">This is what they see when you knock, so make it something they
+        will recognise.</p>
+      <p id="join-note" class="note"></p>
+      <button type="button" id="join-knock">Knock</button>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-knock" hidden>
+    <div class="pad">
+      <h1>Waiting to be let in</h1>
+      <div class="code" id="knock-code">·····</div>
+      <p class="muted">Ask the person who invited you to check this code matches the one on
+        their screen.</p>
+      <p id="knock-countdown" class="muted small"></p>
+      <button type="button" id="knock-cancel" class="quiet-button">Cancel</button>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-guest" hidden>
+    <div id="guest-bar">
+      <div class="guest-who">
+        <div id="guest-desktop"></div>
+        <div id="guest-role" class="muted small"></div>
+      </div>
+      <span id="guest-status" class="chip">connecting</span>
+      <button type="button" id="guest-leave" class="quiet-button">Leave</button>
+    </div>
+    <div id="guest-panes"></div>
+    <!-- Who else is here, from `participants` and `control`: names, roles and who is driving. -->
+    <div id="guest-presence"></div>
+
+    <div id="guest-screen-pane">
+      <div id="guest-screen-wrap"></div>
+      <button type="button" id="guest-new-output" hidden>New output &darr;</button>
+    </div>
+    <div id="guest-note" class="muted small"></div>
+
+    <!-- Editor only. Typing is a request: the keyboard is one per pane and the owner's own
+         keystroke always takes it back. -->
+    <div id="guest-drive-bar" hidden>
+      <span id="guest-drive-mode" class="chip">Watching</span>
+      <button type="button" id="guest-ask">Ask to type</button>
+      <button type="button" id="guest-direct" hidden>Keyboard</button>
+      <button type="button" id="guest-hand-back" hidden>Hand back</button>
+    </div>
+    <input id="guest-capture" type="text" autocapitalize="off" autocomplete="off"
+           autocorrect="off" spellcheck="false" aria-label="Terminal keyboard" hidden>
+    <div id="guest-keys" hidden></div>
+    <div id="guest-line-row" hidden>
+      <input id="guest-line" type="text" autocapitalize="off" autocomplete="off"
+             autocorrect="off" spellcheck="false" placeholder="A line for the program…"
+             aria-label="A line for the program">
+      <button type="button" id="guest-line-send">Send</button>
+    </div>
+
+    <!-- A guest's prompt is a request, and the box says so before it is sent as well as after. -->
+    <div id="guest-prompts"></div>
+    <div id="guest-composer" hidden>
+      <textarea id="guest-prompt-text" rows="1" autocapitalize="sentences" autocomplete="off"
+                placeholder="Ask their agent… (they approve it first)"></textarea>
+      <button type="button" id="guest-prompt-send">Send</button>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-ended" hidden>
+    <div class="pad">
+      <h1>This invitation has ended</h1>
+      <p id="ended-text" class="muted"></p>
+    </div>
+  </section>
 </main>
 
 <script type="module" src="./app.js"></script>
