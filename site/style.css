@@ -227,50 +227,65 @@ footer a:hover { color: var(--text); }
   pre { font-size: 0.76rem; padding: 12px; }
 }
 
-/* ---- the patch panel -----------------------------------------------------------------------
-   Relay's name, its tracker and its behaviour are all one idea: a line patched to a destination.
-   The hero says so literally. Brass and bakelite for the board; the product's own cyan and violet
-   for whichever line is live. */
+/* ---- the routing board --------------------------------------------------------------------
+   Relay's name, its tracker and its behaviour are one idea: a line routed to a destination. The
+   hero shows it as a junction board — dark mesh, dim traces, and the live path lit in the
+   product's own colours. Static and readable without JavaScript. */
 .stage { display: grid; gap: 18px; }
 .board { margin: 0; }
-.board-face {
-  position: relative; height: 150px;
-  background: linear-gradient(180deg, #1a1712 0%, #141210 100%);
-  border: 1px solid #2c2620;
-}
+.board-face { position: relative; background: #0c0f14; border: 1px solid var(--line); margin-right: 58px; }
 .board-face::before {
   content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(to bottom, rgba(200, 164, 92, 0.16), transparent 30%);
+  background: linear-gradient(to bottom, rgba(230, 232, 236, 0.10), transparent 24%);
 }
-.cords { position: absolute; inset: 0; width: 100%; height: 100%; }
-.cord { fill: none; stroke: #6b5a3c; stroke-width: 2.4; stroke-linecap: round; opacity: 0; }
-.board[data-line="shell"] .cord-shell,
-.board[data-line="agent"] .cord-agent { opacity: 1; stroke: #c8a45c; }
-@media (prefers-reduced-motion: no-preference) { .cord { transition: opacity 220ms ease; } }
+/* A CRT breath over the board, the way an old console diagram reads. Nothing else on the page has it. */
+.board-face::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0.5;
+  background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px);
+}
+.grid { display: block; width: 100%; height: auto; }
 
-.jack-in { position: absolute; left: 20px; top: 22px; display: flex; align-items: center; gap: 10px; }
-.jacks { position: absolute; left: 20px; bottom: 26px; right: 20px; display: flex; gap: 62px; }
+.route { stroke: transparent; }
+.board[data-line="shell"] .route-shell { stroke: var(--shell); }
+.board[data-line="agent"] .route-agent { stroke: var(--agent); }
+@media (prefers-reduced-motion: no-preference) {
+  .route { transition: stroke 260ms ease; }
+  .board[data-line="shell"] .route-shell,
+  .board[data-line="agent"] .route-agent {
+    stroke-dasharray: 460; animation: draw 620ms ease-out 1;
+  }
+  @keyframes draw { from { stroke-dashoffset: 460; } to { stroke-dashoffset: 0; } }
+}
+
+.node { fill: #0c0f14; stroke: #33405a; stroke-width: 2; }
+.node-in { stroke: var(--muted); }
+.board[data-line="shell"] .node-shell { stroke: var(--shell); fill: rgba(62, 197, 240, 0.22); }
+.board[data-line="agent"] .node-agent { stroke: var(--agent); fill: rgba(180, 142, 247, 0.22); }
+@media (prefers-reduced-motion: no-preference) {
+  .board[data-line="shell"] .node-shell, .board[data-line="agent"] .node-agent {
+    animation: live 2.6s ease-in-out infinite;
+  }
+  @keyframes live { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+}
+
+.board-labels {
+  position: absolute; inset: 0; pointer-events: none;
+  font-family: var(--mono); font-size: 0.76rem; letter-spacing: 0.04em;
+}
+.label-in { position: absolute; left: 4%; top: 62%; color: var(--muted); }
+.jacks { position: absolute; inset: 0 -58px 0 0; pointer-events: none; }
 .jack {
-  display: flex; align-items: center; gap: 10px; padding: 0; background: none; border: 0;
-  color: var(--muted); font: inherit; cursor: pointer;
+  position: absolute; right: 3%; transform: translateY(-50%);
+  background: none; border: 0; padding: 3px 5px; cursor: pointer; pointer-events: auto;
+  font: inherit; color: var(--muted); text-align: right;
 }
-.jack-ring {
-  width: 22px; height: 22px; border-radius: 50%;
-  background: radial-gradient(circle at 50% 35%, #2a2520 0 45%, #7d6738 46%, #c8a45c 62%, #6b5637 100%);
-  box-shadow: inset 0 1px 1px rgba(255, 233, 186, 0.35);
-  flex: none;
-}
-.jack-label { font-family: var(--mono); font-size: 0.8rem; letter-spacing: 0.02em; }
-.jack-in .jack-label { color: var(--muted); }
-.board[data-line="shell"] .jack-shell .jack-ring,
-.board[data-line="agent"] .jack-agent .jack-ring { box-shadow: inset 0 1px 1px rgba(255, 233, 186, 0.35), 0 0 0 3px rgba(62, 197, 240, 0.25); }
-.board[data-line="agent"] .jack-agent .jack-ring { box-shadow: inset 0 1px 1px rgba(255, 233, 186, 0.35), 0 0 0 3px rgba(180, 142, 247, 0.28); }
-.board[data-line="shell"] .jack-shell .jack-label { color: var(--shell); }
-.board[data-line="agent"] .jack-agent .jack-label { color: var(--agent); }
-.jack:hover .jack-label { color: var(--text); }
-.jack:focus-visible { outline: 2px solid var(--shell); outline-offset: 4px; }
+.jack-shell { top: 30%; right: -2px; }
+.jack-agent { top: 70%; right: -2px; }
+.jack:hover { color: var(--text); }
+.board[data-line="shell"] .jack-shell { color: var(--shell); }
+.board[data-line="agent"] .jack-agent { color: var(--agent); }
+.jack:focus-visible { outline: 2px solid var(--shell); outline-offset: 3px; }
 .board-note { color: var(--muted); font-size: 0.85rem; margin: 10px 0 0; }
 
-/* The caret takes the colour of whatever is patched. */
 .board[data-line="agent"] ~ .screen .caret { background: var(--agent); }
 .input-text { color: var(--text); }

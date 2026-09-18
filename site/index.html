@@ -52,26 +52,53 @@
 
         <div class="stage">
         <div class="board" data-line="shell">
-          <!-- The patch panel: one line in, two lines out. Clicking or keyboarding a jack re-patches
-               it, and the session below shows what that line does. Static and readable without JS. -->
+          <!-- A routing board: your line enters at the left and lights a path to one of two junctions.
+               Clicking or keyboarding a junction re-routes it. Works as a static diagram without JS. -->
           <div class="board-face">
-            <svg class="cords" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-              <path class="cord cord-shell" vector-effect="non-scaling-stroke" d="M9 20 C 9 72, 20 60, 20 78" />
-              <path class="cord cord-agent" vector-effect="non-scaling-stroke" d="M9 20 C 9 86, 55 62, 55 78" />
+            <svg class="grid" viewBox="0 0 400 200" preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false">
+              <defs>
+                <pattern id="mesh" width="20" height="20" patternUnits="userSpaceOnUse">
+                  <path d="M20 0H0V20" fill="none" stroke="#1d2530" stroke-width="1"/>
+                </pattern>
+                <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+                  <feGaussianBlur stdDeviation="3.2" result="b"/>
+                  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+              </defs>
+              <rect width="400" height="200" fill="url(#mesh)"/>
+
+              <!-- every trace on the board, unlit -->
+              <g class="trace-dim" fill="none" stroke="#273040" stroke-width="2">
+                <path d="M40 100 H120 V40 H260 V60 H340"/>
+                <path d="M40 100 H120 V160 H260 V140 H340"/>
+                <path d="M120 100 H200 V120 H300"/>
+                <path d="M200 40 V160"/>
+                <path d="M260 60 H300 V100"/>
+              </g>
+
+              <!-- the two routed paths -->
+              <path class="route route-shell" d="M40 100 H120 V40 H260 V60 H340" fill="none" stroke-width="2.5" filter="url(#glow)"/>
+              <path class="route route-agent" d="M40 100 H120 V160 H260 V140 H340" fill="none" stroke-width="2.5" filter="url(#glow)"/>
+
+              <g class="nodes">
+                <circle class="node node-in" cx="40" cy="100" r="6"/>
+                <circle class="node" cx="120" cy="100" r="4"/>
+                <circle class="node" cx="200" cy="40" r="4"/>
+                <circle class="node" cx="200" cy="160" r="4"/>
+                <circle class="node node-out node-shell" cx="340" cy="60" r="7"/>
+                <circle class="node node-out node-agent" cx="340" cy="140" r="7"/>
+              </g>
             </svg>
-            <div class="jack-in"><span class="jack-ring"></span><span class="jack-label">your line</span></div>
-            <div class="jacks" role="radiogroup" aria-label="Where this line is patched">
-              <button type="button" class="jack jack-shell" role="radio" aria-checked="true" data-target="shell">
-                <span class="jack-ring"></span>
-                <span class="jack-label">shell</span>
-              </button>
-              <button type="button" class="jack jack-agent" role="radio" aria-checked="false" data-target="agent">
-                <span class="jack-ring"></span>
-                <span class="jack-label">agent</span>
-              </button>
+
+            <div class="board-labels">
+              <span class="label-in">your line</span>
+              <div class="jacks" role="radiogroup" aria-label="Where this line is routed">
+                <button type="button" class="jack jack-shell" role="radio" aria-checked="true" data-target="shell">shell</button>
+                <button type="button" class="jack jack-agent" role="radio" aria-checked="false" data-target="agent">agent</button>
+              </div>
             </div>
           </div>
-          <p class="board-note">Relay patches every line you type to one of these two. Try the other jack.</p>
+          <p class="board-note">Every line you type is routed to one of these two. Try the other.</p>
         </div>
 
         <div class="screen">
