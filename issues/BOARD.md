@@ -2,13 +2,14 @@
      edit the card files and regenerate. -->
 # Board
 
-96 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+108 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (75)
+## Features (80)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#8E4Q` | [How far the switchboard aesthetic goes inside the app](features/2026-09-17-switchboard-aesthetic.md) | discussing |  | 0/7 |  |
+| `#KKYC` | [Clicking a folder: open the explorer or navigate there?](features/2026-09-18-clicking-a-folder-opens-or-navigates.md) | discussing | owner |  |  |
 | `#GDQN` | [Two-way sync between the Switchboard and GitHub Issues](features/2026-09-17-github-issues-sync.md) | ready |  |  |  |
 | `#SSRQ` | [MCP server support](features/2026-09-17-mcp-support.md) | ready |  |  |  |
 | `#YJK8` | [Portable terminal engine for macOS and Windows](features/2026-09-17-portable-terminal-engine.md) | ready |  |  |  |
@@ -17,87 +18,98 @@
 | `#P4GP` | [Website and beta release](features/2026-09-17-website-and-beta-release.md) | ready |  |  |  |
 | `#05J2` | [Export settings, and an optional sync across machines](features/2026-09-17-settings-export-and-sync.md) | ready |  |  |  |
 | `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | ready |  |  |  |
+| `#0EXJ` | [/light and /dark commands](features/2026-09-18-light-and-dark-commands.md) | ready | agent |  |  |
+| `#V9V1` | [An open-external button for every file, and a menu order to match](features/2026-09-18-open-external-in-the-right-click-menu.md) | ready | agent |  |  |
+| `#4TNY` | [Text editing for text files: word wrap, syntax highlighting, find](features/2026-09-18-text-editing-for-text-files.md) | ready | agent |  |  |
+| `#WQFS` | [In-app PDF rendering](features/2026-09-18-in-app-pdf-rendering.md) | ready | agent |  |  |
 | `#W5N2` | [Remote access from a phone and multiplayer shared terminals](features/2026-09-17-remote-phone-and-multiplayer.md) | in-progress |  |  |  |
-| `#C1HH` | [Agent drives interactive programs in the visible pane, with take-over](features/needs_qa_llm/2026-09-17-agent-delegate-and-take-over.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
-| `#G8DK` | [Aliased terminal commands and prompts (Warp workflows)](features/needs_qa_llm/2026-09-17-aliases-and-workflows.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, aliases worktree), 2026-09-17 |  |  |
-| `#YZTK` | [Clickable file and folder paths open Relay panes](features/needs_qa_llm/2026-09-17-clickable-paths.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
-| `#EM1E` | [Image context in agent prompts](features/needs_qa_llm/2026-09-17-image-context.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
-| `#GWXM` | [Keyboard shortcut to step through files, folders and links in output](features/needs_qa_llm/2026-09-17-keyboard-jump-to-output-links.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
-| `#YR21` | [Detect programs waiting for input from the screen text (new engine)](features/needs_qa_llm/2026-09-17-screen-text-input-detection.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
-| `#NY7Z` | [Voice transcription mode (microphone button, hold Right Alt)](features/needs_qa_llm/2026-09-17-voice-transcription.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
-| `#BPK3` | [Show agent output live while a program owns the terminal](features/needs_qa_llm/2026-09-17-agent-output-while-program-runs.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
-| `#W011` | [Tell the agent which program owns the terminal](features/needs_qa_llm/2026-09-17-agent-program-context.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
+| `#C1HH` | [Agent drives interactive programs in the visible pane, with take-over](features/needs_qa_llm/2026-09-17-agent-delegate-and-take-over.md) | needs-qa-llm | agent |  |  |
+| `#G8DK` | [Aliased terminal commands and prompts (Warp workflows)](features/needs_qa_llm/2026-09-17-aliases-and-workflows.md) | needs-qa-llm | agent |  |  |
+| `#YZTK` | [Clickable file and folder paths open Relay panes](features/needs_qa_llm/2026-09-17-clickable-paths.md) | needs-qa-llm | agent |  |  |
+| `#EM1E` | [Image context in agent prompts](features/needs_qa_llm/2026-09-17-image-context.md) | needs-qa-llm | agent |  |  |
+| `#GWXM` | [Keyboard shortcut to step through files, folders and links in output](features/needs_qa_llm/2026-09-17-keyboard-jump-to-output-links.md) | needs-qa-llm | agent |  |  |
+| `#YR21` | [Detect programs waiting for input from the screen text (new engine)](features/needs_qa_llm/2026-09-17-screen-text-input-detection.md) | needs-qa-llm | agent |  |  |
+| `#NY7Z` | [Voice transcription mode (microphone button, hold Right Alt)](features/needs_qa_llm/2026-09-17-voice-transcription.md) | needs-qa-llm | agent |  |  |
+| `#BPK3` | [Show agent output live while a program owns the terminal](features/needs_qa_llm/2026-09-17-agent-output-while-program-runs.md) | needs-qa-llm | agent |  |  |
+| `#W011` | [Tell the agent which program owns the terminal](features/needs_qa_llm/2026-09-17-agent-program-context.md) | needs-qa-llm | agent |  |  |
 | `#AGN8` | [Queue steering, Esc to interrupt, and keyboard editing of queued prompts](features/needs_qa_llm/2026-09-17-agent-queue-steering-and-editing.md) | needs-qa-llm |  |  |  |
 | `#X5D1` | [Show agent responses inline in the terminal](features/needs_qa_llm/2026-09-17-agent-responses-in-terminal.md) | needs-qa-llm |  |  |  |
-| `#AE08` | [Agent sessions UI: model and effort, context, slash commands, rewind, fork, resume, recaps, export](features/needs_qa_llm/2026-09-17-agent-sessions-ui.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI E1 subagent), 2026-09-17 |  |  |
-| `#QRNJ` | [AI next-command and next-prompt suggestions](features/needs_qa_llm/2026-09-17-ai-command-and-prompt-suggestions.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI E1 subagent), 2026-09-17 |  |  |
-| `#AM2Z` | [@ file picker in the prompt box](features/needs_qa_llm/2026-09-17-at-file-picker.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI D subagent), 2026-09-17 |  |  |
-| `#BXPG` | [Agent sessions backend: model/effort, context and compaction, checkpoints, sessions, recaps, plan mode, instructions, suggestions](features/needs_qa_llm/2026-09-17-backend-sessions.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, backend sessions worktree), 2026-09-17 |  |  |
-| `#2JY7` | [Backend: subagents and agent definitions from all tools](features/needs_qa_llm/2026-09-17-backend-subagents.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, backend B worktree), 2026-09-17 |  |  |
-| `#4C94` | [One combined queue for terminal commands and agent prompts](features/needs_qa_llm/2026-09-17-combined-terminal-agent-queue.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI D subagent), 2026-09-17 |  |  |
-| `#VSDH` | [Ctrl+I toggles terminal command vs agent prompt](features/needs_qa_llm/2026-09-17-ctrl-i-input-toggle.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
-| `#94V5` | [Wrong-mode error hints (flash mode chip + Ctrl+I toast)](features/needs_qa_llm/2026-09-17-wrong-mode-hints.md) | needs-qa-llm | implemented by Warp agent (auto), 2026-09-17/18 |  |  |
-| `#9VXF` | [Relay's own terminal engine, selectable per pane](features/needs_qa_llm/2026-09-17-engine-integration.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
-| `#CCKY` | [Conversation list with full-text search](features/needs_qa_llm/2026-09-17-conversation-list-and-search.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, conversation-search worktree), 2026-09-17 |  |  |
-| `#QQK4` | [Folder explorer and file preview panes (plain Qt)](features/needs_qa_llm/2026-09-17-file-explorer-and-preview-panes.md) | needs-qa-llm | widgets implemented by Claude Opus 5 (Claude Code subagent), 2026-09-17; integration into windows, tabs and panes is done by the main session |  |  |
-| `#NK66` | [Model settings: an API-keys modal, a Main/Flash/Lite roles modal, and a compact Settings window](features/needs_qa_llm/2026-09-17-model-settings.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, model-settings worktree), 2026-09-17 |  |  |
-| `#VH4B` | [Fix and re-run invalid or failing commands in terminal mode](features/needs_qa_llm/2026-09-17-fix-and-rerun-terminal-commands.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
-| `#FR72` | [Ghost-text command suggestions from history](features/needs_qa_llm/2026-09-17-history-suggestions.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI D subagent), 2026-09-17 |  |  |
-| `#9D0B` | [Human and agent control toggle, auto control for running programs, password detection](features/needs_qa_llm/2026-09-17-human-agent-control-and-password-prompts.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
-| `#MH58` | [Instruction files onboarding and relay.md synthesis](features/needs_qa_llm/2026-09-17-instructions-onboarding.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI E1 subagent), 2026-09-17 |  |  |
-| `#RBVK` | [Configurable shortcuts, program pass-through, palettes, and per-pane controls](features/needs_qa_llm/2026-09-17-keyboard-shortcuts-and-palettes.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session) and a backend subagent, 2026-09-17 |  |  |
-| `#AK6B` | [Let the agent use global Warp skills](features/needs_qa_llm/2026-09-17-load-global-warp-skills.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, skills subagent), 2026-09-17 |  |  |
-| `#KH72` | [Model roles in settings: main, fast, terminal-use, subagent, Switchboard, chores, vision](features/needs_qa_llm/2026-09-17-model-roles-and-fast-agent.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, model-roles worktree), 2026-09-17 |  |  |
-| `#4WHD` | [Model roles: a configurable model per job, fast agent in panes](features/needs_qa_llm/2026-09-17-model-roles.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, model-roles worktree), 2026-09-17 |  |  |
-| `#ANX9` | [Palette search aliases](features/needs_qa_llm/2026-09-17-palette-search-aliases.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17 |  |  |
-| `#F9SD` | [Pane-specific processes so one runaway pane cannot take down Relay](features/needs_qa_llm/2026-09-17-pane-process-isolation.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
-| `#WDVD` | [Pane and tab buttons, moving panes and tabs](features/needs_qa_llm/2026-09-17-pane-tab-buttons-and-moving.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17 |  |  |
-| `#THHF` | [Plan mode: Shift+Tab, PLAN chip, editable plan pane with Execute](features/needs_qa_llm/2026-09-17-plan-mode-and-plan-pane.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI E1 subagent), 2026-09-17 |  |  |
-| `#X2N2` | [! and * prompt prefixes (Claude Code style)](features/needs_qa_llm/2026-09-17-prefix-modes.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17 |  |  |
-| `#ZK66` | ["Agent stays in control" option, per program](features/needs_qa_llm/2026-09-17-program-control-policy.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
-| `#TP3W` | [Prompt box stays visible for ordinary programs; hides for full-screen, password and remote sessions; waiting-for-input focus](features/needs_qa_llm/2026-09-17-prompt-visibility-and-waiting-input.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI D subagent), 2026-09-17 |  |  |
-| `#HR4B` | [Relay draws its own title bar, with a notification centre behind a bell](features/needs_qa_llm/2026-09-17-window-header-and-notifications.md) | needs-qa-llm | implemented by Claude Opus 5 (Relay agent session), 2026-09-17 |  |  |
-| `#K1YZ` | [Queue or interrupt agent prompts sent while the agent is busy](features/needs_qa_llm/2026-09-17-queue-or-interrupt-agent-prompts.md) | needs-qa-llm | unassigned (backend implemented by Claude Opus 5, 2026-09-16) |  |  |
+| `#AE08` | [Agent sessions UI: model and effort, context, slash commands, rewind, fork, resume, recaps, export](features/needs_qa_llm/2026-09-17-agent-sessions-ui.md) | needs-qa-llm | agent |  |  |
+| `#QRNJ` | [AI next-command and next-prompt suggestions](features/needs_qa_llm/2026-09-17-ai-command-and-prompt-suggestions.md) | needs-qa-llm | agent |  |  |
+| `#AM2Z` | [@ file picker in the prompt box](features/needs_qa_llm/2026-09-17-at-file-picker.md) | needs-qa-llm | agent |  |  |
+| `#BXPG` | [Agent sessions backend: model/effort, context and compaction, checkpoints, sessions, recaps, plan mode, instructions, suggestions](features/needs_qa_llm/2026-09-17-backend-sessions.md) | needs-qa-llm | agent |  |  |
+| `#2JY7` | [Backend: subagents and agent definitions from all tools](features/needs_qa_llm/2026-09-17-backend-subagents.md) | needs-qa-llm | agent |  |  |
+| `#4C94` | [One combined queue for terminal commands and agent prompts](features/needs_qa_llm/2026-09-17-combined-terminal-agent-queue.md) | needs-qa-llm | agent |  |  |
+| `#VSDH` | [Ctrl+I toggles terminal command vs agent prompt](features/needs_qa_llm/2026-09-17-ctrl-i-input-toggle.md) | needs-qa-llm | agent |  |  |
+| `#94V5` | [Wrong-mode error hints (flash mode chip + Ctrl+I toast)](features/needs_qa_llm/2026-09-17-wrong-mode-hints.md) | needs-qa-llm | agent |  |  |
+| `#9VXF` | [Relay's own terminal engine, selectable per pane](features/needs_qa_llm/2026-09-17-engine-integration.md) | needs-qa-llm | agent |  |  |
+| `#CCKY` | [Conversation list with full-text search](features/needs_qa_llm/2026-09-17-conversation-list-and-search.md) | needs-qa-llm | agent |  |  |
+| `#QQK4` | [Folder explorer and file preview panes (plain Qt)](features/needs_qa_llm/2026-09-17-file-explorer-and-preview-panes.md) | needs-qa-llm | agent |  |  |
+| `#NK66` | [Model settings: an API-keys modal, a Main/Flash/Lite roles modal, and a compact Settings window](features/needs_qa_llm/2026-09-17-model-settings.md) | needs-qa-llm | agent |  |  |
+| `#VH4B` | [Fix and re-run invalid or failing commands in terminal mode](features/needs_qa_llm/2026-09-17-fix-and-rerun-terminal-commands.md) | needs-qa-llm | agent |  |  |
+| `#FR72` | [Ghost-text command suggestions from history](features/needs_qa_llm/2026-09-17-history-suggestions.md) | needs-qa-llm | agent |  |  |
+| `#9D0B` | [Human and agent control toggle, auto control for running programs, password detection](features/needs_qa_llm/2026-09-17-human-agent-control-and-password-prompts.md) | needs-qa-llm | agent |  |  |
+| `#MH58` | [Instruction files onboarding and relay.md synthesis](features/needs_qa_llm/2026-09-17-instructions-onboarding.md) | needs-qa-llm | agent |  |  |
+| `#RBVK` | [Configurable shortcuts, program pass-through, palettes, and per-pane controls](features/needs_qa_llm/2026-09-17-keyboard-shortcuts-and-palettes.md) | needs-qa-llm | agent |  |  |
+| `#AK6B` | [Let the agent use global Warp skills](features/needs_qa_llm/2026-09-17-load-global-warp-skills.md) | needs-qa-llm | agent |  |  |
+| `#KH72` | [Model roles in settings: main, fast, terminal-use, subagent, Switchboard, chores, vision](features/needs_qa_llm/2026-09-17-model-roles-and-fast-agent.md) | needs-qa-llm | agent |  |  |
+| `#4WHD` | [Model roles: a configurable model per job, fast agent in panes](features/needs_qa_llm/2026-09-17-model-roles.md) | needs-qa-llm | agent |  |  |
+| `#ANX9` | [Palette search aliases](features/needs_qa_llm/2026-09-17-palette-search-aliases.md) | needs-qa-llm | agent |  |  |
+| `#F9SD` | [Pane-specific processes so one runaway pane cannot take down Relay](features/needs_qa_llm/2026-09-17-pane-process-isolation.md) | needs-qa-llm | agent |  |  |
+| `#WDVD` | [Pane and tab buttons, moving panes and tabs](features/needs_qa_llm/2026-09-17-pane-tab-buttons-and-moving.md) | needs-qa-llm | agent |  |  |
+| `#THHF` | [Plan mode: Shift+Tab, PLAN chip, editable plan pane with Execute](features/needs_qa_llm/2026-09-17-plan-mode-and-plan-pane.md) | needs-qa-llm | agent |  |  |
+| `#X2N2` | [! and * prompt prefixes (Claude Code style)](features/needs_qa_llm/2026-09-17-prefix-modes.md) | needs-qa-llm | agent |  |  |
+| `#ZK66` | ["Agent stays in control" option, per program](features/needs_qa_llm/2026-09-17-program-control-policy.md) | needs-qa-llm | agent |  |  |
+| `#TP3W` | [Prompt box stays visible for ordinary programs; hides for full-screen, password and remote sessions; waiting-for-input focus](features/needs_qa_llm/2026-09-17-prompt-visibility-and-waiting-input.md) | needs-qa-llm | agent |  |  |
+| `#HR4B` | [Relay draws its own title bar, with a notification centre behind a bell](features/needs_qa_llm/2026-09-17-window-header-and-notifications.md) | needs-qa-llm | agent |  |  |
+| `#K1YZ` | [Queue or interrupt agent prompts sent while the agent is busy](features/needs_qa_llm/2026-09-17-queue-or-interrupt-agent-prompts.md) | needs-qa-llm | unassigned |  |  |
 | `#4TZD` | [Queue or interrupt shell commands while a foreground program runs](features/needs_qa_llm/2026-09-17-queue-shell-commands-while-busy.md) | needs-qa-llm |  |  |  |
-| `#9PGA` | [Backend: request ledger, todos, completion check, drop-path fixes, compaction that keeps asks](features/needs_qa_llm/2026-09-17-request-ledger-todos-completion.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, backend), 2026-09-17. Not committed. |  |  |
-| `#WGAR` | [Tasks UI: Tasks 3/5 chip, task list, Continue after the step limit, end-of-turn task line](features/needs_qa_llm/2026-09-17-requests-ui.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code), 2026-09-17; reworked into Tasks the same day |  |  |
-| `#64KE` | [Restore windows, tabs, panes and their conversations on start](features/needs_qa_llm/2026-09-17-restore-windows-on-start.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
-| `#9DYD` | [Router: an inclusive list of commands that are also English words](features/needs_qa_llm/2026-09-17-router-english-commands.md) | needs-qa-llm | implemented by Claude Opus 5 (1M context), 2026-09-17 |  |  |
-| `#CW8D` | [Backend: routing assist, thinking events, turn records, skill refine and import](features/needs_qa_llm/2026-09-17-routing-assist-thinking-skills-backend.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, backend F2 worktree), 2026-09-17 |  |  |
-| `#ZVF8` | [Routing assist in the prompt box](features/needs_qa_llm/2026-09-17-routing-assist-ui.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17 |  |  |
-| `#B6E5` | [Shortcut hints (Superhuman-style)](features/needs_qa_llm/2026-09-17-shortcut-hints.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17 |  |  |
-| `#NK0T` | [Skills dialog: list, exclude, refine, import, check updates](features/needs_qa_llm/2026-09-17-skills-dialog.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17 |  |  |
-| `#1T0W` | [Steering: add a prompt to the running agent turn at its next tool call](features/needs_qa_llm/2026-09-17-steering-running-agent-turn.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI E1 subagent), 2026-09-17 |  |  |
-| `#M9T4` | [Subagents UI: running-agents list, live transcripts, stop keys](features/needs_qa_llm/2026-09-17-subagents-ui.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, GUI E2 worktree), 2026-09-17 |  |  |
-| `#23XM` | [Switchboard phase 0: card format, tasks, threads and `relay-board` tooling](features/needs_qa_llm/2026-09-17-switchboard-phase0.md) | needs-qa-llm | Claude Opus 5 (1M context), 2026-09-17 |  |  |
-| `#QVVA` | [Thinking stream, "✦ thought for N s", "✦ N tool calls" links and the relay:// handler](features/needs_qa_llm/2026-09-17-thinking-and-tool-call-summaries.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17 |  |  |
-| `#80FZ` | [Windows, tabs and panes with Chrome-style shortcuts](features/needs_qa_llm/2026-09-17-windows-tabs-panes.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
-| `#0JA7` | [Colour themes](features/needs_qa_llm/2026-09-17-color-themes.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, color-themes worktree), 2026-09-17 |  |  |
+| `#9PGA` | [Backend: request ledger, todos, completion check, drop-path fixes, compaction that keeps asks](features/needs_qa_llm/2026-09-17-request-ledger-todos-completion.md) | needs-qa-llm | agent |  |  |
+| `#WGAR` | [Tasks UI: Tasks 3/5 chip, task list, Continue after the step limit, end-of-turn task line](features/needs_qa_llm/2026-09-17-requests-ui.md) | needs-qa-llm | agent |  |  |
+| `#64KE` | [Restore windows, tabs, panes and their conversations on start](features/needs_qa_llm/2026-09-17-restore-windows-on-start.md) | needs-qa-llm | agent |  |  |
+| `#9DYD` | [Router: an inclusive list of commands that are also English words](features/needs_qa_llm/2026-09-17-router-english-commands.md) | needs-qa-llm | agent |  |  |
+| `#CW8D` | [Backend: routing assist, thinking events, turn records, skill refine and import](features/needs_qa_llm/2026-09-17-routing-assist-thinking-skills-backend.md) | needs-qa-llm | agent |  |  |
+| `#ZVF8` | [Routing assist in the prompt box](features/needs_qa_llm/2026-09-17-routing-assist-ui.md) | needs-qa-llm | agent |  |  |
+| `#B6E5` | [Shortcut hints (Superhuman-style)](features/needs_qa_llm/2026-09-17-shortcut-hints.md) | needs-qa-llm | agent |  |  |
+| `#NK0T` | [Skills dialog: list, exclude, refine, import, check updates](features/needs_qa_llm/2026-09-17-skills-dialog.md) | needs-qa-llm | agent |  |  |
+| `#1T0W` | [Steering: add a prompt to the running agent turn at its next tool call](features/needs_qa_llm/2026-09-17-steering-running-agent-turn.md) | needs-qa-llm | agent |  |  |
+| `#M9T4` | [Subagents UI: running-agents list, live transcripts, stop keys](features/needs_qa_llm/2026-09-17-subagents-ui.md) | needs-qa-llm | agent |  |  |
+| `#23XM` | [Switchboard phase 0: card format, tasks, threads and `relay-board` tooling](features/needs_qa_llm/2026-09-17-switchboard-phase0.md) | needs-qa-llm | agent |  |  |
+| `#QVVA` | [Thinking stream, "✦ thought for N s", "✦ N tool calls" links and the relay:// handler](features/needs_qa_llm/2026-09-17-thinking-and-tool-call-summaries.md) | needs-qa-llm | agent |  |  |
+| `#80FZ` | [Windows, tabs and panes with Chrome-style shortcuts](features/needs_qa_llm/2026-09-17-windows-tabs-panes.md) | needs-qa-llm | agent |  |  |
+| `#0JA7` | [Colour themes](features/needs_qa_llm/2026-09-17-color-themes.md) | needs-qa-llm | agent |  |  |
 | `#D60R` | [File explorer: right-click menu, navigate here, and a toggle shortcut](features/needs_qa_llm/2026-09-17-explorer-right-click-and-toggle.md) | needs-qa-llm | agent |  |  |
-| `#K13B` | [Update the website for the new engine and features](features/needs_qa_llm/2026-09-17-website-update-engine-features.md) | needs-qa-llm | Claude Opus 5 (1M context), 2026-09-17 |  |  |
-| `#JRWQ` | [The pane header is an agent-written summary of the session](features/needs_qa_llm/2026-09-17-pane-title-summary.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, pane-title worktree), 2026-09-17 |  |  |
+| `#K13B` | [Update the website for the new engine and features](features/needs_qa_llm/2026-09-17-website-update-engine-features.md) | needs-qa-llm | agent |  |  |
+| `#JRWQ` | [The pane header is an agent-written summary of the session](features/needs_qa_llm/2026-09-17-pane-title-summary.md) | needs-qa-llm | agent |  |  |
 | `#78BN` | [One key for a new pane, with an arrow to choose the side](features/needs_qa_llm/2026-09-17-new-pane-direction-by-arrow.md) | needs-qa-llm | agent |  |  |
 | `#X2F1` | [Bring the useful Konsole context-menu items to the engine panes](features/needs_qa_llm/2026-09-17-port-konsole-context-menus.md) | needs-qa-llm | agent |  |  |
 | `#5FY5` | [Ctrl+Shift alternates for the core shortcuts](features/needs_qa_llm/2026-09-17-in-app-shortcut-alternates.md) | needs-qa-llm |  |  |  |
-| `#1AXN` | [Switchboard phase 1: agent tools and policy, the protocol, the pane, `#` references](features/needs_qa_llm/2026-09-17-switchboard-phase1.md) | needs-qa-llm | Claude Opus 5 (1M context), 2026-09-17 |  |  |
-| `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | Claude Opus 5 (orchestrating) with subagents, 2026-09-17 |  |  |
-| `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | Claude Opus 5 research subagent, 2026-09-16 |  |  |
-| `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | implemented by Claude Opus 5 (Claude Code session), 2026-09-16 |  |  |
+| `#1AXN` | [Switchboard phase 1: agent tools and policy, the protocol, the pane, `#` references](features/needs_qa_llm/2026-09-17-switchboard-phase1.md) | needs-qa-llm | agent |  |  |
+| `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | agent |  |  |
+| `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
+| `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 
-## Bugs (19)
+## Bugs (26)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
+| `#X59Q` | [A bare "continue" should reach the agent, not the shell](changes/2026-09-18-continue-should-reach-the-agent.md) | inbox | agent |  |  |
+| `#0T2R` | [The permanent pane buttons should keep the brighter outline](changes/2026-09-18-pane-buttons-brighter-outline.md) | inbox | agent |  |  |
+| `#VXTF` | [A Markdown preview should label its views "source (MD)" and "rendered (MD)"](changes/2026-09-18-markdown-view-labels-say-md.md) | inbox | agent |  |  |
+| `#S1JP` | [A link clicked inside a file preview replaces the file with no way back](changes/2026-09-18-preview-link-has-no-way-back.md) | inbox | agent |  |  |
+| `#ZW95` | [Tab completion adds a stray "-" after a folder](changes/2026-09-18-tab-completion-adds-a-stray-dash.md) | inbox | agent |  |  |
+| `#3W58` | [Markdown files are not rendered as Markdown](changes/2026-09-18-markdown-files-do-not-render.md) | inbox | agent |  |  |
 | `#GDWE` | [@ file completion runs synchronous git on the GUI thread (multi-second block)](changes/2026-09-17-file-completion-runs-synchronous-git-on-the-gui.md) | ready |  |  | [2](threads/GDWE.md) |
 | `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | ready |  |  | [2](threads/72NR.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | ready |  |  | [2](threads/9MYY.md) |
-| `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
-| `#XXP5` | [Retire KonsolePart: Relay's own engine is the only terminal](changes/needs_qa_llm/2026-09-18-retire-konsolepart.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-18 |  |  |
+| `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | agent |  |  |
+| `#XXP5` | [Retire KonsolePart: Relay's own engine is the only terminal](changes/needs_qa_llm/2026-09-18-retire-konsolepart.md) | needs-qa-llm | agent |  |  |
+| `#SP4N` | [Settings as a full pane, with sub-tabs and one search over settings and actions](changes/needs_qa_llm/2026-09-18-settings-as-a-full-pane.md) | needs-qa-llm | agent |  |  |
 | `#90JF` | [Check that a terminal command will run before it is sent](changes/needs_qa_llm/2026-09-17-pre-submit-run-check.md) | needs-qa-llm |  |  |  |
-| `#AHS5` | [The prompt box is the only input; clicking the terminal does not type into it](changes/needs_qa_llm/2026-09-17-terminal-not-directly-typable.md) | needs-qa-llm | implemented by Claude Opus 5 (1M context) (Claude Code session), 2026-09-17 |  |  |
-| `#Q7MK` | [Numpad Enter submits like Return instead of inserting a newline](changes/needs_qa_llm/2026-09-17-keypad-enter-submits.md) | needs-qa-llm | implemented by Claude (Relay agent session), 2026-09-17 |  |  |
-| `#H3QW` | [Tasks are the model's todos only; the request ledger becomes invisible](changes/needs_qa_llm/2026-09-17-tasks-are-todos-only.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code), 2026-09-17 |  |  |
-| `#D8VN` | [A turn that writes no todo list is checked by nothing — add a no-list nudge](changes/needs_qa_llm/2026-09-17-no-list-nudge.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code), 2026-09-17 |  |  |
+| `#AHS5` | [The prompt box is the only input; clicking the terminal does not type into it](changes/needs_qa_llm/2026-09-17-terminal-not-directly-typable.md) | needs-qa-llm | agent |  |  |
+| `#Q7MK` | [Numpad Enter submits like Return instead of inserting a newline](changes/needs_qa_llm/2026-09-17-keypad-enter-submits.md) | needs-qa-llm | agent |  |  |
+| `#H3QW` | [Tasks are the model's todos only; the request ledger becomes invisible](changes/needs_qa_llm/2026-09-17-tasks-are-todos-only.md) | needs-qa-llm | agent |  |  |
+| `#D8VN` | [A turn that writes no todo list is checked by nothing — add a no-list nudge](changes/needs_qa_llm/2026-09-17-no-list-nudge.md) | needs-qa-llm | agent |  |  |
 | `#ERES` | [Ctrl+Alt+arrow pane moves and pane dragging do not work](changes/needs_qa_llm/2026-09-17-pane-move-keys-and-drag-broken.md) | needs-qa-llm | agent |  |  |
 | `#308N` | [Next command and next prompt suggestions never appear](changes/needs_qa_llm/2026-09-17-suggestions-not-working.md) | needs-qa-llm | agent |  |  |
 | `#4PW5` | [A new pane is not active: typing and Ctrl+W do nothing](changes/needs_qa_llm/2026-09-17-new-pane-not-active.md) | needs-qa-llm | agent |  |  |
@@ -105,7 +117,7 @@
 | `#T9ZS` | [Ctrl+? does not open the shortcuts overlay](changes/needs_qa_llm/2026-09-17-ctrl-question-shortcuts.md) | needs-qa-llm | agent |  |  |
 | `#G152` | [Ctrl+H shrinks a pane to almost nothing](changes/needs_qa_llm/2026-09-17-ctrl-h-shrinks-pane.md) | needs-qa-llm | agent |  |  |
 | `#0C7V` | [Single click opens folders in the explorer pane (Dolphin style)](changes/needs_qa_llm/2026-09-17-single-click-folders.md) | needs-qa-llm | agent |  |  |
-| `#SQAM` | [Provider stalls have no visible progress, no retry and no log](changes/needs_qa_llm/2026-09-17-provider-stalls-and-no-logs.md) | needs-qa-llm | implemented by Claude Opus 5 (1M context), Claude Code session, 2026-09-17 |  |  |
+| `#SQAM` | [Provider stalls have no visible progress, no retry and no log](changes/needs_qa_llm/2026-09-17-provider-stalls-and-no-logs.md) | needs-qa-llm | agent |  |  |
 | `#FW3Z` | [Cleanup quick wins: dead-code removal, logging for silent failures, stale build dirs, docs index, deploy.sh](changes/needs_qa_llm/2026-09-17-cleanup-quick-wins-dead-code-removal-logging-for.md) | needs-qa-llm |  |  | [3](threads/FW3Z.md) |
 
 ## Planning (2)
