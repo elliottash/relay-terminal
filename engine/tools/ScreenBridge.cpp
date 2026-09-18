@@ -22,7 +22,8 @@
 //        {"t":"snapshot","rows":R,"cols":C,"alt":bool,"cursor":{...},"lines":[<row>...]}
 //        {"t":"diff","cursor":{...},"lines":[<row>...]}        only rows that changed
 //        {"t":"title","text":"..."} {"t":"cwd","path":"..."} {"t":"bell"}
-//        {"t":"history","from":I,"lines":[...],"more":b}       a page of scrollback, oldest first
+//        {"t":"history","from":I,"lines":[<row>...],"more":b,"total":T}
+//                                                  a page of scrollback, oldest first, styled
 //        {"t":"mark","kind":K,"row":R,"exit":E}                OSC 133
 //        {"t":"status","foreground_pid":N,"running":bool}       tcgetpgrp on the master
 //        {"t":"out","bytes":"<base64>"}     raw PTY bytes, only with --raw-out
@@ -32,7 +33,15 @@
 // watches the screen state. The phone never receives these bytes.
 //
 //   <row> is {"row":N,"segs":[[text,fg,bg,attrs],...]} — runs of identical style, so the client
-//   needs no index arithmetic and no second emulator. fg/bg are packed relay::CellColor.
+//   needs no index arithmetic and no second emulator. fg/bg are packed relay::CellColor. A
+//   snapshot or diff numbers its rows from the top of the viewport; a history page numbers them
+//   in absolute scrollback rows (0 = the oldest line the core still holds), which is also what
+//   `from` is: the row of the first line of the page. `more` says whether anything older than
+//   `from` exists, and `total` is historyRows() at the moment of the answer.
+//
+//   A history row is trimmed of trailing blanks, so it carries no run of trailing spaces the way
+//   a screen row does; everything else — colours, attributes, wide glyphs, clusters, OSC 133
+//   marks — is the live screen's shape exactly, because both go through one serializer.
 #include "ScreenJson.h"
 #include "session/TerminalSession.h"
 
@@ -133,39 +142,32 @@ private:
         writeLine(relay::screenjson::frameOf(m_frame, full));
     }
 
-    // Scrollback for a phone (protocol section 6.5). `before` counts from the end — the page is
-    // the N lines above the newest K — because an absolute row number would drift the moment the
-    // shell prints anything. historyText/historyRows are const and never move the viewport, which
-    // is the other hard rule of section 6.5: the desktop user's screen is shared state.
+    // Scrollback for a phone (protocol section 6.5), styled: the page goes out in exactly the
+    // `segs` shape the live screen uses, through the same screenjson::rowOf().
+    //
+    // `before` counts from the end — the page is the N lines above the newest K — because an
+    // absolute row number would drift the moment the shell prints anything. The reply carries the
+    // absolute rows anyway (`from`, and `row` per line), so a client that wants to anchor a
+    // scrollbar can, and `total` says how far back the page came from.
+    //
+    // historyLines() is const and never moves the viewport, which is the other hard rule of
+    // section 6.5: the desktop user's screen is shared state.
     void sendHistory(int before, int count)
     {
         before = qBound(0, before, 10'000'000);
         count = qBound(1, count, 200);
-        int total = 0;
-        QStringList lines;
+        int total = 0, from = 0;
+        std::vector<Line> lines;
         m_session->withCore([&](VtCore &core) {
             total = core.historyRows();
-            const int available = qMax(0, total - before);
-            const int want = qMin(count, available);
-            if (want > 0) {
-                lines = core.historyText(before + want);
-                if (lines.size() > want) lines = lines.mid(0, want);
-            }
+            const int end = qMax(0, total - before); // one past the newest row of this page
+            from = core.historyLines(end - qMin(count, end), qMin(count, end), &lines);
         });
         QJsonArray rows;
-        for (int index = 0; index < lines.size(); ++index) {
-            QJsonArray segment;
-            segment.append(lines[index]);
-            segment.append(0.0);
-            segment.append(0.0);
-            segment.append(0);
-            QJsonObject row;
-            row["row"] = total - before - int(lines.size()) + index;
-            row["segs"] = QJsonArray{segment};
-            rows.append(row);
-        }
-        writeLine({{"t", "history"}, {"from", total - before - int(lines.size())},
-                   {"lines", rows}, {"more", bool(total - before - int(lines.size()) > 0)}});
+        for (int index = 0; index < int(lines.size()); ++index)
+            rows.append(relay::screenjson::rowOf(lines[size_t(index)], from + index));
+        writeLine({{"t", "history"}, {"from", from}, {"lines", rows},
+                   {"more", from > 0}, {"total", total}});
     }
 
     void sendStatus()
