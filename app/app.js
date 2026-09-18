@@ -519,7 +519,9 @@ function updateDriveUi() {
   // A `view` device may not compose at all, so it gets no box rather than one that only ever
   // reports "not permitted". With direct typing on, the keys go straight through instead.
   const canCompose = capability === 'agent' || capability === 'full';
-  $('composer').hidden = !canCompose || (driving && directKeys);
+  // The pane view has the pane's own prompt box, so the client's older one stays down while the
+  // view is up — otherwise a device gets two boxes that both say "send" (found by #W5N2's QA).
+  $('composer').hidden = !!paneView || !canCompose || (driving && directKeys);
   updateVoiceUi();
   $('composer-text').placeholder = driving ? 'Type a line for the program…' : 'Ask or run…';
   if (!allowed) {
@@ -1106,6 +1108,12 @@ function voiceDone(text) {
   voiceRequest = '';
   updateVoiceUi();
   if (!text) { voiceNote('Nothing was said.'); return; }
+  if (paneView) {
+    // The pane view's box is the one on screen; the client's is hidden behind it.
+    paneView.appendText(text);
+    voiceNote('Transcribed · check it, then send.');
+    return;
+  }
   const box = $('composer-text');
   // Appended, never replacing: whatever was already typed is still the person's.
   const before = box.value;

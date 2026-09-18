@@ -258,6 +258,12 @@ export function mountPane(container, options = {}) {
     send({ t, pane: paneId(), ...fields });
   }
 
+  // 72 random bits, the shape the client's composer already sends.
+  function messageId() {
+    const bytes = crypto.getRandomValues(new Uint8Array(9));
+    return btoa(String.fromCharCode(...bytes));
+  }
+
   // ---- hints (laptop only) ----------------------------------------------------------------
   function showToast(text) {
     toast.textContent = text;
@@ -544,7 +550,19 @@ export function mountPane(container, options = {}) {
 
   function compose(text, when) {
     if (!text.trim()) return;
-    emit('compose', { text, when });
+    // `agent: false` asks the desktop to route the line the way its own prompt box would — a
+    // command runs in the shell, anything else goes to the agent. Only a device the desktop
+    // trusts with typing may ask for that, and the state says so: a full device is offered the
+    // composer's own modes, an agent device only "agent". Without this a typed command reached
+    // the agent, which ran it as a tool call on the owner's key (found by #W5N2's end-to-end QA).
+    const modes = arr(state && state.composer && state.composer.modes);
+    const mayRoute = modes.includes('auto') || modes.includes('shell');
+    emit('compose', {
+      text, when,
+      ...(mayRoute ? { agent: false } : {}),
+      // The same dedup id the client's older composer sends, so a retried send is not two prompts.
+      msg_id: messageId(),
+    });
     editRow = '';
     staged = when === 'queue'
       ? { text, stage: 1, at: clock(), rowId: '', steerId: '', known: new Set(rowList().map((r) => r.id)) }
@@ -919,6 +937,18 @@ export function mountPane(container, options = {}) {
     },
 
     get editingRow() { return editRow; },
+
+    // Text from somewhere other than the keyboard — a voice clip the client transcribed. It lands
+    // in the pane's box, which is the only one on screen while the view is up.
+    appendText(text) {
+      const addition = String(text || '');
+      if (!addition) return;
+      box.value = box.value ? `${box.value.replace(/\s*$/, '')} ${addition}` : addition;
+      fitBox();
+      renderSendState();
+      box.focus();
+      box.setSelectionRange(box.value.length, box.value.length);
+    },
 
     destroy() {
       clearTimeout(toastTimer);

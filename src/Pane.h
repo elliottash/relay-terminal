@@ -8318,7 +8318,7 @@ private:
         // turn to steer, the worker queues it, exactly as the desktop's own steer does.
         m_remoteAuthor = originName.trimmed();
         if (when == QLatin1String("steer") && m_agentBusy) {
-            m_remoteSubmit = true; submitAgent(trimmed, false, origin); m_remoteSubmit = false;
+            m_remoteSubmit = true; submitAgent(trimmed, false, who); m_remoteSubmit = false;   // the name, not the id
             if (!m_entries.isEmpty() && m_entries.last().agent) {
                 m_lastQueuedEntryId = m_entries.last().id;
                 m_lastQueuedAt.start();
@@ -8328,7 +8328,7 @@ private:
             return;
         }
         if (!route || !m_workerReady) {
-            m_remoteSubmit = true; submitAgent(trimmed, false, origin); m_remoteSubmit = false;
+            m_remoteSubmit = true; submitAgent(trimmed, false, who); m_remoteSubmit = false;   // the name, not the id
             m_remoteAuthor.clear();
             return;
         }

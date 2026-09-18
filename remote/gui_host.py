@@ -102,7 +102,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from remote import devtls, guests as guests_mod, host as host_mod, identity as identity_mod, \
-    panes as panes_mod, tailnet as tailnet_mod, terminal as terminal_mod, wire
+    cloudflare as cloudflare_mod, panes as panes_mod, tailnet as tailnet_mod, \
+    terminal as terminal_mod, wire
 from rendezvous.server import Store, build
 
 log = logging.getLogger("relay.gui_host")
@@ -443,6 +444,9 @@ class Sidecar:
         # says whether `tailscale serve` is up right now, because it has to come down again.
         self.found = tailnet_mod.Tailnet()
         self.served_by_tailscale = False
+        # A public link (cloudflared quick tunnel): the third address, for someone who is on
+        # neither the network nor the tailnet. Mutually exclusive with the tailnet one.
+        self.served_by_cloudflare = False
         self.server = None
         self.store = None
         self.serving: asyncio.Task | None = None
@@ -608,6 +612,7 @@ class Sidecar:
         self.address = ""
         self.tls_port = 0
         self.served_by_tailscale = False
+        self.served_by_cloudflare = False
         # Detection is two `tailscale` calls, so it happens off the loop: a wedged CLI must not
         # hold the share button down.
         self.found = await asyncio.to_thread(tailnet_mod.probe)
@@ -653,6 +658,10 @@ class Sidecar:
                 "pairing code when they reload past it.")
 
     TAILNET_WHERE = "no certificate warning, works from anywhere on your tailnet"
+    CLOUDFLARE_WHERE = "a public link, for someone not on your network"
+    # The picker sends a value back, and a quick tunnel has no name until it is running, so this
+    # stands for "the public link" in both directions.
+    CLOUDFLARE_VALUE = "cloudflare"
 
     def address_list(self) -> list[dict]:
         """What the share dialog offers, best first.
@@ -680,6 +689,16 @@ class Sidecar:
              "label": f"{address} — reachable from {devtls.describe(address)}",
              "current": not self.served_by_tailscale and address == self.address}
             for address in devtls.local_addresses())
+        # Last, and never the default: a public link is a deliberate pick. It is the only entry
+        # whose address stops working when sharing stops, so the label says so.
+        tunnel = cloudflare_mod.probe()
+        entries.append(
+            {"value": self.CLOUDFLARE_VALUE, "kind": "cloudflare",
+             "available": not tunnel.reason, "where": self.CLOUDFLARE_WHERE,
+             "reason": tunnel.reason,
+             "label": ("a public link — for someone not on your network; it stops working when you "
+                       "stop sharing") if not tunnel.reason else "",
+             "current": self.served_by_cloudflare})
         return entries
 
     def announce(self) -> None:
@@ -712,6 +731,35 @@ class Sidecar:
                      "behind a certificate it did not like.")
         return True
 
+    async def use_cloudflare(self) -> bool:
+        """Put the app behind a cloudflared quick tunnel, and point the pairing link at it.
+
+        Like `tailscale serve`, the tunnel fronts the **plain http** loopback port, so the routes,
+        the CSP and the Noise session are the ones a phone on the LAN meets; what changes is who
+        can reach them. Publishing takes seconds, so it runs off the event loop.
+        """
+        if self.server is None:
+            return False
+        await self.drop_tailnet()          # one address at a time, or the link means two things
+        url, said = await asyncio.to_thread(cloudflare_mod.publish, self.server.port)
+        if url is None:
+            self.emit({"t": "error", "message": said})
+            self.served_by_cloudflare = False
+            return False
+        self.served_by_cloudflare = True
+        self.address = self.CLOUDFLARE_VALUE
+        self.base = url
+        self.note = ("Anyone with this link can reach the pairing page, so send it to one person "
+                     "and admit them yourself. It stops working when you stop sharing, and the "
+                     "next one will be a different link.")
+        return True
+
+    async def drop_cloudflare(self) -> None:
+        if not self.served_by_cloudflare:
+            return
+        await asyncio.to_thread(cloudflare_mod.unpublish)
+        self.served_by_cloudflare = False
+
     async def drop_tailnet(self) -> None:
         if not self.served_by_tailscale:
             return
@@ -722,7 +770,13 @@ class Sidecar:
         """Point the pairing link at another of this machine's addresses."""
         if self.server is None:
             return
+        if address == self.CLOUDFLARE_VALUE:
+            if not self.served_by_cloudflare:
+                await self.use_cloudflare()
+            self.announce()
+            return
         if address and address == self.found.name:
+            await self.drop_cloudflare()
             if not self.served_by_tailscale:
                 await self.use_tailnet()
             self.announce()
@@ -730,6 +784,7 @@ class Sidecar:
         if not self.tls_port or address not in devtls.local_addresses():
             return
         await self.drop_tailnet()
+        await self.drop_cloudflare()
         self.address = address
         self.base = f"https://{address}:{self.tls_port}"
         self.note = self.self_signed_note()
@@ -865,6 +920,7 @@ class Sidecar:
         # Before anything else: a `tailscale serve` route left behind would go on answering for a
         # port nothing is listening on.
         await self.drop_tailnet()
+        await self.drop_cloudflare()   # no tunnel outlives the sidecar
         if self.host is not None:
             await self.host.stop()
         if self.serving:
