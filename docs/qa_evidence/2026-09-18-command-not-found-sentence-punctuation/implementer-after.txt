@@ -1,0 +1,98 @@
+== PROSE
+agent       'yeah, see if there is a clear issue to resolve. if not, lets unblock and start backfilling at full capacity' 
+agent       'yeah see if there is a clear issue to resolve. if not, lets unblock and start backfilling at full capacity' 
+agent       'yeah,'                                                      
+agent       'yeah.'                                                      
+agent       'ok.'                                                        
+agent       'ok, go ahead'                                               
+agent       'okay: do it'                                                
+agent  NOTE 'hmm; not sure'                                              command not found: hmm
+agent       'really?'                                                    
+agent       'ready?'                                                     
+agent       'done!'                                                      
+agent       'thanks!'                                                    
+agent       'great, thanks'                                              
+agent       'Yeah, see if there is a clear issue'                        
+agent       'Yeah'                                                       
+agent       'Sure'                                                       
+agent       'Hmm, what now'                                              
+agent       'nope, try again'                                            
+agent       'cool.'                                                      
+agent       'right...'                                                   
+agent       'wait... what'                                               
+agent       'ok...'                                                      
+agent       'hmm…'                                                       
+agent       'yes!'                                                       
+agent       'sure thing.'                                                
+agent       "let's unblock and start backfilling"                        
+agent       "don't break the build"                                      
+agent       'lets go'                                                    
+agent       "it's broken"                                                
+agent       "what's up"                                                  
+agent       "Let's go"                                                   
+agent       'yeah — do it'                                               
+agent       'yeah—do it'                                                 
+agent       'ok -- do it'                                                
+agent       'yeah - do it'                                               
+agent       'nah, leave it'                                              
+agent  NOTE '"yeah" is fine'                                             command not found: yeah
+agent       'yep: ship it'                                               
+agent       'sounds good.'                                               
+agent       'Sounds good!'                                               
+agent       'perfect, now commit'                                        
+agent       'alright, carry on'                                          
+agent       'hmm?'                                                       
+agent       'ok!'                                                        
+agent       'yeah, thanks!'                                              
+agent       'awesome'                                                    
+agent       'Awesome!'                                                   
+agent       'Continue'                                                   
+agent       'Resume'                                                     
+agent       'resume.'                                                    
+agent       'continue.'                                                  
+agent       'ok'                                                         
+agent       'no'                                                         
+agent       'good'                                                       
+agent       'fine'                                                       
+agent       'cool'                                                       
+agent       'nope'                                                       
+agent       'yep'                                                        
+agent       'hi'                                                         
+agent       'go'                                                         
+agent       'stop'                                                       
+agent       'yes'                                                        
+agent       'Yes'                                                        
+agent       'nice'                                                       
+shell       'wait'                                                       
+agent       'Wait'                                                       
+agent       'really?!'                                                   
+agent       "it's fine, isn't it"                                        
+agent       'don’t break it'                                             
+agent       'ok go'                                                      
+agent       'Great, thanks.'                                             
+agent       '“yeah” works'                                               
+== TYPO
+agent  NOTE 'gti status'                                                 command not found: gti
+agent  NOTE 'pyton -m x'                                                 command not found: pyton
+agent  NOTE './run.sh'                                                   no such file: ./run.sh
+agent  NOTE 'ls -la | grpe x'                                            command not found: grpe
+agent  NOTE 'nonexistentcmd123'                                          command not found: nonexistentcmd123
+agent  NOTE 'docekr ps -a'                                               command not found: docekr
+agent  NOTE 'pyton script.py'                                            command not found: pyton
+agent  NOTE 'lls'                                                        command not found: lls
+agent  NOTE 'ls | nonexistentcmd123'                                     command not found: nonexistentcmd123
+agent  NOTE 'gti'                                                        command not found: gti
+agent  NOTE 'Gti status'                                                 command not found: Gti
+agent  NOTE 'kubectl2 get pods'                                          command not found: kubectl2
+agent  NOTE 'pip4 install x'                                             command not found: pip4
+agent       'gti, status'                                                
+agent  NOTE "echo 'unfinished"                                           syntax error: unexpected EOF while looking for matching `''
+agent  NOTE 'echo "unfinished'                                           syntax error: unexpected EOF while looking for matching `"'
+agent  NOTE 'Docker ps'                                                  command not found: Docker
+agent  NOTE 'gti stauts.'                                                command not found: gti
+agent  NOTE 'GTI status'                                                 command not found: GTI
+agent  NOTE 'Ls'                                                         command not found: Ls
+agent  NOTE 'gti --'                                                     command not found: gti
+shell       'yes | head -3'                                              
+agent  NOTE 'Gti'                                                        command not found: Gti
+agent       'pyton,'                                                     
