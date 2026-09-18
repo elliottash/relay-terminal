@@ -1,6 +1,6 @@
 # Legible text: implementer evidence
 
-Card [#LG7T](../../../issues/changes/needs_qa_llm/2026-09-18-legible-text.md). Implementer screenshots
+Card [#N50J](../../../issues/changes/needs_qa_llm/2026-09-18-legible-text.md). Implementer screenshots
 (Claude Opus 5), not QA verdicts. 1440×900 under Xvfb with an isolated `HOME`, `XDG_CONFIG_HOME`,
 `XDG_RUNTIME_DIR` and `TMPDIR`, taken by `drive.sh` with the same steps for both builds:
 

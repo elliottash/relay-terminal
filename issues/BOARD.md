@@ -129,7 +129,7 @@
 | `#P43F` | [Button labels painted past the button's edge](changes/needs_qa_llm/2026-09-18-button-labels-clipped.md) | needs-qa-llm | agent |  |  |
 | `#T4JV` | [The "command not found" note has to prove a command was meant](changes/needs_qa_llm/2026-09-18-command-not-found-under-a-request.md) | needs-qa-llm | agent |  |  |
 | `#P1CE` | [Commands outlive their timeout](changes/needs_qa_llm/2026-09-18-commands-outlive-their-timeout.md) | needs-qa-llm | agent |  |  |
-| `#LG7T` | [Text is legible everywhere: a size floor, 4.5:1 on every surface, no italic muted mono](changes/needs_qa_llm/2026-09-18-legible-text.md) | needs-qa-llm | agent |  |  |
+| `#N50J` | [Text is legible everywhere: a size floor, 4.5:1 on every surface, no italic muted mono](changes/needs_qa_llm/2026-09-18-legible-text.md) | needs-qa-llm | agent |  |  |
 | `#C6YX` | [Four model commands in the composer, and the Flash role stops calling itself "fast"](changes/needs_qa_llm/2026-09-18-model-tier-commands-and-flash-naming.md) | needs-qa-llm | agent |  |  |
 | `#X2PC` | [Two close buttons on top of each other in the Settings pane](changes/needs_qa_llm/2026-09-18-one-close-button-per-pane.md) | needs-qa-llm | agent |  |  |
 | `#C4M8` | [The queue strip is one list: steers are rows like the rest](changes/needs_qa_llm/2026-09-18-one-queue-list.md) | needs-qa-llm | agent |  |  |

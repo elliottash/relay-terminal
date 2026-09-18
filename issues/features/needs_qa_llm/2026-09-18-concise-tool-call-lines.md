@@ -195,6 +195,6 @@ every call row was drawn with `Ink::Note`, which carried SGR 3 (italic) whether 
 folded — the `✦ 10 tool calls · 1 s` line, which is nowhere near a fold, is italic in `pane-04` for
 the same reason. The two shots were taken minutes apart from two different `build/relay` binaries
 and the later one had already picked up the legibility pass. Italic muted monospace is gone with
-fac5dac (#LG7T, `docs/ARCHITECTURE.md` § 14 rule 3), and the shots were re-taken afterwards.
+fac5dac (#N50J, `docs/ARCHITECTURE.md` § 14 rule 3), and the shots were re-taken afterwards.
 `ViewTest::anOpenFoldLeavesTheRealRowsAloneWhenItIsPainted` pins the engine side: a real row
 painted directly under a fold's last row is pixel-identical to the same row with the fold shut.
