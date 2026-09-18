@@ -1,0 +1,193 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+// The terminal pane's tool-call lines (#TK9C, docs/AGENT-SESSIONS-PROTOCOL.md § 23): everything
+// about them that is not a byte written into the terminal.
+//
+// The pane prints one row per tool call — `▸ ran pytest · 212 lines · exit 1 · 8 s` — wrapped in an
+// OSC 8 anchor the engine's fold layer owns (docs/ENGINE.md, "Folds"). Clicking it unfolds the
+// call's detail underneath it, in place. Four things have to be decided for that, and all four are
+// here so they can be tested without a window (tests/calllines_test.cpp):
+//
+//   * the anchor URI — built, and read back when a click or a fold request arrives;
+//   * the row's text — title, stats, the ✗ of a failure, cut to the pane's columns so it never
+//     wraps (a wrapped anchor line would hang its fold under the wrong row);
+//   * whether a result rewrites the row already on screen or starts a new one, and when a run of
+//     consecutive reads stays on one row (LineCursor — the whole state machine);
+//   * the fold's content: § 23.5's `detail` sections, or a merged run's member lines, as the
+//     engine's FoldLine spans.
+//
+// Pure: QtCore, QColor and the two parsers this shares with the other surfaces (ToolLabel,
+// DiffView). No widget, no theme — the colours arrive in a Palette the caller fills from the live
+// theme tokens.
+#include "TerminalBackend.h"   // relay::FoldSpan, relay::FoldLine
+#include "ToolLabel.h"
+
+#include <QColor>
+#include <QJsonObject>
+#include <QString>
+#include <QVector>
+
+namespace relay::calllines {
+
+// The fold layer is given this prefix; every URI under it is an anchor it owns.
+inline const QLatin1String kFoldPrefix("relay://call/");
+// A line whose click is *not* a fold (a file, a diff pane, a subagent, a card) needs a scheme the
+// fold layer does not swallow, so it gets its own host and is routed like relay://turn.
+inline const QLatin1String kOpenPrefix("relay://open-call/");
+// What a fold is allowed to hold. Beyond it the fold ends with "… N more lines · open in pane".
+inline constexpr int kFoldLineCap = 5000;
+
+// ----- the anchor URI -------------------------------------------------------------------------
+
+// relay://call/<pane>/<turn>/<call>, with the ids percent-encoded. `extra` above zero makes the
+// merged run's URI: the first member's id, a `+`, and how many calls the row now stands for.
+QString foldUri(const QString &pane, const QString &turn, const QString &call, int extra = 0);
+// The same, under relay://open-call/. A merged run never opens anything but its fold.
+QString openUri(const QString &pane, const QString &turn, const QString &call);
+
+struct Ref {
+    bool valid = false;
+    bool fold = false;      // relay://call/… (true) or relay://open-call/… (false)
+    QString pane, turn, call;
+    int extra = 0;          // members of a merged run, 0 when the URI names one call
+    bool merged() const { return extra > 1; }
+};
+// Reads back either scheme. Anything else comes back invalid.
+Ref parseUri(const QString &uri);
+
+// The `<call>` component for a run of `count` calls that began with `first`.
+QString runCall(const QString &first, int count);
+
+// ----- the row --------------------------------------------------------------------------------
+
+// One row, split where its ink changes: the title (the error ink when the call failed) and the
+// muted remainder. Already cut to the width it was asked for.
+struct Row {
+    QString title;
+    QString rest;       // " · 212 lines · exit 1 · 8 s", or empty
+    bool failed = false;
+    QString text() const { return title + rest; }
+};
+
+// The finished row. `cells` is how many columns the text may use (the pane subtracts the "▸ "
+// placeholder and any trailing hint); zero or less means "do not cut".
+Row finishedRow(const toollabel::Label &label, int cells);
+// The row while the call runs. `liveLines` above zero appends the live counter the streaming
+// output feeds ("running pytest… · 120 lines").
+Row runningRow(const toollabel::Label &label, int cells, qint64 liveLines = 0);
+// A merged run's row: "read 6 files · 4,100 lines".
+Row mergedRow(const toollabel::MergeRun &run, int cells);
+
+// Cuts `text` to `cells` columns, ending it with "…" when anything was dropped.
+QString fit(const QString &text, int cells);
+
+// ----- what a click does ----------------------------------------------------------------------
+
+enum class Click { Fold, File, Diff, Subagent, Card, Plan, Todos };
+// § 23.6, with its one override: a failed call always opens its fold, whatever it would have
+// opened. An unknown `open.type` folds too.
+Click clickFor(const toollabel::Label &label);
+
+// ----- the state machine ------------------------------------------------------------------------
+//
+// Which row the cursor is on, whether it may still be rewritten, and how far a run of mergeable
+// calls has got. The pane feeds it events and writes the bytes each Step asks for; it never writes
+// anything itself.
+//
+//     const Step step = cursor.result(callId, label);
+//     if (step.endRun) out += "\r\n";              // the held row is finished
+//     if (step.rewrite) out += "\r\x1b[2K";        // redraw the row the cursor is on
+//     else if (step.newRow) ensureLineStart();
+//     draw(step.row, step.call);
+//     if (!step.hold) out += "\r\n";               // a mergeable row keeps the cursor
+//
+struct Step {
+    bool endRun = false;    // a held row is on screen with no newline: end it before anything else
+    bool rewrite = false;   // "\r" + erase, then redraw in place
+    bool newRow = false;    // a fresh row (the pane's ensureLineStart() first)
+    bool hold = false;      // leave the cursor on the row: the run may still grow
+    bool nothing = false;   // print nothing at all (a merged call starting inside a run)
+    Row row;
+    QString call;           // the URI's <call> component: "c3", or "c3+4" for a merged row
+    bool merged = false;
+};
+
+// One member of a merged run, for the run's fold.
+struct RunMember {
+    QString line;   // "read agent.py · 412 lines"
+    QString path;   // workspace-relative, for the FoldSpan link; may be empty
+    QString call;
+};
+
+class LineCursor {
+public:
+    // tool_started. `label` is the started label (title as far as it is known, `merge` when the
+    // call may join a run).
+    Step start(const QString &call, const toollabel::Label &label);
+    // A live tool_output tick while `call` runs: rewrite the running row with its counter. Comes
+    // back with `nothing` when the row is no longer the one on screen.
+    Step live(const QString &call, const toollabel::Label &label, qint64 lines, int cells);
+    // tool_result.
+    Step result(const QString &call, const toollabel::Label &label, int cells);
+    // Anything else is about to print (prose, a note, a steer, the turn ending, closeInline).
+    // Ends any held row; the next result starts a row of its own.
+    Step other();
+
+    // A row is on screen without its trailing newline.
+    bool holding() const { return m_held; }
+    // The <call> component of the row on screen, or empty.
+    QString openCall() const;
+    // The members of the run on screen, oldest first. Empty unless a run of two or more is held.
+    const QVector<RunMember> &members() const { return m_members; }
+    // How wide the running and merged rows are drawn. Set once from the pane's columns.
+    void setCells(int cells) { m_cells = cells; }
+
+private:
+    void dropRun();
+    toollabel::MergeRun m_run;
+    QVector<RunMember> m_members;
+    QString m_first;            // the run's first call id
+    QString m_started;          // the call whose "running…" row is on screen
+    bool m_held = false;        // a row is on screen with no newline
+    bool m_dirty = false;       // something else printed since the row was drawn
+    bool m_runRow = false;      // the held row belongs to a run, not to one started call
+    int m_cells = 0;
+};
+
+// ----- the fold's content -----------------------------------------------------------------------
+
+// Every colour a fold uses, from the caller's live theme.
+struct Palette {
+    QColor text;                 // the default; invalid = the terminal's own foreground
+    QColor muted;                // headings, hunk headers, the last row
+    QColor code;                 // a command line
+    QColor add, remove;          // diff foregrounds
+    QColor addBg, removeBg;      // diff backgrounds, already blended into the surface
+    QColor error;
+};
+
+struct FoldOptions {
+    int maxLines = kFoldLineCap;
+    QString openInPane;      // the link "open in pane" carries; empty drops that word
+    QString openPath;        // the link "open <name>" carries (an absolute path)
+    QString openName;        // what to show after "open "; defaults to openPath's last component
+    bool diffToPane = false; // the diff went to a diff pane: say so instead of repeating it
+};
+
+// § 23.5's `detail` sections of a `tool_output` reply, as fold rows. Falls back to the reply's own
+// `text`/`preview` when it carries no sections (a worker from before § 23.5).
+QVector<FoldLine> foldForReply(const QJsonObject &reply, const Palette &palette, const FoldOptions &options);
+
+// A merged run's fold: one row per member, each linking to the file it read.
+QVector<FoldLine> foldForRun(const QVector<RunMember> &members, const Palette &palette,
+                             const FoldOptions &options);
+
+// One muted row — what a fold says when the turn is gone from the worker's log, or the pane has no
+// worker to ask.
+QVector<FoldLine> foldForNote(const QString &text, const Palette &palette);
+
+// Control characters and escape sequences out of stored output: a fold row is text, and the view
+// paints it; an ANSI escape left in it would be drawn as mojibake.
+QString stripAnsi(const QString &text);
+
+}  // namespace relay::calllines

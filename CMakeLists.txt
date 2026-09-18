@@ -275,6 +275,15 @@ target_include_directories(relay-toollabel PUBLIC src)
 target_link_libraries(relay-toollabel PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-toollabel PRIVATE -Wall -Wextra -Wpedantic)
 
+# The terminal pane's tool-call lines (card #TK9C): the anchor URI, the row and how far it may be
+# cut, the rewrite-or-new-row state machine, and a fold's rows. src/Pane.h is the glue that writes
+# the bytes; everything it decides first lives here, so it is tested without a terminal. engine/ is
+# on the include path for relay::FoldLine alone (a declaration -- the engine is not linked in).
+add_library(relay-calllines STATIC src/CallLines.cpp src/CallLines.h)
+target_include_directories(relay-calllines PUBLIC src ${CMAKE_CURRENT_SOURCE_DIR}/engine)
+target_link_libraries(relay-calllines PUBLIC relay-toollabel relay-diffview)
+target_compile_options(relay-calllines PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
 target_include_directories(relay-requests PUBLIC src)
 target_link_libraries(relay-requests PUBLIC ${RELAY_QT}::Widgets)
@@ -301,7 +310,7 @@ if(RELAY_BUILD_APP)
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
-    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-terminal-engine relay-screen relay-slash relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -458,6 +467,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-toollabel-tests PRIVATE relay-toollabel ${RELAY_QT}::Test)
     add_test(NAME toollabel COMMAND relay-toollabel-tests)
     set_tests_properties(toollabel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-calllines-tests tests/calllines_test.cpp)
+    target_link_libraries(relay-calllines-tests PRIVATE relay-calllines ${RELAY_QT}::Test)
+    add_test(NAME calllines COMMAND relay-calllines-tests)
+    set_tests_properties(calllines PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The turn pane is part of the application rather than a library; the test compiles it directly.
     add_executable(relay-turntranscript-tests tests/turntranscript_test.cpp src/TurnTranscript.cpp)
     target_link_libraries(relay-turntranscript-tests PRIVATE relay-toollabel relay-highlight ${RELAY_QT}::Test)
