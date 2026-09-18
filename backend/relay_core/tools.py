@@ -178,11 +178,20 @@ class Workspace:
 
     def resolve(self, name: str, *, allow_missing: bool = False) -> Path:
         if not isinstance(name, str) or not name or "\x00" in name:
-            raise ValueError("A valid workspace-relative path is required.")
-        relative = Path(name)
-        if relative.is_absolute() or ".." in relative.parts:
-            raise ValueError("Absolute paths and parent traversal are not allowed in file tools.")
-        candidate = self.root / relative
+            raise ValueError("A valid path is required.")
+        # Card #E99H (owner, 2026-09-18): an absolute path and a `..` in the middle of one are
+        # ordinary ways to name a file, so neither is refused on sight any more. What confines a
+        # call is the same thing it always was — the path has to land inside the workspace, and
+        # the symlink and secret-file guards below walk what it lands on.
+        candidate = Path(name)
+        if not candidate.is_absolute():
+            candidate = self.root / candidate
+        # Collapse `..` textually first: a lexical path is what the guards below can walk, and it
+        # keeps a `..` from being answered by the filesystem before this check runs.
+        candidate = Path(os.path.normpath(candidate))
+        if not candidate.is_relative_to(self.root):
+            raise ValueError("Path escapes the workspace.")
+        relative = candidate.relative_to(self.root)
         # Refuse symlinks even when they lead back inside the workspace.
         current = self.root
         for part in relative.parts:
