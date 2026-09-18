@@ -165,7 +165,7 @@ target_compile_options(relay-outputlinks PRIVATE -Wall -Wextra -Wpedantic)
 # Aliases: saved commands and prompts (issue G8DK): turning an alias's template into composer
 # fields, walking them with Tab, and deciding whether a typed line names an alias. Plain QtCore so
 # every rule is testable without a window; the worker owns the files and the shell-safe parameter
-# substitution (protocol 19).
+# substitution (protocol 20).
 add_library(relay-aliases STATIC src/Aliases.cpp src/Aliases.h)
 target_include_directories(relay-aliases PUBLIC src)
 target_link_libraries(relay-aliases PUBLIC ${RELAY_QT}::Core)

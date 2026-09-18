@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """`type_into_program`: the tool, its per-turn grant, its caps and every refusal.
 
-Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 17.
+Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 21.
 Card: issues/features/2026-09-17-agent-delegate-and-take-over.md (#C1HH).
 """
 import json

@@ -19,6 +19,7 @@ issues/<category>/<state>/     needs_qa_llm/ needs_qa_human/ needs_review/ needs
                                needs_ab/ deferred/ done/
 issues/planning/               plan cards (type: plan), done ones in planning/done/
 issues/memory/                 memory cards (type: memory), retired ones in memory/archive/
+issues/aliases/                alias cards (type: alias), retired ones in aliases/archive/
 issues/threads/<ID>.md         one append-only thread per card
 issues/.private/…              the private root: same layout, gitignored (issues/.gitignore)
 ```
@@ -89,12 +90,20 @@ Every type: `id`, `type`, `status`, `rank`, `created`, `labels`, `assignee`, `pr
 | `work` (default) | `component`, `milestone`, `workstream`, `acceptance`, `implemented_by`, `label_count`, `label_output`, `codebook` | `inbox`, `discussing`, `ready`, `in-progress`, `needs-review`, `needs-labels`, `needs-ab`, `needs-qa-llm`, `needs-qa-human`, `deferred`, `done`, `dropped` | `<category>/` plus the state subfolder |
 | `plan` | `approved_by`, `goal` | `draft`, `approved`, `executing`, `done`, `dropped` | `planning/`, `planning/done/` |
 | `memory` | `name`, `description`, `kind`, `topic`, `scope`, `paths`, `pinned`, `supersedes`, `reviewed`, `author` | `active`, `retired` | `memory/`, `memory/archive/` |
+| `alias` | `name`, `kind`, `shell` | `active`, `retired` | `aliases/`, `aliases/archive/` |
 
 - `ready` is what the old tracker called `open`; `dropped` cards live in `done/` beside `done` ones.
 - A **memory** card is one fact per file. `kind` is `convention | fact | lesson | reference |
   preference` (the memory design called this field `type`; it is `kind` here because `type` names
   the card type), `scope` is `project | team | user`, `paths` auto-attaches the body when a matching
   file is read, `pinned` always loads it.
+- An **alias** card (issue `#G8DK`, protocol section 20) is one saved command or prompt per file,
+  named `<name>.md`. `name` is what you type to run it (`/name`); `kind` is `command | prompt`.
+  The runnable text is the first fenced block of a `## Run` section (or the section itself, for a
+  prompt), and the parameters are a list in `## Parameters` (`` - `arg` = `default` — note ``).
+  They are in the body, not the front matter, because a default may hold any character while a
+  front matter scalar is single-line. The same layout serves the global Switchboard
+  (`$XDG_CONFIG_HOME/relay/switchboard/aliases/`), where a repository's `issues/` is not the root.
 - A **plan** card's body holds the plan prose and a `## Steps` checklist. It may be used on its own;
   `links.cards` and per-step `card=` markers connect it to work cards.
 - `check` rejects a field that is not listed for the card's type, so a typo is caught rather than

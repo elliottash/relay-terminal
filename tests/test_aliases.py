@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Aliases: the file format, parameter substitution, and global vs local resolution (issue G8DK,
-docs/AGENT-SESSIONS-PROTOCOL.md section 19).
+docs/AGENT-SESSIONS-PROTOCOL.md section 20).
 
 Everything here is offline and touches only temporary directories: no model, no network, and no
 alias text is ever executed.  The GUI-side rules (matching a typed line, the composer's fields)

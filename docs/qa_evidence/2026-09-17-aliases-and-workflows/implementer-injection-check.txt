@@ -1,0 +1,2 @@
+ls: cannot access '/tmp/relay-alias-should-not-exist': No such file or directory
+OK: the injected command never ran

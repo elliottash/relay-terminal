@@ -273,7 +273,8 @@ from the link or palette (→ `/continue` or `agent.continue`), wrong-mode submi
 "Wrong-mode hints": a request that failed in terminal mode or a failing shell command in agent
 mode → `input.toggle`, with the mode chip flashing), dropping an image on the prompt box (→ the
 paste shortcut) and "Screenshot this pane" from the palette (→ `agent.screenshotPane`,
-Ctrl+Shift+G), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
+Ctrl+Shift+G), running an alias from the palette (→ `/name`, and for a command the name typed in
+terminal mode), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
 and rotating idle tips 4 s after a finished agent turn with an
 from the link or palette (→ `/continue` or `agent.continue`), the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
@@ -661,7 +662,7 @@ over. `Ctrl+Shift+J` (`program.delegate`), the banner's "Let the agent drive" bu
 palette action turn it on; with text in the prompt box the same key also sends that text to the
 agent. The pane then prints `✦ <program> handed to the agent · Ctrl+H takes it back`, the banner
 becomes "Agent driving apt · 3 keystroke(s) · apt is asking: …" with a "Take over" button, and
-every prompt submitted for that program carries `context.program_control` (protocol section 17),
+every prompt submitted for that program carries `context.program_control` (protocol section 21),
 including the screen.
 
 Every write is a round trip: the worker's `type_into_program` emits `program_input`, the pane
@@ -1064,6 +1065,29 @@ which on GLM is `glm-5.3-flash`. When the turn ends, each image is replaced in t
 one-line description and its path, and an image is estimated as a flat `context.IMAGE_TOKENS` so it
 cannot compact its own turn.
 
+### Aliases: saved commands and prompts
+
+`src/Aliases.*` and `backend/relay_core/aliases.py` (issue `#G8DK`, protocol section 20). An alias
+is a saved terminal command or agent prompt with `{{parameter}}` placeholders, stored as one
+Switchboard card per alias: **global** aliases in the global Switchboard
+(`$XDG_CONFIG_HOME/relay/switchboard/aliases/`), **local** ones in the repository Switchboard
+(`issues/aliases/`, or `.relay/aliases/` before a board exists). A local alias hides a global one
+of the same name.
+
+It runs three ways — the "Aliases…" palette submenu, `/name` in the composer, and the name typed on
+its own in terminal mode — and all three send one `alias_run`, so the substitution happens once, in
+the worker. A template whose parameters all have values runs straight away; one with a blank lands
+in the prompt box with the blank selected and Tab moving between the fields. Nothing runs without
+passing through the prompt box, and a line edited past recognition stops being an alias and goes to
+the router as itself (`relay::aliases::reparse`).
+
+Substitution is **quote-aware**: a value is escaped for the shell context it lands in, so a value
+holding `;`, `$(…)` or a backtick is one literal word, never new syntax. Importing Warp workflows
+(from a read-only copy of `warp.sqlite`, and from workflow YAML) and shell aliases (read, never
+sourced) always shows a preview of exactly what would be stored, with the origin and any warning;
+the worker writes from its own copy of that preview. The agent may propose an alias for a command
+run three times or more — a suggestion only, logged in `worker.log`.
+
 ## 12. Keys, keyring and imports
 
 `backend/relay_core/keystore.py`.
@@ -1299,14 +1323,11 @@ Other limits:
 | `src/PaneTitles.*` | pane titles and the tab labels made from them: tidying a title, the offline "same work" rule, joining and shortening |
 | `src/InputPolicy.*` | who may type where: the prompt-box-only rules, passwords, and whether the agent may type into the program |
 | `src/ScreenPrompt.*` | the screen-text classifier: is the foreground program waiting for input, and for what (section 9.1) |
+| `src/Aliases.*` | aliases (saved commands and prompts): the composer's `{{parameter}}` fields and Tab, re-reading the values out of an edited line, and whether a typed line names an alias |
 | `src/Voice.*` | voice transcription: capture tool and arguments, the hold key, the transcript's place in the composer, WAV repair |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
-| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search), `logs` (rotating `worker.log`) |
-| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and tab labels), `voice` (transcription) |
-| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `voice` (transcription), `program_input` (the agent typing into the visible pane) |
-| `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Switchboard messages) |
-| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `voice` (transcription) |
+| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and tab labels), `voice` (transcription), `program_input` (the agent typing into the visible pane), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Switchboard messages), `aliases` and `alias_import` (saved commands and prompts, and importing Warp workflows and shell aliases) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `src/KonsoleBackend.*`, `src/EngineBackend.*` | the two `TerminalBackend` implementations |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |

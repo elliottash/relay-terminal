@@ -20,7 +20,7 @@ pane knows the state at the instant of the write:
 * **A cap per turn** (`max_program_writes`, default 20) stops a loop from hammering a program.
 * **Nothing is invisible.** The pane prints "✦ typed: y" inline for every write.
 
-Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 17. Card:
+Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 21. Card:
 issues/features/2026-09-17-agent-delegate-and-take-over.md (#C1HH).
 """
 from __future__ import annotations

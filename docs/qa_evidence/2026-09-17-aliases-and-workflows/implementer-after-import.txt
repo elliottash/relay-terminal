@@ -1,0 +1,11 @@
+=== global switchboard ===
+/tmp/tmp.PWlKsZ5P9G/config/relay/switchboard/aliases/example-workflow.md
+/tmp/tmp.PWlKsZ5P9G/config/relay/switchboard/aliases/thermal-status.md
+/tmp/tmp.PWlKsZ5P9G/config/relay/switchboard/aliases/squash-the-last-n-commits.md
+/tmp/tmp.PWlKsZ5P9G/config/relay/switchboard/aliases/undo-the-last-git-commit.md
+/tmp/tmp.PWlKsZ5P9G/config/relay/switchboard/aliases/kill-the-process-running-on-a.md
+/tmp/tmp.PWlKsZ5P9G/config/relay/switchboard/aliases/hello.md
+/tmp/tmp.PWlKsZ5P9G/config/relay/switchboard/aliases/explain.md
+
+=== local switchboard ===
+/tmp/tmp.PWlKsZ5P9G/work/issues/aliases/recent.md

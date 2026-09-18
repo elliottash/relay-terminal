@@ -2506,7 +2506,7 @@ public:
         m_skillsDialog->refresh();
     }
 
-    // ----- aliases: saved commands and prompts (issue G8DK, protocol 19) ----------------------
+    // ----- aliases: saved commands and prompts (issue G8DK, protocol 20) ----------------------
     // An alias runs three ways — the actions palette, `/name`, and the name typed in terminal mode.
     // All three end here: the template's `{{parameters}}` become fields in the prompt box, Tab moves
     // between them, and submitting sends the values to the worker, which does the substitution and
@@ -2617,6 +2617,7 @@ public:
 
     // `/name …` typed in the composer, when `name` is an alias and not a built-in command.
     bool tryRunAliasSlash(const QString &text) {
+        if (m_aliasExpanding) return false;   // an alias expands once; see tryRunAliasTyped
         QStringList reserved;
         for (const auto &command : slashCommands()) reserved << command.name;
         const auto match = relay::aliases::matchSlash(text.trimmed(), relay::aliases::names(m_aliasList), reserved);
@@ -2631,7 +2632,9 @@ public:
     // The alias name typed on its own in terminal mode. Only in terminal mode: in agent mode the
     // same word is prose, and in auto mode the router decides what a bare word means.
     bool tryRunAliasTyped(const QString &text, const QString &mode) {
-        if (mode != QStringLiteral("shell")) return false;
+        // Never while an expansion is being submitted: `alias ll = "ll -h"` would otherwise match
+        // its own output and expand for ever. An alias expands once, like a shell alias.
+        if (m_aliasExpanding || mode != QStringLiteral("shell")) return false;
         const auto match = relay::aliases::matchTyped(text, relay::aliases::names(m_aliasList));
         if (!match.matched) return false;
         m_editor->remember(text.trimmed());
@@ -2684,7 +2687,9 @@ public:
                     break;
                 }
             }
+            m_aliasExpanding = true;
             requestRoute(true, prompt ? QStringLiteral("agent") : QStringLiteral("shell"));
+            m_aliasExpanding = false;
             return true;
         }
         if (type == QStringLiteral("alias_saved")) {
@@ -2767,7 +2772,7 @@ public:
         m_aliasImport = dialog;
         dialog->setAttribute(Qt::WA_DeleteOnClose);
         dialog->setWindowTitle(QStringLiteral("Import workflows and shell aliases"));
-        dialog->resize(900, 560);
+        dialog->resize(1180, 560);
         auto *layout = new QVBoxLayout(dialog);
         auto *caption = new QLabel(QStringLiteral(
             "Nothing here has been run, and nothing is saved until you press Import. "
@@ -2835,7 +2840,7 @@ private:
     QList<relay::aliases::Alias> m_aliasList;
     relay::aliases::Rendered m_aliasFields;
     QString m_aliasName, m_aliasKind, m_aliasRunId, m_aliasRunKind, m_aliasRunName;
-    bool m_aliasFromPalette = false, m_aliasRunFromPalette = false;
+    bool m_aliasFromPalette = false, m_aliasRunFromPalette = false, m_aliasExpanding = false;
     QPointer<QDialog> m_aliasImport;
 
     // ----- voice transcription (issue NY7Z, protocol 16) -------------------------------------
@@ -3791,6 +3796,9 @@ private:
     void updateSlashPopup() {
         const QString text = m_editor ? m_editor->toPlainText() : QString();
         if (!m_editor || m_native || !text.startsWith('/') || text.contains(QRegularExpression(QStringLiteral("\\s")))) { hideSlashPopup(); return; }
+        // The first `/` of a command is the cue to re-read the aliases, for the same reason the
+        // palette does: they are files somebody else may have written (issue G8DK).
+        if (text == QStringLiteral("/")) refreshAliases();
         const QString query = text.mid(1).toLower();
         struct Ranked { int score; int index; };
         QList<Ranked> ranked;
@@ -9092,6 +9100,9 @@ private:
         m_returnPane = m_active;
         m_returnFocus = QApplication::focusWidget();
         m_terminalContext = m_active && m_active->ownsTerminalWidget(m_returnFocus);
+        // Aliases are files: one may have arrived from an agent, a git pull or an editor since the
+        // list was last read, so ask again on the way in (issue G8DK).
+        if (m_active) m_active->refreshAliases();
         m_stack.clear();
         m_filter->clear();
         renderPalette();

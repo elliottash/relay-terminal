@@ -9,7 +9,6 @@
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#8E4Q` | [How far the switchboard aesthetic goes inside the app](features/2026-09-17-switchboard-aesthetic.md) | discussing |  | 0/7 |  |
-| `#G8DK` | [Aliased terminal commands and prompts (Warp workflows)](features/2026-09-17-aliases-and-workflows.md) | ready |  |  |  |
 | `#GDQN` | [Two-way sync between the Switchboard and GitHub Issues](features/2026-09-17-github-issues-sync.md) | ready |  |  |  |
 | `#SSRQ` | [MCP server support](features/2026-09-17-mcp-support.md) | ready |  |  |  |
 | `#YJK8` | [Portable terminal engine for macOS and Windows](features/2026-09-17-portable-terminal-engine.md) | ready |  |  |  |
@@ -21,6 +20,7 @@
 | `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | ready |  |  |  |
 | `#W5N2` | [Remote access from a phone and multiplayer shared terminals](features/2026-09-17-remote-phone-and-multiplayer.md) | in-progress |  |  |  |
 | `#C1HH` | [Agent drives interactive programs in the visible pane, with take-over](features/needs_qa_llm/2026-09-17-agent-delegate-and-take-over.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
+| `#G8DK` | [Aliased terminal commands and prompts (Warp workflows)](features/needs_qa_llm/2026-09-17-aliases-and-workflows.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, aliases worktree), 2026-09-17 |  |  |
 | `#YZTK` | [Clickable file and folder paths open Relay panes](features/needs_qa_llm/2026-09-17-clickable-paths.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
 | `#EM1E` | [Image context in agent prompts](features/needs_qa_llm/2026-09-17-image-context.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
 | `#GWXM` | [Keyboard shortcut to step through files, folders and links in output](features/needs_qa_llm/2026-09-17-keyboard-jump-to-output-links.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |

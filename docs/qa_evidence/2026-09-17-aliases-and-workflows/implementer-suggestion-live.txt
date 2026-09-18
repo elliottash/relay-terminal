@@ -1,0 +1,35 @@
+repeats found offline (no model call yet):
+  4x  pytest tests/test_agent.py -k slow -x
+  3x  docker compose -f deploy/compose.yml up -d --build web
+
+suggestion event (no key, no prompt text in it):
+{
+  "event": "suggestion",
+  "kind": "alias",
+  "text": "pytest {{test_file}} -k {{keyword}} -x",
+  "reason": "run 4 times",
+  "repeated": [
+    {
+      "command": "pytest tests/test_agent.py -k slow -x",
+      "count": 4
+    },
+    {
+      "command": "docker compose -f deploy/compose.yml up -d --build web",
+      "count": 3
+    }
+  ]
+}
+
+proposed alias:
+  name        pytest-k
+  title       Run pytest filtered by keyword, stop on failure
+  kind        command
+  text        pytest {{test_file}} -k {{keyword}} -x
+  params      [('test_file', 'tests/test_agent.py'), ('keyword', 'slow')]
+  required    []
+  source      agent suggestion, 2026-09-17
+
+what it would run with a hostile value in every parameter:
+  pytest 'v; rm -rf / #' -k 'v; rm -rf / #' -x
+
+nothing was written: []
