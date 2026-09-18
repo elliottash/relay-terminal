@@ -116,7 +116,11 @@ still passes inside `backend-and-bash`.
   `e05`), whose file sets only nine `[ui]` tokens, one `[syntax]` colour and two `[terminal]` colours — the
   rest falls back to Relay Dark, visibly.
 
-Both stderr logs are clean.
+* `drive-persists.sh` — Relay started with `theme/name=solarized-dark` already in `relay.conf`, which
+  is what the picker writes: the chrome, the terminal and the generated `relayrc` all come up on Solarized
+  Dark, so the choice survives a restart (`implementer-p01`).
+
+All three stderr logs are clean.
 
 ## QA checklist
 

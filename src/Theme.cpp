@@ -42,8 +42,10 @@ QString monoFamily() {
 
 // Relay's own settings file, addressable before QApplication has set the organisation name
 // (exposeKonsoleProfile() has to know the chosen theme that early).
+// NativeFormat, not IniFormat: on Unix the two differ in the file extension (relay.conf against
+// relay.ini), and the rest of the app reads the native one.
 QSettings relaySettings() {
-    return QSettings(QSettings::IniFormat, QSettings::UserScope, QStringLiteral("RelayTerminal"),
+    return QSettings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("RelayTerminal"),
                      QStringLiteral("relay"));
 }
 
@@ -596,7 +598,6 @@ bool setActiveTheme(const QString &id) {
     const ThemeSpec *spec = loadTheme(id);
     if (!spec) return false;
     relaySettings().setValue(QStringLiteral("theme/name"), id);
-    QSettings().setValue(QStringLiteral("theme/name"), id);
     adoptTokens(*spec);
     if (auto *app = qobject_cast<QApplication *>(QCoreApplication::instance())) {
         applyPalette(*app, *spec);
