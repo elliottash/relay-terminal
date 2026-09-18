@@ -288,6 +288,10 @@ class Agent:
         self.plans_dir = Path(plans_dir) if plans_dir else root / ".relay" / "plans"
         self.store = SessionStore(session_dir) if session_dir else None
         self._lock = threading.RLock()
+        # Held only across "read the session, write the session": the title and the summary each
+        # save from their own background thread, and two saves that interleave would write one
+        # thread's older state after the other's newer state.
+        self._save_lock = threading.Lock()
         self._last_usage = None
         # Protocol 11: per-turn tool results, thinking time and transcript for the last MAX_TURN_LOG turns.
         self.turn_log: OrderedDict[str, dict] = OrderedDict()
@@ -308,6 +312,15 @@ class Agent:
         self.title_turn = 0
         self._title_stale = False
         self._title_running = False
+        # Session summary: two or three sentences for the session list, written by the same chores
+        # role at the same cadence points as the title. `branch` is the workspace's checked-out
+        # branch, re-read from .git/HEAD at each autosave.
+        self.summary = ""
+        self.summary_turn = 0
+        self.summary_time = 0.0
+        self._summary_stale = False
+        self._summary_running = False
+        self.branch = ""
         self.epoch = 0
         self.snapshots: dict[str, list[dict]] = {}
         self.checkpoints = CheckpointStore(self.store.blob_dir(self.session_id) if self.store else None)
@@ -330,6 +343,7 @@ class Agent:
         self.announce_requests()
         if self._announce:
             self.emit(self.title_event())
+            self.emit(self.summary_event())
 
     # ----- requests and todos ------------------------------------------------------
     def _requests_changed(self) -> None:
@@ -883,8 +897,10 @@ class Agent:
             self.messages = result["messages"]
             self.context.invalidate()
             after, _ = self.context.used(self.messages, tools)
-            # The work moved on enough to rewrite the conversation: the pane title is owed a refresh.
+            # The work moved on enough to rewrite the conversation: the pane title and the session
+            # summary are both owed a refresh.
             self._title_stale = True
+            self._summary_stale = True
             event = {"event": "compacted", "reason": reason, "before_tokens": before, "after_tokens": after,
                      "summary_chars": result["summary_chars"], "trimmed_tool_outputs": result["trimmed"]}
             if result.get("carried") is not None:
@@ -1608,6 +1624,69 @@ class Agent:
             return self.title_event()
         return None
 
+    # ----- session summary ----------------------------------------------------------------
+    def summary_event(self) -> dict:
+        """`session_summary` for the GUI: the standing two-or-three-sentence summary and the turn
+        it covers (0 while there is none)."""
+        return {"event": "session_summary", "summary": self.summary, "turn": self.summary_turn,
+                "session_id": self.session_id}
+
+    def set_summary(self, text) -> dict | None:
+        """Store a fresh summary. An empty or unusable reply keeps the one there already is and
+        returns None, so a failed call never blanks the session list."""
+        cleaned = session_titles.clean_summary(text)
+        if not cleaned:
+            return None
+        with self._lock:
+            self.summary = cleaned
+            self.summary_turn = self.turns
+            self.summary_time = time.time()
+            self._summary_stale = False
+        self.autosave()
+        if self.store is not None:
+            # autosave() has just written the same field to the meta file; this is the index row.
+            self.store.note_summary(self.session_id, cleaned, meta=False)
+        return self.summary_event()
+
+    def summary_due(self) -> bool:
+        """Whether an automatic summary is owed: see titles.summary_due for the cadence."""
+        with self._lock:
+            return not self._summary_running and session_titles.summary_due(
+                self.turns, self.summary_turn, self._summary_stale, session_titles.has_reply(self.messages))
+
+    def claim_summary(self, force: bool = False) -> dict | None:
+        """Claim the next summary, or None when none is owed or one is already running.
+
+        Like claim_title(): the caller runs the model call off the protocol thread and hands the
+        result to release_summary(), so exactly one summary call is ever in flight per pane.
+        """
+        with self._lock:
+            if self._summary_running or not (force or self.summary_due()):
+                return None
+            self._summary_running = True
+            return {"messages": list(self.messages), "turns": self.turns,
+                    "files": session_titles.touched_files(self.checkpoints.items),
+                    "todos": [t.get("text", "") for t in self.todos.open_items()][:session_titles.DIGEST_TODOS]}
+
+    def release_summary(self, text: str, claim: dict) -> dict | None:
+        """Apply a claimed summary. Returns the `session_summary` event to emit, or None."""
+        with self._lock:
+            self._summary_running = False
+        event = self.set_summary(text) if text else None
+        if event is None:
+            # No model, or nothing usable came back: the previous summary stands and the cadence
+            # moves on, so a dead provider is not asked again after every turn.
+            with self._lock:
+                self.summary_turn = max(self.summary_turn, int(claim.get("turns") or self.turns))
+                self._summary_stale = False
+        return event
+
+    def refresh_branch(self) -> str:
+        """The workspace's checked-out branch, re-read from .git/HEAD (no git process, worktrees
+        and detached HEADs handled by sessions.git_branch) and kept on the session."""
+        self.branch = sessions_usage.git_branch(self.executor.workspace.root)
+        return self.branch
+
     # ----- rewind, fork, persistence --------------------------------------------
     def _location(self, item: dict):
         """(epoch key, message list, index) where this turn's user message starts, or None."""
@@ -1768,6 +1847,20 @@ class Agent:
         self.title_source = data.get("title_source") if data.get("title_source") in ("user", "model") else ""
         title_turn = data.get("title_turn")
         self.title_turn = title_turn if type(title_turn) is int and title_turn >= 0 else (self.turns if self.title else 0)
+        self.summary = session_titles.clean_summary(data.get("summary"))
+        summary_turn = data.get("summary_turn")
+        self.summary_turn = summary_turn if type(summary_turn) is int and summary_turn >= 0 else 0
+        self.summary_time = float(data["summary_time"]) if isinstance(data.get("summary_time"), (int, float)) else 0.0
+        if not self.summary and keep_id and self.store is not None:
+            # Summarised on demand while nobody had it open: that summary lives in the meta file,
+            # so resuming picks it up instead of asking the model for it again.
+            meta = sessions_usage.read_meta(self.store.directory, self.session_id)
+            self.summary = session_titles.clean_summary(meta.get("summary"))
+            if self.summary:
+                # It covered the session as it was saved, so the cadence starts from there.
+                turn = meta.get("summary_turn")
+                self.summary_turn = turn if type(turn) is int and turn > 0 else self.turns
+        self.branch = str(data.get("branch") or "")[:200]
         if keep_id and isinstance(data.get("created"), (int, float)):
             self.created = data["created"]
         self.usage_totals = sessions_usage.load_usage(data.get("usage"))
@@ -1780,10 +1873,14 @@ class Agent:
         # A resumed pane puts its header back before the first new turn (issue JRWQ).
         if self._announce:
             self.emit(self.title_event())
+            self.emit(self.summary_event())
 
     def session_data(self) -> dict:
         return {"version": STATE_VERSION, "kind": "relay_session", "id": self.session_id, "title": self.title,
                 "title_source": self.title_source, "title_turn": self.title_turn,
+                # The agent-written summary for the session list, and the branch it was written on.
+                "summary": self.summary, "summary_turn": self.summary_turn, "summary_time": self.summary_time,
+                "branch": self.refresh_branch(),
                 "created": self.created, "updated": time.time(), "workspace": str(self.executor.workspace.root),
                 "model": self.config.model, "preset": self.preset.id if self.preset else None,
                 "effort": self.effort, "mode": self.mode, "turns": self.turns, "epoch": self.epoch,
@@ -1801,7 +1898,9 @@ class Agent:
         if self.store is None or (self.turns == 0 and not self.store.path(self.session_id).exists()):
             return
         try:
-            self.store.save(self.session_data())
+            # session_data() and the write together: see _save_lock.
+            with self._save_lock:
+                self.store.save(self.session_data())
         except OSError as exc:
             self.emit({"event": "status", "text": f"Session not saved ({type(exc).__name__})."})
 

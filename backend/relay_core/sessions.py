@@ -28,6 +28,7 @@ import uuid
 from pathlib import Path
 
 from . import conv_index, logs
+from .titles import MAX_SUMMARY
 
 log = logs.get("sessions")
 
@@ -141,6 +142,21 @@ def _atomic_json(path: Path, data: dict) -> None:
             os.unlink(temp)
 
 
+def read_meta(directory: str | Path, session_id: str) -> dict:
+    """``<id>.meta.json`` as a dict; empty when it is missing or unreadable.
+
+    The *user* fields inside it (custom title, pin, a summary written while nobody had the session
+    open) are conv_index's, read and written through read_user_fields/write_user_fields; this is
+    the whole file, for the listing and for what save() must not drop.
+    """
+    try:
+        with open(Path(directory) / f"{check_id(session_id)}.meta.json", encoding="utf-8") as handle:
+            meta = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
 class SessionStore:
     def __init__(self, directory: str | Path, index=None):
         self.directory = Path(directory).expanduser()
@@ -181,11 +197,23 @@ class SessionStore:
         session_id = check_id(data["id"])
         _atomic_json(self.path(session_id), data)
         meta = {key: data.get(key) for key in ("id", "title", "created", "updated", "turns", "model", "preset",
-                                               "open_requests", "models", "usage")}
-        # A title or pin the user set in the session manager lives here, not in the index (a cache);
-        # an autosave from the pane must not drop it.
+                                               "open_requests", "models", "usage",
+                                               # the agent-written summary and the workspace's branch
+                                               "summary", "summary_turn", "branch")}
+        # The turn a summary written elsewhere covered; the summary itself comes back below.
+        kept = read_meta(self.directory, session_id)
+        for key in ("summary_turn", "branch"):
+            if not meta.get(key) and kept.get(key):
+                meta[key] = kept[key]
+        # A title or pin the user set in the session manager lives here, not in the index (a cache),
+        # and so does a summary written while nobody had the session open; an autosave from the pane
+        # must not drop either.
         user = conv_index.read_user_fields(self.directory, session_id)
         meta.update({k: v for k, v in user.items() if v})
+        # This worker holds the session, so its own summary is the newer one (conv_index's
+        # index_session_file merges in the same order).
+        if data.get("summary"):
+            meta["summary"] = data["summary"]
         _atomic_json(self.directory / f"{session_id}.meta.json", meta)
         index = self.index()
         if index is not None:
@@ -195,6 +223,30 @@ class SessionStore:
                                       "pinned": bool(user.get("pinned"))}, self.directory)
             except (OSError, ValueError, sqlite3.Error):
                 log.exception("session index update failed for %s", session_id)
+
+    def note_summary(self, session_id: str, summary: str, *, meta: bool = True) -> bool:
+        """Record a fresh agent-written summary for a saved session.
+
+        It goes into ``<id>.meta.json`` as a user field and into the index, never into the session
+        file: another worker may have that session open and owns those bytes. ``meta=False`` is for
+        the pane that holds the session itself, whose own save() has just written the same field.
+        Returns False when there is no meta file to hold it (the session is gone).
+        """
+        session_id = check_id(session_id)
+        summary = " ".join(str(summary or "").split())[:MAX_SUMMARY]
+        if not summary:
+            return False
+        if meta and not conv_index.write_user_fields(self.directory, session_id, summary=summary):
+            return False
+        index = self.index()
+        # conv_index owns the index schema; set_summary arrived with it, so ask before calling.
+        setter = getattr(index, "set_summary", None) if index is not None else None
+        if setter is not None:
+            try:
+                setter(session_id, summary)
+            except (OSError, ValueError, TypeError, sqlite3.Error):
+                log.exception("session index summary failed for %s", session_id)
+        return True
 
     def set_user_fields(self, session_id: str, **fields) -> None:
         """Rename (custom_title; empty restores the generated one) or pin a saved session."""
@@ -268,7 +320,8 @@ class SessionStore:
             items.append({"id": meta["id"], "title": meta.get("custom_title") or meta.get("title") or "",
                           "updated": meta.get("updated"),
                           "turns": meta.get("turns") or 0, "model": meta.get("model") or "",
-                          "open_requests": meta.get("open_requests") or 0})
+                          "open_requests": meta.get("open_requests") or 0,
+                          "summary": meta.get("summary") or "", "branch": meta.get("branch") or ""})
         items.sort(key=lambda item: item.get("updated") or 0, reverse=True)
         return items[:MAX_LISTED]
 

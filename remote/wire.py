@@ -185,8 +185,10 @@ FORWARDED_EVENTS = frozenset({
     # User-facing like model_changed, not routing internals like route: the owner's decision for
     # #EM1E is that Relay says when it swaps to a vision model, and a phone is a user surface.
     "vision_route", "vision_route_ended", "vision_unavailable",
-    # Pane titles and tab labels: what a phone needs to label the panes it is showing.
-    "session_title", "tab_label",
+    # Pane titles and tab labels: what a phone needs to label the panes it is showing. The
+    # session summary (protocol 18.4) is the same thing at greater length - this pane's own
+    # description, written from this pane's own conversation, which the phone is already watching.
+    "session_title", "tab_label", "session_summary",
     # Switchboard (protocol 19): cards, their threads and what the agent did to them. A phone
     # watching a pane should see the board move for the same reason the desktop does; the card
     # bodies are the user's own notes, already in git, not desktop-local configuration.
@@ -234,6 +236,13 @@ WITHHELD_EVENTS: dict[str, str] = {
     "job_output": "reply to the desktop's own request (up to 256 KiB of command output)",
     "conversation_pinned": "desktop-local administration",
     "conversation_renamed": "desktop-local administration",
+    # Summarising saved sessions (protocol 18.4). Same call as a rename or a pin: the reply to a
+    # click on the desktop's session list, about sessions other than the pane the phone is
+    # watching. The batch stream would hand a phone every other session's summary at once.
+    "conversation_summary": "reply to the desktop's own request; another session's content",
+    "conversations_summarize_estimate": "desktop-local administration",
+    "conversations_summarize_progress": "desktop-local administration; other sessions' summaries",
+    "conversations_summarize_cancelled": "desktop-local administration",
     # The ⓘ view (protocol 25): session file paths, instruction paths and the whole history.
     "session_info": "reply to the desktop's own request; local file paths",
     # A todo handed to a subagent from the task list: the answer to the desktop's own click. The

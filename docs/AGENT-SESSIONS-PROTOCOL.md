@@ -652,7 +652,7 @@ falls back reports `agent_role: "main"`. `configure` with an unusable `agent_rol
 - Not implemented on purpose (owner: "later"): routing between the Main and Flash agent by estimated task
   difficulty.
 
-## 14. Conversation list and full-text search (v1.4, 2026-09-17)
+## 14. Conversation list and full-text search (v1.4, 2026-09-17; v2.8, 2026-09-18)
 
 Backend: `backend/relay_core/conv_index.py` (the index) with command handlers in
 `session_protocol.py` and the autosave hook in `sessions.py`; GUI: `src/Conversations.{h,cpp}`
@@ -668,7 +668,11 @@ from the session JSON, so a database that is corrupt or unreadable is deleted an
 `meta.schema_version` records the version; `journal_mode=WAL` and `busy_timeout=10000` let one
 worker per pane write to it. **Version 2** (2026-09-18, section 25) adds subagent threads; a v1
 database is migrated in place (columns added, user titles and pins copied into the session meta
-files), because terminal-history rows have no file to be rebuilt from. Any other mismatch wipes
+files), because terminal-history rows have no file to be rebuilt from. **Version 3** (2026-09-18)
+adds the overview columns below and is migrated the same way: the columns are added empty and
+every agent and subagent row is marked `indexed_version = 0`, which is what the next
+`reconcile()` notices — it re-reads those rows once, whatever their mtime says, and reports how
+many in `backfilled`. Any other mismatch wipes
 it. The first conversation command a worker handles runs `reconcile()`: sessions and threads
 missing from the index or newer on disk are indexed, rows whose file is gone are dropped (one
 `stat` and one small meta read per session, a few ms when nothing changed). Before this,
@@ -676,11 +680,12 @@ sessions saved before the index existed or with it off were never found.
 
 | Table | Holds |
 |---|---|
-| `conversations` | one row per conversation: `session_id`, `source` (`agent`/`terminal`/`subagent`), `workspace`, `project`, `title`, `custom_title` (rename), `model`, `preset`, `created`, `updated`, `turns`, `open_requests`, `session_dir`, `pinned`; v2: `owner_session`, `parent_thread`, `agent_id`, `agent_type`, `spawn_turn`, `status`, `models` (JSON list), `tokens`, `cost`, `file_mtime` |
+| `conversations` | one row per conversation: `session_id`, `source` (`agent`/`terminal`/`subagent`), `workspace`, `project`, `title`, `custom_title` (rename), `model`, `preset`, `created`, `updated`, `turns`, `open_requests`, `session_dir`, `pinned`; v2: `owner_session`, `parent_thread`, `agent_id`, `agent_type`, `spawn_turn`, `status`, `models` (JSON list), `tokens`, `cost`, `file_mtime`; v3: `summary`, `first_prompt`, `last_prompt`, `files` (JSON list), `files_count`, `has_edits`, `branch`, `unfinished`, `mode`, `todos` (JSON list), `indexed_version` |
 | `entries` | one row per indexed piece of text: `session_id`, `turn`, `seq`, `kind`, `time`, `status`, `text` |
 | `entries_fts` | FTS5 (`unicode61 remove_diacritics 2`) over `entries.text`, external content, kept in step by triggers |
 
-`kind` is `prompt`, `reply`, `tool_call`, `tool_output` (agent threads) or `command`,
+`kind` is `title` or `summary` (v3: what the conversation is, not something inside it),
+`prompt`, `reply`, `tool_call`, `tool_output` (agent threads) or `command`,
 `command_output` (terminal history). User prompts are indexed from the **checkpoints**, so they
 survive compaction, which rewrites the message list; replies, tool calls and capped tool output
 come from the messages. Context blocks Relay writes into a user message
@@ -697,13 +702,65 @@ The workspace is spelled one way everywhere (`conv_index.normalize_workspace`: `
 symlinks resolved): the session directory digest, the `workspace` column, the "this project"
 filter and the terminal-history id all use it, so a symlinked workspace finds its own sessions.
 
-### 14.2 Queries
+The v3 columns are read out of the same session JSON on every autosave, so the list and the
+inline preview never open a session file:
+
+| Column | Where it comes from |
+|---|---|
+| `summary` | the session's own `summary`, else the `summary` in `<id>.meta.json` (a session summarised while nobody had it open), else the one already in the row — an autosave that carries none does not erase one. `set_summary()` writes it on its own. |
+| `first_prompt`, `last_prompt` | the first and last checkpoint prompt, whitespace collapsed, ~300 characters |
+| `files`, `files_count` | the distinct paths the agent **wrote** — a checkpoint's `files` entries that have an `after` digest, so an attempted write that never landed is not one — most recently written first, 50 kept, `files_count` the true total |
+| `has_edits` | `files_count > 0` |
+| `branch` | the session's `branch` (the git branch the workspace was on) |
+| `unfinished` | any of: the last checkpoint has no `ended` stamp, in a session whose checkpoints carry one at all (a session saved before that field existed never counts as unfinished just for that); the last message is a `user` or `tool` message, so nothing answered it; a todo is still `pending`, `in_progress` or `blocked` |
+| `mode` | the session's `mode` (`build`, `plan`, …) |
+| `todos` | `[{text, status}]`, the open ones first, 10 kept — for the overview in 14.4 |
+
+### 14.2 Queries and operators
 
 A query is words and `"quoted phrases"`. Every word is escaped and turned into an FTS5 prefix
 term (`"word"*`), a quoted run into a phrase; nothing the user types can reach FTS5 as an
 operator. Several words are an **AND over the whole conversation** (since v2): a conversation
 matches when every word or phrase occurs somewhere in it, and the matches shown are the entries
 that hold any of them. (Until 2026-09-18 the AND was inside one message.)
+
+Since v3 the query may also carry **operators**, taken out of the string before anything reaches
+FTS5; what is left is the free text. A value may be quoted (`file:"my file.py"`).
+
+| Operator | Matches |
+|---|---|
+| `project:<word>` | the project name or the workspace path contains it, ignoring case. **Implies `scope: "all"`** — naming a project is asking about that project, wherever the pane is. |
+| `file:<substring>` | the session wrote a path containing it, ignoring case |
+| `model:<substring>` | the session's model contains it (the `model` request field is an exact match instead) |
+| `branch:<substring>` | the session's branch contains it |
+| `after:<date>` | `updated >= ` the date |
+| `before:<date>` | `updated < ` the date |
+| `has:tasks` | open requests |
+| `has:edits` | the session wrote a file |
+| `has:summary` | it has a summary |
+| `is:pinned` | pinned |
+| `is:unfinished` | `unfinished` (14.1) |
+| `in:terminal`, `in:agent` | that `source` only |
+| `-word`, `-"a phrase"` | the conversation contains it **nowhere** (the exclusion spans every message, the way the AND does) |
+
+A date is `YYYY-MM-DD` (local midnight at its start, so `after:2026-09-18` includes that whole
+day and `before:2026-09-18` stops where it begins), `today`, `yesterday`, or `Nd` (`7d` = seven
+days ago). An operator may be negated too (`-model:kimi`, `-has:edits`).
+
+An **unknown key** is not an error and not an operator: the whole token goes back into the free
+text, so `colour:teal` and `https://example.com/x` still search for what they say. A **known key
+with a value it cannot use** (`has:wombat`, `before:yesteryear`, a bare `is:`) filters nothing
+and is named in `parsed.ignored`, so the GUI can grey it out rather than return an empty list.
+
+Every value is a bound parameter, and a `LIKE` value has its own `%` and `_` escaped: nothing
+typed into the box reaches FTS5 or SQLite as syntax.
+
+**Ranking.** `sort: "relevance"` orders by the **best kind** a conversation matched first —
+`title` > `summary` > user `prompt` (and terminal `command`) > assistant `reply` > `tool_call` >
+`tool_output` / `command_output` — then by how many entries matched, then by `updated`. A title
+hit therefore beats any number of tool-output hits. A title or summary match is a match line like
+any other, with `kind: "title"` / `"summary"` and `turn: 0`, so it leads the `matches` list. A
+rename re-writes the title entry, so a conversation is findable under its new name at once.
 
 ### 14.3 `conversations`
 
@@ -712,24 +769,49 @@ until?, sources?: ["agent"|"terminal"|"subagent"], include_threads?: bool, sort?
 "recent"|"oldest"|"longest"|"relevance", offset?, matches_per_item? (1–20, default 5),
 limit? (1–200, default 50), id?}`
 
+v3 filter fields, all optional and all stacking with whatever the query's operators say:
+`has_edits?: bool`, `unfinished?: bool`, `pinned?: bool`, `has_summary?: bool`, `file?: string`
+(substring of a written path), `branch?: string` (substring). The four booleans are **three
+state**: absent means "do not filter", `false` means "only the ones without it". A non-boolean
+there, or a non-string `file`/`branch`, is an error.
+
 Subagent threads (`source: "subagent"`) are left out unless `include_threads` is true or
 `sources` names `subagent`; `sources` absent means agent sessions and terminal history. `sort`
 (pinned first in every order): newest `updated` first (default), oldest first, most turns, or
-most matching entries. `offset` pages: the event carries `next_offset` when there is more.
+relevance (14.2). `offset` pages: the event carries `next_offset` when there is more.
 
 `scope` defaults to `project`, which uses `workspace` (the pane's own workspace when the field is
 absent). `since`/`until` are epoch seconds against `updated`. An empty `query` lists conversations
 instead of searching. No agent has to be configured.
 
 → `conversations {id?, scope, workspace, query, sort, offset, next_offset?, total, elapsed_ms,
-items: [...]}`
+parsed, facets, items: [...]}`
+
+`scope` in the **event** is the scope actually used, which is `"all"` when the query carried a
+`project:` operator whatever the request asked for; the GUI should follow it.
+
+`parsed` is what the query was understood to mean, for the chips above the box:
+`{text: "<the free text that went to FTS5>", operators: [{key, value, negated?}], ignored:
+["<raw token>", …]}`. An excluded word or phrase appears as `{key: "text", value: "pelican",
+negated: true}`; every other key is one of the operators in 14.2.
+
+`facets` is `{models: [...], branches: [...], projects: [...]}` — the distinct non-empty values of
+the rows the **filters** select (the query text is not applied, so a menu does not empty out as
+the user types), most recently used first, at most 30 each. It is there so the filter menus need
+no second request.
 
 Each item:
 
 `{session_id, source, title, generated_title, workspace, project, model, preset, created, updated,
 turns, open_requests, session_dir, pinned, snippet, match_count, matches: [{turn, kind, line,
 ranges: [[start, length], …], time}], owner_session, parent_thread, agent_id, agent_type,
-spawn_turn, status, models, tokens, cost, owner_title?, parent_title?}`
+spawn_turn, status, models, tokens, cost, owner_title?, parent_title?,
+summary, first_prompt, last_prompt, files: [… up to 8], files_count, has_edits: bool, branch,
+unfinished: bool, mode}`
+
+The v3 fields are the columns of 14.1: `files` is the first eight of the paths the session wrote
+and `files_count` how many there are in all, `summary` is empty when it has none. `snippet` is the
+summary when there is one, else the first prompt.
 
 A thread row's `owner_session` is the session that was in the pane when it was started, and
 `owner_title` that session's title (so a list can say whose thread it is even when the owner is
@@ -747,12 +829,29 @@ Terminal history appears as its own conversation per workspace, `session_id` `te
 ### 14.4 `conversation_get`
 
 `conversation_get {session_id, turn?, query?, limit? (≤2000, default 400), id?}` →
-`conversation {id?, …the item fields…, items: [{turn, kind, time, text, exit_status?, line?,
-ranges?}], match_count}`
+`conversation {id?, …the item fields…, overview, items: [{turn, kind, time, text, exit_status?,
+line?, ranges?}], match_count}`
 
-Entries come back in conversation order (`turn`, then write order). With `query`, every entry that
-matches carries `line` and `ranges`, and `match_count` is how many entries matched — this is also
-how Ctrl+F counts matches in the pane's own conversation.
+Entries come back in conversation order (`turn`, then write order). The `title` and `summary`
+entries are not messages, so `items` leaves them out; `overview` carries the summary instead. With
+`query`, every entry that matches carries `line` and `ranges`, and `match_count` is how many
+entries matched — this is also how Ctrl+F counts matches in the pane's own conversation.
+
+`overview` (v3) is the inline preview the session-manager pane draws before the transcript. It is
+built from the conversation's own row and a handful of its entries, so opening a preview never
+reads a session file back off disk:
+
+```
+overview: {summary, first_prompt,
+           last_turns: [{turn, prompt, reply}],   // the last three turns, each text ≤400 chars
+           files: [...],                          // the first twelve written paths
+           files_count,
+           todos: [{text, status}],               // open ones first, at most ten
+           branch, unfinished}
+```
+
+For terminal history a "turn" is a command, so `prompt` is the command line and `reply` its
+captured output.
 
 ### 14.5 `conversation_delete`, `conversation_rename`, `conversation_pin`
 
@@ -795,12 +894,26 @@ threads, entries, ms, conversations, bytes, schema_version, path}`.
 - The index holds message text. It lives in the same 0700 directory as the sessions, is never
   synced, and holds nothing the session files do not already hold. There is no telemetry.
 - Since v2 the words of a query may sit in different turns (14.2); a quoted phrase still has to
-  be in one entry.
+  be in one entry. An excluded word (`-word`) is the same rule the other way: it must be in no
+  entry of the conversation.
+- `total` and `facets` count what the **filters** match, not the query, so they do not move as the
+  user types; excluded words are part of the query and do not change them either.
 - `conversations` returns at most `matches_per_item` (default five, at most 20) matching turns per
   conversation; `conversation_get` has the rest.
 - Measured on 300 conversations × 30 turns (36 000 entries, 36 MiB of session JSON): index 44.7
   MiB, full rebuild 1.2 s, autosave update 3.4 ms, worst-case search (a word in every entry) 56–64
   ms median. On a real 248-session set: index 388 KiB, rebuild 61 ms, search 0.03–1.2 ms.
+- v3, measured on a synthetic 1 000 sessions × 42 entries (42 000 entries, 41 MiB index): listing
+  3.1 ms, one word 4.4–4.6 ms, two words 5.3 ms, relevance sort 3.9 ms, a negated word 4.3 ms,
+  `file:` 5.2 ms, operators alone 2.0 ms, `conversation_get` with its overview 0.2 ms, autosave
+  1.7 ms — all medians. At 340 sessions (the size of the real index) every one of those is under
+  2.2 ms. The one case that is not is a corpus with a twenty-word vocabulary, where every query
+  word really is in every entry: 80–100 ms there, and it is the FTS scan, not the v3 additions
+  (the kind weighting costs 0.3 ms of it and the facets 0.1 ms).
+- `ConversationIndex.set_summary(session_id, summary)` writes a summary and its searchable entry
+  without re-reading the session file; an empty string clears both. It is what section 18.4 calls
+  when it summarises a session nobody has loaded, and the summary is kept in that session's
+  `<id>.meta.json` so a rebuilt index reads it back.
 
 ## 15. Provider stalls, retry and logs (v1.5, 2026-09-17)
 
@@ -1226,6 +1339,115 @@ call**. The only judgement is whether the panes are on the same work: one phrase
 (`titles.related_text`, mirrored in `src/PaneTitles.cpp`) is that every title shares a content word
 with the first, and it is what the GUI uses until the worker answers and whenever no model is
 configured. A failed call is not an error: the offline answer is sent instead.
+
+### 18.4 Session summary (v1.8, 2026-09-18)
+
+Where the title says in six words what a pane is *doing*, the **summary** says in two or three
+sentences what happened: what the person wanted, what was done, and what is left or where it
+stopped — written like a commit message ("Fix the FTS index going stale. Added reconcile on first
+use and an autosave hook; symlink digests unified. Left: backfill old summaries."). It is what the
+session list, the resume picker and the conversation search (section 14, `has:summary`) show under
+a session's title. Backend: `titles.clean_summary`/`digest`/`generate_summary` with the state on
+`Agent` and the handlers in `session_protocol.py`; tests: `tests/test_summaries.py`.
+
+**Stored fields.** The session file gains four top-level fields, restored on resume and on
+`load_state`:
+
+| Field | Meaning |
+|---|---|
+| `summary` (str) | the standing summary, plain text, ≤ 320 characters |
+| `summary_turn` (int) | the turn it covers (0 while there is none) |
+| `summary_time` (float) | when it was written |
+| `branch` (str) | the workspace's checked-out branch, re-read from `.git/HEAD` at each save (a worktree's `.git` file is followed; a detached HEAD gives the short commit; no repository gives `""`) |
+
+`<id>.meta.json` carries `summary`, `summary_turn` and `branch` too, so the listing and the picker
+never open a session file. `summary` is also a **user field** there (`conv_index.read_user_fields` /
+`write_user_fields`, beside `custom_title` and `pinned`): that is how a session summarised while
+nobody had it open keeps its summary, and why an autosave from a pane can never drop one. When a
+worker does hold the session, its own summary is the newer one and wins.
+
+`session_summary {summary, turn, session_id}` (event)
+
+Sent when a new summary is stored, and again whenever a session is resumed or loaded and when a
+new conversation starts (`summary: ""`), exactly like `session_title`. Whenever one is stored,
+`ConversationIndex.set_summary(session_id, summary)` is called as well, so search sees it without
+re-reading the file.
+
+**When the worker writes one.** On the same cheap `chores`-role call as the title (section 13,
+Lite tier by default), started from the same hook after a turn ends, so the two cheap calls happen
+together and neither blocks the turn:
+
+| Situation | A summary call? |
+|---|---|
+| Before the first assistant reply | no |
+| Right after the first turn that has one | yes |
+| Each of the next four turns | no |
+| Five turns after the last summary (`titles.SUMMARY_REFRESH_TURNS`) | yes |
+| After a compaction | yes, at the end of the next turn |
+| Rewound to before the last summary | no |
+| Worker shutdown | **no** — see the note at the end |
+
+The call is given a **bounded digest**, never the whole conversation: the first request, the most
+recent compaction summary (`relay_kind: "summary"`), the tail of the user prompts and assistant
+replies (tool names, not tool output), the files the session wrote and the todos still open —
+hard-capped at 6 000 characters whatever the conversation's size. The reply is asked for as
+`{"summary": "..."}` and put through `clean_summary`: markdown, bullets, headings, links, quotes
+and the "Here is a summary:" / "The user wanted to" preambles come off, whitespace collapses and
+the text is cut on a sentence boundary at 320 characters. **A failed or unusable reply keeps the
+summary there already is** — it never blanks one — and the cadence moves on, so a dead provider is
+not asked again after every turn. At most one summary call per pane is ever in flight.
+
+#### `conversation_summarize` (one saved session, on demand)
+
+`conversation_summarize {session_id, session_dir?, id?}`
+→ `conversation_summary {session_id, summary, session_dir?, turn?, live?, id?}`
+or `conversation_summary {session_id, error, id?}`
+
+Summarises a session the user picked in the list. `session_dir` defaults to this pane's. A session
+**this pane holds** is summarised in place (`live: true`, and its `session_summary` event follows);
+any other is read from disk and its summary written to that session's `<id>.meta.json` alone — never
+to its session file, which a worker that has it open owns. A session with no assistant reply, or
+one that cannot be read, comes back as `error`, not as a protocol error.
+
+#### `conversations_summarize_estimate` / `_all` / `_cancel` (batch)
+
+`conversations_summarize_estimate {scope?: "project"|"all", workspace?, id?}`
+→ `conversations_summarize_estimate {scope, workspace, count, sessions, approx_input_tokens, approx_output_tokens, model, id?}`
+
+What summarising everything in scope would cost, before anything is sent anywhere. `sessions` is
+the agent sessions in scope; `count` is those of them with no summary and at least one turn, which
+is what a run would do. The token numbers are an estimate from the digest cap and the session
+files' size (about four characters to the token) — nothing is billed on them — and `model` is the
+model the `chores` role currently resolves to.
+
+`conversations_summarize_all {scope?, workspace?, limit?, id?}`
+→ `conversations_summarize_progress {done, total, session_id, summary | error, id?}` per session,
+then `conversations_summarize_progress {done, total, finished: true, failed, cancelled, id?}`
+
+Runs the same sessions one after another on a background thread, emitting one progress event per
+session as it lands. One batch per worker: a second request while one runs is an error. **There is
+no automatic backfill** (owner decision, 2026-09-18) — a batch only ever starts on this message.
+
+`conversations_summarize_cancel {id?}` → `conversations_summarize_cancelled {running, id?}`
+
+Stops a running batch *after* the session it is on, so no summary is half written; `running` says
+whether there was one to stop.
+
+**Privacy.** The digest goes to the provider the `chores` role already uses for titles and tab
+labels — the same key, the same endpoint, no new destination — and nothing else about a session
+leaves the machine. With no model configured nothing is sent at all and sessions simply have no
+summary. On the remote wire (`remote/wire.py`), `session_summary` is forwarded to a paired phone
+for the same reason `session_title` is — it describes the pane the phone is already watching —
+while `conversation_summary` and the three batch events are withheld, like `conversation_renamed`
+and `conversation_pinned`: they answer a click on the desktop's session list and would otherwise
+hand a phone every other session's summary.
+
+**Shutdown.** A last summary for a stale session on the worker's exit path is **not** implemented:
+`backend/worker.py` breaks out of its loop straight into `subagents.shutdown()` /
+`observe.shutdown()` / `turns.shutdown(timeout=1)` with no hook for the session handlers, and a
+model call there would hold the exit open for as long as the provider takes. The summary the
+cadence already wrote at the last turn boundary is what a closed session keeps; anything staler
+than that is one `conversation_summarize` away.
 
 ## 19. Switchboard: cards, threads and the Switchboard agent (v1.7, 2026-09-17)
 

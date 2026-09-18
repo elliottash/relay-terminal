@@ -32,6 +32,9 @@ TYPES = {"set_model", "set_effort", "context", "compact", "checkpoints", "rewind
          "synthesize_instructions", "suggest",
          # pane title and tab label (protocol section 18)
          "set_session_title", "tab_label",
+         # session summaries, on demand and in a batch (protocol section 18.4)
+         "conversation_summarize", "conversations_summarize_estimate",
+         "conversations_summarize_all", "conversations_summarize_cancel",
          # aliases: saved commands and prompts (protocol section 20)
          "aliases", "alias_run", "alias_save", "alias_delete",
          "alias_import_preview", "alias_import_apply",
@@ -371,7 +374,11 @@ class SessionCommands:
         Off the protocol thread with its own provider, like recaps: the GUI never waits for it, and
         stopping the turn never cancels it. A failure is not an error - the first-prompt title in
         `session_title` still names the pane.
+
+        The session summary rides the same moments (section 18.4), so the two cheap calls happen
+        together and neither one ever runs per turn.
         """
+        self.maybe_summary()
         agent = self.turns.agent
         if agent is None:
             return
@@ -412,6 +419,274 @@ class SessionCommands:
             except Exception:
                 return offline
         self._background("tab_label", request_id, work, lambda text: offline)
+
+    # ----- session summaries (protocol section 18.4) -----------------------------------------
+    def _summary_state(self) -> dict:
+        """State of the one batch this worker may run. Built on first use so the constructor,
+        which other sessions share, stays as it is."""
+        state = getattr(self, "_summaries", None)
+        if state is None:
+            state = {"lock": threading.Lock(), "cancel": threading.Event(), "running": False}
+            self._summaries = state
+        return state
+
+    @staticmethod
+    def _chores_provider(agent):
+        """The cheap chores-role provider summaries run on, or None when none can be built."""
+        if agent is None:
+            return None
+        try:
+            return agent.side_provider(cheap=True, role="chores", max_tokens=titles.SUMMARY_MAX_TOKENS)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _chores_model(agent) -> str:
+        """Which model a summary would run on, for the estimate."""
+        if agent is None:
+            return ""
+        try:
+            resolved = agent.roles.resolve("chores") if agent.roles is not None else None
+            if resolved is not None and not resolved.is_main:
+                return resolved.config.model
+        except Exception:
+            pass
+        return agent.config.model
+
+    def maybe_summary(self, force: bool = False) -> None:
+        """Write the session summary on a cheap chores-role call, when the cadence says one is owed.
+
+        Started from maybe_title(), so the summary and the title share their moments; off the
+        protocol thread, so no turn ever waits for it, and never twice at once per pane. A failure
+        is not an error: the summary already stored stands.
+        """
+        agent = self.turns.agent
+        if agent is None:
+            return
+        claim = agent.claim_summary(force=force)
+        if claim is None:
+            return
+        provider = self._chores_provider(agent)
+
+        def work():
+            text = ""
+            try:
+                if provider is not None:
+                    text = titles.generate_summary(provider, claim["messages"], threading.Event(),
+                                                   files=claim["files"], todos=claim["todos"])
+            except Exception:
+                text = ""
+            return agent.release_summary(text, claim)
+        self._background("session_summary", None, work, lambda _text: agent.release_summary("", claim))
+
+    def _summary_directory(self, request) -> str:
+        directory = _abs_dir(request.get("session_dir"), "session_dir")
+        if directory:
+            return directory
+        agent = self.turns.agent
+        if agent is None or agent.store is None:
+            raise ValueError("This pane has no saved sessions.")
+        return str(agent.store.directory)
+
+    def _summary_store(self, directory: str) -> SessionStore:
+        """A store for a session this pane does not hold, sharing the worker's index."""
+        return SessionStore(directory, index=self._index_or_none() or False)
+
+    def _index_or_none(self):
+        try:
+            return self.index()
+        except (ValueError, sqlite3.Error, OSError):
+            return None
+
+    def _summarize_saved(self, store: SessionStore, session_id: str, provider) -> tuple[str, str]:
+        """Generate and store one saved session's summary. Returns (summary, error); never raises.
+
+        The result goes to that session's `<id>.meta.json` and to the index, never to the session
+        file: another worker may have it open and owns those bytes.
+        """
+        try:
+            data = store.load(session_id)
+        except (ValueError, OSError) as exc:
+            return "", str(exc)[:300]
+        inputs = titles.saved_inputs(data)
+        if not titles.has_reply(inputs["messages"]):
+            return "", "That session has no assistant reply to summarise."
+        try:
+            text = titles.generate_summary(provider, inputs["messages"], threading.Event(),
+                                           files=inputs["files"], todos=inputs["todos"])
+        except (ValueError, OSError, ProviderError) as exc:
+            return "", str(exc)[:300]
+        except Exception as exc:
+            return "", f"Summary failed ({type(exc).__name__})."
+        if not text:
+            return "", "The model did not return a usable summary."
+        try:
+            if not store.note_summary(session_id, text):
+                return "", "That session has no metadata file to hold a summary."
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            return "", str(exc)[:300]
+        return text, ""
+
+    def _conversation_summarize(self, request):
+        """`conversation_summarize {session_id, session_dir?}`: summarise one saved session now.
+
+        The session this pane holds is summarised in place (its own `session_summary` follows);
+        any other is read from disk and its summary written to its meta file alone.
+        """
+        session_id = check_id(request.get("session_id"))
+        directory = self._summary_directory(request)
+        request_id = request.get("id")
+        agent = self._agent()
+        provider = self._chores_provider(agent)
+        if provider is None:
+            raise ValueError("No model is configured for the chores role; a summary needs one.")
+        failed = lambda text: {"event": "conversation_summary", "id": request_id,   # noqa: E731
+                               "session_id": session_id, "error": text}
+        live = (agent.store is not None and agent.session_id == session_id
+                and os.path.normpath(directory) == os.path.normpath(str(agent.store.directory)))
+        if live:
+            claim = agent.claim_summary(force=True)
+            if claim is None:
+                raise ValueError("A summary of this session is already being written.")
+
+            def work():
+                text = ""
+                try:
+                    text = titles.generate_summary(provider, claim["messages"], threading.Event(),
+                                                   files=claim["files"], todos=claim["todos"])
+                except Exception:
+                    text = ""
+                event = agent.release_summary(text, claim)
+                if event is None:
+                    return failed("The model did not return a usable summary.")
+                self.emit(event)
+                return {"event": "conversation_summary", "id": request_id, "session_id": session_id,
+                        "summary": event["summary"], "turn": event["turn"], "live": True}
+
+            def give_up(text):
+                agent.release_summary("", claim)
+                return failed(text)
+            self._background("conversation_summary", request_id, work, give_up)
+            return
+        store = self._summary_store(directory)
+
+        def work():
+            summary, error = self._summarize_saved(store, session_id, provider)
+            if error:
+                return failed(error)
+            return {"event": "conversation_summary", "id": request_id, "session_id": session_id,
+                    "summary": summary, "session_dir": directory}
+        self._background("conversation_summary", request_id, work, failed)
+
+    def _summary_scope(self, request) -> tuple[str, str]:
+        scope = request.get("scope", "project") or "project"
+        if scope not in ("project", "all"):
+            raise ValueError('scope must be "project" or "all".')
+        return scope, self._workspace(request)
+
+    def _summary_rows(self, scope: str, workspace: str) -> list[dict]:
+        """Agent sessions in scope, from the index; with the index off, this pane's own directory."""
+        rows = []
+        try:
+            result = self.index().search("", scope=scope, workspace=workspace, sources=["agent"],
+                                         limit=conv_index.MAX_LIMIT)
+            rows = [{"session_id": item["session_id"], "session_dir": item.get("session_dir") or "",
+                     "turns": item.get("turns") or 0} for item in result.get("items") or []]
+        except (ValueError, sqlite3.Error, OSError):
+            rows = []
+        if rows:
+            return [row for row in rows if row["session_dir"]]
+        agent = self.turns.agent
+        if agent is None or agent.store is None:
+            return []
+        return [{"session_id": item["id"], "session_dir": str(agent.store.directory),
+                 "turns": item.get("turns") or 0} for item in agent.store.listing()]
+
+    def _summary_candidates(self, scope: str, workspace: str) -> tuple[list[dict], int]:
+        """(sessions in scope with no summary yet, sessions in scope). A session with no turn has
+        no assistant reply either, so it is not counted."""
+        rows = self._summary_rows(scope, workspace)
+        pending = []
+        for row in rows:
+            try:
+                meta = session_files.read_meta(row["session_dir"], row["session_id"])
+                if (row["turns"] or 0) < 1 or meta.get("summary"):
+                    continue
+                size = SessionStore(row["session_dir"], index=False).path(row["session_id"]).stat().st_size
+            except (OSError, ValueError):
+                continue
+            pending.append({**row, "chars": min(titles.SUMMARY_DIGEST_CHARS, size)})
+        return pending, len(rows)
+
+    def _conversations_summarize_estimate(self, request):
+        """What summarising everything in scope would cost. Nothing is sent to any model here."""
+        scope, workspace = self._summary_scope(request)
+        pending, total = self._summary_candidates(scope, workspace)
+        chars = sum(item["chars"] for item in pending) + len(titles.SUMMARY_SYSTEM) * len(pending)
+        self.emit({"event": "conversations_summarize_estimate", "id": request.get("id"),
+                   "scope": scope, "workspace": workspace, "count": len(pending), "sessions": total,
+                   "approx_input_tokens": titles.approx_tokens(chars),
+                   "approx_output_tokens": len(pending) * titles.SUMMARY_OUTPUT_TOKENS,
+                   "model": self._chores_model(self.turns.agent)})
+
+    def _conversations_summarize_all(self, request):
+        """Summarise every session in scope that has none, one after another in the background.
+
+        Only ever on an explicit request: Relay never backfills summaries by itself.
+        """
+        scope, workspace = self._summary_scope(request)
+        limit = request.get("limit")
+        if limit is not None and type(limit) is not int:
+            raise ValueError("limit must be an integer.")
+        provider = self._chores_provider(self._agent())
+        if provider is None:
+            raise ValueError("No model is configured for the chores role; a summary needs one.")
+        state = self._summary_state()
+        with state["lock"]:
+            if state["running"]:
+                raise ValueError("A batch of summaries is already running.")
+            state["running"] = True
+            state["cancel"] = threading.Event()
+            cancel = state["cancel"]
+        try:
+            pending, _total = self._summary_candidates(scope, workspace)
+        except Exception:
+            with state["lock"]:
+                state["running"] = False
+            raise
+        if limit is not None and limit > 0:
+            pending = pending[:limit]
+        request_id, total = request.get("id"), len(pending)
+
+        def work():
+            done = failed = 0
+            try:
+                for item in pending:
+                    if cancel.is_set():
+                        break
+                    summary, error = self._summarize_saved(self._summary_store(item["session_dir"]),
+                                                           item["session_id"], provider)
+                    done += 1
+                    failed += 1 if error else 0
+                    progress = {"event": "conversations_summarize_progress", "id": request_id,
+                                "done": done, "total": total, "session_id": item["session_id"]}
+                    progress["error" if error else "summary"] = error or summary
+                    self.emit(progress)
+            finally:
+                with state["lock"]:
+                    state["running"] = False
+            return {"event": "conversations_summarize_progress", "id": request_id, "done": done,
+                    "total": total, "finished": True, "failed": failed, "cancelled": cancel.is_set()}
+        self._background("conversations_summarize", request_id, work)
+
+    def _conversations_summarize_cancel(self, request):
+        """Stop a running batch after the session it is on."""
+        state = self._summary_state()
+        with state["lock"]:
+            running = state["running"]
+            if running:
+                state["cancel"].set()
+        self.emit({"event": "conversations_summarize_cancelled", "id": request.get("id"), "running": running})
 
     # ----- request ledger and todos (protocol section 12) ------------------------------------
     def _tracking_agent(self):
@@ -482,7 +757,7 @@ class SessionCommands:
         return check_id(value)
 
     def _conversations(self, request):
-        for name in ("model",):
+        for name in ("model", "file", "branch"):
             if request.get(name) is not None and not isinstance(request.get(name), str):
                 raise ValueError(f"{name} must be text.")
         sources = request.get("sources")
@@ -495,6 +770,13 @@ class SessionCommands:
         include_threads = request.get("include_threads", False)
         if type(include_threads) is not bool:
             raise ValueError("include_threads must be true or false.")
+        # The three-state filters (protocol 14.3): absent means "do not filter", not "false".
+        flags = {}
+        for name in ("has_edits", "unfinished", "pinned", "has_summary"):
+            value = request.get(name)
+            if value is not None and type(value) is not bool:
+                raise ValueError(f"{name} must be true or false.")
+            flags[name] = value
         result = self.index().search(
             request.get("query", "") or "", scope=request.get("scope", "project") or "project",
             workspace=self._workspace(request), model=request.get("model") or None,
@@ -502,7 +784,8 @@ class SessionCommands:
             until=request.get("until"), sources=sources, limit=request.get("limit", 50),
             include_threads=include_threads, sort=request.get("sort") or "recent",
             offset=request.get("offset") or 0,
-            matches_per_item=request.get("matches_per_item") or conv_index.MAX_MATCHES_PER_ITEM)
+            matches_per_item=request.get("matches_per_item") or conv_index.MAX_MATCHES_PER_ITEM,
+            file=request.get("file") or None, branch=request.get("branch") or None, **flags)
         self.emit({"event": "conversations", "id": request.get("id"),
                    "scope": request.get("scope", "project") or "project",
                    "workspace": self._workspace(request), **result})
