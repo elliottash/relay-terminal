@@ -974,8 +974,26 @@ am present* with its grace period, told to guests as `share_state`; the outbound
 10.1; the queue-text filter of 10.1; and the audit kinds of 10.6. Lapses are driven by injected
 clocks, so the ten minutes and the sixty seconds are tested as numbers rather than waited on.
 
+**The desktop half of 10.5 is built** (2026-09-18, `src/SharingPane.{h,cpp}`, `src/RemoteShare.cpp`,
+`tests/sharingpane_test.cpp`, evidence in
+`docs/qa_evidence/2026-09-18-remote-multiplayer-desktop/`). The share window gains "Invite someone
+to this pane" — role, expiry, uses, the link and its QR — and everything that follows is a splitter
+pane rather than a dialog: per shared pane the participants with their key fingerprints and who is
+driving, the live invites with uses and expiry and a Revoke, and the knocks, control requests and
+guest prompts, each with the countdown of its own kind and Refuse first and holding the focus. The
+pane opens from the share chip, from the palette (`pane.sharing`) and by itself when somebody
+knocks, and opening it never takes the keyboard, because the next keystroke would land on Admit.
+The owner's keystroke in a pane a guest is driving sends `control_take` from the same place the
+agent's hand-over already ends.
+
+Reconciled against the hub's lines as written rather than as sketched here: a `participants` item
+carries `online` and the panes that person is `driving`, a `prompt_ask` carries the `plan` id when
+a guest's `plan_execute` became a prompt, `share_state {pane, paused, reason}` says whether guests
+are paused and whether it was the owner or their absence, and a participant's `expires` is an
+absolute epoch while an invite's is already the seconds left.
+
 What is **not** built: *following* and selection highlights, which 10.3 puts out of scope for v1
-with a reason. The desktop UI for the owner's side of all this is `src/`'s, against the 10.5 lines.
+with a reason.
 
 **The guest's web client is built** (`app/guest.js`, served at `/join`). It is a separate
 session from the owner's phone rather than that one with buttons hidden: `app/app.js` hands

@@ -12,7 +12,7 @@ rank: 6d
 created: '2026-09-17'
 acceptance: from a phone, the owner follows and drives a desktop Relay pane's agent and terminal with notifications; two people share a pane with clear control handoff; all traffic end-to-end encrypted
 source: '`issues/feature_intake.txt`, 2026-09-17: "another important feature i need: remote access on phone. multiplayer shared terminals. i like warp remote control and blink but they kind of suck. lets make a good version of that."'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-17-remote-p1/, docs/qa_evidence/2026-09-17-remote-share-button/], related: [C1HH, YR21, 05J2], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-17-remote-p1/, docs/qa_evidence/2026-09-17-remote-share-button/, docs/qa_evidence/2026-09-18-remote-multiplayer-desktop/], related: [C1HH, YR21, 05J2], github: null}
 ---
 # Remote access from a phone and multiplayer shared terminals
 
@@ -72,6 +72,7 @@ python3 -m remote.cli share --tls    # prints a QR; scan it, confirm the five-di
 | Viewing and typing as separate grants, enforced per message | `src/RemoteShare.cpp`, `remote/wire.py`, `remote/host.py` |
 | Local attach, so the desktop shares the same shell | `remote/attach.py` |
 | The share button, dialog and GUI sidecar | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` |
+| Multiplayer, the owner's desktop: "Invite someone to this pane", and the Sharing pane where knocks, control requests and guest prompts are answered | `src/SharingPane.{h,cpp}`, `src/RemoteShare.{h,cpp}`, `tests/sharingpane_test.cpp` |
 | Dev harness with the QR and self-signed TLS | `remote/cli.py`, `remote/devtls.py` |
 
 ## What is left (refreshed 2026-09-18, 15:00, against `dd35ead`)

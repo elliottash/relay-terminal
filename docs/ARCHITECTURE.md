@@ -253,6 +253,7 @@ property on the leaf widget (the `ToolPane`), read at paint time:
 | `options` (and `settings`, until nothing sets it) | gear (as on the title-bar button), OPTIONS | green (`success`) | tools: brass |
 | `actions` | bolt, ACTIONS | green, shared with Options | tools: brass |
 | `sessions` | list, SESSIONS | the shell blue (`shell`) | tools: brass |
+| `sharing` | phone, SHARING | brass | tools: brass |
 | `subagent` | tree, SUBAGENT | violet (`agent`) | agents: violet |
 | `turn` | bubble, AGENT TURN | violet (`agent`) | agents: violet |
 | anything else | a square, the type's own name | brass | tools: brass |
@@ -433,7 +434,9 @@ double-click in the text (→ `e`), a card's Discuss, Plan and Execute buttons (
 and rotating idle tips 4 s after a finished agent turn with an
 from the link or palette (→ `/continue` or `agent.continue`), the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter) and the subagent pane's "← main agent" (→ `agent.subagentPane`), a turn that printed tool-call
 lines (→ click a ▸ line to unfold it, `Ctrl+Shift+Return` for the nearest) and a diff pane opening
-(→ n and p step through the hunks), and rotating idle tips 4 s after a finished agent turn with an
+(→ n and p step through the hunks), the share chip on a pane that is already shared (→ the palette, then "Sharing", because
+`pane.sharing` deliberately has no key of its own),
+and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
 in `WARP.md`); tests in `tests/hints_test.cpp`.
 
@@ -847,6 +850,7 @@ native mode.
 | Ctrl+Shift+H | Composer back. While a program runs, submissions go to the agent |
 | Ctrl+Shift+J (`program.delegate`), the banner button, the palette | Hands the running program to the agent (section 9.2). With text in the prompt box it sends that request too. Pressed again, or Ctrl+H, takes it back |
 | F12 (`terminal.native`) | Toggles native input, unchanged, for people who want the old behaviour |
+| A guest holds the pane's keyboard (`#W5N2`, protocol 10.3) | One driver per pane, and it is the same token: "the agent is driving" and "alice is driving" are one state. The owner's physical keystroke always takes it back, without asking — `Pane::takeBackFromGuest()` sends `control_take` and is called from exactly the two places `endDelegation()` is, `setNative()` and the key filter, which never swallows the key that did it |
 
 Policy lives in QSettings: `control/default` (`agent`, the default — the prompt box keeps the
 keyboard — or `human`, the old automatic hand-over) and `control/programs` (basename → `human` or
@@ -1922,6 +1926,37 @@ Two rules decide the shape:
 - **Approving a device is a deliberate click**, and viewing and typing are separate grants. The
   dialog shows a five-digit code derived from the Noise handshake on both ends, and *Refuse* holds
   the focus, because allowing typing hands a phone the keyboard of a live shell.
+
+**Inviting another person, and the Sharing pane** (`#W5N2`, protocol section 10). Pairing your own
+phone is a moment and stays a dialog; being host to somebody else is not, so it is a pane. The
+share window gains "Invite someone to this pane" — role (Viewer or Editor), expiry, uses, the link
+as a read-only field with a Copy button and its QR, and one sentence saying what the role allows.
+Everything after that lives in `src/SharingPane.{h,cpp}` (library `relay-sharing`), a `ToolPane` of
+kind `Sharing` whose `paneType` is `sharing`:
+
+- `relay::sharing::Model` holds no widgets. It reads the sidecar's section-10.5 lines — who is on
+  each pane, which invites are live, what is waiting for the owner, who is driving — and expires a
+  waiting request on the hub's own clock (2 min for a knock, 60 s for the keyboard, 10 min for a
+  prompt). `tests/sharingpane_test.cpp` drives it without a hub and without a display.
+- `SharingView` renders it and calls back; `RemoteShare` is the only place a line is ever sent.
+- Refuse is first and holds the focus on every question, the editor button is absent on a
+  viewer-only invite (admitting may lower a role, never raise it), and a guest's prompt is shown
+  whole and wrapped, because approving it is approving exactly that text. There is no "approve
+  always" in v1, by the protocol's own argument (section 10.5).
+
+The pane opens from the share chip once a pane is shared, from the palette (`pane.sharing`), and by
+itself when somebody knocks. **Opening it never takes the keyboard**: `RelayWindow::openSharingPane`
+puts the focused widget back, now and again after the layout has run, because the next keystroke
+would otherwise land on Admit. The bell carries the same news through `Pane::notifyFromWindow`,
+which is the ordinary notification path — the desktop only hears about it while Relay is not the
+window you are looking at.
+
+While a pane is shared its header says so: "phone", "2 guests", or — when somebody else holds the
+keyboard — "alice is typing" in the remote session's own hue, with the hatched band across the
+title row, because it means the same thing as an ssh session does. Typing in such a pane takes
+control straight back (`control_take`), from the two places that already do this for the agent:
+`Pane::setNative()`, beside the `endDelegation()` that ends the agent's turn at the keyboard
+(section 9, card #C1HH), and the key filter, which passes the keystroke on untouched.
 
 Everything else — pairing, capabilities, the password-prompt refusal, revocation — is the protocol's
 job and is described in [REMOTE-PROTOCOL.md](REMOTE-PROTOCOL.md).
