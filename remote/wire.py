@@ -10,7 +10,9 @@ docs/REMOTE-PROTOCOL.md sections 6 and 7.
 """
 from __future__ import annotations
 
+import base64
 import json
+import re
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -196,6 +198,26 @@ def decode(data: bytes) -> dict:
     if not isinstance(message, dict) or not isinstance(message.get("t"), str):
         raise WireError("unknown_type", 'a message must be an object with a string "t".')
     return message
+
+
+# The web client encodes bytes as base64url and drops the padding, which is what `btoa` plus a
+# URL-safe swap gives you. Strict standard-base64 decoding rejects all of it, so binary fields are
+# decoded here, in one place, for both spellings.
+_BASE64 = re.compile(r"^[A-Za-z0-9+/=_-]*$")
+
+
+def decode_bytes(value, limit: int, what: str) -> bytes:
+    """A base64 or base64url field as bytes, or a WireError naming the field."""
+    if not isinstance(value, str) or len(value) > limit:
+        raise WireError("unknown_type", f"{what} must be base64, at most {limit} characters.")
+    if not _BASE64.match(value):
+        raise WireError("unknown_type", f"{what} is not base64.")
+    padded = value.replace("-", "+").replace("_", "/")
+    padded += "=" * (-len(padded) % 4)
+    try:
+        return base64.b64decode(padded, validate=True)
+    except Exception as exc:
+        raise WireError("unknown_type", f"{what} is not base64.") from exc
 
 
 def error(code: str, message: str, request_id=None) -> dict:

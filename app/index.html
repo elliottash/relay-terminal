@@ -71,9 +71,14 @@
       <div id="term-bar">
         <span id="term-mode" class="chip">Watching</span>
         <span id="term-note" class="muted small"></span>
+        <button type="button" id="term-direct" hidden>Keyboard</button>
         <button type="button" id="term-take">Take over</button>
         <button type="button" id="term-release" hidden>Hand back</button>
       </div>
+      <!-- Focus target for direct typing: a real field, so a tablet's keyboard opens and every
+           key reaches keydown. It is never read; the bytes go straight out. -->
+      <input id="term-capture" type="text" autocapitalize="off" autocomplete="off"
+             autocorrect="off" spellcheck="false" aria-label="Terminal keyboard" hidden>
       <div id="term-keys" hidden></div>
       <div id="term-composer" hidden>
         <input id="term-line" type="text" placeholder="Type a line, Enter to run"

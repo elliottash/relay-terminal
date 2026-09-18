@@ -641,13 +641,7 @@ class Host:
         audio_format = message.get("format", "webm")
         if audio_format not in ("webm", "ogg", "wav", "mp3", "m4a"):
             raise wire.WireError("unknown_type", "unsupported audio format.")
-        data = message.get("data")
-        if not isinstance(data, str) or len(data) > MAX_VOICE_BYTES * 4 // 3 + 8:
-            raise wire.WireError("unknown_type", "that clip is too large for one frame.")
-        try:
-            audio = base64.b64decode(data, validate=True)
-        except Exception as error:
-            raise wire.WireError("unknown_type", "the clip is not base64.") from error
+        audio = wire.decode_bytes(message.get("data"), MAX_VOICE_BYTES * 4 // 3 + 8, "the clip")
         text = await self.source.transcribe(pane, audio, audio_format)
         await channel.send({"t": "agent", "pane": pane,
                             "event": {"event": "transcribed", "text": text},
@@ -678,13 +672,7 @@ class Host:
 
     async def _on_keys(self, channel: Channel, message: dict) -> None:
         pane = self._typing_pane(channel, message)
-        data = message.get("bytes")
-        if not isinstance(data, str) or len(data) > 8192:
-            raise wire.WireError("unknown_type", "keys needs base64 bytes.")
-        try:
-            raw = base64.b64decode(data, validate=True)
-        except Exception as error:
-            raise wire.WireError("unknown_type", "keys must be base64.") from error
+        raw = wire.decode_bytes(message.get("bytes"), 8192, "keys")
         await self.source.send_keys(pane, raw, device=channel.device_id)
 
     async def _on_line(self, channel: Channel, message: dict) -> None:

@@ -12,6 +12,7 @@ Feature `#W5N2`. Relay sharing one of its own panes with a phone, driven under X
 | `implementer-06-paired.png` | After allowing |
 | `implementer-07-pane-after-phone-typed.png` | The desktop pane showing the line the browser typed, and the share chip lit |
 | `pair.log` | What the browser saw, including its own copy of the five-digit code |
+| `implementer-08-ipad-inbox.png`, `implementer-09-ipad-terminal.png` | The same client at iPad size, typing directly into the shell with a hardware keyboard |
 
 The run pairs a headless Chrome standing in for a phone, so the codes in `implementer-05` and
 `pair.log` are derived independently at each end from the Noise handshake and must match.

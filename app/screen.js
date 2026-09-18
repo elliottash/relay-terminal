@@ -184,7 +184,31 @@ export const KEYS = {
   '^K': '\x0b', '^U': '\x15', '^W': '\x17', '^R': '\x12',
 };
 
+// A key event as the bytes a terminal expects. Returns null for keys we do not send, so the
+// browser keeps its own behaviour (tab-switching shortcuts, for one).
+export function keyEventBytes(event) {
+  const { key, ctrlKey, altKey, metaKey } = event;
+  if (metaKey) return null;                 // Cmd is the tablet's, not the terminal's
+  const named = {
+    Enter: '\r', Tab: '\t', Escape: '\x1b', Backspace: '\x7f', Delete: '\x1b[3~',
+    ArrowUp: '\x1b[A', ArrowDown: '\x1b[B', ArrowRight: '\x1b[C', ArrowLeft: '\x1b[D',
+    Home: '\x1b[H', End: '\x1b[F', PageUp: '\x1b[5~', PageDown: '\x1b[6~',
+    F1: '\x1bOP', F2: '\x1bOQ', F3: '\x1bOR', F4: '\x1bOS',
+    F5: '\x1b[15~', F6: '\x1b[17~', F7: '\x1b[18~', F8: '\x1b[19~',
+    F9: '\x1b[20~', F10: '\x1b[21~', F11: '\x1b[23~', F12: '\x1b[24~',
+  };
+  if (named[key]) return altKey ? `\x1b${named[key]}` : named[key];
+  if (key.length !== 1) return null;        // Shift, Meta, dead keys and the rest
+  if (ctrlKey) {
+    const byte = controlByte(key);
+    return byte === null ? null : byte;
+  }
+  return altKey ? `\x1b${key}` : key;
+}
+
 export function controlByte(letter) {
+  // Ctrl+A..Ctrl+_ are the character minus 64; Ctrl+Space is NUL.
+  if (letter === ' ') return '\x00';
   const code = letter.toUpperCase().charCodeAt(0);
   if (code < 64 || code > 95) return null;
   return String.fromCharCode(code - 64);

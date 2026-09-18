@@ -239,6 +239,69 @@ class BrowserTerminalTests(unittest.TestCase):
         asyncio.run(asyncio.wait_for(main(), 240))
 
 
+@unittest.skipUnless(BRIDGE and find_chrome(), "needs the screen bridge and Chrome")
+class DirectTypingTests(unittest.TestCase):
+    """The tablet path: a real keyboard, every key straight through to the program."""
+
+    def test_keys_go_through_one_at_a_time(self):
+        async def main():
+            async with Harness() as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    await browser.evaluate("document.querySelectorAll('.pane-row')[0].click()")
+                    await browser.wait_for(shown('terminal-pane'), timeout=20)
+                    await browser.wait_for("document.querySelectorAll('.screen-row').length > 1",
+                                           timeout=30)
+                    await browser.evaluate("document.getElementById('term-take').click()")
+                    await browser.wait_for(shown('term-composer'), timeout=20)
+
+                    # Turn on direct typing: the line box goes, the keyboard target arrives.
+                    await browser.evaluate("document.getElementById('term-direct').click()")
+                    await browser.wait_for("!" + shown('term-composer'), timeout=10)
+                    self.assertEqual(
+                        await browser.evaluate("document.activeElement.id"), "term-capture")
+
+                    # Type it a key at a time, the way a keyboard does.
+                    await browser.evaluate("""
+                        (() => {
+                          const target = document.getElementById('term-capture');
+                          const send = (key, init = {}) => target.dispatchEvent(
+                            new KeyboardEvent('keydown', {key, bubbles: true, cancelable: true,
+                                                          ...init}));
+                          for (const key of 'echo direct-keys-4242') send(key);
+                          send('Enter');
+                          return true;
+                        })()
+                    """)
+                    deadline = asyncio.get_event_loop().time() + 20
+                    while "direct-keys-4242" not in harness.screen_text():
+                        if asyncio.get_event_loop().time() > deadline:
+                            self.fail(f"never arrived; screen was:\n{harness.screen_text()}")
+                        await asyncio.sleep(0.2)
+
+                    # Ctrl and the arrow keys are encoded, not sent as letters.
+                    await browser.evaluate("""
+                        (() => {
+                          const target = document.getElementById('term-capture');
+                          target.dispatchEvent(new KeyboardEvent('keydown',
+                            {key: 'c', ctrlKey: true, bubbles: true, cancelable: true}));
+                          return true;
+                        })()
+                    """)
+                    await asyncio.sleep(1)
+                    self.assertNotIn("direct-keys-4242c", harness.screen_text())
+
+                    problems = [line for line in browser.console if "EXCEPTION" in line]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 240))
+
+
 @unittest.skipUnless(BRIDGE, "relay-screen-bridge is not built")
 class BridgeTests(unittest.TestCase):
     def test_the_bridge_reports_a_password_prompt(self):

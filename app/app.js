@@ -6,7 +6,7 @@
 // textContent. There is no innerHTML in this file, and the CSP forbids inline script anyway.
 
 import { Rrp, loadDevice, forgetDevice, fingerprint, b64 } from './rrp.js';
-import { ScreenView, KEYS, controlByte } from './screen.js';
+import { ScreenView, KEYS, controlByte, keyEventBytes } from './screen.js';
 
 const rrp = new Rrp();
 let panes = [];
@@ -19,6 +19,7 @@ let screenView = null;
 let tab = 'agent';
 let driving = false;
 let sticky = { ctrl: false, alt: false };
+let directKeys = false;
 
 const $ = (id) => document.getElementById(id);
 const show = (name) => {
@@ -82,6 +83,7 @@ async function afterConnect(record) {
   $('capability').textContent = record.capability;
   capability = record.capability;
   if (!rrp.session) await rrp.connect(record);
+  setStatus('connected', 'ok');
   show('inbox');
 }
 
@@ -210,9 +212,15 @@ function updateDriveUi() {
   const allowed = capability === 'full';
   $('term-take').hidden = driving || !allowed;
   $('term-release').hidden = !driving;
+  $('term-direct').hidden = !driving;
   $('term-keys').hidden = !driving;
-  $('term-composer').hidden = !driving;
-  $('term-mode').textContent = driving ? 'You have the keyboard' : 'Watching';
+  // With direct typing on, the line box would only be in the way.
+  $('term-composer').hidden = !driving || directKeys;
+  $('term-capture').hidden = !driving || !directKeys;
+  $('term-direct').classList.toggle('is-on', directKeys);
+  $('term-mode').textContent = driving
+    ? (directKeys ? 'Typing directly' : 'You have the keyboard')
+    : 'Watching';
   $('term-mode').className = `chip ${driving ? 'ok' : ''}`;
   if (!allowed) {
     $('term-note').textContent = 'This device is paired for viewing only.';
@@ -221,6 +229,27 @@ function updateDriveUi() {
   } else {
     $('term-note').textContent = '';
   }
+}
+
+// Direct typing: every key goes straight to the program, so a tablet with a keyboard behaves
+// like a terminal. The line box stays the default on a phone, where soft keyboards mangle
+// per-key input; this is the opt-in for when there are real keys.
+function setDirectKeys(on) {
+  directKeys = on;
+  updateDriveUi();
+  if (on) {
+    const capture = $('term-capture');
+    capture.value = '';
+    capture.focus();
+  }
+}
+
+function onDirectKey(event) {
+  if (!driving || !directKeys) return;
+  const bytes = keyEventBytes(event);
+  if (bytes === null) return;
+  event.preventDefault();
+  sendKeys(bytes);
 }
 
 function sendKeys(text) {
@@ -516,9 +545,23 @@ window.addEventListener('DOMContentLoaded', () => {
   $('term-release').addEventListener('click', () => {
     rrp.send({ t: 'control_release', pane: current }).catch(() => {});
     driving = false;
+    directKeys = false;
     updateDriveUi();
   });
   $('term-send').addEventListener('click', sendLine);
+  $('term-direct').addEventListener('click', () => setDirectKeys(!directKeys));
+  $('term-capture').addEventListener('keydown', onDirectKey);
+  // Never let the field accumulate text: it is a focus target, not an input.
+  $('term-capture').addEventListener('input', (event) => { event.target.value = ''; });
+  $('term-capture').addEventListener('paste', (event) => {
+    event.preventDefault();
+    const text = event.clipboardData?.getData('text') || '';
+    if (text && current) rrp.send({ t: 'paste', pane: current, text }).catch(() => {});
+  });
+  // Tapping the screen while typing directly puts the keyboard back where it belongs.
+  $('screen-wrap').addEventListener('click', () => {
+    if (driving && directKeys) $('term-capture').focus();
+  });
   $('term-line').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') { event.preventDefault(); sendLine(); }
   });

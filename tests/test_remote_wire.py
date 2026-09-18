@@ -78,6 +78,31 @@ class DecodeTests(unittest.TestCase):
             wire.decode(b"x" * (wire.MAX_MESSAGE + 1))
 
 
+class BinaryFieldTests(unittest.TestCase):
+    """The web client sends base64url with no padding; both spellings must decode."""
+
+    def test_both_spellings_decode(self):
+        import base64
+        payload = bytes(range(256))
+        standard = base64.b64encode(payload).decode()
+        urlsafe = base64.urlsafe_b64encode(payload).decode().rstrip("=")
+        self.assertEqual(wire.decode_bytes(standard, 10000, "x"), payload)
+        self.assertEqual(wire.decode_bytes(urlsafe, 10000, "x"), payload)
+
+    def test_unpadded_short_values_decode(self):
+        # One keystroke is two base64 characters and no padding — the case that was broken.
+        self.assertEqual(wire.decode_bytes("eA", 100, "keys"), b"x")
+
+    def test_rubbish_is_refused(self):
+        for bad in (None, 12, "not base64!", "*" * 8):
+            with self.assertRaises(wire.WireError, msg=bad):
+                wire.decode_bytes(bad, 100, "x")
+
+    def test_oversized_is_refused(self):
+        with self.assertRaises(wire.WireError):
+            wire.decode_bytes("A" * 200, 100, "x")
+
+
 class StreamTests(unittest.TestCase):
     def test_sequence_numbers_start_at_one_and_advance(self):
         stream = wire.Stream("panes")

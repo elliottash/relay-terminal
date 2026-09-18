@@ -10,6 +10,9 @@
    this every screen draws at once. */
 [hidden] { display: none !important; }
 html, body { height: 100%; }
+/* iOS inflates text in narrow columns unless told not to, which would override the terminal's own
+   measured font size and break the alignment of the grid. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--text);
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -177,3 +180,31 @@ p { margin: 0 0 12px; }
   border-radius: 10px; padding: 10px 12px; font: inherit;
   font-family: ui-monospace, Menlo, monospace;
 }
+
+/* ---- tablets and desktop browsers -------------------------------------------------------- */
+/* The layout is phone-first: one column, edge to edge. On a wider screen that leaves text lines
+   far too long to read, so everything but the terminal gets a comfortable measure, while the
+   terminal keeps the full width — more columns visible is the whole point of a bigger screen. */
+@media (min-width: 700px) {
+  #pane-list, #thread-body, .pad, #thread-bar, #thread-tabs, #composer, #term-bar, #term-keys,
+  #term-composer {
+    max-width: 920px;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+  }
+  .pane-row { border-radius: 10px; margin: 6px 0; border-bottom: 0; }
+  #pane-list { padding: 6px 12px; }
+  .prompt, .turn { max-width: 720px; }
+  #screen-wrap { padding: 10px 16px; }
+  .screen-grid { margin: 0 auto; display: block; width: fit-content; }
+}
+
+/* The focus target for direct typing. It must be focusable and on screen for a tablet keyboard to
+   open, so it is a real field kept out of sight rather than display:none. */
+#term-capture {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  opacity: 0; border: 0; pointer-events: none;
+}
+#term-direct.is-on { background: var(--ok); color: #10131a; }
+#term-direct { background: var(--line); color: var(--text); }
