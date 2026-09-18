@@ -23,7 +23,7 @@ class QTreeView;
 
 namespace relay {
 
-// ----- explorer right-click menu (issue #D60R) --------------------------------------------------
+// ----- right-click menus (issues #D60R, V9V1) ---------------------------------------------------
 //
 // The menu is described as data so the list — which entries appear for a folder, for a file and
 // for the empty space below the rows, and which of them are greyed out — can be checked without a
@@ -32,7 +32,7 @@ namespace relay {
 enum class FileMenuTarget { None, File, Folder };
 
 struct FileMenuItem {
-    QString id;               // "navigate", "open", "preview", "copyPath", …; "-" is a separator
+    QString id;               // "openInternal", "openExternal", "openFolder", "navigate", …; "-" is a separator
     QString label;
     bool enabled = true;
     bool isSeparator() const { return id == QLatin1String("-"); }
@@ -47,9 +47,18 @@ struct FileMenuHost {
     bool writable = true;
 };
 
+// The three entries every menu leads with, appended in the owner's order (issue V9V1, 2026-09-18:
+// "open internal at the top and open external second and open folder third"). Internal is a Relay
+// pane, external is the desktop's default application, folder is the desktop's file manager.
+void openEntries(QList<FileMenuItem> &items, FileMenuTarget target, const FileMenuHost &host);
+
 // The entries for one right-click, in order, with separators as items whose id is "-". Never
 // starts or ends with a separator and never has two in a row.
 QList<FileMenuItem> explorerMenu(FileMenuTarget target, const FileMenuHost &host);
+
+// The same three entries plus Copy path, for a right-click inside a preview pane. The viewer's
+// own Copy / Select all follow them in the QMenu that FilePreview builds.
+QList<FileMenuItem> previewMenu(const FileMenuHost &host);
 
 // A directory browser rooted at one folder. Enter, or a click (double by default, single when
 // "Open items with a single click" is on), opens: a folder navigates into it, a file calls
@@ -147,6 +156,9 @@ public:
     // Room the host's floating pane buttons need at the right of the header row, so the view
     // button ("Source (MD)") never ends up underneath them.
     void setHeaderRightInset(int pixels);
+    // The entries a right-click in the preview offers, in order: what showMenu() builds its QMenu
+    // from, and what a test checks. Empty while no file is open.
+    QList<FileMenuItem> menu() const;
 
     static constexpr qint64 kMaxTextBytes = 2 * 1024 * 1024;
     static constexpr qint64 kMaxImageBytes = 64 * 1024 * 1024;
@@ -159,9 +171,13 @@ public:
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
+    bool eventFilter(QObject *object, QEvent *event) override;
 
 private:
     void followLink(const QUrl &url);
+    bool showMenu(const QPoint &globalPos, QWidget *source);
+    void runMenuAction(const QString &id);
     void showText(const QString &path, qint64 size);
     void showMarkdown(const QString &path, qint64 size);
     bool showImage(const QString &path, qint64 size);

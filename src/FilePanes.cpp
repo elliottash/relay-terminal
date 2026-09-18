@@ -24,6 +24,7 @@
 #include <QHeaderView>
 #include <QImageReader>
 #include <QInputDialog>
+#include <QContextMenuEvent>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -73,6 +74,20 @@ QString humanSize(qint64 bytes) {
     return QLocale().formattedDataSize(bytes);
 }
 
+// "Open folder": ask the desktop's file manager to show the entry, so the file is selected in the
+// folder it sits in. Falls back to opening the folder itself when no FileManager1 service answers.
+void openContainingFolder(const QString &path) {
+    const QString folder = QFileInfo(path).isDir() ? path : QFileInfo(path).absolutePath();
+    if (!QProcess::startDetached(QStringLiteral("dbus-send"),
+                                 {QStringLiteral("--session"), QStringLiteral("--print-reply"),
+                                  QStringLiteral("--dest=org.freedesktop.FileManager1"),
+                                  QStringLiteral("--type=method_call"), QStringLiteral("/org/freedesktop/FileManager1"),
+                                  QStringLiteral("org.freedesktop.FileManager1.ShowItems"),
+                                  QStringLiteral("array:string:") + QUrl::fromLocalFile(path).toString(),
+                                  QStringLiteral("string:")}))
+        QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+}
+
 QString tildePath(const QString &path) {
     const QString home = QDir::homePath();
     if (path == home) return QStringLiteral("~");
@@ -81,7 +96,26 @@ QString tildePath(const QString &path) {
 }
 }  // namespace
 
-// ----- explorer right-click menu ------------------------------------------------------------------
+// ----- right-click menus --------------------------------------------------------------------------
+
+void openEntries(QList<FileMenuItem> &items, FileMenuTarget target, const FileMenuHost &host) {
+    if (target != FileMenuTarget::None)
+        items.append({QStringLiteral("openInternal"), QStringLiteral("Open internal"),
+                      target == FileMenuTarget::Folder || host.canPreview});
+    items.append({QStringLiteral("openExternal"), QStringLiteral("Open external"), true});
+    items.append({QStringLiteral("openFolder"), QStringLiteral("Open folder"), true});
+}
+
+QList<FileMenuItem> previewMenu(const FileMenuHost &host) {
+    // The preview shows one file, so its menu is the three open entries and the two copies; there
+    // is no row that was clicked and nothing to create, rename or delete. "Open internal" reopens
+    // the file in this pane, which is also how a Markdown file gets back to the rendered view.
+    QList<FileMenuItem> items;
+    openEntries(items, FileMenuTarget::File, host);
+    items.append({QStringLiteral("-"), QString(), true});
+    items.append({QStringLiteral("copyPath"), QStringLiteral("Copy path"), true});
+    return items;
+}
 
 QList<FileMenuItem> explorerMenu(FileMenuTarget target, const FileMenuHost &host) {
     QList<FileMenuItem> items;
@@ -92,25 +126,21 @@ QList<FileMenuItem> explorerMenu(FileMenuTarget target, const FileMenuHost &host
         if (!items.isEmpty() && !items.last().isSeparator()) items.append({QStringLiteral("-"), QString(), true});
     };
 
-    if (target == FileMenuTarget::Folder) {
-        add("open", QStringLiteral("Open"));
-        if (host.canNavigateTerminal) add("navigate", QStringLiteral("Navigate here"));
-    } else if (target == FileMenuTarget::File) {
-        add("open", QStringLiteral("Open"));
-        if (host.canPreview) add("preview", QStringLiteral("Open in a preview pane"));
-        if (host.canNavigateTerminal) add("navigate", QStringLiteral("Navigate here"));
-    } else if (host.canNavigateTerminal) {
-        // The empty space below the rows acts on the folder the explorer is showing.
-        add("navigate", QStringLiteral("Navigate here"));
-    }
+    // The three the owner asked every entry to lead with, in their order (issue V9V1, owner
+    // 2026-09-18: "when you right click it should say open internal at the top and open external
+    // second and open folder third"). "Open internal" is a Relay pane — a preview for a file, this
+    // explorer for a folder; "open external" is the desktop's default application; "open folder"
+    // hands the entry to the desktop's file manager, which is what this menu used to call "Reveal
+    // in file manager". The empty space below the rows offers the last two for the folder it is
+    // showing, which is already open internally.
+    openEntries(items, target, host);
+    if (host.canNavigateTerminal) add("navigate", QStringLiteral("Navigate here"));
 
     if (target != FileMenuTarget::None) {
         separate();
         add("copyPath", QStringLiteral("Copy path"));
         add("copyRelativePath", QStringLiteral("Copy relative path"));
     }
-    separate();
-    add("reveal", QStringLiteral("Reveal in file manager"));
 
     separate();
     add("newFile", QStringLiteral("New file…"), host.writable);
@@ -363,12 +393,12 @@ void FileExplorer::showMenu(const QPoint &viewportPos) {
 
 void FileExplorer::runMenuAction(const QString &id, const QString &path) {
     const QString target = path.isEmpty() ? m_root : path;
-    if (id == QLatin1String("open")) {
+    if (id == QLatin1String("openInternal")) {
+        // Relay's own pane: a folder becomes this explorer's root, a file opens in a preview.
         if (QFileInfo(target).isDir()) setRoot(target);
-        // A file "opens" the way the desktop would open it; the preview pane is its own entry.
-        else QDesktopServices::openUrl(QUrl::fromLocalFile(target));
-    } else if (id == QLatin1String("preview")) {
-        if (onOpenInPreview) onOpenInPreview(target);
+        else if (onOpenInPreview) onOpenInPreview(target);
+    } else if (id == QLatin1String("openExternal")) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(target));
     } else if (id == QLatin1String("navigate")) {
         const QString directory = QFileInfo(target).isDir() ? target : QFileInfo(target).absolutePath();
         if (onNavigateHere) onNavigateHere(directory);
@@ -376,17 +406,8 @@ void FileExplorer::runMenuAction(const QString &id, const QString &path) {
         QApplication::clipboard()->setText(target);
     } else if (id == QLatin1String("copyRelativePath")) {
         QApplication::clipboard()->setText(QDir(m_root).relativeFilePath(target));
-    } else if (id == QLatin1String("reveal")) {
-        // Ask the desktop's file manager to select the entry; fall back to opening the folder.
-        const QString folder = QFileInfo(target).isDir() ? target : QFileInfo(target).absolutePath();
-        if (!QProcess::startDetached(QStringLiteral("dbus-send"),
-                                     {QStringLiteral("--session"), QStringLiteral("--print-reply"),
-                                      QStringLiteral("--dest=org.freedesktop.FileManager1"),
-                                      QStringLiteral("--type=method_call"), QStringLiteral("/org/freedesktop/FileManager1"),
-                                      QStringLiteral("org.freedesktop.FileManager1.ShowItems"),
-                                      QStringLiteral("array:string:") + QUrl::fromLocalFile(target).toString(),
-                                      QStringLiteral("string:")}))
-            QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+    } else if (id == QLatin1String("openFolder")) {
+        openContainingFolder(target);
     } else if (id == QLatin1String("newFile")) {
         createEntry(false);
     } else if (id == QLatin1String("newFolder")) {
@@ -670,6 +691,16 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     m_mode->hide();
     m_reload->setEnabled(false);
     m_external->setEnabled(false);
+
+    // Right-clicking anywhere in the preview offers the same three entries the explorer offers
+    // (issue V9V1). The viewers keep their own Copy / Select all, which showMenu() appends under
+    // them, so taking the menu over loses nothing. It has to be an event filter on the viewports
+    // rather than a context-menu policy: QTextEdit's text control answers ContextMenu from inside
+    // viewportEvent(), before the policy is looked at, and would put its own menu on top of this
+    // one.
+    for (QWidget *widget : {m_textView->viewport(), m_markdownView->viewport(),
+                            static_cast<QWidget *>(m_image), static_cast<QWidget *>(m_info)})
+        widget->installEventFilter(this);
 }
 
 FilePreview::~FilePreview() {
@@ -871,6 +902,69 @@ void FilePreview::followLink(const QUrl &url) {
         return;
     }
     QDesktopServices::openUrl(resolved);
+}
+
+QList<FileMenuItem> FilePreview::menu() const {
+    if (m_path.isEmpty()) return {};
+    FileMenuHost host;
+    host.canPreview = true;   // "Open internal" reopens the file here, which always works
+    host.writable = false;
+    return previewMenu(host);
+}
+
+bool FilePreview::eventFilter(QObject *object, QEvent *event) {
+    if (event->type() == QEvent::ContextMenu) {
+        QWidget *source = nullptr;
+        if (object == m_textView->viewport()) source = m_textView;
+        else if (object == m_markdownView->viewport()) source = m_markdownView;
+        if (showMenu(static_cast<QContextMenuEvent *>(event)->globalPos(), source)) return true;
+    }
+    return QWidget::eventFilter(object, event);
+}
+
+void FilePreview::contextMenuEvent(QContextMenuEvent *event) {
+    // The header, the notice line and the empty room around a viewer: the same menu, with no
+    // viewer entries to add.
+    if (showMenu(event->globalPos(), nullptr)) event->accept();
+    else QWidget::contextMenuEvent(event);
+}
+
+bool FilePreview::showMenu(const QPoint &globalPos, QWidget *source) {
+    const QList<FileMenuItem> items = menu();
+    if (items.isEmpty()) return false;
+    auto *menu = new QMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    for (const FileMenuItem &item : items) {
+        if (item.isSeparator()) { menu->addSeparator(); continue; }
+        QAction *action = menu->addAction(item.label);
+        action->setEnabled(item.enabled);
+        const QString id = item.id;
+        connect(action, &QAction::triggered, this, [this, id] { runMenuAction(id); });
+    }
+    // The viewer's own entries (Copy, Select all, and over a link Copy link location) follow, so
+    // taking the context menu over does not take them away. The actions move to this menu, which
+    // then owns them; the throwaway menu they came in goes. Reparenting that menu instead would
+    // clear its Qt::Popup flag and draw it as a child widget over these entries.
+    QMenu *standard = nullptr;
+    if (source == m_textView) standard = m_textView->createStandardContextMenu();
+    else if (source == m_markdownView) standard = m_markdownView->createStandardContextMenu();
+    if (standard) {
+        const auto actions = standard->actions();
+        for (QAction *action : actions) action->setParent(menu);
+        menu->addSeparator();
+        menu->addActions(actions);
+        delete standard;
+    }
+    menu->popup(globalPos);
+    return true;
+}
+
+void FilePreview::runMenuAction(const QString &id) {
+    if (m_path.isEmpty()) return;
+    if (id == QLatin1String("openInternal")) open(m_path);
+    else if (id == QLatin1String("openExternal")) QDesktopServices::openUrl(QUrl::fromLocalFile(m_path));
+    else if (id == QLatin1String("openFolder")) openContainingFolder(m_path);
+    else if (id == QLatin1String("copyPath")) QApplication::clipboard()->setText(m_path);
 }
 
 void FilePreview::setHeaderRightInset(int pixels) {

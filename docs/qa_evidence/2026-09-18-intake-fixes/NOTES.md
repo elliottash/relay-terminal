@@ -40,3 +40,16 @@ Both Markdown paths were exercised before anything was changed.
 | `s1jp-after-link-opens-its-own-pane-beside-the-original.png` | The same click after the fix: `notes.md` in its own pane beside the README preview, which still holds its file, rendered. The tab reads "w2; README.md; notes.md · 4". |
 | `s1jp-after-back-link-focuses-the-pane-already-open.png` | The "README" link inside `notes.md`: focus moves to the pane already showing it. Still four panes — clicking back and forth does not pile them up. |
 | `s1jp-after-a-txt-link-gets-the-text-viewer.png` | A link to `plain.txt`: its own pane with the monospace text viewer, not plain text dumped into the Markdown view. |
+
+## #V9V1 — open internal / open external / open folder
+
+Under Xvfb there is no desktop default application and no FileManager1 service, so "Open external"
+and "Open folder" were checked by reading the code, not by watching an application come up. That
+part is for human QA.
+
+| Shot | What it shows |
+|---|---|
+| `v9v1-explorer-menu-open-internal-external-folder.png` | Right-click on `README.md` in the explorer: Open internal, Open external, Open folder, then Navigate here, the copies and the create/rename/delete group. |
+| `v9v1-open-internal-opened-the-preview.png` | "Open internal" on that file: a rendered preview pane. |
+| `v9v1-preview-menu-on-a-markdown-file.png` | A preview pane had no menu of its own before; right-clicking gave the QTextEdit menu. Now: the three entries, Copy path, and the viewer's Copy / Copy Link Location / Select All under a separator. |
+| `v9v1-preview-menu-on-a-text-file.png` | The same in the text viewer (no Copy Link Location, because there is no link). |
