@@ -12,7 +12,7 @@ rank: zzzzzz
 created: '2026-09-18'
 source: issues/feature_intake.txt, 2026-09-18
 acceptance: '`tests/subagents_test.cpp` (ctest `subagents`), live run in `docs/qa_evidence/2026-09-18-waiting-for-subagents/`'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-18-waiting-for-subagents/], related: [QHR1, WD83], github: null}
+links: {plans: [], commits: [7b2b028], evidence: [docs/qa_evidence/2026-09-18-waiting-for-subagents/], related: [QHR1, WD83], github: null}
 ---
 # "waiting for N subagents . . ." in the prompt box
 
@@ -106,7 +106,7 @@ run `drive.sh` without it.
 - [ ] `ctest --test-dir build -R subagents` passes, including `waitingForSubagentsLine` and
       `foregroundSubagentsAreTrackedForTheWaitLine`.
 - [ ] A turn that calls `agent_wait` shows "waiting for N subagents . . ." in the prompt box, with
-      the dots growing about twice a second and the line never shifting sideways.
+      the dots growing a step every 0.6 s (a full cycle just over two seconds) and the line never shifting sideways.
 - [ ] The strip clock says "waiting for N subagents · <s> s · Esc stops" while blocked, and goes back
       to "thinking · …" when the wait returns and the agent works again.
 - [ ] Typing removes the line at the first character and the text is never drawn over; deleting the
