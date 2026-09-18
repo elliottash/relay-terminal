@@ -108,6 +108,41 @@ QFrame#composer[relayActive="true"] { border: 2px solid @accent; }
     return css.arg(light, dark);
 }
 
+// `[flags] metal = true` (Dark Copper): the raised chrome is a milled metal face rather than a
+// flat fill. Metal is a gradient and a specular edge — a flat fill of any copper reads as brown
+// paint — so every raised surface runs from a lit top to a shaded bottom with one bright line
+// along its top edge, and a press turns the light round. The grid is never touched
+// (docs/SWITCHBOARD-AESTHETIC.md 2.2), and neither is any surface text is read on: the composer
+// and the file panes stay flat, because a gradient behind a caret is a distraction, not a
+// material. Colours come from `[metal]`, and both ends of every face carry the theme's contrast
+// contract (tests/theme_test.cpp).
+QString metalStylesheet(const ThemeSpec &spec) {
+    const QString light = hex(extraColor(spec, QStringLiteral("metal.light"), SurfaceRaised.lighter(125)));
+    const QString mid = hex(extraColor(spec, QStringLiteral("metal.mid"), SurfaceRaised));
+    const QString dark = hex(extraColor(spec, QStringLiteral("metal.dark"), SurfaceRaised.darker(130)));
+    const QString edge = hex(extraColor(spec, QStringLiteral("metal.edge"), SurfaceRaised.lighter(190)));
+    const QString chromeTop = hex(extraColor(spec, QStringLiteral("metal.chrome_light"), Background.lighter(135)));
+    const QString chromeBottom = hex(extraColor(spec, QStringLiteral("metal.chrome_dark"), Background.darker(115)));
+    QString css = QStringLiteral(R"(
+QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
+QToolButton#workChip, QFrame#paneChrome[hot="true"], QMenu, QFrame#notificationsPopup,
+QFrame#helpCard, QLabel#toast {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 %4, stop:0.09 %1, stop:0.55 %2, stop:1 %3); }
+QPushButton:hover, QComboBox:hover, QToolButton#stripChip:hover, QToolButton#workChip:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 %4, stop:0.14 %1, stop:0.6 %1, stop:1 %2); }
+QPushButton:pressed, QToolButton#stripChip:pressed, QToolButton#workChip:pressed {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %3, stop:0.9 %2, stop:1 %4); }
+QPushButton:disabled { background: %3; }
+/* The frame the panes sit in: a shallower sheen, so the chrome reads as one sheet of metal
+   with the chips raised out of it rather than as a second set of buttons. */
+QToolBar, QTabBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %5, stop:1 %6); }
+)");
+    return css.arg(light, mid, dark, edge, chromeTop, chromeBottom);
+}
+
 // --- the theme registry -------------------------------------------------------------------------
 
 struct Registry {
@@ -528,6 +563,7 @@ QPushButton#boardReplyButton, QFrame#boardReply QPushButton#primary { padding: 4
     // Per-theme chrome switches ([flags] in the theme file). A theme that sets neither gets the
     // sheet above unchanged.
     if (spec.flag(QStringLiteral("bevel"))) css += bevelStylesheet(spec);
+    if (spec.flag(QStringLiteral("metal"))) css += metalStylesheet(spec);
     if (themeDataDir().isEmpty()) {
         // Without bundled icons, fall back to the style's own arrows and check marks.
         css.remove(QRegularExpression(QStringLiteral(R"([^\n]*url\(@icons[^\n]*\n)")));

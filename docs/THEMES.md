@@ -83,6 +83,14 @@ the bottom edge as often as the top. Only the default ground is shaded: a cell c
 background colour still paints solid, so `\e[41m` is the same red everywhere on the page. The
 gradient is the engine's own, drawn by `TerminalView::paintEvent`.
 
+A theme may also declare `[flags] metal = true` with a `[metal]` table (`light`, `mid`, `dark`,
+`edge`, `chrome_light`, `chrome_dark`). Raised chrome — buttons, chips, menus, the pane header —
+is then painted as a metal face: a specular line along the top edge, a lit upper half, and shade
+below, with the light turned round on a press. It is for a theme whose chrome is a material
+(Dark Copper), and it never touches the grid or a surface text is typed on. Both ends of a face
+are grounds people read on, so the rules above are measured on `metal.light` and `metal.dark`
+as well as on `surface_raised`.
+
 **Distinctness** (the rule WCAG does not have): `accent` and `border_strong` against `warning` and
 `error`; `surface_raised` against `warning`; `border` against `error`; and `shell` against
 `agent`. The first four are the copper trap (§4); the last keeps the destination pair two colours

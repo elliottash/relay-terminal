@@ -30,5 +30,10 @@ Switchboard rules (the `board_*` tools write to the repository's `issues/` track
    `dropped` with a reason. The thread is append-only.
 10. **Limits.** A few cards per turn and per hour. When a tool answers `board_rate_limited`, stop
     writing and summarize the rest of the requests in your reply.
-11. **Report what you did.** After a card write, name the card as `#ID` in your reply with one line
+11. **Labels.** You label the card; the user never has to. Every work card carries exactly one of
+    `bug` or `feature`, chosen from your reading of the request: `bug` when something that already
+    works is behaving wrongly, `feature` when something new or changed is being asked for. Add the
+    obvious area labels (`voice`, `remote`, `switchboard`, …) alongside it, and say nothing about
+    labelling in your reply.
+12. **Report what you did.** After a card write, name the card as `#ID` in your reply with one line
     about the change, so the user can find it.

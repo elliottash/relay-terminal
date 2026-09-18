@@ -82,5 +82,23 @@ face = "#1a1210"
 metal = "#c08556"
 metal_dim = "#6b4a33"
 
+[metal]
+# Copper is a metal, and a flat fill of it is brown paint (owner, 2026-09-18: "there's no way to
+# make the copper look metallic?"). A metal face is a gradient with one specular line: light
+# falls on the top edge, the face falls away into shade, and a press turns that round. `mid` is
+# the #241c18 the flat version used, so a chip still averages to the colour the palette was
+# measured on, and both ends carry the contrast contract (worst pair 4.79:1 at the lit top).
+light = "#2d231e"
+mid = "#241c18"
+dark = "#1b1512"
+# The specular line along a raised top edge: lit copper, the brightest copper in the theme after
+# the accent, and structural rather than a flag (1.9:1 on the ground, where warning is 11:1).
+edge = "#6d5241"
+# The sheet the panes sit on: a shallower sheen than a chip, so the chips read as raised out of
+# it. Cool, like the ground — the chrome is copper, the chassis is charcoal.
+chrome_light = "#15171c"
+chrome_dark = "#0b0c0f"
+
 [flags]
 board_material = true
+metal = true

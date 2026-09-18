@@ -281,18 +281,35 @@ private Q_SLOTS:
         struct Pair { QColor fg, bg; double min; const char *what; };
         const auto ui = [&spec](const char *t) { return spec.uiColor(QString::fromLatin1(t)); };
         QList<Pair> pairs;
+        // A `[flags] metal` theme paints its raised chrome as a gradient, so the lit top and the
+        // shaded bottom of a chip are both grounds text is read on.
+        QList<QColor> raisedFaces{ui("surface_raised")};
+        if (spec.flag(QStringLiteral("metal"))) {
+            for (const char *stop : {"metal.light", "metal.dark"}) {
+                const QStringList raw = spec.extra.value(QString::fromLatin1(stop));
+                QVERIFY2(!raw.isEmpty(), stop);
+                const QColor face(raw.first().trimmed());
+                QVERIFY2(face.isValid(), stop);
+                raisedFaces << face;
+            }
+        }
+        for (const QColor &face : raisedFaces)
+            pairs << Pair{ui("text"), face, 4.5, "text on a raised face"}
+                  << Pair{ui("text_muted"), face, 4.5, "text_muted on a raised face"};
         for (const char *ground : {"background", "surface", "surface_raised"}) {
             pairs << Pair{ui("text"), ui(ground), 4.5, "text"} << Pair{ui("text_muted"), ui(ground), 4.5, "text_muted"};
         }
         pairs << Pair{ui("accent"), ui("background"), 4.5, "accent as text"}
               << Pair{ui("accent_text"), ui("accent"), 4.5, "primary button label"}
               << Pair{ui("border_strong"), ui("background"), 3.0, "focused pane outline (UI)"};
-        for (const char *dest : {"shell", "agent"})
-            for (const char *ground : {"background", "surface_raised"})
-                pairs << Pair{ui(dest), ui(ground), 4.5, dest};
-        for (const char *state : {"success", "warning", "error"})
-            for (const char *ground : {"background", "surface_raised"})
-                pairs << Pair{ui(state), ui(ground), 4.5, state};
+        for (const char *dest : {"shell", "agent"}) {
+            pairs << Pair{ui(dest), ui("background"), 4.5, dest};
+            for (const QColor &face : raisedFaces) pairs << Pair{ui(dest), face, 4.5, dest};
+        }
+        for (const char *state : {"success", "warning", "error"}) {
+            pairs << Pair{ui(state), ui("background"), 4.5, state};
+            for (const QColor &face : raisedFaces) pairs << Pair{ui(state), face, 4.5, state};
+        }
         // The idle composer is `surface`, the focused one `surface_raised`: syntax is read on both.
         for (const QString &token : syntaxTokenNames())
             for (const char *ground : {"surface", "surface_raised"})

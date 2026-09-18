@@ -1746,17 +1746,8 @@ protected:
             endRename();
             return false;
         }
-        // The folder line opens the explorer, and closes it again when it is already showing this
-        // folder (issue #D60R).
-        if (object == m_cwdLabel && event->type() == QEvent::MouseButtonRelease
-            && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && !m_cwdLabel->hasSelectedText()) {
-            if (onToggleExplorer) onToggleExplorer(m_cwd);
-            else if (onOpenPath) onOpenPath(m_cwd, 0);
-            hint(QStringLiteral("files.explorer.mouse"),
-                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("files.explorer")),
-                                                QStringLiteral("the file explorer")));
-            return false;
-        }
+        // The folder line still opens the explorer on a click; headerDragEvent calls this when the
+        // press and the release both land on it without a drag in between (issue #D60R).
         // Right-click anywhere in this pane's terminal: Relay's menu, not the engine's (issue
         // #X2F1). Real widgets inside the terminal, such as the engine's Find bar, keep theirs.
         //
@@ -1879,6 +1870,8 @@ private:
             if (mouse->button() != Qt::LeftButton || !onHeader(object)) return false;
             if (m_titleEdit && m_titleEdit->isVisible()) return false;   // renaming: the mouse is the caret's
             m_headerPressAt = mouse->globalPos();
+            m_headerPressOn = qobject_cast<QWidget *>(object);
+            qDebug("RELAYDBG press on %s", qPrintable(object->objectName().isEmpty() ? QString::fromLatin1(object->metaObject()->className()) : object->objectName()));
             m_headerPressed = true;
             m_headerDragging = false;
             return false;
@@ -1897,9 +1890,24 @@ private:
         case QEvent::MouseButtonRelease: {
             if (!m_headerPressed) return false;
             m_headerPressed = false;
-            if (!m_headerDragging) return false;   // a click, not a drag: let the header have it
-            endHeaderDrag(static_cast<QMouseEvent *>(event)->globalPos(), true);
-            return true;
+            auto *mouse = static_cast<QMouseEvent *>(event);
+            if (m_headerDragging) { endHeaderDrag(mouse->globalPos(), true); return true; }
+            // A click, not a drag. The folder line is the one part of the header that acts on one:
+            // it opens the explorer, and closes it again when that is already this folder (#D60R).
+            // Handled here because the press is what decides who gets the release, and since the
+            // header became a drag handle that is no longer the label itself.
+            qDebug("RELAYDBG release pressOn=%p cwd=%p in=%d", (void*)m_headerPressOn.data(), (void*)m_cwdLabel,
+                   m_cwdLabel ? int(m_cwdLabel->rect().contains(m_cwdLabel->mapFromGlobal(mouse->globalPos()))) : -1);
+            if (m_headerPressOn == m_cwdLabel && m_cwdLabel
+                && m_cwdLabel->rect().contains(m_cwdLabel->mapFromGlobal(mouse->globalPos()))) {
+                if (onToggleExplorer) onToggleExplorer(m_cwd);
+                else if (onOpenPath) onOpenPath(m_cwd, 0);
+                hint(QStringLiteral("files.explorer.mouse"),
+                     relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("files.explorer")),
+                                                    QStringLiteral("the file explorer")));
+                return true;
+            }
+            return false;
         }
         case QEvent::KeyPress:
             if (m_headerDragging && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
@@ -7741,6 +7749,7 @@ private:
     // Dragging the pane by its header: where the press landed, and whether it has gone far enough
     // to be a drag rather than a click.
     QPoint m_headerPressAt;
+    QPointer<QWidget> m_headerPressOn;
     bool m_headerPressed = false, m_headerDragging = false;
     QString m_title;
     bool m_titleUser = false;
@@ -8051,9 +8060,13 @@ public:
         m_grip->setToolTip(QStringLiteral("Drag onto another pane's edge to move this pane there, or onto the tab bar to make it a tab"));
         m_grip->installEventFilter(this);
         row->addWidget(m_grip);
-        // The + makes it obvious that these open a new pane (a new shell and chat), not a layout toggle.
-        button(row, QStringLiteral("◫+"), QStringLiteral("pane.splitRight"), QStringLiteral("New pane to the right"));
+        // The + makes it obvious that these open a new pane (a new shell and chat), not a layout
+        // toggle. Both hover-only buttons sit to the LEFT of the always-on three: the row is
+        // right-anchored, so opening it grows leftward and none of the three moves out from under
+        // the cursor that opened it (which is how pointing at "new pane to the right" used to hand
+        // you "new pane below").
         m_splitDown = button(row, QStringLiteral("⬓+"), QStringLiteral("pane.splitDown"), QStringLiteral("New pane below"));
+        button(row, QStringLiteral("◫+"), QStringLiteral("pane.splitRight"), QStringLiteral("New pane to the right"));
         button(row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
         button(row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
         // The row keeps the width it has with everything on it, so the header's inset — and with
@@ -11776,6 +11789,11 @@ private:
         if (!move.isEmpty())
             if (auto *w = windowOf(dragged))
                 w->hint(QStringLiteral("pane.drag"), QStringLiteral("Next time: %1 and the other arrows move the focused pane").arg(move));
+        // The drop moved panes out from under a cursor that has not itself moved, so nothing will
+        // send an enter event: work out again which pane the mouse is over, once the layout settles.
+        QTimer::singleShot(0, this, [this] {
+            if (auto *w = windowOf(leafOf(QApplication::widgetAt(QCursor::pos())))) w->showChromeFor(leafOf(QApplication::widgetAt(QCursor::pos())));
+        });
     }
 
     // Remove a leaf from its window's layout without destroying it (the shell and worker keep

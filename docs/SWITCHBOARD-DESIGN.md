@@ -194,6 +194,9 @@ Evidence: `docs/qa_evidence/2026-09-17-switchboard-ux/`.
    evidence path and a QA checklist, in the same commit as the change (skill rule).
 5. **Unrelated faults** found along the way: a new Bugs inbox card with measured evidence, never a silent fix.
 6. **People's cards:** comment only; never reassign.
+7. **Labels are the agent's job.** Every work card carries exactly one of `bug` (something built behaves wrongly) or
+   `feature` (something new or changed is asked for), chosen from the agent's reading of the request, plus obvious area
+   labels. The owner never has to label a card, and the agent does not narrate the labelling.
 
 ### 6.3 Guardrails
 

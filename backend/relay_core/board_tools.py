@@ -112,7 +112,8 @@ TOOL_SPECS = [
          {"tab": {"type": "string", "description": "Tab id from board.yaml, e.g. features, bugs, design, planning."},
           "status": {"type": "string", "description": "Exact status, e.g. inbox, ready, in-progress, needs-qa-llm, done."},
           "type": {"type": "string", "enum": list(B.CARD_TYPES), "description": "work (default view), plan or memory."},
-          "labels": {"type": "array", "items": {"type": "string"}, "description": "Every label must be present."},
+          "labels": {"type": "array", "items": {"type": "string"},
+                     "description": "Every label must be present, e.g. ['bug'] for the fault list."},
           "query": {"type": "string", "description": "Case-insensitive text matched against id, title and body."},
           "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIST_LIMIT}},
          []),
@@ -133,7 +134,11 @@ TOOL_SPECS = [
           "title": {"type": "string", "description": "One line, your words; becomes the card's `# ` heading."},
           "request": {"type": "string", "description": "The user's words verbatim. Do not paraphrase or tidy them."},
           "type": {"type": "string", "enum": list(B.CARD_TYPES), "description": "work (default), plan or memory."},
-          "labels": {"type": "array", "items": {"type": "string"}},
+          "labels": {"type": "array", "items": {"type": "string"},
+                     "description": "You choose these, not the user. Always exactly one of 'bug' "
+                                    "(something built behaves wrongly) or 'feature' (something new "
+                                    "or changed is asked for), decided from your understanding of "
+                                    "the request, plus any obvious area labels."},
           "source": {"type": "string", "description": "Where the request came from, e.g. 'pane 2, 2026-09-17'."},
           "related": {"type": "array", "items": {"type": "string"}, "description": "Ids of related cards."},
           "not_duplicate_of": {"type": "array", "items": {"type": "string"},
