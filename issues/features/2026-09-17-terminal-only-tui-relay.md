@@ -2,6 +2,7 @@
 id: FW77
 type: work
 status: ready
+labels: [feature]
 component: [agent, router]
 milestone: cross-platform
 workstream: agent

@@ -2,6 +2,7 @@
 id: RBVK
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui, agent]
 milestone: desktop-alpha
 workstream: terminal

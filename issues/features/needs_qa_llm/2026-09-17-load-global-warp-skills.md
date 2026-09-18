@@ -2,6 +2,7 @@
 id: AK6B
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [agent]
 milestone: desktop-alpha
 workstream: agent

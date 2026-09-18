@@ -2,6 +2,7 @@
 id: BXPG
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [worker, agent]
 milestone: desktop-alpha
 workstream: agent (A, backend sessions)

@@ -2,6 +2,7 @@
 id: YR21
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui, terminal engine]
 milestone: cross-platform
 workstream: terminal

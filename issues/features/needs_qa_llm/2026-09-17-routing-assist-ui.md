@@ -2,6 +2,7 @@
 id: ZVF8
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: composer

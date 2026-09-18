@@ -2,6 +2,7 @@
 id: KJ44
 type: work
 status: done
+labels: [feature]
 component: [agent, worker, gui]
 milestone: desktop-alpha
 workstream: agent

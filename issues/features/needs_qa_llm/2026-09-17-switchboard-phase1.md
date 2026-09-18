@@ -2,7 +2,7 @@
 id: 1AXN
 type: work
 status: needs-qa-llm
-labels: [switchboard]
+labels: [feature, switchboard]
 component: [worker, gui]
 milestone: desktop-alpha
 workstream: switchboard

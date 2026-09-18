@@ -2,6 +2,7 @@
 id: D8VN
 type: work
 status: needs-qa-llm
+labels: [bug]
 component: [worker]
 milestone: desktop-alpha
 workstream: agent

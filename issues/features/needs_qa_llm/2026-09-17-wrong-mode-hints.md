@@ -2,6 +2,7 @@
 id: 94V5
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui, router]
 milestone: desktop-alpha
 workstream: routing

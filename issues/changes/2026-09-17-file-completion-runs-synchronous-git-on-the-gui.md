@@ -2,6 +2,7 @@
 id: GDWE
 type: work
 status: ready
+labels: [bug]
 rank: zzw
 created: '2026-09-17'
 source: Relay pane, cleanup audit 2026-09-17

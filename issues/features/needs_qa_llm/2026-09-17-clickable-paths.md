@@ -2,6 +2,7 @@
 id: YZTK
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui, shell-integration]
 milestone: desktop-alpha
 workstream: terminal

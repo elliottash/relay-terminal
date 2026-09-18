@@ -2,6 +2,7 @@
 id: KX82
 type: work
 status: done
+labels: [feature]
 component: [gui, router]
 milestone: 0.1-preview
 workstream: routing

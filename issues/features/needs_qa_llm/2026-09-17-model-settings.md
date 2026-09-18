@@ -2,6 +2,7 @@
 id: NK66
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui, worker, providers]
 milestone: desktop-alpha
 workstream: providers

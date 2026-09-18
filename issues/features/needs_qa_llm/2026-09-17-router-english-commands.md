@@ -2,6 +2,7 @@
 id: 9DYD
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [router]
 milestone: 0.1-preview
 workstream: routing

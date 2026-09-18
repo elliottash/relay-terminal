@@ -2,6 +2,7 @@
 id: 0JA7
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui, theme]
 milestone: desktop-alpha
 workstream: terminal

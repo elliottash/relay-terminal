@@ -2,6 +2,7 @@
 id: FW3Z
 type: work
 status: needs-qa-llm
+labels: [bug]
 implemented_by: Relay agent (model self-unidentified), 2026-09-17
 rank: zzzr
 created: '2026-09-17'

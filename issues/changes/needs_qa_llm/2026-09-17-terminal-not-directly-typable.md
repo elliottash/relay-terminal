@@ -2,6 +2,7 @@
 id: AHS5
 type: work
 status: needs-qa-llm
+labels: [bug]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal

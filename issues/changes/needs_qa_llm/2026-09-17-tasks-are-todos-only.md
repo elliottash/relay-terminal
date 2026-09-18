@@ -2,6 +2,7 @@
 id: H3QW
 type: work
 status: needs-qa-llm
+labels: [bug]
 component: [gui]
 milestone: desktop-alpha
 workstream: agent

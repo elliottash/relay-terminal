@@ -2,6 +2,7 @@
 id: S976
 type: work
 status: ready
+labels: [feature]
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: agent

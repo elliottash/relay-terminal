@@ -2,6 +2,7 @@
 id: W5N2
 type: work
 status: in-progress
+labels: [feature]
 component: [gui, worker, terminal engine]
 milestone: desktop-alpha
 workstream: terminal

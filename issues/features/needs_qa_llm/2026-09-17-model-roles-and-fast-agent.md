@@ -2,6 +2,7 @@
 id: KH72
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [worker, gui]
 milestone: desktop-alpha
 workstream: agent

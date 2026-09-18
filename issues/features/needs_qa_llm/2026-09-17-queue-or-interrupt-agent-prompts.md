@@ -2,6 +2,7 @@
 id: K1YZ
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: agent

@@ -2,6 +2,7 @@
 id: M9T4
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: agent (E2, subagents UI)

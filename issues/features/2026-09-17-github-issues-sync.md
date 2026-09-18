@@ -2,6 +2,7 @@
 id: GDQN
 type: work
 status: ready
+labels: [feature]
 component: [worker, gui]
 milestone: post-mvp
 workstream: switchboard

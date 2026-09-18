@@ -2,6 +2,7 @@
 id: 9VXF
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui]
 milestone: cross-platform
 workstream: terminal

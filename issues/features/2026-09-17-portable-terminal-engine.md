@@ -2,6 +2,7 @@
 id: YJK8
 type: work
 status: ready
+labels: [feature]
 component: [gui]
 milestone: cross-platform
 workstream: terminal

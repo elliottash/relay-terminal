@@ -2,6 +2,7 @@
 id: 9MYY
 type: work
 status: ready
+labels: [bug]
 rank: zzz
 created: '2026-09-17'
 source: Relay pane, cleanup audit 2026-09-17

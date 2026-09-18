@@ -2,7 +2,7 @@
 id: 8E4Q
 type: work
 status: discussing
-labels: [design]
+labels: [feature, design]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal

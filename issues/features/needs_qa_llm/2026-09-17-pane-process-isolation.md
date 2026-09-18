@@ -2,6 +2,7 @@
 id: F9SD
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui, worker, shell-integration]
 milestone: desktop-alpha
 workstream: terminal

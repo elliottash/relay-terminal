@@ -2,6 +2,7 @@
 id: XXP5
 type: work
 status: needs-qa-llm
+labels: [bug]
 component: [gui, packaging]
 milestone: beta
 workstream: terminal

@@ -2,6 +2,7 @@
 id: CW8D
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [router, worker, agent, providers]
 milestone: desktop-alpha
 workstream: routing, agent (F2, backend)

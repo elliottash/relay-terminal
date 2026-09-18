@@ -2,6 +2,7 @@
 id: 05J2
 type: work
 status: ready
+labels: [feature]
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: terminal

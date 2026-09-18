@@ -2,6 +2,7 @@
 id: C1HH
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [agent, gui, shell-integration]
 milestone: desktop-alpha
 workstream: agent

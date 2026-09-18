@@ -2,6 +2,7 @@
 id: Q7MK
 type: work
 status: needs-qa-llm
+labels: [bug]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal

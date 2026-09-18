@@ -2,6 +2,7 @@
 id: 2JY7
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [agent, worker]
 milestone: desktop-alpha
 workstream: agent (B, backend subagents)

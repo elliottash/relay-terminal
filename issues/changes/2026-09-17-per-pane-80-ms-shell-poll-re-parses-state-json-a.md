@@ -2,6 +2,7 @@
 id: 72NR
 type: work
 status: ready
+labels: [bug]
 rank: zzy
 created: '2026-09-17'
 source: Relay pane, cleanup audit 2026-09-17

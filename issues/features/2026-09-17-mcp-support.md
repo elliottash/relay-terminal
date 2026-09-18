@@ -2,6 +2,7 @@
 id: SSRQ
 type: work
 status: ready
+labels: [feature]
 component: [worker]
 milestone: post-mvp
 workstream: agent

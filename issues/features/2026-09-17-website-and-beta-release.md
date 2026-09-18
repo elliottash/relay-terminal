@@ -2,6 +2,7 @@
 id: P4GP
 type: work
 status: ready
+labels: [feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal

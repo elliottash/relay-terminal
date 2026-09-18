@@ -2,6 +2,7 @@
 id: 16QX
 type: work
 status: done
+labels: [feature]
 component: [agent]
 milestone: 0.1-preview
 workstream: agent

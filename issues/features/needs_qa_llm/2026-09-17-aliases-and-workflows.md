@@ -2,6 +2,7 @@
 id: G8DK
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: terminal

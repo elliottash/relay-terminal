@@ -2,6 +2,7 @@
 id: W011
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui, worker, agent]
 milestone: desktop-alpha
 workstream: agent

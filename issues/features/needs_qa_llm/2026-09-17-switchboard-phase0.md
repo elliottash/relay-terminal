@@ -2,6 +2,7 @@
 id: 23XM
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [worker]
 milestone: desktop-alpha
 workstream: switchboard

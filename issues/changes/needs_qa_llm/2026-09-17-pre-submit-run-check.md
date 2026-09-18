@@ -2,6 +2,7 @@
 id: 90JF
 type: work
 status: needs-qa-llm
+labels: [bug]
 component: [router, gui]
 milestone: desktop-alpha
 workstream: routing

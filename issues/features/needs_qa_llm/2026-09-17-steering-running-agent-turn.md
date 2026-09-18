@@ -2,6 +2,7 @@
 id: 1T0W
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: agent

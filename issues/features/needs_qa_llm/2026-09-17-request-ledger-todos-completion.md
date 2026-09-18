@@ -2,6 +2,7 @@
 id: 9PGA
 type: work
 status: needs-qa-llm
+labels: [feature]
 component: [agent, worker]
 milestone: desktop-alpha
 workstream: agent

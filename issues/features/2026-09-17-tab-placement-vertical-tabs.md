@@ -2,6 +2,7 @@
 id: 072Z
 type: work
 status: ready
+labels: [feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal
