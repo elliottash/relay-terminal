@@ -11,7 +11,7 @@ implemented_by: Claude Opus 5 (Claude Code), 2026-09-18
 rank: zzzzzr
 created: '2026-09-18'
 source: issues/bug_intake.txt, 2026-09-18
-acceptance: 'A model switch (chip, /model, /glm, /kimi, the palette, Alt+F / /flash / /main) is accepted while a turn runs; the request in flight finishes on the old model; the next request of the same turn goes to the new model with the whole conversation; the transcript marks where it took effect; `tests/test_model_switch.py` passes; live glm-5.3 -> glm-5.3-flash and glm-5.3 -> kimi-k3 both finish the turn'
+acceptance: 'A model switch (chip, /model, /glm, /kimi, the palette, Alt+F / /flash / /main) is accepted while a turn runs; the request in flight finishes on the old model; the next request of the same turn goes to the new model with the whole conversation; the transcript marks where it took effect; `tests/test_model_switch.py` passes; live glm-5.3 -> glm-5.3-flash and glm-5.3 -> kimi-k3 both finish the turn; the context bar measures against the new model from the moment of the switch; the phone shows the switch lines and its model indicator follows; a smaller window compacts before the switch (old model summarising) and a switch that cannot fit is refused with the pane left on the current model'
 links: {plans: [], commits: [f83d73d], evidence: ['docs/qa_evidence/2026-09-18-model-switch-mid-turn/'], related: [WFJM, EM1E], github: null}
 ---
 # Changing the model is refused while the agent is working
@@ -73,6 +73,46 @@ dialog no longer shows the first preset's endpoint after a switch (evidence:
 
 **Remote.** `model_applied` is classified as forwarded in `remote/wire.py`, like `model_changed`.
 
+### The three gaps, closed (2026-09-18, second pass)
+
+1. **The context bar agrees with the chip from the moment of the switch.** While a switch waits,
+   the worker's `context` event carries `next {model, window, limit_tokens, used_tokens, percent,
+   will_compact, in_flight_model}` (`Agent.context_event`, from `Agent.switch_fit`), and `set_model`
+   / `set_agent_role` are followed by `context` whatever the outcome. The pane
+   (`Pane::updateContextLabel`) shows `N% left ↻` against the new window; the tooltip says it is
+   measured against the new model's window, that the request in flight is still on the old one (and
+   its window) until the switch lands, and, when the conversation is already over the new limit, that
+   the switch compacts first — the bar turns amber / reads `0.0% left ↻` at once. `model_applied`
+   and `model_switch_refused` clear it.
+2. **The phone shows the switch.** `app/app.js` renders `model_changed` (deferred), `model_applied`
+   and `model_switch_refused` with the desktop's own wording (`↻ X takes over at the next step · Y is
+   not interrupted`, `→ now on X · …`, `✗ …`) in its transcript and prompt-box note, and keeps a
+   per-pane model indicator under the pane title (`small · big finishing the current step` while a
+   switch waits, accent colour; back to the current model on a refusal). The phone had no model
+   indicator before; it now has one, fed by these events. `model_switch_refused` is forwarded
+   (`remote/wire.py`).
+3. **A smaller window compacts before the switch; a switch that cannot fit is refused.**
+   `Agent.apply_pending_model` checks the conversation against the new window before switching.
+   Over its limit (`min(auto-compaction limit, window − min(max_tokens, window/4))`): the existing
+   compactor (`Agent.compact`, now with `target_window` / `target_max_tokens` / `target_model` /
+   `keep_turns`) runs with the **model still in force summarising** and the new window's limit and
+   carried-block budgets as the target (`compaction_started/compacted {reason: "model_switch",
+   for_model}`), with one more pass keeping only the last turn if a previous turn kept whole is
+   still too much; then the switch lands (`model_applied {compacted: true}`). Still over the ceiling
+   (one long current turn), or the compaction fails or is stopped: `model_switch_refused {at, model,
+   current_model, preset, agent_role?, reason}`, the pane stays on the current model, the turn
+   carries on (a stop still stops it). A window that cannot hold the system prompt and tools with
+   room for a reply is refused when the switch is asked for, before anything changes
+   (`at: "request"`, no `model_changed`). `model_changed` says `will_compact: true` when it can tell
+   at the switch. An idle switch that must compact runs as an exclusive task off the protocol
+   thread (`applies: "after_compaction"`, `model_applied {at: "now"}`), and so does a turn-end
+   landing that must compact, before the next queued turn starts (`TurnSupervisor.
+   start_exclusive_locked`). One entry point for both switches: `Agent.request_model` (set_model and
+   `set_agent_role`). The GUI prints `✗ <reason>` in the transcript and puts the chip, the role and
+   the provider settings back; the phone does the same.
+
+Also closed: `model_applied {at: "turn_end"}` now carries the `turn_id` of the turn it waited for.
+
 **Docs.** `docs/AGENT-SESSIONS-PROTOCOL.md` section 2 (the whole contract) and 12.8 (event order).
 
 **Tests.** `tests/test_model_switch.py` (9, offline): the next step runs on the new model and the
@@ -89,8 +129,8 @@ OpenRouter-style `reasoning` converted to Kimi's `reasoning_content`. The busy-r
   conversion is by `adapt_history`. A provider that needs something Relay does not keep (say, signed
   thinking blocks) would fail its first request after the switch with the provider's own error, as
   it would after an idle switch today.
-- **A conversation that does not fit the new window even after compaction** fails that request like
-  any over-long conversation. Compaction trims tool outputs and summarizes older turns first.
+- **A conversation that does not fit the new window even after compaction** is no longer sent to
+  fail: the switch is refused (`model_switch_refused`) and the pane stays on the model it was on.
 - **The request in flight is never moved.** A switch while the model is streaming its answer lands
   only if the turn makes another request; otherwise it applies from the next turn.
 
@@ -117,10 +157,32 @@ OpenRouter-style `reasoning` converted to Kimi's `reasoning_content`. The busy-r
    Moonshot ones, not Z.AI's.
 8. **Tests.** `./scripts/test.sh` and `ctest`. `tests/test_model_switch.py` fails on the old code
    (the switch was refused).
+9. **Context bar at the switch (gap 1).** `gaps-driver.sh compact` (offline: `fake-provider.py` as
+   three local endpoints, no key). Right after `/model small` mid-turn the chip says `small · local`
+   and the bar reads `0.0% left ↻`, amber; hovering it says `Measured against small's window, which
+   serves the next request`, `Over it: the switch compacts the conversation first` and `The request
+   in flight is still on big (131,072-token window)`. After `→ now on small` the ↻ is gone.
+10. **Compact before switching (gap 3).** Same run: `↻ small takes over at the next step · big is not
+    interrupted · will compact to fit`, then after `exit 0` two `Conversation compacted (to fit
+    small's window)` lines, `→ now on small · compacted to fit its window`, and the answer from small.
+    `gaps-compact-requests.jsonl`: the summary calls (`tools: false`) went to `big`, and small's first
+    request is a few thousand characters, not the 65k the conversation was.
+11. **Refused (gap 3).** `gaps-driver.sh refuse`: idle `/model micro` prints `✗ micro cannot take
+    over: its 2,048-token window does not hold the system prompt and tools …` and the chip stays
+    `big · local`. Then a turn with one 60k-character answer: `/model small` during its command is
+    refused after `exit 0` (`✗ small cannot take over: even compacted …`), the chip goes back to
+    `big · local`, and the turn finishes `Done on big`. No request ever went to small.
+12. **Phone (gap 2).** `tests/test_remote_browser.py` `test_a_model_switch_mid_turn_shows_where_it_lands`,
+    and `phone-shots.py` for screenshots at a phone's size: the three lines, the indicator `small ·
+    big finishing the current step` (accent) and then `small`, and a refusal in red with the
+    indicator on the model kept. With a real desktop (screen stream) the lines arrive in the terminal
+    as the desktop prints them; the indicator and note come from the events.
 
 ## Known gaps
 
-- The context bar shows the old model's window until the switch lands; the chip shows the new model
-  at once. That is deliberate (the window shown is the one in force) but could read as a mismatch.
-- `model_applied` for a turn-end landing has no `turn_id` (the supervisor applies it between turns).
-- The phone client (`app/app.js`) receives `model_applied` but does not render it yet.
+None of the three listed on the first pass is left (see "The three gaps, closed" above).
+
+- The phone's model indicator appears with the first model event of a session it watches; the pane
+  list it gets on connecting carries no model. Adding one means a `model` field in the pane list the
+  desktop publishes (`src/RemoteShare.*`, `remote/gui_host.py`, `remote/panes.py`), which are another
+  session's files with uncommitted work in them today; left for that session or a follow-up card.

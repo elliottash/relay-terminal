@@ -190,7 +190,7 @@ class TurnSupervisor:
         with self._lock:
             return now() if self._running is None else later()
 
-    def _settle_model_locked(self, agent) -> None:
+    def _settle_model_locked(self, agent, turn_id: str | None = None) -> None:
         """A model switch that arrived after the turn's last request applies once the turn is over.
 
         One that must compact the conversation first (a smaller window) runs as an exclusive task
@@ -202,9 +202,10 @@ class TurnSupervisor:
         try:
             compacts = getattr(agent, "pending_model_compacts", None)
             if compacts is not None and compacts():
-                self.start_exclusive_locked("set_model", lambda a: a.apply_pending_model(at="turn_end"))
+                self.start_exclusive_locked("set_model", lambda a: a.apply_pending_model(turn_id, at="turn_end"))
                 return
-            apply(at="turn_end")
+            # turn_id: the turn it waited for, so the landing can be tied to it.
+            apply(turn_id, at="turn_end")
         except Exception as exc:  # never let it wedge the queue; the old model simply stays
             self._emit({"event": "error", "source": "set_model",
                         "text": str(exc)[:2000] if isinstance(exc, ValueError) else f"Model switch failed ({type(exc).__name__})."})
@@ -443,7 +444,7 @@ class TurnSupervisor:
                 if self._steer:
                     self._return_steer_locked()
                 self._running = None
-                self._settle_model_locked(agent)
+                self._settle_model_locked(agent, item["id"])
                 if outcome == "error" and any(not i["force"] for i in self._queue):
                     # Tool actions may already have run; do not fire queued prompts blindly.
                     self._paused = True

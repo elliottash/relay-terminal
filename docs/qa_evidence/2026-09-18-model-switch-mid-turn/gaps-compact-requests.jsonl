@@ -1,0 +1,8 @@
+{"model": "big", "tools": true, "messages": 2, "chars": 4426}
+{"model": "big", "tools": false, "messages": 2, "chars": 2122}
+{"model": "big", "tools": true, "messages": 4, "chars": 34869}
+{"model": "big", "tools": true, "messages": 6, "chars": 65322}
+{"model": "big", "tools": false, "messages": 2, "chars": 5679}
+{"model": "big", "tools": false, "messages": 2, "chars": 6425}
+{"model": "small", "tools": true, "messages": 8, "chars": 6204}
+{"model": "small", "tools": false, "messages": 2, "chars": 2498}

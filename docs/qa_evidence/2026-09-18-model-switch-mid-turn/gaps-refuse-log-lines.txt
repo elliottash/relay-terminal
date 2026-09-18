@@ -1,0 +1,4 @@
+2026-09-18T19:07:22.057Z INFO relay.agent turn_start turn=17c6b0863d29466d9e21f15b54b09b6f model=big host=127.0.0.1
+2026-09-18T19:07:42.081Z INFO relay.agent model_switch_refused turn=17c6b0863d29466d9e21f15b54b09b6f at=step model=small current_model=big
+2026-09-18T19:07:42.097Z INFO relay.agent turn_end turn=17c6b0863d29466d9e21f15b54b09b6f outcome=done ms=20040 tools=1
+2026-09-18T19:07:42.119Z INFO relay.gui event type=agent_finished outcome=done

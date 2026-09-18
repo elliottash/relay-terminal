@@ -75,6 +75,9 @@ p { margin: 0 0 12px; }
   padding: 0 6px; cursor: pointer;
 }
 #thread-title { font-weight: 600; }
+/* The pane's model; accent while a switch waits for the next step (issue 3ES1). */
+#thread-model.waiting { color: var(--accent); }
+.model-line { overflow-wrap: anywhere; }
 #thread-body { flex: 1; overflow-y: auto; padding: 12px 14px 4px; }
 
 .prompt {

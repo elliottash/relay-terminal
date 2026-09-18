@@ -564,7 +564,8 @@ class Agent:
         try:
             self.compact("model_switch", target_window=window, target_max_tokens=config.max_tokens,
                          target_model=config.model)
-            if self.context.used(self.messages, self.tools())[0] >= fit["limit"]:
+            if (self.context.used(self.messages, self.tools())[0] >= fit["limit"]
+                    and len(compaction.turn_starts(self.messages)) >= 2):
                 # Auto-compaction keeps the last two turns whole; to fit this window, only the last.
                 self.compact("model_switch", target_window=window, target_max_tokens=config.max_tokens,
                              target_model=config.model, keep_turns=1)

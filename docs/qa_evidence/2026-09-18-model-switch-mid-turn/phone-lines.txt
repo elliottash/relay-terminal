@@ -1,0 +1,5 @@
+↻ small takes over at the next step · big is not interrupted · will compact to fit
+→ now on small · compacted to fit its window
+↻ tiny takes over at the next step · small is not interrupted
+✗ tiny cannot take over: even compacted, the conversation needs about 5,100 tokens and its 4,096-token window holds 3,072 with room for a reply. Staying on small.
+indicator: small

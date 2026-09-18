@@ -135,6 +135,7 @@ class ModelSwitchMidTurnTests(unittest.TestCase):
         gate.set()
         applied = self.rec.wait(lambda e: e['event'] == 'model_applied')
         self.assertEqual((applied['at'], applied['model'], applied['context_window']), ('turn_end', 'new', 200000))
+        self.assertEqual(applied['turn_id'], self.rec.of('agent_finished')[0]['id'])   # the turn it waited for
         # After the turn's own end, never inside it: done stays the turn's last event.
         self.assertLess(self.index(lambda e: e['event'] == 'agent_finished'),
                         self.index(lambda e: e['event'] == 'model_applied'))

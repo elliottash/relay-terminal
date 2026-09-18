@@ -1,0 +1,10 @@
+2026-09-18T19:08:03.336Z INFO relay.agent turn_start turn=1884c829a3e44c18b2ef09ac8387b44a model=big host=127.0.0.1
+2026-09-18T19:08:03.365Z INFO relay.agent turn_end turn=1884c829a3e44c18b2ef09ac8387b44a outcome=done ms=29 tools=0
+2026-09-18T19:08:05.392Z INFO relay.agent turn_start turn=06c344151d504793821bef1a50875136 model=big host=127.0.0.1
+2026-09-18T19:08:05.417Z INFO relay.agent turn_end turn=06c344151d504793821bef1a50875136 outcome=done ms=24 tools=0
+2026-09-18T19:08:09.669Z INFO relay.agent turn_start turn=955e113882af4d0bafdc3b0d171dd7bc model=big host=127.0.0.1
+2026-09-18T19:08:29.732Z INFO relay.agent model_applied turn=955e113882af4d0bafdc3b0d171dd7bc at=step step=2 from_model=big to_model=small host=127.0.0.1 compacted=True
+2026-09-18T19:08:29.746Z INFO relay.agent turn_end turn=955e113882af4d0bafdc3b0d171dd7bc outcome=done ms=20077 tools=1
+2026-09-18T19:08:03.384Z INFO relay.gui event type=agent_finished outcome=done
+2026-09-18T19:08:05.421Z INFO relay.gui event type=agent_finished outcome=done
+2026-09-18T19:08:29.764Z INFO relay.gui event type=agent_finished outcome=done

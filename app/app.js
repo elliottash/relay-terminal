@@ -21,6 +21,7 @@ let sticky = { ctrl: false, alt: false };
 let directKeys = false;
 let passwordEntry = false;  // the owner's per-device switch (welcome.password_entry)
 let answerNode = null;      // the answer being streamed, without a terminal to print into
+const models = new Map();   // pane -> {model, waiting}: the model indicator (issue 3ES1)
 
 const $ = (id) => document.getElementById(id);
 const show = (name) => {
@@ -163,6 +164,7 @@ function openPane(paneId) {
   const pane = panes.find((item) => item.id === paneId);
   $('thread-title').textContent = pane?.title || paneId;
   $('thread-cwd').textContent = pane?.cwd || '';
+  renderModel();
   $('thread-body').replaceChildren();
   answerNode = null;
   driving = false;
@@ -326,8 +328,10 @@ function toggleSticky(name) {
 // terminal (ARCHITECTURE section 8). So there is no transcript to render here — only the state a
 // prompt box needs: whether a turn is running, and anything it wants to say.
 function onAgent(message) {
-  if (message.pane !== current) return;
   const event = message.event || {};
+  // Every pane's model, not just the open one's, so the indicator is right when it is opened.
+  trackModel(message.pane, event);
+  if (message.pane !== current) return;
   const note = (text) => { $('term-note').textContent = text; };
   // A desktop with no screen stream — the agent companion — has no terminal to print into, so
   // the reply is rendered here instead. With a terminal, this is silent: the same text is
@@ -350,6 +354,12 @@ function onAgent(message) {
     case 'plan_written':
       note('A plan is ready on the desktop.');
       break;
+    case 'model_changed':
+    case 'model_applied':
+    case 'model_switch_refused':
+      renderModel();
+      note(modelLine(event));
+      break;
     case 'status':
       if (event.text) note(event.text);
       break;
@@ -360,6 +370,63 @@ function onAgent(message) {
     default:
       break;
   }
+}
+
+// ---- the model a pane runs (issue 3ES1) ---------------------------------------------------------
+
+// A switch can be accepted while the agent works: the request in flight finishes on the old model
+// and the new one takes over at the next step (or after a compaction a smaller window needs). The
+// lines are the desktop's own, so a phone reads the same story as the pane.
+function modelLine(event) {
+  const model = event.model || '';
+  if (event.event === 'model_changed') {
+    const was = event.in_flight_model || '';
+    if (event.applies === 'after_compaction') {
+      return `↻ ${model} takes over once the conversation is compacted to fit its window · ${was} summarises it`;
+    }
+    if (event.applies === 'next_step' || event.applies === 'turn_end') {
+      const when = event.applies === 'turn_end' ? 'after this turn' : 'at the next step';
+      return `↻ ${model} takes over ${when} · ${was} is not interrupted${event.will_compact ? ' · will compact to fit' : ''}`;
+    }
+    return `Model: ${model} · conversation kept`;
+  }
+  if (event.event === 'model_applied') {
+    let line = `→ now on ${model}`;
+    if (event.at === 'turn_end') line += ' · from the next turn';
+    if (event.history_converted) line += ` · conversation converted from ${event.from_model || ''}`;
+    if (event.compacted) line += ' · compacted to fit its window';
+    return line;
+  }
+  // The reason is a whole sentence that names both models.
+  return `✗ ${event.reason || `${model} did not take over.`}`;
+}
+
+function trackModel(pane, event) {
+  switch (event.event) {
+    case 'model_changed':
+      models.set(pane, { model: event.model || '',
+                         waiting: event.applies && event.applies !== 'now' ? event.in_flight_model || '' : '' });
+      break;
+    case 'model_applied':
+      models.set(pane, { model: event.model || '', waiting: '' });
+      break;
+    case 'model_switch_refused':
+      models.set(pane, { model: event.current_model || '', waiting: '' });
+      break;
+    default:
+      break;
+  }
+}
+
+// The indicator under the pane's title: the model the pane is on, and while a switch waits, the
+// model still finishing the request in flight.
+function renderModel() {
+  const node = $('thread-model');
+  const info = models.get(current);
+  node.hidden = !info?.model;
+  node.classList.toggle('waiting', !!info?.waiting);
+  node.textContent = !info?.model ? '' : info.waiting ? `${info.model} · ${info.waiting} finishing the current step`
+                                                      : info.model;
 }
 
 // The fallback transcript: prompt, tool lines and the answer, for a desktop that cannot send a
@@ -410,6 +477,15 @@ function transcribe(event) {
     }
     case 'recap':
       body.append(el('div', 'note', event.text || ''));
+      answerNode = null;
+      break;
+    case 'model_changed':
+    case 'model_applied':
+    case 'model_switch_refused':
+      // With a screen these lines arrive in the terminal, printed by the desktop; here they are
+      // the transcript's own, worded the same.
+      body.append(el('div', event.event === 'model_switch_refused' ? 'note error model-line' : 'note model-line',
+                     modelLine(event)));
       answerNode = null;
       break;
     case 'agent_finished':

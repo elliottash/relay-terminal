@@ -264,8 +264,11 @@ so there is one vocabulary and no translation table to drift:
 
 `agent_started`, `delta`, `thinking_delta`, `thinking_done`, `tool_started`, `tool_result`,
 `turn_summary`, `agent_finished`, `agent_stopped`, `cancelled`, `error`, `queued`, `queue_changed`,
-`status`, `context`, `mode_changed`, `model_changed`, `plan_written`, `recap`, `subagent_started`,
-`subagent_progress`, `subagent_finished`, `subagent_handoff`.
+`status`, `context`, `mode_changed`, `model_changed`, `model_applied`, `model_switch_refused`,
+`plan_written`, `recap`, `subagent_started`, `subagent_progress`, `subagent_finished`, `subagent_handoff`.
+The client shows the three model events as the desktop does (`↻ X takes over at the next step · Y
+is not interrupted`, `→ now on X`, `✗ <the reason, naming both models>`) and keeps a per-pane model
+indicator from them (issue 3ES1).
 
 Forwarded as `{t: "agent", pane, seq, event: {...the worker event verbatim...}}`.
 

@@ -25,3 +25,21 @@ Files per case:
   WFJM): after `/kimi` they name Moonshot's endpoint, not the Z.AI one the pane started on.
 
 Six small paid requests in total (three per case).
+
+## The three gaps (second pass, offline)
+
+`gaps-driver.sh <compact|refuse>` runs Relay under Xvfb, isolated as above, against
+`fake-provider.py` registered as three local endpoints (`local:big` 131,072 tokens, `local:small`
+12,000, `local:micro` 2,048): no key, no credits. `gaps-<case>-requests.jsonl` is the fake's own log
+(model, tools or not, message count, characters); `gaps-<case>-log-lines.txt` the worker/GUI lines.
+
+| Case | What happens | Result |
+|---|---|---|
+| `compact` | two 30k-character answers, then `/model small` while `sleep 20` runs | bar `0.0% left ↻` on small at once (04, tooltip 05); two compactions summarised by **big**, then `model_applied at=step step=2 … compacted=True`; small's first request 6,204 characters; turn `done` (06) |
+| `refuse` | idle `/model micro`; then one 60k-character answer and `/model small` during its command | micro refused when asked, chip stays big (02); small refused at step 2 (`model_switch_refused at=step`), chip back to big, turn `done` on big, no request to small (05) |
+
+`phone-shots.py`: the real web client (`app/`) in headless Chrome at 390×844, paired over the real
+rendezvous and host, fed the same model events: `phone-01-switch-accepted.png` (the ↻ line, indicator
+`small · big finishing the current step`), `phone-02-landed-after-compaction.png` (`→ now on small ·
+compacted to fit its window`), `phone-03-refused.png` (a refusal in red, indicator on the model kept);
+`phone-lines.txt` has the rendered text.

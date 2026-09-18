@@ -3371,7 +3371,9 @@ private:
             clearNextContext();
             const QString reason = event.value(QStringLiteral("reason")).toString();
             ensureLineStart();
-            printInline(QStringLiteral("✗ %1 did not take over · %2\n").arg(refused, reason), Ink::Error);
+            // The reason is a whole sentence that names both models.
+            printInline(QStringLiteral("✗ %1\n").arg(reason.isEmpty() ? refused + QStringLiteral(" did not take over.") : reason),
+                        Ink::Error);
             if (!m_agentBusy && !moreTurnsPending()) closeInline();
             const QString what = QStringLiteral("Still on %1 · %2's window is too small for this conversation").arg(m_model, refused);
             status(what); toast(what);

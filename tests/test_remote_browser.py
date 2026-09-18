@@ -150,6 +150,65 @@ class BrowserClientTests(unittest.TestCase):
                     await browser.stop()
         asyncio.run(asyncio.wait_for(main(), 180))
 
+    def test_a_model_switch_mid_turn_shows_where_it_lands(self):
+        # Issue 3ES1: the phone says what the desktop says - the switch accepted mid-turn, where it
+        # took over, and a refusal - and its model indicator follows, back to the old model when a
+        # switch is refused.
+        async def main():
+            async with Harness() as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=60)
+                    await browser.wait_for("document.querySelectorAll('.pane-row').length > 0")
+                    await browser.evaluate("""[...document.querySelectorAll('.pane-row')].find(
+                        row => row.querySelector('.pane-title')?.textContent === 'relay-terminal').click()""")
+                    await browser.wait_for(shown('screen-thread'))
+                    pane = "pane-1"             # DemoPaneSource's relay-terminal pane
+                    lines = "[...document.querySelectorAll('.model-line')].map(n => n.textContent)"
+                    indicator = "document.getElementById('thread-model')"
+
+                    harness.source._emit(pane, {"event": "model_changed", "model": "kimi-k3",
+                                                "applies": "next_step", "in_flight_model": "glm-5.3",
+                                                "will_compact": True})
+                    await browser.wait_for(f"{lines}.length === 1")
+                    self.assertEqual(await browser.evaluate(lines), [
+                        "↻ kimi-k3 takes over at the next step · glm-5.3 is not interrupted · will compact to fit"])
+                    self.assertEqual(await browser.evaluate(f"{indicator}.textContent"),
+                                     "kimi-k3 · glm-5.3 finishing the current step")
+                    self.assertTrue(await browser.evaluate(f"{indicator}.classList.contains('waiting')"))
+                    self.assertFalse(await browser.evaluate(f"{indicator}.hidden"))
+
+                    harness.source._emit(pane, {"event": "model_applied", "model": "kimi-k3", "at": "step",
+                                                "from_model": "glm-5.3", "history_converted": True,
+                                                "compacted": True})
+                    await browser.wait_for(f"{lines}.length === 2")
+                    self.assertEqual((await browser.evaluate(lines))[1],
+                                     "→ now on kimi-k3 · conversation converted from glm-5.3"
+                                     " · compacted to fit its window")
+                    self.assertEqual(await browser.evaluate(f"{indicator}.textContent"), "kimi-k3")
+                    self.assertFalse(await browser.evaluate(f"{indicator}.classList.contains('waiting')"))
+
+                    harness.source._emit(pane, {"event": "model_changed", "model": "tiny", "applies": "next_step",
+                                                "in_flight_model": "kimi-k3"})
+                    harness.source._emit(pane, {"event": "model_switch_refused", "model": "tiny", "at": "step",
+                                                "current_model": "kimi-k3",
+                                                "reason": "tiny cannot take over. Staying on kimi-k3."})
+                    await browser.wait_for(f"{lines}.length === 4")
+                    self.assertEqual((await browser.evaluate(lines))[3],
+                                     "✗ tiny cannot take over. Staying on kimi-k3.")
+                    self.assertEqual(await browser.evaluate(f"{indicator}.textContent"), "kimi-k3")
+                    self.assertTrue(await browser.evaluate(
+                        "document.querySelectorAll('.model-line')[3].classList.contains('error')"))
+                    problems = [line for line in browser.console
+                                if "EXCEPTION" in line or "error:" in line.lower()]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 180))
+
     def test_a_refused_device_shows_the_reason_and_stores_nothing(self):
         async def main():
             async with Harness(approve=False) as harness:
