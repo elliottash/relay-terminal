@@ -2098,3 +2098,172 @@ class Host:
             "desktop_id": self.identity.desktop_id, "token": self.token,
             "endpoint": endpoint, "ciphertext": base64.b64encode(payload).decode(),
             "ttl": push_mod.PUSH_TTL, "urgency": "normal"})
+
+    # ---- pane_state (relay-terminal-71) ----------------------------------------------------------
+    # One pane model, two views (docs/REMOTE-PROTOCOL.md section 16). The GUI publishes each shared
+    # pane's state as a `pane_state` line; the hub cleans it (remote/pane_state.py), keeps the
+    # latest, and sends each device watching the pane its own capability's view of it. The client
+    # actions below forward to the GUI as sidecar lines of the same names, carrying only ids the
+    # desktop minted; the GUI resolves them against its own tables and re-checks that the action is
+    # one the row offers right now.
+    #
+    # Never to a participant: `_send_pane_state` refuses a guest's channel before anything else,
+    # and every client type here is in wire.GUEST_NEVER, so a guest can neither ask for a state nor
+    # act on one. The latest state is kept outside `self.streams` on purpose — a `resume` replays a
+    # stream's ring as stored, which would skip both the capability filter and that rule.
+
+    def _pane_state_book(self) -> pane_state_mod.Book:
+        book = self.__dict__.get("_pane_states")
+        if book is None:
+            book = self.__dict__["_pane_states"] = pane_state_mod.Book()
+        return book
+
+    def pane_state_from_gui(self, message: dict) -> None:
+        """A `pane_state` or `queue_edit_text` line from the GUI (remote/gui_host.py)."""
+        kind = message.get("t")
+        if kind == "pane_state":
+            self.pane_state_published(message)
+        elif kind == "queue_edit_text":
+            self._queue_edit_answered(message)
+
+    def pane_state_published(self, message: dict) -> None:
+        state = pane_state_mod.clean(message)
+        if state is None:
+            return
+        book = self._pane_state_book()
+        if not self.source.has_pane(state["pane"]):
+            book.forget(state["pane"])
+            return
+        stamped = book.store(state)
+        waiting = book.take_waiting(state["pane"])
+        asked = {id(channel) for channel, _ in waiting}
+        for channel, request_id in waiting:
+            self._spawn(self._send_pane_state(channel, stamped, asked=True, request_id=request_id))
+        for channel in list(self.channels.values()):
+            if id(channel) not in asked:
+                self._spawn(self._send_pane_state(channel, stamped))
+
+    async def _send_pane_state(self, channel: Channel, state: dict, *, asked: bool = False,
+                               request_id=None) -> None:
+        """One device's view of one state. The capability is read here, as it is sent."""
+        if channel.participant_id is not None or channel.closed:
+            return                              # never to a guest, whatever asked for it
+        if not asked and state["pane"] not in channel.subscribed:
+            return
+        view = pane_state_mod.for_capability(state, channel.capability())
+        if view is None:
+            return
+        view["seq"] = state["seq"]
+        if request_id is not None:
+            view["id"] = request_id
+        await channel.send(view)
+
+    def _pane_state_line(self, message: dict) -> None:
+        """Hand a line to the GUI. Only a source the GUI drives publishes pane state."""
+        send = getattr(self.source, "send", None)
+        if not callable(send):
+            raise wire.WireError("not_permitted", "this desktop does not publish pane state.")
+        send(message)
+
+    def _pane_state_origin(self, channel: Channel) -> dict:
+        device = channel.device
+        return {"origin": f"remote:{channel.device_id}",
+                "device_name": device.name if device is not None else ""}
+
+    def _pane_state_pane(self, channel: Channel, message: dict) -> str:
+        if channel.participant_id is not None:
+            # GUEST_NEVER already refused every type that lands here; this is the second lock.
+            raise wire.WireError("not_permitted", "a guest never gets that.")
+        return self._pane_of(message)
+
+    async def _on_pane_state_get(self, channel: Channel, message: dict) -> None:
+        pane = self._pane_state_pane(channel, message)
+        book = self._pane_state_book()
+        latest = book.latest.get(pane)
+        if latest is not None:
+            await self._send_pane_state(channel, latest, asked=True, request_id=message.get("id"))
+            return
+        # Nothing published yet: ask the GUI, and answer this channel when the state arrives.
+        if not book.wait(pane, channel, message.get("id")):
+            raise wire.WireError("busy", "that pane's state has been asked for already.")
+        self._pane_state_line({"t": "pane_state_get", "pane": pane})
+
+    async def _on_queue_move(self, channel: Channel, message: dict) -> None:
+        pane = self._pane_state_pane(channel, message)
+        row, to = pane_state_mod.row_of(message), pane_state_mod.move_of(message)
+        self._pane_state_line({"t": "queue_move", "pane": pane, "row": row, "to": to,
+                               **self._pane_state_origin(channel)})
+
+    async def _on_queue_send_now(self, channel: Channel, message: dict) -> None:
+        pane = self._pane_state_pane(channel, message)
+        row = pane_state_mod.row_of(message)
+        self._pane_state_line({"t": "queue_send_now", "pane": pane, "row": row,
+                               **self._pane_state_origin(channel)})
+
+    async def _on_queue_edit(self, channel: Channel, message: dict) -> None:
+        """Take a row back to edit it on the phone. The GUI withdraws the row and answers with
+        its text, which goes to this device alone — never fanned out, never to anyone else."""
+        pane = self._pane_state_pane(channel, message)
+        row = pane_state_mod.row_of(message)
+        book = self._pane_state_book()
+        edit_id = book.new_edit(channel, message.get("id"), pane, row)
+        if edit_id is None:
+            raise wire.WireError("busy", "too many edits waiting on the desktop.")
+        try:
+            self._pane_state_line({"t": "queue_edit", "pane": pane, "row": row, "id": edit_id,
+                                   **self._pane_state_origin(channel)})
+        except wire.WireError:
+            book.take_edit(edit_id)
+            raise
+
+        async def lapse() -> None:
+            await asyncio.sleep(QUEUE_EDIT_TIMEOUT)
+            pending = book.take_edit(edit_id)
+            if pending is not None:
+                await channel.send(wire.error("internal", "the desktop did not answer.",
+                                              pending.request_id))
+
+        self._spawn(lapse())
+
+    def _queue_edit_answered(self, message: dict) -> None:
+        pending = self._pane_state_book().take_edit(message.get("id"))
+        if pending is None:
+            return                              # not an id this hub minted, or it lapsed
+        if message.get("pane") != pending.pane or message.get("row") != pending.row:
+            self._spawn(pending.channel.send(wire.error(
+                "internal", "the desktop answered a different row.", pending.request_id)))
+            return
+        ok, text = pane_state_mod.edit_answer(message)
+        channel = pending.channel
+        if channel.participant_id is not None:
+            return
+        if not ok:
+            self._spawn(channel.send(wire.error("not_permitted", text, pending.request_id)))
+            return
+        reply = {"t": "queue_edit_text", "pane": pending.pane, "row": pending.row, "text": text}
+        if pending.request_id is not None:
+            reply["id"] = pending.request_id
+        self._spawn(channel.send(reply))
+
+    async def _on_model_pick(self, channel: Channel, message: dict) -> None:
+        pane = self._pane_state_pane(channel, message)
+        choice = pane_state_mod.choice_of(message)
+        self._pane_state_line({"t": "model_pick", "pane": pane, "choice": choice,
+                               **self._pane_state_origin(channel)})
+
+    async def _on_conversation_new(self, channel: Channel, message: dict) -> None:
+        pane = self._pane_state_pane(channel, message)
+        self._pane_state_line({"t": "conversation_new", "pane": pane,
+                               **self._pane_state_origin(channel)})
+
+
+# pane_state (relay-terminal-71): imported here, below the class, so this module's shared import
+# block stays untouched while other sessions edit it; nothing above runs before the module is done.
+from . import pane_state as pane_state_mod  # noqa: E402
+
+QUEUE_EDIT_TIMEOUT = 15.0          # a wedged GUI is an error on the phone, not a spinner
+LIMITS.update({
+    "model_pick": (20, 60),        # each one reconfigures the pane's provider
+    "conversation_new": (10, 60),
+    "queue_edit": (60, 60),
+})

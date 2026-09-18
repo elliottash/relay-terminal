@@ -1,0 +1,95 @@
+{
+  "t": "pane_state",
+  "v": 1,
+  "pane": "5d0c9a3e-8f21-4c55-b1d7-2f6f0e7c9a10",
+  "seq": 57,
+  "turn": {
+    "phase": "tool",
+    "clock": "running · 1 min 12 s · step 4/256 · Esc stops",
+    "busy": true
+  },
+  "thinking": {
+    "visible": true,
+    "header": "Thinking… · fake · 12 s",
+    "tail": "Reasoning sentence number 31 about the plan. Reasoning sentence number 32 about the plan."
+  },
+  "queue": {
+    "paused": false,
+    "pause_reason": "",
+    "running": {
+      "label": "✦ please plan this out"
+    },
+    "rows": [
+      {
+        "id": "steer:steer-3",
+        "kind": "steer",
+        "label": "↪ next tool call  ✦ please QUEUEDFOUR list the open issues NOW",
+        "state": "waiting",
+        "actions": []
+      },
+      {
+        "id": "steer:steer-4",
+        "kind": "steer",
+        "label": "↪ next tool call  ✦ please STEERTWO also look at the tests  withdrawing…",
+        "state": "withdrawing",
+        "actions": []
+      },
+      {
+        "id": "entry:7",
+        "kind": "agent",
+        "label": "✦ please QUEUEDTHREE summarize the changes",
+        "state": "queued",
+        "actions": []
+      },
+      {
+        "id": "entry:8",
+        "kind": "agent",
+        "label": "✦ please QUEUEDFIVE remove me later",
+        "state": "editing",
+        "actions": []
+      },
+      {
+        "id": "entry:9",
+        "kind": "command",
+        "label": "$ make -C build test",
+        "state": "queued",
+        "actions": []
+      }
+    ],
+    "hint": ""
+  },
+  "model": {
+    "label": "fake · local",
+    "choices": []
+  },
+  "context": {
+    "label": "91% left",
+    "percent_left": 91
+  },
+  "sessions": {
+    "rows": [
+      {
+        "id": "s1",
+        "title": "Thinking copy test",
+        "when": "14:02",
+        "current": true,
+        "running": false
+      },
+      {
+        "id": "s2",
+        "title": "Queue as one list",
+        "when": "11:40",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s3",
+        "title": "Fix the flaky PTY test",
+        "when": "Mon",
+        "current": false,
+        "running": false
+      }
+    ],
+    "can_new": false
+  }
+}

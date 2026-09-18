@@ -199,6 +199,13 @@ target_include_directories(relay-queuenav PUBLIC src)
 target_link_libraries(relay-queuenav PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-queuenav PRIVATE -Wall -Wextra -Wpedantic)
 
+# pane_state (relay-terminal-71): a pane as a paired phone draws it, and the publisher that
+# coalesces its changes. Plain inputs in, the v1 JSON out; QtCore only, so it is tested headless.
+add_library(relay-panestate STATIC src/PaneState.cpp src/PaneState.h)
+target_include_directories(relay-panestate PUBLIC src)
+target_link_libraries(relay-panestate PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-panestate PRIVATE -Wall -Wextra -Wpedantic)
+
 # Pane movement: which pane is the neighbour in a direction, how two panes swap inside their
 # splitter, and which edge a dropped pane lands on. Plain Qt widgets, no terminal.
 add_library(relay-panes STATIC src/PaneLayout.cpp src/PaneLayout.h)
@@ -366,6 +373,7 @@ if(RELAY_BUILD_APP)
         RELAY_VERSION="${PROJECT_VERSION}")
     target_compile_options(relay PRIVATE -Wall -Wextra -Wpedantic)
     install(TARGETS relay RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    target_link_libraries(relay PRIVATE relay-panestate)   # pane_state (relay-terminal-71)
     # remote/, rendezvous/ and app/ are the phone-sharing sidecar, its relay and the web client.
     install(DIRECTORY backend shell remote rendezvous app DESTINATION ${CMAKE_INSTALL_DATADIR}/relay
         PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
@@ -459,6 +467,9 @@ if(BUILD_TESTING)
     add_executable(relay-queuenav-tests tests/queuenav_test.cpp)
     target_link_libraries(relay-queuenav-tests PRIVATE relay-queuenav ${RELAY_QT}::Test)
     add_test(NAME queuenav COMMAND relay-queuenav-tests)
+    add_executable(relay-panestate-tests tests/panestate_test.cpp)
+    target_link_libraries(relay-panestate-tests PRIVATE relay-panestate ${RELAY_QT}::Test)
+    add_test(NAME panestate COMMAND relay-panestate-tests)
     add_executable(relay-panes-tests tests/panelayout_test.cpp)
     target_link_libraries(relay-panes-tests PRIVATE relay-panes ${RELAY_QT}::Test)
     add_test(NAME panes COMMAND relay-panes-tests)

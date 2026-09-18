@@ -1,0 +1,418 @@
+{
+  "t": "pane_state",
+  "v": 1,
+  "pane": "5d0c9a3e-8f21-4c55-b1d7-2f6f0e7c9a10",
+  "seq": 101,
+  "turn": {
+    "phase": "thinking",
+    "clock": "thinking · 3 s · step 1/256 · Esc stops",
+    "busy": true
+  },
+  "thinking": {
+    "visible": true,
+    "header": "Thinking… · fake · 3 s",
+    "tail": "Reading the session index."
+  },
+  "queue": {
+    "paused": false,
+    "pause_reason": "",
+    "running": {
+      "label": "✦ what did we do yesterday?"
+    },
+    "rows": [],
+    "hint": ""
+  },
+  "model": {
+    "label": "fake · local",
+    "choices": [
+      {
+        "id": "m1",
+        "label": "fake · local",
+        "current": true
+      },
+      {
+        "id": "m2",
+        "label": "Kimi K2 · Main",
+        "current": false
+      },
+      {
+        "id": "m3",
+        "label": "GLM 4.6 · Flash",
+        "current": false
+      },
+      {
+        "id": "m4",
+        "label": "Bonsai 2 27B · Local",
+        "current": false
+      }
+    ]
+  },
+  "composer": {
+    "mode": "auto",
+    "placeholder": "Shell commands or agent prompts…      ?  for help",
+    "modes": [
+      "auto",
+      "shell",
+      "agent"
+    ]
+  },
+  "context": {
+    "label": "100% left",
+    "percent_left": 100
+  },
+  "sessions": {
+    "rows": [
+      {
+        "id": "s1",
+        "title": "Thinking copy test",
+        "when": "14:02",
+        "current": true,
+        "running": true
+      },
+      {
+        "id": "s2",
+        "title": "Queue as one list",
+        "when": "12:07",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s3",
+        "title": "Fix the flaky PTY test",
+        "when": "11:14",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s4",
+        "title": "Local model smoke test",
+        "when": "10:21",
+        "current": false,
+        "running": true
+      },
+      {
+        "id": "s5",
+        "title": "Share a pane with the phone",
+        "when": "09:28",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s6",
+        "title": "Settings as a pane",
+        "when": "08:35",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s7",
+        "title": "Toasts and the turn clock",
+        "when": "07:42",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s8",
+        "title": "Legible text everywhere",
+        "when": "06:49",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s9",
+        "title": "Board: cleanup panel",
+        "when": "05:56",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s10",
+        "title": "Remote scrollback",
+        "when": "04:03",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s11",
+        "title": "Thinking copy test (2)",
+        "when": "03:10",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s12",
+        "title": "Queue as one list (2)",
+        "when": "02:17",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s13",
+        "title": "Fix the flaky PTY test (2)",
+        "when": "Sat",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s14",
+        "title": "Local model smoke test (2)",
+        "when": "Fri",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s15",
+        "title": "Share a pane with the phone (2)",
+        "when": "Thu",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s16",
+        "title": "Settings as a pane (2)",
+        "when": "Mon",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s17",
+        "title": "Toasts and the turn clock (2)",
+        "when": "Sun",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s18",
+        "title": "Legible text everywhere (2)",
+        "when": "Sat",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s19",
+        "title": "Board: cleanup panel (2)",
+        "when": "Fri",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s20",
+        "title": "Remote scrollback (2)",
+        "when": "Thu",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s21",
+        "title": "Thinking copy test (3)",
+        "when": "Mon",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s22",
+        "title": "Queue as one list (3)",
+        "when": "Sun",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s23",
+        "title": "Fix the flaky PTY test (3)",
+        "when": "Sat",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s24",
+        "title": "Local model smoke test (3)",
+        "when": "Fri",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s25",
+        "title": "Share a pane with the phone (3)",
+        "when": "Thu",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s26",
+        "title": "Settings as a pane (3)",
+        "when": "Mon",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s27",
+        "title": "Toasts and the turn clock (3)",
+        "when": "Sun",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s28",
+        "title": "Legible text everywhere (3)",
+        "when": "Sat",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s29",
+        "title": "Board: cleanup panel (3)",
+        "when": "Fri",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s30",
+        "title": "Remote scrollback (3)",
+        "when": "Thu",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s31",
+        "title": "Thinking copy test (4)",
+        "when": "3 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s32",
+        "title": "Queue as one list (4)",
+        "when": "4 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s33",
+        "title": "Fix the flaky PTY test (4)",
+        "when": "5 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s34",
+        "title": "Local model smoke test (4)",
+        "when": "6 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s35",
+        "title": "Share a pane with the phone (4)",
+        "when": "7 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s36",
+        "title": "Settings as a pane (4)",
+        "when": "8 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s37",
+        "title": "Toasts and the turn clock (4)",
+        "when": "9 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s38",
+        "title": "Legible text everywhere (4)",
+        "when": "10 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s39",
+        "title": "Board: cleanup panel (4)",
+        "when": "11 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s40",
+        "title": "Remote scrollback (4)",
+        "when": "12 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s41",
+        "title": "Thinking copy test (5)",
+        "when": "13 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s42",
+        "title": "Queue as one list (5)",
+        "when": "14 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s43",
+        "title": "Fix the flaky PTY test (5)",
+        "when": "15 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s44",
+        "title": "Local model smoke test (5)",
+        "when": "16 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s45",
+        "title": "Share a pane with the phone (5)",
+        "when": "17 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s46",
+        "title": "Settings as a pane (5)",
+        "when": "18 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s47",
+        "title": "Toasts and the turn clock (5)",
+        "when": "19 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s48",
+        "title": "Legible text everywhere (5)",
+        "when": "20 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s49",
+        "title": "Board: cleanup panel (5)",
+        "when": "21 Aug",
+        "current": false,
+        "running": false
+      },
+      {
+        "id": "s50",
+        "title": "Remote scrollback (5)",
+        "when": "22 Aug",
+        "current": false,
+        "running": false
+      }
+    ],
+    "can_new": true
+  }
+}

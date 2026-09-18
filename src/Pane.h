@@ -42,6 +42,7 @@
 #include "WindowState.h"
 #include "RuntimeDirs.h"
 #include "RemoteShare.h"
+#include "PaneState.h"
 #include "PaneStatus.h"
 #include "RemoteSession.h"
 #include "RemoteFiles.h"     // the host's files: the link probe's cache and `ssh://host/path` (#S5SH)
@@ -2164,6 +2165,7 @@ private:
     }
 
     void updateContextLabel() {
+        m_paneState.changed();   // pane_state (relay-terminal-71)
         if (!m_ctxLabel) return;
         if (m_ctxWindow <= 0) { m_ctxLabel->hide(); return; }
         // While a switch waits (issue 3ES1) the chip already names the new model, so the bar agrees
@@ -2515,6 +2517,7 @@ private:
     // up"). placeThinking() sets the height, and every show or hide runs through keepPaneSizes().
     void appendThinking(const QString &text) {
         if (text.isEmpty()) return;
+        m_paneState.changed();   // pane_state (relay-terminal-71)
         if (!m_thinking) {
             m_thinking = new QFrame(this);
             m_thinking->setObjectName(QStringLiteral("thinkingOverlay"));
@@ -2622,6 +2625,7 @@ private:
     }
 
     void endThinking() {
+        m_paneState.changed();   // pane_state (relay-terminal-71)
         if (!m_thinkingShown) return;
         m_thinkingShown = false;
         if (m_thinking) hideBubble(m_thinking);
@@ -4224,6 +4228,7 @@ private:
         }
         // ----- conversation list and search (protocol section 14) -----------------------------
         if (type == QStringLiteral("conversations")) {
+            noteRemoteSessions(event);   // pane_state (relay-terminal-71)
             // Only the manager's own queries (another client may ask this worker too).
             if (m_conversations && event.value(QStringLiteral("id")).toString() == QStringLiteral("conv-list"))
                 m_conversations->setResults(event);
@@ -7245,6 +7250,7 @@ private:
     }
 
     void stopTurnClock() {
+        m_paneState.changed();   // pane_state (relay-terminal-71)
         if (m_turnClock) m_turnClock->stop();
         m_turnStep.clear();
         m_waitCall.clear();      // no turn, no agent_wait (card #V7QD)
@@ -7253,6 +7259,7 @@ private:
     }
 
     void tickTurnClock() {
+        m_paneState.changed();   // pane_state (relay-terminal-71)
         if (!m_agentBusy) { stopTurnClock(); return; }
         const qint64 seconds = m_turnElapsed.elapsed() / 1000;
         const QString stop = Keymap::instance().shortcutText(QStringLiteral("agent.stop"));
@@ -7282,6 +7289,7 @@ private:
     }
 
     void refreshPickers() {
+        m_paneState.changed();   // pane_state (relay-terminal-71): model and mode; changed() runs this
         if (!m_modelBox) return;
         const QSignalBlocker modelBlock(m_modelBox);
         if (m_modeChip) {
@@ -7375,6 +7383,194 @@ private:
         }
         return lines.join('\n');
     }
+
+    // ----- pane_state (relay-terminal-71): this pane as a paired phone draws it ------------------
+    // One pane model, two views (docs/REMOTE-PROTOCOL.md section 16). remoteState() gathers what
+    // the pane already shows — the turn clock, the reasoning, the queue rows, the model chip and
+    // its menu, the prompt box, the context chip, the session list — and relay::panestate builds
+    // the message, coalesced to one per 100 ms by m_paneState. The places that change those call
+    // m_paneState.changed(); it costs nothing while nobody listens (onPaneState unset). The
+    // remote* functions below are what the phone's actions come to: each takes only ids this pane
+    // minted and re-checks, against the pane as it is now, that the row still offers the action.
+public:
+    std::function<void(const QJsonObject &state)> onPaneState;   // wired to RemoteShare in phase B
+
+    relay::panestate::Inputs remoteState() const {
+        relay::panestate::Inputs in;
+        in.pane = m_token;
+        in.busy = m_agentBusy;
+        in.toolRunning = m_agentBusy && !m_liveCall.isEmpty();
+        const relay::panestatus::Facts facts = statusFacts();
+        in.waiting = facts.programAsking || facts.handoffWaiting;
+        in.clock = m_agentBusy && m_turnClockLabel ? m_turnClockLabel->text() : QString();
+        in.thinkingVisible = m_thinkingShown && !m_thinkingDismissed;
+        if (m_thinkingHeader) in.thinkingHeader = m_thinkingHeader->text();
+        if (m_thinkingView) in.thinkingText = m_thinkingView->toPlainText().right(relay::panestate::kTailMax);
+
+        in.queuePaused = queueBlocked();
+        in.pauseReason = !m_pauseReason.isEmpty() ? m_pauseReason
+                         : queueHeldBySelection() ? QStringLiteral("Held while the next item is edited on the desktop")
+                                                  : QString();
+        for (const QueueRow &row : queueRows()) {
+            if (row.kind == QLatin1String("running")) { in.running = row.preview; continue; }
+            relay::panestate::Row out{row.id, row.kind, row.preview, row.state, false};
+            for (const QueueEntry &entry : m_entries)
+                if (QStringLiteral("entry:%1").arg(entry.id) == row.id) { out.written = entry.written(); break; }
+            in.rows << out;
+        }
+        const bool headSteerable = m_selected == 0 && m_agentBusy && !m_entries.isEmpty() && m_entries.first().agent
+                                   && !m_entries.first().written();
+        in.queueHint = relay::panestate::queueHint(!m_selectedSteer.isEmpty(), headSteerable, m_selected >= 0);
+
+        // The chip's own text, and the rows of its menu that switch the model: the presets with a
+        // stored key (m_stored), then the agent roles. Not the gear (desktop settings) and not
+        // the "this turn" image row, which is not a choice.
+        QString chip = m_modelBox ? m_modelBox->currentText() : m_model;
+        in.modelLabel = chip.remove(QChar(0x2713)).trimmed();
+        for (const auto &model : std::as_const(m_stored))
+            in.choices << relay::panestate::Choice{QStringLiteral("preset:") + model.first, conciseModel(model.first, model.second),
+                                                   model.first == m_currentPreset && m_agentRole == QLatin1String("main")};
+        QStringList roles{QStringLiteral("main"), QStringLiteral("flash")};
+        if (hasLocalEndpoint()) roles << QStringLiteral("local");
+        if (!roles.contains(m_agentRole)) roles << m_agentRole;
+        for (const QString &role : std::as_const(roles)) {
+            const QString model = roleModelText(role);
+            in.choices << relay::panestate::Choice{QStringLiteral("role:") + role,
+                                                   roleLabel(role) + (model.isEmpty() ? QString() : QStringLiteral(" · ") + model),
+                                                   role == m_agentRole};
+        }
+
+        in.mode = m_modeValue;
+        if (m_editor) in.placeholder = m_editor->placeholderText().isEmpty() ? m_savedPlaceholder : m_editor->placeholderText();
+
+        if (m_ctxLabel && m_ctxWindow > 0) {
+            in.contextLabel = m_ctxLabel->text();
+            const double percent = m_ctxNextWindow > 0 ? m_ctxNextPercent : m_ctxPercent;
+            in.percentLeft = int(std::lround(std::clamp(100.0 - percent, 0.0, 100.0)));
+        }
+
+        // The session manager's rows (/resume, /conversations): agent sessions of this project, as
+        // the worker last listed them. Terminal history cannot be resumed and threads belong to
+        // their session, so neither is a row here. Observing only: nothing here opens one.
+        const QDateTime now = QDateTime::currentDateTime();
+        for (const QJsonValue &value : m_remoteSessions) {
+            const QJsonObject item = value.toObject();
+            const QString id = item.value(QStringLiteral("session_id")).toString();
+            const QString source = item.value(QStringLiteral("source")).toString();
+            if (id.isEmpty() || source == QLatin1String("terminal") || source == QLatin1String("subagent")) continue;
+            QString title = item.value(QStringLiteral("title")).toString();
+            if (title.trimmed().isEmpty()) title = item.value(QStringLiteral("first_prompt")).toString();
+            if (title.trimmed().isEmpty()) title = QStringLiteral("Untitled conversation");
+            const bool current = id == m_sessionId;
+            in.sessions << relay::panestate::Session{id, title,
+                                                     relay::conversations::whenText(item.value(QStringLiteral("updated")).toDouble(), now),
+                                                     current, current && m_agentBusy};
+        }
+        in.canNew = m_workerReady && !m_agentBusy;
+        return in;
+    }
+
+    // The whole state now, whatever the interval: the answer to a phone's pane_state_get.
+    QJsonObject paneStateNow() { return m_paneState.publishNow(); }
+
+    // Ask the worker for the session list a phone sees. Its answer arrives as `conversations`
+    // with this id and lands in noteRemoteSessions().
+    void requestRemoteSessions() {
+        if (!m_workerReady) return;
+        send({{"type", "conversations"}, {"id", "conv-remote"}, {"scope", "project"},
+              {"workspace", m_workspace}, {"limit", relay::panestate::kSessionsMax}});
+    }
+
+    // Queue actions from a phone (queue_remove, queue_move, queue_edit, queue_send_now). False when
+    // the row is gone or no longer offers the action — the phone saw an older state.
+    bool remoteQueueRemove(const QString &rowId) {
+        return remoteRowOffers(rowId, QStringLiteral("remove")) && removeRow(rowId);
+    }
+    bool remoteQueueMove(const QString &rowId, const QString &to) {
+        if (!remoteRowOffers(rowId, to)) return false;
+        if (to == QLatin1String("to_queue")) { withdrawSteer(rowId.mid(6), SteerEntry::ToQueue); return true; }
+        const quint64 id = rowId.mid(6).toULongLong();
+        if (to == QLatin1String("steer")) return !steerQueuedEntry(id).isEmpty();
+        int from = -1;
+        for (int i = 0; i < m_entries.size(); ++i) if (m_entries[i].id == id) { from = i; break; }
+        const int target = from + (to == QLatin1String("up") ? -1 : 1);
+        if (from < 0 || target < 0 || target >= m_entries.size()) return false;
+        const quint64 selected = selectedEntryId();
+        m_entries.move(from, target);
+        keepSelectionOn(selected);   // a row the desktop is editing keeps its highlight, wherever it went
+        rebuildQueueStrip(); changed();
+        return true;
+    }
+    // Take a row back for the phone's prompt box: a steer is withdrawn, a queued row removed, and
+    // the text goes to the phone. Nothing lands in this pane's own prompt box.
+    bool remoteQueueEdit(const QString &rowId, QString *text) {
+        if (!remoteRowOffers(rowId, QStringLiteral("edit"))) return false;
+        if (rowId.startsWith(QLatin1String("steer:"))) {
+            const QString requestId = rowId.mid(6);
+            for (const auto &steer : std::as_const(m_steering))
+                if (steer.requestId == requestId) { *text = steer.text; break; }
+            withdrawSteer(requestId, SteerEntry::Drop);
+            return true;
+        }
+        const quint64 id = rowId.mid(6).toULongLong();
+        for (const QueueEntry &entry : std::as_const(m_entries))
+            if (entry.id == id) { *text = entry.text; removeEntry(id); return true; }
+        return false;
+    }
+    bool remoteQueueSendNow(const QString &rowId) {
+        return remoteRowOffers(rowId, QStringLiteral("send_now")) && sendSteerNow(rowId.mid(6));
+    }
+
+    // model_pick: a token from this pane's last pane_state, resolved here. Only what the menu
+    // offered can be reached — a stored-key preset or a role — never the provider settings.
+    bool remoteModelPick(const QString &choiceId, const QString &deviceName) {
+        const QString key = m_paneState.choiceKey(choiceId);
+        const QString who = deviceName.trimmed().isEmpty() ? QStringLiteral("a paired device") : deviceName.trimmed();
+        if (key.startsWith(QLatin1String("role:"))) {
+            const QString role = key.mid(5);
+            if (role == QLatin1String("local") && !hasLocalEndpoint()) return false;
+            chooseAgentRole(role);
+        } else if (key.startsWith(QLatin1String("preset:"))) {
+            const QString preset = key.mid(7);
+            const bool stored = std::any_of(m_stored.cbegin(), m_stored.cend(), [&](const auto &model) { return model.first == preset; });
+            if (!stored || !m_configured) return false;
+            selectModel(preset);
+        } else {
+            return false;
+        }
+        status(QStringLiteral("Model changed from %1 · %2").arg(who, remoteState().modelLabel));
+        return true;
+    }
+
+    // conversation_new: the same as /new, refused while a turn runs exactly as /new is.
+    bool remoteConversationNew(const QString &deviceName) {
+        if (!m_workerReady || m_agentBusy) return false;
+        newChat();
+        status(QStringLiteral("New conversation from %1")
+                   .arg(deviceName.trimmed().isEmpty() ? QStringLiteral("a paired device") : deviceName.trimmed()));
+        requestRemoteSessions();
+        return true;
+    }
+
+private:
+    bool remoteRowOffers(const QString &rowId, const QString &action) const {
+        return relay::panestate::actionsFor(remoteState(), rowId).contains(action);
+    }
+    // The worker's answer to requestRemoteSessions(), or to the session manager's own unfiltered
+    // listing, which is the same list. A search's results are not the list and are left alone.
+    void noteRemoteSessions(const QJsonObject &event) {
+        const QString id = event.value(QStringLiteral("id")).toString();
+        const bool listing = id == QLatin1String("conv-list") && event.value(QStringLiteral("query")).toString().trimmed().isEmpty()
+                             && event.value(QStringLiteral("offset")).toInt() == 0;
+        if (id != QLatin1String("conv-remote") && !listing) return;
+        m_remoteSessions = event.value(QStringLiteral("items")).toArray();
+        m_paneState.changed();
+    }
+
+    QJsonArray m_remoteSessions;   // the session list a phone sees (noteRemoteSessions)
+    relay::panestate::Publisher m_paneState{[this] { return remoteState(); },
+                                            [this](const QJsonObject &state) { if (onPaneState) onPaneState(state); },
+                                            [this] { return bool(onPaneState); }};
 
     void clearFix() { m_fixCommand.clear(); m_fixWatch = false; m_fixArmed = false; m_fixAwaitingAgent = false; m_fixAttempt = 0; }
 
@@ -9485,6 +9681,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
     // covering its last lines (owner report, 2026-09-18), and the show runs through
     // keepPaneSizes() because the row's height is part of this pane's minimum height (#G152).
     void rebuildQueueStrip() {
+        m_paneState.changed();   // pane_state (relay-terminal-71)
         if (!m_queueStrip) return;
         const bool visible = !m_entries.isEmpty() || m_entriesPaused || !m_steering.isEmpty();
         auto *layout = static_cast<QVBoxLayout *>(m_queueStrip->layout());

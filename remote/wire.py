@@ -199,6 +199,29 @@ def may_send_to_guest(kind: str) -> bool:
 
 
 
+# pane_state (relay-terminal-71) ----------------------------------------------------------------
+# One pane model, two views (section 16): the desktop pane publishes `pane_state`, the phone draws
+# it and sends back actions on the rows and choices it was shown. Every id in these messages was
+# minted by the desktop (remote/pane_state.py checks their shapes), so none of them names a preset,
+# a path or a session file. Added here, as one block, rather than inside the literals above.
+CLIENT_TYPES.update({
+    "pane_state_get": VIEW,        # reading, like screen_get: a view device is sent pane_state too
+    "queue_move": AGENT,           # {pane, row, to: to_queue | steer | up | down}
+    "queue_edit": AGENT,           # {pane, row}: withdraws the row, answered by queue_edit_text
+    "queue_send_now": AGENT,       # {pane, row}: a steer, now, interrupting the running turn
+    "model_pick": AGENT,           # {pane, choice}: only a model with a stored key is ever offered
+    "conversation_new": AGENT,     # {pane}: opening a *past* conversation is not offered remotely
+})
+GUEST_NEVER.update({
+    "pane_state_get": "the owner's queue, models and sessions are the owner's pane, not the share",
+    "queue_move": "queue edits of other people's items",
+    "queue_edit": "queue edits of other people's items",
+    "queue_send_now": "interrupts the owner's turn; not among an editor's actions",
+    "model_pick": "model changes are never a guest's (section 10.1)",
+    "conversation_new": "resets the owner's conversation",
+})
+SERVER_TYPES = SERVER_TYPES | frozenset({"pane_state", "queue_edit_text"})
+
 # ---- worker events --------------------------------------------------------------------------
 # Forwarded to a phone, wrapped in an `agent` message.
 

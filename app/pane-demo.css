@@ -1,0 +1,26 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* The demo page around the pane view (app/pane-demo.html). Only the page chrome is here. */
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex;
+  flex-direction: column;
+  font: 13px/1.4 system-ui, sans-serif;
+}
+/* The page takes the pane's own theme: the stage is the .relay-pane's parent, so these read the
+   same generated tokens through a wrapper that carries them. */
+body, #demo-bar, #demo-log { background: #0b0c0f; color: #c8ccd4; }
+#demo-bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 6px 10px; border-bottom: 1px solid #2a2e37; }
+#demo-bar select, #demo-bar button { font: inherit; }
+.demo-file input { max-width: 0; opacity: 0; }
+.demo-file { cursor: pointer; text-decoration: underline; }
+#demo-note { margin: 0; padding: 6px 10px; color: #e5c07b; }
+#demo-stage { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+#demo-log { margin: 0; max-height: 30vh; overflow: auto; padding: 6px 10px; border-top: 1px solid #2a2e37; font: 12px/1.4 monospace; }
+body.demo-bare #demo-bar, body.demo-bare #demo-log { display: none !important; }
+
+/* A stand-in for the terminal canvas, which the host draws (app/screen.js). */
+.demo-terminal { margin: 0; padding: 10px 12px; font: inherit; font-size: calc(var(--rt-pt) * 10); line-height: 1.45; white-space: pre-wrap; }
+.demo-terminal .demo-prompt { color: var(--rt-term-foreground); }
+.demo-terminal .demo-agent { color: var(--rt-agent); font-weight: 700; }
+.demo-terminal .demo-dim { color: var(--rt-ansi-8); }

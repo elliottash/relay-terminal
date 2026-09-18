@@ -563,6 +563,11 @@ class Sidecar:
                 changes = {name: bool(message[name]) for name in
                            ("prompts_immediate", "present_only") if name in message}
                 self.host.set_share_options(str(message.get("pane") or ""), **changes)
+        # pane_state (relay-terminal-71): a pane's state for the phone, and the text of a row a
+        # phone took back to edit (docs/REMOTE-PROTOCOL.md section 16). The hub cleans both.
+        elif kind in ("pane_state", "queue_edit_text"):
+            if self.host is not None:
+                self.host.pane_state_from_gui(message)
         elif kind == "stop":
             await self.stop()
 

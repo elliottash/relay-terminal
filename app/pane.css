@@ -1,0 +1,435 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* The web view of a Relay pane (app/pane.js). Layout only: every colour, font and widget style is a
+   variable from app/pane-theme.css, which scripts/gen-web-theme.py generates from the desktop's
+   src/Theme.cpp, so a theme change reaches the desktop and this view together. --qss-<widget>-*
+   is what Qt's stylesheet gives that widget on the desktop; --rt-* are the theme tokens.
+   tests/test_web_theme.py fails if a literal colour appears here. */
+
+.relay-pane[hidden], .relay-pane [hidden] { display: none !important; }
+.relay-pane, .relay-pane *, .relay-pane *::before, .relay-pane *::after { box-sizing: border-box; }
+
+.relay-pane {
+  /* This file's own lengths. --rp-tap is the smallest tap target: nothing on a desktop, the 44 px
+     of Apple's and Google's guidelines on a touch screen. */
+  --rp-tap: 0px;
+  --rp-gap: 6px;
+  --rp-pad: 6px;
+  --rp-line: 1.35;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--rp-gap);
+  height: 100%;
+  min-height: 0;
+  padding: var(--rp-pad);
+  background: var(--qss-pane-background);
+  color: var(--rt-text);
+  font-family: var(--rt-ui-font);
+  font-size: var(--rt-body-size);
+  line-height: var(--rp-line);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+.relay-pane button, .relay-pane select, .relay-pane textarea { font: inherit; color: inherit; }
+
+/* Sizes follow the device, in rem so the browser's zoom and text size still apply. A laptop gets
+   the desktop's own point (pane-theme.css); a tablet a little more; a phone 10pt = 16 px of body
+   text, which is also what keeps iOS from zooming into the prompt box. */
+.relay-pane[data-device="tablet"] { --rt-pt: 0.09375rem; --rp-gap: 8px; --rp-pad: 10px; }
+.relay-pane[data-device="phone"] { --rt-pt: 0.1rem; --rp-gap: 6px; --rp-pad: 6px; }
+.relay-pane[data-input="touch"] { --rp-tap: 44px; }
+
+/* Keyboard focus is always visible (the desktop's stylesheet turns outlines off; a browser user
+   needs them). The prompt box shows focus with its own border instead. */
+.relay-pane :focus { outline: none; }
+.relay-pane :focus-visible { outline: 2px solid var(--rt-accent); outline-offset: 1px; }
+.relay-pane .rp-input:focus-visible { outline: none; }
+
+/* ---- the terminal, and toasts over it ------------------------------------------------------ */
+.rp-term-wrap { position: relative; display: flex; flex: 1 1 auto; min-height: 96px; }
+.rp-terminal {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--rt-term-background);
+  color: var(--rt-term-foreground);
+  font-family: var(--rt-mono);
+}
+.rp-toast {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  max-width: min(80%, 520px);
+  background: var(--qss-toast-background);
+  color: var(--qss-toast-color);
+  border: var(--qss-toast-border);
+  border-radius: var(--qss-toast-border-radius);
+  padding: var(--qss-toast-padding);
+}
+
+/* ---- the thinking bubble ------------------------------------------------------------------ */
+.rp-thinking {
+  flex: none;
+  background: var(--qss-thinkingOverlay-background);
+  border: var(--qss-thinkingOverlay-border);
+  border-radius: var(--qss-thinkingOverlay-border-radius);
+  padding: 4px 10px 6px;
+}
+.rp-thinking-head { display: flex; align-items: center; gap: 2px; }
+.rp-thinking-header {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--qss-transcriptHeader-color);
+}
+.rp-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: max(26px, var(--rp-tap));
+  min-height: max(24px, var(--rp-tap));
+  padding: 0 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--rt-text);
+  cursor: pointer;
+}
+.rp-icon-button:hover { border-color: var(--rt-border); background: var(--rt-surface); }
+/* The reasoning is text to read and to copy: selectable everywhere, a real selection colour, and
+   pane.js never replaces it while part of it is selected. Two lines until opened, as on the
+   desktop. */
+.rp-thinking-tail {
+  --rp-tail-line: calc(var(--qss-thinkingView-font-size) * var(--rp-line));
+  max-height: calc(var(--rp-tail-line) * 2 + 2px);
+  overflow-y: auto;
+  padding: 0 8px;
+  color: var(--qss-thinkingView-color);
+  background: var(--qss-thinkingView-background);
+  font-family: var(--qss-thinkingView-font-family);
+  font-size: var(--qss-thinkingView-font-size);
+  line-height: var(--rp-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+  cursor: text;
+}
+.rp-thinking.rp-expanded .rp-thinking-tail { max-height: min(45vh, calc(var(--rp-tail-line) * 20)); }
+.rp-thinking-tail::selection { background: var(--rt-selection); color: var(--rt-selection-text); }
+
+/* ---- the queue strip ---------------------------------------------------------------------- */
+.rp-queue {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 10px 8px;
+  background: var(--qss-queueStrip-background);
+  border: var(--qss-queueStrip-border);
+  border-radius: var(--qss-queueStrip-border-radius);
+}
+.rp-queue-head { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.rp-queue-title {
+  flex: 1 0 auto;
+  color: var(--qss-queueTitle-color);
+  font-weight: var(--qss-queueTitle-font-weight);
+  letter-spacing: var(--qss-queueTitle-letter-spacing);
+}
+.rp-queue-hint {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--qss-queueHint-color);
+}
+/* The hint line names keys; a touch screen has none. */
+.relay-pane[data-input="touch"] .rp-queue-hint { display: none; }
+.rp-queue-reason { color: var(--rt-muted); font-size: var(--rt-secondary-size); }
+.rp-queue-running {
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+  color: var(--qss-queueRunning-color);
+}
+.rp-running-lead { margin-right: 0.6em; }
+.rp-rows {
+  list-style: none;
+  margin: 0;
+  padding: 1px;
+  max-height: calc(6 * max(calc(1em * var(--rp-line) + 8px), var(--rp-tap)) + 4px);
+  overflow-y: auto;
+  background: var(--qss-queueList-background);
+  color: var(--qss-queueList-color);
+  border: var(--qss-queueList-border);
+  border-radius: var(--qss-queueList-border-radius);
+}
+.rp-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: max(calc(1em * var(--rp-line) + 8px), var(--rp-tap));
+  padding-left: 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.rp-row[aria-disabled="true"] { cursor: default; }
+.rp-row[aria-selected="true"], .rp-row[data-state="editing"] { background: var(--rt-queue-row-selected); }
+.rp-row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+  color: var(--qss-queueItem-color);
+}
+/* Colours as QueueRowDelegate paints them: ✦ in the accent, $ in amber, a steer wholly in the
+   agent's colour, a steer being withdrawn in grey. */
+.rp-row-glyph { display: inline-block; width: 18px; margin-right: 4px; text-align: center; color: var(--rt-accent); }
+.rp-row[data-kind="command"] .rp-row-glyph { color: var(--rt-warning); }
+.rp-row[data-kind="steer"] .rp-row-label,
+.rp-row[data-kind="steer"] .rp-row-glyph { color: var(--qss-queueSteer-color); }
+.rp-row[data-state="withdrawing"] .rp-row-label,
+.rp-row[data-state="withdrawing"] .rp-row-glyph,
+.rp-row[data-state="paused"] .rp-row-glyph { color: var(--rt-muted); }
+.rp-row-lead { margin-right: 4px; }
+.rp-row-x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: max(24px, var(--rp-tap));
+  height: max(20px, var(--rp-tap));
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--qss-queueButton-color);
+  cursor: pointer;
+}
+.rp-row-x:hover { color: var(--qss-queueButton-hover-color); border-color: var(--qss-queueButton-hover-border-color); }
+
+/* ---- the prompt box and its strip --------------------------------------------------------- */
+.rp-composer {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px 8px;
+  background: var(--qss-composer-background);
+  border: var(--qss-composer-border);
+  border-radius: var(--qss-composer-border-radius);
+}
+/* The desktop's focused pane: a raised prompt box with the accent border. */
+.rp-composer:focus-within {
+  background: var(--qss-composer-relay-active-true-background);
+  border: var(--qss-composer-relay-active-true-border);
+}
+.rp-composer-line { display: flex; align-items: flex-start; gap: 8px; }
+.rp-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: calc(var(--qss-composerEditor-font-size) * 1.4 + 6px);
+  resize: none;
+  overflow-y: auto;
+  background: var(--qss-composerEditor-background);
+  border: var(--qss-composerEditor-border);
+  padding: var(--qss-composerEditor-padding);
+  color: var(--qss-composerEditor-color);
+  font-family: var(--qss-composerEditor-font-family);
+  font-size: var(--qss-composerEditor-font-size);
+  line-height: 1.4;
+  caret-color: var(--rt-shell);
+}
+.rp-composer[data-mode="agent"] .rp-input { caret-color: var(--rt-agent); }
+.rp-input::placeholder { color: var(--rt-muted); opacity: 1; }
+.rp-input::selection { background: var(--rt-selection); color: var(--rt-selection-text); }
+
+.rp-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.rp-no-composer > .rp-strip { flex: none; padding: 2px 4px; }
+.rp-spacer { flex: 1 1 0; min-width: 0; }
+/* QToolButton#stripChip / QLabel#stripChipLabel: min-height is Qt's content height, so the box is
+   that plus the 2 px padding and 1 px border above and below. */
+.rp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-height: max(calc(var(--qss-stripChip-min-height) + 6px), var(--rp-tap));
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: var(--qss-stripChipLabel-padding);
+  background: var(--qss-stripChipLabel-background);
+  border: var(--qss-stripChipLabel-border);
+  border-radius: var(--qss-stripChipLabel-border-radius);
+  color: var(--qss-stripChipLabel-color);
+  font-size: var(--qss-stripChipLabel-font-size);
+  line-height: 1.2;
+}
+.rp-context[data-warn="true"] { color: var(--qss-stripChipLabel-warn-true-color); border-color: var(--qss-stripChipLabel-warn-true-border-color); }
+button.rp-chip, .rp-folder {
+  padding: var(--qss-stripChip-padding);
+  background: var(--qss-stripChip-background);
+  border: var(--qss-stripChip-border);
+  border-radius: var(--qss-stripChip-border-radius);
+  color: var(--qss-stripChip-color);
+  font-size: var(--qss-stripChip-font-size);
+}
+button.rp-chip { cursor: pointer; }
+button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: var(--qss-stripChip-hover-border-color); }
+.rp-folder { max-width: 34%; }
+.rp-sessions-button { max-width: 38%; }
+.rp-sessions-title { overflow: hidden; text-overflow: ellipsis; }
+.rp-sessions-title:empty { display: none; }
+/* The mode chip at the right of the prompt line takes the destination's colour, like the caret. */
+.rp-mode { flex: none; align-self: flex-start; }
+.rp-mode[data-dest="shell"] { color: var(--qss-stripChip-dest-shell-color); border-color: var(--qss-stripChip-dest-shell-border-color); }
+.rp-mode[data-dest="agent"] { color: var(--qss-stripChip-dest-agent-color); border-color: var(--qss-stripChip-dest-agent-border-color); }
+
+/* QComboBox#statusPicker: a quiet chip with a chevron, and the native picker behind it so a phone
+   gets its own wheel or sheet. */
+.rp-model-wrap { position: relative; display: inline-flex; max-width: 42%; }
+.rp-model {
+  -webkit-appearance: none;
+  appearance: none;
+  max-width: 100%;
+  min-height: max(calc(var(--qss-stripChip-min-height) + 6px), var(--rp-tap));
+  padding: var(--qss-statusPicker-padding);
+  padding-right: 22px;
+  background: var(--qss-statusPicker-background);
+  border: var(--qss-statusPicker-border);
+  border-radius: var(--qss-statusPicker-border-radius);
+  color: var(--qss-statusPicker-color);
+  font-size: var(--qss-statusPicker-font-size);
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.rp-model:hover:not(:disabled) { color: var(--qss-statusPicker-hover-color); border-color: var(--qss-statusPicker-hover-border-color); }
+.rp-model:disabled { cursor: default; opacity: 1; }
+.rp-model option { background: var(--qss-menu-background); color: var(--qss-menu-color); }
+.rp-model-chevron {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--qss-statusPicker-color);
+  font-size: var(--rt-floor-size);
+}
+.rp-model-wrap[data-pickable="false"] .rp-model-chevron { display: none; }
+.rp-model-wrap[data-pickable="false"] .rp-model { padding-right: 8px; }
+
+/* Send, and when: the one part of the prompt box a desktop does with keys. Same height as a chip. */
+.rp-send-group { display: inline-flex; gap: 2px; }
+.rp-send, .rp-send-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: max(calc(var(--qss-stripChip-min-height) + 14px), var(--rp-tap));
+  min-height: max(calc(var(--qss-stripChip-min-height) + 6px), var(--rp-tap));
+  padding: 0 8px;
+  border: 1px solid var(--rt-accent);
+  background: var(--rt-accent);
+  color: var(--rt-accent-text);
+  border-radius: var(--qss-stripChip-border-radius);
+  cursor: pointer;
+}
+.rp-send-menu { background: var(--qss-stripChip-background); color: var(--rt-accent); border-color: var(--rt-accent-border); }
+.rp-send:hover:not(:disabled) { background: var(--rt-accent-hover); }
+.rp-send:disabled { background: var(--qss-stripChip-background); border-color: var(--rt-border); color: var(--rt-disabled); cursor: default; }
+.rp-icon { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---- sheets: a row's actions, the send menu, the conversations ---------------------------- */
+.rp-layer { position: absolute; inset: 0; z-index: 10; }
+.rp-backdrop { position: absolute; inset: 0; background: transparent; }
+.rp-sheet {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-width: min(420px, calc(100% - 16px));
+  max-height: min(70vh, calc(100% - 16px));
+  overflow-y: auto;
+  padding: var(--qss-menu-padding);
+  background: var(--qss-menu-background);
+  color: var(--qss-menu-color);
+  border: var(--qss-menu-border);
+  border-radius: 8px;
+}
+.rp-sheet[data-kind="sessions"] { width: 420px; }
+.rp-sheet-title {
+  padding: 4px 10px 6px;
+  margin-bottom: 4px;
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+  color: var(--rt-muted);
+  font-size: var(--rt-secondary-size);
+  border-bottom: 1px solid var(--rt-border);
+}
+.rp-sheet-item {
+  display: flex;
+  align-items: center;
+  min-height: max(28px, var(--rp-tap));
+  padding: var(--qss-menu-item-padding);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--qss-menu-item-border-radius);
+  cursor: pointer;
+}
+.rp-sheet-item:hover:not(:disabled), .rp-sheet-item:focus-visible { background: var(--qss-menu-item-selected-background); }
+.rp-sheet-item:disabled { color: var(--rt-disabled); cursor: default; }
+.rp-sheet-item.rp-danger { color: var(--rt-error); }
+.rp-new-conversation { color: var(--rt-accent); }
+.rp-session-list { list-style: none; margin: 0; padding: 0; }
+.rp-session-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: max(28px, var(--rp-tap));
+  padding: 4px 10px;
+  border-radius: var(--qss-menu-item-border-radius);
+}
+.rp-session-row.rp-current { background: var(--rt-accent-soft); }
+.rp-session-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rp-session-when { color: var(--rt-muted); font-family: var(--rt-mono); font-size: var(--rt-floor-size); }
+.rp-session-dot { width: 7px; height: 7px; border-radius: 50%; }
+.rp-session-dot.rp-running { background: var(--rt-success); }
+
+/* A phone gets bottom sheets over a dimmed pane. */
+.relay-pane[data-device="phone"] .rp-backdrop { background: var(--rt-bg); opacity: 0.7; }
+.relay-pane[data-device="phone"] .rp-sheet {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  max-width: none;
+  max-height: 80%;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  border-radius: 12px 12px 0 0;
+}
+
+/* ---- the device: tablet roomier, phone compact --------------------------------------------- */
+.relay-pane[data-device="tablet"] .rp-queue,
+.relay-pane[data-device="tablet"] .rp-thinking { padding: 8px 14px 10px; }
+.relay-pane[data-device="tablet"] .rp-strip { gap: 8px; }
+.relay-pane[data-device="phone"] .rp-composer { padding: 8px 10px 8px; }
+.relay-pane[data-device="phone"] .rp-queue { padding: 6px 8px 8px; }
+.relay-pane[data-device="phone"] .rp-strip { gap: 4px 6px; }
+.relay-pane[data-device="phone"] .rp-folder { display: none; }
+.relay-pane[data-device="phone"] .rp-model-wrap { max-width: 60%; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .relay-pane[data-device="phone"] .rp-sheet { animation: rp-sheet-in 140ms ease-out; }
+  @keyframes rp-sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+}
