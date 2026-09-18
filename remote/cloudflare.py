@@ -23,6 +23,19 @@ What this widens, and what it does not:
   taken down when the share ends, and the URL — which is the thing worth guessing — stays out of
   the logs.
 
+Two traps this module hit, both found by tests rather than by use, and both easy to re-introduce:
+
+* **reading the child's output.** `readline()` plus `select` looks right and is not: a buffered
+  stream pulls several lines into Python on one read, after which `select` truthfully reports the
+  pipe empty while the line being waited for is already in hand — the tunnel "never came up"
+  although its URL had been printed. It only shows when a second tunnel follows a first in one
+  process. So the loop below reads raw bytes and splits lines itself, and the deadline is enforced
+  on the wait, never between lines;
+* **making the child die with its parent.** `PR_SET_PDEATHSIG` from a `preexec_fn` is the obvious
+  way and deadlocks the child before it execs when the process has threads — this one keeps a
+  reader thread per tunnel. Teardown is explicit instead: on address switch, on share end, on
+  sidecar stop, and `atexit`.
+
 A quick tunnel's name is new every run and its lifetime is the process's. That suits a demo and a
 "look at this for ten minutes"; a colleague's link dies when the share does. The stable version is
 a **named** tunnel under a domain the owner controls, which needs a DNS record and a credentials
