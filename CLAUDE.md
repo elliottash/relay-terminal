@@ -28,6 +28,17 @@ What this means in practice:
 - Subagents work in this checkout too. Give them a narrow, named area of the code so two of them
   cannot land in the same function, and tell them not to commit anything they did not write.
 
+## Fix clear gaps; do not list them
+
+Owner's rule, 2026-09-18: **when you find a clear gap in your own work, fix it rather than list
+it.** A "Known gaps" or "Deliberately left" section is for what genuinely needs the owner — a product
+decision, a trade-off with no obvious answer, or work outside what you may touch — not for loose ends
+you could have tied. Before reporting, go through your gaps and ask of each: is the right behaviour
+obvious, and is it within reach? If yes, do it, test it, and report it as done. What stays listed
+must say why it could not be done here (whose decision it is, or which session's files it needs).
+The same goes for subagents: tell them this rule, and when their report lists a gap that fails the
+test, send them back to fix it rather than passing it on.
+
 ## `src/main.cpp` was split (2026-09-18). Here is where things went.
 
 `main.cpp` was 13,000 lines and every session was editing the same file. It is now the includes,
