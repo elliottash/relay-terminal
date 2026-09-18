@@ -138,6 +138,7 @@ details.tool > summary::marker { color: var(--muted); }
 
 .note { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
 .note.error { color: var(--bad); }
+#thread-note.error { color: var(--bad); }   /* a refusal or a dropped link, under the terminal */
 
 #secret-row {
   display: flex;

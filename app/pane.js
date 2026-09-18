@@ -572,9 +572,15 @@ export function mountPane(container, options = {}) {
   }
 
   function fitBox() {
+    // An empty box is measured against its placeholder, which is the desktop's own sentence and
+    // wraps to two lines on a phone: sized to the content alone it would clip the second line.
+    // Nothing is painted between the two assignments, so the value never flickers.
+    const empty = !box.value;
+    if (empty) box.value = box.placeholder;
     box.style.height = 'auto';
     const max = Math.round(window.innerHeight * 0.3);
     box.style.height = `${Math.min(box.scrollHeight, max)}px`;
+    if (empty) box.value = '';
   }
 
   function renderSendState() {
@@ -641,7 +647,8 @@ export function mountPane(container, options = {}) {
     const c = obj(state.composer);
     composer.hidden = !c;
     if (c) {
-      box.placeholder = str(c.placeholder);
+      const placeholder = str(c.placeholder);
+      if (box.placeholder !== placeholder) { box.placeholder = placeholder; fitBox(); }
       const mode = str(c.mode);
       show(modeChip, mode);
       composer.dataset.mode = mode;
@@ -665,6 +672,9 @@ export function mountPane(container, options = {}) {
     // The strip is the prompt box's bottom row; with no prompt box (a view-only device) it is
     // still how the model, the clock and the sessions are seen, so it stands on its own.
     if (!c) root.classList.add('rp-no-composer'); else root.classList.remove('rp-no-composer');
+    // Send belongs to the prompt box: a device the hub sends no `composer` (a `view` device) may
+    // not compose at all, and the strip it keeps must not offer it a send button anyway.
+    sendGroup.hidden = !c;
     if (!c && strip.parentNode === composer) root.insertBefore(strip, layer);
     if (c && strip.parentNode !== composer) composer.appendChild(strip);
   }

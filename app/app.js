@@ -349,6 +349,15 @@ async function toggleNotifications() {
 
 // ---- thread -----------------------------------------------------------------------------------
 
+// A line under the terminal, where a refusal or a dropped link is actually read: #thread-body is
+// the fallback transcript and is hidden whenever the pane has a screen, which is the normal case
+// (card #W5N2's owner, 2026-09-18). Both callers used to reach for an append() that never existed.
+function threadNote(text, isError = false) {
+  const node = $('thread-note');
+  node.textContent = text || '';
+  node.classList.toggle('error', !!text && isError);
+}
+
 // ---- the pane view ------------------------------------------------------------------------
 
 let paneView = null;
@@ -1192,7 +1201,7 @@ rrp.addEventListener('error', (event) => {
     screenView.more = false;
     return;
   }
-  if (current) $('thread-body').append(el('div', 'note error', detail.message || 'Refused.'));
+  if (current) threadNote(detail.message || 'Refused.', true);
 });
 
 rrp.addEventListener('revoked', async () => {
@@ -1210,7 +1219,7 @@ rrp.addEventListener('closed', (event) => {
 
 rrp.addEventListener('fault', (event) => {
   setStatus('dropped', 'warn');
-  $('thread-body').append(el('div', 'note error', event.detail.message));
+  threadNote(event.detail.message, true);
 });
 
 document.addEventListener('visibilitychange', () => {
