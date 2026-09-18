@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- B: the operator's plug, tip down over its jack. -->
+  <defs>
+    <linearGradient id="b-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="b-metal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="var(--metal-dark)"/><stop offset="0.35" stop-color="var(--metal-light)"/>
+      <stop offset="0.7" stop-color="var(--metal)"/><stop offset="1" stop-color="var(--metal-dark)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#b-tile)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- cord -->
+  <path d="M256 60 V116" stroke="var(--shell)" stroke-width="34" stroke-linecap="round"/>
+  <!-- plug body -->
+  <rect x="196" y="116" width="120" height="150" rx="16" fill="url(#b-metal)"/>
+  <rect x="196" y="176" width="120" height="26" fill="var(--tile-bottom)" fill-opacity="0.85"/>
+  <!-- shaft and tip -->
+  <rect x="226" y="266" width="60" height="96" fill="url(#b-metal)"/>
+  <path d="M226 362 h60 l-30 46 z" fill="var(--metal-light)"/>
+  <!-- the jack it is going into -->
+  <rect x="140" y="404" width="232" height="56" rx="28" fill="var(--jack)"/>
+  <circle cx="256" cy="432" r="22" fill="var(--tile-bottom)"/>
+</svg>

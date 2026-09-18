@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- E: a jack field with one line patched across it. -->
+  <defs>
+    <linearGradient id="e-plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#e-plate)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <g fill="var(--jack)">
+    <circle cx="140" cy="150" r="40"/><circle cx="256" cy="150" r="40"/><circle cx="372" cy="150" r="40"/>
+    <circle cx="140" cy="362" r="40"/><circle cx="256" cy="362" r="40"/><circle cx="372" cy="362" r="40"/>
+  </g>
+  <g fill="var(--hole)">
+    <circle cx="140" cy="150" r="17"/><circle cx="256" cy="150" r="17"/><circle cx="372" cy="150" r="17"/>
+    <circle cx="140" cy="362" r="17"/><circle cx="256" cy="362" r="17"/><circle cx="372" cy="362" r="17"/>
+  </g>
+  <!-- the patch: shell jack, up and over to the agent jack -->
+  <path d="M140 362 C140 250 372 262 372 150" fill="none" stroke="var(--cord)" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="140" cy="362" r="30" fill="var(--shell)"/>
+  <circle cx="372" cy="150" r="30" fill="var(--agent)"/>
+</svg>

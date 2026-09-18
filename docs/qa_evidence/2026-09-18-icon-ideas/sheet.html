@@ -1,0 +1,1273 @@
+<!doctype html><meta charset=utf-8>
+<style>
+ body { margin:0; font:12px/1.4 "IBM Plex Mono",monospace; }
+ section { padding:24px 26px; }
+ h2 { font-size:12px; letter-spacing:.09em; text-transform:uppercase; margin:0 0 16px; }
+ .row { display:flex; gap:22px; align-items:center; flex-wrap:wrap; }
+ .row.small { margin-top:18px; gap:22px; }
+ .pair { display:flex; gap:9px; align-items:center; }
+ figure { margin:0; text-align:center; }
+ figcaption { margin-top:7px; font-size:10.5px; opacity:.75; }
+ .i svg { display:block; }
+</style>
+<section style="background:#0e0f12; color:#a2968c"><h2>Dark Copper</h2><div class="row"><figure><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- A: the patched line. One line enters, one of two jacks is lit. -->
+  <defs>
+    <linearGradient id="a-tile-ca-patch" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#a-tile-ca-patch)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the dim alternative route -->
+  <path d="M104 256 H196 V372 H360" fill="none" stroke="var(--dim)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="372" r="34" fill="none" stroke="var(--dim)" stroke-width="22"/>
+  <!-- the live route -->
+  <path d="M104 256 H196 V140 H360" fill="none" stroke="var(--shell)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="140" r="34" fill="var(--shell)" fill-opacity="0.28" stroke="var(--shell)" stroke-width="22"/>
+  <circle cx="104" cy="256" r="28" fill="var(--metal)"/>
+</svg>
+</div><figcaption>A · patched line</figcaption></figure><figure><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- B: the operator's plug, tip down over its jack. -->
+  <defs>
+    <linearGradient id="b-tile-cb-plug" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="b-metal-cb-plug" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="var(--metal-dark)"/><stop offset="0.35" stop-color="var(--metal-light)"/>
+      <stop offset="0.7" stop-color="var(--metal)"/><stop offset="1" stop-color="var(--metal-dark)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#b-tile-cb-plug)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- cord -->
+  <path d="M256 60 V116" stroke="var(--shell)" stroke-width="34" stroke-linecap="round"/>
+  <!-- plug body -->
+  <rect x="196" y="116" width="120" height="150" rx="16" fill="url(#b-metal-cb-plug)"/>
+  <rect x="196" y="176" width="120" height="26" fill="var(--tile-bottom)" fill-opacity="0.85"/>
+  <!-- shaft and tip -->
+  <rect x="226" y="266" width="60" height="96" fill="url(#b-metal-cb-plug)"/>
+  <path d="M226 362 h60 l-30 46 z" fill="var(--metal-light)"/>
+  <!-- the jack it is going into -->
+  <rect x="140" y="404" width="232" height="56" rx="28" fill="var(--jack)"/>
+  <circle cx="256" cy="432" r="22" fill="var(--tile-bottom)"/>
+</svg>
+</div><figcaption>B · the plug</figcaption></figure><figure><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- C: today's chevron, struck into a metal plate instead of glowing. -->
+  <defs>
+    <linearGradient id="c-plate-cc-stamp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="0.55" stop-color="var(--plate-mid)"/>
+      <stop offset="1" stop-color="var(--plate-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#c-plate-cc-stamp)"/>
+  <path d="M112 16 H400 A96 96 0 0 1 496 112 V128 H16 V112 A96 96 0 0 1 112 16 Z" fill="var(--specular)" fill-opacity="0.5"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the groove: a dark stamp with a lit lower lip -->
+  <g fill="none" stroke-width="52" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M160 168 L256 264 L160 360" stroke="var(--groove)"/>
+    <path d="M160 176 L256 272 L160 368" stroke="var(--specular)" stroke-opacity="0.35"/>
+  </g>
+  <circle cx="356" cy="264" r="30" fill="var(--groove)"/>
+  <circle cx="356" cy="272" r="30" fill="var(--specular)" fill-opacity="0.3"/>
+</svg>
+</div><figcaption>C · stamped chevron</figcaption></figure><figure><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- D: the machine itself. A moulded bezel, a warm screen, one caret. -->
+  <defs>
+    <linearGradient id="d-case-cd-crt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--case-top)"/><stop offset="1" stop-color="var(--case-bottom)"/>
+    </linearGradient>
+    <linearGradient id="d-screen-cd-crt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--grid-top)"/><stop offset="1" stop-color="var(--grid-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="40" fill="url(#d-case-cd-crt)"/>
+  <path d="M56 16 H456 A40 40 0 0 1 496 56 V70 H16 V56 A40 40 0 0 1 56 16 Z" fill="var(--bevel-light)"/>
+  <rect x="16" y="446" width="480" height="50" fill="var(--bevel-dark)" fill-opacity="0.55"/>
+  <rect x="18" y="18" width="476" height="476" rx="38" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- recessed screen -->
+  <rect x="86" y="96" width="340" height="252" rx="18" fill="var(--bevel-dark)"/>
+  <rect x="94" y="104" width="324" height="236" rx="14" fill="url(#d-screen-cd-crt)"/>
+  <!-- the prompt: a chevron and a block caret -->
+  <path d="M146 176 L186 212 L146 248" fill="none" stroke="var(--shell)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="216" y="176" width="34" height="76" rx="4" fill="var(--agent)"/>
+  <!-- vents on the case chin -->
+  <g fill="var(--bevel-dark)" fill-opacity="0.5">
+    <rect x="150" y="392" width="212" height="12" rx="6"/>
+    <rect x="150" y="416" width="212" height="12" rx="6"/>
+  </g>
+</svg>
+</div><figcaption>D · the machine</figcaption></figure><figure><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- E: a jack field with one line patched across it. -->
+  <defs>
+    <linearGradient id="e-plate-ce-field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#e-plate-ce-field)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <g fill="var(--jack)">
+    <circle cx="140" cy="150" r="40"/><circle cx="256" cy="150" r="40"/><circle cx="372" cy="150" r="40"/>
+    <circle cx="140" cy="362" r="40"/><circle cx="256" cy="362" r="40"/><circle cx="372" cy="362" r="40"/>
+  </g>
+  <g fill="var(--hole)">
+    <circle cx="140" cy="150" r="17"/><circle cx="256" cy="150" r="17"/><circle cx="372" cy="150" r="17"/>
+    <circle cx="140" cy="362" r="17"/><circle cx="256" cy="362" r="17"/><circle cx="372" cy="362" r="17"/>
+  </g>
+  <!-- the patch: shell jack, up and over to the agent jack -->
+  <path d="M140 362 C140 250 372 262 372 150" fill="none" stroke="var(--cord)" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="140" cy="362" r="30" fill="var(--shell)"/>
+  <circle cx="372" cy="150" r="30" fill="var(--agent)"/>
+</svg>
+</div><figcaption>E · jack field</figcaption></figure><figure><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- F: the destination as a rocker switch — one side down, one side lit. -->
+  <defs>
+    <linearGradient id="f-case-cf-rocker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--case-top)"/><stop offset="1" stop-color="var(--case-bottom)"/>
+    </linearGradient>
+    <linearGradient id="f-up-cf-rocker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-mid)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="72" fill="url(#f-case-cf-rocker)"/>
+  <path d="M88 16 H424 A72 72 0 0 1 496 88 V100 H16 V88 A72 72 0 0 1 88 16 Z" fill="var(--bevel-light)" fill-opacity="0.85"/>
+  <rect x="18" y="18" width="476" height="476" rx="70" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the recess -->
+  <rect x="112" y="122" width="288" height="268" rx="26" fill="var(--bevel-dark)"/>
+  <!-- the pressed half: shell, lit -->
+  <path d="M126 256 h260 v106 a22 22 0 0 1 -22 22 h-216 a22 22 0 0 1 -22 -22 z" fill="var(--shell)" fill-opacity="0.26"/>
+  <rect x="126" y="256" width="260" height="14" fill="var(--shell)"/>
+  <path d="M186 312 L216 340 L186 368" fill="none" stroke="var(--shell)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- the raised half: agent, waiting -->
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v88 h-260 v-88 a22 22 0 0 1 22 -22 z" fill="url(#f-up-cf-rocker)"/>
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v8 h-260 v-8 a22 22 0 0 1 22 -22 z" fill="var(--specular)" fill-opacity="0.45"/>
+  <path d="M256 170 l16 32 34 5 -25 24 6 34 -31 -16 -31 16 6 -34 -25 -24 34 -5 z" fill="var(--agent)"/>
+</svg>
+</div><figcaption>F · the rocker</figcaption></figure><figure><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- G: today's chevron, drawn by a patch cord that ends in a plug. -->
+  <defs>
+    <linearGradient id="g-tile-cg-cord" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="g-cord-cg-cord" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="var(--metal-light)"/><stop offset="1" stop-color="var(--metal)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#g-tile-cg-cord)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the jack it is plugged into -->
+  <circle cx="380" cy="256" r="58" fill="var(--jack)"/>
+  <circle cx="380" cy="256" r="26" fill="var(--hole)"/>
+  <!-- the cord, bent into the prompt -->
+  <path d="M120 140 L246 256 L120 372" fill="none" stroke="url(#g-cord-cg-cord)" stroke-width="54"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M246 256 H352" fill="none" stroke="url(#g-cord-cg-cord)" stroke-width="54" stroke-linecap="butt"/>
+  <!-- the plug tip, in the live destination's colour -->
+  <circle cx="380" cy="256" r="30" fill="var(--shell)"/>
+</svg>
+</div><figcaption>G · the cord as the prompt</figcaption></figure><figure><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- H: the whole product in three marks — one cord, two destinations. -->
+  <defs>
+    <linearGradient id="h-tile-ch-two" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#h-tile-ch-two)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <path d="M112 256 C112 150 344 160 344 148" fill="none" stroke="var(--cord)" stroke-width="40" stroke-linecap="round"/>
+  <path d="M112 256 C112 362 344 352 344 364" fill="none" stroke="var(--dim)" stroke-width="40" stroke-linecap="round"/>
+  <circle cx="112" cy="256" r="44" fill="var(--metal)"/>
+  <circle cx="356" cy="140" r="52" fill="var(--shell)"/>
+  <circle cx="356" cy="372" r="52" fill="none" stroke="var(--agent)" stroke-width="24"/>
+</svg>
+</div><figcaption>H · one line, two ends</figcaption></figure></div><div class="row small"><div class="pair"><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- A: the patched line. One line enters, one of two jacks is lit. -->
+  <defs>
+    <linearGradient id="a-tile-c32a-patch" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#a-tile-c32a-patch)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the dim alternative route -->
+  <path d="M104 256 H196 V372 H360" fill="none" stroke="var(--dim)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="372" r="34" fill="none" stroke="var(--dim)" stroke-width="22"/>
+  <!-- the live route -->
+  <path d="M104 256 H196 V140 H360" fill="none" stroke="var(--shell)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="140" r="34" fill="var(--shell)" fill-opacity="0.28" stroke="var(--shell)" stroke-width="22"/>
+  <circle cx="104" cy="256" r="28" fill="var(--metal)"/>
+</svg>
+</div><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- A: the patched line. One line enters, one of two jacks is lit. -->
+  <defs>
+    <linearGradient id="a-tile-c16a-patch" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#a-tile-c16a-patch)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the dim alternative route -->
+  <path d="M104 256 H196 V372 H360" fill="none" stroke="var(--dim)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="372" r="34" fill="none" stroke="var(--dim)" stroke-width="22"/>
+  <!-- the live route -->
+  <path d="M104 256 H196 V140 H360" fill="none" stroke="var(--shell)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="140" r="34" fill="var(--shell)" fill-opacity="0.28" stroke="var(--shell)" stroke-width="22"/>
+  <circle cx="104" cy="256" r="28" fill="var(--metal)"/>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- B: the operator's plug, tip down over its jack. -->
+  <defs>
+    <linearGradient id="b-tile-c32b-plug" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="b-metal-c32b-plug" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="var(--metal-dark)"/><stop offset="0.35" stop-color="var(--metal-light)"/>
+      <stop offset="0.7" stop-color="var(--metal)"/><stop offset="1" stop-color="var(--metal-dark)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#b-tile-c32b-plug)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- cord -->
+  <path d="M256 60 V116" stroke="var(--shell)" stroke-width="34" stroke-linecap="round"/>
+  <!-- plug body -->
+  <rect x="196" y="116" width="120" height="150" rx="16" fill="url(#b-metal-c32b-plug)"/>
+  <rect x="196" y="176" width="120" height="26" fill="var(--tile-bottom)" fill-opacity="0.85"/>
+  <!-- shaft and tip -->
+  <rect x="226" y="266" width="60" height="96" fill="url(#b-metal-c32b-plug)"/>
+  <path d="M226 362 h60 l-30 46 z" fill="var(--metal-light)"/>
+  <!-- the jack it is going into -->
+  <rect x="140" y="404" width="232" height="56" rx="28" fill="var(--jack)"/>
+  <circle cx="256" cy="432" r="22" fill="var(--tile-bottom)"/>
+</svg>
+</div><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- B: the operator's plug, tip down over its jack. -->
+  <defs>
+    <linearGradient id="b-tile-c16b-plug" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="b-metal-c16b-plug" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="var(--metal-dark)"/><stop offset="0.35" stop-color="var(--metal-light)"/>
+      <stop offset="0.7" stop-color="var(--metal)"/><stop offset="1" stop-color="var(--metal-dark)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#b-tile-c16b-plug)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- cord -->
+  <path d="M256 60 V116" stroke="var(--shell)" stroke-width="34" stroke-linecap="round"/>
+  <!-- plug body -->
+  <rect x="196" y="116" width="120" height="150" rx="16" fill="url(#b-metal-c16b-plug)"/>
+  <rect x="196" y="176" width="120" height="26" fill="var(--tile-bottom)" fill-opacity="0.85"/>
+  <!-- shaft and tip -->
+  <rect x="226" y="266" width="60" height="96" fill="url(#b-metal-c16b-plug)"/>
+  <path d="M226 362 h60 l-30 46 z" fill="var(--metal-light)"/>
+  <!-- the jack it is going into -->
+  <rect x="140" y="404" width="232" height="56" rx="28" fill="var(--jack)"/>
+  <circle cx="256" cy="432" r="22" fill="var(--tile-bottom)"/>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- C: today's chevron, struck into a metal plate instead of glowing. -->
+  <defs>
+    <linearGradient id="c-plate-c32c-stamp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="0.55" stop-color="var(--plate-mid)"/>
+      <stop offset="1" stop-color="var(--plate-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#c-plate-c32c-stamp)"/>
+  <path d="M112 16 H400 A96 96 0 0 1 496 112 V128 H16 V112 A96 96 0 0 1 112 16 Z" fill="var(--specular)" fill-opacity="0.5"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the groove: a dark stamp with a lit lower lip -->
+  <g fill="none" stroke-width="52" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M160 168 L256 264 L160 360" stroke="var(--groove)"/>
+    <path d="M160 176 L256 272 L160 368" stroke="var(--specular)" stroke-opacity="0.35"/>
+  </g>
+  <circle cx="356" cy="264" r="30" fill="var(--groove)"/>
+  <circle cx="356" cy="272" r="30" fill="var(--specular)" fill-opacity="0.3"/>
+</svg>
+</div><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- C: today's chevron, struck into a metal plate instead of glowing. -->
+  <defs>
+    <linearGradient id="c-plate-c16c-stamp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="0.55" stop-color="var(--plate-mid)"/>
+      <stop offset="1" stop-color="var(--plate-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#c-plate-c16c-stamp)"/>
+  <path d="M112 16 H400 A96 96 0 0 1 496 112 V128 H16 V112 A96 96 0 0 1 112 16 Z" fill="var(--specular)" fill-opacity="0.5"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the groove: a dark stamp with a lit lower lip -->
+  <g fill="none" stroke-width="52" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M160 168 L256 264 L160 360" stroke="var(--groove)"/>
+    <path d="M160 176 L256 272 L160 368" stroke="var(--specular)" stroke-opacity="0.35"/>
+  </g>
+  <circle cx="356" cy="264" r="30" fill="var(--groove)"/>
+  <circle cx="356" cy="272" r="30" fill="var(--specular)" fill-opacity="0.3"/>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- D: the machine itself. A moulded bezel, a warm screen, one caret. -->
+  <defs>
+    <linearGradient id="d-case-c32d-crt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--case-top)"/><stop offset="1" stop-color="var(--case-bottom)"/>
+    </linearGradient>
+    <linearGradient id="d-screen-c32d-crt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--grid-top)"/><stop offset="1" stop-color="var(--grid-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="40" fill="url(#d-case-c32d-crt)"/>
+  <path d="M56 16 H456 A40 40 0 0 1 496 56 V70 H16 V56 A40 40 0 0 1 56 16 Z" fill="var(--bevel-light)"/>
+  <rect x="16" y="446" width="480" height="50" fill="var(--bevel-dark)" fill-opacity="0.55"/>
+  <rect x="18" y="18" width="476" height="476" rx="38" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- recessed screen -->
+  <rect x="86" y="96" width="340" height="252" rx="18" fill="var(--bevel-dark)"/>
+  <rect x="94" y="104" width="324" height="236" rx="14" fill="url(#d-screen-c32d-crt)"/>
+  <!-- the prompt: a chevron and a block caret -->
+  <path d="M146 176 L186 212 L146 248" fill="none" stroke="var(--shell)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="216" y="176" width="34" height="76" rx="4" fill="var(--agent)"/>
+  <!-- vents on the case chin -->
+  <g fill="var(--bevel-dark)" fill-opacity="0.5">
+    <rect x="150" y="392" width="212" height="12" rx="6"/>
+    <rect x="150" y="416" width="212" height="12" rx="6"/>
+  </g>
+</svg>
+</div><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- D: the machine itself. A moulded bezel, a warm screen, one caret. -->
+  <defs>
+    <linearGradient id="d-case-c16d-crt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--case-top)"/><stop offset="1" stop-color="var(--case-bottom)"/>
+    </linearGradient>
+    <linearGradient id="d-screen-c16d-crt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--grid-top)"/><stop offset="1" stop-color="var(--grid-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="40" fill="url(#d-case-c16d-crt)"/>
+  <path d="M56 16 H456 A40 40 0 0 1 496 56 V70 H16 V56 A40 40 0 0 1 56 16 Z" fill="var(--bevel-light)"/>
+  <rect x="16" y="446" width="480" height="50" fill="var(--bevel-dark)" fill-opacity="0.55"/>
+  <rect x="18" y="18" width="476" height="476" rx="38" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- recessed screen -->
+  <rect x="86" y="96" width="340" height="252" rx="18" fill="var(--bevel-dark)"/>
+  <rect x="94" y="104" width="324" height="236" rx="14" fill="url(#d-screen-c16d-crt)"/>
+  <!-- the prompt: a chevron and a block caret -->
+  <path d="M146 176 L186 212 L146 248" fill="none" stroke="var(--shell)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="216" y="176" width="34" height="76" rx="4" fill="var(--agent)"/>
+  <!-- vents on the case chin -->
+  <g fill="var(--bevel-dark)" fill-opacity="0.5">
+    <rect x="150" y="392" width="212" height="12" rx="6"/>
+    <rect x="150" y="416" width="212" height="12" rx="6"/>
+  </g>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- E: a jack field with one line patched across it. -->
+  <defs>
+    <linearGradient id="e-plate-c32e-field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#e-plate-c32e-field)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <g fill="var(--jack)">
+    <circle cx="140" cy="150" r="40"/><circle cx="256" cy="150" r="40"/><circle cx="372" cy="150" r="40"/>
+    <circle cx="140" cy="362" r="40"/><circle cx="256" cy="362" r="40"/><circle cx="372" cy="362" r="40"/>
+  </g>
+  <g fill="var(--hole)">
+    <circle cx="140" cy="150" r="17"/><circle cx="256" cy="150" r="17"/><circle cx="372" cy="150" r="17"/>
+    <circle cx="140" cy="362" r="17"/><circle cx="256" cy="362" r="17"/><circle cx="372" cy="362" r="17"/>
+  </g>
+  <!-- the patch: shell jack, up and over to the agent jack -->
+  <path d="M140 362 C140 250 372 262 372 150" fill="none" stroke="var(--cord)" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="140" cy="362" r="30" fill="var(--shell)"/>
+  <circle cx="372" cy="150" r="30" fill="var(--agent)"/>
+</svg>
+</div><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- E: a jack field with one line patched across it. -->
+  <defs>
+    <linearGradient id="e-plate-c16e-field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#e-plate-c16e-field)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <g fill="var(--jack)">
+    <circle cx="140" cy="150" r="40"/><circle cx="256" cy="150" r="40"/><circle cx="372" cy="150" r="40"/>
+    <circle cx="140" cy="362" r="40"/><circle cx="256" cy="362" r="40"/><circle cx="372" cy="362" r="40"/>
+  </g>
+  <g fill="var(--hole)">
+    <circle cx="140" cy="150" r="17"/><circle cx="256" cy="150" r="17"/><circle cx="372" cy="150" r="17"/>
+    <circle cx="140" cy="362" r="17"/><circle cx="256" cy="362" r="17"/><circle cx="372" cy="362" r="17"/>
+  </g>
+  <!-- the patch: shell jack, up and over to the agent jack -->
+  <path d="M140 362 C140 250 372 262 372 150" fill="none" stroke="var(--cord)" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="140" cy="362" r="30" fill="var(--shell)"/>
+  <circle cx="372" cy="150" r="30" fill="var(--agent)"/>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- F: the destination as a rocker switch — one side down, one side lit. -->
+  <defs>
+    <linearGradient id="f-case-c32f-rocker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--case-top)"/><stop offset="1" stop-color="var(--case-bottom)"/>
+    </linearGradient>
+    <linearGradient id="f-up-c32f-rocker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-mid)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="72" fill="url(#f-case-c32f-rocker)"/>
+  <path d="M88 16 H424 A72 72 0 0 1 496 88 V100 H16 V88 A72 72 0 0 1 88 16 Z" fill="var(--bevel-light)" fill-opacity="0.85"/>
+  <rect x="18" y="18" width="476" height="476" rx="70" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the recess -->
+  <rect x="112" y="122" width="288" height="268" rx="26" fill="var(--bevel-dark)"/>
+  <!-- the pressed half: shell, lit -->
+  <path d="M126 256 h260 v106 a22 22 0 0 1 -22 22 h-216 a22 22 0 0 1 -22 -22 z" fill="var(--shell)" fill-opacity="0.26"/>
+  <rect x="126" y="256" width="260" height="14" fill="var(--shell)"/>
+  <path d="M186 312 L216 340 L186 368" fill="none" stroke="var(--shell)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- the raised half: agent, waiting -->
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v88 h-260 v-88 a22 22 0 0 1 22 -22 z" fill="url(#f-up-c32f-rocker)"/>
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v8 h-260 v-8 a22 22 0 0 1 22 -22 z" fill="var(--specular)" fill-opacity="0.45"/>
+  <path d="M256 170 l16 32 34 5 -25 24 6 34 -31 -16 -31 16 6 -34 -25 -24 34 -5 z" fill="var(--agent)"/>
+</svg>
+</div><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- F: the destination as a rocker switch — one side down, one side lit. -->
+  <defs>
+    <linearGradient id="f-case-c16f-rocker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--case-top)"/><stop offset="1" stop-color="var(--case-bottom)"/>
+    </linearGradient>
+    <linearGradient id="f-up-c16f-rocker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-mid)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="72" fill="url(#f-case-c16f-rocker)"/>
+  <path d="M88 16 H424 A72 72 0 0 1 496 88 V100 H16 V88 A72 72 0 0 1 88 16 Z" fill="var(--bevel-light)" fill-opacity="0.85"/>
+  <rect x="18" y="18" width="476" height="476" rx="70" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the recess -->
+  <rect x="112" y="122" width="288" height="268" rx="26" fill="var(--bevel-dark)"/>
+  <!-- the pressed half: shell, lit -->
+  <path d="M126 256 h260 v106 a22 22 0 0 1 -22 22 h-216 a22 22 0 0 1 -22 -22 z" fill="var(--shell)" fill-opacity="0.26"/>
+  <rect x="126" y="256" width="260" height="14" fill="var(--shell)"/>
+  <path d="M186 312 L216 340 L186 368" fill="none" stroke="var(--shell)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- the raised half: agent, waiting -->
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v88 h-260 v-88 a22 22 0 0 1 22 -22 z" fill="url(#f-up-c16f-rocker)"/>
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v8 h-260 v-8 a22 22 0 0 1 22 -22 z" fill="var(--specular)" fill-opacity="0.45"/>
+  <path d="M256 170 l16 32 34 5 -25 24 6 34 -31 -16 -31 16 6 -34 -25 -24 34 -5 z" fill="var(--agent)"/>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- G: today's chevron, drawn by a patch cord that ends in a plug. -->
+  <defs>
+    <linearGradient id="g-tile-c32g-cord" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="g-cord-c32g-cord" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="var(--metal-light)"/><stop offset="1" stop-color="var(--metal)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#g-tile-c32g-cord)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the jack it is plugged into -->
+  <circle cx="380" cy="256" r="58" fill="var(--jack)"/>
+  <circle cx="380" cy="256" r="26" fill="var(--hole)"/>
+  <!-- the cord, bent into the prompt -->
+  <path d="M120 140 L246 256 L120 372" fill="none" stroke="url(#g-cord-c32g-cord)" stroke-width="54"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M246 256 H352" fill="none" stroke="url(#g-cord-c32g-cord)" stroke-width="54" stroke-linecap="butt"/>
+  <!-- the plug tip, in the live destination's colour -->
+  <circle cx="380" cy="256" r="30" fill="var(--shell)"/>
+</svg>
+</div><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- G: today's chevron, drawn by a patch cord that ends in a plug. -->
+  <defs>
+    <linearGradient id="g-tile-c16g-cord" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="g-cord-c16g-cord" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="var(--metal-light)"/><stop offset="1" stop-color="var(--metal)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#g-tile-c16g-cord)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the jack it is plugged into -->
+  <circle cx="380" cy="256" r="58" fill="var(--jack)"/>
+  <circle cx="380" cy="256" r="26" fill="var(--hole)"/>
+  <!-- the cord, bent into the prompt -->
+  <path d="M120 140 L246 256 L120 372" fill="none" stroke="url(#g-cord-c16g-cord)" stroke-width="54"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M246 256 H352" fill="none" stroke="url(#g-cord-c16g-cord)" stroke-width="54" stroke-linecap="butt"/>
+  <!-- the plug tip, in the live destination's colour -->
+  <circle cx="380" cy="256" r="30" fill="var(--shell)"/>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- H: the whole product in three marks — one cord, two destinations. -->
+  <defs>
+    <linearGradient id="h-tile-c32h-two" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#h-tile-c32h-two)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <path d="M112 256 C112 150 344 160 344 148" fill="none" stroke="var(--cord)" stroke-width="40" stroke-linecap="round"/>
+  <path d="M112 256 C112 362 344 352 344 364" fill="none" stroke="var(--dim)" stroke-width="40" stroke-linecap="round"/>
+  <circle cx="112" cy="256" r="44" fill="var(--metal)"/>
+  <circle cx="356" cy="140" r="52" fill="var(--shell)"/>
+  <circle cx="356" cy="372" r="52" fill="none" stroke="var(--agent)" stroke-width="24"/>
+</svg>
+</div><div class="i" style="--tile-top:#1a1210; --tile-bottom:#0b0c0f; --edge:#3a2822; --dim:#3d2b22;
+  --metal:#c08556; --metal-light:#d79a68; --metal-dark:#6b4a33;
+  --shell:#45c8ee; --agent:#ab97f7; --jack:#6b4a33; --hole:#0b0c0f; --cord:#c08556;
+  --plate-top:#2d231e; --plate-mid:#241c18; --plate-bottom:#1b1512; --specular:#6d5241; --groove:#0b0c0f;
+  --case-top:#241c18; --case-bottom:#15100d; --bevel-light:#6d5241; --bevel-dark:#120d0a;
+  --grid-top:#12131a; --grid-bottom:#0a0b0e;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- H: the whole product in three marks — one cord, two destinations. -->
+  <defs>
+    <linearGradient id="h-tile-c16h-two" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#h-tile-c16h-two)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <path d="M112 256 C112 150 344 160 344 148" fill="none" stroke="var(--cord)" stroke-width="40" stroke-linecap="round"/>
+  <path d="M112 256 C112 362 344 352 344 364" fill="none" stroke="var(--dim)" stroke-width="40" stroke-linecap="round"/>
+  <circle cx="112" cy="256" r="44" fill="var(--metal)"/>
+  <circle cx="356" cy="140" r="52" fill="var(--shell)"/>
+  <circle cx="356" cy="372" r="52" fill="none" stroke="var(--agent)" stroke-width="24"/>
+</svg>
+</div></div></div></section><section style="background:#f4efe4; color:#4d463a"><h2>IBM Beige</h2><div class="row"><figure><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- A: the patched line. One line enters, one of two jacks is lit. -->
+  <defs>
+    <linearGradient id="a-tile-ba-patch" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#a-tile-ba-patch)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the dim alternative route -->
+  <path d="M104 256 H196 V372 H360" fill="none" stroke="var(--dim)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="372" r="34" fill="none" stroke="var(--dim)" stroke-width="22"/>
+  <!-- the live route -->
+  <path d="M104 256 H196 V140 H360" fill="none" stroke="var(--shell)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="140" r="34" fill="var(--shell)" fill-opacity="0.28" stroke="var(--shell)" stroke-width="22"/>
+  <circle cx="104" cy="256" r="28" fill="var(--metal)"/>
+</svg>
+</div><figcaption>A · patched line</figcaption></figure><figure><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- B: the operator's plug, tip down over its jack. -->
+  <defs>
+    <linearGradient id="b-tile-bb-plug" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="b-metal-bb-plug" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="var(--metal-dark)"/><stop offset="0.35" stop-color="var(--metal-light)"/>
+      <stop offset="0.7" stop-color="var(--metal)"/><stop offset="1" stop-color="var(--metal-dark)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#b-tile-bb-plug)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- cord -->
+  <path d="M256 60 V116" stroke="var(--shell)" stroke-width="34" stroke-linecap="round"/>
+  <!-- plug body -->
+  <rect x="196" y="116" width="120" height="150" rx="16" fill="url(#b-metal-bb-plug)"/>
+  <rect x="196" y="176" width="120" height="26" fill="var(--tile-bottom)" fill-opacity="0.85"/>
+  <!-- shaft and tip -->
+  <rect x="226" y="266" width="60" height="96" fill="url(#b-metal-bb-plug)"/>
+  <path d="M226 362 h60 l-30 46 z" fill="var(--metal-light)"/>
+  <!-- the jack it is going into -->
+  <rect x="140" y="404" width="232" height="56" rx="28" fill="var(--jack)"/>
+  <circle cx="256" cy="432" r="22" fill="var(--tile-bottom)"/>
+</svg>
+</div><figcaption>B · the plug</figcaption></figure><figure><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- C: today's chevron, struck into a metal plate instead of glowing. -->
+  <defs>
+    <linearGradient id="c-plate-bc-stamp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="0.55" stop-color="var(--plate-mid)"/>
+      <stop offset="1" stop-color="var(--plate-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#c-plate-bc-stamp)"/>
+  <path d="M112 16 H400 A96 96 0 0 1 496 112 V128 H16 V112 A96 96 0 0 1 112 16 Z" fill="var(--specular)" fill-opacity="0.5"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the groove: a dark stamp with a lit lower lip -->
+  <g fill="none" stroke-width="52" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M160 168 L256 264 L160 360" stroke="var(--groove)"/>
+    <path d="M160 176 L256 272 L160 368" stroke="var(--specular)" stroke-opacity="0.35"/>
+  </g>
+  <circle cx="356" cy="264" r="30" fill="var(--groove)"/>
+  <circle cx="356" cy="272" r="30" fill="var(--specular)" fill-opacity="0.3"/>
+</svg>
+</div><figcaption>C · stamped chevron</figcaption></figure><figure><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- D: the machine itself. A moulded bezel, a warm screen, one caret. -->
+  <defs>
+    <linearGradient id="d-case-bd-crt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--case-top)"/><stop offset="1" stop-color="var(--case-bottom)"/>
+    </linearGradient>
+    <linearGradient id="d-screen-bd-crt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--grid-top)"/><stop offset="1" stop-color="var(--grid-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="40" fill="url(#d-case-bd-crt)"/>
+  <path d="M56 16 H456 A40 40 0 0 1 496 56 V70 H16 V56 A40 40 0 0 1 56 16 Z" fill="var(--bevel-light)"/>
+  <rect x="16" y="446" width="480" height="50" fill="var(--bevel-dark)" fill-opacity="0.55"/>
+  <rect x="18" y="18" width="476" height="476" rx="38" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- recessed screen -->
+  <rect x="86" y="96" width="340" height="252" rx="18" fill="var(--bevel-dark)"/>
+  <rect x="94" y="104" width="324" height="236" rx="14" fill="url(#d-screen-bd-crt)"/>
+  <!-- the prompt: a chevron and a block caret -->
+  <path d="M146 176 L186 212 L146 248" fill="none" stroke="var(--shell)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="216" y="176" width="34" height="76" rx="4" fill="var(--agent)"/>
+  <!-- vents on the case chin -->
+  <g fill="var(--bevel-dark)" fill-opacity="0.5">
+    <rect x="150" y="392" width="212" height="12" rx="6"/>
+    <rect x="150" y="416" width="212" height="12" rx="6"/>
+  </g>
+</svg>
+</div><figcaption>D · the machine</figcaption></figure><figure><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- E: a jack field with one line patched across it. -->
+  <defs>
+    <linearGradient id="e-plate-be-field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#e-plate-be-field)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <g fill="var(--jack)">
+    <circle cx="140" cy="150" r="40"/><circle cx="256" cy="150" r="40"/><circle cx="372" cy="150" r="40"/>
+    <circle cx="140" cy="362" r="40"/><circle cx="256" cy="362" r="40"/><circle cx="372" cy="362" r="40"/>
+  </g>
+  <g fill="var(--hole)">
+    <circle cx="140" cy="150" r="17"/><circle cx="256" cy="150" r="17"/><circle cx="372" cy="150" r="17"/>
+    <circle cx="140" cy="362" r="17"/><circle cx="256" cy="362" r="17"/><circle cx="372" cy="362" r="17"/>
+  </g>
+  <!-- the patch: shell jack, up and over to the agent jack -->
+  <path d="M140 362 C140 250 372 262 372 150" fill="none" stroke="var(--cord)" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="140" cy="362" r="30" fill="var(--shell)"/>
+  <circle cx="372" cy="150" r="30" fill="var(--agent)"/>
+</svg>
+</div><figcaption>E · jack field</figcaption></figure><figure><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- F: the destination as a rocker switch — one side down, one side lit. -->
+  <defs>
+    <linearGradient id="f-case-bf-rocker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--case-top)"/><stop offset="1" stop-color="var(--case-bottom)"/>
+    </linearGradient>
+    <linearGradient id="f-up-bf-rocker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-mid)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="72" fill="url(#f-case-bf-rocker)"/>
+  <path d="M88 16 H424 A72 72 0 0 1 496 88 V100 H16 V88 A72 72 0 0 1 88 16 Z" fill="var(--bevel-light)" fill-opacity="0.85"/>
+  <rect x="18" y="18" width="476" height="476" rx="70" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the recess -->
+  <rect x="112" y="122" width="288" height="268" rx="26" fill="var(--bevel-dark)"/>
+  <!-- the pressed half: shell, lit -->
+  <path d="M126 256 h260 v106 a22 22 0 0 1 -22 22 h-216 a22 22 0 0 1 -22 -22 z" fill="var(--shell)" fill-opacity="0.26"/>
+  <rect x="126" y="256" width="260" height="14" fill="var(--shell)"/>
+  <path d="M186 312 L216 340 L186 368" fill="none" stroke="var(--shell)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- the raised half: agent, waiting -->
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v88 h-260 v-88 a22 22 0 0 1 22 -22 z" fill="url(#f-up-bf-rocker)"/>
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v8 h-260 v-8 a22 22 0 0 1 22 -22 z" fill="var(--specular)" fill-opacity="0.45"/>
+  <path d="M256 170 l16 32 34 5 -25 24 6 34 -31 -16 -31 16 6 -34 -25 -24 34 -5 z" fill="var(--agent)"/>
+</svg>
+</div><figcaption>F · the rocker</figcaption></figure><figure><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- G: today's chevron, drawn by a patch cord that ends in a plug. -->
+  <defs>
+    <linearGradient id="g-tile-bg-cord" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="g-cord-bg-cord" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="var(--metal-light)"/><stop offset="1" stop-color="var(--metal)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#g-tile-bg-cord)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the jack it is plugged into -->
+  <circle cx="380" cy="256" r="58" fill="var(--jack)"/>
+  <circle cx="380" cy="256" r="26" fill="var(--hole)"/>
+  <!-- the cord, bent into the prompt -->
+  <path d="M120 140 L246 256 L120 372" fill="none" stroke="url(#g-cord-bg-cord)" stroke-width="54"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M246 256 H352" fill="none" stroke="url(#g-cord-bg-cord)" stroke-width="54" stroke-linecap="butt"/>
+  <!-- the plug tip, in the live destination's colour -->
+  <circle cx="380" cy="256" r="30" fill="var(--shell)"/>
+</svg>
+</div><figcaption>G · the cord as the prompt</figcaption></figure><figure><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="120" height="120">
+  <!-- H: the whole product in three marks — one cord, two destinations. -->
+  <defs>
+    <linearGradient id="h-tile-bh-two" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#h-tile-bh-two)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <path d="M112 256 C112 150 344 160 344 148" fill="none" stroke="var(--cord)" stroke-width="40" stroke-linecap="round"/>
+  <path d="M112 256 C112 362 344 352 344 364" fill="none" stroke="var(--dim)" stroke-width="40" stroke-linecap="round"/>
+  <circle cx="112" cy="256" r="44" fill="var(--metal)"/>
+  <circle cx="356" cy="140" r="52" fill="var(--shell)"/>
+  <circle cx="356" cy="372" r="52" fill="none" stroke="var(--agent)" stroke-width="24"/>
+</svg>
+</div><figcaption>H · one line, two ends</figcaption></figure></div><div class="row small"><div class="pair"><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- A: the patched line. One line enters, one of two jacks is lit. -->
+  <defs>
+    <linearGradient id="a-tile-b32a-patch" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#a-tile-b32a-patch)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the dim alternative route -->
+  <path d="M104 256 H196 V372 H360" fill="none" stroke="var(--dim)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="372" r="34" fill="none" stroke="var(--dim)" stroke-width="22"/>
+  <!-- the live route -->
+  <path d="M104 256 H196 V140 H360" fill="none" stroke="var(--shell)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="140" r="34" fill="var(--shell)" fill-opacity="0.28" stroke="var(--shell)" stroke-width="22"/>
+  <circle cx="104" cy="256" r="28" fill="var(--metal)"/>
+</svg>
+</div><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- A: the patched line. One line enters, one of two jacks is lit. -->
+  <defs>
+    <linearGradient id="a-tile-b16a-patch" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#a-tile-b16a-patch)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the dim alternative route -->
+  <path d="M104 256 H196 V372 H360" fill="none" stroke="var(--dim)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="372" r="34" fill="none" stroke="var(--dim)" stroke-width="22"/>
+  <!-- the live route -->
+  <path d="M104 256 H196 V140 H360" fill="none" stroke="var(--shell)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="140" r="34" fill="var(--shell)" fill-opacity="0.28" stroke="var(--shell)" stroke-width="22"/>
+  <circle cx="104" cy="256" r="28" fill="var(--metal)"/>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- B: the operator's plug, tip down over its jack. -->
+  <defs>
+    <linearGradient id="b-tile-b32b-plug" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="b-metal-b32b-plug" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="var(--metal-dark)"/><stop offset="0.35" stop-color="var(--metal-light)"/>
+      <stop offset="0.7" stop-color="var(--metal)"/><stop offset="1" stop-color="var(--metal-dark)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#b-tile-b32b-plug)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- cord -->
+  <path d="M256 60 V116" stroke="var(--shell)" stroke-width="34" stroke-linecap="round"/>
+  <!-- plug body -->
+  <rect x="196" y="116" width="120" height="150" rx="16" fill="url(#b-metal-b32b-plug)"/>
+  <rect x="196" y="176" width="120" height="26" fill="var(--tile-bottom)" fill-opacity="0.85"/>
+  <!-- shaft and tip -->
+  <rect x="226" y="266" width="60" height="96" fill="url(#b-metal-b32b-plug)"/>
+  <path d="M226 362 h60 l-30 46 z" fill="var(--metal-light)"/>
+  <!-- the jack it is going into -->
+  <rect x="140" y="404" width="232" height="56" rx="28" fill="var(--jack)"/>
+  <circle cx="256" cy="432" r="22" fill="var(--tile-bottom)"/>
+</svg>
+</div><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- B: the operator's plug, tip down over its jack. -->
+  <defs>
+    <linearGradient id="b-tile-b16b-plug" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="b-metal-b16b-plug" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="var(--metal-dark)"/><stop offset="0.35" stop-color="var(--metal-light)"/>
+      <stop offset="0.7" stop-color="var(--metal)"/><stop offset="1" stop-color="var(--metal-dark)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#b-tile-b16b-plug)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- cord -->
+  <path d="M256 60 V116" stroke="var(--shell)" stroke-width="34" stroke-linecap="round"/>
+  <!-- plug body -->
+  <rect x="196" y="116" width="120" height="150" rx="16" fill="url(#b-metal-b16b-plug)"/>
+  <rect x="196" y="176" width="120" height="26" fill="var(--tile-bottom)" fill-opacity="0.85"/>
+  <!-- shaft and tip -->
+  <rect x="226" y="266" width="60" height="96" fill="url(#b-metal-b16b-plug)"/>
+  <path d="M226 362 h60 l-30 46 z" fill="var(--metal-light)"/>
+  <!-- the jack it is going into -->
+  <rect x="140" y="404" width="232" height="56" rx="28" fill="var(--jack)"/>
+  <circle cx="256" cy="432" r="22" fill="var(--tile-bottom)"/>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- C: today's chevron, struck into a metal plate instead of glowing. -->
+  <defs>
+    <linearGradient id="c-plate-b32c-stamp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="0.55" stop-color="var(--plate-mid)"/>
+      <stop offset="1" stop-color="var(--plate-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#c-plate-b32c-stamp)"/>
+  <path d="M112 16 H400 A96 96 0 0 1 496 112 V128 H16 V112 A96 96 0 0 1 112 16 Z" fill="var(--specular)" fill-opacity="0.5"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the groove: a dark stamp with a lit lower lip -->
+  <g fill="none" stroke-width="52" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M160 168 L256 264 L160 360" stroke="var(--groove)"/>
+    <path d="M160 176 L256 272 L160 368" stroke="var(--specular)" stroke-opacity="0.35"/>
+  </g>
+  <circle cx="356" cy="264" r="30" fill="var(--groove)"/>
+  <circle cx="356" cy="272" r="30" fill="var(--specular)" fill-opacity="0.3"/>
+</svg>
+</div><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- C: today's chevron, struck into a metal plate instead of glowing. -->
+  <defs>
+    <linearGradient id="c-plate-b16c-stamp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="0.55" stop-color="var(--plate-mid)"/>
+      <stop offset="1" stop-color="var(--plate-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#c-plate-b16c-stamp)"/>
+  <path d="M112 16 H400 A96 96 0 0 1 496 112 V128 H16 V112 A96 96 0 0 1 112 16 Z" fill="var(--specular)" fill-opacity="0.5"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the groove: a dark stamp with a lit lower lip -->
+  <g fill="none" stroke-width="52" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M160 168 L256 264 L160 360" stroke="var(--groove)"/>
+    <path d="M160 176 L256 272 L160 368" stroke="var(--specular)" stroke-opacity="0.35"/>
+  </g>
+  <circle cx="356" cy="264" r="30" fill="var(--groove)"/>
+  <circle cx="356" cy="272" r="30" fill="var(--specular)" fill-opacity="0.3"/>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- D: the machine itself. A moulded bezel, a warm screen, one caret. -->
+  <defs>
+    <linearGradient id="d-case-b32d-crt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--case-top)"/><stop offset="1" stop-color="var(--case-bottom)"/>
+    </linearGradient>
+    <linearGradient id="d-screen-b32d-crt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--grid-top)"/><stop offset="1" stop-color="var(--grid-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="40" fill="url(#d-case-b32d-crt)"/>
+  <path d="M56 16 H456 A40 40 0 0 1 496 56 V70 H16 V56 A40 40 0 0 1 56 16 Z" fill="var(--bevel-light)"/>
+  <rect x="16" y="446" width="480" height="50" fill="var(--bevel-dark)" fill-opacity="0.55"/>
+  <rect x="18" y="18" width="476" height="476" rx="38" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- recessed screen -->
+  <rect x="86" y="96" width="340" height="252" rx="18" fill="var(--bevel-dark)"/>
+  <rect x="94" y="104" width="324" height="236" rx="14" fill="url(#d-screen-b32d-crt)"/>
+  <!-- the prompt: a chevron and a block caret -->
+  <path d="M146 176 L186 212 L146 248" fill="none" stroke="var(--shell)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="216" y="176" width="34" height="76" rx="4" fill="var(--agent)"/>
+  <!-- vents on the case chin -->
+  <g fill="var(--bevel-dark)" fill-opacity="0.5">
+    <rect x="150" y="392" width="212" height="12" rx="6"/>
+    <rect x="150" y="416" width="212" height="12" rx="6"/>
+  </g>
+</svg>
+</div><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- D: the machine itself. A moulded bezel, a warm screen, one caret. -->
+  <defs>
+    <linearGradient id="d-case-b16d-crt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--case-top)"/><stop offset="1" stop-color="var(--case-bottom)"/>
+    </linearGradient>
+    <linearGradient id="d-screen-b16d-crt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--grid-top)"/><stop offset="1" stop-color="var(--grid-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="40" fill="url(#d-case-b16d-crt)"/>
+  <path d="M56 16 H456 A40 40 0 0 1 496 56 V70 H16 V56 A40 40 0 0 1 56 16 Z" fill="var(--bevel-light)"/>
+  <rect x="16" y="446" width="480" height="50" fill="var(--bevel-dark)" fill-opacity="0.55"/>
+  <rect x="18" y="18" width="476" height="476" rx="38" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- recessed screen -->
+  <rect x="86" y="96" width="340" height="252" rx="18" fill="var(--bevel-dark)"/>
+  <rect x="94" y="104" width="324" height="236" rx="14" fill="url(#d-screen-b16d-crt)"/>
+  <!-- the prompt: a chevron and a block caret -->
+  <path d="M146 176 L186 212 L146 248" fill="none" stroke="var(--shell)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="216" y="176" width="34" height="76" rx="4" fill="var(--agent)"/>
+  <!-- vents on the case chin -->
+  <g fill="var(--bevel-dark)" fill-opacity="0.5">
+    <rect x="150" y="392" width="212" height="12" rx="6"/>
+    <rect x="150" y="416" width="212" height="12" rx="6"/>
+  </g>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- E: a jack field with one line patched across it. -->
+  <defs>
+    <linearGradient id="e-plate-b32e-field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#e-plate-b32e-field)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <g fill="var(--jack)">
+    <circle cx="140" cy="150" r="40"/><circle cx="256" cy="150" r="40"/><circle cx="372" cy="150" r="40"/>
+    <circle cx="140" cy="362" r="40"/><circle cx="256" cy="362" r="40"/><circle cx="372" cy="362" r="40"/>
+  </g>
+  <g fill="var(--hole)">
+    <circle cx="140" cy="150" r="17"/><circle cx="256" cy="150" r="17"/><circle cx="372" cy="150" r="17"/>
+    <circle cx="140" cy="362" r="17"/><circle cx="256" cy="362" r="17"/><circle cx="372" cy="362" r="17"/>
+  </g>
+  <!-- the patch: shell jack, up and over to the agent jack -->
+  <path d="M140 362 C140 250 372 262 372 150" fill="none" stroke="var(--cord)" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="140" cy="362" r="30" fill="var(--shell)"/>
+  <circle cx="372" cy="150" r="30" fill="var(--agent)"/>
+</svg>
+</div><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- E: a jack field with one line patched across it. -->
+  <defs>
+    <linearGradient id="e-plate-b16e-field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#e-plate-b16e-field)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <g fill="var(--jack)">
+    <circle cx="140" cy="150" r="40"/><circle cx="256" cy="150" r="40"/><circle cx="372" cy="150" r="40"/>
+    <circle cx="140" cy="362" r="40"/><circle cx="256" cy="362" r="40"/><circle cx="372" cy="362" r="40"/>
+  </g>
+  <g fill="var(--hole)">
+    <circle cx="140" cy="150" r="17"/><circle cx="256" cy="150" r="17"/><circle cx="372" cy="150" r="17"/>
+    <circle cx="140" cy="362" r="17"/><circle cx="256" cy="362" r="17"/><circle cx="372" cy="362" r="17"/>
+  </g>
+  <!-- the patch: shell jack, up and over to the agent jack -->
+  <path d="M140 362 C140 250 372 262 372 150" fill="none" stroke="var(--cord)" stroke-width="30" stroke-linecap="round"/>
+  <circle cx="140" cy="362" r="30" fill="var(--shell)"/>
+  <circle cx="372" cy="150" r="30" fill="var(--agent)"/>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- F: the destination as a rocker switch — one side down, one side lit. -->
+  <defs>
+    <linearGradient id="f-case-b32f-rocker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--case-top)"/><stop offset="1" stop-color="var(--case-bottom)"/>
+    </linearGradient>
+    <linearGradient id="f-up-b32f-rocker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-mid)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="72" fill="url(#f-case-b32f-rocker)"/>
+  <path d="M88 16 H424 A72 72 0 0 1 496 88 V100 H16 V88 A72 72 0 0 1 88 16 Z" fill="var(--bevel-light)" fill-opacity="0.85"/>
+  <rect x="18" y="18" width="476" height="476" rx="70" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the recess -->
+  <rect x="112" y="122" width="288" height="268" rx="26" fill="var(--bevel-dark)"/>
+  <!-- the pressed half: shell, lit -->
+  <path d="M126 256 h260 v106 a22 22 0 0 1 -22 22 h-216 a22 22 0 0 1 -22 -22 z" fill="var(--shell)" fill-opacity="0.26"/>
+  <rect x="126" y="256" width="260" height="14" fill="var(--shell)"/>
+  <path d="M186 312 L216 340 L186 368" fill="none" stroke="var(--shell)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- the raised half: agent, waiting -->
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v88 h-260 v-88 a22 22 0 0 1 22 -22 z" fill="url(#f-up-b32f-rocker)"/>
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v8 h-260 v-8 a22 22 0 0 1 22 -22 z" fill="var(--specular)" fill-opacity="0.45"/>
+  <path d="M256 170 l16 32 34 5 -25 24 6 34 -31 -16 -31 16 6 -34 -25 -24 34 -5 z" fill="var(--agent)"/>
+</svg>
+</div><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- F: the destination as a rocker switch — one side down, one side lit. -->
+  <defs>
+    <linearGradient id="f-case-b16f-rocker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--case-top)"/><stop offset="1" stop-color="var(--case-bottom)"/>
+    </linearGradient>
+    <linearGradient id="f-up-b16f-rocker" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-mid)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="72" fill="url(#f-case-b16f-rocker)"/>
+  <path d="M88 16 H424 A72 72 0 0 1 496 88 V100 H16 V88 A72 72 0 0 1 88 16 Z" fill="var(--bevel-light)" fill-opacity="0.85"/>
+  <rect x="18" y="18" width="476" height="476" rx="70" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the recess -->
+  <rect x="112" y="122" width="288" height="268" rx="26" fill="var(--bevel-dark)"/>
+  <!-- the pressed half: shell, lit -->
+  <path d="M126 256 h260 v106 a22 22 0 0 1 -22 22 h-216 a22 22 0 0 1 -22 -22 z" fill="var(--shell)" fill-opacity="0.26"/>
+  <rect x="126" y="256" width="260" height="14" fill="var(--shell)"/>
+  <path d="M186 312 L216 340 L186 368" fill="none" stroke="var(--shell)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- the raised half: agent, waiting -->
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v88 h-260 v-88 a22 22 0 0 1 22 -22 z" fill="url(#f-up-b16f-rocker)"/>
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v8 h-260 v-8 a22 22 0 0 1 22 -22 z" fill="var(--specular)" fill-opacity="0.45"/>
+  <path d="M256 170 l16 32 34 5 -25 24 6 34 -31 -16 -31 16 6 -34 -25 -24 34 -5 z" fill="var(--agent)"/>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- G: today's chevron, drawn by a patch cord that ends in a plug. -->
+  <defs>
+    <linearGradient id="g-tile-b32g-cord" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="g-cord-b32g-cord" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="var(--metal-light)"/><stop offset="1" stop-color="var(--metal)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#g-tile-b32g-cord)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the jack it is plugged into -->
+  <circle cx="380" cy="256" r="58" fill="var(--jack)"/>
+  <circle cx="380" cy="256" r="26" fill="var(--hole)"/>
+  <!-- the cord, bent into the prompt -->
+  <path d="M120 140 L246 256 L120 372" fill="none" stroke="url(#g-cord-b32g-cord)" stroke-width="54"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M246 256 H352" fill="none" stroke="url(#g-cord-b32g-cord)" stroke-width="54" stroke-linecap="butt"/>
+  <!-- the plug tip, in the live destination's colour -->
+  <circle cx="380" cy="256" r="30" fill="var(--shell)"/>
+</svg>
+</div><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- G: today's chevron, drawn by a patch cord that ends in a plug. -->
+  <defs>
+    <linearGradient id="g-tile-b16g-cord" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="g-cord-b16g-cord" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="var(--metal-light)"/><stop offset="1" stop-color="var(--metal)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#g-tile-b16g-cord)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the jack it is plugged into -->
+  <circle cx="380" cy="256" r="58" fill="var(--jack)"/>
+  <circle cx="380" cy="256" r="26" fill="var(--hole)"/>
+  <!-- the cord, bent into the prompt -->
+  <path d="M120 140 L246 256 L120 372" fill="none" stroke="url(#g-cord-b16g-cord)" stroke-width="54"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M246 256 H352" fill="none" stroke="url(#g-cord-b16g-cord)" stroke-width="54" stroke-linecap="butt"/>
+  <!-- the plug tip, in the live destination's colour -->
+  <circle cx="380" cy="256" r="30" fill="var(--shell)"/>
+</svg>
+</div></div><div class="pair"><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <!-- H: the whole product in three marks — one cord, two destinations. -->
+  <defs>
+    <linearGradient id="h-tile-b32h-two" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#h-tile-b32h-two)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <path d="M112 256 C112 150 344 160 344 148" fill="none" stroke="var(--cord)" stroke-width="40" stroke-linecap="round"/>
+  <path d="M112 256 C112 362 344 352 344 364" fill="none" stroke="var(--dim)" stroke-width="40" stroke-linecap="round"/>
+  <circle cx="112" cy="256" r="44" fill="var(--metal)"/>
+  <circle cx="356" cy="140" r="52" fill="var(--shell)"/>
+  <circle cx="356" cy="372" r="52" fill="none" stroke="var(--agent)" stroke-width="24"/>
+</svg>
+</div><div class="i" style="--tile-top:#e0d6bd; --tile-bottom:#cdc0a8; --edge:#9c8d74; --dim:#b0a184;
+  --metal:#63492b; --metal-light:#8a7550; --metal-dark:#4a3720;
+  --shell:#324d5c; --agent:#4f4163; --jack:#8a7550; --hole:#3a3226; --cord:#63492b;
+  --plate-top:#e4dac6; --plate-mid:#ded3bf; --plate-bottom:#d6cbb4; --specular:#fdf8ee; --groove:#8e785d;
+  --case-top:#ded3bf; --case-bottom:#cdc0a8; --bevel-light:#f0e4d4; --bevel-dark:#8e785d;
+  --grid-top:#f8f4ec; --grid-bottom:#efe8da;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16" height="16">
+  <!-- H: the whole product in three marks — one cord, two destinations. -->
+  <defs>
+    <linearGradient id="h-tile-b16h-two" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#h-tile-b16h-two)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <path d="M112 256 C112 150 344 160 344 148" fill="none" stroke="var(--cord)" stroke-width="40" stroke-linecap="round"/>
+  <path d="M112 256 C112 362 344 352 344 364" fill="none" stroke="var(--dim)" stroke-width="40" stroke-linecap="round"/>
+  <circle cx="112" cy="256" r="44" fill="var(--metal)"/>
+  <circle cx="356" cy="140" r="52" fill="var(--shell)"/>
+  <circle cx="356" cy="372" r="52" fill="none" stroke="var(--agent)" stroke-width="24"/>
+</svg>
+</div></div></div></section>

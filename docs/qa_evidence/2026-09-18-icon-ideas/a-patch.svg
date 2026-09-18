@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- A: the patched line. One line enters, one of two jacks is lit. -->
+  <defs>
+    <linearGradient id="a-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#a-tile)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the dim alternative route -->
+  <path d="M104 256 H196 V372 H360" fill="none" stroke="var(--dim)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="372" r="34" fill="none" stroke="var(--dim)" stroke-width="22"/>
+  <!-- the live route -->
+  <path d="M104 256 H196 V140 H360" fill="none" stroke="var(--shell)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="140" r="34" fill="var(--shell)" fill-opacity="0.28" stroke="var(--shell)" stroke-width="22"/>
+  <circle cx="104" cy="256" r="28" fill="var(--metal)"/>
+</svg>

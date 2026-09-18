@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- F: the destination as a rocker switch — one side down, one side lit. -->
+  <defs>
+    <linearGradient id="f-case" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--case-top)"/><stop offset="1" stop-color="var(--case-bottom)"/>
+    </linearGradient>
+    <linearGradient id="f-up" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--plate-top)"/><stop offset="1" stop-color="var(--plate-mid)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="72" fill="url(#f-case)"/>
+  <path d="M88 16 H424 A72 72 0 0 1 496 88 V100 H16 V88 A72 72 0 0 1 88 16 Z" fill="var(--bevel-light)" fill-opacity="0.85"/>
+  <rect x="18" y="18" width="476" height="476" rx="70" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the recess -->
+  <rect x="112" y="122" width="288" height="268" rx="26" fill="var(--bevel-dark)"/>
+  <!-- the pressed half: shell, lit -->
+  <path d="M126 256 h260 v106 a22 22 0 0 1 -22 22 h-216 a22 22 0 0 1 -22 -22 z" fill="var(--shell)" fill-opacity="0.26"/>
+  <rect x="126" y="256" width="260" height="14" fill="var(--shell)"/>
+  <path d="M186 312 L216 340 L186 368" fill="none" stroke="var(--shell)" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- the raised half: agent, waiting -->
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v88 h-260 v-88 a22 22 0 0 1 22 -22 z" fill="url(#f-up)"/>
+  <path d="M148 136 h216 a22 22 0 0 1 22 22 v8 h-260 v-8 a22 22 0 0 1 22 -22 z" fill="var(--specular)" fill-opacity="0.45"/>
+  <path d="M256 170 l16 32 34 5 -25 24 6 34 -31 -16 -31 16 6 -34 -25 -24 34 -5 z" fill="var(--agent)"/>
+</svg>

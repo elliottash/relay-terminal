@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- G: today's chevron, drawn by a patch cord that ends in a plug. -->
+  <defs>
+    <linearGradient id="g-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--tile-top)"/><stop offset="1" stop-color="var(--tile-bottom)"/>
+    </linearGradient>
+    <linearGradient id="g-cord" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="var(--metal-light)"/><stop offset="1" stop-color="var(--metal)"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#g-tile)"/>
+  <rect x="18" y="18" width="476" height="476" rx="94" fill="none" stroke="var(--edge)" stroke-width="4"/>
+  <!-- the jack it is plugged into -->
+  <circle cx="380" cy="256" r="58" fill="var(--jack)"/>
+  <circle cx="380" cy="256" r="26" fill="var(--hole)"/>
+  <!-- the cord, bent into the prompt -->
+  <path d="M120 140 L246 256 L120 372" fill="none" stroke="url(#g-cord)" stroke-width="54"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M246 256 H352" fill="none" stroke="url(#g-cord)" stroke-width="54" stroke-linecap="butt"/>
+  <!-- the plug tip, in the live destination's colour -->
+  <circle cx="380" cy="256" r="30" fill="var(--shell)"/>
+</svg>
