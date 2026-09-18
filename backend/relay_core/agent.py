@@ -16,15 +16,17 @@ from . import context as compaction
 from . import logs
 from . import route_assist
 from . import todos as todo_tool
+from .attachments import content_parts as image_content_parts
 from .attachments import format_block as format_attachments
+from .attachments import image_block, images as image_attachments, replace_images
 from .checkpoints import CheckpointStore
 from .context import DEFAULT_THRESHOLD, ContextTracker
 from .planning import (PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, validate_mode, validate_plan_args,
                        write_plan)
-from .presets import (apply_effort, context_window_for, effort_style, infer_effort, resolve_preset,
-                      validate_effort)
+from .presets import (apply_effort, context_window_for, effort_style, infer_effort,
+                      model_supports_vision, resolve_preset, validate_effort)
 from .provider import (DEFAULT_STALL_TIMEOUT, Cancelled, ChatProvider, ProviderConfig, ProviderError,
-                       ProviderStalled, validate_stall_timeout)
+                       ProviderStalled, message_images, validate_stall_timeout)
 from .requests import OPEN as REQUEST_OPEN
 from .requests import AUDIT_MAX_TOKENS, RequestLedger, run_audit
 from .sessions import STATE_VERSION, SessionStore, validate_messages
@@ -163,6 +165,8 @@ class Agent:
         self.audit_requests = audit_requests
         self._announce = False   # emit requests/todos events on change (after construction)
         self._turn_ctx = None
+        # The model swap an image turn is running under, or None (issue EM1E).
+        self._vision: dict | None = None
         # --- subagents (relay_core.subagents) ---
         # subagents: SubagentManager giving this main agent the agent tools; None for subagents (no nesting).
         # inbox: object with drain()/restore(); its notes are added before each model call.
@@ -522,7 +526,8 @@ class Agent:
             raise ValueError("Prompt must contain 1–131072 bytes of text.")
         # `cd` in the terminal moves the agent's default working directory with it.
         self.executor.set_default_cwd((validate_context(context) or {}).get("terminal_cwd"))
-        note = self._pending_note + format_context(context) + format_attachments(attachments)
+        note = (self._pending_note + format_context(context) + format_attachments(attachments)
+                + image_block(attachments))
         if reset_cancellation:
             self.cancel_event.clear()
         self._pending_note = ""
@@ -563,7 +568,15 @@ class Agent:
         over_budget_steps = 0
         reminders = 0
         batch = None               # subagents: `agent` calls started for the current response
+        pictures = image_attachments(attachments)
         try:
+            if pictures:
+                # Decide the model first: a refusal must not leave a half-built image message behind,
+                # and a swap has to be in place before the first model call (issue EM1E).
+                self._begin_vision_turn(pictures, turn_id)
+                message["content"] = image_content_parts(note + prompt, attachments)
+                message["relay_images"] = [{"path": p["path"], "media_type": p["media_type"],
+                                            "bytes": p["bytes"]} for p in pictures]
             while True:
                 if self.cancel_event.is_set():
                     raise Cancelled("Stopped.")
@@ -681,6 +694,9 @@ class Agent:
             self._end_turn(record, {"event": "error", "turn_id": turn_id, "text": text,
                                     "open_items": self._open_items(ctx, final=True)})
         finally:
+            # Backstop: _end_turn already did both for every normal end state (issue EM1E).
+            self._end_vision_turn()
+            self._forget_images()
             self._turn = None
             self._turn_record = None
             self._turn_ctx = None
@@ -688,6 +704,80 @@ class Agent:
                 record["elapsed_ms"] = int((time.monotonic() - record["started"]) * 1000)
                 record["outcome"] = record["outcome"] or "error"
             self.autosave()
+
+    # ----- image turns (issue EM1E) ---------------------------------------------------
+    def _begin_vision_turn(self, pictures: list[dict], turn_id: str) -> dict | None:
+        """Route one turn that carries images, for that turn only (owner decisions, 2026-09-17).
+
+        Three outcomes:
+        * the pane's own model reads images — nothing changes and no event is sent;
+        * it does not, and a vision model is configured or the provider has one (GLM-5.3 → GLM-5.3
+          Flash) — this turn runs on that model, which `vision_route` says in the UI;
+        * neither — the turn is refused with a message naming what to do, rather than being sent to
+          a model that will reject it.
+
+        A vision model the user picked by hand wins even over a main model that can read images:
+        they chose it for pictures, so pictures go there.
+        """
+        main_reads_images = model_supports_vision(self.config.model)
+        pinned = bool(self.roles is not None and self.roles.stored().get("vision"))
+        target = self.roles.vision_target() if self.roles is not None else None
+        if target is None or target.config.model == self.config.model:
+            if main_reads_images:
+                return None
+            text = (f"{self.config.model} cannot read images and no vision model is set. "
+                    "Choose one under Settings › Models › Vision model, or switch this pane to a model "
+                    "that reads images. Nothing was sent to the provider.")
+            self.emit({"event": "vision_unavailable", "turn_id": turn_id, "model": self.config.model,
+                       "images": len(pictures), "text": text})
+            raise ValueError(text)
+        if main_reads_images and not pinned:
+            return None
+        swap = {"turn_id": turn_id, "provider": self.provider, "back_to": self.config.model,
+                "model": target.config.model}
+        self._vision = swap
+        if not self._injected_provider:
+            self.provider = ChatProvider(target.config, self.stall_timeout_s)
+        logs.event(_log, "vision_route", session=self.session_id, turn=turn_id,
+                   from_model=self.config.model, to_model=target.config.model,
+                   host=_host(target.config.base_url), images=len(pictures), source=target.source)
+        self.emit({"event": "vision_route", "turn_id": turn_id, "model": target.config.model,
+                   "from_model": self.config.model, "preset": target.preset_id,
+                   "base_url": target.config.base_url, "source": target.source,
+                   "images": len(pictures), "scope": "turn",
+                   "text": f"Image in this prompt · this turn runs on {target.config.model}, "
+                           f"then back to {self.config.model}."})
+        self.emit({"event": "status", "text": f"Image turn · {target.config.model}"})
+        return swap
+
+    def _end_vision_turn(self) -> None:
+        """Put the pane's own model back after an image turn. Always runs, however the turn ended,
+        and runs before the turn's terminal event so done/error/cancelled stay last."""
+        swap, self._vision = self._vision, None
+        if not swap:
+            return
+        if not self._injected_provider:
+            self.provider = swap["provider"]
+        self.emit({"event": "vision_route_ended", "turn_id": swap["turn_id"], "model": swap["back_to"],
+                   "was": swap["model"], "text": f"Back to {swap['back_to']}."})
+
+    def _forget_images(self) -> None:
+        """Replace every image still in the conversation with its description and path.
+
+        In place, because the same message objects are in the turn record: nothing should keep
+        megabytes of base64 alive once the turn that needed them is over.
+        """
+        changed = False
+        for message in self.messages:
+            if not message_images(message):
+                continue
+            replaced = replace_images(message)
+            message.clear()
+            message.update(replaced)
+            changed = True
+        if changed:
+            # The conversation just got much smaller than the last usage report described it.
+            self.context.invalidate()
 
     # ----- model call and stall retry (issue SQAM) -------------------------------------
     def _model_call(self, record: dict, ctx: dict, step: int) -> dict:
@@ -811,7 +901,10 @@ class Agent:
                 extra = format_context(entry.get("context"))
             except ValueError:
                 extra = ""
-            parts.append(header + extra + format_attachments(entry.get("attachments")) + entry["prompt"])
+            # A steer joins a turn already in flight, so an image on it is named by path rather than
+            # attached: the turn's model was chosen before the steer existed (issue EM1E).
+            parts.append(header + extra + format_attachments(entry.get("attachments"))
+                         + image_block(entry.get("attachments")) + entry["prompt"])
         message = {"role": "user", "content": "\n\n".join(parts), "relay_kind": "steer"}
         if ids:
             message["relay_requests"] = ids
@@ -899,6 +992,10 @@ class Agent:
                    thinking_ms=record["thinking_ms"], tools=len(record["tools"]),
                    retries=record.get("retries", 0), open_items=len(event.get("open_items") or []),
                    error=_error_text(event), leaked_socket=leaked or None)
+        # An image is context for its own turn only (issue EM1E): the model swap goes back and the
+        # pictures leave the conversation here, before the terminal event, so that stays last.
+        self._end_vision_turn()
+        self._forget_images()
         self.emit(self.turn_summary(record))
         self.emit(event)
 

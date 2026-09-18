@@ -377,6 +377,17 @@ class RoleResolver:
             self.warnings.append(resolved.warning)
         return resolved
 
+    def vision_target(self) -> Resolved | None:
+        """Where a turn carrying an image goes when the main model cannot read one (issue EM1E).
+
+        None means "nothing is configured and the provider has no image model", which the agent
+        turns into a refusal with a message rather than a provider error. A resolution that lands
+        back on the main agent counts as None for exactly that reason: sending an image to a model
+        that cannot read it is the failure this is here to avoid.
+        """
+        resolved = self.resolve("vision")
+        return None if resolved.is_main else resolved
+
     def rebase(self, main_config: ProviderConfig, main_preset_id: str | None, main_effort: str | None = None) -> None:
         """Follow a set_model switch: per-provider defaults are recomputed for the new main model."""
         self.main_config = main_config

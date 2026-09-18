@@ -65,11 +65,44 @@ def validate_window(value) -> int:
     return value
 
 
+# An image costs the model roughly a constant, whatever its file size; the base64 data URL that
+# carries it is 4/3 of the file and would otherwise be counted as characters, so a 1 MiB screenshot
+# would read as ~350k tokens and trigger a compaction in the middle of its own turn (issue EM1E).
+IMAGE_TOKENS = 1_600
+
+
+def _without_image_data(obj):
+    """(obj without base64 image payloads, number of images). For estimation only."""
+    images = 0
+    if isinstance(obj, list):
+        out = []
+        for item in obj:
+            if (isinstance(item, dict) and item.get("type") == "image_url"
+                    and isinstance(item.get("image_url"), dict)):
+                images += 1
+                out.append({"type": "image_url"})
+                continue
+            item, found = _without_image_data(item)
+            images += found
+            out.append(item)
+        return out, images
+    if isinstance(obj, dict):
+        out = {}
+        for key, value in obj.items():
+            value, found = _without_image_data(value)
+            images += found
+            out[key] = value
+        return out, images
+    return obj, 0
+
+
 def estimate_tokens(obj) -> int:
     if not obj:
         return 0
-    text = obj if isinstance(obj, str) else json.dumps(obj, ensure_ascii=False)
-    return len(text) // CHARS_PER_TOKEN + 1
+    if isinstance(obj, str):
+        return len(obj) // CHARS_PER_TOKEN + 1
+    obj, images = _without_image_data(obj)
+    return len(json.dumps(obj, ensure_ascii=False)) // CHARS_PER_TOKEN + 1 + images * IMAGE_TOKENS
 
 
 def limit_tokens(window: int, threshold: float, max_tokens: int) -> int:

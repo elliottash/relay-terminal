@@ -2,6 +2,7 @@
 """OpenAI-compatible chat-completions transport with streamed tool-call assembly."""
 from __future__ import annotations
 
+import base64
 import json
 import os
 import socket
@@ -129,6 +130,67 @@ def _reasoning_text(part: dict) -> str:
                     texts.append(value)
         return "".join(texts)
     return ""
+
+
+# --- multimodal content parts (issue EM1E) ------------------------------------------------------
+# OpenAI-compatible chat completions carry an image as a content part on a user message:
+#   {"role": "user", "content": [{"type": "text", "text": ...},
+#                                {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}]}
+# Relay always inlines the bytes as a data URL: no image of the user's ever leaves the machine for
+# anywhere but the configured provider, and no third party has to be able to fetch a URL.
+#
+# The caps are local, not the provider's. A base64 data URL is 4/3 of the file, the whole request
+# has to stay under MAX_RESPONSE (8 MiB), and the conversation has to fit beside it, so one image
+# may be 3 MiB and a turn 6 MiB of raw image bytes.
+MAX_IMAGE_BYTES = 3 * 1024 * 1024
+MAX_IMAGE_TOTAL = 6 * 1024 * 1024
+MAX_IMAGES_PER_TURN = 4
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
+IMAGE_DETAIL = "auto"
+
+
+def data_url(media_type: str, raw: bytes) -> str:
+    """`data:<type>;base64,<data>` for one image. Rejects an unsupported type or an oversized file."""
+    if media_type not in IMAGE_TYPES:
+        raise ValueError(f"Unsupported image type {media_type!r}; use PNG, JPEG, WebP or GIF.")
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise ValueError(f"Image is larger than the {MAX_IMAGE_BYTES // (1024 * 1024)} MiB limit for one image.")
+    return f"data:{media_type};base64," + base64.b64encode(raw).decode("ascii")
+
+
+def image_part(media_type: str, raw: bytes, detail: str = IMAGE_DETAIL) -> dict:
+    return {"type": "image_url", "image_url": {"url": data_url(media_type, raw), "detail": detail}}
+
+
+def text_part(text: str) -> dict:
+    return {"type": "text", "text": text}
+
+
+def content_parts(text: str, images: list[dict]) -> list[dict]:
+    """The `content` list for a user message that carries images.
+
+    ``images`` are ``{media_type, raw}`` in the order the user attached them; the text always comes
+    first, because a model reads the instruction before the picture.
+    """
+    if len(images) > MAX_IMAGES_PER_TURN:
+        raise ValueError(f"At most {MAX_IMAGES_PER_TURN} images per turn.")
+    total = sum(len(image["raw"]) for image in images)
+    if total > MAX_IMAGE_TOTAL:
+        raise ValueError(f"Images in one turn may total at most {MAX_IMAGE_TOTAL // (1024 * 1024)} MiB.")
+    return [text_part(text)] + [image_part(image["media_type"], image["raw"]) for image in images]
+
+
+def message_images(message) -> list[dict]:
+    """The image parts of one message, or an empty list. Never raises on odd content."""
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, list):
+        return []
+    return [part for part in content
+            if isinstance(part, dict) and part.get("type") == "image_url" and isinstance(part.get("image_url"), dict)]
+
+
+def has_images(messages: list[dict]) -> bool:
+    return any(message_images(message) for message in messages)
 
 
 def wire_messages(messages: list[dict]) -> list[dict]:
@@ -297,6 +359,9 @@ class ChatProvider:
             payload["tools"] = tools
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         if len(data) > MAX_RESPONSE:
+            if has_images(messages):
+                raise ProviderError("This turn is too large to send with its images. Attach a smaller image, "
+                                    "or fewer of them.")
             raise ProviderError("Conversation exceeds the local request size limit. Start a new conversation.")
         headers = {"Content-Type": "application/json", "Accept": "text/event-stream", "User-Agent": "Relay/0.1"}
         if self.config.api_key:
