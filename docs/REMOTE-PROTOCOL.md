@@ -293,7 +293,23 @@ On demand, mirroring the worker's own requests: `turn_transcript_get {pane, turn
 | `screen_diff` | desktop → client | `{pane, seq, cursor, lines: [<row>]}` — only rows that changed |
 | `screen_get` | client → desktop | `{pane}` — ask for a fresh snapshot after a reconnect |
 | `history_get` | client → desktop | `{pane, id, before_row, count}` (`count` ≤ 200) |
-| `history` | desktop → client | `{pane, id, from_row, lines: [...], more}` |
+| `history` | desktop → client | `{pane, id, from_row, total, lines: [...], more}` |
+
+**The scrollback cursor is absolute.** `before_row` is the row the page ends just below: the reply
+holds rows `[before_row - count, before_row)`, numbered from 0 = the oldest line the desktop still
+holds. Omitting it (or sending a negative one) asks for the newest page. `from_row` is the row of
+the first line returned, `total` is how many scrollback rows there were at the moment of the
+answer, and `more` says whether anything older than `from_row` exists. Every line carries its own
+absolute `row` as well, so a client de-duplicates by number rather than by arithmetic.
+
+It is absolute rather than counted back from the newest row because a phone pages while the shell
+is still printing. A cursor counted from the end moves by however many lines arrived between two
+requests, so consecutive pages overlap or leave a hole in the middle of what the person is
+reading; an absolute row moves only when a full scrollback ring evicts its oldest line, and then
+only for content that is being discarded anyway. A client that finds a page does not join the one
+below it starts again from that page, which is what an eviction looks like from the outside.
+
+The host never sends scrollback unasked, and asking never changes what the desktop shows.
 
 A `<row>` is `{row, segs: [[text, fg, bg, attrs], ...]}`: runs of identical style. The client needs
 no index arithmetic — a run carries its own text — and no second emulator. `fg` and `bg` are packed
@@ -323,9 +339,10 @@ Two rules come from the engine and are not negotiable:
   that consumer is `TerminalView` and the hub reads the frame it already produced. In
   `relay-screen-bridge` — the headless PTY used by remote access today — the bridge is the only
   consumer and calls it directly.
-- **`history_get` is served by a const `VtCore::historyLines(from, count, out)`**, to be added in
-  both cores in P2. It **must not** move the viewport: `scrollViewportToRow` is shared state and
-  would drag the desktop user's own screen.
+- **`history_get` is served by a const `VtCore::historyLines(from, count, out)`**, in both cores.
+  It **must not** move the viewport: `scrollViewportToRow` is shared state and would drag the
+  desktop user's own screen. It returns the same `relay::Line` the viewport frame carries, so one
+  serializer (`engine/tools/ScreenJson.h`) shapes the live screen and history alike.
 
 **Sizing.** The host is authoritative. The client scales its font so the host's column count fits,
 and **must not** send its own size. There is no resize message in RRP/1 at all, which is what makes
@@ -751,6 +768,9 @@ and P3 clients interoperate at P1's level.
 | Resume: in-ring, out-of-ring, new `hub_epoch`, duplicate `msg_id` | Hub tests against a fake transport |
 | The screen stream does not disturb the local view | Engine test: hub reads frames while `TerminalView` keeps repainting |
 | `historyLines` matches `historyText` and does not move the viewport | `engine/tests/CoreTest.cpp`, both cores |
+| Pages join with no hole and nothing repeated while the shell prints | `tests/test_remote_terminal.py` (the bridge, and through the hub over a real shell) |
+| A page reaches the device that asked for it, and a wedged desktop is an error | `tests/test_remote_gui_host.py` |
+| Dragging the terminal down on a phone pages history in, styled, and new output moves nothing | `tests/test_remote_browser.py` |
 | End to end | Loopback rendezvous plus a headless browser client in `ci.yml` |
 
 ## 14. What exists today (2026-09-18)
@@ -768,6 +788,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | Python client | `remote/client.py` | For tests and scripts; also where the client-side pinning rule is tested |
 | Dev harness | `remote/cli.py` | `python3 -m remote.cli share` shares a real shell; `dev` runs the demo agent. Both print the pairing QR |
 | Screen stream (P2) | `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `app/screen.js` | A real PTY parsed by Relay's own emulator, streamed as styled rows, painted as a cell grid on the phone |
+| Scrollback (§6.5) | `engine/core/VtCore.h` (`historyLines`), `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `remote/gui_host.py`, `src/RemoteShare.cpp`, `app/screen.js` | Paging by absolute row, from the bridge and from a GUI pane. Pages are fetched one ahead of the reader and de-duplicated by row; output arriving while somebody is scrolled back moves nothing and offers a way to live instead; at most 2000 rows are kept on the phone. History is painted by the run painter the live screen uses, because both ends of the wire go through one serializer |
 | Take-over (P3) | `remote/host.py`, `app/app.js` | `keys`, `paste`, `line`, `control_request`/`control_release`, an extra-keys row and a line box, refused at a password prompt |
 | Password entry (§6.7) | `remote/host.py`, `src/Pane.h` (`submitRemoteSecret`), `app/app.js` | A desktop-minted single-use nonce bound to the prompt, a per-device switch that is off by default, a fresh termios check in the hub and again at the write, a password field in the client. Tested; not yet tried on a real phone |
 | Notifications (§9) | `remote/push.py`, `remote/notify.py`, `remote/host.py`, `app/app.js`, `app/sw.js`, `src/RemoteShare.cpp` | Connected end to end. `push_subscribe`/`push_unsubscribe` inside the Noise session, five triggers with a checkbox each on the phone, the presence rule over `window_active`, a per-pane cooldown, constructed bodies, a 410 or a revoke dropping the subscription, and a "Notify me" row that asks permission from a tap. RFC 8291 is checked against the RFC's own Appendix A vector, `app/sw.js` opens a Python seal under Node, and a local push service takes a real delivery (`tests/test_remote_push.py`). **Not yet tried on a real phone**: that needs the hosted rendezvous reachable from the push service |
@@ -779,9 +800,17 @@ against **real shells** — including Relay's own panes, from the share button i
 
 Every Relay pane is an engine pane, so every pane can be shared.
 
-Not implemented, and refused explicitly rather than silently: `history_get` (the bridge can page
-plain text, but scrollback is to be styled, which needs a const `VtCore::historyLines` in both
-cores); and all of section 10.
+Not implemented, and refused explicitly rather than silently: all of section 10.
+
+`history_get` now works from both sources. The engine's `VtCore::historyLines` is const and moves
+nothing — not the viewport, the dirty state, the selection or the search — so a phone paging back
+cannot scroll the screen the owner is looking at, and the same `screenjson::rowOf()` that shapes a
+live row shapes a history row, so the two cannot drift. Over a real shell the hub puts the request
+to `relay-screen-bridge` under a per-pane lock, so two devices paging at once queue rather than
+read each other's pages; from a GUI pane the sidecar sends a `history` line and waits for the
+answer by an id it minted, and a desktop that never answers is an error the phone shows rather
+than a scroll gesture held open. `welcome` advertises `history` only when the source has
+scrollback behind it.
 
 `voice` from a GUI pane now works: the sidecar sends the clip to the GUI as a `voice` line with an
 id it minted, the pane writes it to a 0600 temp file whose name and extension it chooses itself and

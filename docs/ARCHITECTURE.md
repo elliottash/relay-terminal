@@ -1798,8 +1798,8 @@ The protocol, the cryptography and the phone's web client live in a Python sidec
 
 | Direction | What crosses |
 |---|---|
-| GUI → sidecar | the pane's title, cwd and status; a screen frame whenever the view pulls one; each worker event; the answer to a pairing question; the transcript of a voice clip |
-| sidecar → GUI | the pairing URL and its QR matrix; a pairing request to put to the person; the keystrokes a phone sent; a prompt a phone submitted; a voice clip to transcribe |
+| GUI → sidecar | the pane's title, cwd and status; a screen frame whenever the view pulls one; each worker event; the answer to a pairing question; the transcript of a voice clip; a page of the pane's scrollback |
+| sidecar → GUI | the pairing URL and its QR matrix; a pairing request to put to the person; the keystrokes a phone sent; a prompt a phone submitted; a voice clip to transcribe; a request for a page of scrollback |
 
 **One prompt box.** A client has a single box, like Relay's own. What is typed arrives as
 `compose`, and `Pane::submitRemote` routes it through the worker's router exactly as the composer
@@ -1820,6 +1820,13 @@ never talks to a transcription provider — that is the whole reason the audio t
 the key. The transcript is routed by the request id the clip carried, so it can no more land in the
 desktop's composer than a remote prompt can, and the clip itself is unlinked as soon as the worker
 has answered.
+
+**Scrollback on the phone.** A client that drags the terminal down asks for a page by absolute
+row, and `RemoteShare::sendHistoryPage` answers it from the pane's own core through
+`VtCore::historyLines`, which is const: reading back must not move the viewport, because that is
+the screen the person at the keyboard is looking at. The rows go out through the same
+`screenjson::rowOf()` the live frames use, so a history row and a live row cannot end up
+different shapes, and the page is capped so a phone pages rather than downloads the buffer.
 
 Two rules decide the shape:
 
