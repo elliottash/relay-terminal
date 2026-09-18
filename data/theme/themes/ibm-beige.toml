@@ -47,27 +47,34 @@ error = "#931c17"
 # neighbours. That is the same order of separation this theme's greyed destination pair settled on
 # (dE 20.3), and the band carries the bolt glyph and the word "Actions" besides.
 action = "#803700"
-# The owner's call for this theme: "terminal is dark gray-blue and agent is dark gray-violet" —
-# a slate and a pewter rather than a teal and a purple, so the pair sits with the plastic instead
-# of looking like a web app dropped into a 1992 case. Their first version (#354a59 / #4c4460) was
-# only CIELAB dE 14 apart at identical lightness; these move each about dE 3 to reach dE 20.3,
-# which is about the most a grey pair of matched lightness can give. Colour is the fourth channel
-# (word, glyph, position first), and this is the theme where that matters most.
-shell = "#324d5c"
-agent = "#4f4163"
+# The destinations. The owner's first call here was a greyed pair — "terminal is dark gray-blue
+# and agent is dark gray-violet", a slate and a pewter so they sat with the plastic — and it did
+# not survive use: "too dark and desaturated, I can't tell them apart from each other or from
+# regular dark text" (owner, 2026-09-18). The measurements agreed. The slate was CIELAB chroma
+# 13.3, barely more than the warm grey of `text_muted`, and the pair was only dE 20.3 apart and
+# dE 27 and 33 from the near-black text, which is what the eye was being asked to do.
+#
+# The case beige is the tight ground here, so the pair is pinned at L 33 whatever its hue; the
+# only free variable is chroma, and the greys were spending almost none of it. These take what
+# each hue allows at 4.5:1 on the case: chroma 31.5 and 82.6, up from 13.3 and 22.5, at the same
+# matched lightness the greyed pair had (L 33.4 and 33.2). They are dE 68 apart, dE 43 and 89
+# from the text, and dE 24 and 48 from the Windows 95 navy, which stays the chrome. The period is
+# on the side of this: a 1990s machine's own 16 colours were saturated, not pastel.
+shell = "#005380"
+agent = "#7220ad"
 
 [syntax]
 # Checked against surface (idle composer) and surface_raised (focused composer, beige): the
 # focused one is the tight ground in this theme.
-command = "#324d5c"
+command = "#005380"
 unknown = "#931c17"
 flag = "#684800"
 string = "#135427"
 path = "#0f5f5a"
 operator = "#5a554a"
-variable = "#4f4163"
-agent = "#4f4163"
-token = "#324d5c"
+variable = "#7220ad"
+agent = "#7220ad"
+token = "#005380"
 
 [terminal]
 # The grid is warm paper, not a white block (owner, 2026-09-18), and the paper is lit rather than
