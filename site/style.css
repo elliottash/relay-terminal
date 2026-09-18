@@ -15,25 +15,149 @@
    The page is built like a session: a terminal gutter down the left, hairline rules instead of boxes,
    and Relay's own two destination colours doing the work — cyan for the shell, violet for the agent.
    Structure follows the other sites in this family (zrh-ai-econ.com, recode.ink): no rounding,
-   no shadows, hairline rules, mono as a structural face. */
+   no shadows, hairline rules, mono as a structural face.
+
+   ---- the two panels -------------------------------------------------------------------------
+   The site wears the app's own two themes, colour for colour out of data/theme/themes: Dark Copper
+   (charcoal chassis, aged copper chrome) and IBM Beige (a 1990s case, moulded plastic, warm paper
+   screen). The browser's setting picks one; the switch in the header patches it by hand, the same
+   way the hero's jacks patch a line.
+
+   Two rules carried over from the app, because they are what make the colours mean something:
+   cyan and violet only ever say *destination* (shell, agent), never chrome; and the accent is
+   whatever the theme's own chrome is — copper on the dark panel, the Windows 95 navy on the light
+   one. Every pair below is measured in docs/THEMES.md. */
 
 :root {
-  --bg: #0f1115;
-  --raised: #161920;
-  --line: #242832;
-  --text: #e6e8ec;
-  --muted: #8b919c;
-  --shell: #3ec5f0;
-  --agent: #b48ef7;
-  --flag: #e5c07b;
-  --string: #7ec88c;
+  /* IBM Beige — the light panel. The page is the warm paper of the terminal, the bands and the
+     raised faces are the case around it. */
+  --beige-bg: #f4efe4;
+  --beige-band: #ebe3d4;
+  --beige-raised: #ded3bf;
+  --beige-line: #9c8d74;
+  --beige-text: #1f1c16;
+  --beige-muted: #4d463a;
+  --beige-accent: #1a3070;
+  --beige-accent-hover: #243d85;
+  --beige-on-accent: #f3f2f0;
+  --beige-shell: #324d5c;
+  --beige-agent: #4f4163;
+  --beige-flag: #684800;
+  --beige-string: #135427;
+  --beige-grid-top: #f8f4ec;
+  --beige-grid-bottom: #efe8da;
+  --beige-board-face: #e0d6bd;
+  --beige-board-mesh: #cbbfa4;
+  --beige-board-trace: #b0a184;
+  --beige-board-node: #8a7550;
+  /* Plastic is lit from above by a broad, soft band — never a specular line. */
+  --beige-edge: linear-gradient(to bottom, rgba(255, 252, 245, 0.75), rgba(255, 252, 245, 0.25) 30%, transparent 70%);
+  --beige-scan: rgba(107, 90, 60, 0.05);
+
+  /* Dark Copper — the dark panel. */
+  --copper-bg: #0e0f12;
+  --copper-band: #13141a;
+  --copper-raised: #241c18;
+  --copper-line: #3a2822;
+  --copper-text: #ece6e0;
+  --copper-muted: #a2968c;
+  --copper-accent: #c07a4a;
+  --copper-accent-hover: #d08a58;
+  --copper-on-accent: #1a0f08;
+  --copper-shell: #45c8ee;
+  --copper-agent: #ab97f7;
+  --copper-flag: #e5c07b;
+  --copper-string: #7ec88c;
+  --copper-grid-top: #12131a;
+  --copper-grid-bottom: #0a0b0e;
+  --copper-board-face: #1a1210;
+  --copper-board-mesh: #241a15;
+  --copper-board-trace: #3d2b22;
+  --copper-board-node: #6b4a33;
+  /* Metal takes light as a line along the top edge. */
+  --copper-edge: linear-gradient(to bottom, rgba(236, 230, 224, 0.16), rgba(236, 230, 224, 0.03) 22%, transparent 60%);
+  --copper-scan: rgba(0, 0, 0, 0.16);
+
   --mono: "IBM Plex Mono", ui-monospace, "DejaVu Sans Mono", monospace;
   --sans: "Space Grotesk", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
   --gutter: 2.25rem;
-  /* Lit from above, the way Linear treats panels: a hairline that brightens along the top edge
-     instead of a shadow underneath. */
-  --edge: linear-gradient(to bottom, rgba(230, 232, 236, 0.16), rgba(230, 232, 236, 0.03) 22%, transparent 60%);
-  --band: #12151b;
+
+  /* Light is the default panel, so a browser that says nothing gets the beige machine. */
+  --bg: var(--beige-bg);
+  --band: var(--beige-band);
+  --raised: var(--beige-raised);
+  --line: var(--beige-line);
+  --text: var(--beige-text);
+  --muted: var(--beige-muted);
+  --accent: var(--beige-accent);
+  --accent-hover: var(--beige-accent-hover);
+  --on-accent: var(--beige-on-accent);
+  --shell: var(--beige-shell);
+  --agent: var(--beige-agent);
+  --flag: var(--beige-flag);
+  --string: var(--beige-string);
+  --grid-top: var(--beige-grid-top);
+  --grid-bottom: var(--beige-grid-bottom);
+  --board-face: var(--beige-board-face);
+  --board-mesh: var(--beige-board-mesh);
+  --board-trace: var(--beige-board-trace);
+  --board-node: var(--beige-board-node);
+  --edge: var(--beige-edge);
+  --scan: var(--beige-scan);
+  color-scheme: light;
+}
+
+/* The copper panel, for the two reasons a reader can be on it: the browser asks for dark and
+   nothing is pinned, or they pinned copper themselves. Same mapping, said twice, because CSS has
+   no way to name one block and apply it from both places. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="beige"]) {
+    --bg: var(--copper-bg);
+    --band: var(--copper-band);
+    --raised: var(--copper-raised);
+    --line: var(--copper-line);
+    --text: var(--copper-text);
+    --muted: var(--copper-muted);
+    --accent: var(--copper-accent);
+    --accent-hover: var(--copper-accent-hover);
+    --on-accent: var(--copper-on-accent);
+    --shell: var(--copper-shell);
+    --agent: var(--copper-agent);
+    --flag: var(--copper-flag);
+    --string: var(--copper-string);
+    --grid-top: var(--copper-grid-top);
+    --grid-bottom: var(--copper-grid-bottom);
+    --board-face: var(--copper-board-face);
+    --board-mesh: var(--copper-board-mesh);
+    --board-trace: var(--copper-board-trace);
+    --board-node: var(--copper-board-node);
+    --edge: var(--copper-edge);
+    --scan: var(--copper-scan);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="copper"] {
+  --bg: var(--copper-bg);
+  --band: var(--copper-band);
+  --raised: var(--copper-raised);
+  --line: var(--copper-line);
+  --text: var(--copper-text);
+  --muted: var(--copper-muted);
+  --accent: var(--copper-accent);
+  --accent-hover: var(--copper-accent-hover);
+  --on-accent: var(--copper-on-accent);
+  --shell: var(--copper-shell);
+  --agent: var(--copper-agent);
+  --flag: var(--copper-flag);
+  --string: var(--copper-string);
+  --grid-top: var(--copper-grid-top);
+  --grid-bottom: var(--copper-grid-bottom);
+  --board-face: var(--copper-board-face);
+  --board-mesh: var(--copper-board-mesh);
+  --board-trace: var(--copper-board-trace);
+  --board-node: var(--copper-board-node);
+  --edge: var(--copper-edge);
+  --scan: var(--copper-scan);
   color-scheme: dark;
 }
 
@@ -50,9 +174,9 @@ body {
 }
 
 img { max-width: 100%; height: auto; display: block; }
-a { color: var(--shell); text-underline-offset: 3px; }
+a { color: var(--accent); text-underline-offset: 3px; }
 a:hover { text-decoration-thickness: 2px; }
-:focus-visible { outline: 2px solid var(--shell); outline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 p { margin: 0 0 14px; max-width: 66ch; }
 
 code, pre, .mono { font-family: var(--mono); }
@@ -62,22 +186,37 @@ code { font-size: 0.92em; }
 .wrap { width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 20px; }
 @media (min-width: 760px) { .wrap { padding: 0 40px; } }
 
-.skip { position: absolute; left: -9999px; top: 8px; background: var(--shell); color: var(--bg); padding: 8px 12px; }
+.skip { position: absolute; left: -9999px; top: 8px; background: var(--accent); color: var(--on-accent); padding: 8px 12px; }
 .skip:focus { left: 8px; }
 
 /* ---- header: a prompt line, not a nav bar ------------------------------------------------- */
 .top { border-bottom: 1px solid var(--line); }
 .top-inner { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 54px; }
+.top-right { display: flex; align-items: center; gap: 18px; }
 .brand {
   display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text);
   font-family: var(--mono); font-weight: 600; font-size: 0.95rem; letter-spacing: 0.02em;
 }
 .brand img { width: 20px; height: 20px; }
-.brand span::before { content: "› "; color: var(--shell); }
+.brand span::before { content: "› "; color: var(--accent); }
 .top nav ul { display: flex; gap: 22px; list-style: none; margin: 0; padding: 0; }
 .top nav a { color: var(--muted); text-decoration: none; font-family: var(--mono); font-size: 0.86rem; }
 .top nav a:hover { color: var(--text); }
 @media (max-width: 560px) { .top nav ul { gap: 14px; } .top nav li:nth-child(3) { display: none; } }
+
+/* The panel switch: two jacks, the same idiom as the hero's. The lit one is the panel you are
+   reading; clicking the other patches the page and remembers it. Without JavaScript it is not
+   rendered at all, and the browser's own setting decides. */
+.panel-switch { display: flex; align-items: center; gap: 0; border: 1px solid var(--line); }
+.panel-switch button {
+  font: inherit; font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.04em;
+  background: none; border: 0; padding: 4px 9px; cursor: pointer; color: var(--muted);
+}
+.panel-switch button + button { border-left: 1px solid var(--line); }
+.panel-switch button:hover { color: var(--text); }
+.panel-switch button[aria-checked="true"] { color: var(--on-accent); background: var(--accent); }
+.panel-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 560px) { .panel-switch button { padding: 4px 7px; } }
 
 /* ---- hero: the copy beside a session ------------------------------------------------------ */
 .hero { padding: 104px 0 96px; }
@@ -104,14 +243,14 @@ h1 {
   color: var(--text); background: transparent; border: 1px solid var(--line);
 }
 .button:hover { border-color: var(--muted); }
-.button.primary { color: var(--bg); background: var(--shell); border-color: var(--shell); font-weight: 600; }
-.button.primary:hover { background: #64d4f6; border-color: #64d4f6; }
+.button.primary { color: var(--on-accent); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .cta-note { color: var(--muted); font-size: 0.9rem; max-width: 48ch; }
 
 /* The session block: the most characteristic thing in the product, so it carries the page. */
 .screen {
   position: relative;
-  background: var(--raised);
+  background: linear-gradient(to bottom, var(--grid-top), var(--grid-bottom));
   border: 1px solid var(--line);
   font-family: var(--mono);
   font-size: 0.86rem;
@@ -144,13 +283,14 @@ h1 {
 }
 .input-meta { display: flex; gap: 8px; margin: 0; }
 .chip { color: var(--muted); font-size: 0.78rem; border: 1px solid var(--line); padding: 1px 7px; }
-.sh-chip { color: var(--shell); border-color: rgba(62, 197, 240, 0.4); }
-.ag-chip { color: var(--agent); border-color: rgba(180, 142, 247, 0.4); }
+.sh-chip { color: var(--shell); border-color: color-mix(in srgb, var(--shell) 45%, transparent); }
+.ag-chip { color: var(--agent); border-color: color-mix(in srgb, var(--agent) 45%, transparent); }
 
 /* ---- sections: a gutter carries the section mark ------------------------------------------ */
 section { padding: 96px 0; scroll-margin-top: 16px; }
 section:nth-of-type(even) { background: var(--band); }
-.hero { background: radial-gradient(120% 60% at 50% -10%, rgba(62, 197, 240, 0.06), transparent 60%); }
+/* One lamp over the top of the page, in whatever the panel's own chrome colour is. */
+.hero { background: radial-gradient(120% 60% at 50% -10%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 60%); }
 h2 {
   font-family: var(--sans); font-weight: 600; font-size: clamp(1.4rem, 1.1rem + 1.2vw, 1.95rem);
   letter-spacing: -0.025em; margin: 0 0 36px; padding-left: var(--gutter); position: relative;
@@ -190,7 +330,7 @@ h3 { font-family: var(--mono); font-size: 1rem; font-weight: 600; margin: 0 0 6p
 @media (max-width: 660px) { .gallery { grid-template-columns: 1fr; } }
 
 /* ---- install ------------------------------------------------------------------------------ */
-.note { border-left: 2px solid var(--shell); padding: 2px 0 2px 16px; margin: 0 0 28px var(--gutter); color: var(--muted); }
+.note { border-left: 2px solid var(--accent); padding: 2px 0 2px 16px; margin: 0 0 28px var(--gutter); color: var(--muted); }
 .note strong { color: var(--text); }
 .grid { display: grid; gap: 28px; list-style: none; margin: 0; padding: 0; }
 .install { grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); padding-left: var(--gutter); }
@@ -208,7 +348,7 @@ pre {
 .two p strong, .checks li strong { color: var(--text); }
 .checks { list-style: none; margin: 0; padding: 0; }
 .checks li { position: relative; padding: 0 0 14px 22px; color: var(--muted); max-width: 66ch; }
-.checks li::before { content: "·"; position: absolute; left: 4px; top: 0; color: var(--shell); font-family: var(--mono); }
+.checks li::before { content: "·"; position: absolute; left: 4px; top: 0; color: var(--accent); font-family: var(--mono); }
 .checks.warn li::before { content: "!"; color: var(--flag); }
 
 footer { border-top: 1px solid var(--line); padding: 26px 0 40px; color: var(--muted); font-size: 0.9rem; }
@@ -233,15 +373,15 @@ footer a:hover { color: var(--text); }
    product's own colours. Static and readable without JavaScript. */
 .stage { display: grid; gap: 18px; }
 .board { margin: 0; }
-.board-face { position: relative; background: #0c0f14; border: 1px solid var(--line); margin-right: 58px; }
+.board-face { position: relative; background: var(--board-face); border: 1px solid var(--line); margin-right: 58px; }
 .board-face::before {
   content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(to bottom, rgba(230, 232, 236, 0.10), transparent 24%);
+  background: var(--edge);
 }
 /* A CRT breath over the board, the way an old console diagram reads. Nothing else on the page has it. */
 .board-face::after {
   content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0.5;
-  background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px);
+  background: repeating-linear-gradient(to bottom, var(--scan) 0 1px, transparent 1px 3px);
 }
 .grid { display: block; width: 100%; height: auto; }
 
@@ -257,10 +397,12 @@ footer a:hover { color: var(--text); }
   @keyframes draw { from { stroke-dashoffset: 460; } to { stroke-dashoffset: 0; } }
 }
 
-.node { fill: #0c0f14; stroke: #33405a; stroke-width: 2; }
+.mesh-line { stroke: var(--board-mesh); }
+.trace-dim { stroke: var(--board-trace); }
+.node { fill: var(--board-face); stroke: var(--board-node); stroke-width: 2; }
 .node-in { stroke: var(--muted); }
-.board[data-line="shell"] .node-shell { stroke: var(--shell); fill: rgba(62, 197, 240, 0.22); }
-.board[data-line="agent"] .node-agent { stroke: var(--agent); fill: rgba(180, 142, 247, 0.22); }
+.board[data-line="shell"] .node-shell { stroke: var(--shell); fill: color-mix(in srgb, var(--shell) 25%, transparent); }
+.board[data-line="agent"] .node-agent { stroke: var(--agent); fill: color-mix(in srgb, var(--agent) 25%, transparent); }
 @media (prefers-reduced-motion: no-preference) {
   .board[data-line="shell"] .node-shell, .board[data-line="agent"] .node-agent {
     animation: live 2.6s ease-in-out infinite;
@@ -284,7 +426,7 @@ footer a:hover { color: var(--text); }
 .jack:hover { color: var(--text); }
 .board[data-line="shell"] .jack-shell { color: var(--shell); }
 .board[data-line="agent"] .jack-agent { color: var(--agent); }
-.jack:focus-visible { outline: 2px solid var(--shell); outline-offset: 3px; }
+.jack:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .board-note { color: var(--muted); font-size: 0.85rem; margin: 10px 0 0; }
 
 .board[data-line="agent"] ~ .screen .caret { background: var(--agent); }

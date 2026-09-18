@@ -5,13 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Relay Terminal — one prompt for your shell and your coding agent</title>
   <meta name="description" content="A Linux terminal for agentic coding on your own API keys. One prompt box: commands run in your shell, everything else goes to the agent. No account, no cloud, no telemetry.">
-  <meta name="theme-color" content="#0f1115">
+  <!-- The two panels the page can be in: IBM Beige and Dark Copper, the app's own themes. -->
+  <meta name="theme-color" content="#f4efe4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e0f12" media="(prefers-color-scheme: dark)">
   <meta property="og:title" content="Relay Terminal — one prompt for your shell and your coding agent">
   <meta property="og:description" content="A Linux terminal for agentic coding on your own API keys.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="assets/agent-inline.png">
   <link rel="icon" href="assets/relay.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
+  <script>
+    // Before first paint, so a pinned panel never flashes the other one.
+    try {
+      var pinned = localStorage.getItem("relay-panel");
+      if (pinned === "copper" || pinned === "beige") document.documentElement.dataset.theme = pinned;
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -22,14 +31,17 @@
         <img src="assets/relay.svg" alt="" width="28" height="28">
         <span>RELAY</span>
       </a>
-      <nav aria-label="Sections">
-        <ul>
-          <li><a href="#features">Features</a></li>
-          <li><a href="#install">Install</a></li>
-          <li><a href="#privacy">Privacy</a></li>
-          <li><a href="https://github.com/elliottash/relay-terminal">GitHub</a></li>
-        </ul>
-      </nav>
+      <div class="top-right">
+        <nav aria-label="Sections">
+          <ul>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#install">Install</a></li>
+            <li><a href="#privacy">Privacy</a></li>
+            <li><a href="https://github.com/elliottash/relay-terminal">GitHub</a></li>
+          </ul>
+        </nav>
+        <div class="panel-switch" role="radiogroup" aria-label="Colour theme" hidden></div>
+      </div>
     </div>
   </header>
 
@@ -58,7 +70,7 @@
             <svg class="grid" viewBox="0 0 400 200" preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false">
               <defs>
                 <pattern id="mesh" width="20" height="20" patternUnits="userSpaceOnUse">
-                  <path d="M20 0H0V20" fill="none" stroke="#1d2530" stroke-width="1"/>
+                  <path class="mesh-line" d="M20 0H0V20" fill="none" stroke-width="1"/>
                 </pattern>
                 <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
                   <feGaussianBlur stdDeviation="3.2" result="b"/>
@@ -68,7 +80,7 @@
               <rect width="400" height="200" fill="url(#mesh)"/>
 
               <!-- every trace on the board, unlit -->
-              <g class="trace-dim" fill="none" stroke="#273040" stroke-width="2">
+              <g class="trace-dim" fill="none" stroke-width="2">
                 <path d="M40 100 H120 V40 H260 V60 H340"/>
                 <path d="M40 100 H120 V160 H260 V140 H340"/>
                 <path d="M120 100 H200 V120 H300"/>
@@ -352,6 +364,55 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
       </ul>
     </div>
   </footer>
+  <script>
+    // The panel switch. The page already answers the browser's own setting in CSS; this only adds
+    // the manual patch, so it is built here and stays absent when JavaScript is off.
+    (function () {
+      var host = document.querySelector(".panel-switch");
+      if (!host) return;
+      var panels = [{ id: "beige", label: "beige" }, { id: "copper", label: "copper" }];
+      var dark = window.matchMedia("(prefers-color-scheme: dark)");
+
+      function current() {
+        var pinned = document.documentElement.dataset.theme;
+        if (pinned === "beige" || pinned === "copper") return pinned;
+        return dark.matches ? "copper" : "beige";
+      }
+      function paint() {
+        var now = current();
+        host.querySelectorAll("button").forEach(function (button) {
+          button.setAttribute("aria-checked", String(button.dataset.panel === now));
+        });
+      }
+      function patch(panel) {
+        document.documentElement.dataset.theme = panel;
+        try { localStorage.setItem("relay-panel", panel); } catch (e) {}
+        paint();
+      }
+
+      panels.forEach(function (panel) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.setAttribute("role", "radio");
+        button.dataset.panel = panel.id;
+        button.textContent = panel.label;
+        button.addEventListener("click", function () { patch(panel.id); });
+        host.appendChild(button);
+      });
+      host.addEventListener("keydown", function (event) {
+        if (["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"].indexOf(event.key) === -1) return;
+        event.preventDefault();
+        var next = current() === "beige" ? "copper" : "beige";
+        patch(next);
+        host.querySelector('[data-panel="' + next + '"]').focus();
+      });
+      // An unpinned page follows the browser, including a change made while it is open.
+      dark.addEventListener("change", paint);
+      host.hidden = false;
+      paint();
+    })();
+  </script>
+
   <script>
     // One interactive moment on the page: re-patching the line. Everything works without it —
     // the shell jack is plugged in the markup, and its session is the one shown.
