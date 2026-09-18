@@ -63,9 +63,13 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 | Ctrl+H / Ctrl+Shift+H | Take control of the terminal (the only way keys reach it) / back to the prompt box |
 | Ctrl+Shift+A | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
 | Ctrl+Shift+O | Options: what persists, a tab per section (again to close; also Ctrl+, and the gear) |
+| Ctrl+Shift+S | Switchboard: this repository's cards, threads and plans |
 | Ctrl+Shift+Y | Resume a saved session (`/resume`) |
+| Alt+A, Ctrl+Shift+X | Subagents: this pane's subagent tabs / stop all running subagents |
 | Ctrl+T, Ctrl+N | New tab, new window |
-| Ctrl+P, Ctrl+Shift+P | Split right, split down |
+| Ctrl+E, Ctrl+Shift+E | New pane to the right (then ← ↑ ↓ places it) |
+| Ctrl+Shift+J | Delegate: the agent drives the program in this pane; ask from the prompt box |
+| Ctrl+Shift+L | Step through files, folders and links in the output (Enter opens, Esc leaves) |
 | Alt+Arrows | Move between panes |
 | Ctrl+W, Ctrl+Shift+W | Close pane (then tab, then window) |
 | Ctrl+Shift+Z | Reopen the last closed pane, tab or window, with its text and conversation |
@@ -181,7 +185,11 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   which kind it is and which turn it came from. Filters: this project or all projects, agent
   threads or terminal history, model, open tasks, date. The right pane previews the conversation
   with the match highlighted; Enter resumes it in this pane, Shift+Enter opens it in a new one,
-  and there are Rename, Pin and Delete. Words are matched inside one message or command; use
+  and there are Rename, Pin and Delete. Each row shows its tags — pinned, unfinished,
+  edits · N files, the branch — and the agent's summary once it has one; → unfolds a quick look
+  (summary, first prompt, the last turns, files, open todos), and **Continue** heads the list
+  with this project's pinned, unfinished and recently closed sessions. Words are matched inside
+  one message or command; use
   `"quotes"` for a phrase.
   **Ctrl+F** searches the current pane instead: the terminal scrollback (Relay engine) and this
   pane's conversation, with next/previous, wrap, a match count and Esc to close.
@@ -257,7 +265,9 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   off with Actions › Reopen windows on start, skip it once with `relay --fresh`, or clear it with
   Actions › Start a fresh window set.
 - **Windows, tabs and panes.** Each pane has its own shell, prompt, agent and conversation.
-  Closed panes, tabs and windows restore in the same directories with new shells. Hovering a
+  Closed panes, tabs and windows restore in the same directories with new shells; Ctrl+Shift+Z
+  brings the last one back, and Actions › Recently closed keeps the last 25 — a list that
+  survives a restart. Hovering a
   pane shows a button row: drag grip ⠿, split right, split down, move to a new tab, close. Drag
   the grip onto another pane's edge (a drop zone shows) to move the pane there, or onto a tab bar
   to make it a tab; Ctrl+Alt+Left/Right/Up/Down moves the focused pane (in the Warp preset these
@@ -267,13 +277,40 @@ closes and puts focus back where it was, so nothing there needs the mouse.
 - **File panes.** Folder explorer and file preview (code, Markdown, images, optional PDF).
   Open with `relay open PATH`, a click on the pane's directory line, or Ctrl+click on a text
   file in terminal output.
+- **SSH hosts.** Actions › **Connect to host…** lists your recent hosts and every `Host` in
+  `~/.ssh/config` (with the `user@host` its block writes); typing `user@host` or `ssh host` in
+  the prompt box offers that host too. Choosing one opens a new tab that logs in, and Split on
+  the same host opens another pane on it. The pane knows the host it is on: remote shell
+  integration is typed into the remote bash or zsh (tmux included, or it says what it needs) so
+  prompt marks and the working directory keep working, and the agent keeps its local powers — it
+  runs commands on the host, and its file tools take a `host`, so it reads and edits remote
+  files and shows the diff before writing (`docs/SSH-AND-MOSH.md`).
+- **Share a pane with a phone — and with other people.** The share chip beside the microphone
+  pairs a phone: a link and QR, a five-digit code both ends derive, and a deliberate choice
+  between viewing and typing. The phone sees the pane's screen, gets one prompt box routed
+  exactly like Relay's own (a command runs, anything else goes to the agent), pages through the
+  scrollback, and can send a voice clip that is transcribed on the desktop, so the API key never
+  leaves it. For other people there is the **Sharing pane** — invite with a role (Viewer or
+  Editor) and an expiry — which opens by itself when somebody knocks: who is here, what is
+  waiting for you, Refuse first. While a guest holds the keyboard the title row says so, and
+  your typing takes control straight back (`docs/REMOTE-PROTOCOL.md`).
+- **Subagents.** A task can go to a subagent that runs in its own tab with its own conversation;
+  the task list shows which task each one works on. Alt+A opens this pane's subagent tabs (and
+  goes back to the main agent), Ctrl+Shift+X stops all running subagents, and `/agents` lists
+  agent definitions and the running ones.
+- **Local models.** Options › **Local models** finds, adds, tests and removes a model server on
+  this machine, and the agent can set one up from the local-model-setup skill. `/local`
+  switches this pane to the Local agent and back.
+- **Voice.** Press the microphone beside the prompt box, or hold the voice key (Right Alt by
+  default), and the transcript is inserted at the cursor; transcription goes through the
+  provider you already use. The hold key is a setting under Options › Voice.
 - **Actions and shortcuts.** The Actions pane (Ctrl+Shift+A, Ctrl+?) lists every action with its
   keys, and its search finds actions and options together; it also matches related words
   ("undo" finds Rewind, "reasoning" finds effort, "detach" finds the move actions). Shortcuts
   live in `~/.config/RelayTerminal/relay/keybindings.json`, reload live, and the agent can change
   them.
 - **Shortcut hints.** When you click something that has a faster key, a short toast says so
-  ("Next time: Ctrl+P · new pane to the right"), at most 3 times per hint and not more than once
+  ("Next time: Ctrl+E · new pane"), at most 3 times per hint and not more than once
   every 20 s. After a finished agent turn, an idle empty prompt box shows a tip. Options ›
   General › Shortcut hints turns them off; Actions › Reset shortcut hints shows them again.
 - **Skills.** The agent sees your Warp-style skills (`~/.warp/skills`, `~/.claude/skills`,
