@@ -61,7 +61,6 @@ public:
     void clearFinished();               // a new user turn
     void clear();                       // worker restarted
     bool mainBusy() const { return m_mainBusy; }
-    qint64 mainContextTokens() const { return m_mainTokens; }
     // "main ctx 38k · agents ~1.2k tok"
     QString tokenSplit() const;
     const QJsonArray &definitions() const { return m_definitions; }

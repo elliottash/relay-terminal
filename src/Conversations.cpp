@@ -275,8 +275,6 @@ void Dialog::requery() {
     onQuery(request);
 }
 
-void Dialog::setError(const QString &text) { m_status->setText(text); }
-
 void Dialog::removed(const QString &sessionId) {
     Q_UNUSED(sessionId);
     requery();

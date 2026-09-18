@@ -108,8 +108,6 @@ public:
     // Empty for a single completed task (nothing worth a line) or no tasks.
     QString turnEndLine(int maxChars = 160) const;
     static QString outcomeWord(TaskOutcome outcome);   // "failed", "unfinished", "in progress"…
-    // Re-ask is refused by the worker while a request runs; queued state is not known here.
-    static bool canReask(const LedgerRequest &request) { return request.status != QStringLiteral("in_progress"); }
 
     static QString statusGlyph(const QString &status);   // ✓ ◐ ○ ✕ ⏸ ✗
     static QString statusLabel(const QString &status);   // "cancelled by you", blocked → "failed"

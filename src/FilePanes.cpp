@@ -544,22 +544,6 @@ struct FilePreview::Private {
     QPixmap pixmap;
 };
 
-bool FilePreview::hasSyntaxHighlighting() {
-#ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
-    return true;
-#else
-    return false;
-#endif
-}
-
-bool FilePreview::hasPdfSupport() {
-#ifdef RELAY_HAVE_QTPDF
-    return true;
-#else
-    return false;
-#endif
-}
-
 FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     setObjectName(QStringLiteral("filePreview"));
     setAttribute(Qt::WA_StyledBackground);

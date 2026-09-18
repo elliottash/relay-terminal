@@ -63,7 +63,6 @@ public:
     // Worker events.
     void setResults(const QJsonObject &event);
     void setPreview(const QJsonObject &event);
-    void setError(const QString &text);
     // Row gone: drop it and re-run the query.
     void removed(const QString &sessionId);
 

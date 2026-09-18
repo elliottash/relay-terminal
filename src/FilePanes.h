@@ -60,7 +60,6 @@ public:
     QString root() const { return m_root; }
     void goUp();
     void setShowHidden(bool show);
-    bool showHidden() const { return m_showHidden; }
     // Type-to-filter: a case-insensitive substring over names in the current folder.
     void setFilter(const QString &text);
     // Paths currently listed under the root, in view order. Mainly for tests.
@@ -138,8 +137,6 @@ public:
 
     static constexpr qint64 kMaxTextBytes = 2 * 1024 * 1024;
     static constexpr qint64 kMaxImageBytes = 64 * 1024 * 1024;
-    static bool hasSyntaxHighlighting();
-    static bool hasPdfSupport();
 
     std::function<void(const QString &)> onTitleChanged;
 

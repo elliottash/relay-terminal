@@ -43,7 +43,6 @@ public:
     bool running() const { return m_running; }
     QString base() const { return m_base; }
     QString note() const { return m_note; }
-    int paneCount() const { return m_panes.size(); }
     bool isSharing(const QString &paneId) const { return m_panes.contains(paneId); }
 
     // What a pane hands over. `status` is polled (idle/running/password/finished/failed) and
