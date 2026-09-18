@@ -437,6 +437,16 @@ def assist_signals(text: str, cwd: str | None = None) -> tuple[int, list[str], s
     if any(a.endswith(",") for a in args) or (args and args[-1].endswith(".") and args[-1][:-1].isalpha()):
         score += 1
         reasons.append("punctuation")
+    # "look for cleanup opportunities", "search for the leak", "check on the build": an
+    # English-word command followed straight away by a preposition or an article is a sentence,
+    # not an invocation — no command takes one of these as its first operand (owner report,
+    # 2026-09-17: "look for cleanup opportunities" ran in the shell).
+    LEAD_IN = {"for", "at", "in", "into", "on", "through", "about", "over", "under", "across",
+               "the", "a", "an", "my", "our", "this", "that", "these", "those", "all", "any",
+               "up", "out", "around", "why", "how", "what", "whether", "if"}
+    if args and args[0].strip("?.,!:").lower() in LEAD_IN and "lead-in" not in reasons:
+        score += 2
+        reasons.append("lead-in")
     pathlike = any("/" in a or "~" in a or ("." in a.strip(".,?!") and not a.endswith(".")) for a in args)
     if len(words) > 4 and not pathlike:
         score += 1

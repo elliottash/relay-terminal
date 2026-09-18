@@ -151,6 +151,16 @@ class ValidityTests(unittest.TestCase):
             self.assertTrue(result.valid)
             self.assertEqual(result.invalid_reason, "")
 
+    def test_a_command_word_followed_by_a_preposition_is_a_sentence(self):
+        # Owner report 2026-09-17: "look for cleanup opportunities" ran in the shell. No command
+        # takes "for", "at" or "the" as its first operand.
+        for text in ["look for cleanup opportunities", "search for the leak", "check on the build",
+                     "look up the error", "look at the tests"]:
+            self.assertEqual(self.check(text).route, "agent", text)
+        # Real invocations whose first operand is not a lead-in word stay in the shell.
+        for text in ["tar xzf archive.tgz", "split file.txt", "watch -n1 ls", "time make", "make -j8"]:
+            self.assertEqual(self.check(text).route, "shell", text)
+
     def test_sentence_naming_a_path_or_glob_is_not_a_command(self):
         # Owner report 2026-09-17: "look" is an installed command, and the glob used to suppress
         # the ambiguity check entirely, so this ran in the shell.
