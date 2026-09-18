@@ -82,8 +82,9 @@ class LocalTransportTests(unittest.TestCase):
         config = ProviderConfig(self.server.base, 'bonsai-2-27b', '', {}, 4096, local=local, **fields)
         return ChatProvider(config, stall)
 
-    def ask(self, provider, tools=TOOLS):
-        return provider.complete([{'role': 'user', 'content': 'hi'}], tools, self.events.append, threading.Event())
+    def ask(self, provider, tools=TOOLS, messages=None):
+        return provider.complete(messages or [{'role': 'user', 'content': 'hi'}], tools,
+                                 self.events.append, threading.Event())
 
     def text(self, kind):
         return ''.join(e.get('text', '') for e in self.events if e['event'] == kind)
@@ -104,6 +105,44 @@ class LocalTransportTests(unittest.TestCase):
         self.server.stream(sse({'content': 'ok'}), sse(finish='stop'), DONE)
         self.ask(self.provider(), tools=[])
         self.assertNotIn('parallel_tool_calls', self.server.requests[-1]['body'])
+
+    # ----- tool-call arguments as objects (a chat template that cannot parse a JSON string) ----
+    def history(self, arguments='{"command": "ls"}'):
+        return [{'role': 'user', 'content': 'hi'},
+                {'role': 'assistant', 'content': None, 'relay_kind': 'turn',
+                 'tool_calls': [{'id': 'c1', 'type': 'function',
+                                 'function': {'name': 'run_command', 'arguments': arguments}}]},
+                {'role': 'tool', 'tool_call_id': 'c1', 'content': 'a.txt'}]
+
+    def replay(self, provider, messages):
+        self.server.stream(sse({'content': 'ok'}), sse(finish='stop'), DONE)
+        self.ask(provider, messages=messages)
+        return self.server.requests[-1]['body']['messages']
+
+    def test_arguments_travel_as_objects_only_when_the_endpoint_asks(self):
+        messages = self.history()
+        sent = self.replay(self.provider(), messages)
+        self.assertEqual(sent[1]['tool_calls'][0]['function']['arguments'], '{"command": "ls"}')
+        sent = self.replay(self.provider(tool_arguments_as_object=True), messages)
+        self.assertEqual(sent[1]['tool_calls'][0]['function']['arguments'], {'command': 'ls'})
+        self.assertNotIn('relay_kind', sent[1])         # the bookkeeping keys still go
+        # The conversation Relay keeps is the one it replays next turn: only the wire copy changed.
+        self.assertEqual(messages[1]['tool_calls'][0]['function']['arguments'], '{"command": "ls"}')
+        self.assertIsNone(messages[1].get('content'))
+        self.assertEqual(messages[1]['relay_kind'], 'turn')
+
+    def test_a_hosted_provider_never_gets_objects_however_it_is_configured(self):
+        with self.assertRaises(ValueError):
+            ProviderConfig('https://api.example.com/v1', 'm', 'key', tool_arguments_as_object=True).validate()
+        config = ProviderConfig(self.server.base, 'm', '', {}, 4096, local=False)
+        config.tool_arguments_as_object = True
+        with self.assertRaises(ValueError):
+            config.validate()
+
+    def test_arguments_that_are_not_json_are_left_as_they_are(self):
+        for arguments in ('not json at all', '"a string"', '[1, 2]', ''):
+            sent = self.replay(self.provider(tool_arguments_as_object=True), self.history(arguments))
+            self.assertEqual(sent[1]['tool_calls'][0]['function']['arguments'], arguments, arguments)
 
     def test_a_hosted_request_is_byte_for_byte_what_it_was(self):
         self.server.stream(sse({'content': 'ok'}), sse(finish='stop'), DONE)

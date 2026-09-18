@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 BONSAI = {'id': 'bonsai', 'label': 'Bonsai 2 27B', 'base_url': 'http://127.0.0.1:8080/v1',
           'model': 'bonsai-2-27b', 'server': 'llamacpp', 'context_window': 131072}
 SMALL = {'id': 'small', 'base_url': 'http://localhost:11434/v1', 'model': 'qwen3:4b', 'server': 'ollama',
-         'context_window': 32768, 'first_token_timeout': 120, 'tool_text_recovery': True}
+         'context_window': 32768, 'first_token_timeout': 120, 'tool_text_recovery': True,
+         'tool_arguments_as_object': True}
 
 
 class Case(unittest.TestCase):
@@ -56,6 +57,8 @@ class ConfigureTests(Case):
     def test_the_endpoints_own_settings_travel_with_it(self):
         config = S.provider_config({'preset': 'local:small', 'use_stored_key': True})
         self.assertEqual((config.first_token_timeout, config.tool_text_recovery), (120.0, True))
+        self.assertIs(config.tool_arguments_as_object, True)
+        self.assertIs(S.provider_config({'preset': 'local:bonsai'}).tool_arguments_as_object, False)
 
     def test_the_output_limit_fits_the_served_window(self):
         self.assertEqual(S.provider_config({'preset': 'local:small', 'use_stored_key': True}).max_tokens, 8192)
@@ -130,6 +133,33 @@ class RoleTests(Case):
             validate_roles({'subagent': {'preset': 'local:gone'}})
         with self.assertRaises(ValueError):
             validate_tiers({'flash': {'preset': 'local:gone'}})
+
+
+class SideCallTests(Case):
+    def test_a_side_call_keeps_the_local_transport(self):
+        """Summaries, recaps and suggestions rebuild the provider with a smaller output budget. That
+        rebuild used to drop everything but URL, model, key and extra, so a local server's side calls
+        went out with the 60 s deadline and none of the endpoint's settings."""
+        from relay_core.agent import Agent
+        config = S.provider_config({'preset': 'local:small'})
+        agent = Agent(config, self.dir.name, lambda event: None, preset_id='local:small')
+        for cheap in (True, False):
+            side = agent.side_provider(cheap=cheap).config
+            self.assertEqual((side.local, side.first_token_timeout, side.tool_text_recovery, side.context_window),
+                             (True, 120.0, True, 32768), cheap)
+            self.assertEqual(side.api_key, '')
+        self.assertEqual(agent.side_provider(cheap=True).config.max_tokens, 4096)
+        self.assertEqual(agent.side_provider(cheap=True, max_tokens=16).config.max_tokens, 16)
+        self.assertEqual(agent.config.max_tokens, 8192)               # the agent's own config is not touched
+
+    def test_a_hosted_side_call_is_what_it_was(self):
+        from relay_core.agent import Agent
+        config = S.provider_config({'preset': 'kimi', 'use_stored_key': True})
+        agent = Agent(config, self.dir.name, lambda event: None, preset_id='kimi')
+        side = agent.side_provider(cheap=True).config
+        self.assertEqual((side.local, side.base_url, side.model, side.api_key, side.max_tokens),
+                         (False, config.base_url, config.model, 'moonshot-key', 4096))
+        self.assertIsNone(side.first_token_timeout)
 
 
 class TestButtonTests(Case):

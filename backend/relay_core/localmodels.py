@@ -83,6 +83,10 @@ class LocalEndpoint:
     # Off unless the owner of the endpoint turns it on: a recovery parser that misfires turns a JSON
     # block in an ordinary answer into an executed command (card #24XJ, Decisions).
     tool_text_recovery: bool = False
+    # Some chat templates cannot read a tool call's arguments as the JSON string OpenAI's shape
+    # carries: Meta's ATEM template on llama.cpp --jinja needs a mapping, and without this the
+    # second turn of every tool conversation fails. Ollama serving the same model does not.
+    tool_arguments_as_object: bool = False
 
     @property
     def slug(self) -> str:
@@ -93,7 +97,8 @@ class LocalEndpoint:
         return {**self.as_preset().to_dict(), "tools": self.tools, "thinking": self.thinking,
                 "first_token_timeout": self.first_token_timeout,
                 "parallel_tool_calls": self.parallel_tool_calls,
-                "tool_text_recovery": self.tool_text_recovery}
+                "tool_text_recovery": self.tool_text_recovery,
+                "tool_arguments_as_object": self.tool_arguments_as_object}
 
     def stored(self) -> dict:
         return {"id": self.id, "label": self.label, "base_url": self.base_url, "model": self.model,
@@ -101,7 +106,8 @@ class LocalEndpoint:
                 "thinking": self.thinking, "extra": dict(self.extra), "note": self.note,
                 "first_token_timeout": self.first_token_timeout,
                 "parallel_tool_calls": self.parallel_tool_calls,
-                "tool_text_recovery": self.tool_text_recovery}
+                "tool_text_recovery": self.tool_text_recovery,
+                "tool_arguments_as_object": self.tool_arguments_as_object}
 
     def as_preset(self) -> Preset:
         """This endpoint in the shape the rest of the backend already reads.
@@ -161,7 +167,8 @@ def from_dict(spec: dict) -> LocalEndpoint:
                          _bool(spec.get("thinking"), "thinking", False),
                          dict(extra), str(spec.get("note") or "")[:200], float(timeout),
                          _bool(spec.get("parallel_tool_calls"), "parallel_tool_calls", False),
-                         _bool(spec.get("tool_text_recovery"), "tool_text_recovery", False))
+                         _bool(spec.get("tool_text_recovery"), "tool_text_recovery", False),
+                         _bool(spec.get("tool_arguments_as_object"), "tool_arguments_as_object", False))
 
 
 # ----- the registry file ---------------------------------------------------------------------
@@ -247,6 +254,7 @@ def provider_fields(preset_id=None, base_url: str = "", model: str = "") -> dict
     return {"local": True, "first_token_timeout": endpoint.first_token_timeout,
             "parallel_tool_calls": endpoint.parallel_tool_calls,
             "tool_text_recovery": endpoint.tool_text_recovery,
+            "tool_arguments_as_object": endpoint.tool_arguments_as_object,
             "context_window": endpoint.context_window}
 
 

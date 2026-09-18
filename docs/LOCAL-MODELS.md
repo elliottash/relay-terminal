@@ -11,6 +11,7 @@ address. No key, no account, nothing leaves the machine. Card `#24XJ`; code in
 scripts/relay-local.py scan                       # what is serving on 11434, 1234, 8080, 8000
 scripts/relay-local.py add --base-url http://127.0.0.1:8080 --id bonsai --label "Bonsai 2 27B" --detect
 scripts/relay-local.py list
+scripts/relay-local.py smoke http://127.0.0.1:8080 --model bonsai-2-27b   # can it drive the agent?
 scripts/relay-agent.py --provider local:bonsai    # the same agent, in a terminal
 ```
 
@@ -32,6 +33,7 @@ path; `scripts/test.sh` points it at a temp file). Each entry:
 | `first_token_timeout` | 300 | Seconds allowed before the first token. Covers a cold load and a long prefill. |
 | `parallel_tool_calls` | false | When false, `parallel_tool_calls: false` is sent with the tools. |
 | `tool_text_recovery` | false | Recover tool calls the model writes as text. See below before turning it on. |
+| `tool_arguments_as_object` | false | Send a tool call's `arguments` as an object, not the JSON string. For a chat template that cannot parse a string. |
 | `extra` | `{}` | `temperature`, `top_p` and the other keys `ProviderConfig` allows. |
 
 If the server is restarted with a different `-c`, run `add --detect` again: the window is read
@@ -55,6 +57,10 @@ host. A hosted provider's request and its failures are byte for byte what they w
   and the context tracker would fall back to four characters a token.
 - **Envelope repair.** `arguments` as a JSON object instead of a string, a missing `id` or `type`,
   a repeated id. A hosted provider doing any of these is still an error.
+- **`arguments` can go out as an object.** With `tool_arguments_as_object: true` the assistant's
+  tool calls are replayed with `arguments` as the object it spells instead of the JSON string.
+  Only the outgoing copy changes; the stored conversation keeps the string, a string that is not
+  JSON is left alone, and the flag is refused on anything but a local endpoint.
 - **`<think>` tags become reasoning**, including a tag cut in two by a chunk boundary, an opener
   that is never closed (the rest is reasoning), and a closer with no opener (a template that opens
   the tag in the prompt). With `llama-server --reasoning-format deepseek` the server already does
@@ -71,7 +77,12 @@ host. A hosted provider's request and its failures are byte for byte what they w
 
 Some models, and some servers started without the right template, write a tool call into the
 answer: `<tool_call>{…}</tool_call>` (Hermes, Qwen), Qwen3-Coder's `<function=…><parameter=…>`
-XML, LM Studio's `[TOOL_REQUEST]…[END_TOOL_REQUEST]`, a fenced JSON block. With
+XML, LM Studio's `[TOOL_REQUEST]…[END_TOOL_REQUEST]`, a fenced JSON block, Meta's ATEM markup
+(`<atem:invoke name="…"><atem:parameter name="…">…`, with or without the `<atem:function_calls>`
+wrapper), and DeepSeek's DSML (`<｜DSML｜invoke name="…"><｜DSML｜parameter name="…" string="true">…`,
+with or without the `calls` wrapper; the bars are U+FF5C, the space DeepSeek V4.1 puts after `DSML｜`
+is optional, and `string="false"` means the value is JSON). A parameter value is typed by what the
+tool declared, except in DSML, where `string` says. With
 `tool_text_recovery: true` Relay turns these back into tool calls. It is off by default because a
 parser that misfires runs a command out of an ordinary answer. When on, it is all or nothing: the
 reply finished normally, carried no native tool calls, consists of call blocks and whitespace
@@ -96,6 +107,11 @@ Flags that matter for an agent, for `llama-server`:
 | `--sleep-idle-seconds N` | Frees the model after N idle seconds, reloads on the next request. `/props` does not count as activity. |
 | `--host 127.0.0.1` | Relay only talks to loopback, and nothing else should reach the server. |
 | no `-ctk q4_0` | llama.cpp's own docs warn that extreme KV quantisation degrades tool calling. |
+
+Muse Glimmer on `llama-server --jinja` needs `tool_arguments_as_object: true`. Its ATEM chat
+template requires `tool_call.function.arguments` to be a mapping, and the HF jinja sandbox cannot
+parse a JSON string, so the second turn of every tool conversation fails without it. The same model
+through Ollama does not need the flag.
 
 Ollama: set `OLLAMA_CONTEXT_LENGTH` (its `/v1` endpoint cannot take a window per request), and use
 a model whose `capabilities` include `tools`. vLLM: `--enable-auto-tool-choice` with the
@@ -137,8 +153,8 @@ loopback ports is provider configuration.
 
 The `presets` event lists saved endpoints after the built-in presets, with the keys of a preset row
 plus `local: true`, `server`, `group: "local"`, `has_stored_key: false`, `key_source: "local"`,
-`efforts: []`, `tools`, `thinking`, `first_token_timeout`, `parallel_tool_calls` and
-`tool_text_recovery`. Built-in rows carry `local: false`.
+`efforts: []`, `tools`, `thinking`, `first_token_timeout`, `parallel_tool_calls`,
+`tool_text_recovery` and `tool_arguments_as_object`. Built-in rows carry `local: false`.
 
 `configure`, `set_model`, a `tiers` entry, a `roles` entry and `test_key` all accept
 `preset: "local:<id>"`. `use_stored_key` is ignored for one: there is no key. `test_key` on a local

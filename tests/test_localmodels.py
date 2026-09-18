@@ -222,7 +222,7 @@ class RegistryTests(RegistryCase):
         bad = [{'base_url': 'https://127.0.0.1:8080/v1'}, {'base_url': 'http://example.com/v1'},
                {'base_url': 'http://user:pw@127.0.0.1:8080/v1'}, {'model': ''}, {'server': 'mystery'},
                {'context_window': 100}, {'context_window': True}, {'first_token_timeout': 0},
-               {'tools': 'yes'}, {'extra': []}, {'id': '!!!'}]
+               {'tools': 'yes'}, {'extra': []}, {'id': '!!!'}, {'tool_arguments_as_object': 'yes'}]
         for change in bad:
             with self.assertRaises(ValueError, msg=change):
                 L.from_dict({**self.SPEC, **change})
@@ -232,7 +232,18 @@ class RegistryTests(RegistryCase):
         self.assertEqual(endpoint.id, 'local:qwen-qwen3-coder')
         self.assertEqual(endpoint.context_window, L.FALLBACK_CONTEXT_WINDOW)
         self.assertEqual((endpoint.parallel_tool_calls, endpoint.tool_text_recovery), (False, False))
+        self.assertEqual(endpoint.tool_arguments_as_object, False)
         self.assertEqual(endpoint.first_token_timeout, 300.0)
+
+    def test_a_template_that_needs_object_arguments_says_so_and_is_kept(self):
+        saved = L.save({**self.SPEC, 'tool_arguments_as_object': True})
+        self.assertIs(saved.tool_arguments_as_object, True)
+        self.assertIs(saved.stored()['tool_arguments_as_object'], True)
+        self.assertIs(saved.to_dict()['tool_arguments_as_object'], True)
+        self.assertIs(L.find('local:bonsai').tool_arguments_as_object, True)
+        fields = L.provider_fields('local:bonsai', 'http://127.0.0.1:8080/v1')
+        self.assertIs(fields['tool_arguments_as_object'], True)
+        self.assertNotIn('tool_arguments_as_object', L.provider_fields(None, 'http://127.0.0.1:9999/v1'))
 
     def test_an_id_can_never_reach_the_keyring(self):
         from relay_core import keystore

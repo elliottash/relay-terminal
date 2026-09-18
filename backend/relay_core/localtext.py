@@ -104,6 +104,30 @@ _BLOCKS = (
 _XML_FUNCTION = re.compile(r"^<function=([^>\s]+)>\s*(.*?)\s*</function>$", re.DOTALL)
 _XML_PARAMETER = re.compile(r"<parameter=([^>\s]+)>\n?(.*?)\n?</parameter>", re.DOTALL)
 
+# Meta's ATEM markup (Muse Glimmer). The template writes
+#   <atem:function_calls><atem:invoke name="TOOL"><atem:parameter name="KEY">VALUE</atem:parameter>…
+# and llama.cpp has it arrive as text when the model drops out of the channel framing. The
+# function_calls wrapper is what the template emits, but recovery accepts a bare invoke too: the
+# text that fell out of the framing is the part that is missing pieces.
+_ATEM_INVOKE = re.compile(r"<atem:invoke\s+name=[\"']([^\"']+)[\"']\s*>\s*(.*?)\s*</atem:invoke\s*>", re.DOTALL)
+_ATEM_PARAMETER = re.compile(r"<atem:parameter\s+name=[\"']([^\"']+)[\"']\s*>\n?(.*?)\n?</atem:parameter\s*>", re.DOTALL)
+_ATEM_WRAPPER = re.compile(r"</?atem:function_calls\s*>")
+
+# DeepSeek's DSML markup. Every bar is FULLWIDTH VERTICAL LINE (U+FF5C), not ASCII "|", and the tag
+# name carries a leading space in V4.1 (<｜DSML｜ invoke>) and none in V4 (<｜DSML｜invoke>); the
+# wrapper is <｜DSML｜tool_calls> in V4 and <｜DSML｜ calls> in V4.1, and a reply that fell back to
+# text may carry no wrapper at all. string="true" means the value is literal text, string="false"
+# that it is JSON; with the attribute absent the declared schema type decides, as it does elsewhere.
+_BAR = "｜"           # U+FF5C, not the ASCII "|" beside it on the keyboard
+_DSML_OPEN = rf"<{_BAR}DSML{_BAR} ?"
+_DSML_SHUT = rf"(?:</{_BAR}DSML{_BAR} ?|<{_BAR}/DSML{_BAR} ?)"
+_DSML_INVOKE = re.compile(_DSML_OPEN + r"invoke\s+name=[\"']([^\"']+)[\"']\s*>\s*(.*?)\s*"
+                          + _DSML_SHUT + r"invoke\s*>", re.DOTALL)
+_DSML_PARAMETER = re.compile(_DSML_OPEN + r"parameter\s+name=[\"']([^\"']+)[\"']"
+                             + r"(?:\s+string=[\"'](true|false)[\"'])?\s*>\n?(.*?)\n?"
+                             + _DSML_SHUT + r"parameter\s*>", re.DOTALL)
+_DSML_WRAPPER = re.compile(rf"(?:{_DSML_OPEN}|{_DSML_SHUT})(?:tool_)?calls\s*>")
+
 
 def _schemas(tools: list[dict]) -> dict[str, dict]:
     out = {}
@@ -133,6 +157,18 @@ def _from_json(body: str):
     return obj["name"], arguments
 
 
+def _typed(name: str, key: str, value: str, schemas: dict[str, dict]):
+    """One XML-ish parameter value, typed by what the tool declared. The template writes every value
+    as text, so a non-string parameter is read as JSON, and text that is not JSON stays text."""
+    declared = (schemas.get(name) or {}).get(key)
+    if isinstance(declared, dict) and declared.get("type") not in (None, "string"):
+        try:
+            return json.loads(value)
+        except ValueError:
+            pass
+    return value
+
+
 def _from_xml(body: str, schemas: dict[str, dict]):
     found = _XML_FUNCTION.match(body)
     if not found:
@@ -140,16 +176,53 @@ def _from_xml(body: str, schemas: dict[str, dict]):
     name, inner = found.group(1), found.group(2)
     if _XML_PARAMETER.sub("", inner).strip():
         return None                       # something between the parameters that is not a parameter
+    return name, {key: _typed(name, key, value, schemas) for key, value in _XML_PARAMETER.findall(inner)}
+
+
+def _from_atem(found, schemas: dict[str, dict]):
+    """One ``<atem:invoke>`` block (Meta, Muse Glimmer)."""
+    name, inner = found.group(1), found.group(2)
+    if _ATEM_PARAMETER.sub("", inner).strip():
+        return None                       # something between the parameters that is not a parameter
+    return name, {key: _typed(name, key, value, schemas) for key, value in _ATEM_PARAMETER.findall(inner)}
+
+
+def _from_dsml(found, schemas: dict[str, dict]):
+    """One ``<｜DSML｜invoke>`` block (DeepSeek). ``string`` says whether the value is text or JSON."""
+    name, inner = found.group(1), found.group(2)
+    if _DSML_PARAMETER.sub("", inner).strip():
+        return None
     arguments = {}
-    for key, value in _XML_PARAMETER.findall(inner):
-        declared = (schemas.get(name) or {}).get(key)
-        if isinstance(declared, dict) and declared.get("type") not in (None, "string"):
+    for key, literal, value in _DSML_PARAMETER.findall(inner):
+        if literal == "true":
+            arguments[key] = value
+        elif literal == "false":
             try:
-                value = json.loads(value)   # the template writes every value as text
+                arguments[key] = json.loads(value)
             except ValueError:
-                pass
-        arguments[key] = value
+                arguments[key] = value    # a model that mislabels its own value still meant the text
+        else:
+            arguments[key] = _typed(name, key, value, schemas)
     return name, arguments
+
+
+# A family of markup whose calls are blocks in their own right, optionally inside a wrapper:
+# (the block, the wrapper tags to discount, how to read one block).
+_FAMILIES = ((_ATEM_INVOKE, _ATEM_WRAPPER, _from_atem),
+             (_DSML_INVOKE, _DSML_WRAPPER, _from_dsml))
+
+
+def _calls(parsed: list, schemas: dict[str, dict]) -> list[dict] | None:
+    """``(name, arguments)`` pairs as tool calls, or None if any of them is not one that was offered."""
+    if not parsed or len(parsed) > MAX_RECOVERED:
+        return None
+    calls = []
+    for index, one in enumerate(parsed):
+        if one is None or one[0] not in schemas:
+            return None
+        calls.append({"id": f"call_text_{index}", "type": "function",
+                      "function": {"name": one[0], "arguments": json.dumps(one[1], ensure_ascii=False)}})
+    return calls
 
 
 def recover_tool_calls(content: str, tools: list[dict]) -> list[dict] | None:
@@ -170,14 +243,13 @@ def recover_tool_calls(content: str, tools: list[dict]) -> list[dict] | None:
             bodies = [m.group(1).strip() for m in matches]
             break
     if bodies is None:
+        for blocks, wrapper, read in _FAMILIES:
+            matches = list(blocks.finditer(text))
+            # The blocks and their wrapper must be the whole message, as for every other format.
+            if matches and not wrapper.sub("", blocks.sub("", text)).strip():
+                return _calls([read(found, schemas) for found in matches[:MAX_RECOVERED + 1]], schemas)
         bodies = [text] if text.startswith("{") and text.endswith("}") else None
-    if not bodies or len(bodies) > MAX_RECOVERED:
+    if not bodies:
         return None
-    calls = []
-    for index, body in enumerate(bodies):
-        parsed = _from_json(body) if body.startswith("{") else _from_xml(body, schemas)
-        if parsed is None or parsed[0] not in schemas:
-            return None
-        calls.append({"id": f"call_text_{index}", "type": "function",
-                      "function": {"name": parsed[0], "arguments": json.dumps(parsed[1], ensure_ascii=False)}})
-    return calls
+    return _calls([_from_json(body) if body.startswith("{") else _from_xml(body, schemas)
+                   for body in bodies[:MAX_RECOVERED + 1]], schemas)

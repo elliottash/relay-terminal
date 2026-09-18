@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 import threading
 import time
@@ -714,7 +715,10 @@ class Agent:
             config = self.config
             extra, _ = apply_effort(config.extra, self._effort_style(), "low")
             limit = min(config.max_tokens, 4096)
-        provider = make(ProviderConfig(config.base_url, config.model, config.api_key, extra, limit))
+        # replace(), not a fresh ProviderConfig: a model server on this machine carries its transport
+        # in the config (local, first_token_timeout, context_window, tool_arguments_as_object, ...),
+        # and a rebuilt one made every summary and suggestion call a hosted-style request again.
+        provider = make(dataclasses.replace(config, extra=extra, max_tokens=limit))
         if max_tokens is not None:
             provider.config.max_tokens = max(1, min(int(max_tokens), provider.config.max_tokens))
         return provider

@@ -83,12 +83,49 @@ class RecoverToolCallsTests(unittest.TestCase):
                 '<parameter=timeout>\n30\n</parameter>\n</function>\n</tool_call>')
         self.assertEqual(self.one(text), ('run_command', {'command': 'echo "a\nb"', 'timeout': 30}))
 
+    def test_atem_invoke_blocks_with_or_without_their_wrapper(self):
+        inner = ('<atem:invoke name="run_command">\n<atem:parameter name="command">ls -la</atem:parameter>\n'
+                 '<atem:parameter name="timeout">30</atem:parameter>\n</atem:invoke>')
+        want = ('run_command', {'command': 'ls -la', 'timeout': 30})
+        self.assertEqual(self.one(inner), want)
+        self.assertEqual(self.one(f'<atem:function_calls>\n{inner}\n</atem:function_calls>'), want)
+        multiline = ('<atem:function_calls><atem:invoke name="run_command"><atem:parameter name="command">\n'
+                     'echo "a\nb"\n</atem:parameter></atem:invoke></atem:function_calls>')
+        self.assertEqual(self.one(multiline), ('run_command', {'command': 'echo "a\nb"'}))
+
+    def test_dsml_parameters_say_whether_they_are_text_or_json(self):
+        text = ('<｜DSML｜calls><｜DSML｜invoke name="run_command">'
+                '<｜DSML｜parameter name="command" string="true">ls -la</｜DSML｜parameter>'
+                '<｜DSML｜parameter name="timeout" string="false">30</｜DSML｜parameter>'
+                '</｜DSML｜invoke></｜DSML｜calls>')
+        self.assertEqual(self.one(text), ('run_command', {'command': 'ls -la', 'timeout': 30}))
+        # string="true" keeps text that happens to look like JSON as text.
+        literal = ('<｜DSML｜invoke name="read_file">\n  <｜DSML｜parameter name="path" '
+                   'string="true">123</｜DSML｜parameter>\n</｜DSML｜invoke>\n')
+        self.assertEqual(self.one(literal), ('read_file', {'path': '123'}))
+
+    def test_dsml_spellings_deepseek_versions_differ_on(self):
+        # V4 writes <｜DSML｜tool_calls> and no space; V4.1 <｜DSML｜ calls> and a space in every tag.
+        spaced = ('<｜DSML｜ calls>\n<｜DSML｜ invoke name="read_file">\n'
+                  '<｜DSML｜ parameter name="path" string="true">a.txt</｜DSML｜ parameter>\n'
+                  '</｜DSML｜ invoke>\n</｜DSML｜ calls>')
+        self.assertEqual(self.one(spaced), ('read_file', {'path': 'a.txt'}))
+        wrapped = ('<｜DSML｜tool_calls><｜DSML｜invoke name="read_file">'
+                   '<｜DSML｜parameter name="path">a.txt</｜DSML｜parameter>'
+                   '</｜DSML｜invoke></｜DSML｜tool_calls>')
+        self.assertEqual(self.one(wrapped), ('read_file', {'path': 'a.txt'}))
+
     def test_several_blocks_keep_their_order_and_get_distinct_ids(self):
         text = ('<tool_call>{"name": "read_file", "arguments": {"path": "a"}}</tool_call>\n'
                 '<tool_call>{"name": "read_file", "arguments": {"path": "b"}}</tool_call>')
         calls = recover_tool_calls(text, TOOLS)
         self.assertEqual([json.loads(c['function']['arguments'])['path'] for c in calls], ['a', 'b'])
         self.assertEqual(len({c['id'] for c in calls}), 2)
+        one = '<atem:invoke name="read_file"><atem:parameter name="path">%s</atem:parameter></atem:invoke>'
+        wrapped = '<atem:function_calls>\n%s\n%s\n</atem:function_calls>' % (one % 'a', one % 'b')
+        calls = recover_tool_calls(wrapped, TOOLS)
+        self.assertEqual([json.loads(c['function']['arguments'])['path'] for c in calls], ['a', 'b'])
+        self.assertIsNone(recover_tool_calls('\n'.join(one % 'a' for _ in range(17)), TOOLS))
 
     def test_an_answer_is_never_a_call(self):
         call = '{"name": "run_command", "arguments": {"command": "rm -rf build"}}'
@@ -103,6 +140,21 @@ class RecoverToolCallsTests(unittest.TestCase):
             f'<tool_call>{call}</tool_call><tool_call>not json</tool_call>',       # one bad block spoils all
             '<tool_call><function=run_command>stray text<parameter=command>ls</parameter></function></tool_call>',
             '', '   ', None,
+        ]
+        atem = '<atem:invoke name="read_file"><atem:parameter name="path">a</atem:parameter></atem:invoke>'
+        dsml = ('<｜DSML｜invoke name="read_file"><｜DSML｜parameter name="path" '
+                'string="true">a</｜DSML｜parameter></｜DSML｜invoke>')
+        refused += [
+            f'I will read it:\n{atem}',                                        # prose around the block
+            f'{atem}\nThen I will tell you what is in it.',
+            f'{dsml} — that is the plan.',
+            atem.replace('read_file', 'delete_everything'),                    # not an offered tool
+            dsml.replace('read_file', 'delete_everything'),
+            atem + '<atem:invoke name="read_file">stray<atem:parameter name="path">b</atem:parameter></atem:invoke>',
+            atem + '<atem:invoke name="read_file"><atem:parameter name="path">b</atem:parameter>',  # never closed
+            f'<tool_call>{call}</tool_call>{atem}',                            # two formats in one message
+            atem + dsml,
+            '<atem:function_calls></atem:function_calls>',                     # a wrapper with no call
         ]
         for content in refused:
             self.assertIsNone(recover_tool_calls(content, TOOLS), content)

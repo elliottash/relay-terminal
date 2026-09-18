@@ -212,11 +212,54 @@ def has_images(messages: list[dict]) -> bool:
     return any(message_images(message) for message in messages)
 
 
-def wire_messages(messages: list[dict]) -> list[dict]:
-    """Drop Relay's own bookkeeping keys (relay_kind, relay_request) before a message leaves the machine."""
-    if not any(isinstance(m, dict) and any(k.startswith("relay_") for k in m) for m in messages):
-        return messages
-    return [{k: v for k, v in m.items() if not k.startswith("relay_")} if isinstance(m, dict) else m for m in messages]
+def _arguments_as_object(message: dict) -> dict | None:
+    """A copy of one message with each tool call's ``arguments`` as the object it spells, or None
+    when nothing needs changing.
+
+    OpenAI's shape carries ``arguments`` as a JSON string, and that is what Relay stores and replays.
+    Some chat templates cannot read it: Meta's ATEM template (Muse Glimmer) served by llama.cpp
+    ``--jinja`` refuses a string, because the HF jinja sandbox has nothing to parse one with, so the
+    second turn of every tool conversation fails. Only a mapping is substituted — that is what such a
+    template iterates — and a string that is not JSON is left exactly as it is.
+    """
+    calls = message.get("tool_calls")
+    if not isinstance(calls, list):
+        return None
+    out, changed = [], False
+    for call in calls:
+        func = call.get("function") if isinstance(call, dict) else None
+        arguments = func.get("arguments") if isinstance(func, dict) else None
+        if isinstance(arguments, str):
+            try:
+                parsed = json.loads(arguments)
+            except ValueError:
+                parsed = None
+            if isinstance(parsed, dict):
+                call = {**call, "function": {**func, "arguments": parsed}}
+                changed = True
+        out.append(call)
+    return {**message, "tool_calls": out} if changed else None
+
+
+def wire_messages(messages: list[dict], *, tool_arguments_as_object: bool = False) -> list[dict]:
+    """The outgoing copy of the conversation: the one place a message is shaped for the wire.
+
+    Relay's own bookkeeping keys (relay_kind, relay_request) are dropped, and for a local endpoint
+    that asked for it, ``tool_calls[].function.arguments`` travels as an object instead of a JSON
+    string. The stored messages are never touched: what changes is copied first.
+    """
+    out, changed = [], False
+    for message in messages:
+        if isinstance(message, dict):
+            if any(k.startswith("relay_") for k in message):
+                message = {k: v for k, v in message.items() if not k.startswith("relay_")}
+                changed = True
+            if tool_arguments_as_object:
+                objects = _arguments_as_object(message)
+                if objects is not None:
+                    message, changed = objects, True
+        out.append(message)
+    return out if changed else messages
 
 
 class ProviderError(RuntimeError):
@@ -298,6 +341,10 @@ class ProviderConfig:
     first_token_timeout: float | None = None   # a cold load plus a long prefill is silent for minutes
     parallel_tool_calls: bool = False
     tool_text_recovery: bool = False           # off unless the endpoint asks (localtext.py)
+    # Send tool-call arguments as an object, not the JSON string OpenAI's shape carries: a chat
+    # template that cannot parse a string (Meta's ATEM on llama.cpp --jinja) fails on the second
+    # turn of every tool conversation otherwise. The outgoing copy only (``wire_messages``).
+    tool_arguments_as_object: bool = False
     context_window: int | None = None          # the served window, for the overflow message only
 
     def validate(self) -> None:
@@ -319,6 +366,9 @@ class ProviderConfig:
             raise ValueError("Output token limit must be between 256 and 32768.")
         if self.local and not loopback_http(self.base_url):
             raise ValueError("Only plain HTTP to a loopback host is a local model server.")
+        if self.tool_arguments_as_object and not self.local:
+            raise ValueError("tool_arguments_as_object is only for a local model server: a hosted "
+                             "provider takes tool-call arguments as a JSON string.")
         if self.first_token_timeout is not None:
             validate_stall_timeout(self.first_token_timeout)
 
@@ -460,7 +510,9 @@ class ChatProvider:
         self._produced = False
         self._streaming = False
         self._note_progress()
-        payload = {"model": self.config.model, "messages": wire_messages(messages),
+        payload = {"model": self.config.model,
+                   "messages": wire_messages(messages, tool_arguments_as_object=(
+                       self.config.local and self.config.tool_arguments_as_object)),
                    "stream": True, "max_tokens": self.config.max_tokens, **self.config.extra}
         if tools:
             # Side calls (summaries, recaps, suggestions) send no tools; some APIs reject "tools": [].
