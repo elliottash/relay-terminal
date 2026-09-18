@@ -22,7 +22,6 @@
 | `#0JA7` | [Colour themes](features/2026-09-17-color-themes.md) | ready |  |  |  |
 | `#D60R` | [File explorer: right-click menu, navigate here, and a toggle shortcut](features/2026-09-17-explorer-right-click-and-toggle.md) | ready |  |  |  |
 | `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | ready |  |  |  |
-| `#JRWQ` | [The pane header is an agent-written summary of the session](features/2026-09-17-pane-title-summary.md) | ready |  |  |  |
 | `#78BN` | [One key for a new pane, with an arrow to choose the side](features/2026-09-17-new-pane-direction-by-arrow.md) | ready |  |  |  |
 | `#X2F1` | [Bring the useful Konsole context-menu items to the engine panes](features/2026-09-17-port-konsole-context-menus.md) | ready |  |  |  |
 | `#YZTK` | [Clickable file and folder paths open Relay panes](features/2026-09-17-clickable-paths.md) | in-progress |  |  |  |
@@ -76,6 +75,7 @@
 | `#QVVA` | [Thinking stream, "✦ thought for N s", "✦ N tool calls" links and the relay:// handler](features/needs_qa_llm/2026-09-17-thinking-and-tool-call-summaries.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17 |  |  |
 | `#80FZ` | [Windows, tabs and panes with Chrome-style shortcuts](features/needs_qa_llm/2026-09-17-windows-tabs-panes.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
 | `#K13B` | [Update the website for the new engine and features](features/needs_qa_llm/2026-09-17-website-update-engine-features.md) | needs-qa-llm | Claude Opus 5 (1M context), 2026-09-17 |  |  |
+| `#JRWQ` | [The pane header is an agent-written summary of the session](features/needs_qa_llm/2026-09-17-pane-title-summary.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, pane-title worktree), 2026-09-17 |  |  |
 | `#5FY5` | [Ctrl+Shift alternates for the core shortcuts](features/needs_qa_llm/2026-09-17-in-app-shortcut-alternates.md) | needs-qa-llm |  |  |  |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | Claude Opus 5 (orchestrating) with subagents, 2026-09-17 |  |  |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | Claude Opus 5 research subagent, 2026-09-16 |  |  |
