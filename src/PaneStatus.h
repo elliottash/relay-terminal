@@ -85,7 +85,7 @@ struct Tokens {
 
 struct TypeStyle {
     bool band = false;   // false: the pane stays plain (terminals and file panes)
-    QString label;       // engraved in the band: "SWITCHBOARD"
+    QString label;       // the band's name, in sentence case: "Switchboard"
     Glyph glyph = Glyph::None;
     QString group;       // "tools" or "agents"
     QColor fill;         // the band's ground: a low-strength tint of the hue on the pane's background

@@ -14,6 +14,7 @@
 #include "ThemeFile.h"
 
 #include <QColor>
+#include <QFont>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -53,6 +54,27 @@ inline QColor SyntaxOperator{0x80, 0x87, 0x96};
 inline QColor SyntaxVariable{0xb4, 0x8e, 0xf7};
 inline QColor SyntaxAgent{0xb4, 0x8e, 0xf7};
 inline QColor SyntaxToken{0x3e, 0xc5, 0xf0};
+
+// --- legible text (docs/ARCHITECTURE.md, "Legible text") ----------------------------------------
+// Three sizes, in points, that every font in Relay stays at or above: the stylesheet's font-size
+// rules and anything a widget paints with QPainter. tests/theme_test.cpp holds the text tokens to
+// 4.5:1 on every surface; tests/buttonfit_test.cpp holds the stylesheet to these sizes.
+//   BodyPt       the application font: prose, row titles, labels. applyTheme() raises a smaller
+//                system default to it (Qt's generic default is 9pt; KDE's and GNOME's are 10–11).
+//   SecondaryPt  what explains the line above it: a setting's detail, a notification's body, a
+//                card's meta line, the composer strip's chips.
+//   FloorPt      nothing smaller, anywhere: timestamps, key hints, counts, engraved headings.
+inline constexpr qreal BodyPt = 10.0;
+inline constexpr qreal SecondaryPt = 9.5;
+inline constexpr qreal FloorPt = 9.0;
+// `font` at no less than `atLeast` points (a pixel-sized font is converted at 96 dpi). Inline, so
+// the small libraries that read the tokens without linking Theme.cpp can use it too.
+inline QFont legible(const QFont &font, qreal atLeast = FloorPt) {
+    QFont out(font);
+    const qreal points = font.pointSizeF() > 0 ? font.pointSizeF() : font.pixelSize() * 0.75;
+    if (points < atLeast) out.setPointSizeF(atLeast);
+    return out;
+}
 
 // --- switching ----------------------------------------------------------------------------------
 // Emits themeChanged() after the tokens, the palette, the stylesheet and the generated terminal

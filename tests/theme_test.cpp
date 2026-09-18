@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <tuple>
 
 using namespace relay::theme;
 
@@ -345,6 +346,39 @@ private Q_SLOTS:
             QVERIFY2(r >= p.min, qPrintable(QStringLiteral("%1: %2 %3 on %4 is %5:1, needs %6:1")
                                                 .arg(id, QString::fromLatin1(p.what), p.fg.name(), p.bg.name())
                                                 .arg(r, 0, 'f', 2).arg(p.min, 0, 'f', 1)));
+        }
+    }
+
+    // "Legible text" (docs/ARCHITECTURE.md, owner 2026-09-18): every shipped theme, not only the
+    // auditioned two. Text, muted text and every state colour that is drawn as text (links, tab
+    // labels, chips) clear 4.5:1 on each ground the chrome paints: background, surface and
+    // surface_raised. Muted text is also the terminal's note and tool ink, so it clears the
+    // terminal's ground too; the composer's syntax colours are read on surface and surface_raised.
+    void everyShippedThemeKeepsItsTextLegible() {
+        const auto files = discoverThemeFiles({QStringLiteral("data/theme/themes")});
+        QVERIFY(files.size() >= 6);
+        for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
+            const ThemeSpec spec = shipped(it.key());
+            const auto ui = [&spec](const char *t) { return spec.uiColor(QString::fromLatin1(t)); };
+            const QList<QPair<const char *, QColor>> grounds{
+                {"background", ui("background")}, {"surface", ui("surface")}, {"surface_raised", ui("surface_raised")}};
+            QList<std::tuple<QString, QColor, QString, QColor>> pairs;
+            for (const char *fg : {"text", "text_muted", "accent", "shell", "agent", "success", "warning", "error"})
+                for (const auto &ground : grounds)
+                    pairs.append({QString::fromLatin1(fg), ui(fg), QString::fromLatin1(ground.first), ground.second});
+            QList<QColor> terminal{spec.terminalBackground};
+            if (spec.terminalBackgroundEnd.isValid()) terminal << spec.terminalBackgroundEnd;
+            for (const QColor &ground : terminal)
+                pairs.append({QStringLiteral("text_muted"), ui("text_muted"), QStringLiteral("the terminal"), ground});
+            for (const QString &token : syntaxTokenNames())
+                for (const char *ground : {"surface", "surface_raised"})
+                    pairs.append({QStringLiteral("syntax.") + token, spec.syntaxColor(token), QString::fromLatin1(ground), ui(ground)});
+            for (const auto &[what, fg, where, bg] : pairs) {
+                const double r = contrast(fg, bg);
+                QVERIFY2(r >= 4.5, qPrintable(QStringLiteral("%1: %2 %3 on %4 %5 is %6:1, needs 4.5:1")
+                                                  .arg(it.key(), what, fg.name(), where, bg.name())
+                                                  .arg(r, 0, 'f', 2)));
+            }
         }
     }
 

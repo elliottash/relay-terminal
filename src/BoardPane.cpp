@@ -81,6 +81,8 @@ QColor alpha(QColor color, int value)
     return color;
 }
 
+// Both stop at theme::FloorPt: a factor of the row's font is how the list keeps its proportions,
+// but 0.8 of a 9pt default was 7.2pt (docs/ARCHITECTURE.md, "Legible text").
 QFont smaller(const QFont &base, qreal factor)
 {
     QFont font(base);
@@ -88,7 +90,7 @@ QFont smaller(const QFont &base, qreal factor)
         font.setPointSizeF(base.pointSizeF() * factor);
     else
         font.setPixelSize(qMax(8, int(base.pixelSize() * factor)));
-    return font;
+    return theme::legible(font);
 }
 
 QFont monoFont(const QFont &base, qreal factor)
@@ -96,7 +98,7 @@ QFont monoFont(const QFont &base, qreal factor)
     QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
     if (base.pointSizeF() > 0)
         font.setPointSizeF(base.pointSizeF() * factor);
-    return font;
+    return theme::legible(font);
 }
 
 // The ink a badge is drawn in, and its pill's edge. An invalid edge means no pill at all: the
@@ -1458,7 +1460,7 @@ private:
         cursor.movePosition(QTextCursor::End);
         QTextCharFormat muted;
         muted.setForeground(theme::TextMuted);
-        muted.setFontPointSize(base * 0.9);
+        muted.setFontPointSize(qMax(theme::FloorPt, base * 0.9));
         QTextCharFormat heading = muted;
         heading.setFontWeight(QFont::DemiBold);
         heading.setFontLetterSpacing(105);

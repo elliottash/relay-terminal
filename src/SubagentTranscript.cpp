@@ -31,7 +31,23 @@ QString sanitize(const QString &text) {
     }
     return clean;
 }
+
 }  // namespace
+
+// The transcript's inks, read from the live theme tokens at write time (a light theme gets dark
+// text; these were Relay Dark's values hard-coded, which put near-white prose on a light pane).
+// Machine lines (tools, their output, notes) are muted and upright: italic muted monospace was the
+// hardest text in the app to read (owner, 2026-09-18; docs/ARCHITECTURE.md, "Legible text").
+QColor SubagentTranscriptView::inkColor(Ink ink) {
+    switch (ink) {
+    case Ink::Agent: return theme::Text;
+    case Ink::User: return theme::Agent;
+    case Ink::Tool: case Ink::ToolOutput: case Ink::Note: return theme::TextMuted;
+    case Ink::DiffAdd: return theme::Success;
+    case Ink::DiffRemove: case Ink::Error: return theme::Error;
+    }
+    return theme::Text;
+}
 
 SubagentTranscriptView::SubagentTranscriptView(const QString &id, QWidget *parent) : QWidget(parent), m_id(id) {
     setObjectName(QStringLiteral("subagentTranscript"));
@@ -59,7 +75,7 @@ SubagentTranscriptView::SubagentTranscriptView(const QString &id, QWidget *paren
     m_log->setObjectName(QStringLiteral("transcriptView"));
     m_log->setReadOnly(true);
     m_log->setFocusPolicy(Qt::ClickFocus);
-    m_log->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    m_log->setFont(theme::legible(QFontDatabase::systemFont(QFontDatabase::FixedFont), theme::BodyPt));   // QPlainTextEdit#transcriptView sets the face
     m_log->setMaximumBlockCount(6000);
     m_log->setLineWrapMode(QPlainTextEdit::WidgetWidth);
     // Clicking a tool line folds its detail open in place (protocol § 23, owner 2026-09-18).
@@ -161,14 +177,7 @@ void SubagentTranscriptView::append(const QString &text, Ink ink) {
     // Same two-level scheme as the terminal's inks (main.cpp, owner 2026-09-18): user lines carry
     // a destination colour and machine lines are grey. Every user line here goes to an agent, so
     // "User" is the agent violet, not the shell cyan.
-    QColor color(226, 229, 235);
-    switch (ink) {
-    case Ink::Agent: break;
-    case Ink::User: color = QColor(180, 142, 247); break;
-    case Ink::Tool: case Ink::ToolOutput: case Ink::Note: color = QColor(128, 135, 150); break;
-    case Ink::DiffAdd: color = QColor(126, 200, 140); break;
-    case Ink::DiffRemove: case Ink::Error: color = QColor(240, 113, 120); break;
-    }
+    const QColor color = inkColor(ink);
     QScrollBar *bar = m_log->verticalScrollBar();
     const bool follow = bar->value() >= bar->maximum() - 4;
     QTextCursor cursor(m_log->document());
@@ -176,7 +185,6 @@ void SubagentTranscriptView::append(const QString &text, Ink ink) {
     QTextCharFormat format;
     format.setForeground(color);
     if (ink == Ink::User) format.setFontWeight(QFont::Bold);
-    if (ink == Ink::Note) format.setFontItalic(true);
     cursor.insertText(clean, format);
     m_atLineStart = clean.endsWith(QLatin1Char('\n'));
     if (follow) bar->setValue(bar->maximum());
@@ -206,7 +214,7 @@ void SubagentTranscriptView::rewriteLine(ToolCall &call, const QString &text, In
     cursor.movePosition(QTextCursor::StartOfBlock);
     cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
     QTextCharFormat format;
-    format.setForeground(ink == Ink::Error ? QColor(240, 113, 120) : QColor(128, 135, 150));
+    format.setForeground(inkColor(ink == Ink::Error ? Ink::Error : Ink::Tool));
     const int start = cursor.selectionStart();
     cursor.insertText(sanitize(text), format);
     // insertText leaves the cursor after the text; the row's anchor belongs at its first character.
@@ -378,11 +386,11 @@ void SubagentTranscriptView::toggleToolCall(int index) {
     cursor.setPosition(call.after.position());
     const int before = m_log->document()->characterCount();
     QTextCharFormat format;
-    format.setForeground(QColor(128, 135, 150));
+    format.setForeground(inkColor(Ink::ToolOutput));
     for (const QString &line : detail.split(QLatin1Char('\n'))) {
         QTextCharFormat lineFormat = format;
-        if (line.startsWith(QLatin1Char('+')) && !line.startsWith(QStringLiteral("+++"))) lineFormat.setForeground(QColor(126, 200, 140));
-        else if (line.startsWith(QLatin1Char('-')) && !line.startsWith(QStringLiteral("---"))) lineFormat.setForeground(QColor(240, 113, 120));
+        if (line.startsWith(QLatin1Char('+')) && !line.startsWith(QStringLiteral("+++"))) lineFormat.setForeground(inkColor(Ink::DiffAdd));
+        else if (line.startsWith(QLatin1Char('-')) && !line.startsWith(QStringLiteral("---"))) lineFormat.setForeground(inkColor(Ink::DiffRemove));
         cursor.insertText(sanitize(QStringLiteral("    ") + line + QLatin1Char('\n')), lineFormat);
     }
     call.foldChars = m_log->document()->characterCount() - before;

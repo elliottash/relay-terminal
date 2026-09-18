@@ -1658,6 +1658,40 @@ colour to that one down the pane (`docs/THEMES.md`); without it the ground is fl
 *added* while Relay is running reaches new panes only after a restart ("Reload themes" says so).
 Relay writes nothing to `~/.config` or `~/.local/share` for the terminal.
 
+### Legible text
+
+Owner, 2026-09-18: "some of the fonts seem hard to read, eg in subagent panes". What made them hard
+was the same few things everywhere — 7–8pt labels, grey on a surface lighter than the one the grey
+was chosen for, and italic, muted and monospace on the same line. These rules hold for every piece
+of text a person reads, in every shipped theme; new UI follows them.
+
+1. **Sizes.** Three, in `src/Theme.h`: `BodyPt` 10 (the application font; `applyTheme()` raises
+   Qt's generic 9pt default to it and leaves a desktop's larger choice alone), `SecondaryPt` 9.5
+   (a setting's detail, a notification's body, a card's meta line, a banner) and `FloorPt` 9
+   (chips, key hints, counts, timestamps, engraved headings). Nothing is smaller — not in the
+   stylesheet, and not in a `QPainter` label: take a derived font through `theme::legible()`.
+   Stylesheet sizes are in `pt`, never `px`. Transcripts (the subagent tab, the program-running
+   overlay, the turn log) are the terminal's mono face at 10pt.
+2. **Contrast.** Text is at least 4.5:1 on the ground it is actually drawn on — `background`,
+   `surface` and `surface_raised`, a band's tint, a chip's fill — in every theme, dark and light.
+   `text_muted` is for genuinely secondary text and still clears 4.5:1. When a token fails on
+   some surface, fix the token in that theme's file, not the widget. Read colours from the live
+   tokens; a hard-coded Relay Dark value is under 2:1 on Relay Light's paper. Disabled controls
+   are exempt (WCAG), a control that is merely *off* is not: an unchecked checkbox's label stays
+   `@muted`. `tests/theme_test.cpp` checks the tokens for every shipped theme; the pane bands
+   check their own label (`tests/panestatus_test.cpp`).
+3. **One marker at a time.** A note is muted *or* carries a glyph — not both plus italic. Italic
+   only where it means something (emphasis in Markdown), and then at the normal text colour; never
+   italic + muted + monospace for anything a person has to read. Faint (SGR 2) and a fold's dim
+   rows should fade toward the ground only as far as 4.5:1; the engine's view still draws them at
+   60% alpha (2.9:1 for the muted grey on Relay Dark), which is the engine's to change.
+4. **Case.** Engraved headings (Switchboard sections, Options groups) may stay in letter-spaced
+   capitals because they are at or above the floor and one or two words long. A name — a pane's
+   header band, a chip that says what something is — is in sentence case.
+
+`tests/buttonfit_test.cpp` fails on any `font-size` in the application stylesheet under `FloorPt`
+or in `px`.
+
 ## 15. Packaging layout
 
 Installed tree (`CMakeLists.txt` `install()`):

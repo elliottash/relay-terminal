@@ -451,12 +451,14 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     m_url->setTextFormat(Qt::PlainText);
     m_url->setWordWrap(true);
     m_url->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_url->setStyleSheet(QStringLiteral("color: palette(mid); font-size: 11px;"));
+    // The theme's muted text at the secondary size: palette(mid) is the border colour, about 1.4:1
+    // on the dialog (docs/ARCHITECTURE.md, "Legible text").
+    m_url->setObjectName(QStringLiteral("shareNote"));
     column->addWidget(m_url);
 
     m_note = new QLabel;
     m_note->setWordWrap(true);
-    m_note->setStyleSheet(QStringLiteral("color: palette(mid); font-size: 11px;"));
+    m_note->setObjectName(QStringLiteral("shareNote"));
     column->addWidget(m_note);
 
     // The approval box: what a phone claims to be, and the code that proves it is the phone in

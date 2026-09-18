@@ -157,7 +157,7 @@ void TurnTranscriptView::setTranscript(const QJsonObject &transcript) {
             QStringList calls;
             for (const auto &call : message.value(QStringLiteral("tool_calls")).toArray())
                 calls << (call.isObject() ? call.toObject().value(QStringLiteral("name")).toString() : call.toString());
-            if (!calls.isEmpty()) add(QStringLiteral("⚙ ") + calls.join(QStringLiteral(", ")) + QLatin1Char('\n'), QColor(0xe5, 0xc0, 0x7b), false);
+            if (!calls.isEmpty()) add(QStringLiteral("⚙ ") + calls.join(QStringLiteral(", ")) + QLatin1Char('\n'), relay::theme::Warning, false);
         } else if (role == QStringLiteral("tool")) {
             QStringList lines = content.split(QLatin1Char('\n'));
             const int total = lines.size();
@@ -179,11 +179,10 @@ void TurnTranscriptView::setToolOutput(const QJsonObject &reply) {
 
     m_log->clear();
     QTextCursor cursor(m_log->document());
-    auto add = [&cursor](const QString &text, const QColor &color, bool bold = false, bool italic = false) {
+    auto add = [&cursor](const QString &text, const QColor &color, bool bold = false) {
         QTextCharFormat format;
         format.setForeground(color);
         if (bold) format.setFontWeight(QFont::Bold);
-        if (italic) format.setFontItalic(true);
         cursor.movePosition(QTextCursor::End);
         cursor.insertText(text, format);
     };
@@ -197,7 +196,7 @@ void TurnTranscriptView::setToolOutput(const QJsonObject &reply) {
         const QString style = section.value(QStringLiteral("style")).toString();
         if (toThePane && style == QStringLiteral("diff")) {
             add(QStringLiteral("\ndiff\n"), relay::theme::TextMuted, true);
-            add(QStringLiteral("(opened in a diff pane)\n"), relay::theme::TextMuted, false, true);
+            add(QStringLiteral("(opened in a diff pane)\n"), relay::theme::TextMuted);
             continue;
         }
         add(QLatin1Char('\n') + section.value(QStringLiteral("heading")).toString() + QLatin1Char('\n'),
@@ -218,7 +217,7 @@ void TurnTranscriptView::setToolOutput(const QJsonObject &reply) {
             add(text + QLatin1Char('\n'), colour);
         }
         if (section.value(QStringLiteral("truncated")).toBool())
-            add(QStringLiteral("(truncated)\n"), relay::theme::TextMuted, false, true);
+            add(QStringLiteral("(truncated)\n"), relay::theme::TextMuted);
     }
     if (sections.isEmpty()) {
         // A worker from before § 23.5 answers with the text it has and no sections at all.
@@ -234,7 +233,7 @@ void TurnTranscriptView::setThinking(const QString &text) {
     if (text.trimmed().isEmpty()) return;
     QTextCursor cursor(m_log->document());
     cursor.movePosition(QTextCursor::Start);
-    QTextCharFormat format; format.setForeground(relay::theme::TextMuted); format.setFontItalic(true);
+    QTextCharFormat format; format.setForeground(relay::theme::TextMuted);   // upright: see "Legible text"
     cursor.insertText(QStringLiteral("Thinking\n") + text.trimmed().left(20000) + QStringLiteral("\n\n"), format);
 }
 

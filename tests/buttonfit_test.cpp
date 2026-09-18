@@ -22,6 +22,7 @@
 #include <QImage>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QTemporaryDir>
 #include <QTest>
 #include <QVBoxLayout>
 
@@ -105,6 +106,9 @@ class ButtonFitTest : public QObject {
 
 private Q_SLOTS:
     void initTestCase() {
+        // The floor test below switches themes, which writes theme/name: never to the real profile.
+        QVERIFY(m_config.isValid());
+        qputenv("XDG_CONFIG_HOME", m_config.path().toLocal8Bit());
         auto *app = qobject_cast<QApplication *>(QCoreApplication::instance());
         relay::theme::applyTheme(*app);
         // Lets QA reproduce the reported clipping without editing the stylesheet, e.g.
@@ -112,6 +116,40 @@ private Q_SLOTS:
         // puts the old rule back and this test has to fail on every :default row.
         const QString extra = QString::fromLocal8Bit(qgetenv("RELAY_BUTTONFIT_EXTRA_QSS"));
         if (!extra.isEmpty()) app->setStyleSheet(app->styleSheet() + QLatin1Char('\n') + extra);
+    }
+
+    // The legibility floor (docs/ARCHITECTURE.md, "Legible text"): every font-size in the live
+    // stylesheet is in points and at least theme::FloorPt, in every shipped theme (a theme's flags
+    // append rules of their own). The application font is at least theme::BodyPt.
+    void stylesheetFontsStayAtOrAboveTheFloor() {
+        auto *app = qobject_cast<QApplication *>(QCoreApplication::instance());
+        QVERIFY(app->font().pointSizeF() >= relay::theme::BodyPt);
+        const QString before = relay::theme::activeThemeId();
+        const QRegularExpression size(QStringLiteral("font-size:\\s*([0-9.]+)\\s*([a-z]*)"));
+        int seen = 0;
+        for (const auto &choice : relay::theme::availableThemes()) {
+            if (!choice.builtin) continue;
+            QVERIFY(relay::theme::setActiveTheme(choice.id));
+            auto it = size.globalMatch(app->styleSheet());
+            while (it.hasNext()) {
+                const auto m = it.next();
+                ++seen;
+                QVERIFY2(m.captured(2) == QStringLiteral("pt"),
+                         qPrintable(QStringLiteral("%1: \"%2\" is not in points").arg(choice.id, m.captured(0))));
+                QVERIFY2(m.captured(1).toDouble() >= relay::theme::FloorPt,
+                         qPrintable(QStringLiteral("%1: \"%2\" is under the %3pt floor")
+                                        .arg(choice.id, m.captured(0)).arg(relay::theme::FloorPt)));
+            }
+        }
+        QVERIFY2(seen > 20, "no font-size rules found; the scan is broken");
+        relay::theme::setActiveTheme(before);
+        // legible() raises a small font and leaves a large one alone, in points or pixels.
+        QFont tiny; tiny.setPointSizeF(7);
+        QCOMPARE(relay::theme::legible(tiny).pointSizeF(), relay::theme::FloorPt);
+        QFont pixels; pixels.setPixelSize(7);
+        QCOMPARE(relay::theme::legible(pixels).pointSizeF(), relay::theme::FloorPt);
+        QFont big; big.setPointSizeF(12);
+        QCOMPARE(relay::theme::legible(big).pointSizeF(), 12.0);
     }
 
     // Guards the measurement itself: a label that plainly does not fit has to be reported as
@@ -168,6 +206,9 @@ private Q_SLOTS:
                                 .arg(label, QString::fromLatin1(kindName(Kind(kind))))
                                 .arg(roomy).arg(natural).arg(button->sizeHint().width())));
     }
+
+private:
+    QTemporaryDir m_config;
 };
 
 QTEST_MAIN(ButtonFitTest)

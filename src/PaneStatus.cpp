@@ -243,7 +243,7 @@ TypeStyle typeStyle(const QString &paneType, ColourMode mode, const Tokens &toke
     else if (kind.type == QStringLiteral("sessions")) hue = tokens.shell;
     else hue = tokens.warning;
     TypeStyle style = tinted(hue, tokens, mode == ColourMode::Off ? 0.06 : tintStrength(tokens));
-    style.label = (label.isEmpty() ? kind.label : label).toUpper();
+    style.label = label.isEmpty() ? kind.label : label;
     style.glyph = kind.glyph;
     style.group = kind.group;
     return style;
@@ -262,7 +262,7 @@ TypeStyle phoneStyle(const Tokens &tokens) {
     TypeStyle style = tinted(tokens.shell, tokens, isLight(tokens.background) ? 0.12 : 0.16);
     style.glyph = Glyph::Phone;
     style.group = QStringLiteral("phone");
-    style.label = QStringLiteral("PHONE");
+    style.label = QStringLiteral("Phone");
     return style;
 }
 

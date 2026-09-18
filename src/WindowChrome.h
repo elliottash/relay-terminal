@@ -9,6 +9,7 @@
 #include "PaneChrome.h"   // relay::chrome::paintTypeGlyph: a tool pane's button wears its pane's glyph
 #include "Notifications.h"
 
+#include <QFontMetricsF>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -144,19 +145,25 @@ private:
         painter.drawArc(QRectF(x - 2, y + 2.6, 4, 3.4), 200 * 16, 140 * 16);   // clapper
         painter.restore();
         if (m_badge <= 0) return;
-        // Unread dot, top-right, over the bell's shoulder.
+        // Unread dot, top-right, over the bell's shoulder. A count grows it into a pill wide
+        // enough for its digits at the legibility floor; they were 7px in an 8px dot.
         painter.setPen(Qt::NoPen);
         painter.setBrush(relay::theme::Accent);
-        const QRectF dot(width() - 11.0, 3.0, 8.0, 8.0);
-        painter.drawEllipse(dot);
-        if (m_badge > 1) {
-            QFont small = font();
-            small.setPixelSize(7);
-            small.setBold(true);
-            painter.setFont(small);
-            painter.setPen(relay::theme::AccentText);
-            painter.drawText(dot, Qt::AlignCenter, m_badge > 9 ? QStringLiteral("9+") : QString::number(m_badge));
+        if (m_badge <= 1) {
+            painter.drawEllipse(QRectF(width() - 11.0, 3.0, 8.0, 8.0));
+            return;
         }
+        QFont small = font();
+        small.setPointSizeF(relay::theme::FloorPt);
+        small.setBold(true);
+        const QString count = m_badge > 9 ? QStringLiteral("9+") : QString::number(m_badge);
+        const QFontMetricsF metrics(small);
+        const qreal h = std::ceil(metrics.height()) - 1, w = std::max(h, metrics.horizontalAdvance(count) + 6);
+        const QRectF pill(width() - w - 1.0, 0.0, w, h);
+        painter.drawRoundedRect(pill, h / 2, h / 2);
+        painter.setFont(small);
+        painter.setPen(relay::theme::AccentText);
+        painter.drawText(pill, Qt::AlignCenter, count);
     }
 
     // A cog drawn as one outline: six teeth around a ring, rather than a circle with spokes

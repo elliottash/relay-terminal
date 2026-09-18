@@ -340,6 +340,12 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
     label->setTextFormat(Qt::PlainText);
     text->addWidget(label);
     if (!row.detail.isEmpty()) text->addWidget(mutedLabel(row.detail, "settingsRowDetail"));
+    // A wrapping label will shrink to its longest word, so in a narrow pane the control beside it
+    // took the row and "Log detail" and its detail came out a word or two per line. The words keep
+    // a column of about eighteen characters (less when they are shorter); the control gives way.
+    const QFontMetrics metrics(label->font());
+    const int words = std::max(metrics.horizontalAdvance(row.label), metrics.horizontalAdvance(row.detail) * 9 / 10);
+    label->setMinimumWidth(std::min(words + 2, metrics.averageCharWidth() * 18));
     box->addLayout(text, 1);
 
     // Every control writes through the row's callback and then asks for a rebuild, so rows that
@@ -376,6 +382,9 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
             combo->addItem(i < row.optionLabels.size() ? row.optionLabels.at(i) : row.options.at(i), row.options.at(i));
         const int index = combo->findData(row.current);
         if (index >= 0) combo->setCurrentIndex(index);
+        // It may shrink below its widest entry (about ten characters and the arrow) when the pane
+        // is narrow, rather than squeeze the label column; the popup still shows every entry.
+        combo->setMinimumWidth(std::min(combo->sizeHint().width(), combo->fontMetrics().averageCharWidth() * 10 + 40));
         connect(combo, QOverload<int>::of(&QComboBox::activated), this, [combo, fn = row.onChoose, after](int i) {
             if (fn) fn(combo->itemData(i).toString());
             after();
@@ -388,7 +397,7 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
         auto *edit = new QLineEdit(row.text);
         edit->setPlaceholderText(row.placeholder);
         edit->setAccessibleName(row.label);
-        edit->setMinimumWidth(200);
+        edit->setMinimumWidth(140);   // narrower than that, the label column goes first
         edit->setMaximumWidth(360);
         connect(edit, &QLineEdit::editingFinished, this, [edit, fn = row.onText, after, was = row.text] {
             if (edit->text().trimmed() == was) return;

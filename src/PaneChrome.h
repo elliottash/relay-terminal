@@ -281,7 +281,7 @@ inline QIcon tabIcon(bool hasTerminal, ps::State state, bool remote, ps::Glyph t
 }  // namespace relay::chrome
 
 // The header band of a special pane (#SPBN): a low-strength tint of the type's colour, its glyph
-// and its name, engraved like the Switchboard's section headers. The pane chrome's buttons sit on
+// and its name, in the weight of a terminal's title. The pane chrome's buttons sit on
 // its right, so the band is the pane's header in the way a terminal's title row is. It is a plain
 // widget, so pressing on it and dragging moves the pane (RelayWindow::toolHeaderDrag).
 class PaneTypeBand final : public QWidget {
@@ -305,10 +305,11 @@ protected:
         p.drawLine(QPointF(r.left(), r.bottom() - 0.5), QPointF(r.right(), r.bottom() - 0.5));
         const QRectF glyph(9, (height() - 14) / 2.0, 14, 14);
         relay::chrome::paintTypeGlyph(p, glyph, style.glyph, style.ink);
-        QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-        font.setPointSizeF(8);
+        // The pane's name in the same face and weight as a terminal's title (QLabel#paneTitle), in
+        // sentence case: an 8pt letter-spaced mono caps label was the hardest text on screen to
+        // read (owner, 2026-09-18; docs/ARCHITECTURE.md, "Legible text").
+        QFont font = relay::theme::legible(QApplication::font(), relay::theme::BodyPt);
         font.setWeight(QFont::DemiBold);
-        font.setLetterSpacing(QFont::AbsoluteSpacing, 1);
         p.setFont(font);
         p.setPen(style.text);
         const QRectF text(glyph.right() + 7, 0, width() - glyph.right() - 7 - m_rightInset, height());

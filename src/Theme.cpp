@@ -320,8 +320,8 @@ QLabel#muted, QLabel#cwd, QLabel#help, QLabel#privacy { color: @muted; }
 QLabel#route { color: @accent; font-family: "@mono"; }
 /* Pane header (issue JRWQ): the session title, the "auto" badge and the directory beside it. */
 QLabel#paneTitle { color: @text; font-weight: 600; }
-QLabel#paneCwd { color: @muted; font-size: 11px; }
-QLabel#paneAuto { color: @muted; font-size: 9px; letter-spacing: 1px; border: 1px solid @border; border-radius: 4px; padding: 0 4px; }
+QLabel#paneCwd { color: @muted; font-size: 9pt; }
+QLabel#paneAuto { color: @muted; font-size: 9pt; border: 1px solid @border; border-radius: 4px; padding: 0 4px; }
 QLineEdit#paneTitleEdit { background: @surface; color: @text; border: 1px solid @accentBorder; border-radius: 4px; padding: 1px 6px; }
 
 QPushButton { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 5px 14px; }
@@ -373,10 +373,10 @@ QLabel#queueItem { color: @text; }
 QLabel#queueSteer { color: @agent; }
 QLabel#opaqueHint { color: @warning; }
 /* Agent sessions: plan chip, context indicator, plan editor */
-QLabel#planChip { color: @onAgent; background: @agent; border-radius: 4px; padding: 1px 6px; font-weight: 700; letter-spacing: 1px; font-size: 8pt; }
+QLabel#planChip { color: @onAgent; background: @agent; border-radius: 4px; padding: 1px 6px; font-weight: 700; letter-spacing: 1px; font-size: 9pt; }
 QLabel#contextLabel { color: @muted; font-family: "@mono"; font-size: 9pt; padding: 0 4px; }
 QLabel#contextLabel[warn="true"] { color: @warning; }
-QToolButton#workChip { color: @muted; border: 1px solid @border; border-radius: 6px; padding: 2px 8px; font-size: 11px; background: @raised; min-height: 16px; }
+QToolButton#workChip { color: @muted; border: 1px solid @border; border-radius: 6px; padding: 2px 8px; font-size: 9pt; background: @raised; min-height: 17px; }
 QToolButton#workChip[state="running"] { color: @text; }
 QToolButton#workChip[state="done"] { color: @success; border-color: @successBorder; }
 QToolButton#workChip[state="attention"] { color: @warning; border-color: @warningBorder; }
@@ -393,9 +393,11 @@ QFrame#transcript { background: @surface; border: 1px solid @accentBorder; borde
    background below @surface so it reads as behind the output rather than on top of it. */
 QFrame#thinkingOverlay { background: @bg; border: 1px solid @border; border-radius: 8px; }
 QLabel#transcriptHeader { color: @muted; }
-QPlainTextEdit#transcriptView { background: transparent; border: none; }
+QPlainTextEdit#transcriptView { background: transparent; border: none; font-family: "@mono"; font-size: 10pt; }
 QPlainTextEdit#thinkingView { background: transparent; border: none; color: @muted; font-family: "@mono"; font-size: 10pt; }
 QLabel#toast { background: @raised; color: @text; border: 1px solid @accentBorder; border-radius: 8px; padding: 6px 12px; }
+/* The share dialog's link and its note (src/RemoteShare.cpp). */
+QLabel#shareNote { color: @muted; font-size: 9.5pt; }
 /* Settings pane (src/SettingsPane.cpp): a full pane, engraved headers like the Switchboard's,
    rows that light up under the pointer and under the keyboard highlight. */
 QWidget#settingsPane { background: @bg; }
@@ -403,13 +405,13 @@ QLineEdit#settingsSearch { padding: 6px 10px; font-size: 10.5pt; }
 QTabBar#settingsTabs::tab { padding: 4px 10px; margin: 0 2px 0 0; }
 QScrollArea#settingsPage, QWidget#settingsPageBody { background: transparent; border: none; }
 QLabel#settingsBlurb, QLabel#settingsInfo { color: @muted; }
-QLabel#settingsHeading { color: @muted; font-family: "@mono"; font-size: 8pt; font-weight: 600; letter-spacing: 1px; padding: 10px 10px 2px 10px; }
+QLabel#settingsHeading { color: @muted; font-family: "@mono"; font-size: 9pt; font-weight: 600; letter-spacing: 1px; padding: 10px 10px 2px 10px; }
 QFrame#settingsRow { background: transparent; border: 1px solid transparent; border-radius: 8px; }
 QFrame#settingsRow:hover { background: @surface; }
 QFrame#settingsRow[current="true"] { background: @surface; border-color: @accentBorder; }
 QLabel#settingsRowLabel { color: @text; }
-QLabel#settingsRowDetail { color: @muted; font-size: 11px; }
-QLabel#settingsFooter { color: @muted; font-size: 11px; padding-top: 6px; border-top: 1px solid @border; }
+QLabel#settingsRowDetail { color: @muted; font-size: 9.5pt; }
+QLabel#settingsFooter { color: @muted; font-size: 9pt; padding-top: 6px; border-top: 1px solid @border; }
 /* The requests ledger and a subagent transcript float over a pane; both are opaque on purpose. */
 QWidget#requestsPanel, QWidget#subagentTranscript { background: @bg; border: 1px solid @border; border-radius: 8px; }
 QWidget#requestsPanel QLabel#panelKeys, QWidget#subagentTranscript QLabel#panelKeys { color: @muted; }
@@ -420,15 +422,15 @@ QWidget#pane { background: @bg; border: 1px solid @border; border-radius: 8px; }
 QWidget#pane[relayActive="true"] { border: 1px solid @borderStrong; }
 /* Pane button row, drop zones, tab bar controls */
 QFrame#helpCard { background: @raised; border: 1px solid @border; border-radius: 8px; }
-QLabel#keyCap { background: @surface; border: 1px solid @border; border-radius: 4px; padding: 1px 6px; color: @text; font-size: 11px; min-width: 14px; }
-QLabel#helpText { color: @muted; font-size: 12px; }
-QLabel#helpFooter { color: @muted; font-size: 11px; padding-top: 6px; border-top: 1px solid @border; }
+QLabel#keyCap { background: @surface; border: 1px solid @border; border-radius: 4px; padding: 1px 6px; color: @text; font-size: 9pt; min-width: 14px; }
+QLabel#helpText { color: @muted; font-size: 9.5pt; }
+QLabel#helpFooter { color: @muted; font-size: 9pt; padding-top: 6px; border-top: 1px solid @border; }
 
 /* Warp-style chips in the composer's status strip: a slightly raised rectangle each. The
-   min-height is a line of the chips' 11px text, so an icon-only chip (Switchboard, tasks,
+   min-height is a line of the chips' 9pt text, so an icon-only chip (Switchboard, tasks,
    microphone, share) is exactly as tall as the text chip beside it (2026-09-17). */
 QToolButton#stripChip { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px;
-                        color: @muted; font-size: 11px; min-height: 16px; }
+                        color: @muted; font-size: 9pt; min-height: 17px; }
 QToolButton#stripChip:hover { color: @text; border-color: @accent; }
 /* The mode chip takes the destination's colour, like the caret. */
 QToolButton#stripChip[dest="shell"] { color: @shell; border-color: @shell; }
@@ -440,11 +442,11 @@ QToolButton#stripChip::menu-indicator { image: none; width: 0; }
 /* Voice: the microphone chip while a recording is running, with the elapsed time beside it. */
 QToolButton#stripChip[recording="true"] { color: @error; border-color: @error; }
 QLabel#stripChipLabel { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px;
-                        color: @muted; font-size: 11px; }
+                        color: @muted; font-size: 9pt; }
 QLabel#stripChipLabel[warn="true"] { color: @warning; border-color: @warning; }
 
 /* The composer's status strip: dim, flat, no dropdown chrome (Warp keeps its chips quiet). */
-QComboBox#statusPicker { background: @raised; border: 1px solid @border; border-radius: 6px; color: @muted; padding: 2px 18px 2px 8px; font-size: 11px; }
+QComboBox#statusPicker { background: @raised; border: 1px solid @border; border-radius: 6px; color: @muted; padding: 2px 18px 2px 8px; font-size: 9pt; }
 QComboBox#statusPicker:hover { color: @text; border-color: @accent; }
 QComboBox#statusPicker::drop-down { border: none; width: 12px; }
 QComboBox#statusPicker QAbstractItemView { background: @raised; color: @text; selection-background-color: @accent; }
@@ -470,9 +472,9 @@ QScrollArea#notificationsScroll > QWidget > QWidget { background: transparent; }
 QFrame#notificationRow { background: @bg; border: 1px solid @border; border-radius: 8px; }
 QFrame#notificationRow:hover { border-color: @accentBorder; }
 QLabel#notificationTitle { color: @text; font-weight: 600; }
-QLabel#notificationBody { color: @muted; font-size: 9pt; }
-QLabel#notificationTime { color: @muted; font-size: 8pt; padding-left: 8px; }
-QLabel#notificationDot { color: @muted; font-size: 8pt; }
+QLabel#notificationBody { color: @muted; font-size: 9.5pt; }
+QLabel#notificationTime { color: @muted; font-size: 9pt; padding-left: 8px; }
+QLabel#notificationDot { color: @muted; font-size: 9pt; }
 QLabel#notificationDot[kind="success"] { color: @success; }
 QLabel#notificationDot[kind="warning"] { color: @warning; }
 QLabel#notificationDot[kind="error"] { color: @error; }
@@ -485,17 +487,17 @@ QToolButton#newTabButton, QToolButton#tabCloseButton { background: transparent; 
 QToolButton#tabDetachButton { color: @muted; border: none; background: transparent; padding: 0; }
 QToolButton#tabDetachButton:hover { color: @accent; }
 /* Composer prefix chip (! terminal, * agent) */
-QLabel#prefixChip { border-radius: 4px; padding: 1px 6px; font-weight: 700; font-size: 8pt; letter-spacing: 1px; }
+QLabel#prefixChip { border-radius: 4px; padding: 1px 6px; font-weight: 700; font-size: 9pt; letter-spacing: 1px; }
 QLabel#prefixChip[kind="shell"] { color: @onWarning; background: @warning; }
 QLabel#prefixChip[kind="agent"] { color: @onShell; background: @shell; }
 /* Prompt-box-only input: masked password field and the take-control button over the terminal */
-QLabel#secretChip { color: @onCaution; background: @caution; border-radius: 4px; padding: 1px 6px; font-weight: 700; font-size: 8pt; letter-spacing: 1px; }
+QLabel#secretChip { color: @onCaution; background: @caution; border-radius: 4px; padding: 1px 6px; font-weight: 700; font-size: 9pt; letter-spacing: 1px; }
 QLineEdit#secretEditor { background: @bg; color: @text; border: 1px solid @caution; border-radius: 6px; padding: 8px; font-family: "@mono"; font-size: 10pt; }
 QPushButton#takeControlChip { color: @text; background: @raised; border: 1px solid @accentBorder; border-radius: 6px; padding: 3px 10px; font-size: 9pt; }
 QPushButton#takeControlChip:hover { border-color: @accent; }
 /* The floating banner over the terminal: what the program is asking, and who answers it */
 QFrame#programBanner { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
-QLabel#programBannerLabel { color: @text; font-size: 9pt; }
+QLabel#programBannerLabel { color: @text; font-size: 9.5pt; }
 QPushButton#delegateChip { color: @text; background: @raised; border: 1px solid @accentBorder; border-radius: 6px; padding: 3px 10px; font-size: 9pt; }
 QPushButton#delegateChip:hover { border-color: @accent; }
 QPushButton#delegateChip:disabled { color: @muted; border-color: @border; }
@@ -504,7 +506,7 @@ QLabel#turnHeader { color: @text; font-weight: 600; padding: 4px 6px; }
 QTreeWidget#turnTools { background: @bg; color: @text; border: 1px solid @border; border-radius: 6px; outline: none; }
 QTreeWidget#turnTools::item { padding: 3px 2px; }
 QTreeWidget#turnTools::item:selected { background: @raised; color: @text; }
-QPlainTextEdit#turnLog { background: @surface; color: @text; border: 1px solid @border; border-radius: 6px; font-family: "@mono"; font-size: 9pt; }
+QPlainTextEdit#turnLog { background: @surface; color: @text; border: 1px solid @border; border-radius: 6px; font-family: "@mono"; font-size: 10pt; }
 QLabel#skillsStatus { color: @muted; }
 QSplitter::handle:horizontal { width: 4px; }
 QSplitter::handle:vertical { height: 4px; }
@@ -572,7 +574,7 @@ QToolButton#fileExplorerHidden:checked { color: @accent; border-color: @accentBo
    rows themselves are painted by RowDelegate from the same tokens, so they follow a theme
    switch; only the chrome around the list is styled here. */
 QWidget#boardView, QWidget#boardListPane { background: @bg; }
-QLabel#boardCount { color: @muted; font-family: "@mono"; font-size: 8pt; padding: 0 2px; }
+QLabel#boardCount { color: @muted; font-family: "@mono"; font-size: 9pt; padding: 0 2px; }
 QLineEdit#boardFilter { padding: 4px 8px; }
 QToolButton#boardAddButton, QToolButton#boardCleanup { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 10px; }
 QToolButton#boardAddButton:hover, QToolButton#boardCleanup:hover { border-color: @accent; }
@@ -594,8 +596,7 @@ QToolButton#boardBack { color: @muted; background: transparent; border: 1px soli
 QToolButton#boardBack:hover { color: @text; border-color: @border; background: @raised; }
 /* Engraved, like the section headers they switch on and off (SWITCHBOARD-AESTHETIC 3.1). The
    font is set here and in no pseudo-state rule, so sizeHint() measures what actually paints. */
-QCheckBox#boardSectionCheck { color: @muted; font-family: "@mono"; font-size: 8pt; spacing: 5px; padding: 0; }
-QCheckBox#boardSectionCheck:!checked { color: @disabled; }
+QCheckBox#boardSectionCheck { color: @muted; font-family: "@mono"; font-size: 9pt; spacing: 5px; padding: 0; }
 QCheckBox#boardSectionCheck::indicator { width: 11px; height: 11px; border-radius: 3px; }
 QListWidget#boardList { background: transparent; border: none; }
 QListWidget#boardList QScrollBar:vertical { width: 8px; margin: 0; }
@@ -608,19 +609,19 @@ QToolButton#boardTextButton { color: @muted; background: transparent; border: 1p
 QToolButton#boardTextButton:hover { color: @text; border-color: @border; background: @raised; }
 QToolButton#boardTextButton:disabled { color: @disabled; }
 QLabel#boardEmpty { color: @muted; }
-QLabel#boardKeys { color: @muted; font-size: 8pt; padding: 4px 10px; border-top: 1px solid @border; }
+QLabel#boardKeys { color: @muted; font-size: 9pt; padding: 4px 10px; border-top: 1px solid @border; }
 QWidget#boardDetail { background: @bg; }
 QLabel#boardCardRef { color: @muted; font-family: "@mono"; }
 QLabel#boardCardTitle { color: @text; font-size: 12pt; font-weight: 600; }
 /* Editing the card's own words: the title in place, and `## Issue` where the document was. */
 QLineEdit#boardCardTitleEdit { color: @text; font-size: 12pt; font-weight: 600; background: @surface; border: 1px solid @accentBorder; border-radius: 6px; padding: 2px 6px; }
 QFrame#boardEdit { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
-QLabel#boardEditHint { color: @muted; font-size: 8pt; }
+QLabel#boardEditHint { color: @muted; font-size: 9pt; }
 QPlainTextEdit#boardIssueEditor { background: transparent; border: none; padding: 2px; }
 QToolButton#boardCardClose { color: @muted; background: transparent; border: 1px solid transparent; border-radius: 4px; font-size: 12pt; padding: 0 6px; }
 QToolButton#boardCardClose:hover { color: @text; border-color: @border; background: @raised; }
 QComboBox#boardPicker { padding: 2px 26px 2px 8px; min-height: 18px; }
-QLabel#boardCardMeta { color: @text; font-size: 9pt; }
+QLabel#boardCardMeta { color: @text; font-size: 9.5pt; }
 QTextBrowser#boardCardDocument { background: @surface; color: @text; border: 1px solid @border; border-radius: 8px; padding: 0; }
 QLabel#boardCardError { color: @error; }
 QFrame#boardReply { background: @surface; border: 1px solid @border; border-radius: 8px; }
@@ -715,6 +716,10 @@ QString themeDataDir() {
 void applyTheme(QApplication &app) {
     const ThemeSpec spec = resolveTheme(settingsThemeId());   // a copy: GCC cannot see the reference outlives the call
     adoptTokens(spec);
+    // The body size is a floor, not a choice: a desktop that asks for more (KDE's Noto Sans 10,
+    // GNOME's 11) keeps it; Qt's generic 9pt default (no desktop, Xvfb) is raised to it, because
+    // every smaller size in the stylesheet is measured from it (docs/ARCHITECTURE.md, "Legible text").
+    if (app.font().pointSizeF() > 0 && app.font().pointSizeF() < BodyPt) app.setFont(legible(app.font(), BodyPt));
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
     applyPalette(app, spec);
     app.setStyleSheet(stylesheetFor(spec));

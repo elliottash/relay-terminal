@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "FilePanes.h"
+#include "Theme.h"
 #include <QTextBlock>
 #include <QTextCursor>
 
@@ -1013,9 +1014,11 @@ public:
     explicit SimpleMarkdownHighlighter(QTextDocument *document) : QSyntaxHighlighter(document) {}
 protected:
     void highlightBlock(const QString &text) override {
-        QTextCharFormat heading; heading.setForeground(QColor(0x3e, 0xc5, 0xf0)); heading.setFontWeight(QFont::Bold);
-        QTextCharFormat bullet; bullet.setForeground(QColor(0xe5, 0xc0, 0x7b));
-        QTextCharFormat code; code.setForeground(QColor(0x9a, 0xd1, 0x8b));
+        // The live theme tokens, not Relay Dark's values: cyan and amber on a light theme's paper
+        // were under 2:1 (docs/ARCHITECTURE.md, "Legible text").
+        QTextCharFormat heading; heading.setForeground(relay::theme::Accent); heading.setFontWeight(QFont::Bold);
+        QTextCharFormat bullet; bullet.setForeground(relay::theme::Warning);
+        QTextCharFormat code; code.setForeground(relay::theme::Success);
         const bool inFence = previousBlockState() == 1;
         const bool fence = text.trimmed().startsWith(QStringLiteral("```"));
         if (inFence || fence) {

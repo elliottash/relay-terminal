@@ -2543,7 +2543,7 @@ private:
                             && !(QApplication::mouseButtons() & Qt::LeftButton && m_thinkingView->underMouse());
         QTextCursor cursor(m_thinkingView->document());
         cursor.movePosition(QTextCursor::End);
-        QTextCharFormat format; format.setForeground(relay::theme::TextMuted); format.setFontItalic(true);
+        QTextCharFormat format; format.setForeground(relay::theme::TextMuted);   // upright: "Legible text"
         cursor.insertText(sanitize(text), format);
         if (follow) bar->setValue(bar->maximum());
         if (!m_thinkingDismissed) placeThinking();   // it decides whether there is room to show it
@@ -7300,9 +7300,10 @@ private:
 
     static QByteArray inkCode(Ink ink) {
         const QColor c = inkColor(ink);
-        // Bold for the lines the user typed, italic for notes, plain otherwise.
-        const QByteArray style = (ink == Ink::User || ink == Ink::UserAgent) ? QByteArray("1;")
-                               : ink == Ink::Note ? QByteArray("3;") : QByteArray();
+        // Bold for the lines the user typed, plain otherwise. Notes are not italic: the muted ink
+        // marks them, and italic muted monospace was the hardest text to read (docs/ARCHITECTURE.md,
+        // "Legible text").
+        const QByteArray style = (ink == Ink::User || ink == Ink::UserAgent) ? QByteArray("1;") : QByteArray();
         return "\x1b[" + style + "38;2;" + QByteArray::number(c.red()) + ';' + QByteArray::number(c.green())
                + ';' + QByteArray::number(c.blue()) + 'm';
     }
@@ -7374,7 +7375,6 @@ private:
         QTextCharFormat format;
         format.setForeground(inkColor(ink));
         if (ink == Ink::User) format.setFontWeight(QFont::Bold);
-        if (ink == Ink::Note) format.setFontItalic(true);
         cursor.insertText(clean, format);
         m_transcriptView->verticalScrollBar()->setValue(m_transcriptView->verticalScrollBar()->maximum());
         if (!m_transcriptDismissed && !m_transcript->isVisible()) m_transcript->show();

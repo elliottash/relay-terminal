@@ -140,14 +140,14 @@ private Q_SLOTS:
         QVERIFY(off.fill != typeStyle(QStringLiteral("board"), ColourMode::ByType, t).fill);
         const TypeStyle board = typeStyle(QStringLiteral("board"), ColourMode::ByType, t);
         QVERIFY(board.band);
-        QCOMPARE(board.label, QStringLiteral("SWITCHBOARD"));
+        QCOMPARE(board.label, QStringLiteral("Switchboard"));   // sentence case: legible text rule
         QCOMPARE(board.glyph, Glyph::Switchboard);
         // A type nobody registered is a tool with its own name.
         const TypeStyle mystery = typeStyle(QStringLiteral("db-browser"), ColourMode::ByType, t);
         QVERIFY(mystery.band);
-        QCOMPARE(mystery.label, QStringLiteral("DB BROWSER"));
+        QCOMPARE(mystery.label, QStringLiteral("Db browser"));
         QCOMPARE(mystery.glyph, Glyph::Tool);
-        QCOMPARE(typeStyle(QStringLiteral("sessions"), ColourMode::ByType, t, QStringLiteral("Resume")).label, QStringLiteral("RESUME"));
+        QCOMPARE(typeStyle(QStringLiteral("sessions"), ColourMode::ByType, t, QStringLiteral("Resume")).label, QStringLiteral("Resume"));
     }
 
     void byTypeDiffersByGroupShares() {

@@ -11,6 +11,7 @@
 // listings collapses into "read 6 files · 4,100 lines".
 #include "SubagentsPanel.h"
 #include "ToolLabel.h"
+#include <QColor>
 #include <QHash>
 #include <QJsonObject>
 #include <QPointer>
@@ -80,6 +81,7 @@ protected:
 
 private:
     enum class Ink { Agent, User, Tool, ToolOutput, DiffAdd, DiffRemove, Error, Note };
+    static QColor inkColor(Ink ink);   // from the live theme tokens
     // One tool call's row: the line itself, what a click folds open under it, and where both sit.
     struct ToolCall {
         QString callId;
