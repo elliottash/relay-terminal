@@ -68,6 +68,12 @@ inline QJsonObject rowOf(const Line &line, int row)
 }
 
 // A whole frame. `full` sends every row and the geometry; otherwise only the dirty rows.
+//
+// Every frame carries `base`, the absolute scrollback row of `lines[0]`, and `history`, how many
+// scrollback rows exist. Without them a client holding a page of scrollback cannot tell where its
+// rows stop and the live block begins: output pushes lines off the screen into the scrollback, the
+// live block starts further down, and the rows in between belong to neither — a hole in the middle
+// of the column (docs/REMOTE-PROTOCOL.md section 6.5).
 inline QJsonObject frameOf(const ViewportFrame &frame, bool full)
 {
     QJsonArray lines;
@@ -80,6 +86,8 @@ inline QJsonObject frameOf(const ViewportFrame &frame, bool full)
     QJsonObject message;
     message["t"] = everything ? QStringLiteral("snapshot") : QStringLiteral("diff");
     message["cursor"] = cursorOf(frame);
+    message["base"] = frame.viewportTop;
+    message["history"] = frame.historyRows;
     message["lines"] = lines;
     if (everything) {
         message["rows"] = frame.rows;

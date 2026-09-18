@@ -16,6 +16,22 @@ from tests.browser import Browser, shown
 
 HERE = Path(__file__).resolve().parent
 ROWS = ".screen-history .screen-row"
+# Every row on screen in the order it is painted: the history buffer, then the live block.
+COLUMN = ("(() => [...document.querySelectorAll("
+          "'.screen-history .screen-row, .screen-grid > .screen-row')]"
+          ".map(n => n.textContent.trim()))()")
+
+
+def seam(rows: list[str]) -> str:
+    """Whether the numbered lines in the column are one unbroken run."""
+    numbers = [int(text.split("-")[-1]) for text in rows if text.startswith("scrollback-")]
+    if not numbers:
+        return "no numbered rows on screen"
+    missing = [n for n in range(numbers[0], numbers[-1] + 1) if n not in set(numbers)]
+    repeated = len(numbers) != len(set(numbers))
+    return (f"rows {numbers[0]}..{numbers[-1]} contiguous: {not missing and not repeated}"
+            + (f" MISSING {missing[:12]}" if missing else "")
+            + (" REPEATED" if repeated else ""))
 
 
 async def shot(browser: Browser, name: str) -> None:
@@ -62,6 +78,7 @@ async def main(url: str) -> None:
         numbers = [int(text.split("-")[-1]) for text in deeper if text.startswith("scrollback-")]
         joined = numbers == list(range(numbers[0], numbers[0] + len(numbers)))
         print("pages join with no gap and no repeat:", joined, flush=True)
+        print("the whole column:", seam(await browser.evaluate(COLUMN)), flush=True)
         await shot(browser, "02-scrolled-back")
 
         style = await browser.evaluate(
@@ -96,6 +113,15 @@ async def main(url: str) -> None:
         print("scroll before new output:", before, "after:", after,
               "moved:", after != before, flush=True)
         print("the way back to live is offered:", chip, flush=True)
+        # The rows that left the live screen must land between the buffer and the live block,
+        # not fall down the hole between them.
+        column = await browser.wait_for(
+            f"(() => {{ const rows = {COLUMN};"
+            " const n = rows.filter(t => t.startsWith('scrollback-'))"
+            "   .map(t => parseInt(t.split('-')[1], 10));"
+            " return n.every((v, i) => i === 0 || v === n[i - 1] + 1) ? rows : null; })()",
+            timeout=30)
+        print("the whole column:", seam(column), flush=True)
         await shot(browser, "03-new-output-while-scrolled-back")
 
         await browser.evaluate("document.getElementById('term-new-output').click()")
@@ -104,6 +130,11 @@ async def main(url: str) -> None:
             "(() => { const w = document.getElementById('screen-wrap');"
             " return w.scrollHeight - w.scrollTop - w.clientHeight <= 4; })()")
         print("tapping it returns to live:", at_bottom, flush=True)
+        print("the whole column:", seam(await browser.evaluate(COLUMN)), flush=True)
+        overflow = await browser.evaluate(
+            "(() => { const w = document.getElementById('screen-wrap');"
+            " return w.scrollWidth - w.clientWidth; })()")
+        print("horizontal overflow (0 = the grid fits):", overflow, flush=True)
         await shot(browser, "04-back-at-live")
         problems = [line for line in browser.console if "EXCEPTION" in line]
         print("console problems:", problems, flush=True)

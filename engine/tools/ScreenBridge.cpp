@@ -22,8 +22,10 @@
 //        {"t":"quit"}
 //
 //   out  {"t":"hello","shell_pid":N,"rows":R,"cols":C}
-//        {"t":"snapshot","rows":R,"cols":C,"alt":bool,"cursor":{...},"lines":[<row>...]}
-//        {"t":"diff","cursor":{...},"lines":[<row>...]}        only rows that changed
+//        {"t":"snapshot","rows":R,"cols":C,"alt":b,"cursor":{...},"base":B,"history":H,
+//         "lines":[<row>...]}
+//        {"t":"diff","cursor":{...},"base":B,"history":H,"lines":[<row>...]}
+//                                                              only rows that changed
 //        {"t":"title","text":"..."} {"t":"cwd","path":"..."} {"t":"bell"}
 //        {"t":"history","from":I,"lines":[<row>...],"more":b,"total":T}
 //                                                  a page of scrollback, oldest first, styled
@@ -37,9 +39,11 @@
 //
 //   <row> is {"row":N,"segs":[[text,fg,bg,attrs],...]} — runs of identical style, so the client
 //   needs no index arithmetic and no second emulator. fg/bg are packed relay::CellColor. A
-//   snapshot or diff numbers its rows from the top of the viewport; a history page numbers them
-//   in absolute scrollback rows (0 = the oldest line the core still holds), which is also what
-//   `from` is: the row of the first line of the page. `more` says whether anything older than
+//   snapshot or diff numbers its rows from the top of the viewport, and says which absolute row
+//   that top is in `base` (`history` is historyRows()); a history page numbers them in absolute
+//   scrollback rows (0 = the oldest line the core still holds), which is also what `from` is: the
+//   row of the first line of the page. `base` is what joins the two: the row after the last line
+//   of a history page that ends at `base` is the first line of the screen. `more` says whether anything older than
 //   `from` exists, and `total` is historyRows() at the moment of the answer.
 //
 //   A history row is trimmed of trailing blanks, so it carries no run of trailing spaces the way

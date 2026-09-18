@@ -188,7 +188,21 @@ details.tool > summary::marker { color: var(--muted); }
 #screen-wrap {
   flex: 1; min-height: 0; overflow: auto; background: var(--term-bg);
   padding: 4px; -webkit-overflow-scrolling: touch;
+  /* Reserved from the start, so the width ScreenView.fit() measures does not change the moment
+     scrollback gives the container something to scroll — which sized the grid too wide and put a
+     horizontal scrollbar under it. */
+  scrollbar-gutter: stable;
+  /* The platform's own scrollbar is white on every desktop Chrome, which on a black terminal is
+     two bright bars down the side of the screenshot. */
+  scrollbar-width: thin; scrollbar-color: var(--line) var(--term-bg);
 }
+#screen-wrap::-webkit-scrollbar { width: 10px; height: 10px; }
+#screen-wrap::-webkit-scrollbar-track,
+#screen-wrap::-webkit-scrollbar-corner { background: var(--term-bg); }
+#screen-wrap::-webkit-scrollbar-thumb {
+  background: var(--line); border-radius: 5px; border: 2px solid var(--term-bg);
+}
+#screen-wrap::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 .screen-grid {
   font-family: ui-monospace, "SF Mono", "DejaVu Sans Mono", Menlo, monospace;
   color: var(--term-fg); white-space: pre; display: inline-block; min-width: 100%;

@@ -144,7 +144,7 @@ class GuiPaneSource(panes_mod.PaneSource):
             # from the GUI fills it in.
             pane = self.panes[pane_id]
             return {"t": "screen_snapshot", "pane": pane_id, "rows": pane.get("rows", 24),
-                    "cols": pane.get("cols", 80), "alt": False,
+                    "cols": pane.get("cols", 80), "alt": False, "base": 0, "history": 0,
                     "cursor": {"row": 0, "col": 0, "visible": False, "shape": 0}, "lines": []}
         return {"t": "screen_snapshot", "pane": pane_id, **state}
 
@@ -181,7 +181,7 @@ class GuiPaneSource(panes_mod.PaneSource):
             state = {"rows": message.get("rows", self.panes[pane_id]["rows"]),
                      "cols": message.get("cols", self.panes[pane_id]["cols"]),
                      "alt": bool(message.get("alt")), "cursor": message.get("cursor", {}),
-                     "lines": []}
+                     "base": 0, "history": 0, "lines": []}
             rows = {line["row"]: line.get("segs", []) for line in lines}
             state["lines"] = [{"row": row, "segs": rows.get(row, [])}
                               for row in range(state["rows"])]
@@ -192,10 +192,15 @@ class GuiPaneSource(panes_mod.PaneSource):
             state["lines"] = [{"row": row, "segs": rows.get(row, [])}
                               for row in range(state["rows"])]
             state["cursor"] = message.get("cursor", state["cursor"])
+        # Where this screen sits in the scrollback, so a client holding history knows whether its
+        # rows still join the live block (section 6.5). Carried on every frame, diff included.
+        state["base"] = int(message.get("base", state.get("base", 0)))
+        state["history"] = int(message.get("history", state.get("history", 0)))
         self.screens[pane_id] = state
 
         out = {"t": "screen_snapshot" if full else "screen_diff", "pane": pane_id,
-               "cursor": message.get("cursor", {}), "lines": lines}
+               "cursor": message.get("cursor", {}), "base": state["base"],
+               "history": state["history"], "lines": lines}
         if full:
             out.update({"rows": state["rows"], "cols": state["cols"], "alt": state["alt"]})
         for callback in list(self._screen_callbacks):

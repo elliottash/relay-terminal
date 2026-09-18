@@ -344,6 +344,33 @@ class HistoryTests(unittest.TestCase):
                 await client.close()
         run(main())
 
+    def test_every_frame_says_where_the_screen_sits_in_the_scrollback(self):
+        """Without `base` a client holding history cannot tell where its rows stop.
+
+        Output pushes lines off the live screen into the scrollback; the live block then starts
+        further down and the rows in between are in neither half. `base` is what closes that seam,
+        so it rides on every frame, a diff included, and on a late joiner's snapshot.
+        """
+        async def main():
+            async with Harness() as harness:
+                client, _ = await harness.paired_client()
+                await client.send({"t": "pane_focus", "pane": "p1"})
+                snapshot = await client.expect("screen_snapshot")
+                self.assertEqual(snapshot["base"], 0)
+                self.assertEqual(snapshot["history"], 0)
+
+                harness.source.set_frame({
+                    "pane": "p1", "full": False, "base": 120, "history": 120,
+                    "cursor": {"row": 1, "col": 0, "visible": True, "shape": 0},
+                    "lines": [{"row": 0, "segs": [["after the scroll", 0, 0, 0]]}]})
+                diff = await client.expect("screen_diff")
+                self.assertEqual(diff["base"], 120)
+                self.assertEqual(diff["history"], 120)
+                # And it is remembered, so the next device to focus the pane is told the same.
+                self.assertEqual(harness.source.screen_snapshot("p1")["base"], 120)
+                await client.close()
+        run(main())
+
     def test_a_page_round_trips_and_keeps_its_id(self):
         async def main():
             async with Harness() as harness:

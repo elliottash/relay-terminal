@@ -289,8 +289,8 @@ On demand, mirroring the worker's own requests: `turn_transcript_get {pane, turn
 
 | Type | Direction | Body |
 |---|---|---|
-| `screen_snapshot` | desktop → client | `{pane, seq, rows, cols, alt, cursor, lines: [<row>]}` — every row |
-| `screen_diff` | desktop → client | `{pane, seq, cursor, lines: [<row>]}` — only rows that changed |
+| `screen_snapshot` | desktop → client | `{pane, seq, rows, cols, alt, cursor, base, history, lines: [<row>]}` — every row |
+| `screen_diff` | desktop → client | `{pane, seq, cursor, base, history, lines: [<row>]}` — only rows that changed |
 | `screen_get` | client → desktop | `{pane}` — ask for a fresh snapshot after a reconnect |
 | `history_get` | client → desktop | `{pane, id, before_row, count}` (`count` ≤ 200) |
 | `history` | desktop → client | `{pane, id, from_row, total, lines: [...], more}` |
@@ -308,6 +308,20 @@ requests, so consecutive pages overlap or leave a hole in the middle of what the
 reading; an absolute row moves only when a full scrollback ring evicts its oldest line, and then
 only for content that is being discarded anyway. A client that finds a page does not join the one
 below it starts again from that page, which is what an eviction looks like from the outside.
+
+**The seam.** A screen frame carries `base`, the absolute scrollback row of its first line, and
+`history`, how many scrollback rows exist. A client holding a page of history needs `base` to know
+where its rows stop: output pushes lines off the live screen into the scrollback, so the live
+block starts further down and the rows in between are in neither half. A client must keep its
+column contiguous — the row after its last history row is `base` — by fetching what appeared in
+between; when the gap is more than a page or two it may leave it until the reader scrolls towards
+it, but it may not paint a column with a hole in it. A `base` *below* the end of what a client
+holds means the scrollback shrank (a clear, a reset, the alternate screen) and the held rows are
+no longer those rows.
+
+For the same reason a client asks for its first page with `before_row: base` rather than by
+omitting it: the desktop's own viewport may be sitting back in its scrollback, and the newest page
+would then overlap what is already on the client's screen.
 
 The host never sends scrollback unasked, and asking never changes what the desktop shows.
 
@@ -837,6 +851,8 @@ and P3 clients interoperate at P1's level.
 | Pages join with no hole and nothing repeated while the shell prints | `tests/test_remote_terminal.py` (the bridge, and through the hub over a real shell) |
 | A page reaches the device that asked for it, and a wedged desktop is an error | `tests/test_remote_gui_host.py` |
 | Dragging the terminal down on a phone pages history in, styled, and new output moves nothing | `tests/test_remote_browser.py` |
+| The column stays contiguous across the seam while output arrives, small burst and large | `tests/test_remote_browser.py` |
+| Every frame carries `base`, a diff included, and a late joiner's snapshot remembers it | `tests/test_remote_gui_host.py` |
 | End to end | Loopback rendezvous plus a headless browser client in `ci.yml` |
 
 ## 14. What exists today (2026-09-18)
@@ -854,7 +870,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | Python client | `remote/client.py` | For tests and scripts; also where the client-side pinning rule is tested |
 | Dev harness | `remote/cli.py` | `python3 -m remote.cli share` shares a real shell; `dev` runs the demo agent. Both print the pairing QR |
 | Screen stream (P2) | `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `app/screen.js` | A real PTY parsed by Relay's own emulator, streamed as styled rows, painted as a cell grid on the phone |
-| Scrollback (§6.5) | `engine/core/VtCore.h` (`historyLines`), `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `remote/gui_host.py`, `src/RemoteShare.cpp`, `app/screen.js` | Paging by absolute row, from the bridge and from a GUI pane. Pages are fetched one ahead of the reader and de-duplicated by row; output arriving while somebody is scrolled back moves nothing and offers a way to live instead; at most 2000 rows are kept on the phone. History is painted by the run painter the live screen uses, because both ends of the wire go through one serializer |
+| Scrollback (§6.5) | `engine/core/VtCore.h` (`historyLines`), `engine/tools/ScreenJson.h`, `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `remote/gui_host.py`, `src/RemoteShare.cpp`, `app/screen.js` | Paging by absolute row, from the bridge and from a GUI pane. Every frame carries `base`, so the client keeps the seam between its history and the live block closed while output arrives. Pages are fetched one ahead of the reader and de-duplicated by row; output arriving while somebody is scrolled back moves nothing and offers a way to live instead; at most 2000 rows are kept on the phone. History is painted by the run painter the live screen uses, because both ends of the wire go through one serializer |
 | Take-over (P3) | `remote/host.py`, `app/app.js` | `keys`, `paste`, `line`, `control_request`/`control_release`, an extra-keys row and a line box, refused at a password prompt |
 | Password entry (§6.7) | `remote/host.py`, `src/Pane.h` (`submitRemoteSecret`), `app/app.js` | A desktop-minted single-use nonce bound to the prompt, a per-device switch that is off by default, a fresh termios check in the hub and again at the write, a password field in the client. Tested; not yet tried on a real phone |
 | Notifications (§9) | `remote/push.py`, `remote/notify.py`, `remote/host.py`, `app/app.js`, `app/sw.js`, `src/RemoteShare.cpp` | Connected end to end. `push_subscribe`/`push_unsubscribe` inside the Noise session, five triggers with a checkbox each on the phone, the presence rule over `window_active`, a per-pane cooldown, constructed bodies, a 410 or a revoke dropping the subscription, and a "Notify me" row that asks permission from a tap. RFC 8291 is checked against the RFC's own Appendix A vector, `app/sw.js` opens a Python seal under Node, and a local push service takes a real delivery (`tests/test_remote_push.py`). **Not yet tried on a real phone**: that needs the hosted rendezvous reachable from the push service |

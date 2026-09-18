@@ -95,6 +95,8 @@ class TerminalPane:
         self.rows = rows
         self.cols = cols
         self.alt = False
+        self.base = 0            # absolute scrollback row of the screen's first line
+        self.history_rows = 0    # how many scrollback rows the core holds
         self.lines: dict[int, list] = {}
         self.cursor = {"row": 0, "col": 0, "visible": True, "shape": 0}
         self.shell_pid = 0
@@ -121,7 +123,7 @@ class TerminalPane:
 
     def snapshot(self) -> dict:
         return {"pane": self.id, "rows": self.rows, "cols": self.cols, "alt": self.alt,
-                "cursor": dict(self.cursor),
+                "cursor": dict(self.cursor), "base": self.base, "history": self.history_rows,
                 "lines": [{"row": row, "segs": self.lines.get(row, [])}
                           for row in range(self.rows)]}
 
@@ -313,9 +315,14 @@ class TerminalPaneSource(panes_mod.PaneSource):
         for row in message.get("lines", []):
             pane.lines[int(row.get("row", 0))] = row.get("segs", [])
         pane.cursor = message.get("cursor", pane.cursor)
+        # Where this screen sits in the scrollback. A client holding a page of history needs it to
+        # know whether its rows still join the live block (section 6.5).
+        pane.base = int(message.get("base", pane.base))
+        pane.history_rows = int(message.get("history", pane.history_rows))
         pane.updated = time.time()
         self._screen(pane.id, {"t": "screen_snapshot" if full else "screen_diff",
                                "pane": pane.id, "cursor": pane.cursor,
+                               "base": pane.base, "history": pane.history_rows,
                                **({"rows": pane.rows, "cols": pane.cols, "alt": pane.alt}
                                   if full else {}),
                                "lines": message.get("lines", [])})

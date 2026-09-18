@@ -79,9 +79,9 @@ export class ScreenView {
     this.rowNodes = [];
     this.history = [];           // {row, segs}, ascending and contiguous
     this.historyTop = null;      // absolute row of history[0]; null when nothing is held
+    this.liveBase = null;        // absolute row of the live block's first line (frame `base`)
     this.more = true;            // is there anything older than historyTop
     this.pending = false;        // one request in flight at a time
-    this.stale = false;          // output arrived while the reader was back here
     this.behind = false;
     this.onNeedHistory = null;   // (beforeRow | null, count) => void
     this.onBehind = null;        // (behind) => void, for the "new output" affordance
@@ -100,14 +100,45 @@ export class ScreenView {
   }
 
   // The host owns the size; we only scale the font so `cols` columns fit the screen.
+  //
+  // `clientWidth` excludes a vertical scrollbar, and scrollback puts one there, so the width this
+  // reads changes the moment history arrives. `scrollbar-gutter: stable` reserves that space from
+  // the start (style.css), which is what stops the grid being sized for a width it no longer has
+  // and spilling into a horizontal scrollbar. Re-fitting is a no-op unless the size really moved,
+  // because changing the font height under somebody who is reading would move their line.
   fit() {
     const available = this.root.clientWidth || window.innerWidth;
     if (!available || !this.cols) return;
-    // 0.6 is the advance width of a monospace glyph as a fraction of the font size, near enough
-    // for every font in the stack; the -2 leaves room for the padding.
-    const size = Math.max(6, Math.min(16, ((available - 8) / this.cols) / 0.6));
-    this.grid.style.fontSize = `${size.toFixed(2)}px`;
+    // clientWidth counts the padding, and the padding is not the same on a phone as on a wider
+    // screen (style.css switches it to 16px a side), so it is read rather than assumed — an 8px
+    // guess left the grid 25px wider than its container and a horizontal scrollbar under it.
+    const style = window.getComputedStyle(this.root);
+    const inset = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+    // Two pixels of slack: a browser rounds each glyph's advance, so a grid sized to exactly the
+    // content width can still land a fraction of a pixel over it and scroll sideways.
+    const exact = ((available - inset - 2) / this.cols) / this.advance();
+    const size = Math.max(6, Math.min(16, Math.floor(exact * 100) / 100));
+    const text = `${size.toFixed(2)}px`;
+    if (text === this.grid.style.fontSize) return;
+    this.grid.style.fontSize = text;
     this.grid.style.lineHeight = `${(size * 1.25).toFixed(2)}px`;
+  }
+
+  // The advance width of one monospace glyph as a fraction of the font size, measured in the
+  // grid's own font rather than assumed. A guessed 0.6 was a few per cent short of the font the
+  // desktop actually gets, which over a hundred columns is enough to push the grid wider than its
+  // container and put a horizontal scrollbar under the terminal. Measured once: the family does
+  // not change, and the ratio does not depend on the size.
+  advance() {
+    if (this.ratio) return this.ratio;
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font-size:100px';
+    probe.textContent = '0'.repeat(50);
+    this.grid.append(probe);
+    const width = probe.getBoundingClientRect().width;
+    probe.remove();
+    this.ratio = width > 0 ? width / 50 / 100 : 0.6;
+    return this.ratio;
   }
 
   apply(message) {
@@ -137,18 +168,26 @@ export class ScreenView {
       this.lines.set(line.row, line.segs || []);
     }
     if (message.cursor) this.cursor = message.cursor;
+    // Where the live block sits in the scrollback. Everything about the seam hangs off this.
+    if (Number.isInteger(message.base)) this.liveBase = message.base;
     this.paint(message.t === 'screen_snapshot' ? null : (message.lines || []).map((l) => l.row));
+    this.checkSeam();
     if (wasAtBottom) {
       this.toBottom();
     } else if ((message.lines || []).length) {
       // Somebody is reading what scrolled away. Say there is more rather than dragging them to it.
-      this.stale = true;
       this.setBehind(true);
     }
     this.requestIfNeeded();
   }
 
   // ---- scrollback ---------------------------------------------------------------------------
+  //
+  // The rows on screen are one column: the history buffer, then the live block. It must be
+  // contiguous — `historyBottom() === liveBase` — because a hole in it is a lie about what the
+  // program printed. Output while somebody is reading further up opens one: lines leave the live
+  // screen into the core's scrollback, the live block starts further down, and the rows in
+  // between are in neither half until they are fetched.
 
   atBottom() {
     return this.root.scrollHeight - this.root.scrollTop - this.root.clientHeight <= 4;
@@ -164,6 +203,26 @@ export class ScreenView {
     if (this.onBehind) this.onBehind(behind);
   }
 
+  // One past the newest row held, which is where the live block should begin.
+  historyBottom() {
+    return this.history.length ? this.history[this.history.length - 1].row + 1 : null;
+  }
+
+  // How many rows are missing between the buffer and the live block.
+  gapRows() {
+    const bottom = this.historyBottom();
+    if (bottom === null || this.liveBase === null) return 0;
+    return Math.max(0, this.liveBase - bottom);
+  }
+
+  // The scrollback shrank under what we hold — a clear, a reset, or the alternate screen, which
+  // has none of its own. The rows are no longer these rows, so they go.
+  checkSeam() {
+    const bottom = this.historyBottom();
+    if (bottom === null || this.liveBase === null) return;
+    if (this.liveBase < bottom) this.resetHistory();
+  }
+
   resetHistory() {
     this.history = [];
     this.historyTop = null;
@@ -172,48 +231,81 @@ export class ScreenView {
     this.historyBox.replaceChildren();
   }
 
-  // Back to the newest output. Rows held from before the output that arrived meanwhile no longer
-  // join the live screen, so they go: the next drag upward asks for them again from the end.
+  // Back to the newest output. The column is contiguous either way, so nothing is thrown away:
+  // this only puts the view at the bottom and takes the affordance down.
   toLive() {
-    if (this.stale) this.resetHistory();
-    this.stale = false;
     this.toBottom();
     this.setBehind(false);
     this.requestIfNeeded();
   }
 
   scrolled() {
-    if (this.atBottom()) {
-      if (this.behind || this.stale) this.toLive();
-      return;
-    }
+    // Even at the bottom there may be a seam to close: the gap sits directly above the live
+    // block, which is exactly what somebody at the bottom is looking at the edge of.
+    if (this.atBottom()) this.setBehind(false);
     this.requestIfNeeded();
   }
 
-  requestIfNeeded() {
-    if (this.pending || !this.more || !this.onNeedHistory) return;
-    // The first page is fetched before it is needed: there has to be something above the live
-    // screen for a drag upward to land in.
-    if (this.historyTop !== null && this.root.scrollTop > PREFETCH_PX) return;
-    this.pending = true;
-    this.onNeedHistory(this.historyTop, HISTORY_PAGE);
+  // Is the reader close enough to the seam to see a hole in it? A small gap is closed whatever
+  // they are looking at, because it costs one request; a large one waits until they come down
+  // towards it, so a chatty shell cannot make the phone fetch rows nobody will read.
+  nearSeam() {
+    const gap = this.gapRows();
+    if (gap === 0) return false;
+    if (gap <= HISTORY_PAGE * 2) return true;
+    const seam = this.historyBox.offsetHeight;
+    return seam - (this.root.scrollTop + this.root.clientHeight) <= PREFETCH_PX;
   }
 
-  // One `history` reply. Rows carry absolute numbers, so what we already hold is dropped by
-  // number rather than by guesswork, and the page joins exactly onto the top of the buffer.
+  requestIfNeeded() {
+    if (this.pending || !this.onNeedHistory) return;
+    // The seam comes first: a hole in the middle of the column is worse than being a page short
+    // of the top, and closing it is what keeps the row numbers honest.
+    if (this.nearSeam()) {
+      const bottom = this.historyBottom();
+      const want = Math.min(this.gapRows(), HISTORY_PAGE);
+      this.pending = true;
+      this.onNeedHistory(bottom + want, want);
+      return;
+    }
+    if (!this.more) return;
+    // The first page is fetched before it is needed: there has to be something above the live
+    // screen for a drag upward to land in. It ends at `liveBase`, not at the newest row the core
+    // holds, because the desktop's own view may be sitting back in its scrollback.
+    if (this.historyTop !== null && this.root.scrollTop > PREFETCH_PX) return;
+    const before = this.historyTop !== null ? this.historyTop : this.liveBase;
+    this.pending = true;
+    this.onNeedHistory(before === null ? null : before, HISTORY_PAGE);
+  }
+
+  // One `history` reply. Rows carry absolute numbers, so which end it belongs to, and what of it
+  // is already painted, are both read off the numbers rather than guessed at.
   applyHistory(message) {
     this.pending = false;
-    this.more = !!message.more;
     const lines = (message.lines || []).filter((line) => Number.isInteger(line.row));
-    const fresh = this.historyTop === null
-      ? lines : lines.filter((line) => line.row < this.historyTop);
-    if (!fresh.length) return;
+    const bottom = this.historyBottom();
+    if (bottom === null) {
+      this.insertTop(lines, message);
+    } else if (lines.length && lines[0].row >= bottom) {
+      this.insertBottom(lines.filter((line) => line.row >= bottom));
+    } else {
+      this.insertTop(lines.filter((line) => line.row < this.historyTop), message);
+    }
+    this.fit();
+    this.requestIfNeeded();
+  }
+
+  // Older rows, above what we hold. The reader stays on their line.
+  insertTop(fresh, message) {
+    if (!fresh.length) {
+      if (this.historyTop === null || this.historyTop <= 0) this.more = false;
+      return;
+    }
     if (this.historyTop !== null && fresh[fresh.length - 1].row + 1 !== this.historyTop) {
       // A hole, which only a scrollback ring evicting underneath us can make. Start from here.
       this.history = [];
       this.historyBox.replaceChildren();
     }
-
     const before = this.root.scrollHeight;
     const batch = document.createDocumentFragment();
     for (const line of fresh) batch.append(this.historyRow(line));
@@ -222,23 +314,48 @@ export class ScreenView {
     this.historyTop = this.history[0].row;
     // Everything above the viewport grew by exactly this much; keep the reader on their line.
     this.root.scrollTop += this.root.scrollHeight - before;
+    this.more = this.historyTop > 0;
     this.trim();
-    this.requestIfNeeded();
   }
 
-  // Bounded memory. We are travelling upward, so the rows furthest from the reader are the ones
-  // nearest the live screen; those go first, and they are below the viewport, so dropping them
-  // moves nothing. The buffer then no longer reaches the live screen, which is what `stale`
-  // means: arriving back at the bottom starts again from the newest page.
+  // The rows that left the live screen while somebody was reading further up. They go below the
+  // buffer and above the live block, which is where the program put them; nothing above the
+  // viewport changes, so the reader does not move.
+  insertBottom(fresh) {
+    if (!fresh.length || fresh[0].row !== this.historyBottom()) return;
+    const wasAtBottom = this.atBottom();
+    const batch = document.createDocumentFragment();
+    for (const line of fresh) batch.append(this.historyRow(line));
+    this.historyBox.append(batch);
+    this.history.push(...fresh);
+    // These go in above the live block, so somebody watching the newest output would be pushed
+    // off the end of it by rows they have already seen.
+    if (wasAtBottom) this.toBottom();
+    this.trim();
+  }
+
+  // Bounded memory. The oldest rows go — never the newest, which would reopen the seam — and only
+  // ones lying entirely above the viewport, so nothing the reader is looking at moves. `more`
+  // stays true, so dragging further up fetches them again.
   trim() {
-    if (this.history.length <= HISTORY_MAX) return;
-    while (this.history.length > HISTORY_MAX) {
-      this.history.pop();
-      const last = this.historyBox.lastElementChild;
-      if (!last) break;
-      last.remove();
+    let excess = this.history.length - HISTORY_MAX;
+    if (excess <= 0) return;
+    const room = this.root.scrollTop - PREFETCH_PX;
+    let height = 0;
+    while (excess > 0) {
+      const first = this.historyBox.firstElementChild;
+      if (!first) break;
+      const rowHeight = first.offsetHeight;
+      if (height + rowHeight > room) break;
+      height += rowHeight;
+      first.remove();
+      this.history.shift();
+      excess -= 1;
     }
-    this.stale = true;
+    if (!height) return;
+    this.historyTop = this.history.length ? this.history[0].row : null;
+    this.more = this.historyTop === null || this.historyTop > 0;
+    this.root.scrollTop -= height;
   }
 
   historyRow(line) {
