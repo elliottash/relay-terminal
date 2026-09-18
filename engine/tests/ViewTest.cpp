@@ -87,6 +87,18 @@ struct Term {
     }
 };
 
+// Does any pixel of this screen row carry exactly this colour? The search
+// highlights are flat fills, so an exact compare is right.
+bool rowHasColor(const QImage &img, int screenRow, int cellHeight, const QColor &c)
+{
+    const int top = 2 + screenRow * cellHeight;
+    for (int y = top; y < top + cellHeight && y < img.height(); ++y)
+        for (int x = 0; x < img.width(); ++x)
+            if (img.pixelColor(x, y) == c)
+                return true;
+    return false;
+}
+
 int countNonBackground(const QImage &img, const QRect &r, const QColor &bg)
 {
     int n = 0;
@@ -607,6 +619,164 @@ private slots:
         QTest::mouseClick(t.view, Qt::LeftButton, Qt::ControlModifier, p);
         QTest::qWait(40);
         QCOMPARE(t.links, QStringList{QStringLiteral("https://relay.test/report")});
+    }
+
+    // ---- find, with the open folds in the sequence (#TK9C)
+
+    void findFindsTextOnlyAnOpenFoldHas()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        const QString uri = QStringLiteral("relay://call/p/1/a");
+        // "treasure" is nowhere in the real rows, so the core on its own finds
+        // nothing: every one of these matches is the view's.
+        t.view->setFoldContent(uri, foldBody({QStringLiteral("hidden treasure"), QStringLiteral("quiet")}));
+        QTest::qWait(120);
+        QCOMPARE(t.view->find(QStringLiteral("treasure"), true), 1);
+        QCOMPARE(t.view->searchMatchCount(), 1);
+        QCOMPARE(t.view->searchIndex(), 0);
+
+        const int anchor = t.rowOf(QStringLiteral("* ran python"));
+        QVERIFY2(anchor >= 0, qPrintable(t.view->visibleRowsText().join(QLatin1Char('|'))));
+        const QImage img = t.grab();
+        QVERIFY2(rowHasColor(img, anchor + 1, t.view->cellHeight(), t.view->colorScheme().searchCurrent),
+                 "the selected match inside the fold is highlighted like the core's own");
+
+        // Dropping the needle takes the highlight with it.
+        t.view->find(QString(), true);
+        QCOMPARE(t.view->searchMatchCount(), 0);
+        QVERIFY(!rowHasColor(t.grab(), anchor + 1, t.view->cellHeight(), t.view->colorScheme().searchCurrent));
+    }
+
+    void findStepsBothSidesOfAFoldAndItsInsideInVisualOrder()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.view->setFoldPrefix(QStringLiteral("relay://call/"));
+        t.backend->writeToDisplay("alpha mark\r\n");
+        for (int i = 0; i < 12; ++i)
+            t.backend->writeToDisplay(QByteArray("filler ") + QByteArray::number(i) + "\r\n");
+        t.backend->writeToDisplay("\x1b]8;;relay://call/p/1/a\x1b\\* ran python\x1b]8;;\x1b\\\r\n");
+        t.backend->writeToDisplay("omega mark\r\n");
+        QTest::qWait(120);
+        t.view->setFoldContent(QStringLiteral("relay://call/p/1/a"),
+                               foldBody({QStringLiteral("inner mark one"), QStringLiteral("quiet"),
+                                         QStringLiteral("inner mark two")}));
+        QTest::qWait(150);
+
+        // Visual order, oldest first: alpha (real), inner one, inner two (the
+        // fold), omega (real). Counted from the newest that is 3, 2, 1, 0.
+        QCOMPARE(t.view->find(QStringLiteral("mark"), true), 4);
+        QCOMPARE(t.view->searchIndex(), 0);
+        for (int want : {1, 2, 3, 0}) { // backwards, wrapping at the oldest
+            QCOMPARE(t.view->searchStep(true), 4);
+            QCOMPARE(t.view->searchIndex(), want);
+        }
+        for (int want : {3, 2, 1, 0}) { // and forwards again, wrapping at the newest
+            QCOMPARE(t.view->searchStep(false), 4);
+            QCOMPARE(t.view->searchIndex(), want);
+        }
+
+        // The selected match is on screen and is the only current one: with the
+        // walk on a fold match no real row carries the current highlight.
+        QCOMPARE(t.view->searchStep(true), 4);
+        QCOMPARE(t.view->searchIndex(), 1); // inner mark two
+        QTest::qWait(80);
+        const QStringList rows = t.view->visibleRowsText();
+        const int inner = rows.indexOf(QStringLiteral("   inner mark two"));
+        QVERIFY2(inner >= 0, qPrintable(rows.join(QLatin1Char('|'))));
+        const QImage img = t.grab();
+        const QColor cur = t.view->colorScheme().searchCurrent;
+        QVERIFY(rowHasColor(img, inner, t.view->cellHeight(), cur));
+        for (int r = 0; r < rows.size(); ++r) {
+            if (r != inner)
+                QVERIFY2(!rowHasColor(img, r, t.view->cellHeight(), cur), qPrintable(rows.value(r)));
+        }
+    }
+
+    void aMatchStraddlingAFoldLinesWrapIsFound()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        // The grid is 50 columns and the block is indented 3, so a fold line
+        // wraps after 47 cells. "wrap" sits across that wrap: cells 44..47.
+        const QString line = QString(44, QLatin1Char('x')) + QStringLiteral("wrapped-needle")
+            + QString(10, QLatin1Char('y'));
+        t.view->setFoldContent(QStringLiteral("relay://call/p/1/a"), foldBody({line}));
+        QTest::qWait(120);
+        // One match, because a fold's *logical* line is what is searched.
+        QCOMPARE(t.view->find(QStringLiteral("wrap"), true), 1);
+        QTest::qWait(80);
+        const int anchor = t.rowOf(QStringLiteral("* ran python"));
+        QVERIFY2(anchor >= 0, qPrintable(t.view->visibleRowsText().join(QLatin1Char('|'))));
+        const QImage img = t.grab();
+        const QColor cur = t.view->colorScheme().searchCurrent;
+        QVERIFY(rowHasColor(img, anchor + 1, t.view->cellHeight(), cur));
+        QVERIFY(rowHasColor(img, anchor + 2, t.view->cellHeight(), cur)); // painted across the wrap
+    }
+
+    void togglingAFoldChangesTheMatchCount()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        const QString uri = QStringLiteral("relay://call/p/1/a");
+        t.backend->writeToDisplay("outer needle\r\n");
+        QTest::qWait(80);
+        t.view->setFoldContent(uri, foldBody({QStringLiteral("inner needle one"),
+                                              QStringLiteral("inner needle two")}));
+        QTest::qWait(150);
+        QCOMPARE(t.view->find(QStringLiteral("needle"), true), 3);
+
+        t.view->setFoldExpanded(uri, false);
+        QTest::qWait(80);
+        QCOMPARE(t.view->searchMatchCount(), 1); // a shut fold is not searched
+        t.view->setFoldExpanded(uri, true);
+        QTest::qWait(80);
+        QCOMPARE(t.view->searchMatchCount(), 3);
+        QCOMPARE(t.view->searchStep(true), 3);
+    }
+
+    void aResizeKeepsTheMatchesInsideTheFold()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        t.view->setFoldContent(QStringLiteral("relay://call/p/1/a"),
+                               foldBody({QStringLiteral("inner needle one"),
+                                         QStringLiteral("inner needle two")}));
+        QTest::qWait(150);
+        QCOMPARE(t.view->find(QStringLiteral("needle"), true), 2);
+        // Both cores reflow and the block rewraps: the matches are recomputed
+        // on the new rows, and stepping still walks the two of them.
+        t.backend->resizeTerminal(14, 34);
+        QTest::qWait(250);
+        QCOMPARE(t.view->searchMatchCount(), 2);
+        QCOMPARE(t.view->searchStep(true), 2);
+        QVERIFY(t.view->searchIndex() >= 0);
+        QVERIFY(t.view->searchIndex() < 2);
+    }
+
+    void aFullScreenProgramSearchesTheRealRowsOnly()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        t.view->setFoldContent(QStringLiteral("relay://call/p/1/a"),
+                               foldBody({QStringLiteral("inner needle")}));
+        QTest::qWait(150);
+        QCOMPARE(t.view->find(QStringLiteral("needle"), true), 1);
+        t.backend->writeToDisplay("\x1b[?1049h"); // the folds are neither painted nor searched
+        QTest::qWait(100);
+        QVERIFY(t.backend->altScreen());
+        QCOMPARE(t.view->searchMatchCount(), 0);
+        t.backend->writeToDisplay("\x1b[?1049l");
+        QTest::qWait(100);
+        QCOMPARE(t.view->searchMatchCount(), 1);
+        QCOMPARE(t.view->searchStep(true), 1);
+        QCOMPARE(t.view->searchIndex(), 0);
     }
 
     void hostShortcutFilter()

@@ -4,6 +4,7 @@
 
 #include "ColorScheme.h"
 #include "FoldLayer.h"
+#include "FoldSearch.h"
 #include "KeyMapper.h"
 #include "OutputLinks.h"
 #include "core/CellTypes.h"
@@ -77,9 +78,22 @@ public:
     void clearSelection();
 
     // ---- search
+    //
+    // The find covers the real rows *and* the text of every open fold, as one
+    // sequence in the order the rows are painted: the cores search their own
+    // rows, the view searches the fold layer's, and the two are merged in
+    // visual order (see view/FoldSearch.h). The host is told a count and an
+    // index and never has to know that folds exist.
     void showSearchBar();
     void hideSearchBar();
     int find(const QString &text, bool backwards); // returns match count
+    // Matches of the current needle: the core's, plus the ones inside open folds.
+    int searchMatchCount() const;
+    // The selected match, counted from the newest (0), or -1 when there is none.
+    int searchIndex() const { return m_searchIndex; }
+    // One match towards older content (backwards) or newer, wrapping. Returns
+    // the count; *index, when given, gets the selected match's index.
+    int searchStep(bool backwards, int *index = nullptr);
 
     // ---- behaviour
     // Return true to let the host handle a key (the view ignores it).
@@ -322,6 +336,11 @@ private:
     void sendMouse(QMouseEvent *e, int action);
     void autoScrollTick();
     void updateSearchLabel(int count, int index);
+    // The count on the search bar after the folds moved under a live search.
+    void refreshSearchLabel();
+    // Put a visual row on screen if it is not already, the way a core scrolls
+    // its own match into view: half a screen above it.
+    void ensureVisualRowVisible(int visualRow);
 
     TerminalSession *m_session;
     ColorScheme m_scheme;
@@ -355,6 +374,9 @@ private:
     // Folds. m_visualTop is the authority while a fold is open: the core's own
     // viewport is then driven to cover the real rows the visual window needs.
     FoldLayer m_folds;
+    // The find's fold half and the merge with the core's matches.
+    FoldSearch m_foldSearch;
+    int m_searchIndex = -1;
     int m_visualTop = 0;
     int m_paintedVisualTop = 0;
     bool m_followBottom = true;  // the view sits at the newest output

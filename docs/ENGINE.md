@@ -142,7 +142,7 @@ Documented fallbacks, not implemented: alacritty_terminal (Rust FFI), xterm.js i
 | Geometry | `resizeTerminal(rows, cols)`, `widget()` (view + scrollbar), `focusWidget()`, `setTerminalFont()` |
 | Clipboard | `copySelection()`, `paste()`, `selectedText()`, `selectAll()`, `clearScrollback()`, `clear()` |
 | Scrolling | `scrollLines(n)`, `scrollPages(n)`, `scrollToBottom()`, `scrollToPrompt(direction)` |
-| Search | `find(text, backwards)` |
+| Search | `find(text, backwards)` — the real rows and the text of every open fold, as one sequence in visual order (see **Folds → Find**) |
 | Links | `stepLink(delta, Link*, index*, count*)`, `endLinkWalk()`, `linkWalkActive()`, `setPlainClickOpensLinks(on)` — the keyboard walk over every file, folder and URL in the screen and the scrollback (`Ctrl+Shift+L`) |
 | Callbacks | `onLinkActivated(target, line, column)` (OSC 8 URI, URL, or absolute path with `:line:col`), `onTitleChanged`, `onCwdChanged`, `onAltScreenChanged`, `onBell`, `onPromptMark(kind 'A'..'D', exitCode)`, `onOutput(bytes)` (opt-in via `setOutputCallbackEnabled`), `onFinished(exitCode)` |
 
@@ -232,20 +232,56 @@ displayed; a wrapped fold line comes back as its one logical line, without the i
 takes a word inside a fold, triple click the line, select-all the scrollback and every open fold,
 and an Alt-drag rectangle still belongs to the core.
 
+### Find
+
+`find()` covers the real rows **and** the text of every open fold, as one sequence in the order the
+rows are painted. The cores search their own rows; `view/FoldSearch.{h,cpp}` (GUI-free, unit tested
+in `tests/FoldSearchTest.cpp`) searches the folds and merges the two.
+
+A fold's **logical** line is what is searched, not its wrapped rows, so a match that straddles the
+block's wrap is one match — painted on both rows, clipped to each. The matching rule is the cores'
+(Qt case-insensitive, non-overlapping), and the count is `searchMatchCount()` + the fold matches.
+`searchStep()`'s index keeps its meaning across both kinds: counted from the newest match, 0.
+
+**Why the core is parked, never stepped and undone.** Neither core can enumerate its matches —
+libghostty-vt answers *how many* and *which one is selected*, not *all of them* — and walking the
+core over every match to find out would be O(matches) FFI calls per needle. So the merge keeps one
+match of look-ahead: it steps the core once and, while the fold matches between the previous
+position and that core match have not been visited, leaves the core **parked** there and walks the
+fold matches on its own; consuming the parked match afterwards is free. That is exactly one
+`VtCore::searchStep()` per core match visited — a step is never made and then undone, which no core
+promises to be exact — and the core's own cyclic order is the order the merged walk needs in both
+directions, wrap included. Reversing direction leaves the parked match on the wrong side, and one
+step in the new direction puts it back on the right one. `VtCore::searchCurrentRow()` (both cores)
+is what says where the core is, in absolute rows, and it is re-read before a parked match is reused,
+so a scrollback that trimmed underneath cannot leave the merge comparing against a row that moved.
+
+The index is arithmetic, not bookkeeping: `searchStep()` says how many core matches are newer than
+the one it selected, and the fold matches newer than a given visual row are counted directly, so
+both kinds' indices are exact at every step and survive a recompute.
+
+The selected fold match is drawn with `ColorScheme::searchCurrent` and the others with
+`searchMatch`, exactly as in the real rows; while the selection is a fold match the view drops the
+`current` flag on the core's own parked match, so only one match anywhere is ever the current one.
+It is scrolled into view with `scrollToVisualRow()`, half a screen above it, the way a core scrolls
+its own match in.
+
+The fold half is recomputed lazily — on a toggle, new content, a rewrap, a resize, a trim — never
+per frame, and never over the scrollback: it costs the fold's own text. A shut fold is not searched,
+and neither is any fold while a full-screen program owns the grid. With no fold open
+(`FoldLayer::active()` is false) `find()` is the core's `searchSet`/`searchStep` and nothing else,
+byte for byte the path it was before.
+
 ### On the alternate screen
 
-Folds are neither painted nor hit-tested while a full-screen program owns the grid, and come back
-when it leaves. Mouse-reporting programs get their clicks as before.
+Folds are neither painted, hit-tested nor searched while a full-screen program owns the grid, and
+come back when it leaves. Mouse-reporting programs get their clicks as before.
 
 ### Limits (2026-09-18)
 
-- **Search does not look inside an open fold.** `searchSet`/`searchStep` are the core's, so matches
-  in the real rows are found, highlighted, counted and stepped through with a fold open, but text
-  inside the block is not searched. The hook the merge needs is already in place:
-  `VtCore::searchCurrentRow()` reports the absolute row of the selected match on both cores, so the
-  view can interleave its own fold matches with the core's in visual order and count them from the
-  newest. Not written yet.
 - On the ghostty core an anchor run must include column 0 (above).
+- The find is the *needle*'s: neither core offers a regex or a whole-word mode, and the fold half
+  matches what they match, nothing more.
 - A selection that reaches above the visible window is read back through the core's own selection,
   so its soft-wrapped rows join as they always did.
 - Rectangle (Alt-drag) selection covers real rows only.
@@ -256,7 +292,9 @@ when it leaves. Mouse-reporting programs get their clicks as before.
 
 `relay-vterm-spike --folds` prints three tool-call lines and registers their detail (a short run, a
 red and green diff with a link, and a 300-line listing).
-`engine/scripts/gui/folds.sh BIN CORE OUTDIR` drives it under Xvfb and captures the states;
+`engine/scripts/gui/folds.sh BIN CORE OUTDIR` drives it under Xvfb and captures the states — the
+last two are a find whose matches straddle the open folds and one whose only match is *inside* a
+fold;
 evidence in [qa_evidence/2026-09-18-concise-tool-call-lines/](qa_evidence/2026-09-18-concise-tool-call-lines/).
 
 ## Status, with KonsolePart as the comparison it replaced

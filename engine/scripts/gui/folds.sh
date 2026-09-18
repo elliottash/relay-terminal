@@ -60,14 +60,22 @@ sleep 0.5
 shot 06-scrolled-inside-the-long-fold
 k ctrl+shift+d; sleep 0.3
 
-# 5. The find bar over a scrollback that has folds open in it. Matches in the
-#    real rows are found and highlighted; text inside an open fold is not
-#    searched yet (docs/ENGINE.md, "Folds", limitations).
+# 5. The find bar over a scrollback that has folds open in it. "python" is in a
+#    tool-call line and inside the run fold, so the count covers both and the
+#    walk visits them in the order they are on screen.
 k ctrl+shift+Home; sleep 0.4
 k ctrl+shift+f; sleep 0.4
 xdotool type --delay 20 'python'
 sleep 0.8
 shot 07-search-while-folds-are-open
+k ctrl+shift+d; sleep 0.3
+
+# 6. A needle only the inside of a fold has: the block is scrolled into view and
+#    the hit is highlighted exactly as one in a real row is.
+k ctrl+a; sleep 0.2
+xdotool type --delay 20 'sum(range'
+sleep 0.9
+shot 08-search-hit-inside-a-fold
 k ctrl+shift+d; sleep 0.3
 
 kill "$pid" 2>/dev/null

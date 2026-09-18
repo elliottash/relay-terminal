@@ -152,9 +152,14 @@ public:
     // Matching is case-insensitive for ASCII letters.
     virtual int searchStep(bool backwards) = 0;
     virtual int searchMatchCount() const = 0;
-    // The absolute scrollback row the selected match starts on, or -1. The view
-    // needs it to interleave matches inside expanded folds with the core's own
-    // in visual order; a core that cannot say puts fold matches after its own.
+    // The absolute scrollback row the selected match starts on, or -1 when
+    // there is no selected match. Both cores implement it; the view's fold
+    // layer needs it to merge the matches inside expanded folds with these in
+    // visual order. It is read again before a position it already knows is
+    // reused, so a trimmed scrollback cannot leave the merge comparing against
+    // a row that has moved (view/FoldSearch.h). A core that never answers
+    // cannot take part in that merge: with a fold open only the fold's own
+    // matches would then be stepped.
     virtual int searchCurrentRow() const { return -1; }
 
     // ---- input (results arrive through events.reply)

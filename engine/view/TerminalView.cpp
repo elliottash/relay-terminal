@@ -437,6 +437,7 @@ void TerminalView::applyGeometry()
     // Both cores rewrap the scrollback on a resize, so every fold has to be
     // told its new width and then find its anchor row again.
     m_folds.setGeometry(cols, m_folds.indent());
+    m_foldSearch.invalidate(); // the block rewrapped: its matches sit on other rows
     if (!m_folds.folds().empty())
         m_foldAnchorsDirty = true;
     emit gridSizeChanged(rows, cols);
@@ -603,6 +604,10 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
     const int cols = std::min<int>(int(line.cells.size()), m_frame.columns);
     const int y = m_padding + row * m_ch;
     const int baseline = y + m_ascent;
+    // The core still calls its own parked match "the selected one" while the
+    // find sits on a match inside a fold; only one match anywhere is current,
+    // so here it is drawn as an ordinary one.
+    const bool foldOwnsCurrent = foldsVisible() && m_foldSearch.currentIsFold();
 
     struct CellColors {
         QColor fg;
@@ -627,7 +632,7 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
         }
         for (const Line::Highlight &h : line.highlights) {
             if (col >= h.start && col <= h.end) {
-                bg = h.current ? m_scheme.searchCurrent : m_scheme.searchMatch;
+                bg = h.current && !foldOwnsCurrent ? m_scheme.searchCurrent : m_scheme.searchMatch;
                 fg = m_scheme.searchText;
                 bgDefault = false;
             }
@@ -839,6 +844,10 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
 
     int selFrom = 0, selTo = -1;
     const bool selected = foldSelectionRange(foldIndex, foldRow, &selFrom, &selTo);
+    // Find matches inside the block, highlighted exactly as the core's are in
+    // the real rows. A match that straddles the block's wrap is one match, so
+    // it comes back clipped to this row.
+    const std::vector<FoldSearch::RowMatch> hits = m_foldSearch.rowMatches(m_folds, foldIndex, foldRow);
 
     int col = indent;
     for (int i = row.first; i < row.first + row.count && i < int(cells.size()); ++i) {
@@ -847,10 +856,19 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
             break;
         const int x = m_padding + col * m_cw;
         QColor fg = c.fg.isValid() ? c.fg : m_scheme.foreground;
+        bool hit = false, hitCurrent = false;
+        for (const FoldSearch::RowMatch &h : hits) {
+            if (i >= h.from && i < h.to) {
+                hit = true;
+                hitCurrent = hitCurrent || h.current;
+            }
+        }
         if (c.bg.isValid())
             p.fillRect(QRect(x, y, c.width * m_cw, m_ch), c.bg);
         if (selected && col >= selFrom && col <= selTo)
             p.fillRect(QRect(x, y, c.width * m_cw, m_ch), m_scheme.selection);
+        if (hit)
+            p.fillRect(QRect(x, y, c.width * m_cw, m_ch), hitCurrent ? m_scheme.searchCurrent : m_scheme.searchMatch);
         if (c.dim)
             fg.setAlphaF(0.6);
         const bool hovered = screenRow == m_hoverRow && col >= m_hoverStart && col <= m_hoverEnd;
@@ -860,6 +878,8 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
         }
         if (!c.link.isEmpty())
             fg = m_scheme.link;
+        if (hit)
+            fg = m_scheme.searchText;
         const int variant = (c.bold ? 1 : 0) | (c.italic ? 2 : 0);
         const std::u32string cps = c.text.toStdU32String();
         if (!cps.empty() && cps[0] != U' ') {
@@ -1767,8 +1787,14 @@ void TerminalView::resolveFoldAnchors()
             seen << f.uri; // never anchored: the line may still be on its way
     }
     m_folds.retainAnchored(seen);
+    // The anchors, and with them the visual rows every fold match sits on, may
+    // have moved (output, trimming, a dropped fold). Recomputing is lazy and
+    // costs nothing while no needle is set; the match list itself usually comes
+    // back identical, which keeps the walk where it was.
+    m_foldSearch.invalidate();
     if (m_folds.visualRows() != before) {
         m_forceFull = true;
+        refreshSearchLabel();
         update();
     }
 }
@@ -1876,6 +1902,7 @@ void TerminalView::setFoldPrefix(const QString &uriPrefix)
 void TerminalView::setFoldIndent(int cells)
 {
     if (m_folds.setGeometry(m_cols, std::max(2, std::min(4, cells)))) {
+        m_foldSearch.invalidate();
         m_forceFull = true;
         scheduleFrame();
     }
@@ -1893,6 +1920,8 @@ void TerminalView::setFoldContent(const QString &uri, const QVector<FoldLine> &l
         m_foldResolveAt.start();
     // A fold whose anchor is already known opens without waiting for the walk.
     keepFoldAnchorInPlace(anchor, keep);
+    m_foldSearch.invalidate();
+    refreshSearchLabel();
     invalidateFoldAnchors();
 }
 
@@ -1904,6 +1933,9 @@ void TerminalView::setFoldExpanded(const QString &uri, bool expanded)
     const int keep = anchor >= 0 ? screenRowOfReal(anchor) : -1;
     m_folds.setExpanded(uri, expanded);
     keepFoldAnchorInPlace(anchor, keep);
+    // A shut fold is not searched, so the count changes with the chevron.
+    m_foldSearch.invalidate();
+    refreshSearchLabel();
     m_forceFull = true;
     scheduleFrame();
 }
@@ -1915,6 +1947,8 @@ void TerminalView::removeFold(const QString &uri)
     if (!m_folds.known(uri))
         return;
     m_folds.remove(uri);
+    m_foldSearch.invalidate();
+    refreshSearchLabel();
     m_forceFull = true;
     scheduleFrame();
 }
@@ -1924,6 +1958,8 @@ void TerminalView::clearFolds()
     if (m_folds.folds().empty())
         return;
     m_folds.clear();
+    m_foldSearch.invalidate();
+    refreshSearchLabel();
     m_forceFull = true;
     scheduleFrame();
 }
@@ -2481,14 +2517,14 @@ void TerminalView::showSearchBar()
         layout->addWidget(close);
         connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString &t) { find(t, true); });
         connect(older, &QToolButton::clicked, this, [this] {
-            updateSearchLabel(m_session->withCore([](VtCore &c) { return c.searchMatchCount(); }),
-                              m_session->withCore([](VtCore &c) { return c.searchStep(true); }));
-            scheduleFrame();
+            int index = -1;
+            const int count = searchStep(true, &index);
+            updateSearchLabel(count, index);
         });
         connect(newer, &QToolButton::clicked, this, [this] {
-            updateSearchLabel(m_session->withCore([](VtCore &c) { return c.searchMatchCount(); }),
-                              m_session->withCore([](VtCore &c) { return c.searchStep(false); }));
-            scheduleFrame();
+            int index = -1;
+            const int count = searchStep(false, &index);
+            updateSearchLabel(count, index);
         });
         connect(close, &QToolButton::clicked, this, &TerminalView::hideSearchBar);
         connect(m_searchEdit, &QLineEdit::returnPressed, this, [this, older, newer] {
@@ -2517,6 +2553,8 @@ void TerminalView::hideSearchBar()
         return;
     m_searchBar->hide();
     m_session->withCore([](VtCore &c) { c.searchSet(QString()); });
+    m_foldSearch.reset();
+    m_searchIndex = -1;
     m_forceFull = true;
     scheduleFrame();
     setFocus();
@@ -2526,21 +2564,100 @@ void TerminalView::updateSearchLabel(int count, int index)
 {
     if (!m_searchLabel)
         return;
-    m_searchLabel->setText(count == 0 ? tr("no matches") : QStringLiteral("%1/%2").arg(index + 1).arg(count));
+    if (count == 0)
+        m_searchLabel->setText(tr("no matches"));
+    else if (index < 0) // the matches moved under the walk: a count, no place in it
+        m_searchLabel->setText(QString::number(count));
+    else
+        m_searchLabel->setText(QStringLiteral("%1/%2").arg(index + 1).arg(count));
+}
+
+// A fold opened, shut, gained content or lost its anchor while a find was
+// live: the count on the bar follows, without moving the selected match.
+void TerminalView::refreshSearchLabel()
+{
+    if (!m_searchLabel || !m_searchBar || m_searchBar->isHidden() || m_foldSearch.needle().isEmpty())
+        return;
+    const int count = searchMatchCount();
+    if (foldsVisible())
+        m_searchIndex = m_foldSearch.index();
+    updateSearchLabel(count, count == 0 ? -1 : m_searchIndex);
+}
+
+int TerminalView::searchMatchCount() const
+{
+    const int core = m_session->withCore([](VtCore &c) { return c.searchMatchCount(); });
+    return foldsVisible() ? core + m_foldSearch.matchCount(m_folds) : core;
+}
+
+void TerminalView::ensureVisualRowVisible(int visualRow)
+{
+    if (visualRow < 0)
+        return;
+    if (!foldsVisible()) {
+        scrollToRow(visualRow);
+        return;
+    }
+    if (visualRow >= m_visualTop && visualRow < m_visualTop + m_rows)
+        return;
+    scrollToVisualRow(std::max(0, visualRow - m_rows / 2));
+}
+
+// One step of the find, over the real rows and the open folds' rows as one
+// sequence in visual order.
+//
+// With no fold open (or a full-screen program on the grid) this is the core's
+// own searchStep(), untouched. Otherwise FoldSearch merges the two kinds of
+// match: it steps the core at most once per call and leaves it parked on that
+// match while the fold matches in between are walked, so a core step is never
+// made and then undone. See view/FoldSearch.h.
+int TerminalView::searchStep(bool backwards, int *index)
+{
+    int selected = -1;
+    int count = 0;
+    if (!foldsVisible()) {
+        m_foldSearch.resetCursor();
+        count = m_session->withCore([&](VtCore &c) {
+            const int n = c.searchMatchCount();
+            if (n > 0)
+                selected = c.searchStep(backwards);
+            return n;
+        });
+    } else {
+        FoldSearch::Core core;
+        core.count = m_session->withCore([](VtCore &c) { return c.searchMatchCount(); });
+        core.step = [this](bool back) {
+            FoldSearch::CorePos p;
+            m_session->withCore([&](VtCore &c) {
+                p.index = c.searchStep(back);
+                p.row = c.searchCurrentRow();
+            });
+            p.valid = p.index >= 0 && p.row >= 0;
+            return p;
+        };
+        core.currentRow = [this] { return m_session->withCore([](VtCore &c) { return c.searchCurrentRow(); }); };
+        const FoldSearch::Step s = m_foldSearch.step(m_folds, backwards, core);
+        selected = s.index;
+        // The core may have recomputed its matches while stepping.
+        count = m_session->withCore([](VtCore &c) { return c.searchMatchCount(); })
+                + m_foldSearch.matchCount(m_folds);
+        ensureVisualRowVisible(s.visualRow);
+    }
+    m_searchIndex = selected;
+    if (index)
+        *index = selected;
+    m_forceFull = true;
+    scheduleFrame();
+    return count;
 }
 
 int TerminalView::find(const QString &text, bool backwards)
 {
+    m_foldSearch.setNeedle(text);
+    m_session->withCore([&](VtCore &c) { c.searchSet(text); });
     int index = -1;
-    const int count = m_session->withCore([&](VtCore &c) {
-        const int n = c.searchSet(text);
-        if (n > 0)
-            index = c.searchStep(backwards);
-        return n;
-    });
+    const int count = searchStep(backwards, &index);
     updateSearchLabel(count, index);
-    m_forceFull = true;
-    scheduleFrame();
     return count;
 }
 
