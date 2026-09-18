@@ -1,7 +1,7 @@
 ---
 id: S5SH
 type: work
-status: in-progress
+status: needs-qa-llm
 labels: [feature]
 component: [gui, shell-integration, agent, router]
 milestone: desktop-alpha
@@ -12,7 +12,7 @@ implemented_by: Claude Opus 5 (Claude Code session relay-terminal-be), 2026-09-1
 created: '2026-09-18'
 acceptance: in a recorded run against a real host, the prompt box types a command into the ssh session, the agent's reply at the remote prompt prints into the terminal, a remote sudo prompt masks the prompt box, and the agent runs a command on the host over the user's connection without a second login
 source: owner, in a Claude Code session, 2026-09-18, after the agent's reply went to the side panel while ssh sat at a remote prompt
-links: {plans: ['docs/SSH-AND-MOSH.md'], commits: [], evidence: ['docs/qa_evidence/2026-09-18-ssh-and-mosh-sessions'], related: ['SPBN', 'D8J3', 'C1HH'], github: null}
+links: {plans: ['docs/SSH-AND-MOSH.md'], commits: ['6796340', 'd1a3bcb', '3f4614c', 'c2f6aae', '70d4b9a', '0e419fe'], evidence: ['docs/qa_evidence/2026-09-18-ssh-and-mosh-sessions'], related: ['SPBN', 'D8J3', 'C1HH'], github: null}
 ---
 # SSH and mosh sessions: the prompt box, the agent and the reply work on the remote host
 
@@ -51,3 +51,33 @@ Owner, 2026-09-18, asked in the session:
 - [x] Clickable paths in a remote pane do not open local files (a toast names the host; URLs still open)
 
 Design: [`docs/SSH-AND-MOSH.md`](../../docs/SSH-AND-MOSH.md).
+
+## QA checklist
+
+Against a real host with key login (`ssh localhost` works on the owner's machine), Relay built from
+main, Options › Terminal › SSH sessions on "Enhance automatically" unless a step says otherwise.
+
+1. `ssh <host>` from the prompt box. Within a second of the remote prompt: the pane chip names the
+   host, a "Logged in to <host>" toast, and no leftover bootstrap line on screen.
+2. Type `ls -la` in the prompt box and Enter: it runs on the host (not queued, no "command not
+   found" from the local router). A remote command whose name is not installed locally (e.g. one
+   only the host has) also runs there.
+3. Ask the agent something (Ctrl+Enter) at the remote prompt: the reply prints in the terminal under
+   the prompt and the remote prompt comes back after it. No "output will also print when ssh exits"
+   panel.
+4. Run `sleep 15` on the host, ask the agent something meanwhile: the reply shows in the side panel,
+   and prints into the terminal when the remote prompt returns (not only when ssh exits).
+5. Ask the agent to check something on the host: it runs `run_command` with `host`, the line says
+   "on <host>", and no password is asked.
+6. On the host: `read -rsp "Password: " pw; echo ${#pw}` (or a real `sudo` with a password). The prompt
+   box becomes the masked "password for ssh" field; the text reaches the host and is in no model
+   request or log.
+7. `cd /etc` on the host: the pane's local folder chip does not change. A path printed by the host that
+   also exists locally, when clicked, gives the "That path is on <host>" toast and opens nothing.
+8. Options on "Ask for each host": the Enhance banner appears; without it, steps 2–3 still work
+   (prompt found from the screen, printed back after the reply). "Off": plain ssh, no banner, the
+   agent says it cannot share the connection.
+9. `mosh <host>` (if installed on both ends): steps 2, 3 and 5 work; no enhancement is attempted.
+10. Actions › Connect to host…: hosts from `~/.ssh/config` and recent ones; choosing one opens a tab
+    that logs in. In a logged-in pane, Split on the same host opens a split that logs in without a
+    password.
