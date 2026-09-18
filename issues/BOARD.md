@@ -2,12 +2,13 @@
      edit the card files and regenerate. -->
 # Board
 
-86 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+87 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (72)
+## Features (73)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
+| `#8E4Q` | [How far the switchboard aesthetic goes inside the app](features/2026-09-17-switchboard-aesthetic.md) | discussing |  | 0/7 |  |
 | `#C1HH` | [Agent drives interactive programs in the visible pane, with take-over](features/2026-09-17-agent-delegate-and-take-over.md) | ready |  |  |  |
 | `#G8DK` | [Aliased terminal commands and prompts (Warp workflows)](features/2026-09-17-aliases-and-workflows.md) | ready |  |  |  |
 | `#GDQN` | [Two-way sync between the Switchboard and GitHub Issues](features/2026-09-17-github-issues-sync.md) | ready |  |  |  |

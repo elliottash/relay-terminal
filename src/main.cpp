@@ -3770,6 +3770,9 @@ private:
             // mode. At most once per turn.
             if (event.value(QStringLiteral("tool")).toString() == QStringLiteral("run_command")) {
                 const QString runText = m_runCommands.take(event.value(QStringLiteral("call_id")).toString());
+                fprintf(stderr, "[wmh] tool_result run='%s' prompt='%s' exit=%d mode=%s shown=%d\n",  // TODO(wmh-debug)
+                        runText.left(80).toUtf8().constData(), m_turnShellPrompt.left(40).toUtf8().constData(),
+                        result.value(QStringLiteral("exit_code")).toInt(), m_modeValue.toUtf8().constData(), int(m_modeHintShown));
                 if (!m_modeHintShown && !runText.isEmpty() && result.value(QStringLiteral("exit_code")).toInt() != 0
                     && m_modeValue == QStringLiteral("agent") && commandMatchesPrompt(runText, m_turnShellPrompt)) {
                     m_modeHintShown = true;
@@ -3868,6 +3871,9 @@ private:
                 decision.value(QStringLiteral("syntax_error")).toString());
             // Wrong-mode hints: agent_signal says the text reads like a request, not a command.
             const bool readsLikeRequest = decision.value(QStringLiteral("agent_signal")).toBool();
+            fprintf(stderr, "[wmh] dispatch route=%s mode=%s valid=%d signal=%d text='%s'\n",  // TODO(wmh-debug)
+                    route.toUtf8().constData(), mode.toUtf8().constData(), int(valid), int(readsLikeRequest),
+                    text.left(60).toUtf8().constData());
             if (mode == QStringLiteral("shell")) {
                 // Terminal mode (Ctrl+Shift+Enter): always the terminal. An invalid command
                 // goes to the agent to be fixed; a failing run is fixed and re-run.
@@ -3924,6 +3930,8 @@ private:
         m_pendingCommand = text; m_loading = true; m_shellReady = false; m_promptReported = false;
         m_fixCommand = watch ? text : QString(); m_fixAttempt = attempt; m_fixWatch = watch; m_fixArmed = false;
         m_commandNatural = natural;   // wrong-mode hints: reads like a request (agent_signal)
+        fprintf(stderr, "[wmh] runInTerminal watch=%d natural=%d text='%s'\n",  // TODO(wmh-debug)
+                int(watch), int(natural), text.left(60).toUtf8().constData());
         // Stage text via a bound Readline function. Enter is sent only after its hash acknowledgement.
         sendShellInput(QString(QChar(24)) + QChar(18));
         const quint64 serial = ++m_loadSerial;
@@ -4169,11 +4177,12 @@ private:
     // Returns whether it was shown, so a caller can tie another visual (the mode chip flash) to
     // the same gates: per-hint limit, cooldown and the global "Shortcut hints" setting.
     bool hint(const QString &id, const QString &text, int limit = 3) {
-        if (text.isEmpty()) return false;
-        if (!relay::ShortcutHints::instance().shouldShow(id, limit)) return false;
+        if (text.isEmpty()) { fprintf(stderr, "[wmh] hint id=%s: empty text\n", id.toUtf8().constData()); return false; }
+        if (!relay::ShortcutHints::instance().shouldShow(id, limit)) { fprintf(stderr, "[wmh] hint id=%s: gated\n", id.toUtf8().constData()); return false; }
+        fprintf(stderr, "[wmh] hint id=%s: showing\n", id.toUtf8().constData());
         toast(text, 5000);
         return true;
-    }
+    }  // TODO(wmh-debug): remove [wmh] logging
 
     // Wrong-mode hints (2026-09-17): a submission that errored and clearly belongs in the other
     // input mode. The mode chip flashes in the suggested mode's colour and a hint names
@@ -4181,6 +4190,7 @@ private:
     // user who turned hints off sees neither; an unbound action teaches nothing and stays quiet.
     void wrongModeHint(bool towardAgent) {
         const QString key = Keymap::instance().shortcutText(QStringLiteral("input.toggle"));
+        fprintf(stderr, "[wmh] wrongModeHint towardAgent=%d key='%s'\n", int(towardAgent), key.toUtf8().constData());  // TODO(wmh-debug)
         if (key.isEmpty()) return;
         const QString text = towardAgent
             ? QStringLiteral("That read like a request, not a command · %1 switches to agent mode").arg(key)
@@ -5853,6 +5863,8 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
                 } else {
                     // Wrong-mode hints: the command ran and failed but read like a request, so the
                     // pane is probably in the wrong input mode. The fix attempt continues regardless.
+                    fprintf(stderr, "[wmh] ready fail: natural=%d mode=%s\n",  // TODO(wmh-debug)
+                            int(m_commandNatural), m_modeValue.toUtf8().constData());
                     if (m_commandNatural && m_modeValue == QStringLiteral("shell")) wrongModeHint(true);
                     // Defer until Readline has drawn the prompt and put the tty in raw mode.
                     QTimer::singleShot(200, this, [this, command, attempt, status] {
