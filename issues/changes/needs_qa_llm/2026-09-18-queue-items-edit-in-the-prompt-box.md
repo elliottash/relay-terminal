@@ -10,9 +10,9 @@ assignee: agent
 implemented_by: Claude Opus 5 (Claude Code), 2026-09-18
 rank: c
 created: '2026-09-18'
-acceptance: 'Up on an empty prompt box opens each queued item in the prompt box for editing; the top item highlighted holds the queue; `tests/queuenav_test.cpp` (21 tests) plus `ctest` (27) and `./scripts/test.sh` (871) pass'
+acceptance: 'Up on an empty prompt box opens each queued item in the prompt box for editing; the top item highlighted holds the queue; `tests/queuenav_test.cpp` (21 tests) plus `ctest` (29) and `./scripts/test.sh` (883) pass'
 source: 'owner in chat, 2026-09-18: "pressing up into the queue and selecting items should put the command in the prompt and make it editable (closer to the claude code functionality). if the top (first-queued) item is highlighted, the queue is paused and wont run."'
-links: {plans: [], commits: [], evidence: [], related: [4C94], github: null}
+links: {plans: [], commits: [95f05b4], evidence: [], related: [4C94, C6YX], github: null}
 ---
 # Queued items are edited in the prompt box, and the highlighted top item holds the queue
 
@@ -74,6 +74,16 @@ The old Enter behaviour pulled the item out of the queue and resubmitted it at t
 what `m_resubmitAtFront` and `m_editKind` existed for. Nothing sets them now, so both are gone, along
 with the two `!m_resubmitAtFront &&` guards in `submitAgent` / `submitTerminal` and the prepend branch
 in `enqueue` (everything queued now joins the back).
+
+## State, 2026-09-18
+
+All of it is on `main` in `95f05b4` — `src/QueueNav.{h,cpp}`, `tests/queuenav_test.cpp` and the
+`src/main.cpp` half (the key routing, the hold, `keepSelectionOn`). That commit swept this work in
+alongside another session's remote-share work, which is why its message does not mention the queue.
+
+Verified: the app builds, `relay-queuenav-tests` passes 21/21, `ctest` is 29/29 and
+`./scripts/test.sh` is 883/883. Nothing in the checklist below has been exercised in the running
+GUI yet — all eleven items are open, so this card is **ready for QA, not for closing**.
 
 ## QA checklist
 

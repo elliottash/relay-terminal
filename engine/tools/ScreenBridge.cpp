@@ -14,6 +14,7 @@
 //   in   {"t":"input","bytes":"<base64>"}      keys or text for the program
 //        {"t":"resize","rows":R,"cols":C}      the *desktop* resizing its own pane
 //        {"t":"snapshot"}                      ask for a full frame (a phone reconnected)
+//        {"t":"history","before":K,"count":N}   scrollback: the N lines before the newest K
 //        {"t":"signal","name":"int"}           ^C without guessing an encoding
 //        {"t":"quit"}
 //
@@ -21,6 +22,7 @@
 //        {"t":"snapshot","rows":R,"cols":C,"alt":bool,"cursor":{...},"lines":[<row>...]}
 //        {"t":"diff","cursor":{...},"lines":[<row>...]}        only rows that changed
 //        {"t":"title","text":"..."} {"t":"cwd","path":"..."} {"t":"bell"}
+//        {"t":"history","from":I,"lines":[...],"more":b}       a page of scrollback, oldest first
 //        {"t":"mark","kind":K,"row":R,"exit":E}                OSC 133
 //        {"t":"status","foreground_pid":N,"running":bool}       tcgetpgrp on the master
 //        {"t":"out","bytes":"<base64>"}     raw PTY bytes, only with --raw-out
@@ -131,6 +133,41 @@ private:
         writeLine(relay::screenjson::frameOf(m_frame, full));
     }
 
+    // Scrollback for a phone (protocol section 6.5). `before` counts from the end — the page is
+    // the N lines above the newest K — because an absolute row number would drift the moment the
+    // shell prints anything. historyText/historyRows are const and never move the viewport, which
+    // is the other hard rule of section 6.5: the desktop user's screen is shared state.
+    void sendHistory(int before, int count)
+    {
+        before = qBound(0, before, 10'000'000);
+        count = qBound(1, count, 200);
+        int total = 0;
+        QStringList lines;
+        m_session->withCore([&](VtCore &core) {
+            total = core.historyRows();
+            const int available = qMax(0, total - before);
+            const int want = qMin(count, available);
+            if (want > 0) {
+                lines = core.historyText(before + want);
+                if (lines.size() > want) lines = lines.mid(0, want);
+            }
+        });
+        QJsonArray rows;
+        for (int index = 0; index < lines.size(); ++index) {
+            QJsonArray segment;
+            segment.append(lines[index]);
+            segment.append(0.0);
+            segment.append(0.0);
+            segment.append(0);
+            QJsonObject row;
+            row["row"] = total - before - int(lines.size()) + index;
+            row["segs"] = QJsonArray{segment};
+            rows.append(row);
+        }
+        writeLine({{"t", "history"}, {"from", total - before - int(lines.size())},
+                   {"lines", rows}, {"more", bool(total - before - int(lines.size()) > 0)}});
+    }
+
     void sendStatus()
     {
         const qint64 foreground = m_session->foregroundPid();
@@ -175,6 +212,8 @@ private:
         } else if (kind == QLatin1String("snapshot")) {
             m_forceSnapshot = true;
             sendFrame();
+        } else if (kind == QLatin1String("history")) {
+            sendHistory(message.value("before").toInt(0), message.value("count").toInt(50));
         } else if (kind == QLatin1String("signal")) {
             const qint64 pid = m_session->foregroundPid();
             if (pid > 0) ::kill(pid_t(pid), SIGINT);

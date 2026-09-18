@@ -401,7 +401,29 @@ desktop-minted prompt nonce and a fresh termios read at write time (P3), WebAuth
 must be bound to the desktop or dropped from the threat table, and the `transport_switch` handshake
 is unwritten (P2).
 
-### 12.5 Still open
+### 12.5 What shipped, and what the phases mean now (2026-09-18)
+
+P0, P1's companion, P2's screen stream and P3's take-over are in and used from a real iPhone and
+iPad. The phase table in section 9 still reads as a plan; against it:
+
+| Phase | Where it stands |
+|---|---|
+| P0 spec | Done, with the security review folded in |
+| P1 agent companion | Pairing, panes, prompts and the agent are in. **Notifications are not**, which is most of this phase's value |
+| P2 terminal view | Screen stream, take-over and direct typing in. No scrollback paging |
+| P3 take over | In, except answering a password prompt from the phone |
+| P4 multiplayer | Not started |
+| P5 native apps | Not started |
+
+Two things the design did not anticipate, both confirmed by use:
+
+- **The agent needs no stream of its own.** Relay prints agent output into the pane's terminal
+  (`ARCHITECTURE.md` section 8), so the screen stream already carries it. The phone shows one
+  prompt box, and the answer arrives where the commands do.
+- **Sharing is no longer engine-gated.** KonsolePart's retirement removed the constraint this
+  document treats as central to P1 versus P2.
+
+### 12.6 Still open
 
 - **Hosting actions are owner-only and on the critical path**: the `app.relay-terminal.ai` vhost and
   the `rv.` cloudflared ingress rule are server-side changes on a box running a dozen sites, exactly

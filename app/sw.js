@@ -1,6 +1,64 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Enough of a service worker to make the app installable, which is what iOS requires before it
-// will deliver Web Push. It deliberately does not cache: a stale copy of a client that holds
-// cryptographic keys is not something to keep around, and the app is tiny.
+// will deliver Web Push, and to receive those pushes. It deliberately does not cache: a stale
+// copy of a client that holds cryptographic keys is not something to keep around.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+
+// One push, opened or dropped. The body arrives sealed to a key only this device and the
+// desktop hold (docs/REMOTE-PROTOCOL.md section 9): a compromised rendezvous cannot forge a
+// "password prompt", because a push this worker cannot open is discarded, never shown.
+const DB_NAME = 'relay-remote';
+const STORE = 'device';
+
+function stored(key) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(STORE);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      const get = db.transaction(STORE, 'readonly').objectStore(STORE).get(key);
+      get.onerror = () => reject(get.error);
+      get.onsuccess = () => resolve(get.result || null);
+    };
+  });
+}
+
+async function openSealed(blob) {
+  const key = await stored('push-key');
+  if (!key) return null;
+  try {
+    const plain = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: blob.slice(0, 12), additionalData: new TextEncoder().encode('relay-push-v1') },
+      key, blob.slice(12));
+    const body = JSON.parse(new TextDecoder().decode(plain));
+    return body && typeof body === 'object' ? body : null;
+  } catch {
+    return null;               // not ours to show: a push we cannot open is discarded
+  }
+}
+
+self.addEventListener('push', (event) => {
+  event.waitUntil((async () => {
+    const body = event.data ? await openSealed(await event.data.arrayBuffer()) : null;
+    if (!body) return;
+    await self.registration.showNotification(body.title || 'Relay', {
+      body: body.body || '',
+      tag: body.kind || 'relay',      // a second "agent finished" replaces the first
+      renotify: false,
+      data: { pane: body.pane },
+    });
+  })());
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of all) {
+      if ('focus' in client) return client.focus();
+    }
+    return self.clients.openWindow('./');
+  })());
+});

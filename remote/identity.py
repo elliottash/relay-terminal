@@ -136,6 +136,9 @@ class Device:
     last_seen: float = 0.0
     password_entry: bool = False       # owner decision 5: off per device by default
     revoked: bool = False
+    # The Web Push subscription (section 9): endpoint + content keys + the inner seal key, sent
+    # by the phone inside the Noise session and kept only here — never at the rendezvous.
+    push: dict | None = None
 
     @property
     def key_bytes(self) -> bytes:
@@ -236,6 +239,14 @@ class DeviceStore:
         device.capability = capability
         self.save()
         self._notify(device_id)              # a downgrade must reach live sessions at once
+        return True
+
+    def set_push(self, device_id: str, subscription: dict | None) -> bool:
+        device = self.devices.get(device_id)
+        if device is None:
+            return False
+        device.push = subscription
+        self.save()
         return True
 
     def set_password_entry(self, device_id: str, allowed: bool) -> bool:

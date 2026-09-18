@@ -31,11 +31,12 @@ from pathlib import Path
 if __package__ in (None, ""):                      # running the file directly
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from remote import envelope, httpd, noise, ws
+from remote import envelope, httpd, noise, push, ws
 
 log = logging.getLogger("relay.rendezvous")
 
 ROOM_TTL = 300              # five minutes, matching the QR secret's life
+MAX_ROOM_TTL = 7 * 86400    # an invite may live up to a week (section 10)
 METADATA_DAYS = 7
 MAX_ROOMS_PER_HOUR = 20
 MAX_CHANNELS_PER_DESKTOP = 32
@@ -76,6 +77,10 @@ CREATE TABLE IF NOT EXISTS challenges (
     ephemeral_private TEXT NOT NULL,
     created REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS push_keys (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    vapid_private TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS events (
     at REAL NOT NULL,
     kind TEXT NOT NULL,
@@ -88,6 +93,14 @@ CREATE INDEX IF NOT EXISTS events_at ON events(at);
 
 def token_hash(token: str) -> str:
     return sha256(token.encode()).hexdigest()
+
+
+def push_public_of(private: bytes) -> bytes:
+    """The VAPID public key for a private one, uncompressed P-256, for the /v1/push/key route."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    key = ec.derive_private_key(int.from_bytes(private, "big"), ec.SECP256R1())
+    return key.public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
 
 
 class Store:
@@ -144,7 +157,7 @@ class Store:
             return None
         room = secrets.token_urlsafe(16)
         self.db.execute("INSERT INTO rooms (room, desktop_id, created, expires) VALUES (?, ?, ?, ?)",
-                        (room, desktop_id, now, now + min(ttl, ROOM_TTL)))
+                        (room, desktop_id, now, now + max(1.0, min(ttl, MAX_ROOM_TTL))))
         self.db.commit()
         return room
 
@@ -197,6 +210,19 @@ class Store:
         return secrets.compare_digest(expected, proof)
 
     # ---- push --------------------------------------------------------------------------------
+
+    def vapid_pair(self) -> tuple[bytes, bytes]:
+        """The one VAPID keypair, made on first use. The private half stays here and signs
+        delivery requests; the public half is what a phone subscribes under."""
+        row = self.db.execute("SELECT vapid_private FROM push_keys WHERE singleton = 1").fetchone()
+        if row:
+            private = base64.b64decode(row["vapid_private"])
+        else:
+            private, _ = push.vapid_generate()
+            self.db.execute("INSERT INTO push_keys (singleton, vapid_private) VALUES (1, ?)",
+                            (base64.b64encode(private).decode(),))
+            self.db.commit()
+        return private, push_public_of(private)
 
     def recent_push_count(self, desktop_id: str) -> int:
         return self.db.execute(
@@ -294,6 +320,15 @@ def build(store: Store, static_root: Path | None = None) -> httpd.Server:
         store.note("room", desktop_id)
         return httpd.Response.json({"room": room, "expires_in": ROOM_TTL})
 
+    @server.route("GET", "/v1/push/key")
+    async def push_key(request: ws.Request, body: bytes) -> httpd.Response:
+        # Public by definition: it is the key a browser subscribes under. CORS-open because in
+        # production the app origin (app.relay-terminal.ai) and this one differ.
+        return httpd.Response(
+            body=json.dumps({"vapid": push.b64url(store.vapid_pair()[1])}).encode(),
+            headers={"Access-Control-Allow-Origin": "*",
+                     "Access-Control-Allow-Methods": "GET"})
+
     @server.route("POST", "/v1/push/send")
     async def push_send(request: ws.Request, body: bytes) -> httpd.Response:
         """The desktop posts an opaque payload and the endpoint to post it to.
@@ -315,14 +350,50 @@ def build(store: Store, static_root: Path | None = None) -> httpd.Server:
         endpoint = str(fields.get("endpoint", ""))
         if not endpoint.startswith("https://") or len(endpoint) > 2048:
             return httpd.Response.error(400, "endpoint must be an https URL.")
-        if not isinstance(fields.get("ciphertext"), str):
+        ciphertext = str(fields.get("ciphertext", ""))
+        try:
+            payload = base64.b64decode(ciphertext, validate=True)
+        except (ValueError, TypeError):
+            return httpd.Response.error(400, "ciphertext must be base64.")
+        if not payload or len(payload) > 4096:
             return httpd.Response.error(400, "ciphertext is required.")
+        urgency = str(fields.get("urgency", "normal"))
+        if urgency not in ("very-low", "low", "normal", "high"):
+            urgency = "normal"
+        ttl = min(max(int(fields.get("ttl", 60) or 60), 0), 24 * 3600)
         store.note("push", desktop_id)
-        # P1 adds VAPID signing and the POST to `endpoint` here. The body arrives encrypted twice
-        # over — to the subscription keys and, inside that, to the device's pinned Noise key — so
-        # this process never holds anything that can open it.
-        return httpd.Response.json({"queued": True, "delivered": False,
-                                    "note": "web push delivery is not wired up yet."})
+        # Delivery: we sign with the VAPID key and post bytes we cannot read. The body arrives
+        # encrypted twice over — RFC 8291 to the subscription keys, and inside that a seal to a
+        # key that travelled to the desktop inside the Noise session — so this process never
+        # holds anything that can open it, and cannot forge one either.
+        delivered, status, drop = await deliver(store.vapid_pair()[0], endpoint, payload,
+                                                ttl, urgency)
+        return httpd.Response.json({"delivered": delivered, "status": status, "drop": drop})
+
+    async def deliver(vapid_private: bytes, endpoint: str, payload: bytes, ttl: int,
+                      urgency: str) -> tuple[bool, int | None, bool]:
+        import urllib.error
+        import urllib.request
+        authorization = push.vapid_authorization(vapid_private, endpoint)
+
+        def go() -> tuple[bool, int | None, bool]:
+            request = urllib.request.Request(
+                endpoint, data=payload, method="POST", headers={
+                    "Authorization": authorization,
+                    "TTL": str(ttl),
+                    "Urgency": urgency,
+                    "Content-Type": "application/octet-stream",
+                })
+            try:
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    return response.status in (200, 201), response.status, False
+            except urllib.error.HTTPError as error:
+                # 404/410: the subscription is gone; the desktop is told to drop it.
+                return False, error.code, error.code in (404, 410)
+            except (urllib.error.URLError, OSError, ValueError) as error:
+                log.info("push to %s failed: %s", endpoint[:48], error)
+                return False, None, False
+        return await asyncio.to_thread(go)
 
     @server.route("GET", "/v1/health")
     async def health(request: ws.Request, body: bytes) -> httpd.Response:

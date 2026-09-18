@@ -187,7 +187,11 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   else follows from it as three models — **Main** for agent turns and subagents, **Flash** for driving
   programs and quick side calls, **Lite** for titles, labels and duplicate checks. Picking GLM gives
   glm-5.3 / glm-5.3-flash / Gemini 3.8 Flash; Kimi gives kimi-k3 / kimi-k2.7-code-highspeed / Gemini
-  3.8 Flash; Anthropic gives Opus 5 / Sonnet 5 / Haiku 4.5. Each row is editable.
+  3.8 Flash; Anthropic gives Opus 5 / Sonnet 5 / Haiku 4.5. Each row is editable, and the rows can name
+  a **different provider** than the default one: point Flash at Z.AI while Main stays on Kimi and you
+  get `glm-5.3-flash`, that provider's own Flash model, without typing a model id. The lists name the
+  company — Kimi, Z.AI (GLM), OpenRouter, OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) — and
+  offer only providers you hold a key for.
   **Advanced options** opens one row per job — agent turns, subagents, terminal use, new panes,
   suggestions, summaries, Switchboard threads, chores, the request audit, images — each showing the
   model it resolves to ("Flash · glm-5.3-flash") and following its tier until you pin it.
@@ -214,7 +218,7 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   shortcut preset), a click on the chip, `/tasks` (also `/requests`, `/todos`) or Actions › Tasks…
   open the task list: requests (your words, verbatim) with their tasks under them, marked
   ✓ ◐ ○ ✗ ⏸ ✕; keys: Enter folds, `d` marks done, `x` cancels, `o` reopens, `r` re-asks, Esc
-  closes. When a turn stops at its step limit (default 50 model calls, 150 tool calls; Actions ›
+  closes. When a turn stops at its step limit (default 256 model calls, 150 tool calls; Actions ›
   Settings › Agent), the terminal shows **▸ Continue** (Ctrl+click, `/continue` or the palette), and
   turns with more than one task end with a line such as
   `✦ Tasks 3/5 (1 failed, 1 deferred) · T4 “…” failed, T5 “…” deferred`. Resume and recaps list

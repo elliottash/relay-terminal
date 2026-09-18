@@ -394,3 +394,50 @@ class BridgeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(BRIDGE, "relay-screen-bridge is not built")
+class HistoryTests(unittest.TestCase):
+    def test_scrollback_pages_over_a_real_shell(self):
+        async def main():
+            async with Harness() as harness:
+                client, _ = await harness.paired_client()
+                pane = harness.pane.id
+                await client.send({"t": "pane_focus", "pane": pane})
+                await client.expect("screen_snapshot")
+                await client.send({"t": "line", "pane": pane,
+                                   "text": "for i in $(seq 1 80); do echo hist-$i; done"})
+                deadline = asyncio.get_event_loop().time() + 20
+                while True:
+                    if asyncio.get_event_loop().time() > deadline:
+                        self.fail(f"the command never finished; screen was:\n{harness.screen_text()}")
+                    try:
+                        message = await asyncio.wait_for(client.inbox.get(), 5)
+                    except asyncio.TimeoutError:
+                        break
+                    if message["t"] == "screen_diff" and any(
+                            "hist-80" in "".join(seg[0] for seg in line["segs"])
+                            for line in message.get("lines", [])):
+                        break
+
+                seen: list[str] = []
+                before, pages = 0, 0
+                while True:
+                    await client.send({"t": "history_get", "pane": pane,
+                                       "before_row": before, "count": 40, "id": f"h{pages}"})
+                    page = await client.expect("history")
+                    lines = ["".join(seg[0] for seg in row["segs"])
+                             for row in page["lines"]]
+                    seen.extend(lines)
+                    before += len(lines)
+                    pages += 1
+                    if not page["more"] or pages > 10:
+                        break
+                self.assertLessEqual(pages, 10)
+                # The newest screenful is still on the live screen, not in scrollback, so
+                # paging to `more: false` reaches everything above it — not the last few lines.
+                hist = [line for line in seen if "hist-" in line]
+                self.assertGreaterEqual(len(hist), 60)
+                self.assertEqual(len(hist), len(set(hist)), "a page repeated itself")
+                await client.close()
+        asyncio.run(asyncio.wait_for(main(), 120))

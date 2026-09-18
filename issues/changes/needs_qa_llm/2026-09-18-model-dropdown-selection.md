@@ -12,7 +12,7 @@ rank: a
 created: '2026-09-18'
 acceptance: 'The composer''s model box swaps the pane between the Main and Flash agents in both directions with the chip following, and the ⚙ row opens the model options modal; `docs/qa_evidence/2026-09-18-model-dropdown-selection/` (implementer run under Xvfb); a non-Claude QA session runs the checklist below'
 source: 'owner in chat, 2026-09-18 (bug intake): "selecting model options in the model dropdown didnt do anything. the main use case for that is going to be swapping between the main and flash models."'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-model-dropdown-selection/'], related: [4WHD, C6YX], github: null}
+links: {plans: [], commits: [95f05b4], evidence: ['docs/qa_evidence/2026-09-18-model-dropdown-selection/'], related: [4WHD, C6YX], github: null}
 ---
 # The model box does nothing when you pick anything that is not a provider
 
@@ -73,12 +73,13 @@ do it. Picking a *preset* still puts the pane back on the Main agent, as before 
 
 ## Implementer evidence
 
-Build clean, `ctest --test-dir build` 25/25, `./scripts/test.sh` 870 tests OK (2026-09-18), on a tree
-carrying this change alone. A later run of the same commands, after other in-flight work landed in the
-same working tree, fails `test_remote_browser.test_pair_and_drive_a_pane_from_the_browser` (the web
-client waiting for `.plan-title`) and with it `backend-and-bash` in ctest. That path — `remote/`,
-`src/RemoteShare.*`, the web client — is not touched here; it belongs to the concurrent remote-share
-work and QA should re-check it against that change, not this one.
+Build clean, `ctest --test-dir build` 25/25 and `./scripts/test.sh` 870 tests OK on a tree carrying
+this change alone (2026-09-18). Re-checked on main after the code landed in 95f05b4, with the rest of
+the day's work beside it: **`ctest` 29/29 and `./scripts/test.sh` 883 OK**. An intermediate run had
+failed `test_remote_browser.test_pair_and_drive_a_pane_from_the_browser` (the web client waiting for
+`.plan-title`); that was the concurrent remote-share rewrite of the web client, which has since
+landed, and the group passes again. Nothing in that path — `remote/`, `src/RemoteShare.*`, the web
+client — is touched here.
 
 Live under Xvfb with an isolated `HOME`/`XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_CACHE_HOME`,
 `RELAY_KEYRING=off` and a literal non-key string in `RELAY_GLM_CODING_API_KEY` (no account, no turn,
@@ -134,7 +135,9 @@ so the drive script is the regression check. See "Known gaps".
   executable, so nothing in `tests/` can construct the model box; adding that seam means lifting the
   composer's chip strip out of `main.cpp`, which is worth doing but is not this fix. `drive.sh` in the
   evidence folder is the repeatable check in the meantime.
-- The intake line for this report is still in `issues/bug_intake.txt`; the coordinator files it.
+- ~~The intake line is still in `issues/bug_intake.txt`.~~ Filed: the three 2026-09-18 bug-intake
+  lines this card came from were cleared from the intake when the day's work was swept up. This card
+  is the record.
 - The subagent rows' own model menu (`Pane::pickSubagentModel`) was checked and is a separate, working
   path — it is a `QMenu`, not this box, and it has no role rows. Whether it should offer Main/Flash per
   subagent is a product question, left alone.

@@ -17,4 +17,10 @@ links: {plans: [], commits: [], evidence: [], related: [], github: null}
 No accounts. Export and import everything that is not a secret: keymap, theme, model roles (not keys),
 Agent options, Switchboard preferences, aliases. Then consider a Brave-style sync: a device pairs with a code,
 content encrypted end to end, no account, using the same pairing machinery as remote access (#W5N2).
+
+That machinery now exists and was deliberately factored to be reused (2026-09-18): `remote/pairing.py`
+is pairing on its own — the QR link with the secret in the fragment, single-use short-lived rooms,
+and the five-digit code both ends derive from the handshake — with no knowledge of panes or agents.
+`remote/noise.py` and `remote/identity.py` hold the session and the pinned device keys. Sync would
+add its own payload over that, not a second way to pair.
 API keys stay in the keyring and are never exported unless the user explicitly asks.

@@ -10,9 +10,9 @@ assignee: agent
 implemented_by: Claude Opus 5 (Claude Code, agent B), 2026-09-18
 rank: b
 created: '2026-09-18'
-acceptance: 'An unknown `/command` prints Relay''s own line with the closest real commands and `/help`; a real slash command still runs; `/usr/bin/foo` and `/tmp` still run in the shell; `./scripts/test.sh` (871) and `ctest` (27, including the new `slash` group) pass'
+acceptance: 'An unknown `/command` prints Relay''s own line with the closest real commands and `/help`; a real slash command still runs; `/usr/bin/foo` and `/tmp` still run in the shell; `./scripts/test.sh` (883) and `ctest` (29 groups, including the new `slash` group) pass'
 source: 'owner, bug intake 2026-09-18: "if / commands are not found, it says ''/command not found''"'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-unknown-slash-command/'], related: [G8DK], github: null}
+links: {plans: [], commits: [95f05b4], evidence: ['docs/qa_evidence/2026-09-18-unknown-slash-command/'], related: [G8DK], github: null}
 ---
 # An unknown `/command` is answered by Relay, not by the shell
 
@@ -94,8 +94,8 @@ shortcut-hint trigger list, the file map) and `README.md`.
 9. **Nothing regressed in routing.** A plain request ("symlink from ~/projects to here") still
    goes to the agent with no "command not found: symlink" note under it, and a mistyped command
    ("gti status") still keeps its note.
-10. **Tests.** `ctest --test-dir build` (27 groups, including `slash`) and `./scripts/test.sh`
-    (871) pass.
+10. **Tests.** `ctest --test-dir build` (29 groups, including `slash`) and `./scripts/test.sh`
+    (883) pass. Both were re-run green on main after the code landed in 95f05b4.
 
 ## Known gaps
 

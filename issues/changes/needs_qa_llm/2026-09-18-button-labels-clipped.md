@@ -12,7 +12,7 @@ rank: b
 created: '2026-09-18'
 acceptance: 'No shipped button label paints wider than its button in any theme, proved by `relay-buttonfit-tests` (which fails its own self-check if the measurement stops measuring); a non-Claude QA session confirms the API keys modal reads correctly'
 source: 'owner in chat, 2026-09-18, with a screenshot of the API keys modal: "in the ''model keys'' modal, this button text is going off the button" and "if easy, see if we can algorithmically check all buttons in case there are others"'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-button-labels-clipped/'], related: [], github: null}
+links: {plans: [], commits: [fd3737f], evidence: ['docs/qa_evidence/2026-09-18-button-labels-clipped/'], related: [], github: null}
 ---
 # Button labels painted past the button's edge
 

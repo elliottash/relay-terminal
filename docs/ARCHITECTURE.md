@@ -941,7 +941,6 @@ Actions › Conversations…), which asks the worker through callbacks and is fe
 reference when the conversation belongs to another workspace); Shift+Enter opens it in a new pane
 through the same path as a fork.
 
-### Model roles
 ### Model roles and the Main / Flash / Lite tiers
 
 `backend/relay_core/roles.py` and the tier table in `presets.py`, protocol sections 13 and 13.7.
@@ -973,8 +972,21 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   next-command/next-prompt suggestions (`suggestions`), the request audit (`audit`), routing assist
   (`route_assist`), and panes that run the Flash agent themselves (`configure {agent_role}` /
   `set_agent_role`).
-- GUI: `src/ModelSettings.*` — `RolesDialog` (default provider, the three tier rows, an Advanced
-  disclosure with one row per job showing the model it resolves to). Reached from Settings › Models,
+- **Naming and what is offered** (2026-09-18, `#P7QK`). A *preset* is a plan you hold a key for, so the
+  keys modal lists one row per plan and uses `label` ("Kimi · K3"). The roles modal picks a **provider**
+  whose model the tier decides, so it uses `provider` — Kimi, Z.AI (GLM), OpenRouter, OpenAI (ChatGPT),
+  Anthropic (Claude), Google (Gemini), MiniMax — and appends `· <plan>` only when two presets of one
+  company are both offered. Its lists hold providers with a stored key, always including the one in
+  use, and fall back to everything marked "(no key)" only when nothing has a key at all.
+- **A tier that names only a provider** runs that provider's model *for that tier*
+  (`presets.provider_tier_model`): Flash on Z.AI is `glm-5.3-flash`, not `glm-5.3`. When a provider's
+  own entry for the tier points elsewhere (every Lite is Gemini through OpenRouter) the named provider
+  wins and the nearest tier that stays on it is used. So Main on Kimi with Flash on the GLM Coding Plan
+  is two picks and no typing, and changing the default provider keeps an override that names a
+  different provider.
+- GUI: `src/ModelSettings.*` (the `relay-modelsettings` library, so the dialogs are testable
+  headlessly — `tests/modelsettings_test.cpp`) — `RolesDialog` (default provider, the three tier rows,
+  an Advanced disclosure with one row per job showing the model it resolves to). Reached from Settings › Models,
   the palette (`agent.modelRoles`) and the ⚙ entry at the bottom of the pane's model box. Plus
   "New panes use the Flash agent" (off by default; the first pane keeps the Main agent), the pane's model
   chip (role and effective model, all roles in its tooltip), "Flash agent for this pane"
@@ -1044,7 +1056,7 @@ conversation.
 
 `backend/relay_core/agent.py`. One conversation per worker. The system prompt tells the model
 that tools run without confirmation, that tool output is untrusted, and that `run_command` is a
-separate non-interactive shell. Per turn: at most 50 model requests and 150 tool calls by default
+separate non-interactive shell. Per turn: at most 256 model requests and 150 tool calls by default
 (`max_steps`/`max_tool_calls`, configurable); hitting a limit ends the turn with
 `done {stop_reason: "limit"}`, which does not pause the queue. On cancel or error the user's prompt
 and delivered steers stay in history; only a half-finished tool-call group is completed with
@@ -1122,10 +1134,11 @@ prepared, `tool_started` carries a preview, and it executes immediately.
 | `set_keybinding` | offered when the GUI sent a catalog (section 4) |
 | `load_skill`, `read_skill_file` | offered when at least one skill is indexed |
 
-File tools reject absolute paths, `..`, symlinks anywhere on the path, paths outside the
-workspace, and `.ssh`, `.gnupg`, `.git`, `.env*`, `id_rsa`, `id_ed25519`, `*.pem`, `*.key`.
-These checks reduce mistakes; they are not a sandbox. `run_command` has the user's full
-filesystem and network permissions.
+File tools accept absolute paths and `..`, but every path is resolved and must land
+inside the workspace. Symlinks anywhere in the workspace part of the path, paths that
+resolve outside it, and `.ssh`, `.gnupg`, `.git`, `.env*`, `id_rsa`, `id_ed25519`, `*.pem`,
+`*.key` are refused. These checks reduce mistakes; they are not a sandbox. `run_command`
+has the user's full filesystem and network permissions.
 
 Remaining controls without approvals: the system prompt, file-tool guards, environment
 scrubbing, timeouts, output caps, step and tool limits, the Stop agent action, and the inline

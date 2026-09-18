@@ -12,7 +12,7 @@ rank: c
 created: '2026-09-18'
 acceptance: 'Quit Relay with output on screen, start it again: the reopened pane shows that text above its new prompt, scrollable and in order; the store is bounded and pruned; `ctest` (29) and `./scripts/test.sh` (883) pass'
 source: 'owner, bug intake 2026-09-18: "when relay quits and restarts and reloads sessions, it should still have the scrollback"'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-scrollback-survives-restart/'], related: [], github: null}
+links: {plans: [], commits: [95f05b4], evidence: ['docs/qa_evidence/2026-09-18-scrollback-survives-restart/'], related: [], github: null}
 ---
 # Scrollback survives a quit and restart
 
@@ -110,7 +110,8 @@ gained or changed, because the terminal's text never goes near the worker.
    pair per restart, and the output typed after the first restore is saved with the rest.
 10. **Nothing regressed.** The layout itself still restores (geometry, screen, tabs, current tab,
     directories, models, session ids). A second Relay still refuses to save. `ctest --test-dir
-    build` (29 groups) and `./scripts/test.sh` (883) pass.
+    build` (29 groups) and `./scripts/test.sh` (883) pass — both re-run green on main after the
+    code landed in 95f05b4.
 
 ## Known gaps
 

@@ -227,3 +227,41 @@ class ScreenTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VoiceTests(unittest.TestCase):
+    """A clip from a phone reaches the GUI as `voice`; the worker's text returns to the phone."""
+
+    def test_a_clip_round_trips_through_the_panes_worker(self):
+        async def main():
+            async with Harness() as harness:
+                client, _ = await harness.paired_client()
+                await client.send({"t": "voice", "pane": "p1", "format": "webm",
+                                   "data": "aGVsbG8gY2xpcA==", "id": "v1"})
+                clip = await harness.settle("voice")
+                self.assertEqual(clip["pane"], "p1")
+                self.assertEqual(clip["format"], "webm")
+                self.assertEqual(clip["data"], "aGVsbG8gY2xpcA==")
+
+                harness.source.voice_reply({"t": "transcribed", "pane": "p1", "ok": True,
+                                            "text": "run the tests"})
+                reply = await client.expect("agent")
+                self.assertEqual(reply["event"]["event"], "transcribed")
+                self.assertEqual(reply["event"]["text"], "run the tests")
+                await client.close()
+        run(main())
+
+    def test_a_failed_transcription_is_an_error_not_a_hang(self):
+        async def main():
+            async with Harness(capability=wire.AGENT) as harness:
+                client, _ = await harness.paired_client()
+                await client.send({"t": "voice", "pane": "p1", "format": "webm",
+                                   "data": "aGVsbG8gY2xpcA==", "id": "v2"})
+                await harness.settle("voice")
+                harness.source.voice_reply({"t": "transcribed", "pane": "p1", "ok": False,
+                                            "error": "no_key"})
+                with self.assertRaises(wire.WireError) as caught:
+                    await client.expect("agent")
+                self.assertIn("no_key", caught.exception.message)   # the worker's own code
+                await client.close()
+        run(main())

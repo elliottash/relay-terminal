@@ -58,6 +58,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
+#include <QTemporaryFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFontDatabase>

@@ -6,11 +6,13 @@ labels: [feature]
 component: [gui, worker, terminal engine]
 milestone: desktop-alpha
 workstream: terminal
+assignee: agent
+implemented_by: claude
 rank: 6d
 created: '2026-09-17'
 acceptance: from a phone, the owner follows and drives a desktop Relay pane's agent and terminal with notifications; two people share a pane with clear control handoff; all traffic end-to-end encrypted
 source: '`issues/feature_intake.txt`, 2026-09-17: "another important feature i need: remote access on phone. multiplayer shared terminals. i like warp remote control and blink but they kind of suck. lets make a good version of that."'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-17-remote-p1/', 'docs/qa_evidence/2026-09-17-remote-share-button/'], related: [C1HH, YR21, 05J2], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-17-remote-p1/, docs/qa_evidence/2026-09-17-remote-share-button/], related: [C1HH, YR21, 05J2], github: null}
 ---
 # Remote access from a phone and multiplayer shared terminals
 

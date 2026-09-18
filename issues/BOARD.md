@@ -2,9 +2,9 @@
      edit the card files and regenerate. -->
 # Board
 
-115 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+122 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (80)
+## Features (81)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -28,6 +28,7 @@
 | `#GWXM` | [Keyboard shortcut to step through files, folders and links in output](features/needs_qa_llm/2026-09-17-keyboard-jump-to-output-links.md) | needs-qa-llm | agent |  |  |
 | `#YR21` | [Detect programs waiting for input from the screen text (new engine)](features/needs_qa_llm/2026-09-17-screen-text-input-detection.md) | needs-qa-llm | agent |  |  |
 | `#NY7Z` | [Voice transcription mode (microphone button, hold Right Alt)](features/needs_qa_llm/2026-09-17-voice-transcription.md) | needs-qa-llm | agent |  |  |
+| `#R8QM` | [Alt+R shows and hides the reasoning, and an F-key scheme is proposed](features/needs_qa_llm/2026-09-18-reasoning-panel-shortcut.md) | needs-qa-llm | agent |  |  |
 | `#BPK3` | [Show agent output live while a program owns the terminal](features/needs_qa_llm/2026-09-17-agent-output-while-program-runs.md) | needs-qa-llm | agent |  |  |
 | `#W011` | [Tell the agent which program owns the terminal](features/needs_qa_llm/2026-09-17-agent-program-context.md) | needs-qa-llm | agent |  |  |
 | `#AGN8` | [Queue steering, Esc to interrupt, and keyboard editing of queued prompts](features/needs_qa_llm/2026-09-17-agent-queue-steering-and-editing.md) | needs-qa-llm |  |  |  |
@@ -89,7 +90,7 @@
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 
-## Bugs (33)
+## Bugs (39)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -102,9 +103,15 @@
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | agent |  |  |
 | `#M2C1` | [The model box does nothing when you pick anything that is not a provider](changes/needs_qa_llm/2026-09-18-model-dropdown-selection.md) | needs-qa-llm | agent |  |  |
 | `#P7QK` | [Model roles names providers, offers only the ones you hold a key for, and gives a tier that provider's tier model](changes/needs_qa_llm/2026-09-18-model-roles-provider-names.md) | needs-qa-llm | agent |  |  |
+| `#N3WD` | [The thinking and queue bubbles move the terminal up instead of covering it](changes/needs_qa_llm/2026-09-18-bubbles-take-the-column.md) | needs-qa-llm | agent |  |  |
 | `#P43F` | [Button labels painted past the button's edge](changes/needs_qa_llm/2026-09-18-button-labels-clipped.md) | needs-qa-llm | agent |  |  |
+| `#T4JV` | [The "command not found" note has to prove a command was meant](changes/needs_qa_llm/2026-09-18-command-not-found-under-a-request.md) | needs-qa-llm | agent |  |  |
 | `#C6YX` | [Four model commands in the composer, and the Flash role stops calling itself "fast"](changes/needs_qa_llm/2026-09-18-model-tier-commands-and-flash-naming.md) | needs-qa-llm | agent |  |  |
+| `#H7KP` | [Pane buttons that are always there, and a header you can drag](changes/needs_qa_llm/2026-09-18-pane-buttons-and-header-drag.md) | needs-qa-llm | agent |  |  |
+| `#B2XF` | [Every skill reaches the prompt by name, and ~/.claude's nesting is indexed](changes/needs_qa_llm/2026-09-18-skills-every-name-in-the-prompt.md) | needs-qa-llm | agent |  |  |
 | `#Q4SD` | [An unknown `/command` is answered by Relay, not by the shell](changes/needs_qa_llm/2026-09-18-unknown-slash-command.md) | needs-qa-llm | agent |  |  |
+| `#K9SR` | [New panes keep the Main agent](changes/needs_qa_llm/2026-09-18-new-panes-keep-the-main-agent.md) | needs-qa-llm | agent |  |  |
+| `#D5MC` | [One icon everywhere: the window header and the web client wear the app's mark](changes/needs_qa_llm/2026-09-18-one-icon-everywhere.md) | needs-qa-llm | agent |  |  |
 | `#9V1F` | [Queued items are edited in the prompt box, and the highlighted top item holds the queue](changes/needs_qa_llm/2026-09-18-queue-items-edit-in-the-prompt-box.md) | needs-qa-llm | agent |  |  |
 | `#SB7K` | [Scrollback survives a quit and restart](changes/needs_qa_llm/2026-09-18-scrollback-survives-restart.md) | needs-qa-llm | agent |  |  |
 | `#XXP5` | [Retire KonsolePart: Relay's own engine is the only terminal](changes/needs_qa_llm/2026-09-18-retire-konsolepart.md) | needs-qa-llm | agent |  |  |

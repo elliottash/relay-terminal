@@ -72,6 +72,19 @@ export async function loadDevice() {
   return (await dbGet('paired')) || null;
 }
 
+// Any value beside the device record — today, the push seal key the service worker shares.
+export async function storedValue(key) {
+  return (await dbGet(key)) || null;
+}
+
+export async function storeValue(key, value) {
+  await dbPut(key, value);
+}
+
+export async function dropValue(key) {
+  await dbDelete(key);
+}
+
 export async function saveDevice(record) {
   await dbPut('paired', record);
 }

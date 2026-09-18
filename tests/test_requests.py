@@ -327,7 +327,7 @@ class AgentRequestTests(Base):
 
     def test_default_limits(self):
         agent = self.agent(Script())
-        self.assertEqual((agent.max_steps, agent.max_tool_calls), (50, 150))
+        self.assertEqual((agent.max_steps, agent.max_tool_calls), (256, 150))
 
     def test_completion_check_reprompts_at_most_twice(self):
         provider = Script([todos_call({'text': 'fix X', 'status': 'in_progress'}, {'text': 'rename Y', 'status': 'pending'})],

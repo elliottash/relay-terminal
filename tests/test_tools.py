@@ -90,6 +90,20 @@ class ToolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.tools.prepare('read_file', {'path': 'outside'})
 
+    def test_absolute_and_parent_paths_allowed_inside_workspace(self):
+        # Absolute paths and `..` are accepted; resolution plus the containment
+        # check confine them, so only paths that resolve outside are refused.
+        (self.root / 'sub').mkdir()
+        (self.root / 'file.txt').write_text('inside')
+        absolute = self.tools.prepare('read_file', {'path': str(self.root / 'file.txt')})
+        self.assertEqual(self.tools.execute(absolute)['content'], 'inside')
+        via_parent = self.tools.prepare('read_file', {'path': 'sub/../file.txt'})
+        self.assertEqual(self.tools.execute(via_parent)['content'], 'inside')
+        for path in ['../', '/', str(self.root.parent), 'sub/../../']:
+            with self.subTest(path=path):
+                with self.assertRaises(ValueError):
+                    self.tools.prepare('read_file', {'path': path})
+
     def test_symlink_swap_after_approval(self):
         path = self.root / 'file.txt'; path.write_text('safe')
         prepared = self.tools.prepare('read_file', {'path': 'file.txt'})

@@ -16,6 +16,14 @@ links: {plans: [], commits: [], evidence: [], related: [], github: null}
 ---
 # Model settings: an API-keys modal, a Main/Flash/Lite roles modal, and a compact Settings window
 
+> **Renamed since this card was written.** The pane-agent role `fast` is called `flash` as of
+> 2026-09-18, and with it `agent.fastAgent` → `agent.flashAgent`, QSettings `agent/panes_fast` →
+> `agent/panes_flash` and `roles/fast/*` → `roles/flash/*`; the visible label is "Flash agent".
+> Wherever this card says `fast`, read `flash`. Old names are still accepted on the way in
+> (`roles.DEPRECATED_ROLES`) and settings are migrated once at startup, so the behaviour described
+> below is unchanged — only the spelling is. See `#C6YX`
+> (`issues/changes/needs_qa_llm/2026-09-18-model-tier-commands-and-flash-naming.md`).
+
 ## What landed
 
 **Keys modal** (`Settings › Models › API keys…`, palette `agent.modelKeys`, or the button inside the roles
@@ -127,3 +135,26 @@ keys modal then shows every provider as "Not set" and Remove does nothing, which
   `MiniMax-M2.7-highspeed` as Flash.
 - Gemini's Pro model is still `gemini-3.1-pro-preview`; there is no GA 3.x Pro.
 - The keys modal has no per-provider "spend" or quota display.
+
+## Since this landed (appended 2026-09-18)
+
+`#P7QK` (`issues/changes/needs_qa_llm/2026-09-18-model-roles-provider-names.md`) changed the roles
+modal, so QA should read these checklist items against the current build, not the text above:
+
+- **Items 1 and 10-13b — what the lists say.** The roles modal now names the *company* — Kimi,
+  Z.AI (GLM), OpenRouter, OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini), MiniMax — instead of
+  the preset label with its model ("Kimi · K3"), and adds "· <plan>" only when two presets of one
+  company are both offered. The **keys modal is unchanged** and still lists one row per plan, so item
+  1 stands as written.
+- **The lists are filtered.** Only providers with a stored key are offered (plus the one in use, and
+  everything marked "(no key)" when nothing has a key at all). Item 10's "switch the default provider"
+  can therefore only reach providers you hold a key for — that is intended, not a regression.
+- **A tier that names only a provider** now runs that provider's model *for that tier*: picking
+  Z.AI for Flash gives `glm-5.3-flash`, where it used to give `glm-5.3`. Item 11's per-provider
+  defaults table is unaffected; it describes the default-provider case.
+- **Changing the default provider** no longer clears a tier override that names a *different*
+  provider, which is what Main-on-Kimi + Flash-on-Z.AI is made of.
+- The **Main tier row is still read-only** — the first follow-up above stands, and the owner asked
+  about it on 2026-09-18 without asking for it to be built.
+- Item 23's counts are from 2026-09-17. On 2026-09-18 the suites are `./scripts/test.sh` 883 and
+  `ctest --test-dir build` 29, both passing.

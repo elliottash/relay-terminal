@@ -1369,7 +1369,7 @@ private:
                                 QStringLiteral("Automatic turns from background agents"),
                                 QStringLiteral("In a row without your input (0 = unlimited)"), 50, 0, 10000);
         agent.rows << numberRow(QStringLiteral("agent/max_steps"), QStringLiteral("Step limit per turn"),
-                                QStringLiteral("Model calls, then the turn stops with Continue"), 50, 1, 500);
+                                QStringLiteral("Model calls, then the turn stops with Continue"), 256, 1, 500);
         agent.rows << numberRow(QStringLiteral("agent/max_tool_calls"), QStringLiteral("Tool-call limit per turn"),
                                 QStringLiteral("Tool calls in one turn"), 150, 1, 2000);
         // Idle deadline for a model call (protocol 15). Applies to the running agent at once.

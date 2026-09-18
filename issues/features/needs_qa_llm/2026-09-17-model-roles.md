@@ -16,6 +16,14 @@ links: {plans: [], commits: [], evidence: [], related: [], github: null}
 ---
 # Model roles: a configurable model per job, fast agent in panes
 
+> **Renamed since this card was written.** The pane-agent role `fast` is called `flash` as of
+> 2026-09-18, and with it `agent.fastAgent` → `agent.flashAgent`, QSettings `agent/panes_fast` →
+> `agent/panes_flash` and `roles/fast/*` → `roles/flash/*`; the visible label is "Flash agent".
+> Wherever this card says `fast`, read `flash`. Old names are still accepted on the way in
+> (`roles.DEPRECATED_ROLES`) and settings are migrated once at startup, so the behaviour described
+> below is unchanged — only the spelling is. See `#C6YX`
+> (`issues/changes/needs_qa_llm/2026-09-18-model-tier-commands-and-flash-naming.md`).
+
 ## Behavior
 
 Backend: `backend/relay_core/roles.py` (new), with call sites in `agent.py`, `subagents.py`,

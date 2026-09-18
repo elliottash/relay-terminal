@@ -10,9 +10,9 @@ assignee: agent
 implemented_by: Claude Opus 5 (Claude Code), 2026-09-18
 rank: b
 created: '2026-09-18'
-acceptance: '`/main`, `/flash`, `/glm` and `/kimi` switch the pane from the composer; nothing in Relay calls the Flash role "fast"; `./scripts/test.sh` (870) and `ctest` (25) pass'
+acceptance: '`/main`, `/flash`, `/glm` and `/kimi` switch the pane from the composer; nothing in Relay calls the Flash role "fast"; `./scripts/test.sh` (883) and `ctest` (29) pass'
 source: 'owner in chat, 2026-09-18: "add /main to switch to the main model for the main terminal agent. add /flash to switch to the flash model. /glm to switch to your glm coding plan /kimi to switch to your kimi coding plan. yes fix the alt + F terminology"'
-links: {plans: [], commits: [], evidence: [], related: [4WHD], github: null}
+links: {plans: [], commits: [bd156a4], evidence: [], related: [4WHD, 9V1F], github: null}
 ---
 # Four model commands in the composer, and the Flash role stops calling itself "fast"
 
@@ -71,6 +71,11 @@ recap sentence pointed at Actions › Agent options; the toggle is `recap/away` 
 2. **Providers.** `/glm` switches to Z.AI · GLM-5.3 · Coding Plan (the Coding Plan key is the one stored
    here). `/kimi` — no `kimi-code` key is stored on this machine, so it must land on Kimi · K3 and say so,
    not error. `/glm` again → "Already on …". A provider with no key at all → the "No stored … key" line.
+   **Checked 2026-09-18 (not in the GUI):** the stored `kimi` key is a Moonshot pay-as-you-go key —
+   it authenticates at `https://api.moonshot.ai/v1` and is refused (401) by the Kimi Code base
+   `https://api.kimi.ai/coding/v1` — so the fall-through to `kimi` is the correct landing here, and a
+   real Coding Plan key would have to come from the kimi.com/code console. The GUI half of this item
+   (the status line, "Already on …") is still to do.
 3. **From the Flash agent.** With the pane on `/flash`, run `/glm`: the pane switches provider *and*
    returns to the Main agent (`selectModel` does both).
 4. **Popup.** Type `/` — the four new rows appear with their descriptions, and `/m`, `/f`, `/g`, `/k`
@@ -85,14 +90,21 @@ recap sentence pointed at Actions › Agent options; the toggle is `recap/away` 
    comes back on the Flash agent (chip and menu tick) and saves back as `"flash"`.
 8. **Old name over the protocol.** `configure` with `{"roles": {"fast": {"preset": "glm"}}}` is accepted
    and reported back under `flash`; a subagent definition with `model: fast` runs on the Flash model.
-9. **Nothing says "fast".** `grep -rn "fastAgent\|panes_fast\|Fast agent" src backend docs README.md tests`
-   returns only `migrateFastRoleSettings` and `docs/qa_evidence/` (recorded worker output from the
-   2026-09-17 run, left as the record of what shipped then). The roles modal's Advanced list row reads
-   "New panes (Flash agent)".
+9. **Nothing says "fast".** ✅ **Checked 2026-09-18.**
+   `grep -rn "fastAgent\|panes_fast\|Fast agent" src backend docs README.md tests` returns only the four
+   lines of `migrateFastRoleSettings` in `src/main.cpp`; `docs/qa_evidence/` is excluded on purpose
+   (recorded worker output from the 2026-09-17 run, left as the record of what shipped then). Still to
+   check in the GUI: the roles modal's Advanced list row reads "New panes (Flash agent)".
+10. **Composing with a cross-provider tier** (new since `834ca1b`, which lets a tier follow another
+    provider). The owner's setup is Kimi for Main and GLM-5.3-Flash for Flash. **Checked 2026-09-18
+    against the worker:** configured that way, `/glm` moves Main to `glm-5.3` and the explicit Flash
+    override stays `glm-5.3-flash` — switching provider does not drag the Flash tier with it. Worth one
+    pass in the GUI to confirm the chip and the roles modal agree.
 
 ## Known gaps
 
 - `/glm` and `/kimi` cover the two providers the owner pays for; other presets still go through
   `/model`. A general `/<preset>` was not added — it would collide with alias names.
 - The intake item that prompted this ("selecting model options in the model dropdown didnt do
-  anything") is a separate bug and is **not** fixed here.
+  anything") is a separate bug and is **not** fixed here. It was picked up independently by another
+  session in this checkout — see `issues/changes/needs_qa_llm/2026-09-18-model-dropdown-selection.md`.

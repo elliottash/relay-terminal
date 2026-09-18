@@ -20,12 +20,18 @@ Qt 5.15.13 (KDE Frameworks 5.115 for the optional syntax highlighter). KonsolePa
 The two Qt counts exclude Qt Test's `initTestCase`/`cleanupTestCase` entries. They were run
 from the existing `build/` binaries; `./scripts/build.sh` rebuilds and runs all three.
 
+**Current totals (2026-09-18, this checkout):** `./scripts/test.sh` **883 passed** and
+`ctest --test-dir build` **29/29**, both clean. The three rows above are the 2026-09-17 snapshot and
+the per-suite tables below have not been re-counted since; the two commands are the source of truth.
+`tests/modelsettings_test.cpp` (the API-keys and model-roles modals, 8 cases) joined the ctest set on
+2026-09-18 and is not yet in the Qt table below.
+
 Backend tests by module:
 
 | Module | Tests | What they check |
 |---|---:|---|
 | `tests/test_router.py` | 26 | Shell vs. language routing, explicit destinations and prefixes, live aliases/functions, every command word in pipelines, lists, subshells, groups and substitutions, assignments/wrappers/redirects, path words, syntax errors, control-character guard, validity fields, that parsing and validity checks never execute input, and a 99-input table of commands that are also English words (sentence vs. command) with false-positive sweeps |
-| `tests/test_tools.py` | 23 | Preparation never executes, output and exit capture, secret env removal, timeouts (including after stdout closes), output cap, read and diff, stale-write refusal, new-file race, path escape and secret guard, symlink swap, FIFO, cancel before and during a command, unknown tools, create and list, and `edit_file`: a unique replacement, an ambiguous one refused with its count and then done with `replace_all`, each refusal that names the fix, the stale-edit race, the path and secret guards, cancel before an edit, and the added/removed counts a write now reports |
+| `tests/test_tools.py` | 24 | Preparation never executes, output and exit capture, secret env removal, timeouts (including after stdout closes), output cap, read and diff, stale-write refusal, new-file race, path escape and secret guard, absolute and `..` paths confined but allowed inside the workspace, symlink swap, FIFO, cancel before and during a command, unknown tools, create and list, and `edit_file`: a unique replacement, an ambiguous one refused with its count and then done with `replace_all`, each refusal that names the fix, the stale-edit race, the path and secret guards, cancel before an edit, and the added/removed counts a write now reports |
 | `tests/test_keybindings.py` | 16 | Key normalization and validation, tool spec and enum, atomic write that keeps other content and reports conflicts, unbind, invalid existing file left alone, configure with and without a catalog, `keybindings` update keeps the conversation |
 | `tests/test_agent.py` | 14 | Commands and writes run without approval and show previews, unknown tools refused, file tools confined, cancel during a command, route without a provider, configure makes no network call and never echoes the key, malformed requests, program context note (labelled, validated, control characters stripped, passed through the queue) |
 | `tests/test_queue.py` | 14 | Ordered turns without overlap, `now` refused while busy, remove and clear, interrupt while streaming, idle and during a tool, FIFO interrupts, cancel pauses until resume, `now` while paused, cancel drops pending interrupts, configure/reset rules, validation, protocol errors, failed turn pauses |
@@ -93,6 +99,8 @@ Claude session. They show the feature worked once; they are not independent QA.
 | Colour themes: four built-ins switched in one running process, every light surface, the Relay engine and a user theme | [`qa_evidence/2026-09-17-color-themes/`](qa_evidence/2026-09-17-color-themes/) |
 | An unknown `/command` answered by Relay (with a suggestion), `/help`, a real command, and `/bin/echo` and `/tmp` still going to the shell | [`qa_evidence/2026-09-18-unknown-slash-command/`](qa_evidence/2026-09-18-unknown-slash-command/) |
 | Terminal scrollback surviving a quit and restart: 120 lines printed, Relay quit, reopened with the text back, scrollable, and a second quit saving the restored text with the new output | [`qa_evidence/2026-09-18-scrollback-survives-restart/`](qa_evidence/2026-09-18-scrollback-survives-restart/) |
+| Model roles: provider names, only providers with a key offered, the two Kimi plans told apart, Flash put on Z.AI with `glm-5.3-flash`, and "Auto" replacing "Auto detect" | [`qa_evidence/2026-09-18-provider-names-and-tier-providers/`](qa_evidence/2026-09-18-provider-names-and-tier-providers/) |
+| A Switchboard card's title and its `## Issue` text edited on the card (`e`, the Edit button, a click on the title), written by the worker, surviving a restart, a save refused when the file changed underneath, and a card still headed `## Request` settling on `## Issue` | [`qa_evidence/2026-09-18-edit-card-title-and-issue/`](qa_evidence/2026-09-18-edit-card-title-and-issue/) |
 
 Live provider smoke test, 2026-09-16, through the real `Agent` loop with keys imported from
 Warp: Kimi K3 (`kimi`), GLM-5.3 Coding Plan (`glm-coding`) and DeepSeek V4.1 Flash via
@@ -157,6 +165,73 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-agent-delegate-and-take-over.md`
 - `2026-09-17-agent-output-while-program-runs.md`
 - `2026-09-17-agent-program-context.md`
+- `2026-09-17-agent-queue-steering-and-editing.md`
+- `2026-09-17-agent-responses-in-terminal.md`
+- `2026-09-17-agent-sessions-ui.md`
+- `2026-09-17-ai-command-and-prompt-suggestions.md`
+- `2026-09-17-aliases-and-workflows.md`
+- `2026-09-17-at-file-picker.md`
+- `2026-09-17-backend-sessions.md`
+- `2026-09-17-backend-subagents.md`
+- `2026-09-17-clickable-paths.md`
+- `2026-09-17-color-themes.md`
+- `2026-09-17-combined-terminal-agent-queue.md`
+- `2026-09-17-conversation-list-and-search.md`
+- `2026-09-17-ctrl-i-input-toggle.md`
+- `2026-09-17-engine-integration.md`
+- `2026-09-17-explorer-right-click-and-toggle.md`
+- `2026-09-17-file-explorer-and-preview-panes.md`
+- `2026-09-17-fix-and-rerun-terminal-commands.md`
+- `2026-09-17-history-suggestions.md`
+- `2026-09-17-human-agent-control-and-password-prompts.md`
+- `2026-09-17-image-context.md`
+- `2026-09-17-in-app-shortcut-alternates.md`
+- `2026-09-17-instructions-onboarding.md`
+- `2026-09-17-keyboard-jump-to-output-links.md`
+- `2026-09-17-keyboard-shortcuts-and-palettes.md`
+- `2026-09-17-load-global-warp-skills.md`
+- `2026-09-17-model-roles-and-fast-agent.md`
+- `2026-09-17-model-roles.md`
+- `2026-09-17-model-settings.md`
+- `2026-09-17-new-pane-direction-by-arrow.md`
+- `2026-09-17-palette-search-aliases.md`
+- `2026-09-17-pane-process-isolation.md`
+- `2026-09-17-pane-tab-buttons-and-moving.md`
+- `2026-09-17-pane-title-summary.md`
+- `2026-09-17-plan-mode-and-plan-pane.md`
+- `2026-09-17-port-konsole-context-menus.md`
+- `2026-09-17-prefix-modes.md`
+- `2026-09-17-program-control-policy.md`
+- `2026-09-17-prompt-visibility-and-waiting-input.md`
+- `2026-09-17-queue-or-interrupt-agent-prompts.md`
+- `2026-09-17-queue-shell-commands-while-busy.md`
+- `2026-09-17-request-ledger-todos-completion.md`
+- `2026-09-17-requests-ui.md`
+- `2026-09-17-restore-windows-on-start.md`
+- `2026-09-17-router-english-commands.md`
+- `2026-09-17-routing-assist-thinking-skills-backend.md`
+- `2026-09-17-routing-assist-ui.md`
+- `2026-09-17-screen-text-input-detection.md`
+- `2026-09-17-shortcut-hints.md`
+- `2026-09-17-skills-dialog.md`
+- `2026-09-17-steering-running-agent-turn.md`
+- `2026-09-17-subagents-ui.md`
+- `2026-09-17-switchboard-phase0.md`
+- `2026-09-17-switchboard-phase1.md`
+- `2026-09-17-thinking-and-tool-call-summaries.md`
+- `2026-09-17-voice-transcription.md`
+- `2026-09-17-website-update-engine-features.md`
+- `2026-09-17-window-header-and-notifications.md`
+- `2026-09-17-windows-tabs-panes.md`
+- `2026-09-17-wrong-mode-hints.md`
+- `2026-09-18-edit-file-tool.md`
+- `2026-09-18-light-and-dark-commands.md`
+- `2026-09-18-open-external-in-the-right-click-menu.md`
+- `2026-09-18-reasoning-panel-shortcut.md`
+
+- `2026-09-17-agent-delegate-and-take-over.md`
+- `2026-09-17-agent-output-while-program-runs.md`
+- `2026-09-17-agent-program-context.md`
 - `2026-09-17-agent-responses-in-terminal.md`
 - `2026-09-17-clickable-paths.md`
 - `2026-09-17-aliases-and-workflows.md`
@@ -187,12 +262,41 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 
 Waiting for QA (`issues/changes/needs_qa_llm/`):
 
+- `2026-09-17-cleanup-quick-wins-dead-code-removal-logging-for.md`
 - `2026-09-17-composer-page-scroll.md`
+- `2026-09-17-ctrl-h-shrinks-pane.md`
+- `2026-09-17-ctrl-question-shortcuts.md`
+- `2026-09-17-keypad-enter-submits.md`
+- `2026-09-17-new-pane-not-active.md`
+- `2026-09-17-no-list-nudge.md`
+- `2026-09-17-pane-move-keys-and-drag-broken.md`
 - `2026-09-17-pre-submit-run-check.md`
+- `2026-09-17-provider-stalls-and-no-logs.md`
+- `2026-09-17-second-window-on-start.md`
+- `2026-09-17-single-click-folders.md`
+- `2026-09-17-suggestions-not-working.md`
+- `2026-09-17-tasks-are-todos-only.md`
 - `2026-09-17-terminal-not-directly-typable.md`
-- `2026-09-18-unknown-slash-command.md`
-- `2026-09-18-scrollback-survives-restart.md`
+- `2026-09-18-bubbles-take-the-column.md`
+- `2026-09-18-button-labels-clipped.md`
+- `2026-09-18-command-not-found-under-a-request.md`
+- `2026-09-18-edit-card-title-and-issue.md`
+- `2026-09-18-markdown-files-do-not-render.md`
+- `2026-09-18-markdown-view-labels-say-md.md`
+- `2026-09-18-model-dropdown-selection.md`
+- `2026-09-18-model-roles-provider-names.md`
+- `2026-09-18-model-tier-commands-and-flash-naming.md`
+- `2026-09-18-new-panes-keep-the-main-agent.md`
+- `2026-09-18-one-icon-everywhere.md`
 - `2026-09-18-output-token-limit-defaults-to-32k.md`
+- `2026-09-18-pane-buttons-and-header-drag.md`
+- `2026-09-18-preview-link-has-no-way-back.md`
+- `2026-09-18-queue-items-edit-in-the-prompt-box.md`
+- `2026-09-18-retire-konsolepart.md`
+- `2026-09-18-scrollback-survives-restart.md`
+- `2026-09-18-settings-as-a-full-pane.md`
+- `2026-09-18-skills-every-name-in-the-prompt.md`
+- `2026-09-18-unknown-slash-command.md`
 
 Closed (`issues/features/done/`): `2026-09-17-review-opencode-agent-design.md` (research) and
 `2026-09-17-terminal-first-agent-fallback.md` (superseded before QA).
