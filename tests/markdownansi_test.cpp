@@ -11,7 +11,11 @@ namespace {
 
 QString render(const QString &markdown) {
     MarkdownAnsi md;
-    return md.feed(markdown) + md.finish();
+    // Sequenced deliberately: `feed(...) + finish()` leaves the order to the compiler, and the
+    // two are not commutative (see MarkdownAnsi::renderInline).
+    QString out = md.feed(markdown);
+    out += md.finish();
+    return out;
 }
 
 // The same text streamed one character at a time, as the slowest provider would send it.
@@ -137,7 +141,8 @@ private slots:
         MarkdownAnsi::Palette p;
         p.inlineCode = QStringLiteral("38;2;9;9;9");
         MarkdownAnsi md(p);
-        const QString out = md.feed(QStringLiteral("| a | b |\n|---|---|\n| `x` | y |\n")) + md.finish();
+        QString out = md.feed(QStringLiteral("| a | b |\n|---|---|\n| `x` | y |\n"));
+        out += md.finish();
         QVERIFY(out.contains(QStringLiteral("38;2;9;9;9m")));
     }
 };

@@ -402,7 +402,12 @@ QString MarkdownAnsi::renderInline(const QString &text, bool bold) const {
     Palette cell = m_palette;
     if (bold) cell.base += QStringLiteral(";1");
     MarkdownAnsi inner(cell);
-    QString rendered = inner.feed(text) + inner.finish();
+    // Two statements, not `feed(text) + finish()`: the order in which `+` evaluates its operands
+    // is unspecified, and g++ 15 on x86_64 runs finish() first, which flushes an empty renderer
+    // and then feeds text nothing will ever emit. Every numeric table cell came out blank on that
+    // toolchain while the same source was right here (aarch64, g++ 13), 2026-09-18.
+    QString rendered = inner.feed(text);
+    rendered += inner.finish();
     return rendered;
 }
 
