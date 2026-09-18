@@ -327,7 +327,7 @@ private:
 // as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
 class ToolPane final : public QWidget {
 public:
-    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions };
+    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff };
 
     ToolPane(Kind kind, const QString &path, bool planActions = true) : m_kind(kind) {
         setObjectName(QStringLiteral("pane"));
@@ -386,6 +386,17 @@ public:
     }
     relay::TurnTranscriptView *turn() const { return m_turn; }
 
+    // One unified diff, read only: the write or edit whose diff is more than 12 changed lines
+    // (#TK9C, protocol section 23.6). Transient -- the diff is a moment in an agent turn, not a
+    // file on disk, so node() saves nothing and a reopened window does not bring it back.
+    ToolPane(relay::DiffView *view, const QString &cwd) : m_kind(Kind::Diff), m_diff(view), m_subagentCwd(cwd) {
+        setObjectName(QStringLiteral("pane"));
+        setAttribute(Qt::WA_StyledBackground);
+        auto *layout = new QVBoxLayout(this); layout->setContentsMargins(1, 1, 1, 1);
+        layout->addWidget(view);
+    }
+    relay::DiffView *diff() const { return m_diff; }
+
     // Views that only need a title, focus and the header inset (relay::PaneView): the ⓘ
     // conversation info (Kind::Info) and the session manager (Kind::Sessions). Transient.
     ToolPane(Kind kind, QWidget *view, relay::PaneView *hosted, const QString &cwd) : m_kind(kind), m_hosted(hosted), m_subagentCwd(cwd) {
@@ -401,14 +412,15 @@ public:
     relay::FilePreview *preview() const { return m_preview; }
     relay::PlanEditor *plan() const { return m_plan; }
     relay::SubagentTabsView *subagent() const { return m_subagent; }
-    QString path() const { return (m_subagent || m_turn || m_board || m_settingsView || m_hosted) ? QString() : m_explorer ? m_explorer->root() : m_plan ? m_plan->path() : m_preview->path(); }
-    QString cwd() const { return (m_subagent || m_turn || m_board || m_settingsView || m_hosted) ? m_subagentCwd : m_explorer ? m_explorer->root() : QFileInfo(path()).absolutePath(); }
+    QString path() const { return (m_subagent || m_turn || m_diff || m_board || m_settingsView || m_hosted) ? QString() : m_explorer ? m_explorer->root() : m_plan ? m_plan->path() : m_preview->path(); }
+    QString cwd() const { return (m_subagent || m_turn || m_diff || m_board || m_settingsView || m_hosted) ? m_subagentCwd : m_explorer ? m_explorer->root() : QFileInfo(path()).absolutePath(); }
     QString title() const {
         if (m_settingsView) return m_settingsView->mode() == relay::SettingsPane::Mode::Actions ? QStringLiteral("Actions") : QStringLiteral("Options");
         if (m_board) return m_board->title();
         if (m_hosted) return m_hosted->paneTitle();
         if (m_subagent) return m_subagent->title();
         if (m_turn) return m_turn->title();
+        if (m_diff) return m_diff->title();
         if (m_plan) return (m_plan->isDirty() ? QStringLiteral("● ") : QString()) + m_plan->title();
         const QString name = QFileInfo(path()).fileName();
         return name.isEmpty() ? path() : name;
@@ -420,7 +432,7 @@ public:
                                                    {"collapsed", m_board->collapsedSections()},
                                                    {"hidden", m_board->hiddenSections()}}}};
         if (m_subagent) return m_subagent->node();
-        if (m_turn || m_settingsView || m_hosted) return {};
+        if (m_turn || m_diff || m_settingsView || m_hosted) return {};
         if (m_plan) return {{"plan", QJsonObject{{"path", path()}}}};
         return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};
     }
@@ -430,6 +442,7 @@ public:
         else if (m_hosted) m_hosted->focusView();
         else if (m_subagent) m_subagent->focusInput();
         else if (m_turn) m_turn->focusInput();
+        else if (m_diff) m_diff->focusInput();
         else if (m_plan) m_plan->editor()->setFocus(Qt::OtherFocusReason);
         else if (m_explorer) m_explorer->view()->setFocus(Qt::OtherFocusReason);
         else m_preview->setFocus(Qt::OtherFocusReason);
@@ -490,6 +503,7 @@ private:
     relay::PlanEditor *m_plan = nullptr;
     relay::SubagentTabsView *m_subagent = nullptr;
     relay::TurnTranscriptView *m_turn = nullptr;
+    relay::DiffView *m_diff = nullptr;
     relay::BoardView *m_board = nullptr;
     relay::SettingsPane *m_settingsView = nullptr;
     relay::PaneView *m_hosted = nullptr;

@@ -196,6 +196,7 @@ Step LineCursor::start(const QString &call, const toollabel::Label &label) {
     step.hold = true;               // the result rewrites this row in place
     step.row = runningRow(label, m_cells);
     step.call = call;
+    step.callId = call;
     m_started = call;
     m_held = true;
     m_dirty = false;
@@ -210,6 +211,7 @@ Step LineCursor::live(const QString &call, const toollabel::Label &label, qint64
     step.hold = true;
     step.row = runningRow(label, cells > 0 ? cells : m_cells, lines);
     step.call = call;
+    step.callId = call;
     return step;
 }
 
@@ -225,6 +227,8 @@ Step LineCursor::result(const QString &call, const toollabel::Label &label, int 
         step.merged = m_run.count() > 1;
         step.row = step.merged ? mergedRow(m_run, width) : finishedRow(label, width);
         step.call = runCall(m_first, m_run.count());
+        step.callId = m_first;
+        step.extra = m_run.count() > 1 ? m_run.count() : 0;
         m_started.clear();
         return step;
     }
@@ -238,6 +242,7 @@ Step LineCursor::result(const QString &call, const toollabel::Label &label, int 
     dropRun();
     step.row = finishedRow(label, width);
     step.call = call;
+    step.callId = call;
     // A mergeable result opens a run: the row keeps the cursor so the next read can rewrite it.
     if (label.hasMerge && !label.failed()) {
         m_run.add(label);

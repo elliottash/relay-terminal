@@ -2355,6 +2355,30 @@ public:
         focusLeaf(tool);
         updateTitles();
     }
+
+    // One unified diff, in a pane beside the terminal: what a write or an edit of more than 12
+    // changed lines opens (#TK9C, protocol § 23.6). A splitter pane, never an overlay — and one
+    // per tab: the next big diff replaces what the last one showed, so a long turn does not leave
+    // a row of panes behind.
+    void openDiffPane(Pane *owner, const QString &title, const QString &unifiedDiff) {
+        QWidget *page = pageOf(owner);
+        if (!page || unifiedDiff.isEmpty()) return;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->diff()) {
+                tool->diff()->setDiff(title, unifiedDiff);
+                setActiveLeaf(tool); focusLeaf(tool); updateTitles(); return;
+            }
+        auto *view = new relay::DiffView;
+        view->setDiff(title, unifiedDiff);
+        auto *tool = new ToolPane(view, owner->cwd());
+        tool->setProperty("paneType", QStringLiteral("diff"));
+        relay::theme::polishWindow(tool);
+        tool->setObjectName(QStringLiteral("pane"));
+        insertBeside(owner, tool, Qt::Horizontal, false);
+        setActiveLeaf(tool);
+        focusLeaf(tool);
+        updateTitles();
+    }
     // ----- the session manager pane and the ⓘ pane (cards #R6J0, #Y63Z) ------------------------
     // One session manager per tab, bound to the pane that opened it: its queries go to that pane's
     // worker and Enter resumes there. /resume, /conversations, Ctrl+Shift+Y (agent.resume) and
@@ -2824,6 +2848,10 @@ private:
         pane->onOpenSubagent = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openSubagentTab(guard, id); };   // subagents UI (#WD83)
         pane->onShowAgents = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openAgentsMenu(); } };   // /agents → subagents panel menu
         pane->onOpenTurn = [guard](const QString &turnId) { if (auto *w = windowOf(guard)) w->openTurnPane(guard, turnId); };
+        // A tool-call line whose diff is too big to read inline (#TK9C).
+        pane->onOpenDiff = [guard](const QString &title, const QString &unifiedDiff) {
+            if (auto *w = windowOf(guard)) w->openDiffPane(guard, title, unifiedDiff);
+        };
         // Session manager and ⓘ (cards #R6J0, #Y63Z).
         pane->onOpenSessions = [guard](const QString &query) { if (auto *w = windowOf(guard)) w->openSessionsFor(guard, query); };
         pane->onOpenInfo = [guard] { if (auto *w = windowOf(guard)) w->openInfoPane(guard); };

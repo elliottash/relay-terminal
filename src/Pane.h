@@ -24,6 +24,8 @@
 #include "PaneLayout.h"
 #include "QueueNav.h"
 #include "PaneTitles.h"
+#include "CallLines.h"      // one line per tool call, and what its fold holds (#TK9C)
+#include "DiffView.h"       // the diff pane a big edit opens
 #include "TurnTranscript.h"
 #include "ModelSettings.h"
 #include "SkillsDialog.h"
@@ -1001,6 +1003,13 @@ public:
                 onOpenTurn(QUrl::fromPercentEncoding(parts.at(1).toUtf8()));
                 return;
             }
+            // A tool-call line whose click is not a fold: the file, the diff pane, the subagent or
+            // the card its label named (#TK9C, § 23.6). relay://call/ never arrives here — the
+            // engine's fold layer takes those before anything else sees them.
+            if (url.host() == QStringLiteral("open-call") && parts.size() == 3) {
+                openCallTarget(target);
+                return;
+            }
             // A `#K7Q2` in the output (Switchboard design section 5): the Switchboard opens in
             // this tab if it is not there yet, and the card opens in it.
             if (url.host() == QStringLiteral("card") && parts.size() == 1 && onOpenCard) {
@@ -1466,6 +1475,11 @@ public:
         QPointer<Pane> self(this);
         view->onSend = [self, id](const QString &text) {
             if (self) self->send({{"type", "agent_message"}, {"id", id}, {"text", text}});
+        };
+        // A subagent's own tool line whose diff is more than 12 changed lines opens the diff pane,
+        // exactly as the terminal's and the turn pane's do (#TK9C, § 23.6).
+        view->onOpenDiff = [self](const QString &title, const QString &unifiedDiff) {
+            if (self && self->onOpenDiff) self->onOpenDiff(title, unifiedDiff);
         };
         if (const auto *row = m_subagents.row(id)) view->setRow(*row, m_subagents.elapsedNow(*row));
         const QObject *gone = view;
@@ -2247,9 +2261,26 @@ private:
 
     // ----- thinking, turn summaries, tool outputs, routing assist, skills (protocol 11) --------
     static bool showThinking() { return QSettings().value(QStringLiteral("agent/show_thinking"), true).toBool(); }
-    // Off by default: tool output collapses to its size, and the turn pane holds the whole thing.
+    // Off by default: a tool call is one line that counts its output, and a click unfolds the whole
+    // of it under that line (#TK9C). On, the stream prints under the line as it arrives.
     static bool showToolOutput() { return QSettings().value(QStringLiteral("agent/show_tool_output"), false).toBool(); }
-    static constexpr int kInlineDiffLines = 8;   // of a write tool's diff, before "… N more lines"
+
+    // The command a RUN COMMAND preview was built from, for the wrong-mode hint alone: its heading
+    // and the notes every tool preview carries, dropped. Nothing else reads a preview any more
+    // (§ 23.1: everything it was parsed for is a field on the label now).
+    static QString runCommandFromPreview(const QString &preview) {
+        QStringList lines = preview.left(6000).split(QLatin1Char('\n'));
+        if (lines.isEmpty() || lines.takeFirst().trimmed() != QStringLiteral("RUN COMMAND")) return {};
+        QStringList body;
+        for (const QString &line : std::as_const(lines)) {
+            if (line.startsWith(QStringLiteral("Working directory: ")) || line.startsWith(QStringLiteral("Timeout: "))
+                || line.startsWith(QStringLiteral("Old bytes: "))) continue;
+            if (body.isEmpty() && line.trimmed().isEmpty()) continue;
+            body << line;
+        }
+        while (!body.isEmpty() && body.last().trimmed().isEmpty()) body.removeLast();
+        return body.join(QLatin1Char('\n')).trimmed();
+    }
 
     bool handleObservabilityEvent(const QString &type, const QJsonObject &event) {
         if (type == QStringLiteral("error")) {
@@ -2267,6 +2298,9 @@ private:
                 status(QStringLiteral("Turn details: ") + event.value(QStringLiteral("text")).toString());
                 return true;
             }
+            // A fold asked for a call the worker no longer has ("Unknown turn_id (only the last 50
+            // turns are kept)"): the fold says so, in one row, rather than staying empty (#TK9C).
+            if (handleFoldError(id, event.value(QStringLiteral("text")).toString())) return true;
             // The ⓘ view's requests (protocol 25): the view says what went wrong, in place.
             if (id.startsWith(QStringLiteral("info-"))) {
                 if (m_infoView) m_infoView->setError(id, event.value(QStringLiteral("text")).toString());
@@ -2316,9 +2350,15 @@ private:
             while (m_turnOrder.size() > 50) { const QString old = m_turnOrder.takeFirst(); m_turnSummaries.remove(old); m_turnThinking.remove(old); }
             const int tools = event.value(QStringLiteral("tools")).toArray().size();
             if (tools > 0) {
+                endCallRun();   // a run of reads that ended the turn gets its newline here (#TK9C)
                 const qint64 ms = event.value(QStringLiteral("elapsed_ms")).toVariant().toLongLong();
                 printTurnLink(QStringLiteral("✦ %1 tool call%2 · %3 s").arg(tools).arg(tools == 1 ? QString() : QStringLiteral("s"))
                                   .arg(std::max<qint64>(1, (ms + 500) / 1000)), turn);
+                // The lines above this one each hold their own detail. Taught once a turn has
+                // printed some, with the key that opens the nearest one without the mouse.
+                if (terminalFolds())
+                    hint(QStringLiteral("call.fold"),
+                         QStringLiteral("Click a ▸ line to unfold it here · Ctrl+Shift+Return unfolds the nearest"));
             }
             if (m_turnViews.contains(turn) && m_turnViews.value(turn)) m_turnViews.value(turn)->setSummary(event);
             return true;
@@ -2329,8 +2369,14 @@ private:
             return true;
         }
         // `tool_output` is also the live command-output stream ({text}); the reply to
-        // tool_output_get is marked `stored: true` (protocol 11.1).
+        // tool_output_get is marked `stored: true` (protocol 11.1). Which of the two asked for it
+        // is the request id: a `fold-` reply fills a fold in the terminal and opens no pane at all.
         if (type == QStringLiteral("tool_output") && event.value(QStringLiteral("stored")).toBool()) {
+            if (handleFoldReply(event)) return true;
+            const QString turn = m_turnOutputRequests.take(event.value(QStringLiteral("id")).toString());
+            if (!turn.isEmpty()) {
+                if (auto view = m_turnViews.value(turn)) { view->setToolOutput(event); return true; }
+            }
             openToolOutput(event);
             return true;
         }
@@ -2579,10 +2625,250 @@ private:
         out += inkCode(Ink::Note) + QByteArray("  (Ctrl+click)") + "\x1b[0m\r\n";
         m_atLineStart = true;
         writeTerminal(out);
-        hint(QStringLiteral("turn.link"), QStringLiteral("Tip: Ctrl+click “tool calls” lines to inspect each call and its output"));
+        // The tool lines below it fold their own detail open now (#TK9C), so the tip is about what
+        // this line adds: the turn as a whole, with its reasoning and every call in one place.
+        hint(QStringLiteral("turn.link"), QStringLiteral("Tip: click a ▸ line to unfold it here · the ✦ line opens the whole turn"));
+    }
+
+    // ----- one line per tool call (#TK9C, docs/AGENT-SESSIONS-PROTOCOL.md § 23) -------------------
+    //
+    // Every call is one row: "▸ ran pytest · 212 lines · exit 1 · 8 s". The row is an OSC 8 anchor
+    // over relay://call/<pane>/<turn>/<call> — the prefix the engine's fold layer owns — so a click
+    // unfolds the call's detail underneath it, in the terminal (docs/ENGINE.md, "Folds"). A line
+    // whose click is not a fold (a file, a big diff, a subagent, a card) anchors relay://open-call/
+    // instead, which the fold layer leaves alone and openOutputTarget routes.
+    //
+    // The anchor begins at column 0 with a "▸ " placeholder the view overpaints with ▸ or ▾: on the
+    // ghostty core an anchor is only found when it starts in the first column.
+    //
+    // Nothing here decides anything — src/CallLines.h does, and is tested headless. This writes the
+    // bytes, and is the only place that knows the pane's inline machinery (m_wrap, m_inlineOpen,
+    // m_atLineStart, holdShellResize).
+
+    // What a call's fold needs, kept until the map is full or the pane is closed.
+    struct CallRecord {
+        QString turnId;
+        QStringList callIds;                              // one, or the members of a merged run
+        relay::toollabel::Label label;
+        QString diff;                                     // the unified diff of a write or an edit
+        bool merged = false;
+        QVector<relay::calllines::RunMember> members;     // a merged run's lines, for its fold
+    };
+
+    bool terminalFolds() const { return terminalCan(relay::TerminalBackend::Folds); }
+
+    // How wide a row may be drawn: the pane's columns, less the "▸ " placeholder and one column
+    // the engine never draws into. Zero when the width is not known, which means "do not cut".
+    int callLineCells() const {
+        const int columns = m_backend ? m_backend->columns() : 0;
+        return columns > 8 ? columns - 3 : 0;
+    }
+
+    // The anchor for one row: a fold URI when a click folds, and the open URI otherwise. A backend
+    // with no fold layer anchors everything to open-call, so a click still reaches the detail.
+    QString callAnchor(const relay::calllines::Step &step, const QString &turnId,
+                       const relay::toollabel::Label &label) const {
+        const bool folds = terminalFolds()
+                           && (step.merged || relay::calllines::clickFor(label) == relay::calllines::Click::Fold);
+        return folds ? relay::calllines::foldUri(m_token, turnId, step.callId, step.extra)
+                     : relay::calllines::openUri(m_token, turnId, step.callId);
+    }
+
+    // Draws one row where the cursor is, exactly as `step` asks. The trailing newline is held back
+    // while a run of reads may still grow, so the next result rewrites the row without a cursor-up.
+    void drawCallRow(const relay::calllines::Step &step, const QString &turnId, const QString &anchor) {
+        QByteArray out = takeWrapped();
+        if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
+        if (step.endRun && !m_atLineStart) { out += "\r\n"; m_atLineStart = true; }
+        if (step.rewrite) out += "\r\x1b[2K";
+        else if (!m_atLineStart) out += "\r\n";
+        out += "\x1b]8;;" + anchor.toUtf8() + "\x1b\\";
+        // Two levels, as everywhere else in the pane: a failure takes the error ink, everything
+        // else is the same muted grey, and the stats are the italic grey notes already use.
+        out += inkCode(step.row.failed ? Ink::Error : Ink::Tool) + QByteArray("▸ ")
+               + sanitize(step.row.title).toUtf8() + "\x1b[0m";
+        if (!step.row.rest.isEmpty()) out += inkCode(Ink::Note) + sanitize(step.row.rest).toUtf8() + "\x1b[0m";
+        out += "\x1b]8;;\x1b\\";
+        if (step.hold) { m_atLineStart = false; }
+        else { out += "\r\n"; m_atLineStart = true; }
+        writeTerminal(out);
+        Q_UNUSED(turnId);
+    }
+
+    // Ends a held row (a run of reads that nothing has interrupted yet). Called before anything
+    // else prints, when the turn ends, and from closeInline().
+    void endCallRun() {
+        const relay::calllines::Step step = m_callCursor.other();
+        if (!step.endRun || !m_inlineOpen) return;
+        writeTerminal(takeWrapped() + QByteArray("\r\n"));
+        m_atLineStart = true;
+    }
+
+    // One call's record, keyed by the anchor its row carries, so a fold request and a click on a
+    // relay://open-call line both find it. Bounded: a long session must not grow a map for ever.
+    void rememberCall(const QString &anchor, const CallRecord &record) {
+        if (anchor.isEmpty()) return;
+        if (!m_calls.contains(anchor)) m_callOrder.append(anchor);
+        m_calls.insert(anchor, record);
+        while (m_callOrder.size() > 400) m_calls.remove(m_callOrder.takeFirst());
+    }
+
+    // The fold's colours, from the live theme. The add/remove tints are the diff pane's: the
+    // token blended into the surface, so a light theme gets a light tint (src/DiffView.cpp).
+    relay::calllines::Palette foldPalette() const {
+        namespace t = relay::theme;
+        relay::calllines::Palette palette;
+        palette.text = t::Text;
+        palette.muted = t::TextMuted;
+        palette.code = t::SyntaxCommand;
+        palette.add = t::Success;
+        palette.remove = t::Error;
+        palette.error = t::SyntaxUnknown;
+        auto tint = [](const QColor &token) {
+            const QColor base = relay::theme::Surface;
+            const qreal mix = 0.22;
+            return QColor(int(base.red() + (token.red() - base.red()) * mix),
+                          int(base.green() + (token.green() - base.green()) * mix),
+                          int(base.blue() + (token.blue() - base.blue()) * mix));
+        };
+        palette.addBg = tint(t::Success);
+        palette.removeBg = tint(t::Error);
+        return palette;
+    }
+
+    relay::calllines::FoldOptions foldOptions(const QString &anchor, const CallRecord &record) const {
+        relay::calllines::FoldOptions options;
+        const relay::calllines::Ref ref = relay::calllines::parseUri(anchor);
+        if (ref.valid && !record.merged)
+            options.openInPane = relay::calllines::openUri(m_token, ref.turn, ref.call);
+        const QString path = record.label.openPath.isEmpty() ? record.label.path : record.label.openPath;
+        if (!path.isEmpty()) {
+            options.openPath = path.startsWith(QLatin1Char('/')) ? path : QDir(m_workspace).filePath(path);
+            options.openName = QFileInfo(options.openPath).fileName();
+        }
+        // A diff of more than 12 changed lines goes to the diff pane, so the fold names it rather
+        // than repeating a wall of green and red inside the terminal.
+        options.diffToPane = relay::calllines::clickFor(record.label) == relay::calllines::Click::Diff;
+        return options;
+    }
+
+    void setFold(const QString &uri, const QVector<relay::FoldLine> &lines) {
+        if (m_backend && terminalFolds()) m_backend->setFoldContent(uri, lines);
+    }
+
+    // A fold anchor with no content yet was clicked: fetch the call's detail. A merged run needs
+    // no worker — its members' lines are already here.
+    void foldRequested(const QString &uri) {
+        const relay::calllines::Ref ref = relay::calllines::parseUri(uri);
+        if (!ref.valid || !ref.fold) return;
+        const CallRecord record = m_calls.value(uri);
+        if (record.merged) { setFold(uri, relay::calllines::foldForRun(record.members, foldPalette(), foldOptions(uri, record))); return; }
+        if (!m_workerReady || ref.turn.isEmpty() || record.callIds.isEmpty()) {
+            setFold(uri, relay::calllines::foldForNote(
+                             QStringLiteral("The detail of this call is not available in this pane any more."),
+                             foldPalette()));
+            return;
+        }
+        const QString id = QStringLiteral("fold-") + QString::number(++m_requestId);
+        m_foldRequests.insert(id, uri);
+        while (m_foldRequests.size() > 64) m_foldRequests.erase(m_foldRequests.begin());
+        send({{"type", "tool_output_get"}, {"id", id}, {"turn_id", ref.turn}, {"call_id", record.callIds.first()}});
+    }
+
+    // The reply to a fold's own tool_output_get. It never opens a pane: the request id says which
+    // of the two asked (`fold-` here, `turn-` for the details pane and the turn view).
+    bool handleFoldReply(const QJsonObject &event) {
+        const QString id = event.value(QStringLiteral("id")).toString();
+        if (!id.startsWith(QStringLiteral("fold-"))) return false;
+        const QString uri = m_foldRequests.take(id);
+        if (uri.isEmpty()) return true;
+        CallRecord record = m_calls.value(uri);
+        if (!record.label.valid) record.label = relay::toollabel::fromEvent(event);
+        setFold(uri, relay::calllines::foldForReply(event, foldPalette(), foldOptions(uri, record)));
+        return true;
+    }
+
+    // The worker could not answer (the turn has scrolled out of its log of fifty): the fold says so
+    // rather than staying empty, which would read as a dead line.
+    bool handleFoldError(const QString &id, const QString &text) {
+        if (!id.startsWith(QStringLiteral("fold-"))) return false;
+        const QString uri = m_foldRequests.take(id);
+        if (!uri.isEmpty()) setFold(uri, relay::calllines::foldForNote(text, foldPalette()));
+        return true;
+    }
+
+    // A click on a relay://open-call line: § 23.6's `open.type`, with the details pane as the
+    // fallback whenever the surface it asks for is not there.
+    void openCallTarget(const QString &uri) {
+        using relay::calllines::Click;
+        const relay::calllines::Ref ref = relay::calllines::parseUri(uri);
+        if (!ref.valid) return;
+        const CallRecord record = m_calls.value(uri);
+        const relay::toollabel::Label &label = record.label;
+        auto absolute = [this](const QString &path) {
+            return path.isEmpty() || path.startsWith(QLatin1Char('/')) ? path : QDir(m_workspace).filePath(path);
+        };
+        switch (relay::calllines::clickFor(label)) {
+        case Click::File: {
+            const QString path = absolute(label.openPath.isEmpty() ? label.path : label.openPath);
+            if (!path.isEmpty() && QFileInfo::exists(path) && onOpenPath) { onOpenPath(path, 0); return; }
+            break;
+        }
+        case Click::Diff:
+            if (!record.diff.isEmpty() && onOpenDiff) {
+                onOpenDiff(label.path.isEmpty() ? label.title : label.path, record.diff);
+                hint(QStringLiteral("diff.hunks"), QStringLiteral("Tip: n and p step through the hunks of a diff pane"));
+                return;
+            }
+            break;
+        case Click::Subagent:
+            if (!label.openId.isEmpty()) { openSubagent(label.openId); return; }
+            break;
+        case Click::Card:
+            if (!label.openId.isEmpty() && onOpenCard) { onOpenCard(label.openId.toUpper()); return; }
+            break;
+        case Click::Plan: {
+            const QString path = absolute(label.path);
+            if (!path.isEmpty() && onOpenDocument) { onOpenDocument(path); return; }
+            break;
+        }
+        case Click::Todos:
+        case Click::Fold:
+            break;
+        }
+        // Everything the label asked for that this pane cannot open, and every fold-typed line on a
+        // backend with no fold layer: the call's stored output, in a preview pane.
+        if (!m_workerReady || ref.turn.isEmpty() || record.callIds.isEmpty()) {
+            status(QStringLiteral("That call's detail is not available in this pane any more."));
+            return;
+        }
+        send({{"type", "tool_output_get"}, {"id", QStringLiteral("turn-") + QString::number(++m_requestId)},
+              {"turn_id", ref.turn}, {"call_id", record.callIds.first()}});
+    }
+
+    // The inline diff of a small write or edit (at most 12 changed lines, § 23.2): printed under
+    // the line with no click at all, in the add/remove inks the rest of Relay uses.
+    void printInlineDiff(const QString &unifiedDiff) {
+        const relay::ParsedDiff diff = relay::parseUnifiedDiff(unifiedDiff);
+        if (diff.isEmpty()) return;
+        for (const relay::DiffLine &line : diff.lines) {
+            if (line.kind == relay::DiffLine::FileHeader) continue;   // the row above already names the file
+            const Ink ink = line.kind == relay::DiffLine::Add      ? Ink::DiffAdd
+                          : line.kind == relay::DiffLine::Remove   ? Ink::DiffRemove
+                          : line.kind == relay::DiffLine::Hunk     ? Ink::Note
+                                                                   : Ink::ToolOutput;
+            printInline(QStringLiteral("  ") + line.text + QLatin1Char('\n'), ink);
+        }
     }
 
 public:
+    // A write or an edit whose diff is more than 12 changed lines (§ 23.6): the window opens a diff
+    // pane beside this one. Also wired into the turn pane's rows (requestTurn).
+    std::function<void(const QString &title, const QString &unifiedDiff)> onOpenDiff;
+
+    // A relay://open-call link arriving from outside the window (the desktop's relay: handler).
+    void openCallLink(const QString &uri) { openCallTarget(uri); }
+
     bool thinkingPanelVisible() const { return m_thinking && m_thinking->isVisible(); }
 
     // Alt+R shows and hides this pane's reasoning panel (owner report, 2026-09-18: "need a keyboard
@@ -3382,8 +3668,19 @@ public:
         m_turnViews.insert(turnId, view);
         if (m_turnSummaries.contains(turnId)) view->setSummary(m_turnSummaries.value(turnId));
         if (m_turnThinking.contains(turnId)) view->setThinking(m_turnThinking.value(turnId));
+        // The reply goes back to the view that asked, not to a preview pane: the request id says
+        // which of the three asked for a call's output (`fold-` a terminal fold, this map the turn
+        // pane, and a plain `turn-` id the "open in pane" path).
         view->onOpenOutput = [this, turnId](const QString &callId) {
-            send({{"type", "tool_output_get"}, {"id", QStringLiteral("turn-") + QString::number(++m_requestId)}, {"turn_id", turnId}, {"call_id", callId}});
+            const QString id = QStringLiteral("turn-") + QString::number(++m_requestId);
+            m_turnOutputRequests.insert(id, turnId);
+            while (m_turnOutputRequests.size() > 64) m_turnOutputRequests.erase(m_turnOutputRequests.begin());
+            send({{"type", "tool_output_get"}, {"id", id}, {"turn_id", turnId}, {"call_id", callId}});
+        };
+        // A row whose diff is more than 12 changed lines opens the diff pane rather than writing a
+        // wall of green and red into the turn pane's log (§ 23.6, #TK9C).
+        view->onOpenDiff = [this](const QString &title, const QString &unifiedDiff) {
+            if (onOpenDiff) onOpenDiff(title, unifiedDiff);
         };
         send({{"type", "turn_transcript_get"}, {"id", QStringLiteral("turn-") + QString::number(++m_requestId)}, {"turn_id", turnId}});
     }
@@ -5215,6 +5512,14 @@ private:
         // `#K7Q2` in the output is a card link when this pane's Switchboard index knows the id
         // (design section 5); the engine asks, the pane answers from the rows it has seen.
         m_backend->setCardLookup([this](const QString &id, QString *title) { return lookupOutputCard(id, title); });
+        // Tool-call lines fold their detail open in place (#TK9C, docs/ENGINE.md "Folds"): every
+        // OSC 8 URI under this prefix is an anchor the view owns, and a click on one that has no
+        // content yet comes back here for it. A backend without the capability ignores both, and
+        // the lines are anchored to relay://open-call instead (callAnchor).
+        if (terminalCan(relay::TerminalBackend::Folds)) {
+            m_backend->setFoldPrefix(QString(relay::calllines::kFoldPrefix));
+            m_backend->onFoldRequested = [this](const QString &uri) { foldRequested(uri); };
+        }
         // The Bash integration changes to this pane's directory after loading the user's
         // configuration, so a shell started elsewhere still lands where the pane says.
         qputenv("RELAY_START_DIR", m_cwd.toUtf8());
@@ -5612,91 +5917,99 @@ private:
             turnHeader(); printInline(text, Ink::Agent);
         } else if (type == QStringLiteral("tool_output")) {
             // Collapsed by default (SWITCHBOARD-DESIGN.md 4.3): a tool's output is counted, not
-            // poured into the pane, and the turn's "✦ N tool calls" line opens it in full. Card
-            // #X5D1 read an earlier owner decision as "print all of it"; the owner corrected that
-            // on 2026-09-17. Agent options › Show tool output brings the stream back.
+            // poured into the pane. Card #X5D1 read an earlier owner decision as "print all of it";
+            // the owner corrected that on 2026-09-17. What the count is for changed with #TK9C: the
+            // call's own line carries it live, and its fold holds the text. Agent options › Show
+            // tool output brings the stream back — and then the line is final where it stands,
+            // because the output below it is where the cursor now is.
             const QString text = event.value(QStringLiteral("text")).toString();
             m_toolLines += text.count('\n');
             m_toolPartialLine = !text.isEmpty() && !text.endsWith('\n');
             if (showToolOutput()) { turnHeader(); printInline(text, Ink::ToolOutput); }
+            else if (!m_liveCall.isEmpty() && shellIdleAtPrompt()) {
+                // The running row counts what the command has printed. Throttled to about ten
+                // rewrites a second: a build that prints a thousand lines must not repaint a row a
+                // thousand times.
+                if (!m_liveTick.isValid() || m_liveTick.elapsed() >= 100) {
+                    m_liveTick.restart();
+                    const int lines = m_toolLines + (m_toolPartialLine ? 1 : 0);
+                    const relay::calllines::Step step =
+                        m_callCursor.live(m_liveCall, m_liveLabel, lines, callLineCells());
+                    if (!step.nothing) drawCallRow(step, m_liveTurn, callAnchor(step, m_liveTurn, m_liveLabel));
+                }
+            }
         } else if (type == QStringLiteral("tool_started")) {
             turnHeader();
             m_toolLines = 0; m_toolPartialLine = false;
-            const QString preview = event.value(QStringLiteral("preview")).toString();
-            // Compact the backend preview: "RUN COMMAND\n\nWorking directory: …\nTimeout: …\n\ncmd"
-            // becomes "⚙ $ cmd"; file tools become "⚙ read path" / "⚙ write path" plus the diff.
-            QStringList lines = preview.left(6000).split('\n');
-            const QString title = lines.isEmpty() ? QString() : lines.takeFirst().trimmed();
-            QStringList body;
-            for (const QString &line : std::as_const(lines)) {
-                if (line.startsWith(QStringLiteral("Working directory: ")) || line.startsWith(QStringLiteral("Timeout: "))
-                    || line.startsWith(QStringLiteral("Old bytes: "))) continue;
-                if (body.isEmpty() && line.trimmed().isEmpty()) continue;
-                body << line;
+            const QString call = event.value(QStringLiteral("call_id")).toString();
+            const QString turn = event.value(QStringLiteral("turn_id")).toString();
+            const relay::toollabel::Label label = relay::toollabel::fromEvent(event);
+            // Wrong-mode hints are unchanged: they key off this run_command's full text, kept by
+            // call_id for the tool_result handler. § 23.1 still sends `preview`, which is where the
+            // text is; nothing else is parsed out of it any more.
+            if (event.value(QStringLiteral("tool")).toString() == QStringLiteral("run_command")
+                || label.kind == QStringLiteral("run") || label.kind == QStringLiteral("job")) {
+                const QString command = runCommandFromPreview(event.value(QStringLiteral("preview")).toString());
+                if (!command.isEmpty()) m_runCommands.insert(call, command);
             }
-            while (!body.isEmpty() && body.last().trimmed().isEmpty()) body.removeLast();
-            QString verb = title == QStringLiteral("RUN COMMAND") ? QStringLiteral("$")
-                         : title == QStringLiteral("READ FILE") ? QStringLiteral("read")
-                         : title == QStringLiteral("LIST DIRECTORY") ? QStringLiteral("list")
-                         : title == QStringLiteral("WRITE FILE") ? QStringLiteral("write")
-                         : event.value(QStringLiteral("tool")).toString();
-            QString head = body.isEmpty() ? QString() : body.takeFirst();
-            // Wrong-mode hints: remember this run_command's full text (multi-line commands
-            // continue in the body), keyed by call_id for the tool_result handler.
-            if (title == QStringLiteral("RUN COMMAND"))
-                m_runCommands.insert(event.value(QStringLiteral("call_id")).toString(),
-                                     (head + (body.isEmpty() ? QString() : QStringLiteral("\n") + body.join(QLatin1Char('\n')))).trimmed());
-            if (verb != QStringLiteral("$") && head.startsWith(m_workspace + '/')) head = head.mid(m_workspace.size() + 1);
-            ensureLineStart();
-            printInline(QStringLiteral("⚙ ") + verb + ' ' + head + '\n', Ink::Tool);
-            // Multi-line commands continue; write diffs are colored. Skip the diff's blank separator.
-            // Bounded like the output above: a long diff belongs in the turn pane, not the terminal.
-            int shown = 0, skipped = 0;
-            for (const QString &line : std::as_const(body)) {
-                if (line.trimmed().isEmpty()) continue;
-                if (!showToolOutput() && shown >= kInlineDiffLines) { ++skipped; continue; }
-                Ink ink = Ink::ToolOutput;
-                if (line.startsWith('+') && !line.startsWith(QStringLiteral("+++"))) ink = Ink::DiffAdd;
-                else if (line.startsWith('-') && !line.startsWith(QStringLiteral("---"))) ink = Ink::DiffRemove;
-                printInline(line + '\n', ink);
-                ++shown;
+            m_liveCall = call; m_liveTurn = turn; m_liveLabel = label;
+            m_liveTick.invalidate();
+            // Deferred while a program owns the terminal: a pending line can only be replayed in
+            // its final form, so nothing is drawn until the result arrives.
+            if (shellIdleAtPrompt()) {
+                m_callCursor.setCells(callLineCells());
+                const relay::calllines::Step step = m_callCursor.start(call, label);
+                if (!step.nothing) drawCallRow(step, turn, callAnchor(step, turn, label));
+                // With the stream on, the output goes under the line: the row is finished here.
+                if (showToolOutput()) endCallRun();
             }
-            if (skipped > 0) printInline(QStringLiteral("  … %1 more lines\n").arg(skipped), Ink::Note);
         } else if (type == QStringLiteral("tool_result")) {
             const auto result = event.value(QStringLiteral("result")).toObject();
+            const QString call = event.value(QStringLiteral("call_id")).toString();
+            const QString turn = event.value(QStringLiteral("turn_id")).toString();
             // Wrong-mode hints: a run_command that failed, while in agent mode, whose text is the
             // prompt the turn started from, means the submission was a shell command in the wrong
             // mode. At most once per turn.
             if (event.value(QStringLiteral("tool")).toString() == QStringLiteral("run_command")) {
-                const QString runText = m_runCommands.take(event.value(QStringLiteral("call_id")).toString());
+                const QString runText = m_runCommands.take(call);
                 if (!m_modeHintShown && !runText.isEmpty() && result.value(QStringLiteral("exit_code")).toInt() != 0
                     && m_modeValue == QStringLiteral("agent") && relay::input::commandMatchesPrompt(runText, m_turnShellPrompt)) {
                     m_modeHintShown = true;
                     wrongModeHint(false);
                 }
             }
-            ensureLineStart();
-            // What the collapsed output cost: the result line carries the size the pane did not show.
-            const int lines = m_toolLines + (m_toolPartialLine ? 1 : 0);
-            const QString size = (lines > 0 && !showToolOutput())
-                ? QStringLiteral(" · %1 %2").arg(lines).arg(lines == 1 ? QStringLiteral("line") : QStringLiteral("lines"))
-                : QString();
+            const relay::toollabel::Label label = relay::toollabel::fromEvent(event);
+            const QString diff = event.value(QStringLiteral("diff")).toString();
             m_toolLines = 0; m_toolPartialLine = false;
-            if (result.contains(QStringLiteral("error"))) printInline(QStringLiteral("✗ ") + result.value(QStringLiteral("error")).toString() + '\n', Ink::Error);
-            // A command past its wait keeps running as a job the agent reads or stops later
-            // (backend/relay_core/jobs.py); a stopped one is not a failure the pane paints red.
-            else if (result.value(QStringLiteral("still_running")).toBool())
-                printInline(QStringLiteral("▸ still running as %1%2\n").arg(result.value(QStringLiteral("job_id")).toString(), size), Ink::Note);
-            else if (result.value(QStringLiteral("stopped")).toBool())
-                printInline(QStringLiteral("■ stopped %1%2\n").arg(result.value(QStringLiteral("job_id")).toString(), size), Ink::Note);
-            else if (result.contains(QStringLiteral("exit_code"))) {
-                const int code = result.value(QStringLiteral("exit_code")).toInt();
-                printInline(QStringLiteral("exit %1%2%3%4\n").arg(code)
-                    .arg(result.value(QStringLiteral("timed_out")).toBool() ? QStringLiteral(" · timed out") : QString())
-                    .arg(result.value(QStringLiteral("truncated")).toBool() ? QStringLiteral(" · output truncated") : QString())
-                    .arg(size),
-                    code == 0 ? Ink::Note : Ink::Error);
-            } else printInline(QStringLiteral("✓ ") + event.value(QStringLiteral("tool")).toString() + size + '\n', Ink::Note);
+            m_liveCall.clear();
+            if (!shellIdleAtPrompt()) {
+                // Deferred: the finished line, as plain text. It carries no anchor, because a line
+                // replayed by flushInline() cannot be rewritten and nothing would fold under it.
+                ensureLineStart();
+                printInline(QStringLiteral("▸ ") + label.line() + QLatin1Char('\n'),
+                            label.failed() ? Ink::Error : Ink::Tool);
+            } else {
+                m_callCursor.setCells(callLineCells());
+                const relay::calllines::Step step = m_callCursor.result(call, label, callLineCells());
+                const QString anchor = callAnchor(step, turn, label);
+                drawCallRow(step, turn, anchor);
+                CallRecord record;
+                record.turnId = turn;
+                record.label = label;
+                record.diff = diff;
+                record.merged = step.merged;
+                record.members = m_callCursor.members();
+                record.callIds.clear();
+                for (relay::calllines::RunMember &member : record.members) {
+                    record.callIds << member.call;
+                    if (!member.path.isEmpty() && !member.path.startsWith(QLatin1Char('/')))
+                        member.path = QDir(m_workspace).filePath(member.path);   // the fold's links open files
+                }
+                if (record.callIds.isEmpty()) record.callIds << call;
+                rememberCall(anchor, record);
+                // At most 12 changed lines (§ 23.2): the diff prints under the line with no click.
+                if (label.inlineDiff && !diff.isEmpty() && !step.hold) printInlineDiff(diff);
+            }
         } else if (type == QStringLiteral("vision_route")) {
             // Image context (protocol 17): this turn runs on another model because the pane's own
             // cannot read images. Said plainly, because the answer comes from a different model.
@@ -6706,6 +7019,7 @@ private:
     void printInline(const QString &text, Ink ink) {
         if (text.isEmpty()) return;
         if (!shellIdleAtPrompt()) { m_inlinePending.append({text, ink}); appendTranscript(text, ink); return; }
+        endCallRun();   // a held tool-call row ends before anything else prints (#TK9C)
         const QString clean = sanitize(text);
         if (clean.isEmpty()) return;
         QByteArray out;
@@ -6766,10 +7080,13 @@ private:
         return bytes;
     }
 
-    void ensureLineStart() { if (m_inlineOpen && !m_atLineStart) printInline(QStringLiteral("\n"), Ink::Note); }
+    // endCallRun() first: a held tool-call row (a run of reads that may still grow) owes a newline,
+    // and once it is written the cursor is already at the start of a line (#TK9C).
+    void ensureLineStart() { endCallRun(); if (m_inlineOpen && !m_atLineStart) printInline(QStringLiteral("\n"), Ink::Note); }
 
     void closeInline() {
         if (!m_inlineOpen) return;
+        endCallRun();
         if (m_markdown.holding()) writeTerminal(wrapped(m_markdown.finish()));
         writeTerminal(takeWrapped());
         if (!m_atLineStart) writeTerminal("\r\n");
@@ -8777,6 +9094,17 @@ private:
     bool m_commandNatural = false, m_modeHintShown = false;
     QString m_turnShellPrompt;
     QHash<QString, QString> m_runCommands;
+    // One line per tool call (#TK9C): the cursor's own state machine, the record behind each
+    // anchor (bounded), the fold requests still in flight, and the call whose row a live
+    // tool_output tick is counting for.
+    relay::calllines::LineCursor m_callCursor;
+    QHash<QString, CallRecord> m_calls;
+    QStringList m_callOrder;
+    QHash<QString, QString> m_foldRequests;        // request id -> the anchor waiting for its content
+    QHash<QString, QString> m_turnOutputRequests;  // request id -> the turn pane that asked
+    QString m_liveCall, m_liveTurn;
+    relay::toollabel::Label m_liveLabel;
+    QElapsedTimer m_liveTick;
     QTimer *m_chipFlash = nullptr;
     QString m_chipFlashDest;
     int m_chipFlashLeft = 0;

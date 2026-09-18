@@ -236,6 +236,20 @@ inline bool WindowManager::handleOpen(const QJsonObject &request) {
                 if (Pane *pane = window->findPaneByToken(parts.at(0))) { pane->continueTurn(true); window->raise(); window->activateWindow(); return true; }
             return false;
         }
+        // relay://open-call/<pane-token>/<turn-id>/<call-id>: a tool-call line whose click is not a
+        // fold (#TK9C, protocol § 23.6). The pane knows what its label asked to open; this only
+        // finds the pane. relay://call/… never reaches here — it belongs to the engine's fold layer.
+        if (url.scheme() == QStringLiteral("relay") && url.host() == QStringLiteral("open-call") && parts.size() == 3) {
+            const QString target = request.value(QStringLiteral("url")).toString();
+            for (RelayWindow *window : std::as_const(m_windows))
+                if (Pane *pane = window->findPaneByToken(QUrl::fromPercentEncoding(parts.at(0).toUtf8()))) {
+                    pane->openCallLink(target);
+                    window->revealPane(pane);
+                    window->raise(); window->activateWindow();
+                    return true;
+                }
+            return false;
+        }
         if (url.scheme() != QStringLiteral("relay") || url.host() != QStringLiteral("turn") || parts.size() != 2) return false;
         for (RelayWindow *window : std::as_const(m_windows))
             if (Pane *pane = window->findPaneByToken(parts.at(0))) {

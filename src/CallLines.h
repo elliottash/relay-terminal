@@ -109,6 +109,8 @@ struct Step {
     bool nothing = false;   // print nothing at all (a merged call starting inside a run)
     Row row;
     QString call;           // the URI's <call> component: "c3", or "c3+4" for a merged row
+    QString callId;         // the one call, or a run's first member — what foldUri() takes
+    int extra = 0;          // a run's member count, 0 when the row stands for one call
     bool merged = false;
 };
 

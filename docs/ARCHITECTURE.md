@@ -703,9 +703,46 @@ engine writes them into its parser.
   error, note).
 - `closeInline` sends Ctrl+X Ctrl+P, so Readline redraws the prompt. While more queued turns
   are pending, the prompt is not redrawn between turns.
-- `tool_started` previews are compacted: `⚙ $ command`, `⚙ read path`, `⚙ list path`,
-  `⚙ write path` plus a colored diff. `tool_result` prints `exit N`, `✓ tool` or `✗ error`.
+- Tool calls print one line each; see "Tool-call lines" below.
 - If the D-Bus session is not found, output goes to stderr.
+
+### Tool-call lines
+
+Every agent tool call is **one row** — `▸ ran pytest · 212 lines · exit 1 · 8 s` — and a click
+unfolds its detail underneath it, inside the terminal (card #TK9C; the wording comes from the
+backend's `label`, protocol section 23; the fold layer is docs/ENGINE.md, "Folds").
+
+- `tool_started` draws the row as `running pytest…` with **no trailing newline**, wrapped in an
+  OSC 8 anchor over `relay://call/<pane>/<turn>/<call>`. The anchor starts at column 0 with a
+  `▸ ` placeholder the view overpaints with ▸ or ▾ — on the ghostty core an anchor that starts
+  further right is never found. While the command streams, the row is rewritten with a live
+  counter (about ten times a second).
+- `tool_result` rewrites the row in place with the finished line: the title in the muted tool ink
+  (the error ink, with a `✗`, when it failed) and the stats muted after it, cut to the pane's
+  columns with `…` so the row never wraps. **If anything else printed in between** (prose, a
+  note, a steer, the streamed output when *Show tool output* is on), the row is finished where it
+  stands and the result prints its own.
+- **Consecutive reads and listings merge**: the row keeps the cursor until a call arrives that
+  cannot join it, and becomes `read 6 files · 4,100 lines`. Its anchor is `<first call>+<n>` and
+  its fold lists the members, each linking to the file it read.
+- A **diff of at most 12 changed lines** prints under the row with no click at all; a larger one
+  opens the diff pane (`ToolPane::Kind::Diff` over `relay::DiffView`, a splitter pane, one per
+  tab). What else a click opens is the label's `open.type` (section 23.6): a file in a preview
+  pane, a subagent tab, a card. Those lines anchor **`relay://open-call/…`** instead, which the
+  fold layer leaves alone and `Pane::openOutputTarget` (and `WindowManager::handleOpen`, for a
+  link from outside) routes.
+- The fold's content comes from `tool_output_get` under a `fold-` request id, so it never also
+  opens a pane, and is built from the reply's `detail` sections: a command with a `$` lead, output
+  with its escapes stripped, a diff in the add/remove inks on a tint, capped at 5,000 rows with a
+  final "open in pane" row. A turn the worker no longer keeps gets a one-row fold that says so.
+- **While a program owns the terminal** nothing can be rewritten, so only the finished line is
+  printed, as plain text with no anchor.
+- Everything the pane decides first — the URI, the row and its cut, the rewrite-or-new-row state
+  machine, the fold's rows — is in `src/CallLines.{h,cpp}` and tested headless
+  (`tests/calllines_test.cpp`); `src/Pane.h` only writes the bytes.
+- Hints: `call.fold` ("Click a ▸ line to unfold it here · Ctrl+Shift+Return unfolds the nearest")
+  after a turn that printed tool lines, and `diff.hunks` ("n and p step through the hunks") when a
+  diff pane opens.
 
 **While a program owns the terminal** (vim, a build, a REPL), printing would corrupt its
 screen. Output is buffered, and also shown live in the **transcript panel** above the composer
