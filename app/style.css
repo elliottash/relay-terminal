@@ -312,9 +312,6 @@ details.tool > summary::marker { color: var(--muted); }
 #guest-role { color: var(--guest); }
 #guest-leave { padding: 5px 10px; font-size: 13px; flex: 0 0 auto; }
 
-#guest-panes { display: flex; gap: 6px; overflow-x: auto; padding: 6px 14px 0; scrollbar-width: none; }
-#guest-panes::-webkit-scrollbar { display: none; }
-#guest-panes:empty { display: none; }
 .guest-pane-chip {
   flex: 0 0 auto; background: none; border: 1px solid var(--line); color: var(--muted);
   border-radius: 8px; padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer;
@@ -322,8 +319,8 @@ details.tool > summary::marker { color: var(--muted); }
 .guest-pane-chip.is-on { color: var(--text); background: var(--panel); cursor: default; }
 
 #guest-presence {
-  display: flex; gap: 6px; overflow-x: auto; padding: 6px 14px; scrollbar-width: none;
-  font-size: 12px;
+  display: flex; align-items: center; gap: 6px; overflow-x: auto; padding: 6px 14px;
+  scrollbar-width: none; font-size: 12px;
 }
 #guest-presence::-webkit-scrollbar { display: none; }
 #guest-presence:empty { display: none; }
@@ -367,7 +364,8 @@ details.tool > summary::marker { color: var(--muted); }
   display: flex; align-items: center; gap: 8px; padding: 8px 12px;
   border-top: 1px solid var(--line); background: var(--panel);
 }
-#guest-drive-mode { flex: 1; }
+/* Hugs its text: with the buttons gone it would otherwise stretch into a banner. */
+#guest-drive-mode { flex: 0 1 auto; margin-right: auto; }
 #guest-hand-back, #guest-direct {
   background: var(--line); color: var(--text); border: 0; border-radius: 8px;
   padding: 7px 12px; font: inherit; font-weight: 600; cursor: pointer;
@@ -396,6 +394,9 @@ details.tool > summary::marker { color: var(--muted); }
   background: var(--panel);
 }
 #guest-line { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, monospace; }
+/* Still there, still theirs, but not sendable until they have the keyboard again. */
+#guest-line[disabled] { color: var(--muted); opacity: 0.7; }
+#guest-line-send[disabled] { background: var(--line); color: var(--muted); cursor: default; }
 
 /* The prompts this guest has asked for, and what became of each. */
 #guest-prompts { max-height: 34vh; overflow-y: auto; padding: 0 14px; }
@@ -412,14 +413,15 @@ details.tool > summary::marker { color: var(--muted); }
 .guest-prompt.is-declined .guest-prompt-state { color: var(--bad); }
 
 #guest-composer {
-  display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 10px;
   border-top: 1px solid var(--line); background: var(--panel);
 }
-#guest-prompt-text { flex: 1; resize: none; max-height: 140px; }
+.guest-composer-row { display: flex; gap: 8px; align-items: flex-end; }
+#guest-prompt-text { flex: 1; min-width: 0; resize: none; max-height: 140px; }
 #guest-prompt-text[disabled] { color: var(--muted); }
 
 @media (min-width: 700px) {
-  #guest-bar, #guest-panes, #guest-presence, #guest-note, #guest-drive-bar, #guest-keys,
+  #guest-bar, #guest-presence, #guest-note, #guest-drive-bar, #guest-keys,
   #guest-line-row, #guest-prompts, #guest-composer {
     max-width: 920px; margin-left: auto; margin-right: auto; width: 100%;
   }

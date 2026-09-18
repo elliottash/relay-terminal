@@ -160,8 +160,9 @@
       <span id="guest-status" class="chip">connecting</span>
       <button type="button" id="guest-leave" class="quiet-button">Leave</button>
     </div>
-    <div id="guest-panes"></div>
-    <!-- Who else is here, from `participants` and `control`: names, roles and who is driving. -->
+    <!-- One strip of context: which pane, then who else is here — names, roles and who is
+         driving — from `participants` and `control`. One row, because a phone has no rows to
+         spare above a terminal. -->
     <div id="guest-presence"></div>
 
     <div id="guest-screen-pane">
@@ -188,12 +189,16 @@
       <button type="button" id="guest-line-send">Send</button>
     </div>
 
-    <!-- A guest's prompt is a request, and the box says so before it is sent as well as after. -->
+    <!-- A guest's prompt is a request, and the box says so before it is sent as well as after.
+         The caption carries the qualifier rather than the placeholder, which a phone clips. -->
     <div id="guest-prompts"></div>
     <div id="guest-composer" hidden>
-      <textarea id="guest-prompt-text" rows="1" autocapitalize="sentences" autocomplete="off"
-                placeholder="Ask their agent… (they approve it first)"></textarea>
-      <button type="button" id="guest-prompt-send">Send</button>
+      <div class="muted small">Goes to their agent — they approve it first.</div>
+      <div class="guest-composer-row">
+        <textarea id="guest-prompt-text" rows="1" autocapitalize="sentences" autocomplete="off"
+                  placeholder="Ask their agent…"></textarea>
+        <button type="button" id="guest-prompt-send">Send</button>
+      </div>
     </div>
   </section>
 

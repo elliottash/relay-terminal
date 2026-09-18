@@ -43,6 +43,7 @@ let knockTimer = null;
 let controlTimer = null;
 let expiryTimer = null;
 let wired = false;
+let noteUntil = 0;     // a held note stands until this moment (see `note`)
 const sticky = { ctrl: false, alt: false };
 const paneState = new Map();  // pane -> its presence, its driver and whether it is paused
 const sent = [];          // composes awaiting `prompt_pending`, oldest first
@@ -52,6 +53,7 @@ const MAX_PENDING = 3;            // section 10.4: three may wait at once
 const PROMPT_LAPSE = 600000;      // ten minutes, as PROMPT_LIFETIME in remote/guests.py
 const CONTROL_LAPSE = 60000;      // a minute, as CONTROL_LIFETIME
 const KNOCK_WAIT = 120;           // seconds, as KNOCK_TIMEOUT
+const HOLD = 8000;                // how long a note about a handoff or a pause stands
 
 const $ = (id) => document.getElementById(id);
 
@@ -75,8 +77,13 @@ function setStatus(text, kind = '') {
   chip.className = `chip ${kind}`;
 }
 
-function note(text) {
+// One status line, with a way to hold it. A handoff, a pause or a role change is the kind of
+// thing a person has to see, and the agent's routine "working…" arrives a moment later and would
+// otherwise wipe it off the screen before it had been read.
+function note(text, hold = 0) {
+  if (!hold && Date.now() < noteUntil) return;
   $('guest-note').textContent = text || '';
+  noteUntil = hold ? Date.now() + hold : 0;
 }
 
 function platformName() {
@@ -356,15 +363,23 @@ async function endSession(text) {
     screenView.destroy();
     screenView = null;
   }
-  $('ended-text').textContent = text;
+  $('ended-text').textContent = `${text} If you are sent a new link, open it to knock again.`;
   show('ended');
+}
+
+// A reason from the wire, made into a sentence rather than pasted mid-sentence.
+function sentence(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return '';
+  return trimmed[0].toUpperCase() + trimmed.slice(1)
+    + (/[.!?]$/.test(trimmed) ? '' : '.');
 }
 
 // ---- the pane ------------------------------------------------------------------------------------
 
-function renderPanes() {
-  const row = $('guest-panes');
-  row.replaceChildren();
+// The pane chips, at the head of the one context strip. An invite may name several panes and all
+// of them are this guest's; with one, the chip is a label rather than a choice.
+function paneChips(row) {
   for (const id of panes) {
     const item = paneItems.find((entry) => entry.id === id);
     const title = item?.title || id;
@@ -425,7 +440,6 @@ function openPane(id) {
   ensureScreen();
   if (changed) screenView.resetHistory();
   screenView.fit();
-  renderPanes();
   renderPresence();
   updateDriveUi();
   if (paused) note(pauseText());
@@ -453,6 +467,7 @@ function toLive() {
 function renderPresence() {
   const row = $('guest-presence');
   row.replaceChildren();
+  paneChips(row);
   const owner = el('span', `who owner${holder === 'owner' ? ' is-driving' : ''}`);
   owner.append(el('span', 'who-name', guest?.desktopName || 'their desktop'));
   owner.append(el('span', 'who-role', holder === 'owner' ? 'driving' : 'owner'));
@@ -487,7 +502,7 @@ function onParticipants(message) {
     applySession({ role: me.role });
     note(promoted
       ? 'They made you an editor: you can ask to type, and ask their agent.'
-      : 'They made you a viewer: you can watch this pane.');
+      : 'They made you a viewer: you can watch this pane.', HOLD);
   }
   if (message.pane !== pane) return;
   presence = items;
@@ -514,18 +529,18 @@ function onControl(message) {
   stopControlTimer();
   if (!driving) directKeys = false;
   if (driving && !was) {
-    note('You have the keyboard. What you type goes to the program on their screen.');
+    note('What you type now goes to the program on their screen.', HOLD);
   } else if (asked && !driving && reason) {
     note(reason === 'lapsed'
       ? 'Nobody answered. You can ask to type again.'
-      : `${ownerName()} said no for now. You can ask again.`);
+      : `${ownerName()} said no for now. You can ask again.`, HOLD);
   } else if (was && !driving) {
     // The owner's own keystroke takes control back without asking. Say so at once — and leave
     // whatever is half-typed in the line box alone, because it is still theirs to send later.
     note(holder === 'owner'
-      ? `${holderName || ownerName()} took the keyboard back. What you had typed is still here.`
+      ? `${holderName || ownerName()} took the keyboard back — what you had typed is still here.`
       : holder === 'agent' ? 'Their agent is driving this pane now.'
-      : `${holderName || 'Somebody else'} is driving this pane now.`);
+      : `${holderName || 'Somebody else'} is driving this pane now.`, HOLD);
   }
   renderPresence();
   updateDriveUi();
@@ -588,7 +603,7 @@ function onShareState(message) {
     stopControlTimer();
   }
   updateDriveUi();
-  note(paused ? pauseText() : '');
+  note(paused ? pauseText() : '', HOLD);
 }
 
 function pauseText() {
@@ -735,7 +750,12 @@ function updateDriveUi() {
   $('guest-direct').hidden = !driving;
   $('guest-direct').classList.toggle('is-on', directKeys);
   $('guest-keys').hidden = !driving;
-  $('guest-line-row').hidden = !driving;
+  // The line box stays while it holds something, even once the keyboard has gone: half a command
+  // is still the person's to finish, and hiding it would look exactly like losing it.
+  const line = $('guest-line');
+  $('guest-line-row').hidden = !(driving || (editor && line.value.trim()));
+  line.disabled = !driving;
+  $('guest-line-send').disabled = !driving;
   $('guest-capture').hidden = !driving || !directKeys;
   $('guest-composer').hidden = !editor;
   const mode = $('guest-drive-mode');
@@ -748,12 +768,12 @@ function updateDriveUi() {
   const full = pendingCount() >= MAX_PENDING;
   box.disabled = paused;
   $('guest-prompt-send').disabled = paused || full;
+  // Short, because a phone clips a long placeholder: the qualifier is the caption above it.
   box.placeholder = paused ? 'Paused by the owner…'
-    : full ? 'Three of your prompts are already waiting…'
-    : 'Ask their agent… (they approve it first)';
+    : full ? 'Three are already waiting…'
+    : 'Ask their agent…';
   if (!editor) {
-    note(paused ? pauseText()
-      : 'You are watching this pane. Only the owner and their editors can type.');
+    note(paused ? pauseText() : 'Watching. Only the owner and their editors can type.');
   }
 }
 
@@ -879,7 +899,11 @@ function onAgent(message) {
       note('Their agent is working…');
       break;
     case 'queued':
-      note(event.origin ? `Queued · ${event.origin}` : 'Queued');
+      // `author` is the hub's own word for whose row this is — "you", another guest's name, or
+      // "the owner". The raw `origin` is a participant id and means nothing to a reader.
+      note(event.author === 'you' ? 'Your prompt is queued for their agent.'
+        : event.author ? `Queued · ${event.author}`
+        : 'Queued');
       break;
     case 'agent_finished':
     case 'agent_stopped':
@@ -933,6 +957,10 @@ function onError(detail) {
 function wire() {
   if (wired) return;
   wired = true;
+  // The app's own header names the desktop this browser is paired with and how it is paired.
+  // A guest is paired with nothing, so it goes: their bar is the one inside their own screen,
+  // and it says whose computer this is instead.
+  $('bar').hidden = true;
 
   $('join-knock').addEventListener('click', knock);
   $('join-name').addEventListener('keydown', (event) => {
@@ -949,8 +977,7 @@ function wire() {
   $('guest-new-output').addEventListener('click', () => toLive());
   $('guest-leave').addEventListener('click', async () => {
     if (pane) rrp.send({ t: 'bye', reason: 'left' }).catch(() => {});
-    await endSession('You left this shared pane. The link you were given may still work — open '
-      + 'it again to knock.');
+    await endSession('You left this shared pane.');
   });
 
   rrp.addEventListener('authcode', (event) => {
@@ -964,7 +991,7 @@ function wire() {
   });
   rrp.addEventListener('panes', (event) => {
     paneItems = event.detail.items || [];
-    renderPanes();
+    renderPresence();
   });
   rrp.addEventListener('participants', (event) => onParticipants(event.detail));
   rrp.addEventListener('control', (event) => onControl(event.detail));
@@ -981,10 +1008,9 @@ function wire() {
     const detail = event.detail || {};
     if (!detail.discard) return;
     // `discard` is the desktop saying to forget the record rather than retry: removed, expired,
-    // or the share was ended.
-    endSession(detail.reason
-      ? `This invitation has ended: ${detail.reason}`
-      : 'This invitation has ended.');
+    // or the share was ended. The heading already says it ended; this is the reason, not a
+    // second copy of the heading.
+    endSession(sentence(detail.reason) || 'Whoever invited you ended your access.');
   });
   rrp.addEventListener('closed', () => {
     if (ended) return;
