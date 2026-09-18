@@ -21,7 +21,7 @@ description = "A 1990s PC: beige case, bevelled chrome, navy selection, a neutra
 [ui]
 background = "#cdc0a8"
 # The screen: 2% saturation. The terminal, the idle composer, editors and previews.
-surface = "#f3f2f0"
+surface = "#f4efe4"
 # A raised plastic face: chips, buttons, menus, the focused composer.
 surface_raised = "#ded3bf"
 border = "#9c8d74"
@@ -64,8 +64,10 @@ agent = "#4f4163"
 token = "#324d5c"
 
 [terminal]
-# The grid is the screen: neutral, and the lightest thing in the theme.
-background = "#f3f2f0"
+# The grid is warm paper, not a white block (owner, 2026-09-18): a faint cream that belongs to the
+# beige case around it, still the lightest thing in the theme and still neutral enough that every
+# ANSI colour keeps AA contrast (worst entry 4.84:1).
+background = "#f4efe4"
 foreground = "#1f1c16"
 cursor = "#23211a"
 background_intense = "#ffffff"
