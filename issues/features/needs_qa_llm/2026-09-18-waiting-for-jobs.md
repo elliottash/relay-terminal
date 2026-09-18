@@ -12,7 +12,7 @@ rank: zzzzzz
 created: '2026-09-18'
 source: issues/feature_intake.txt, 2026-09-18
 acceptance: '`tests/panestatus_test.cpp` (ctest `panestatus`), `tests/subagents_test.cpp` (ctest `subagents`), live run in `docs/qa_evidence/2026-09-18-waiting-for-jobs/`'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-18-waiting-for-jobs/], related: [V7QD], github: null}
+links: {plans: [], commits: [883a081], evidence: [docs/qa_evidence/2026-09-18-waiting-for-jobs/], related: [V7QD], github: null}
 ---
 # "waiting for N jobs . . ." in the prompt box
 
