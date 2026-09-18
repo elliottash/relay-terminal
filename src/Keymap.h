@@ -208,7 +208,7 @@ private:
         // SSH (#S5SH). No default keys: of the Ctrl+Shift letters still free, U belongs to the
         // input method's Unicode entry, Q quits other terminals and M says nothing about hosts.
         // Bind one in keybindings.json and the shortcut hints start teaching it.
-                add("ssh.connect", "tab", "Connect to host…: a new tab running ssh to a host from ~/.ssh/config or a recent one", {});
+        add("ssh.connect", "tab", "Connect to host…: a new tab running ssh to a host from ~/.ssh/config or a recent one", {});
         // Ctrl+E, not Ctrl+P: one-handed (owner, 2026-09-17). Ctrl+D is left alone because it is
         // end-of-input for a running program. Ctrl+Shift+E is the twin that programs cannot swallow.
         // One key is now the whole of "new pane": it makes one on the right, and Left, Up or Down
