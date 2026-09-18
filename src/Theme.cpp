@@ -252,7 +252,7 @@ QLabel#opaqueHint { color: @warning; }
 QLabel#planChip { color: @onAgent; background: @agent; border-radius: 4px; padding: 1px 6px; font-weight: 700; letter-spacing: 1px; font-size: 8pt; }
 QLabel#contextLabel { color: @muted; font-family: "@mono"; font-size: 9pt; padding: 0 4px; }
 QLabel#contextLabel[warn="true"] { color: @warning; }
-QToolButton#requestsChip { color: @muted; border: 1px solid @border; border-radius: 4px; padding: 0 6px; font-size: 9pt; background: transparent; }
+QToolButton#requestsChip { color: @muted; border: 1px solid @border; border-radius: 6px; padding: 2px 8px; font-size: 11px; background: @raised; }
 QToolButton#requestsChip[state="running"] { color: @text; }
 QToolButton#requestsChip[state="done"] { color: @success; border-color: @successBorder; }
 QToolButton#requestsChip[state="attention"] { color: @warning; border-color: @warningBorder; }
