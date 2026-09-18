@@ -71,6 +71,8 @@ under Xvfb in an isolated jail against `fake-provider.py`, a streaming local mod
   is a product decision.
 - The "Withdrawn" toast is usually hidden behind the "thinking · N s" pill that shares its corner.
   The row disappearing is the visible confirmation.
+  *Update 2026-09-18:* fixed by #HEFA (cce9871): the clock moved to a chip by "% left" and
+  toasts now queue, so "Withdrawn" and "N characters copied" show during a turn.
 
 ## QA checklist
 
