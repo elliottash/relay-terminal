@@ -80,6 +80,7 @@
 #include <QDesktopServices>
 #include <QMetaObject>
 #include <QSignalBlocker>
+#include <QSocketNotifier>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStandardPaths>
@@ -123,6 +124,8 @@
 #include <functional>
 #include <memory>
 #include <cmath>
+#include <csignal>
+#include <cstring>
 #include <stdexcept>
 #include <fcntl.h>
 #include <termios.h>
@@ -8853,6 +8856,7 @@ public:
         file.write(address.toUtf8());
         if (file.commit()) QFile::setPermissions(runtime + QStringLiteral("/relay/open-socket"), QFile::ReadOwner | QFile::WriteOwner);
     }
+    ~WindowManager();   // defined below RelayWindow: it deletes the windows a quit left open
     QString workspace() const { return m_workspace; }
     bool cleanShell() const { return m_cleanShell; }
     RelayWindow *newWindow(const QJsonArray &tabs, int current = 0, const QRect &geometry = QRect());
@@ -12500,6 +12504,14 @@ private:
 // See the block comment on WindowManager. The file format and the pure rules live in
 // src/WindowState.h; everything below walks the live windows.
 
+// A quit (Ctrl+Q, a signal, the session ending) stops the event loop with the windows still open,
+// and a window is only ever deleted by closing it. Without this nothing destroys their panes: the
+// workers are not told to shut down and each pane's private /tmp/relay-XXXXXX directory stays.
+WindowManager::~WindowManager() {
+    const QList<QPointer<RelayWindow>> windows = m_windows;   // a window may still call forget()
+    for (const QPointer<RelayWindow> &window : windows) delete window.data();
+}
+
 void WindowManager::setUpLayoutSaving() {
     m_statePath = relay::windowstate::defaultPath();
     const QString lockPath = relay::windowstate::defaultLockPath();
@@ -12816,6 +12828,43 @@ static void migrateFastRoleSettings() {
     }
 }
 
+// ----- quitting on a signal ----------------------------------------------------------------------
+//
+// Qt does nothing about SIGTERM: left alone, `kill`, `pkill relay`, a systemd stop and a logout
+// without a session manager all end Relay where it stands — no layout or scrollback saved, the
+// workers not told to shut down, and every pane's private /tmp/relay-XXXXXX directory left behind.
+// A handler may only do async-signal-safe work, so it writes one byte to a pipe and the event loop
+// turns that into an ordinary quit(): aboutToQuit saves, and the destructors clean up.
+static int g_quitPipe[2] = {-1, -1};
+
+static void quitSignalHandler(int) {
+    const char byte = 1;
+    const ssize_t written = ::write(g_quitPipe[1], &byte, 1);
+    (void)written;   // a full pipe means a quit is already on its way
+}
+
+static void installQuitSignals(QCoreApplication &app) {
+    if (::pipe2(g_quitPipe, O_CLOEXEC | O_NONBLOCK) != 0) return;
+    auto *notifier = new QSocketNotifier(g_quitPipe[0], QSocketNotifier::Read, &app);
+    QObject::connect(notifier, &QSocketNotifier::activated, &app, [] {
+        char drained[16];
+        while (::read(g_quitPipe[0], drained, sizeof drained) > 0) {}
+        relay::log::info(QStringLiteral("gui_quit reason=signal"));
+        QCoreApplication::quit();
+    });
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    action.sa_handler = quitSignalHandler;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = SA_RESTART;
+    for (const int sig : {SIGTERM, SIGINT, SIGHUP}) {
+        // Started with the signal ignored (nohup, a launcher): leave it ignored.
+        struct sigaction current;
+        if (::sigaction(sig, nullptr, &current) == 0 && current.sa_handler == SIG_IGN) continue;
+        ::sigaction(sig, &action, nullptr);
+    }
+}
+
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
     relay::theme::applyDarkTheme(app);
@@ -12859,8 +12908,9 @@ int main(int argc, char **argv) {
         qputenv("PATH", (scripts + ':' + qEnvironmentVariable("PATH")).toUtf8());
         WindowManager manager(path, parser.isSet(clean));
         manager.setUpLayoutSaving();
-        // Quit without closing the windows (Ctrl+Q, session logout, SIGTERM through Qt) still
-        // saves; closing them goes through RelayWindow::closeEvent instead.
+        installQuitSignals(app);   // SIGTERM, SIGINT and SIGHUP become an ordinary quit
+        // Quit without closing the windows (Ctrl+Q, session logout, a signal) still saves;
+        // closing them goes through RelayWindow::closeEvent instead.
         // A quit that never closed a window (a session ending, `relay` told to stop) still saves
         // both halves: the layout and each pane's terminal text.
         QObject::connect(&app, &QCoreApplication::aboutToQuit, &app, [&manager] {
