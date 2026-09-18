@@ -145,7 +145,7 @@ QString metalStylesheet(const ThemeSpec &spec) {
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
 QToolButton#workChip, QMenu, QFrame#notificationsPopup,
-QFrame#helpCard, QLabel#toast, QFrame#placementPrompt {
+QFrame#helpCard, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %4, stop:0.09 %1, stop:0.55 %2, stop:1 %3); }
 QPushButton:hover, QComboBox:hover, QToolButton#stripChip:hover, QToolButton#workChip:hover {
@@ -174,7 +174,7 @@ QString plasticStylesheet(const ThemeSpec &spec) {
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
 QToolButton#workChip, QMenu, QFrame#notificationsPopup,
-QFrame#helpCard, QLabel#toast, QFrame#placementPrompt {
+QFrame#helpCard, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %1, stop:0.45 %2, stop:1 %3); }
 QPushButton:hover, QComboBox:hover, QToolButton#stripChip:hover, QToolButton#workChip:hover {
@@ -396,10 +396,6 @@ QLabel#transcriptHeader { color: @muted; }
 QPlainTextEdit#transcriptView { background: transparent; border: none; }
 QPlainTextEdit#thinkingView { background: transparent; border: none; color: @muted; font-family: "@mono"; font-size: 10pt; }
 QLabel#toast { background: @raised; color: @text; border: 1px solid @accentBorder; border-radius: 8px; padding: 6px 12px; }
-/* The pane chrome's "which side?" prompt (#803C): a toast you can click, with the arrows as buttons. */
-QFrame#placementPrompt { background: @raised; border: 1px solid @accentBorder; border-radius: 8px; }
-QLabel#placementPromptText { color: @text; background: transparent; }
-QLabel#placementPromptHint { color: @muted; background: transparent; font-size: 9pt; }
 /* Settings pane (src/SettingsPane.cpp): a full pane, engraved headers like the Switchboard's,
    rows that light up under the pointer and under the keyboard highlight. */
 QWidget#settingsPane { background: @bg; }

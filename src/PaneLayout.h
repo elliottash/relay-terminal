@@ -62,28 +62,17 @@ void restoreSizes(const QList<QPointer<QSplitter>> &splitters, const QList<QList
 // anything else — another key, a click, or two seconds passing — closes the window and behaves
 // normally, so arrows typed a moment later still reach the shell or the prompt box.
 //
-// The pane chrome's one "New pane" button opens the same window in `Mode::Choose` (card #803C):
-// no pane exists yet, all four arrows place it, Esc cancels (and is consumed), and the window
-// stays open long enough to reach the arrow buttons with the mouse.
-//
 // No widgets and no timers: the caller passes a monotonic clock in milliseconds, so the rules
 // can be tested on their own (tests/panelayout_test.cpp).
 class PlacementWindow {
 public:
     // How long a new pane may still be placed with an arrow.
     static constexpr qint64 kTimeoutMs = 2000;
-    // How long the chrome button's "which side?" prompt waits.
-    static constexpr qint64 kChooseTimeoutMs = 10000;
 
-    enum class Mode {
-        Move,    // the pane is already on the right; an arrow re-docks it (the key path)
-        Choose,  // no pane yet; an arrow says where to make it (the button path)
-    };
     enum class Action {
         None,     // the window was not open; the caller does nothing special
-        Place,    // put the new pane on `direction`; the caller consumes the key
+        Place,    // re-dock the new pane on `direction`; the caller consumes the key
         Dismiss,  // the window just closed; the caller does NOT consume the key
-        Cancel,   // Esc in Mode::Choose: the window closed, no pane; the caller consumes the key
     };
     struct Response {
         Action action = Action::None;
@@ -91,11 +80,9 @@ public:
     };
 
     // Arm the window; `nowMs` is a monotonic millisecond clock.
-    void arm(qint64 nowMs, Mode mode = Mode::Move) { m_armed = true; m_since = nowMs; m_mode = mode; }
+    void arm(qint64 nowMs) { m_armed = true; m_since = nowMs; }
     void cancel() { m_armed = false; }
-    Mode mode() const { return m_mode; }
-    qint64 timeoutMs() const { return m_mode == Mode::Choose ? kChooseTimeoutMs : kTimeoutMs; }
-    bool armed(qint64 nowMs) const { return m_armed && nowMs - m_since < timeoutMs(); }
+    bool armed(qint64 nowMs) const { return m_armed && nowMs - m_since < kTimeoutMs; }
 
     // A key press anywhere in the window. Modifier-only presses (Ctrl, Shift, Alt, Meta, AltGr)
     // keep the window open, because they are the first half of a shortcut, not "any other key".
@@ -106,7 +93,6 @@ public:
 private:
     bool m_armed = false;
     qint64 m_since = 0;
-    Mode m_mode = Mode::Move;
 };
 
 }  // namespace relay::panes

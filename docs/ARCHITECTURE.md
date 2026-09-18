@@ -147,16 +147,13 @@ Layout rules:
 - Closing a window asks for confirmation when it has more than one pane or anything is busy.
 - **Pane button row** (`PaneChrome`, a child of each leaf created in `syncChrome()`): shown for
   the leaf under the mouse (application event filter, Enter/MouseMove). There is **one** new-pane
-  button, ⊞ (card #803C; it replaced ⬓+ and ◫+). It runs `pane.choose`, which is not a Keymap
-  action: `RelayWindow::choosePlacement()` arms `relay::panes::PlacementWindow` in `Mode::Choose`
-  and shows a toast-styled card (`QFrame#placementPrompt`) under the button row — "Use arrow keys
-  to place the new pane" and ← ↑ → ↓ as buttons, plus, the first three times, "Next time: <the
-  live `pane.splitRight` keys>, then an arrow" (hint id `pane.choose.mouse`). An arrow key or an
-  arrow button calls `placeChosen()`, which runs `splitToward()` on that side of the pane, so left
-  and above insert before it. Esc (consumed), any other key, a click elsewhere or ten seconds
-  close it with nothing made. The key path (`pane.splitRight`, then an arrow within two seconds
-  re-docks, #78BN) is unchanged. The other buttons run the same actions as the keys
-  (`pane.moveToNewTab`, `pane.close`).
+  button, ⊞ (card #803C; it replaced ⬓+ and ◫+). It runs `pane.newByMouse`, which is not a
+  Keymap action: `splitToward(Right)` at once, like Ctrl+E but without the two-second arrow window
+  (#78BN) — the pointer is already in hand, so the pane is placed by dragging its header. It
+  toasts "New pane · drag its header to place it" and, per the hint registry (`pane.new.mouse`),
+  "Next time: <live `pane.splitRight` keys> · new pane". The tooltip shows the
+  `pane.splitRight` keys through the button's `keysFrom` property. The other buttons run the same
+  actions as the keys (`pane.moveToNewTab`, `pane.close`).
   `PaneChrome` has no `Q_OBJECT`, so it is found with `dynamic_cast` (`chromeOf`), never
   `findChild<PaneChrome*>` (that matches any `QFrame`, such as the transcript panel).
   `showChromeFor()` records the wanted leaf **before** hiding or showing anything: `hide()` and

@@ -514,7 +514,7 @@ private:
 // A small overlay in each pane's top-right corner. The three a person reaches for — new pane,
 // move to a tab of its own, close — are on screen in every pane at all times (owner, 2026-09-17:
 // buttons that appear only under the mouse are buttons you have to go looking for). There is one
-// new-pane button, which asks for a side (card #803C). Dragging a Pane's header moves the pane.
+// new-pane button, which puts the pane on the right (card #803C). Dragging a pane's header moves it.
 class PaneChrome final : public QFrame {
 public:
     std::function<void(const QString &action)> onAction;
@@ -527,10 +527,10 @@ public:
         // toggle. Every button is here at all times: the row no longer grows, lifts onto a tile or
         // rearranges itself under the pointer (owner, 2026-09-18). The drag grip is gone with the
         // hover row — pressing anywhere on the header moves the pane.
-        // One "new pane" button, not one per side (owner, 2026-09-18, card #803C): it asks which
-        // side, and an arrow key or one of the prompt's arrow buttons answers. Its tooltip shows
-        // the key that makes a pane without asking (pane.splitRight, then an arrow re-docks it).
-        button(row, QStringLiteral("⊞"), QStringLiteral("pane.choose"), QStringLiteral("New pane — then an arrow picks the side"))
+        // One "new pane" button, not one per side (owner, 2026-09-18, card #803C). It makes the
+        // pane on the right at once, like Ctrl+E; the mouse is already in hand, so the pane is
+        // placed by dragging its header. Its tooltip shows the key (pane.splitRight).
+        button(row, QStringLiteral("⊞"), QStringLiteral("pane.newByMouse"), QStringLiteral("New pane (drag its header to place it)"))
             ->setProperty("keysFrom", QStringLiteral("pane.splitRight"));
         button(row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
         button(row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));

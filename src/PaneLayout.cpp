@@ -79,11 +79,6 @@ PlacementWindow::Response PlacementWindow::keyPress(int key, Qt::KeyboardModifie
         // Right means "yes, where it is". The window closes and the key is swallowed, so the
         // pane does not also scroll or move a cursor.
         case Qt::Key_Right: m_armed = false; return {Action::Place, Direction::Right};
-        // Asked "which side?", Esc is the answer "none": nothing is made and the key goes no
-        // further (it would otherwise clear the prompt box or reach a full-screen program).
-        case Qt::Key_Escape:
-            if (m_mode == Mode::Choose) { m_armed = false; return {Action::Cancel, Direction::Right}; }
-            break;
         default: break;
         }
     }
