@@ -12167,7 +12167,8 @@ int main(int argc, char **argv) {
         QString png = root + QStringLiteral("/data/icons/hicolor/256x256/apps/org.relayterminal.Relay.png");
         if (!QFileInfo::exists(png)) png = root + QStringLiteral("/../icons/hicolor/256x256/apps/org.relayterminal.Relay.png");
         QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("org.relayterminal.Relay"), QIcon(png)));
-    } catch (const std::exception &) {
+    } catch (const std::exception &error) {
+        relay::log::info(QStringLiteral("window_icon_unavailable error=%1").arg(QString::fromUtf8(error.what())));
     }
     QCommandLineParser parser; parser.setApplicationDescription(QStringLiteral("Terminal with rich input and BYOK agents."));
     parser.addHelpOption(); parser.addVersionOption();

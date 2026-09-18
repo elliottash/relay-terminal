@@ -18,6 +18,7 @@ service name as API keys but a distinct attribute namespace), and otherwise in a
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -26,6 +27,8 @@ from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 from . import noise, pairing
+
+log = logging.getLogger("relay.identity")
 
 SERVICE = "org.relayterminal.Relay"
 ATTRIBUTE = "remote-identity"          # distinct from the API-key namespace
@@ -263,4 +266,4 @@ class DeviceStore:
             try:
                 callback(device_id)
             except Exception:
-                pass
+                log.exception("revoke callback failed for device %s", device_id)

@@ -22,7 +22,9 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from . import conv_index
+from . import conv_index, logs
+
+log = logs.get("sessions")
 
 SESSION_ID = re.compile(r"^[0-9a-f]{32}$")
 MAX_LISTED = 200
@@ -120,7 +122,7 @@ class SessionStore:
             try:
                 index.update_session(data, self.directory)
             except (OSError, ValueError, sqlite3.Error):
-                pass
+                log.exception("session index update failed for %s", session_id)
 
     def delete(self, session_id: str) -> dict:
         """Remove a session, its metadata, its checkpoint blobs and its index rows."""
