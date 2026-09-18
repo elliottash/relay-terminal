@@ -6939,7 +6939,14 @@ private:
     void acceptTabSelection() {
         if (!m_tabList || !m_tabList->currentItem()) return;
         const QString insert = m_tabList->currentItem()->data(Qt::UserRole).toString();
-        replaceComposerToken(m_tabCompletion, insert + (insert.endsWith('/') ? QString() : QStringLiteral(" ")));
+        // The word to replace is the one under the cursor *now*, not the one the popup opened on:
+        // Tab has since filled in the candidates' common prefix, and the user may have typed more.
+        // Replacing the stale range left the difference behind — "cd 2026-09-18-EG/G", and with
+        // folders that diverge at a dash, the "cd 2026-09-18-EG/-" of the owner's report.
+        const QTextCursor cursor = m_editor->textCursor();
+        const relay::Completion live =
+            relay::completeAt(cursor.block().text(), cursor.positionInBlock(), m_cwd, knownCommandNames());
+        replaceComposerToken(live, insert + (insert.endsWith('/') ? QString() : QStringLiteral(" ")));
         hideTabPopup();
     }
 
