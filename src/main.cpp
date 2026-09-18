@@ -26,7 +26,7 @@
 #include "TerminalBackend.h"
 #include "WindowState.h"   // saved window layout ("reopen where I left off")
 #include "RemoteShare.h"    // sharing a pane with a phone (docs/REMOTE-PROTOCOL.md)
-#include "backend/VTermBackend.h"  // engine panes can hand over a frame; KonsolePart cannot
+#include "backend/VTermBackend.h"  // the engine can hand over a frame to a program
 #include "Voice.h"          // voice transcription: capture, the hold key, the transcript
 #include "Images.h"         // image context: paste, drop, `@path` and "Screenshot this pane"
 #include "Aliases.h"        // aliases: saved commands and prompts, their fields and invocations
@@ -599,9 +599,8 @@ public:
     }
 };
 
-// One terminal pane: a shell behind relay::TerminalBackend (KonsolePart by default, Relay's
-// own engine with --engine=relay), its Bash bridge, a composer, and its own agent worker and
-// conversation. Windows arrange panes in tabs and splits; the toolbar acts on the active pane.
+// One terminal pane: a shell behind relay::TerminalBackend (Relay's own engine, engine/), its
+// Bash bridge, a composer, and its own agent worker and conversation. Windows arrange panes in tabs and splits; the toolbar acts on the active pane.
 class Pane final : public QWidget {
 public:
     struct QueueEntry {
@@ -614,9 +613,8 @@ public:
     // Why the prompt box is hidden, so it can come back by itself when the reason ends.
     enum class HideReason { None, AltScreen, Remote, Manual };
     Pane(const QString &workspace, const QString &cwd, bool cleanShell,
-         relay::EngineKind engine = relay::defaultEngineKind(), const QString &engineCore = relay::defaultEngineCore())
+         const QString &engineCore = relay::defaultEngineCore())
         : m_workspace(workspace), m_cwd(cwd.isEmpty() ? workspace : cwd), m_cleanShell(cleanShell) {
-        m_engine = engine;
         m_engineCore = engineCore;
         m_data = dataRoot();
         m_python = QStandardPaths::findExecutable(QStringLiteral("python3"));
@@ -699,12 +697,15 @@ public:
     std::function<void(const QString &turnId)> onOpenTurn;   // "✦ N tool calls" link or palette
     // Right-click menu entries the window owns: new pane, close pane, tasks (issue #X2F1).
     std::function<void(const QString &action)> onWindowAction;
+    // Dragging the pane's header moves the whole pane; the window decides where it lands (owner,
+    // 2026-09-17). Same pair as PaneChrome's grip, so both handles take one path through the window.
+    std::function<void(const QPoint &global)> onHeaderDragMove;
+    std::function<void(const QPoint &global, bool drop)> onHeaderDragEnd;
 
     QString cwd() const { return m_cwd; }
     QString sessionToken() const { return m_token; }
     QString workspace() const { return m_workspace; }
     bool cleanShell() const { return m_cleanShell; }
-    relay::EngineKind engine() const { return m_engine; }
     QString engineCore() const { return m_engineCore; }
     QString mode() const { return m_modeValue; }
     void setMode(const QString &mode) {
@@ -1001,9 +1002,9 @@ public:
     }
 
     // ===== screen-text input detection and agent-driven programs (cards YR21, C1HH) ==========
-    // Only an engine that can read the screen can show the agent what a program is asking, so
-    // everything below is gated on TerminalBackend::ScreenText. KonsolePart on KF5 reports it
-    // false and the pane keeps the /proc-only behaviour, saying so where the user can see it.
+    // Only a backend that can read the screen can show the agent what a program is asking, so
+    // everything below is gated on TerminalBackend::ScreenText. Relay's engine has it; the gate
+    // stays because the pane must still say so honestly if a backend ever cannot.
     bool canShowAgentTheScreen() const {
         return m_backend && (m_backend->capabilities() & relay::TerminalBackend::ScreenText);
     }
@@ -1070,8 +1071,8 @@ private:
         if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return false; }
         if (!processBusy()) { status(QStringLiteral("Nothing is running in this pane to hand over.")); return false; }
         if (!canShowAgentTheScreen()) {
-            status(QStringLiteral("This pane runs on KonsolePart, which does not let Relay read the screen, so the "
-                                  "agent cannot see the program. Open a Relay-engine pane to hand a program over."));
+            status(QStringLiteral("This pane cannot let Relay read the screen, so the agent cannot see the "
+                                  "program."));
             return false;
         }
         if (m_secretMode || m_screenPrompt.masked) {
@@ -1357,7 +1358,7 @@ public:
     // leaves the shell one line out of step: Readline still believes its prompt is where it drew
     // it, so the repaint is a no-op and the screen ends up blank with no prompt. Ctrl+L is
     // Readline's own clear-screen, so it wipes the screen and repaints the prompt itself, and its
-    // idea of the cursor stays true. Konsole's scrollback is dropped separately.
+    // idea of the cursor stays true. The scrollback is dropped separately.
     // Falls back to the raw clear when a program owns the screen, where Ctrl+L belongs to it.
     void clearTerminal() {
         if (!m_backend) return;
@@ -1370,9 +1371,8 @@ public:
         }
     }
     QString engineLabel() const {
-        return m_engine == relay::EngineKind::Relay
-            ? (m_engineCore.isEmpty() ? QStringLiteral("Relay engine") : QStringLiteral("Relay engine (%1)").arg(m_engineCore))
-            : QStringLiteral("KonsolePart");
+        return m_engineCore.isEmpty() ? QStringLiteral("Relay engine")
+                                      : QStringLiteral("Relay engine (%1)").arg(m_engineCore);
     }
     bool runCommand(const QString &command) { return runInTerminal(command, false, 0); }
     void sendKeybindings() { if (m_configured) send(QJsonObject{{"type", "keybindings"}, {"path", Keymap::instance().path()}, {"actions", Keymap::instance().catalog().value(QStringLiteral("actions"))}}); }
@@ -1399,8 +1399,8 @@ public:
 
     // ----- the terminal pane's right-click menu (issue #X2F1) -------------------------------------
     //
-    // One menu for both engines, built from relay::terminalContextMenu(): Relay's own entries, the
-    // Konsole items worth keeping, and the pane actions. `global` is where the click landed, used
+    // Built from relay::terminalContextMenu(): Relay's own entries, the terminal items worth
+    // having, and the pane actions. `global` is where the click landed, used
     // to find a link or a path under the pointer.
     void showTerminalMenu(const QPoint &global) {
         relay::TerminalMenuState state;
@@ -1411,9 +1411,6 @@ public:
         state.canInject = terminalCan(relay::TerminalBackend::DisplayInjection);
         state.canZoom = terminalCan(relay::TerminalBackend::FontZoom);
         if (m_backend) {
-            // Only engines that can answer "is anything selected?" grey Copy out; KonsolePart
-            // has no such query, so its Copy stays live and simply does nothing without one.
-            state.selectionKnown = m_engine == relay::EngineKind::Relay;
             state.hasSelection = !m_backend->selectedText().isEmpty();
             int line = -1, column = -1;
             // The click arrives in whichever child widget the engine put under the pointer; the
@@ -1724,6 +1721,9 @@ protected:
     }
 
     bool eventFilter(QObject *object, QEvent *event) override {
+        // Moving the pane by its header comes first: once a drag is under way it owns the mouse,
+        // so the folder line below cannot open an explorer when the drag happens to end on it.
+        if (headerDragEvent(object, event)) return true;
         // A toast that is up when the layout changes (the fix loop opening the agent transcript
         // resizes the terminal host) would strand over the composer; re-anchor it like the other
         // floating overlays (placeQueueStrip and friends in resizeEvent).
@@ -1760,19 +1760,12 @@ protected:
         // Right-click anywhere in this pane's terminal: Relay's menu, not the engine's (issue
         // #X2F1). Real widgets inside the terminal, such as the engine's Find bar, keep theirs.
         //
-        // Relay's engine sends a proper context-menu event, and withholds it while a program is
-        // reading the mouse, so that is the event to take. KonsolePart never sends one: its
-        // display pops its menu straight out of the mouse press, so for Konsole panes the press
-        // itself is taken instead (which does mean a program reading the mouse does not see a
-        // right-click in a Konsole pane).
-        if (event->type() == QEvent::ContextMenu || (event->type() == QEvent::MouseButtonPress
-                && m_engine == relay::EngineKind::Konsole
-                && static_cast<QMouseEvent *>(event)->button() == Qt::RightButton)) {
+        // The engine sends a proper context-menu event, and withholds it while a program is
+        // reading the mouse, so that is the event to take.
+        if (event->type() == QEvent::ContextMenu) {
             auto *widget = qobject_cast<QWidget *>(object);
             if (ownsTerminalWidget(widget) && !acceptsTypedInput(widget)) {
-                showTerminalMenu(event->type() == QEvent::ContextMenu
-                                     ? static_cast<QContextMenuEvent *>(event)->globalPos()
-                                     : static_cast<QMouseEvent *>(event)->globalPos());
+                showTerminalMenu(static_cast<QContextMenuEvent *>(event)->globalPos());
                 return true;
             }
         }
@@ -1866,12 +1859,85 @@ protected:
     }
 
 private:
+    // ----- moving the pane by its header (owner, 2026-09-17) ---------------------------------
+    // Press anywhere on the header — the title, the "auto" badge, the folder line, the gap
+    // between them — and drag: the pane travels, exactly as it does from the chrome's ⠿ grip.
+    // Drop it on another pane's edge to split that pane, or on the tab bar to give it a tab of
+    // its own; Esc puts it back.
+    //
+    // A press is not taken here, only watched: anything shorter than the platform's drag distance
+    // is still an ordinary click, so double click still renames and the folder line still opens
+    // the explorer. This filter runs on qApp (so the mouse is followed wherever it goes during a
+    // drag), hence the check that the press really started on *this* pane's header.
+    bool headerDragEvent(QObject *object, QEvent *event) {
+        const QEvent::Type type = event->type();
+        if (type != QEvent::MouseButtonPress && type != QEvent::MouseMove
+            && type != QEvent::MouseButtonRelease && type != QEvent::KeyPress) return false;
+        switch (type) {
+        case QEvent::MouseButtonPress: {
+            auto *mouse = static_cast<QMouseEvent *>(event);
+            if (mouse->button() != Qt::LeftButton || !onHeader(object)) return false;
+            if (m_titleEdit && m_titleEdit->isVisible()) return false;   // renaming: the mouse is the caret's
+            m_headerPressAt = mouse->globalPos();
+            m_headerPressed = true;
+            m_headerDragging = false;
+            return false;
+        }
+        case QEvent::MouseMove: {
+            if (!m_headerPressed) return false;
+            auto *mouse = static_cast<QMouseEvent *>(event);
+            if (!m_headerDragging) {
+                if ((mouse->globalPos() - m_headerPressAt).manhattanLength() < QApplication::startDragDistance()) return false;
+                m_headerDragging = true;
+                QApplication::setOverrideCursor(Qt::ClosedHandCursor);
+            }
+            if (onHeaderDragMove) onHeaderDragMove(mouse->globalPos());
+            return true;
+        }
+        case QEvent::MouseButtonRelease: {
+            if (!m_headerPressed) return false;
+            m_headerPressed = false;
+            if (!m_headerDragging) return false;   // a click, not a drag: let the header have it
+            endHeaderDrag(static_cast<QMouseEvent *>(event)->globalPos(), true);
+            return true;
+        }
+        case QEvent::KeyPress:
+            if (m_headerDragging && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape) {
+                m_headerPressed = false;
+                endHeaderDrag(QCursor::pos(), false);
+                return true;
+            }
+            return false;
+        default: break;
+        }
+        return false;
+    }
+
+    bool onHeader(QObject *object) const {
+        auto *widget = qobject_cast<QWidget *>(object);
+        for (; widget; widget = widget->parentWidget()) {
+            if (widget == m_headerWidget) return true;
+            if (widget == this) return false;
+        }
+        return false;
+    }
+
+    void endHeaderDrag(const QPoint &global, bool drop) {
+        if (!m_headerDragging) return;
+        m_headerDragging = false;
+        QApplication::restoreOverrideCursor();
+        if (onHeaderDragEnd) onHeaderDragEnd(global, drop);
+    }
+
     void buildUi() {
         auto *layout = new QVBoxLayout(this); layout->setContentsMargins(8, 6, 8, 8); layout->setSpacing(6);
         // Pane header (issue JRWQ): what this pane is doing, written by the model and refreshed as
         // the work moves on; the directory keeps its place on the right, smaller and dim. Double
         // click the title to name the pane by hand (/rename does the same without the mouse).
         auto *header = new QWidget;
+        header->setObjectName(QStringLiteral("paneHeader"));
+        // The whole row is the pane's drag handle (headerDragEvent), so it says so with the cursor.
+        header->setCursor(Qt::OpenHandCursor);
         auto *headerRow = new QHBoxLayout(header);
         m_headerLayout = headerRow;
         headerRow->setContentsMargins(0, 0, 0, 0);
@@ -1905,7 +1971,8 @@ private:
         m_cwdLabel->setMinimumWidth(1);
         m_cwdLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
         m_cwdLabel->installEventFilter(this);
-        m_cwdLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        // Not selectable any more: dragging across the path is how you move the pane now, and a
+        // half-selected path is a poor trade for that. The tooltip still has both paths in full.
         headerRow->addWidget(m_titleLabel, 0);
         headerRow->addWidget(m_titleEdit, 1);
         headerRow->addWidget(m_titleAuto, 0);
@@ -2512,7 +2579,8 @@ private:
     }
 
     // One inline line that is also a terminal hyperlink (OSC 8) to relay://turn/<pane>/<turn>.
-    // Konsole opens it through the desktop's x-scheme-handler/relay entry (see ensureUrlHandler).
+    // The pane handles a click itself; another app opens it through the desktop's
+    // x-scheme-handler/relay entry (see ensureUrlHandler).
     void printTurnLink(const QString &label, const QString &turnId) {
         if (!shellIdleAtPrompt()) { printInline(label + QStringLiteral("  (Actions › Open last agent turn)\n"), Ink::Note); m_lastTurnId = turnId; return; }
         m_lastTurnId = turnId;
@@ -2933,7 +3001,7 @@ public:
         relay::RemoteShare &share = relay::RemoteShare::instance();
         if (!share.isSharing(m_token)) {
             relay::RemoteShare::PaneHooks hooks;
-            // Only Relay's own engine can hand over a frame; KonsolePart cannot (docs/ENGINE.md).
+            // The engine hands the phone a frame of the screen (docs/ENGINE.md).
             if (auto *engine = dynamic_cast<relay::VTermBackend *>(m_backend)) {
                 hooks.view = engine->view();
             }
@@ -4559,10 +4627,10 @@ private:
         qputenv("RELAY_PYTHON", m_python.toUtf8());
         qputenv("RELAY_CLEAN_SHELL", cleanShell ? "1" : "0");
         // Opt-in OSC 7 / OSC 133 marks (shell/relay-integration.bash). Relay's own engine
-        // tracks the working directory and command boundaries from them; Konsole ignores them.
+        // tracks the working directory and command boundaries from them.
         qputenv("RELAY_SHELL_INTEGRATION",
                 QSettings().value(QStringLiteral("terminal/shell_integration"), false).toBool() ? "1" : "0");
-        m_backendOwned.reset(relay::createTerminalBackend(m_engine, m_engineCore, m_terminalHost));
+        m_backendOwned.reset(relay::createTerminalBackend(m_engineCore, m_terminalHost));
         m_backend = m_backendOwned.get();
         m_terminal = m_backend->widget();
         m_terminalHost->layout()->addWidget(m_terminal);
@@ -4585,8 +4653,7 @@ private:
             }
             if (onShellExited) QTimer::singleShot(0, this, [this] { if (onShellExited) onShellExited(); });
         };
-        // Alternate screen (vim, less, htop, tmux): KonsolePart reports it through its Session
-        // signal, the Relay engine through the emulator itself.
+        // Alternate screen (vim, less, htop, tmux), reported by the emulator itself.
         m_backend->onAltScreenChanged = [this](bool active) { onPrimaryScreen(!active); };
         // OSC 7 from the shell integration (engine panes; see shell/relay-integration.bash).
         m_backend->onCwdChanged = [this](const QString &path) {
@@ -4612,10 +4679,8 @@ private:
             Q_UNUSED(column);
             openOutputTarget(target, line, true);
         };
-        // The part has loaded Relay's profile; the shell should see the user's own XDG paths.
-        relay::theme::restoreXdgEnvironment();
-        // Konsole starts new sessions in its own default directory, so the Bash integration
-        // changes to this pane's directory after loading the user's configuration.
+        // The Bash integration changes to this pane's directory after loading the user's
+        // configuration, so a shell started elsewhere still lands where the pane says.
         qputenv("RELAY_START_DIR", m_cwd.toUtf8());
         const QStringList shell{QStringLiteral("/bin/bash"), QStringLiteral("--noprofile"),
             QStringLiteral("--rcfile"), m_data + QStringLiteral("/shell/integration.bash"), QStringLiteral("-i")};
@@ -5201,8 +5266,8 @@ private:
         if (!m_backend || m_shellStopped) return;
         int pid = shellPid();
         if (pid > 0) m_shellPid = pid;
-        // A shell killed by a signal leaves Konsole showing "Program crashed" instead of closing,
-        // and KonsolePart then reports no PID; use the last PID the shell itself reported.
+        // A shell killed by a signal can leave the pane with no PID to ask about; use the last
+        // PID the shell itself reported.
         if (m_shellPid > 0 && !QFileInfo::exists(QStringLiteral("/proc/%1").arg(m_shellPid))) { shellStopped(); return; }
         pid = m_shellPid;
         if (m_shellUnit.isEmpty()) return;
@@ -5410,8 +5475,8 @@ private:
 
     static bool copyOnSelect() { return QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool(); }
 
-    // KonsolePart exposes no "has selection" query, and its copy does nothing without a
-    // selection. Copy, and treat a clipboard change as proof that text was selected; the
+    // A backend with no "has selection" query copies nothing when nothing is selected.
+    // Copy, and treat a clipboard change as proof that text was selected; the
     // engine behaves the same way (it only writes the clipboard for a non-empty selection).
     bool copySelection() {
         if (!m_backend) return false;
@@ -5537,8 +5602,7 @@ public:
     }
 private:
 
-    // Scroll the terminal's scrollback by one page (Konsole's possibly hidden scrollbar, or
-    // the engine's viewport).
+    // Scroll the terminal's scrollback by one page (the engine's viewport).
     bool scrollTerminalPage(int direction) {
         if (!m_backend || !(m_backend->capabilities() & relay::TerminalBackend::ScrollControl)) return false;
         m_backend->scrollPages(direction);
@@ -5839,7 +5903,7 @@ private:
 
     // Inline agent output: bytes go to the terminal emulator as if the program had printed
     // them. Nothing is typed into the shell, so agent text never reaches shell history and is
-    // never executed. KonsolePart does it through its Session, the engine through its parser.
+    // never executed: the engine feeds them to its parser.
     void writeTerminal(const QByteArray &bytes) {
         if (m_backend && (m_backend->capabilities() & relay::TerminalBackend::DisplayInjection))
             m_backend->writeToDisplay(bytes);
@@ -6825,7 +6889,7 @@ private:
     }
 
     // ----- program state: alternate screen, passwords, waiting for input ----------------------
-    // Called from the backend's onAltScreenChanged (Konsole's Session signal or the engine).
+    // Called from the backend's onAltScreenChanged.
     void onPrimaryScreen(bool primary) {
         m_altScreen = !primary;
         if (!primary) {
@@ -7213,7 +7277,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
     }
 
     // "Let the agent drive" / "Take over", and an honest explanation when this pane's engine
-    // cannot show the agent the screen (KonsolePart without getDisplayedText, i.e. KF5).
+    // cannot show the agent the screen.
     void updateDelegateButton(const QString &who) {
         if (!m_delegateButton) return;
         if (m_delegated) {
@@ -7231,8 +7295,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
         m_delegateButton->setToolTip(
             masked ? QStringLiteral("Relay never lets the agent type into a password prompt.")
             : !canShowAgentTheScreen()
-                ? QStringLiteral("This pane runs on KonsolePart, which does not let Relay read the screen, so the "
-                                 "agent cannot see %1. Open a Relay-engine pane to hand a program over.").arg(who)
+                ? QStringLiteral("This pane cannot let Relay read the screen, so the agent cannot see %1.").arg(who)
                 : QStringLiteral("Let the agent type into %1 · %2 takes it back")
                       .arg(who, Keymap::instance().shortcutText(QStringLiteral("control.human"))));
         m_delegateButton->setVisible(!masked);
@@ -7485,7 +7548,8 @@ public:
                                         : m_title + (m_titleUser ? QStringLiteral("  (set by hand)")
                                                                  : QStringLiteral("  (written by the model)"));
         return tip + QStringLiteral("\n\nTerminal: ") + m_cwd + QStringLiteral("\nAgent workspace: ") + m_workspace
-               + QStringLiteral("\n\nDouble click to rename · /rename");
+               + QStringLiteral("\n\nDouble click to rename · /rename")
+               + QStringLiteral("\nDrag this header onto another pane's edge to move the pane there, or onto the tab bar to make it a tab");
     }
 
     // The pane button row floats over the top right of the leaf, exactly where the directory sits.
@@ -7664,7 +7728,6 @@ private:
     // shell ends; m_backendOwned keeps the object alive until it can be destroyed safely.
     std::unique_ptr<relay::TerminalBackend> m_backendOwned;
     relay::TerminalBackend *m_backend = nullptr;
-    relay::EngineKind m_engine = relay::EngineKind::Konsole;
     QString m_engineCore;
     QWidget *m_terminal = nullptr, *m_terminalHost = nullptr;
     RichEditor *m_editor = nullptr;
@@ -7675,6 +7738,10 @@ private:
     QLineEdit *m_titleEdit = nullptr;
     QHBoxLayout *m_headerLayout = nullptr;
     QWidget *m_headerWidget = nullptr;
+    // Dragging the pane by its header: where the press landed, and whether it has gone far enough
+    // to be a drag rather than a click.
+    QPoint m_headerPressAt;
+    bool m_headerPressed = false, m_headerDragging = false;
     QString m_title;
     bool m_titleUser = false;
     bool m_native = false, m_workerReady = false, m_shellReady = false, m_loading = false;
@@ -7963,8 +8030,11 @@ private:
 };
 
 // ----- pane chrome: button row and drag handle -----------------------------------------------
-// A small overlay in each pane's top-right corner, shown while the mouse is over the pane:
-// drag grip, split right, split down, move to new tab, close. Dragging the grip moves the pane.
+// A small overlay in each pane's top-right corner. The three a person reaches for — new pane,
+// move to a tab of its own, close — are on screen in every pane at all times (owner, 2026-09-17:
+// buttons that appear only under the mouse are buttons you have to go looking for). Pointing at
+// the pane lifts the row onto its raised tile and adds the two it was hiding: the drag grip and
+// "new pane below". Dragging the grip moves the pane, as does dragging a Pane's header.
 class PaneChrome final : public QFrame {
 public:
     std::function<void(const QString &action)> onAction;
@@ -7983,11 +8053,29 @@ public:
         row->addWidget(m_grip);
         // The + makes it obvious that these open a new pane (a new shell and chat), not a layout toggle.
         button(row, QStringLiteral("◫+"), QStringLiteral("pane.splitRight"), QStringLiteral("New pane to the right"));
-        button(row, QStringLiteral("⬓+"), QStringLiteral("pane.splitDown"), QStringLiteral("New pane below"));
+        m_splitDown = button(row, QStringLiteral("⬓+"), QStringLiteral("pane.splitDown"), QStringLiteral("New pane below"));
         button(row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
         button(row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
-        hide();
+        // The row keeps the width it has with everything on it, so the header's inset — and with
+        // it the title's elision — does not twitch as the mouse comes and goes. The row is
+        // right-anchored, so the two extras grow leftward and the always-on three never move.
+        adjustSize();
+        m_fullWidth = width();
+        setHovered(false);
     }
+
+    // On the pane under the mouse: the full row on its raised tile. Everywhere else: the three
+    // buttons alone, quiet, on no background at all.
+    void setHovered(bool hovered) {
+        if (m_hovered == hovered && property("hot").isValid()) return;
+        m_hovered = hovered;
+        setProperty("hot", hovered);
+        m_grip->setVisible(hovered);
+        m_splitDown->setVisible(hovered);
+        style()->unpolish(this); style()->polish(this); update();
+        place();
+    }
+    bool hovered() const { return m_hovered; }
 
     void place() {
         const auto *leaf = parentWidget();
@@ -7998,13 +8086,13 @@ public:
     }
 
     // Pane title (issue JRWQ): the header's right-hand directory must not end up under these
-    // buttons, so the header gives up exactly the room they take while they are on screen.
+    // buttons, so the header gives up exactly the room the full row takes.
     void syncHeaderInset() {
         if (auto *pane = dynamic_cast<Pane *>(parentWidget()))
-            pane->setHeaderRightInset(isVisible() ? width() + 10 : 0);
+            pane->setHeaderRightInset(isVisible() ? m_fullWidth + 10 : 0);
         // The Switchboard's first row is its tab bar, which these buttons would otherwise cover.
         else if (auto *tool = dynamic_cast<ToolPane *>(parentWidget()); tool && tool->board())
-            tool->board()->setHeaderRightInset(isVisible() ? width() + 4 : 0);
+            tool->board()->setHeaderRightInset(isVisible() ? m_fullWidth + 4 : 0);
     }
 
 protected:
@@ -8064,16 +8152,20 @@ protected:
     }
 
 private:
-    void button(QHBoxLayout *row, const QString &glyph, const QString &action, const QString &label) {
+    QToolButton *button(QHBoxLayout *row, const QString &glyph, const QString &action, const QString &label) {
         auto *b = new QToolButton;
         b->setObjectName(QStringLiteral("paneChromeButton"));
         b->setText(glyph); b->setAutoRaise(true); b->setFocusPolicy(Qt::NoFocus);
         b->setProperty("action", action); b->setProperty("label", label);
         connect(b, &QToolButton::clicked, this, [this, action] { if (onAction) onAction(action); });
         row->addWidget(b);
+        return b;
     }
 
     QLabel *m_grip = nullptr;
+    QToolButton *m_splitDown = nullptr;
+    int m_fullWidth = 0;
+    bool m_hovered = false;
     QPoint m_pressAt;
     bool m_pressed = false, m_dragging = false;
 };
@@ -8103,8 +8195,7 @@ struct ClosedItem {
 class WindowManager {
 public:
     WindowManager(QString workspace, bool cleanShell) : m_workspace(std::move(workspace)), m_cleanShell(cleanShell) {
-        // `relay open PATH` in Relay shells and Konsole's file-link editor command both reach
-        // this process through a private local socket. The directory is created mode 0700.
+        // `relay open PATH` in Relay shells reaches this process through a private local socket. The directory is created mode 0700.
         if (m_socketDir.isValid()) {
             QFile::setPermissions(m_socketDir.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
             const QString address = m_socketDir.filePath(QStringLiteral("open.sock"));
@@ -8939,7 +9030,7 @@ protected:
             return QMainWindow::eventFilter(object, event);
         if (pane && pane->ownsTerminalWidget(widget) && pane->processBusy() && !Keymap::instance().actsInsidePrograms(key))
             return QMainWindow::eventFilter(object, event);
-        // Accept the override so neither the composer nor Konsole consumes the key,
+        // Accept the override so neither the composer nor the terminal consumes the key,
         // then act on the key press itself. Auto-repeat does not open a burst of tabs.
         event->accept();
         if (event->type() == QEvent::KeyPress && !key->isAutoRepeat()) {
@@ -9150,7 +9241,7 @@ private:
         else if (id == QStringLiteral("tab.next")) cycleTab(1);
         else if (id == QStringLiteral("tab.previous")) cycleTab(-1);
         // One key, one new pane on the right, then ← ↑ ↓ within two seconds to place it (#78BN).
-        else if (id == QStringLiteral("pane.splitRight")) splitToward(relay::panes::Direction::Right, QString(), true);
+        else if (id == QStringLiteral("pane.splitRight")) splitToward(relay::panes::Direction::Right, true);
         else if (id == QStringLiteral("pane.splitDown")) { splitToward(relay::panes::Direction::Down); hintPlacement(QStringLiteral("↓")); }
         else if (id == QStringLiteral("pane.splitLeft")) { splitToward(relay::panes::Direction::Left); hintPlacement(QStringLiteral("←")); }
         else if (id == QStringLiteral("pane.splitUp")) { splitToward(relay::panes::Direction::Up); hintPlacement(QStringLiteral("↑")); }
@@ -10114,26 +10205,6 @@ private:
             items << board;
         }
         items << actionItem(panes, QStringLiteral("Open file…"), QStringLiteral("Preview a file in a pane"), QStringLiteral("files.open"));
-        {
-            // Per-pane terminal engine (docs/ENGINE.md). Both can run side by side in one window.
-            const bool engineDefault = relay::defaultEngineKind() == relay::EngineKind::Relay;
-            PaletteItem relayPane;
-            relayPane.key = QStringLiteral("pane.splitRight.relay"); relayPane.section = panes;
-            relayPane.label = QStringLiteral("New pane (Relay engine)");
-            relayPane.detail = QStringLiteral("Splits right using Relay's own terminal engine%1")
-                                   .arg(engineDefault ? QStringLiteral(" (the default here)") : QString());
-            relayPane.aliases = QStringLiteral("engine vterm ghostty libvterm");
-            relayPane.run = [this] { split(Qt::Horizontal, QStringLiteral("relay")); };
-            items << relayPane;
-            PaletteItem konsolePane;
-            konsolePane.key = QStringLiteral("pane.splitRight.konsole"); konsolePane.section = panes;
-            konsolePane.label = QStringLiteral("New pane (Konsole engine)");
-            konsolePane.detail = QStringLiteral("Splits right using KonsolePart%1")
-                                     .arg(engineDefault ? QString() : QStringLiteral(" (the default here)"));
-            konsolePane.aliases = QStringLiteral("engine kpart konsolepart");
-            konsolePane.run = [this] { split(Qt::Horizontal, QStringLiteral("konsole")); };
-            items << konsolePane;
-        }
         // The one key makes a pane on the right; all four directions keep an action of their own
         // so they can be run from here or bound (issue #78BN).
         items << actionItem(panes, QStringLiteral("New pane to the right"),
@@ -10825,12 +10896,11 @@ private:
         const QString fallback = relay::windowstate::resolveDirectory(m_manager->workspace(), QString(), QDir::homePath());
         const QString workspace = relay::windowstate::resolveDirectory(spec.value(QStringLiteral("workspace")).toString(), fallback, fallback);
         const QString cwd = relay::windowstate::resolveDirectory(spec.value(QStringLiteral("cwd")).toString(), workspace, workspace);
-        // Per-pane terminal engine: the spec (palette action or restored session), else the
-        // process default from --engine / RELAY_ENGINE.
-        relay::EngineKind engine = relay::defaultEngineKind();
-        relay::parseEngineKind(spec.value(QStringLiteral("engine")).toString(), &engine);
+        // The emulator core: the restored session's, else the process default from
+        // --engine-core / RELAY_ENGINE_CORE. A session saved before KonsolePart was retired may
+        // still carry an "engine" key; it is ignored, and every pane gets Relay's engine.
         const QString core = spec.value(QStringLiteral("engine_core")).toString(relay::defaultEngineCore());
-        auto *pane = new Pane(workspace, cwd, m_manager->cleanShell(), engine, core);
+        auto *pane = new Pane(workspace, cwd, m_manager->cleanShell(), core);
         // Model roles (protocol 13): panes opened after the first one default to the fast agent.
         const QString savedRole = spec.value(QStringLiteral("agent_role")).toString();
         if (!savedRole.isEmpty()) pane->initAgentRole(savedRole);
@@ -10925,7 +10995,6 @@ private:
             // One node shape for both users: "restore last closed" (Ctrl+Shift+W) and the saved
             // window layout (src/WindowState.h). Everything a pane needs to come back lives here.
             QJsonObject leaf{{"cwd", pane->cwd()}, {"workspace", pane->workspace()},
-                             {"engine", relay::engineKindName(pane->engine())},
                              {"agent_role", pane->agentRole()},
                              {"agent_mode", pane->agentMode()},
                              {"input_mode", pane->mode()},
@@ -11179,19 +11248,18 @@ private:
         updateTitles();
     }
 
-    void split(Qt::Orientation orientation, const QString &engine = QString()) {
-        splitToward(orientation == Qt::Horizontal ? relay::panes::Direction::Right : relay::panes::Direction::Down, engine);
+    void split(Qt::Orientation orientation) {
+        splitToward(orientation == Qt::Horizontal ? relay::panes::Direction::Right : relay::panes::Direction::Down);
     }
 
     // A new pane on `direction`'s side of the focused one. `offerPlacement` opens the short window
     // in which Left, Up or Down re-dock it (issue #78BN); only the one-key "new pane" uses it.
-    void splitToward(relay::panes::Direction direction, const QString &engine = QString(), bool offerPlacement = false) {
+    void splitToward(relay::panes::Direction direction, bool offerPlacement = false) {
         QWidget *anchor = m_activeLeaf;
         if (!anchor) return;
         Pane *pane = nullptr;
         const QString workspace = m_active ? m_active->workspace() : m_manager->workspace();
         QJsonObject spec{{"cwd", leafCwd(anchor)}, {"workspace", workspace}};
-        if (!engine.isEmpty()) spec.insert(QStringLiteral("engine"), engine);
         try { pane = createPane(spec); }
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
         insertBeside(anchor, pane, relay::panes::orientationFor(direction), relay::panes::towardStart(direction));
@@ -11596,10 +11664,17 @@ private:
                     };
                     chrome->onDragMove = [guard](const QPoint &global) { if (auto *w = windowOf(guard)) w->dragPaneMove(guard, global); };
                     chrome->onDragEnd = [guard](const QPoint &global, bool drop) { if (auto *w = windowOf(guard)) w->dragPaneEnd(guard, global, drop); };
+                    // Dragging a terminal pane's header does what dragging the grip does, so the
+                    // whole title row is a handle (owner, 2026-09-17).
+                    if (auto *pane = dynamic_cast<Pane *>(leaf)) {
+                        pane->onHeaderDragMove = [guard](const QPoint &global) { if (auto *w = windowOf(guard)) w->dragPaneMove(guard, global); };
+                        pane->onHeaderDragEnd = [guard](const QPoint &global, bool drop) { if (auto *w = windowOf(guard)) w->dragPaneEnd(guard, global, drop); };
+                    }
                     leaf->installEventFilter(this);
                 }
                 chrome->refreshTooltips();
                 chrome->place();
+                chrome->show();
             }
         placeTabBarControls();
     }
@@ -11612,13 +11687,15 @@ private:
         return nullptr;
     }
 
-    // Show the button row of the pane under the mouse, and only that one.
+    // Open the button row of the pane under the mouse, and only that one. Every pane keeps its
+    // three always-on buttons; this only adds the grip and "new pane below" to the one you are
+    // pointing at, and lifts its row onto a tile.
     //
-    // hide() and show() make Qt deliver synthetic enter/leave and mouse-move events for whatever
-    // the change put under the cursor, and those come straight back here through the window's
-    // application event filter. So this only records what is wanted while an update is running,
-    // and the loop applies it once the widgets have settled; hiding a chrome from inside its own
-    // hide() used to recurse until the stack ran out (clicking ⇱ "Move to new tab" crashed).
+    // Showing and hiding those two makes Qt deliver synthetic enter/leave and mouse-move events
+    // for whatever the change put under the cursor, and those come straight back here through the
+    // window's application event filter. So this only records what is wanted while an update is
+    // running, and the loop applies it once the widgets have settled; hiding a chrome from inside
+    // its own hide() used to recurse until the stack ran out (clicking ⇱ "Move to new tab" crashed).
     void showChromeFor(QWidget *leaf) {
         m_wantedHoverLeaf = leaf;
         if (m_updatingChrome) return;
@@ -11627,8 +11704,8 @@ private:
         for (int pass = 0; pass < 8 && m_hoverLeaf != m_wantedHoverLeaf; ++pass) {
             QWidget *old = m_hoverLeaf;
             m_hoverLeaf = m_wantedHoverLeaf;
-            if (old) if (auto *chrome = chromeOf(old)) chrome->hide();
-            if (m_hoverLeaf) if (auto *chrome = chromeOf(m_hoverLeaf)) { chrome->place(); chrome->show(); }
+            if (old) if (auto *chrome = chromeOf(old)) chrome->setHovered(false);
+            if (m_hoverLeaf) if (auto *chrome = chromeOf(m_hoverLeaf)) { chrome->setHovered(true); chrome->show(); }
         }
         m_updatingChrome = false;
     }
@@ -11709,7 +11786,8 @@ private:
         if (!page) return false;
         if (m_hoverLeaf == leaf) m_hoverLeaf = nullptr;
         if (m_wantedHoverLeaf == leaf) m_wantedHoverLeaf = nullptr;
-        if (auto *chrome = chromeOf(leaf)) chrome->hide();
+        // Closed, not hidden: the three always-on buttons travel with the pane to wherever it lands.
+        if (auto *chrome = chromeOf(leaf)) chrome->setHovered(false);
         const bool last = leavesIn(page).size() <= 1;
         auto *splitter = dynamic_cast<QSplitter *>(leaf->parentWidget());
         leaf->hide();
@@ -12194,7 +12272,7 @@ bool WindowManager::handleOpen(const QJsonObject &request) {
     if (path.isEmpty() || !QFileInfo::exists(path)) return false;
     const int line = request.value(QStringLiteral("line")).toInt();
     const QString token = request.value(QStringLiteral("token")).toString();
-    // A shell names its pane; a Konsole link click comes from the focused window.
+    // A shell names its pane; a link click from another app lands on the focused window.
     if (!token.isEmpty()) {
         for (RelayWindow *window : std::as_const(m_windows))
             if (Pane *pane = window->findPaneByToken(token)) { window->openPath(path, line, pane); return true; }
@@ -12238,7 +12316,8 @@ void WindowManager::restore(RelayWindow *requester) {
     if (requester) requester->notice(QStringLiteral("Nothing to restore."));
 }
 
-// Konsole opens OSC 8 links through KIO, which launches the desktop's handler for the scheme.
+// A relay:// link clicked in another application (a browser, an editor, a file manager) reaches
+// the desktop's handler for the scheme. Relay's own panes open these links themselves.
 // Install a user-level x-scheme-handler/relay entry that runs relay-open (idempotent, silent;
 // one status message the first time). RELAY_NO_URL_HANDLER=1 skips it.
 static void registerUrlHandler() {
@@ -12280,8 +12359,6 @@ static void registerUrlHandler() {
 }
 
 int main(int argc, char **argv) {
-    // Must precede QApplication: KDE platform plugins may open relayrc during construction.
-    relay::theme::exposeKonsoleProfile();
     QApplication app(argc, argv);
     relay::theme::applyDarkTheme(app);
     QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminal"));
@@ -12306,22 +12383,18 @@ int main(int argc, char **argv) {
     parser.addHelpOption(); parser.addVersionOption();
     QCommandLineOption workspace(QStringList{QStringLiteral("w"), QStringLiteral("workspace")}, QStringLiteral("Initial terminal directory and agent workspace."), QStringLiteral("path"), QDir::currentPath());
     QCommandLineOption clean(QStringLiteral("clean-shell"), QStringLiteral("Do not source ~/.bashrc; useful for incompatible DEBUG/preexec prompt hooks."));
-    QCommandLineOption engine(QStringLiteral("engine"), QStringLiteral("Terminal engine for new panes: konsole (default) or relay. Also RELAY_ENGINE."), QStringLiteral("name"));
     QCommandLineOption engineCore(QStringLiteral("engine-core"), QStringLiteral("Emulator core of Relay-engine panes: ghostty or libvterm. Also RELAY_ENGINE_CORE."), QStringLiteral("name"));
     // Saved window layout: --fresh ignores it this once (the file itself is kept).
     QCommandLineOption fresh(QStringLiteral("fresh"), QStringLiteral("Start with one new window instead of reopening the saved window layout."));
-    parser.addOption(workspace); parser.addOption(clean); parser.addOption(engine); parser.addOption(engineCore);
+    parser.addOption(workspace); parser.addOption(clean); parser.addOption(engineCore);
     parser.addOption(fresh); parser.process(app);
-    // Per-pane terminal engine (docs/ENGINE.md); the palette can still pick the other one.
-    QString engineWarning;
-    relay::setDefaultEngineKind(relay::resolveEngineKind(parser.value(engine), qEnvironmentVariable("RELAY_ENGINE"), &engineWarning));
+    // The emulator core under Relay's engine (docs/ENGINE.md).
     relay::setDefaultEngineCore(relay::resolveEngineCore(parser.value(engineCore), qEnvironmentVariable("RELAY_ENGINE_CORE")));
-    if (!engineWarning.isEmpty()) fprintf(stderr, "relay: %s\n", qPrintable(engineWarning));
     const auto path = QFileInfo(parser.value(workspace)).canonicalFilePath();
     if (path.isEmpty() || !QFileInfo(path).isDir()) { QMessageBox::critical(nullptr, QStringLiteral("Relay"), QStringLiteral("Workspace must be an existing directory.")); return 1; }
     QDir::setCurrent(path);
     try {
-        // Make relay-open available to Konsole's file-link command and to Relay shells.
+        // Make relay-open available to Relay shells and to anything they launch.
         const QString scripts = dataRoot() + QStringLiteral("/scripts");
         qputenv("RELAY_OPEN_HELPER", (scripts + QStringLiteral("/relay-open")).toUtf8());
         qputenv("PATH", (scripts + ':' + qEnvironmentVariable("PATH")).toUtf8());

@@ -11,13 +11,13 @@
   </developer>
   <description>
     <p>
-      Relay embeds Konsole's terminal component and adds a real text editor for
+      Relay has its own terminal engine and adds a real text editor for
       composing commands: mouse selection, multi-line editing, undo and history.
       The same prompt sends natural-language requests to an agent that runs on
       your own API key with any OpenAI-compatible provider.
     </p>
     <ul>
-      <li>The real Konsole terminal, with tabs, splits and native input when a program needs it</li>
+      <li>A full terminal emulator, with tabs, splits and native input when a program needs it</li>
       <li>Automatic routing between the shell and the agent, with explicit overrides</li>
       <li>Agent tool calls, commands and file diffs shown inline in the terminal</li>
       <li>Folder explorer and file preview panes</li>
@@ -41,7 +41,6 @@
     <keyword>terminal</keyword>
     <keyword>shell</keyword>
     <keyword>agent</keyword>
-    <keyword>konsole</keyword>
   </keywords>
   <url type="homepage">https://github.com/elliottash/relay-terminal</url>
   <url type="bugtracker">https://github.com/elliottash/relay-terminal/issues</url>

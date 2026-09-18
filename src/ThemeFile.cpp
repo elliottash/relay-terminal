@@ -91,10 +91,6 @@ QColor mix(const QColor &a, const QColor &b, double weightOfA) {
                   int(std::lround(a.blue() * w + b.blue() * (1 - w))));
 }
 
-QString iniColor(const QString &group, const QColor &c) {
-    return QStringLiteral("[%1]\nColor=%2,%3,%4\n\n").arg(group).arg(c.red()).arg(c.green()).arg(c.blue());
-}
-
 }  // namespace
 
 QStringList uiTokenNames() { return requiredUi() + optionalUi(); }
@@ -119,8 +115,6 @@ bool ThemeSpec::flag(const QString &name, bool fallback) const {
     const auto it = flags.constFind(name);
     return it == flags.constEnd() ? fallback : *it;
 }
-
-QColor faintOf(const QColor &color, const QColor &background) { return mix(color, background, 0.67); }
 
 // --- TOML ---------------------------------------------------------------------------------------
 
@@ -362,62 +356,6 @@ QMap<QString, QString> discoverThemeFiles(const QStringList &dirs) {
                 found.insert(file.completeBaseName(), file.absoluteFilePath());
     }
     return found;
-}
-
-// --- generated Konsole files --------------------------------------------------------------------
-
-QString konsoleNameFor(const QString &themeId) {
-    QString name = QStringLiteral("RelayTheme");
-    bool upper = true;
-    for (const QChar c : themeId) {
-        if (!c.isLetterOrNumber()) { upper = true; continue; }
-        name += upper ? c.toUpper() : c;
-        upper = false;
-    }
-    return name;
-}
-
-QString konsoleSchemeText(const ThemeSpec &spec) {
-    const QColor background = spec.terminalBackground;
-    QString out;
-    out += iniColor(QStringLiteral("Background"), background);
-    out += iniColor(QStringLiteral("BackgroundFaint"), background);
-    out += iniColor(QStringLiteral("BackgroundIntense"), spec.terminalBackgroundIntense);
-    for (int i = 0; i < 8 && spec.ansi.size() == 16; ++i) {
-        const QString base = QStringLiteral("Color%1").arg(i);
-        out += iniColor(base, spec.ansi.at(i));
-        out += iniColor(base + QStringLiteral("Faint"), faintOf(spec.ansi.at(i), background));
-        out += iniColor(base + QStringLiteral("Intense"), spec.ansi.at(i + 8));
-    }
-    out += iniColor(QStringLiteral("Foreground"), spec.terminalForeground);
-    out += iniColor(QStringLiteral("ForegroundFaint"), faintOf(spec.terminalForeground, background));
-    out += iniColor(QStringLiteral("ForegroundIntense"), spec.terminalForegroundIntense);
-    out += QStringLiteral("[General]\nAnchor=0.5,0.5\nBlur=false\nColorRandomization=false\n"
-                          "Description=%1\nFillStyle=Tile\nOpacity=1\nWallpaper=\n"
-                          "WallpaperFlipType=NoFlip\nWallpaperOpacity=1\n")
-               .arg(spec.name.isEmpty() ? spec.id : spec.name);
-    return out;
-}
-
-QString konsoleProfileText(const QString &baseProfile, const QString &profileName, const QString &schemeName) {
-    QStringList lines;
-    bool sawScheme = false, sawName = false;
-    for (const QString &line : baseProfile.split('\n')) {
-        if (line.startsWith(QLatin1String("ColorScheme="))) {
-            lines << QStringLiteral("ColorScheme=") + schemeName;
-            sawScheme = true;
-        } else if (line.startsWith(QLatin1String("Name="))) {
-            lines << QStringLiteral("Name=") + profileName;
-            sawName = true;
-        } else {
-            lines << line;
-        }
-    }
-    QString out = lines.join('\n');
-    if (!sawScheme) out += QStringLiteral("\n[Appearance]\nColorScheme=") + schemeName + QLatin1Char('\n');
-    if (!sawName) out += QStringLiteral("\n[General]\nName=") + profileName + QLatin1Char('\n');
-    if (!out.endsWith('\n')) out += QLatin1Char('\n');
-    return out;
 }
 
 }  // namespace relay::theme

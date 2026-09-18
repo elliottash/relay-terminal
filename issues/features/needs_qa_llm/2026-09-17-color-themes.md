@@ -240,7 +240,7 @@ unchanged and `relay-dark` stays the default.
 - `main` at `c0ac7f7` does not build: `main.cpp` includes the uncommitted `MarkdownAnsi.h`. The audition
   binary was built outside the tree with a CMake overlay (see the evidence README).
 - `test_remote_wire.test_every_worker_event_is_classified` fails on `main` (`subagent_model` is
-  unclassified). `relay-board.py check` flags `2026-09-17-wrong-mode-hints.md` id `94U5`: `U` is not
+  unclassified). `relay-board.py check` flagged `2026-09-17-wrong-mode-hints.md` id `94U5` (fixed to `94V5`): `U` is not
   Crockford base32. Both were already on `main`, and this change touches neither.
 
 ### QA checklist (audition)

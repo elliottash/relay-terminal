@@ -12,7 +12,7 @@
 #
 # What the marks are used for: Relay's own terminal engine (--engine=relay) tracks the
 # working directory from OSC 7 and command boundaries from OSC 133, which give it
-# "jump to previous/next prompt". KonsolePart ignores both. Other terminals that
+# "jump to previous/next prompt". Other terminals that
 # implement the same sequences (kitty, WezTerm, Ghostty, VS Code, iTerm2) understand
 # them too, so enabling this is not Relay-specific.
 #

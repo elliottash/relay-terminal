@@ -10,11 +10,11 @@ pkgname=relay-terminal
 _tag=v0.1.0-beta.1
 pkgver=0.1.0beta.1
 pkgrel=1
-pkgdesc="Linux terminal with a rich prompt and bring-your-own-key agents (embeds KonsolePart)"
+pkgdesc="Linux terminal with a rich prompt and bring-your-own-key agents"
 arch=('x86_64' 'aarch64')
 url="https://github.com/elliottash/relay-terminal"
 license=('GPL-3.0-or-later')
-depends=('konsole' 'kparts' 'kcoreaddons' 'syntax-highlighting' 'qt6-base' 'python' 'bash'
+depends=('syntax-highlighting' 'qt6-base' 'python' 'bash'
          'gcc-libs' 'glibc' 'hicolor-icon-theme')
 makedepends=('cmake' 'ninja')
 checkdepends=('git')

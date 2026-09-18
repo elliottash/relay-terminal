@@ -1,4 +1,0 @@
-# Relay's KonsolePart configuration. Found through XDG_CONFIG_DIRS at startup
-# so the embedded terminal uses Relay's profile without editing user files.
-[Desktop Entry]
-DefaultProfile=Relay.profile

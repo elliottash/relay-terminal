@@ -241,66 +241,26 @@ private Q_SLOTS:
         QCOMPARE(themeSearchDirs(QString(), QString()), QStringList());
     }
 
-    // --- the generated Konsole files -----------------------------------------------------------
-    void konsoleNamesAreStableAndSafe() {
-        QCOMPARE(konsoleNameFor(QStringLiteral("relay-dark")), QStringLiteral("RelayThemeRelayDark"));
-        QCOMPARE(konsoleNameFor(QStringLiteral("solarized_light 2")), QStringLiteral("RelayThemeSolarizedLight2"));
-    }
-
-    void theSchemeCarriesEveryColourKonsoleReads() {
-        const QString text = konsoleSchemeText(builtinDark());
-        // Konsole numbers the 16 ANSI colours Color0..Color7 plus Intense; Faint is the third.
-        for (int i = 0; i < 8; ++i) {
-            QVERIFY(text.contains(QStringLiteral("[Color%1]\n").arg(i)));
-            QVERIFY(text.contains(QStringLiteral("[Color%1Faint]\n").arg(i)));
-            QVERIFY(text.contains(QStringLiteral("[Color%1Intense]\n").arg(i)));
-        }
-        QVERIFY(text.contains(QStringLiteral("[Background]\nColor=15,17,21\n")));
-        QVERIFY(text.contains(QStringLiteral("[Foreground]\nColor=216,220,227\n")));
-        // The bright half of the palette is what Konsole calls Intense.
-        QVERIFY(text.contains(QStringLiteral("[Color1Intense]\nColor=255,140,143\n")));
-        QVERIFY(text.contains(QStringLiteral("[General]\n")));
-        QVERIFY(text.contains(QStringLiteral("Description=Relay Dark")));
-    }
-
-    void faintIsTheColourMixedIntoTheBackground() {
-        const QColor faint = faintOf(QColor(242, 119, 122), QColor(15, 17, 21));
-        QCOMPARE(faint.red(), 167);
-        // Faint of the background is the background.
-        QCOMPARE(faintOf(QColor(15, 17, 21), QColor(15, 17, 21)).name(), QStringLiteral("#0f1115"));
-    }
-
-    void theProfileKeepsEverythingButTheSchemeAndTheName() {
-        const QString base = QStringLiteral("[Appearance]\nColorScheme=RelayDark\nFont=Hack,11\nTerminalMargin=12\n"
-                                            "\n[General]\nName=Relay\nParent=FALLBACK/\n");
-        const QString out = konsoleProfileText(base, QStringLiteral("RelayThemeX"), QStringLiteral("RelayThemeX"));
-        QVERIFY(out.contains(QStringLiteral("ColorScheme=RelayThemeX")));
-        QVERIFY(out.contains(QStringLiteral("Name=RelayThemeX")));
-        QVERIFY(!out.contains(QStringLiteral("ColorScheme=RelayDark")));
-        QVERIFY(out.contains(QStringLiteral("Font=Hack,11")));
-        QVERIFY(out.contains(QStringLiteral("TerminalMargin=12")));
-        QVERIFY(out.contains(QStringLiteral("Parent=FALLBACK/")));
-    }
-
-    void aProfileWithoutThoseKeysStillGetsThem() {
-        const QString out = konsoleProfileText(QStringLiteral("[Scrolling]\nHistorySize=20000\n"),
-                                               QStringLiteral("RelayThemeX"), QStringLiteral("RelayThemeX"));
-        QVERIFY(out.contains(QStringLiteral("ColorScheme=RelayThemeX")));
-        QVERIFY(out.contains(QStringLiteral("Name=RelayThemeX")));
-        QVERIFY(out.contains(QStringLiteral("HistorySize=20000")));
-    }
-
-    // Every shipped theme has to survive the round trip to a Konsole scheme, because that file is
-    // what both KonsolePart and Relay's own engine read.
-    void everyShippedThemeGeneratesAScheme() {
+    // --- what the engine is handed -------------------------------------------------------------
+    // Colour reaches the terminal straight from the theme (src/EngineBackend.cpp applyThemeColors),
+    // so a shipped theme has to carry a whole grid: 16 ANSI entries, a ground, a foreground and a
+    // cursor. This is what the generated Konsole .colorscheme used to prove before KonsolePart was
+    // retired (2026-09-18).
+    void everyShippedThemeCarriesAWholeGrid() {
         const auto files = discoverThemeFiles({QStringLiteral("data/theme/themes")});
+        QVERIFY(!files.isEmpty());
         for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
             const ThemeSpec spec = parseTheme(read(*it), it.key(), builtinDark());
-            const QString text = konsoleSchemeText(spec);
-            QVERIFY(text.contains(QStringLiteral("[Color7Intense]\n")));
-            QVERIFY(text.contains(QStringLiteral("Description=") + spec.name));
-            // 8 ANSI colours x (base, faint, intense) + a background and a foreground trio.
-            QCOMPARE(text.count(QStringLiteral("\nColor=")), 30);
+            QCOMPARE(spec.ansi.size(), 16);
+            for (int i = 0; i < 16; ++i)
+                QVERIFY2(spec.ansi.at(i).isValid(), qPrintable(it.key() + QStringLiteral(" ANSI %1").arg(i)));
+            for (const QColor &c : {spec.terminalBackground, spec.terminalForeground, spec.terminalCursor,
+                                    spec.terminalBackgroundIntense, spec.terminalForegroundIntense})
+                QVERIFY2(c.isValid(), qPrintable(it.key()));
+            // A gradient end is optional, but a theme that names one has to mean it.
+            if (!spec.terminalBackgroundEnd.isValid())
+                continue;
+            QVERIFY2(spec.terminalBackgroundEnd != spec.terminalBackground, qPrintable(it.key()));
         }
     }
 

@@ -7,7 +7,7 @@ step() { printf '\n== %s\n' "$*"; }
 
 step "installed files"
 for f in /usr/bin/relay /usr/share/relay/backend/worker.py /usr/share/relay/shell/integration.bash \
-    /usr/share/relay/shell/event.py /usr/share/relay/scripts/relay-open /usr/share/relay/theme/konsole/Relay.profile \
+    /usr/share/relay/shell/event.py /usr/share/relay/scripts/relay-open /usr/share/relay/theme/terminal.conf \
     /usr/share/applications/org.relayterminal.Relay.desktop /usr/share/metainfo/org.relayterminal.Relay.metainfo.xml \
     /usr/share/icons/hicolor/scalable/apps/org.relayterminal.Relay.svg \
     /usr/share/icons/hicolor/256x256/apps/org.relayterminal.Relay.png; do
@@ -25,9 +25,6 @@ reply=$(echo '{"type":"shutdown"}' | timeout 20 python3 -S /usr/share/relay/back
 echo "$reply"
 grep -q '"event": *"ready"' <<<"$reply"
 
-step "KonsolePart plugin present"
-part=$(find /usr/lib* -name 'konsolepart.so' -print -quit 2>/dev/null); [[ -n $part ]] || { echo 'konsolepart.so not found' >&2; exit 1; }; echo "$part"
-
 step "GUI start under Xvfb (offscreen and xcb)"
 # Seconds the app gets to start. Raise it under emulation (e.g. RELAY_SMOKE_SECONDS=60 in an
 # amd64 container on an arm64 host): xvfb-run alone waits 3 seconds for the X server.
@@ -37,8 +34,8 @@ gui_check() {
   local platform=$1 log home
   log=$(mktemp); home=$(mktemp -d)
   # A startup failure shows a modal dialog and keeps running, so "still alive at the timeout"
-  # alone proves nothing. Instead check that KonsolePart spawned Relay's Bash integration
-  # shell and that the agent worker started, and (xcb) that the main window is mapped.
+  # alone proves nothing. Instead check that the terminal engine spawned Relay's Bash
+  # integration shell and that the agent worker started, and (xcb) that the window is mapped.
   HOME=$home QT_QPA_PLATFORM=$platform RELAY_SMOKE_SLEEP=$((wait_s - 4)) timeout "$wait_s" \
     xvfb-run -a -s '-screen 0 1280x800x24' \
     bash -c 'relay --workspace /tmp & app=$!; sleep "$RELAY_SMOKE_SLEEP"
@@ -50,7 +47,7 @@ gui_check() {
   echo "[$platform] exit status $status (124 = still running at timeout)"
   grep -v -e 'Detected locale' -e 'UTF-8 locale' -e 'reconfigure your locale' -e 'for more information' "$log" | tail -n 25
   [[ $status == 124 ]] || return 1
-  grep -q 'integration.bash' "$log" || { echo "[$platform] no Bash integration shell: KonsolePart did not start" >&2; return 1; }
+  grep -q 'integration.bash' "$log" || { echo "[$platform] no Bash integration shell: the terminal engine did not start" >&2; return 1; }
   grep -q 'worker.py' "$log" || { echo "[$platform] agent worker did not start" >&2; return 1; }
   if [[ $platform == xcb ]]; then
     grep -q '"Relay could not start"' "$log" && { echo "[xcb] startup error dialog shown" >&2; return 1; }

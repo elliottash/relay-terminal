@@ -1,5 +1,5 @@
 pkgbase = relay-terminal
-	pkgdesc = Linux terminal with a rich prompt and bring-your-own-key agents (embeds KonsolePart)
+	pkgdesc = Linux terminal with a rich prompt and bring-your-own-key agents
 	pkgver = 0.1.0beta.1
 	pkgrel = 1
 	url = https://github.com/elliottash/relay-terminal
@@ -9,9 +9,6 @@ pkgbase = relay-terminal
 	checkdepends = git
 	makedepends = cmake
 	makedepends = ninja
-	depends = konsole
-	depends = kparts
-	depends = kcoreaddons
 	depends = syntax-highlighting
 	depends = qt6-base
 	depends = python

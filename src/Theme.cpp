@@ -40,8 +40,7 @@ QString monoFamily() {
     return QFontDatabase::systemFont(QFontDatabase::FixedFont).family();
 }
 
-// Relay's own settings file, addressable before QApplication has set the organisation name
-// (exposeKonsoleProfile() has to know the chosen theme that early).
+// Relay's own settings file, addressable before QApplication has set the organisation name.
 // NativeFormat, not IniFormat: on Unix the two differ in the file extension (relay.conf against
 // relay.ini), and the rest of the app reads the native one.
 QSettings relaySettings() {
@@ -96,7 +95,7 @@ QString bevelStylesheet(const ThemeSpec &spec) {
     const QString dark = hex(extraColor(spec, QStringLiteral("bevel.dark"), SurfaceRaised.darker(160)));
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
-QFrame#paneChrome, QWidget#sidebar, QFrame#helpCard, QMenu, QFrame#notificationsPopup {
+QFrame#paneChrome[hot="true"], QWidget#sidebar, QFrame#helpCard, QMenu, QFrame#notificationsPopup {
     border-top: 2px solid %1; border-left: 2px solid %1; border-bottom: 2px solid %2; border-right: 2px solid %2; }
 QPushButton:pressed, QToolButton#stripChip:pressed {
     border-top: 2px solid %2; border-left: 2px solid %2; border-bottom: 2px solid %1; border-right: 2px solid %1; }
@@ -346,10 +345,15 @@ QComboBox#statusPicker { background: @raised; border: 1px solid @border; border-
 QComboBox#statusPicker:hover { color: @text; border-color: @accent; }
 QComboBox#statusPicker::drop-down { border: none; width: 12px; }
 QComboBox#statusPicker QAbstractItemView { background: @raised; color: @text; selection-background-color: @accent; }
-QFrame#paneChrome { background: @raised; border: 1px solid @border; border-radius: 6px; }
+/* The pane's button row. It is on screen in every pane, so at rest it is three quiet glyphs on
+   the pane's own ground; the pane under the mouse ("hot") gets the raised tile, the grip and the
+   second split button. */
+QFrame#paneChrome { background: transparent; border: 1px solid transparent; border-radius: 6px; }
+QFrame#paneChrome[hot="true"] { background: @raised; border-color: @border; }
 QLabel#paneGrip { color: @muted; padding: 0 4px; font-size: 11pt; }
 QLabel#paneGrip:hover { color: @text; }
-QToolButton#paneChromeButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; min-width: 16px; }
+QToolButton#paneChromeButton { color: @disabled; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; min-width: 16px; }
+QFrame#paneChrome[hot="true"] QToolButton#paneChromeButton { color: @muted; }
 QToolButton#paneChromeButton:hover { color: @text; border-color: @border; background: @surface; }
 QFrame#dropZone { background: @accentSoft; border: 2px solid @accent; border-radius: 6px; }
 /* Window header: Relay's own title bar (frameless window). The tab row carries the Relay icon
@@ -537,62 +541,12 @@ QPushButton#boardReplyButton, QFrame#boardReply QPushButton#primary { padding: 4
     return css;
 }
 
-// --- generated Konsole files --------------------------------------------------------------------
-
-bool writeFileIfChanged(const QString &path, const QString &content) {
-    QFile existing(path);
-    if (existing.open(QIODevice::ReadOnly) && QString::fromUtf8(existing.readAll()) == content) return true;
-    existing.close();
-    QDir().mkpath(QFileInfo(path).absolutePath());
-    QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly)) return false;
-    file.write(content.toUtf8());
-    return file.commit();
-}
-
-QString baseProfileText() {
-    const QString dir = themeDataDir();
-    QFile file(dir + QStringLiteral("/konsole/Relay.profile"));
-    if (dir.isEmpty() || !file.open(QIODevice::ReadOnly | QIODevice::Text)) return {};
-    return QString::fromUtf8(file.readAll());
-}
-
-// Write one .profile and one .colorscheme per known theme, plus relayrc pointing at the chosen
-// one. Konsole builds its profile list once, so every theme has to exist on disk before
-// QApplication starts; that is why this runs from exposeKonsoleProfile().
-void generateKonsoleFiles(const QString &activeId) {
-    const QString runtime = runtimeThemeDir();
-    if (runtime.isEmpty()) return;
-    const QString base = baseProfileText();
-    if (!registry().scanned) scan();
-    QStringList ids = registry().files.keys();
-    if (!ids.contains(QStringLiteral("relay-dark"))) ids << QStringLiteral("relay-dark");
-    for (const QString &id : ids) {
-        const ThemeSpec *spec = loadTheme(id);
-        const ThemeSpec &theme = spec ? *spec : builtinDark();
-        const QString name = konsoleNameFor(id);
-        writeFileIfChanged(runtime + QStringLiteral("/konsole/") + name + QStringLiteral(".colorscheme"),
-                           konsoleSchemeText(theme));
-        if (!base.isEmpty())
-            writeFileIfChanged(runtime + QStringLiteral("/konsole/") + name + QStringLiteral(".profile"),
-                               konsoleProfileText(base, name, name));
-    }
-    const QString chosen = ids.contains(activeId) ? activeId : QStringLiteral("relay-dark");
-    writeFileIfChanged(runtime + QStringLiteral("/relayrc"),
-                       QStringLiteral("# Generated by Relay from the selected theme (issue 0JA7).\n"
-                                      "# The source of truth is data/theme/themes/<id>.toml.\n"
-                                      "[Desktop Entry]\nDefaultProfile=%1.profile\n")
-                           .arg(konsoleNameFor(chosen)));
-}
-
 }  // namespace
 
 Notifier *notifier() { static Notifier n; return &n; }
 
 const ThemeSpec &active() { return activeSpec(); }
 QString activeThemeId() { return activeSpec().id; }
-QString konsoleProfileName(const QString &themeId) { return konsoleNameFor(themeId); }
-
 void refreshThemes() { scan(); }
 
 QList<ThemeChoice> availableThemes() {
@@ -621,54 +575,6 @@ QString themeDataDir() {
     return {};
 }
 
-QString runtimeThemeDir() {
-    QString cache = qEnvironmentVariable("XDG_CACHE_HOME");
-    if (cache.isEmpty()) {
-        const QString home = QDir::homePath();
-        if (home.isEmpty()) return {};
-        cache = home + QStringLiteral("/.cache");
-    }
-    return QDir(cache).absoluteFilePath(QStringLiteral("relay/theme"));
-}
-
-namespace {
-struct SavedVariable { QByteArray name, value; bool set; };
-QList<SavedVariable> &savedXdg() { static QList<SavedVariable> saved; return saved; }
-
-void prepend(const char *name, const QStringList &dirs, const char *fallback) {
-    const bool set = qEnvironmentVariableIsSet(name);
-    const QByteArray value = qgetenv(name);
-    savedXdg().append({QByteArray(name), value, set});
-    const QByteArray base = value.isEmpty() ? QByteArray(fallback) : value;
-    QByteArray prefix;
-    for (const QString &dir : dirs) {
-        if (dir.isEmpty()) continue;
-        if (!prefix.isEmpty()) prefix += ':';
-        prefix += QFile::encodeName(dir);
-    }
-    qputenv(name, prefix.isEmpty() ? base : prefix + ':' + base);
-}
-}
-
-bool exposeKonsoleProfile() {
-    const QString dir = themeDataDir();
-    if (dir.isEmpty() || !savedXdg().isEmpty()) return false;
-    const QString runtime = runtimeThemeDir();
-    generateKonsoleFiles(settingsThemeId());
-    const QStringList dirs{runtime, dir};
-    prepend("XDG_CONFIG_DIRS", dirs, "/etc/xdg");
-    prepend("XDG_DATA_DIRS", dirs, "/usr/local/share:/usr/share");
-    return true;
-}
-
-void restoreXdgEnvironment() {
-    for (const auto &variable : savedXdg()) {
-        if (variable.set) qputenv(variable.name.constData(), variable.value);
-        else qunsetenv(variable.name.constData());
-    }
-    savedXdg().clear();
-}
-
 void applyTheme(QApplication &app) {
     const ThemeSpec spec = resolveTheme(settingsThemeId());   // a copy: GCC cannot see the reference outlives the call
     adoptTokens(spec);
@@ -689,9 +595,6 @@ bool setActiveTheme(const QString &id) {
         applyPalette(*app, *spec);
         app->setStyleSheet(stylesheetFor(*spec));
     }
-    // New panes read relayrc; running ones are switched by KonsoleBackend/EngineBackend on the
-    // signal below.
-    generateKonsoleFiles(id);
     repolishAll();
     notifier()->emitChanged();
     return true;

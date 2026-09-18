@@ -11,7 +11,7 @@ if [[ -w /proc/$$/oom_score_adj ]]; then
     printf '300\n' > /proc/$$/oom_score_adj 2>/dev/null || :
 fi
 
-# Required values are set by the parent before Konsole starts this shell.
+# Required values are set by the parent before the terminal starts this shell.
 if [[ -z ${RELAY_RUNTIME_DIR:-} || -z ${RELAY_SHELL_EVENT:-} || -z ${RELAY_SESSION_TOKEN:-} ]]; then
     return
 fi
@@ -113,7 +113,7 @@ fi
 
 # Opt-in OSC 7 / OSC 133 marks (palette: "Shell integration (OSC 7/133)", or
 # RELAY_SHELL_INTEGRATION=1). Sourced last so it wraps the final PS1/PROMPT_COMMAND.
-# Relay's own engine uses the marks; KonsolePart ignores them. See docs/ARCHITECTURE.md.
+# Relay's engine uses the marks. See docs/ARCHITECTURE.md.
 if [[ ${RELAY_SHELL_INTEGRATION:-0} == 1 && -r ${BASH_SOURCE[0]%/*}/relay-integration.bash ]]; then
     source "${BASH_SOURCE[0]%/*}/relay-integration.bash"
 fi

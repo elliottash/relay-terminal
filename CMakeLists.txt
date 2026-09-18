@@ -5,18 +5,22 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 include(GNUInstallDirs)
 include(CTest)
-option(RELAY_BUILD_APP "Build the native Konsole-based Relay application" ON)
+option(RELAY_BUILD_APP "Build the Relay application" ON)
 set(RELAY_QT_MAJOR "AUTO" CACHE STRING "Qt/KDE Frameworks major version: AUTO, 6, or 5")
 set_property(CACHE RELAY_QT_MAJOR PROPERTY STRINGS AUTO 6 5)
 if(RELAY_QT_MAJOR STREQUAL "AUTO")
-    # Probe config files without find_package(): loading Qt6 packages sets
-    # QT_MAJOR_VERSION, which later breaks KF5's Qt5 dependency resolution.
+    # Probe config files without find_package(), which would fix QT_MAJOR_VERSION too early.
+    #
+    # Qt 5 wins when it is installed. Until KonsolePart was retired (2026-09-18) that was decided
+    # for us — Qt 6 was only chosen when KF6Parts was there too — and the code has never been
+    # built against Qt 6 end to end. Pass -DRELAY_QT_MAJOR=6 to try it; the remaining work is
+    # qsizetype narrowing (src/ScreenPrompt.cpp is the first one).
+    find_file(RELAY_QT5_CONFIG Qt5Config.cmake PATH_SUFFIXES cmake/Qt5 lib/cmake/Qt5 lib/${CMAKE_LIBRARY_ARCHITECTURE}/cmake/Qt5)
     find_file(RELAY_QT6_CONFIG Qt6Config.cmake PATH_SUFFIXES cmake/Qt6 lib/cmake/Qt6 lib/${CMAKE_LIBRARY_ARCHITECTURE}/cmake/Qt6)
-    find_file(RELAY_KF6PARTS_CONFIG KF6PartsConfig.cmake PATH_SUFFIXES cmake/KF6Parts lib/cmake/KF6Parts lib/${CMAKE_LIBRARY_ARCHITECTURE}/cmake/KF6Parts)
-    if(RELAY_QT6_CONFIG AND (RELAY_KF6PARTS_CONFIG OR NOT RELAY_BUILD_APP))
-        set(RELAY_QT_MAJOR 6)
-    else()
+    if(RELAY_QT5_CONFIG OR NOT RELAY_QT6_CONFIG)
         set(RELAY_QT_MAJOR 5)
+    else()
+        set(RELAY_QT_MAJOR 6)
     endif()
 endif()
 if(RELAY_QT_MAJOR STREQUAL "6")
@@ -27,8 +31,10 @@ else()
     message(FATAL_ERROR "RELAY_QT_MAJOR must be AUTO, 6, or 5.")
 endif()
 set(RELAY_QT Qt${RELAY_QT_MAJOR})
+# KDE Frameworks is no longer required — KonsolePart was retired on 2026-09-18 — but the
+# optional file-preview highlighter still comes from it when it happens to be installed.
 set(RELAY_KF KF${RELAY_QT_MAJOR})
-message(STATUS "Relay: building against ${RELAY_QT} / ${RELAY_KF}")
+message(STATUS "Relay: building against ${RELAY_QT}")
 find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
 
 add_library(relay-editor STATIC src/RichEditor.cpp src/RichEditor.h)
@@ -72,14 +78,14 @@ target_include_directories(relay-subagents PUBLIC src)
 target_link_libraries(relay-subagents PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-subagents PRIVATE -Wall -Wextra -Wpedantic)
 
-# Terminal engine selection (--engine / RELAY_ENGINE): plain Qt, no KParts and no engine,
-# so the parsing rules can be tested on their own. src/BackendFactory.cpp adds the two
-# implementations to the app.
+# Terminal engine settings (--engine-core / RELAY_ENGINE_CORE) and the pane's right-click menu:
+# plain Qt, no engine linked in, so the rules can be tested on their own.
+# src/BackendFactory.cpp adds the implementation to the app.
 add_library(relay-backends STATIC src/TerminalBackends.cpp src/TerminalBackends.h)
 target_include_directories(relay-backends PUBLIC src)
 target_link_libraries(relay-backends PUBLIC ${RELAY_QT}::Core)
-# The engine library is always built (see add_subdirectory(engine) below), so
-# --engine=relay is available in every build.
+# The engine library is always built (see add_subdirectory(engine) below), so every build of
+# the app has a terminal.
 target_compile_definitions(relay-backends PUBLIC RELAY_HAVE_ENGINE)
 target_compile_options(relay-backends PRIVATE -Wall -Wextra -Wpedantic)
 
@@ -187,8 +193,8 @@ target_link_libraries(relay-voice PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-voice PRIVATE -Wall -Wextra -Wpedantic)
 
 # Colour themes (issue 0JA7): reading a theme file (TOML) into a ThemeSpec, the tokens a theme
-# must carry, discovery across the built-in and the user folder, and the Konsole colour scheme and
-# profile generated from it. Plain Qt Gui so every rule can be tested without a window;
+# must carry, and discovery across the built-in and the user folder. Plain Qt Gui so every rule
+# can be tested without a window;
 # src/Theme.cpp turns the result into the live palette, stylesheet and terminal colours.
 add_library(relay-theme STATIC src/ThemeFile.cpp src/ThemeFile.h)
 target_include_directories(relay-theme PUBLIC src)
@@ -216,16 +222,14 @@ add_subdirectory(engine)
 
 if(RELAY_BUILD_APP)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        message(FATAL_ERROR "Relay v0.1 targets Linux (KonsolePart, /proc, and Bash integration).")
+        message(FATAL_ERROR "Relay v0.1 targets Linux (/proc and the Bash integration).")
     endif()
-    find_package(${RELAY_KF}CoreAddons REQUIRED)
-    find_package(${RELAY_KF}Parts REQUIRED)
     add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/Hints.cpp src/Hints.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
         src/ModelSettings.cpp src/ModelSettings.h
-        src/KonsoleBackend.cpp src/KonsoleBackend.h src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
+        src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
-    find_package(${RELAY_QT} REQUIRED COMPONENTS DBus)
-    target_link_libraries(relay PRIVATE relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-board relay-aliases ${RELAY_KF}::Parts ${RELAY_KF}::CoreAddons ${RELAY_QT}::DBus)
+    find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
+    target_link_libraries(relay PRIVATE relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"

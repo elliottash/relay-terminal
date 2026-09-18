@@ -27,19 +27,22 @@ Contents:
 
 ## 1. Overview
 
-Relay is a native C++/Qt application for Linux. It embeds **KonsolePart**, Konsole's
-terminal component, loaded at runtime as a KPart. Under each terminal sits a real text
-editor (the composer). Text typed there goes to the shell or to a bring-your-own-key agent.
+Relay is a native C++/Qt application for Linux with **its own terminal engine** (`engine/`,
+`docs/ENGINE.md`). It embedded KonsolePart until 2026-09-18, when the owner retired it: the
+engine had been every pane's terminal long enough to be the only one. Under each terminal sits
+a real text editor (the composer). Text typed there goes to the shell or to a bring-your-own-key agent.
 The agent runs in a separate Python process per pane and talks to any OpenAI-compatible
 chat-completions endpoint.
 
-It builds against Qt6 + KF6 or Qt5 + KF5 (`CMakeLists.txt`, `RELAY_QT_MAJOR=AUTO|6|5`).
-It is not a Konsole fork and does not patch Konsole.
+It builds against Qt5, and against Qt6 once the remaining `qsizetype` narrowing is fixed
+(`CMakeLists.txt`, `RELAY_QT_MAJOR=AUTO|6|5`; AUTO takes Qt5 wherever it is installed). KDE
+Frameworks is optional and supplies only the file-preview highlighter. It is not a Konsole fork
+and does not read or patch Konsole's configuration.
 
 ## 2. Process model
 
 ```text
-relay  (GUI process: Qt, all KonsolePart instances, all screens and scrollback)
+relay  (GUI process: Qt, every terminal engine instance, all screens and scrollback)
  |
  |-- WindowManager: private QLocalServer  $TMPDIR/relay-open-XXXXXX/open.sock   <-- scripts/relay-open
  |
@@ -51,27 +54,25 @@ relay  (GUI process: Qt, all KonsolePart instances, all screens and scrollback)
  |        |-- shell/event.py  (writes state.json)                |-- bash -n  (router syntax check)
  |        +-- user commands, vim, builds ...                     +-- bash --norc -c  (run_command)
  |               ^                                                      ^
- |               | PTY (KonsolePart startProgram / sendInput)           | NDJSON over stdin/stdout
+ |               | PTY (engine TerminalSession / sendInput)             | NDJSON over stdin/stdout
  +---------------+------------------------------------------------------+
 ```
 
 | Process | Started by | Talks to the GUI through |
 |---|---|---|
 | `relay` | user or desktop file | n/a |
-| Pane shell (Bash) | KonsolePart `startProgram`, wrapped in `systemd-run --user --scope` when available | PTY bytes; atomic `state.json` events; `input.txt` for staged commands |
+| Pane shell (Bash) | the engine's `TerminalSession`, wrapped in `systemd-run --user --scope` when available | PTY bytes; atomic `state.json` events; `input.txt` for staged commands |
 | `shell/event.py` | Bash prompt and DEBUG hooks | writes `state.json` (token, sequence, event, status, cwd, shell PID, aliases/functions, PATH) |
 | Agent worker `backend/worker.py` | `QProcess`, wrapped in `systemd-run` when available | newline-delimited JSON on private stdin/stdout. No TCP port. |
 | Agent tool commands | worker, `/bin/bash --noprofile --norc -c` in a new session | results go back through the worker |
-| `scripts/relay-open` | `relay open` in a pane shell, or Konsole's file-link editor command | Unix socket `RELAY_OPEN_SOCKET`, one JSON line |
+| `scripts/relay-open` | `relay open` in a pane shell, or another application opening a `relay://` link | Unix socket `RELAY_OPEN_SOCKET`, one JSON line |
 
 Startup (`main()` in `src/main.cpp`):
 
-1. `relay::theme::exposeKonsoleProfile()` prepends `data/theme` to `XDG_CONFIG_DIRS` and
-   `XDG_DATA_DIRS`, before `QApplication` exists.
-2. The data root is the first of `$RELAY_DATA_DIR`, `<exe>/../share/relay`, the compiled
+1. The data root is the first of `$RELAY_DATA_DIR`, `<exe>/../share/relay`, the compiled
    `RELAY_DATA_DIR`, or the source tree that contains `backend/worker.py`.
-3. `<data>/scripts` is prepended to `PATH`; `RELAY_OPEN_HELPER` points at `relay-open`.
-4. `WindowManager` opens the socket, then `newWindowAt(--workspace)` creates the first window.
+2. `<data>/scripts` is prepended to `PATH`; `RELAY_OPEN_HELPER` points at `relay-open`.
+3. `WindowManager` opens the socket, then `newWindowAt(--workspace)` creates the first window.
 
 Options: `--workspace/-w PATH` (initial terminal directory and agent workspace) and
 `--clean-shell` (skip `~/.bashrc`).
@@ -84,7 +85,7 @@ Options: `--workspace/-w PATH` (initial terminal directory and agent workspace) 
 | `RelayWindow` | `QMainWindow`: its own title bar (the tab row), a `QTabWidget`, the actions palette overlay, an application event filter for shortcuts |
 | `RelayWindow` | `QMainWindow`: toolbar (Actions, New chat, Stop agent, Provider / BYOK…), a `QTabWidget`, the actions palette overlay, the Settings window, an application event filter for shortcuts |
 | Tab page | One root widget: a leaf or a tree of `QSplitter`s |
-| `Pane` (leaf) | Terminal pane: KonsolePart, Bash bridge, composer, its own worker and conversation |
+| `Pane` (leaf) | Terminal pane: the engine, a Bash bridge, a composer, its own worker and conversation |
 | `ToolPane` (leaf) | Folder explorer or file preview (section 10) |
 
 Pane anatomy, top to bottom: the header (the pane title on the left, the directory on the right;
@@ -141,7 +142,7 @@ Layout rules:
   splitter already owns and numbers the index as if it had been taken out first — "finishing" a
   move toward the end with a second insert of the neighbour puts both back where they started,
   which is what made Ctrl+Alt+Right and Ctrl+Alt+Down do nothing.
-- **Drag:** the grip tracks the mouse itself (no `QDrag`, because KonsolePart accepts text
+- **Drag:** the grip tracks the mouse itself (no `QDrag`, because a terminal accepts text
   drops). `dropTarget()` picks the nearest edge of the leaf under the cursor or a `QTabBar`; a
   translucent `dropZone` frame shows the half that will be taken. Esc cancels. Dropping on the
   half two neighbours already share means "stay here", so nothing moves.
@@ -305,7 +306,7 @@ its window and runs `runAction(id)`, which the toolbar and palette also use.
 - While a foreground program owns the focused terminal, only keys allowed by
   `program_keys` act. The default lets Ctrl+Shift combinations and F-keys through to Relay.
 - Terminal clipboard: Ctrl+C invokes the display's `copyToClipboard` slot and treats a
-  clipboard change as proof of a selection (KonsolePart has no selection query); otherwise
+  clipboard change as proof of a selection (a backend need not have a selection query); otherwise
   the key reaches the shell. Ctrl+V pastes at a prompt and passes through inside programs.
   Optional copy-on-select (`terminal/copy_on_select`).
 
@@ -491,12 +492,8 @@ Applies only to terminal mode (Ctrl+Shift+Enter, `/shell `, or the Terminal pick
 
 There is no agent pane. Output goes through the pane's backend
 (`TerminalBackend::writeToDisplay`, capability `DisplayInjection`; section 16). Bytes reach
-the emulator like program output and never reach the shell, its history or its input. Relay's
-own engine writes them into its parser; KonsolePart has no API for it, but each Konsole
-`Session` registers on D-Bus at `/Sessions/N`, so in-process
-`QDBusConnection::objectRegisteredAt()` returns that `QObject`, and `src/KonsoleBackend.cpp`
-finds the session whose child reports the shell PID through `processId()` and invokes its
-`onReceiveBlock(const char*, int)` slot.
+the emulator like program output and never reach the shell, its history or its input: the
+engine writes them into its parser.
 
 `Pane::printInline`:
 
@@ -525,11 +522,9 @@ per pane (last 50) and, when the turn used tools, prints `✦ N tool calls · T 
 OSC 8 hyperlink to `relay://turn/<pane token>/<turn id>`. The live `tool_output {text}` stream and
 the stored reply `tool_output {stored: true, …}` share a name; the GUI branches on `stored`.
 
-**`relay://` links.** Konsole 23.08 opens OSC 8 links only when the profile has
-`AllowEscapedLinks=true` and the scheme is in `EscapedLinksSchema` (`data/theme/konsole/Relay.profile`),
-and KonsolePart applies its profile before the view exists, which leaves the URL extractor off;
-`Pane` re-applies the profile (`TerminalInterfaceV2::setCurrentProfile`) after starting the shell.
-Clicks go through `KIO::OpenUrlJob`, so `registerUrlHandler()` (1.5 s after start, idempotent,
+**`relay://` links.** A click inside a pane is handled in-process (`Pane::openOutputTarget`).
+A `relay://` link opened anywhere else — a browser, an editor, a file manager — reaches the
+desktop's scheme handler, so `registerUrlHandler()` (1.5 s after start, idempotent,
 `RELAY_NO_URL_HANDLER=1` skips it) writes
 `$XDG_DATA_HOME/applications/org.relayterminal.Relay.url-handler.desktop` (`Exec=python3
 relay-open %u`, template in `data/`), runs `xdg-mime default … x-scheme-handler/relay`,
@@ -552,7 +547,7 @@ the restore (the backend skips files changed since and reports them in `rewound`
 
 **The prompt box is the only keyboard input** (Warp-style). The terminal widget only holds the
 keyboard in native mode, which the user enters on purpose. The rules live in the Pane, not in a
-backend, so KonsolePart panes and Relay-engine panes behave the same; the decisions themselves are
+backend, not in the engine; the decisions themselves are
 pure functions in `src/InputPolicy.{h,cpp}` (library `relay-input`, tests
 `tests/inputpolicy_test.cpp`).
 
@@ -713,7 +708,6 @@ Ways to open a path:
 | `relay open PATH` in a pane shell | shell function → `scripts/relay-open` → socket request `{path, line, token}`; the token selects the pane |
 | Click or Ctrl+click a path in an engine pane's output | `relay::links` (`src/OutputLinks.*`) → `TerminalView::linkActivated` → `Pane::openOutputTarget` |
 | `Ctrl+Shift+L` then Enter (engine panes) | the keyboard walk over the same links |
-| Ctrl+click a text file in a KonsolePart pane | Relay's Konsole profile sets `UnderlineFilesEnabled=true` and `TextEditorCmdCustom=relay-open PATH:LINE:COLUMN` |
 
 ### Clickable paths in terminal output
 
@@ -734,10 +728,6 @@ Ctrl+click, the right-click menu ("Open …", "Open in the system editor", "Copy
 ordered link list behind `Ctrl+Shift+L`. `Pane::openOutputTarget` routes the result: a folder to
 an explorer pane, a file to a preview pane at `line`, a URL to `QDesktopServices`.
 
-KonsolePart panes keep the older, narrower path: the profile underlines files and hands text
-files to `relay-open`. KonsolePart sends folders, images and PDFs to KIO (the desktop default
-app), does not recognise a `:line:column` suffix, and exposes no screen text, so `Ctrl+Shift+L`
-says so and does nothing (`issues/features/needs_qa_llm/2026-09-17-clickable-paths.md`).
 `relay-open` falls back to `xdg-open` when Relay is not reachable.
 
 ## 10a. The Switchboard pane
@@ -1160,9 +1150,9 @@ bar says so once.
 
 Detection, once a second: an increase in the shell scope's `memory.events` `oom_kill` shows
 "A command in this pane was stopped because it ran out of memory"; a dead shell PID or
-`Result=oom-kill` shows a banner with Restart shell (Ctrl+Shift+R), which replaces the
-KonsolePart in the same pane. A stopped worker shows Restart agent. Failed scopes are
-`reset-failed`. Scrollback is capped at 20,000 lines by the profile.
+`Result=oom-kill` shows a banner with Restart shell (Ctrl+Shift+R), which replaces the terminal
+in the same pane. A stopped worker shows Restart agent. Failed scopes are `reset-failed`.
+Scrollback is capped at 20,000 lines.
 
 ## 13a. Logs
 
@@ -1200,7 +1190,7 @@ all in one place (issue `0JA7`).
 |---|---|
 | Built-in themes | `data/theme/themes/*.toml` — `relay-dark`, `relay-light`, `solarized-dark`, `gruvbox-dark` |
 | User themes | `~/.config/relay/themes/*.toml`; a file of the same id replaces the built-in one |
-| Reader, token contract, discovery, generated Konsole files | `src/ThemeFile.{h,cpp}` (`relay-theme`, `tests/theme_test.cpp`) |
+| Reader, token contract, discovery | `src/ThemeFile.{h,cpp}` (`relay-theme`, `tests/theme_test.cpp`) |
 | Live palette, stylesheet, the switch | `src/Theme.{h,cpp}` |
 | Picker | Settings › Appearance (built in `src/main.cpp`; the actions palette renders the same row) |
 
@@ -1221,19 +1211,13 @@ stylesheet or rebuild on that signal. Setting: `theme/name`.
 
 `polishWindow()` still tags unnamed widgets by object name.
 
-**The terminal.** The Konsole colour scheme is generated, never checked in. Before
-`QApplication` starts, `exposeKonsoleProfile()` writes one `.colorscheme` and one `.profile` per
-known theme into `$XDG_CACHE_HOME/relay/theme/konsole/`, plus a `relayrc` naming the chosen one,
-and prepends that directory and `data/theme` to `XDG_CONFIG_DIRS` and `XDG_DATA_DIRS`.
-`data/theme/konsole/Relay.profile` is the base the generated profiles are built from, so the
-font, margins, scrollback and link settings stay in one place. Every theme is written up front
-because Konsole builds its profile list once: on a switch `KonsoleBackend::applyTheme()` only has
-to name the right profile through the Session object's scriptable `setProfile()`, and the pane
-recolours in place. `EngineBackend::applyThemeColors()` reads the active `ThemeSpec` straight into
-the view. Both are connected to `themeChanged()`, so neither engine needs a new pane. A theme file
+**The terminal.** Nothing is generated and nothing is checked in: `EngineBackend::applyThemeColors()`
+reads the active `ThemeSpec` straight into the view, on `themeChanged()`, so a running pane
+recolours in place. `data/theme/terminal.conf` holds what is not colour — font, line spacing,
+margin, cursor — in one place. `[terminal] background_end` shades the ground from the top
+colour to that one down the pane (`docs/THEMES.md`); without it the ground is flat. A theme file
 *added* while Relay is running reaches new panes only after a restart ("Reload themes" says so).
-Both XDG variables are restored before each shell starts, so user programs see their original
-paths, and nothing is written to `~/.config` or `~/.local/share/konsole`.
+Relay writes nothing to `~/.config` or `~/.local/share` for the terminal.
 
 ## 15. Packaging layout
 
@@ -1244,7 +1228,7 @@ Installed tree (`CMakeLists.txt` `install()`):
 | `bin/relay` | the application |
 | `share/relay/backend/`, `share/relay/shell/` | worker, `relay_core`, Bash integration |
 | `share/relay/scripts/` | `relay-open`, `relay-agent.py` |
-| `share/relay/theme/` | `themes/*.toml` (the built-in colour themes), `relayrc`, the base Konsole profile, icons used by the stylesheet |
+| `share/relay/theme/` | `themes/*.toml` (the built-in colour themes), `terminal.conf`, icons used by the stylesheet |
 | `share/applications/org.relayterminal.Relay.desktop` | desktop entry |
 | `share/metainfo/org.relayterminal.Relay.metainfo.xml` | AppStream metadata |
 | `share/icons/hicolor/…` | PNG and SVG icons |
@@ -1252,9 +1236,9 @@ Installed tree (`CMakeLists.txt` `install()`):
 
 | Piece | File |
 |---|---|
-| `.deb` (CPack) | `packaging/cpack.cmake`; runtime deps `konsole-kpart` pinned below or above 4:24.02 to match KF5 or KF6, `python3 (>= 3.10)`, `bash`; recommends `libsecret-tools`, `xdg-utils` |
+| `.deb` (CPack) | `packaging/cpack.cmake`; runtime deps `python3 (>= 3.10)`, `bash`; recommends `libsecret-tools`, `xdg-utils` |
 | Per-distro build in a container | `packaging/deb/build-deb.sh` (Ubuntu 24.04 Qt5; Debian 13, Ubuntu 25.10/26.04 Qt6) |
-| Install + smoke test | `packaging/deb/smoke-test.sh`, `packaging/smoke-installed.sh` (installed files, `--version`, worker `ready`, KonsolePart plugin, GUI start under Xvfb offscreen and xcb) |
+| Install + smoke test | `packaging/deb/smoke-test.sh`, `packaging/smoke-installed.sh` (installed files, `--version`, worker `ready`, GUI start under Xvfb offscreen and xcb) |
 | Local matrix | `packaging/deb/docker-build-all.sh` |
 | Arch | `packaging/arch/relay-terminal/PKGBUILD` (release tarball), `relay-terminal-git` |
 | CI | `.github/workflows/ci.yml`: Ubuntu 24.04 Qt5 build, ctest, install layout, desktop/AppStream validation; Debian 13 Qt6 build, tests and `.deb` |
@@ -1265,7 +1249,7 @@ Version: `project(Relay VERSION …)` in `CMakeLists.txt` is passed to the app a
 the worker reports `relay_core.__version__`, which `tests/test_version.py` checks against CMake.
 Procedure: [RELEASING.md](RELEASING.md).
 
-## 16. Terminal engines: `TerminalBackend`, KonsolePart and Relay's own engine
+## 16. The terminal: `TerminalBackend` and Relay's engine
 
 A pane never touches a terminal implementation directly. It holds a
 `relay::TerminalBackend *` (`engine/TerminalBackend.h`): process control, input, inline
@@ -1276,27 +1260,21 @@ are real, so the pane only offers what its engine supports.
 
 | Implementation | File | Notes |
 |---|---|---|
-| `relay::KonsoleBackend` | `src/KonsoleBackend.{h,cpp}` | **Default.** KParts KonsolePart: `TerminalInterface`, the Session D-Bus object (`onReceiveBlock` for inline output, `primaryScreenInUse` for the alternate screen), the display's clipboard slots and the hidden scrollbar. Reports `AltScreenState`, `DisplayInjection`, `ScrollControl` (plus `ScreenText` on KF6) |
-| `relay::EngineBackend` | `src/EngineBackend.{h,cpp}` | Relay's own engine (`engine/`, [ENGINE.md](ENGINE.md)) — `relay::VTermBackend` plus Relay's font and colour scheme from `data/theme/konsole` and the copy-on-select setting. Reports every capability |
+| `relay::EngineBackend` | `src/EngineBackend.{h,cpp}` | Relay's own engine (`engine/`, [ENGINE.md](ENGINE.md)) — `relay::VTermBackend` plus the font and spacing from `data/theme/terminal.conf`, colour from the active theme, and the copy-on-select setting. Reports every capability |
 
-Capabilities a KonsolePart pane does not report, so the actions behind them are only offered
-in engine panes: `ScreenText`, `Scrollback`, `LinkClicks`, `Osc8Links`, `PromptMarks`,
-`CwdTracking`, `Search` and `LinkWalk` (the `Ctrl+Shift+L` walk over the output's links).
-Two features are gated on `ScreenText` and degrade honestly without it (section 9.1): the
-screen-text input detection falls back to the `/proc` signals alone, so the banner says
-"apt is asking for input" instead of naming the question; and a program cannot be handed to the
-agent at all, with "Let the agent drive" disabled and a status line saying why. On KF5,
-KonsolePart has no `getDisplayedText`, so a KonsolePart pane there behaves exactly as it did
-before this work.
+KonsolePart was the other implementation, and the default, until the owner retired it on
+2026-09-18 (commit "Retire KonsolePart"). The interface keeps its capability bits: a pane still
+only offers what `capabilities()` reports, and two features degrade honestly without
+`ScreenText` (section 9.1) — the input detection falls back to the `/proc` signals alone, and a
+program cannot be handed to the agent.
 
-`src/TerminalBackends.{h,cpp}` holds the selection rules (unit-tested in
-`tests/backends_test.cpp`); `src/BackendFactory.cpp` is the only file that knows both
-implementations. The engine is chosen **per pane**, so both run side by side in one window:
+`src/TerminalBackends.{h,cpp}` holds the settings and the right-click menu (unit-tested in
+`tests/backends_test.cpp`); `src/BackendFactory.cpp` is the only file that constructs the
+backend. What is still chosen is the emulator core underneath:
 
-- `--engine=konsole|relay` (default `konsole`) and `--engine-core=ghostty|libvterm`
-- `RELAY_ENGINE` / `RELAY_ENGINE_CORE` when the flags are absent
-- the palette: "New pane (Relay engine)" and "New pane (Konsole engine)"
-- restored sessions keep each pane's engine (`"engine"` in the saved pane state)
+- `--engine-core=ghostty|libvterm`, or `RELAY_ENGINE_CORE` when the flag is absent
+- restored sessions keep each pane's core (`"engine_core"` in the saved pane state); an
+  `"engine"` key from a session saved before the retirement is ignored
 
 `engine/` is always built and linked into `relay` (`RELAY_HAVE_ENGINE`), and
 `relay-engine-tests` runs under `ctest`. `-DRELAY_BUILD_ENGINE=ON` adds the manual harness
@@ -1309,34 +1287,23 @@ the vendored libvterm core, which needs no Zig.
 directory and OSC 133 A/B/C/D for prompt, command and output boundaries with the exit code.
 It is **opt-in**: source it from `~/.bashrc`, or turn on "Shell integration (OSC 7/133)" in
 the palette (`terminal/shell_integration`), which sets `RELAY_SHELL_INTEGRATION=1` for new
-panes so `shell/integration.bash` sources it last. Engine panes turn those marks into cwd
-tracking and the palette's "Jump to previous/next prompt"; KonsolePart ignores them.
+panes so `shell/integration.bash` sources it last. The engine turns those marks into cwd
+tracking and the palette's "Jump to previous/next prompt".
 
 Status and the remaining parity gaps: [ENGINE.md](ENGINE.md) and
 `issues/features/needs_qa_llm/2026-09-17-engine-integration.md`.
 
 ## 17. Fragile dependencies and limits
 
-Relay relies on KonsolePart internals that are not a public API (all in
-`src/KonsoleBackend.cpp`, and all exercised on Konsole 23.08 / KF5 only). Panes running
-Relay's own engine do not use any of them:
-
-| Dependency | Used for |
-|---|---|
-| `QDBusConnection::objectRegisteredAt("/Sessions/N")`, a child with `processId()`, slot `onReceiveBlock(const char*, int)` | inline agent output |
-| Display slots `copyToClipboard()`, `pasteFromClipboard()` | terminal Ctrl+C / Ctrl+V |
-| The terminal's hidden vertical `QScrollBar` | PageUp/PageDown from the composer |
-| Profile keys `TextEditorCmdCustom`, `UnderlineFilesEnabled`, `HistoryMode` via `XDG_*` paths | Ctrl+click text files, scrollback cap, theme |
-
-Other limits:
+Retiring KonsolePart (2026-09-18) removed this section's contents: Relay no longer depends on
+any private Konsole API, KDE Frameworks Parts or a runtime plugin. What remains are the limits
+of the platform and of the engine itself.
 
 - Linux only: `/proc/<pid>/fd/0`, `/proc/<pid>/stat`, `/proc/<pid>/cmdline`, cgroup files,
   `systemd-run`. CMake refuses to build the app on other systems.
 - Rich integration is Bash only. Zsh, Fish, SSH and tmux sessions work through native input.
-- KonsolePart exposes no screen text, alternate-screen state or click signal, so the agent
-  cannot read the terminal and folder/image clicks go to the desktop.
-- The GUI process holds every pane's screen and scrollback; a KonsolePart crash takes down
-  all panes.
+- The GUI process holds every pane's screen and scrollback, so a crash in the engine takes
+  down every pane. Per-pane process isolation is tracked separately.
 
 ## 18. Source map
 
@@ -1346,7 +1313,7 @@ Other limits:
 | `src/RichEditor.*` | composer editor |
 | `src/FilePanes.*` | explorer and preview widgets |
 | `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Switchboard: card rows, tabs, columns, filters; the pane and card detail; the per-window Switchboard worker |
-| `src/Theme.*` | live tokens, palette, stylesheet, the theme switch, generated Konsole profiles |
+| `src/Theme.*` | live tokens, palette, stylesheet, the theme switch |
 | `src/ThemeFile.*` | the theme file format: reader, token contract, discovery, generated colour scheme |
 | `src/Hints.*` | shortcut hint limits and idle tips |
 | `src/OutputLinks.*` | which spans of terminal output are files, folders or URLs, what they resolve to, and the keyboard cursor over them |
@@ -1368,11 +1335,11 @@ Other limits:
 | `backend/worker.py` | worker protocol loop |
 | `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and tab labels), `voice` (transcription), `program_input` (the agent typing into the visible pane), `conv_index` (conversation index and search), `logs` (rotating `worker.log`), `board` (card format), `board_tools` (the `board_*` agent tools and their guardrails), `board_protocol` (the Switchboard messages), `aliases` and `alias_import` (saved commands and prompts, and importing Warp workflows and shell aliases) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
-| `src/KonsoleBackend.*`, `src/EngineBackend.*` | the two `TerminalBackend` implementations |
+| `src/EngineBackend.*` | the `TerminalBackend` implementation over `engine/` |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |
 | `shell/relay-integration.bash`, `.zsh` | opt-in OSC 7 / OSC 133 marks |
 | `engine/` | Relay's terminal engine: cores, PTY, session, view, `TerminalBackend.h` |
-| `data/` | colour themes, base Konsole profile, icons |
+| `data/` | colour themes, `terminal.conf`, icons |
 | `packaging/`, `.github/workflows/`, `site/` | packages, CI, release, website |
 | `tests/` | Python backend and PTY tests, Qt editor and file pane tests |
 | `issues/` | file-based tracker, and the Switchboard's storage (`board.yaml`, cards, `threads/`) |
@@ -1395,8 +1362,8 @@ Two rules decide the shape:
 
 - **Screen state comes from the frame `TerminalView` already pulled** (`TerminalView::frame()`,
   `frameChanged()`). `VtCore::updateFrame` consumes the dirty state, so a second caller would stop
-  the pane repainting. It also means **only engine panes can be shared**: KonsolePart cannot
-  produce a frame at all (`docs/ENGINE.md`), and the button says so.
+  the pane repainting. Only a pane with a frame can be shared, which since the engine became the
+  only terminal is every pane.
 - **Approving a device is a deliberate click.** The dialog shows a five-digit code derived from the
   Noise handshake on both ends, and *Refuse* holds the focus, because allowing hands a phone the
   keyboard of a live shell.

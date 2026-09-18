@@ -15,7 +15,7 @@ The owner named these as required for the first MVP, in addition to what already
 | Delegate and take over (agent drives the visible pane) | `issues/features/2026-09-17-agent-delegate-and-take-over.md` | Relay engine (screen text, alt-screen state) |
 | Clickable paths in the terminal | `issues/features/2026-09-17-clickable-paths.md` | Relay engine (link/path click events) |
 | Keyboard jumping to links in output | `issues/features/2026-09-17-keyboard-jump-to-output-links.md` | Relay engine (screen text) |
-| Portable engine and screen-text input detection | `issues/features/2026-09-17-portable-terminal-engine.md`, `issues/features/2026-09-17-screen-text-input-detection.md` | Engine phase 1 done (libghostty-vt core, `docs/ENGINE.md`); next: TerminalBackend around KonsolePart, `--engine=vterm` per pane, then default |
+| Portable engine and screen-text input detection | `issues/features/2026-09-17-portable-terminal-engine.md`, `issues/features/2026-09-17-screen-text-input-detection.md` | Done on Linux: the engine runs every pane and KonsolePart was retired (2026-09-18). Next: macOS and Windows |
 | Website and beta release | `issues/features/2026-09-17-website-and-beta-release.md` | Owner actions in `docs/RELEASING.md` |
 | Voice transcription | `issues/features/2026-09-17-voice-transcription.md` | OpenRouter key; `google/gemini-3.5-flash-lite` |
 
@@ -38,13 +38,13 @@ milestone; four of six items depend on its integration.
 
 | Decision | Consequence | Source |
 |---|---|---|
-| **No Konsole fork.** Relay embeds the installed KonsolePart and does not patch it. | Features KonsolePart withholds (screen text, click signals, alternate-screen state) wait for the owned engine | [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section A, recommendation "hybrid 3a" |
+| **No Konsole fork**, and since 2026-09-18 no Konsole at all: Relay's own engine is the terminal. | Screen text, click signals and alternate-screen state are Relay's to provide; KDE Frameworks is no longer a runtime dependency | [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section A; [ENGINE.md](ENGINE.md) |
 | **No per-action approvals.** Agent tools run immediately; every action is previewed inline and Stop is always available. | Safety relies on previews, guards, limits and clear warnings. opencode-style permission rules are not planned. | commit `1ad28fa`; [OPENCODE-NOTES.md](OPENCODE-NOTES.md) status header |
 | **BYOK only.** Keys come from environment variables or the desktop keyring. | No hosted models, no billing, no Relay account | `backend/relay_core/keystore.py` |
 | **No telemetry.** No analytics, crash reporting or Relay server. | Any update check must be opt-in | `site/index.html` privacy section; [DISTRIBUTION-RESEARCH.md](DISTRIBUTION-RESEARCH.md) section 1 |
 | The agent drives the user's **visible** pane, not a hidden one. | Delegate/take-over needs screen reading in the visible terminal | `issues/features/2026-09-17-agent-delegate-and-take-over.md` |
 | File panes are plain Qt, not KDE parts. | They already work on the future macOS/Windows path | `issues/features/needs_qa_llm/2026-09-17-file-explorer-and-preview-panes.md` |
-| Vertical tabs deferred; Konsole-style top tabs for now. | | `issues/features/2026-09-17-tab-placement-vertical-tabs.md` |
+| Vertical tabs deferred; top tabs for now. | | `issues/features/2026-09-17-tab-placement-vertical-tabs.md` |
 
 ## Near term: Linux beta 0
 
@@ -55,7 +55,6 @@ milestone; four of six items depend on its integration.
 | Landing page on GitHub Pages | `site/` exists; Pages disabled; screenshots need replacing | `site/`, [RELEASING.md](RELEASING.md) |
 | **QA pass by a non-Claude model** for every feature in `needs_qa_llm/` | Not started; 15 issues waiting | [VALIDATION.md](VALIDATION.md#the-qa-lane), [`issues/README.md`](../issues/README.md) |
 | Manual check on a real KF6 desktop (Wayland and X11) | Not done | [VALIDATION.md](VALIDATION.md#not-verified) |
-| **`TerminalBackend` adapter around KonsolePart**, so `src/main.cpp` stops calling KonsolePart and its Session D-Bus object directly | Interface exists in `engine/TerminalBackend.h`; no adapter; about 1 week | [ENGINE-SPIKE.md](ENGINE-SPIKE.md) "Recommendation" step 1 |
 | Re-enable PDF preview in Qt6 packages | The `QPdfView` enum fix is in `src/FilePanes.cpp`; Qt6 packaging still disables Qt PDF | `packaging/deb/build-deb.sh`, `packaging/arch/*/PKGBUILD` |
 | Queue or interrupt **shell commands** while a program runs | Designed, not implemented | `issues/features/2026-09-17-queue-shell-commands-while-busy.md`, [QUEUE-INTERRUPT.md](QUEUE-INTERRUPT.md) |
 | Release notes: known limitations and privacy summary | Checklist in [RELEASING.md](RELEASING.md) | |
@@ -68,7 +67,7 @@ output open the desktop app; agent tools run without approval and are not sandbo
 
 | Work | Why | Issue or doc |
 |---|---|---|
-| **Own terminal engine** (libvterm + Qt renderer, forkpty/ConPTY) behind `TerminalBackend`, first on macOS and Windows | KonsolePart is Linux-first and withholds screen text and clicks. Spike: works with vim/less/htop/tmux, 2x slower than Konsole on floods, IME/accessibility/emoji gaps. Estimate 12–18 weeks to a shippable cross-platform engine. | `issues/features/2026-09-17-portable-terminal-engine.md`, [ENGINE-SPIKE.md](ENGINE-SPIKE.md) |
+| **The engine on macOS and Windows** (forkpty is done, ConPTY is a stub) | The engine is Linux-proven and is now Relay's only terminal, so the remaining cross-platform work is the PTY, the key mapper and packaging | `issues/features/2026-09-17-portable-terminal-engine.md`, [ENGINE.md](ENGINE.md) |
 | Parity gate before switching Linux | Re-run the spike's scripts against the owned engine; decide libvterm scroll patch vs. libghostty-vt | [ENGINE-SPIKE.md](ENGINE-SPIKE.md) |
 | **Delegate and take over**: the agent types into the visible pane and reads its screen; any user key takes over | Needs `screenText`/`altScreen` from the backend, an "agent in control" indicator and immediate stop | `issues/features/2026-09-17-agent-delegate-and-take-over.md` |
 | **Clickable paths everywhere**: folders, images and PDFs in terminal output open Relay panes | Text files already work through `relay-open`; the rest needs `LinkClicks` from the owned engine | `issues/features/2026-09-17-clickable-paths.md` |
@@ -83,7 +82,7 @@ output open the desktop app; agent tools run without approval and are not sandbo
 |---|---|---|
 | **Terminal-only Relay** (`relay-tui`) that runs inside any terminal, including over SSH | Reuses `backend/worker.py` and `relay_core` over the same JSON protocol. Options: a Bash/Zsh prompt wrapper (1–2 weeks) or a Textual app with a shell pane (4–6 weeks). Needs an owner decision on scope. | `issues/features/2026-09-17-terminal-only-tui-relay.md`, [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section C |
 | Keep UI logic out of `src/main.cpp` and document the worker protocol as stable | What makes a second frontend cheap | [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section C |
-| Out-of-process pane rendering | Only with the owned engine; not practical on Wayland with KonsolePart | [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section B, option 5 |
+| Out-of-process pane rendering | Now possible in principle: the engine is Relay's own code | [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) section B, option 5 |
 
 ## Non-goals
 

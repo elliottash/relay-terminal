@@ -10,8 +10,8 @@
 // One instance per process, like the notification centre. Several panes can be shared at once.
 //
 // Screen state comes from the frame `relay::TerminalView` has already pulled: `VtCore::updateFrame`
-// consumes the dirty state, so a second caller would stop the pane repainting. That is why only
-// engine panes can be shared — KonsolePart cannot produce a frame at all (docs/ENGINE.md).
+// consumes the dirty state, so a second caller would stop the pane repainting. A pane without a
+// frame cannot be shared (docs/ENGINE.md).
 #include <QByteArray>
 #include <QDialog>
 #include <QJsonArray>

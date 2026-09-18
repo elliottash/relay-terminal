@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
 Name=Relay
-Comment=Konsole-based terminal with rich command input and BYOK agents
+Comment=Terminal with rich command input and BYOK agents
 Exec=relay
 Icon=org.relayterminal.Relay
 Terminal=false
 Categories=System;TerminalEmulator;Development;
-Keywords=terminal;shell;agent;AI;Konsole;
+Keywords=terminal;shell;agent;AI;
 StartupNotify=true

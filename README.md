@@ -2,13 +2,12 @@
 
 A Linux terminal with a rich prompt and bring-your-own-key agents.
 
-Relay embeds Konsole's real terminal (KonsolePart) by default, and ships its own terminal
-engine as an option you can pick per pane. Under it sits a normal text editor. Type a shell
+Relay has its own terminal engine, and under it sits a normal text editor. Type a shell
 command and it runs in the terminal. Type a request in plain language and an agent, using
 your own API key, answers inline in the same terminal.
 
-**Status: Linux beta in preparation.** The app runs on Ubuntu 24.04 (Qt5/KF5) and builds for
-Qt6/KF6. It has not had independent QA yet. See [docs/VALIDATION.md](docs/VALIDATION.md).
+**Status: Linux beta in preparation.** The app runs on Ubuntu 24.04 (Qt5). It has not had
+independent QA yet. See [docs/VALIDATION.md](docs/VALIDATION.md).
 
 <!-- Screenshot placeholder: composer, an inline agent answer with a tool call, a split pane. -->
 
@@ -16,25 +15,17 @@ Qt6/KF6. It has not had independent QA yet. See [docs/VALIDATION.md](docs/VALIDA
 
 ### From source
 
-Ubuntu 24.04 (Qt5 / KF5):
+Ubuntu 24.04:
 
 ```bash
 sudo apt install build-essential cmake ninja-build python3 libsecret-tools \
-  qtbase5-dev libkf5parts-dev libkf5coreaddons-dev libkf5syntaxhighlighting-dev \
-  qtpdf5-dev konsole-kpart
+  qtbase5-dev libkf5syntaxhighlighting-dev qtpdf5-dev
 ./scripts/build.sh                 # configures, builds, runs all tests
 ./build/relay --workspace ~/project
 ```
 
-Debian 13 or Ubuntu 26.04 (Qt6 / KF6):
-
-```bash
-sudo apt install build-essential cmake ninja-build python3 libsecret-tools \
-  qt6-base-dev libkf6parts-dev libkf6coreaddons-dev libkf6syntaxhighlighting-dev konsole-kpart
-./scripts/build.sh
-```
-
-`build.sh` picks Qt6+KF6 when both are installed, else Qt5+KF5. Force one with
+Relay builds against Qt 5; KDE Frameworks is no longer required (KonsolePart was retired on
+2026-09-18). Qt 6 is selected only when Qt 5 is absent and is not yet finished — force one with
 `./scripts/build.sh -DRELAY_QT_MAJOR=5` (or `6`). KSyntaxHighlighting and Qt PDF are optional.
 `cmake --install build` installs to `~/.local` by default.
 
@@ -104,11 +95,9 @@ nothing there needs the mouse.
   tests pass"), the label shows the local guess and asks the agent's model in the background
   ("AGENT · guessed: … (82%)"); Enter uses the model's answer if it arrives within 400 ms,
   otherwise the local guess. Typing is never blocked.
-- **Two terminal engines, per pane.** KonsolePart is the default. Relay's own engine
-  (`docs/ENGINE.md`) is built in: start with `--engine=relay` (or `RELAY_ENGINE=relay`), or
-  use the palette's "New pane (Relay engine)" to run both side by side in one window. The
-  engine adds screen and scrollback text for the agent, alternate-screen detection, OSC 8
-  links, search and prompt marks; `--engine-core=ghostty|libvterm` picks its emulator core.
+- **Relay's own terminal engine** (`docs/ENGINE.md`) runs every pane. It gives the agent the
+  screen and the scrollback, detects the alternate screen, and handles OSC 8 links, search and
+  prompt marks; `--engine-core=ghostty|libvterm` picks its emulator core.
 - **Shell integration (opt-in).** `source /usr/share/relay/shell/relay-integration.bash` in
   `~/.bashrc` (or the palette's "Shell integration (OSC 7/133)") emits OSC 7 and OSC 133, so
   engine panes track the working directory and can jump between prompts. A Zsh version ships
@@ -277,7 +266,7 @@ nothing there needs the mouse.
 - **Pane isolation.** Each pane's shell and agent run in their own systemd user scope with
   memory limits, so a runaway command stops inside its pane. Limits are configurable.
 
-Relay is not a Konsole fork and does not change your Konsole settings or dotfiles.
+Relay is not a Konsole fork and does not read or change your Konsole settings or dotfiles.
 
 ### Switchboard (Ctrl+Shift+S)
 
@@ -343,5 +332,5 @@ releasing, and research notes.
 
 ## License
 
-GPL-3.0-or-later. See `LICENSE`. Qt, KDE Frameworks and Konsole are external dependencies
-under their own licenses. No Warp source code is included.
+GPL-3.0-or-later. See `LICENSE`. Qt and, when present, KSyntaxHighlighting are external
+dependencies under their own licenses. No Warp source code is included.

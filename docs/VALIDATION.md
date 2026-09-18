@@ -4,7 +4,8 @@ Last updated 2026-09-17. Status: **Linux beta in preparation.** Nothing here is 
 from an independent model; see [The QA lane](#the-qa-lane).
 
 Reference machine for local runs: Ubuntu 24.04.5, aarch64, kernel 7.0, Python 3.12.3,
-Qt 5.15.13, KDE Frameworks 5.115, `konsole-kpart` 23.08.5.
+Qt 5.15.13 (KDE Frameworks 5.115 for the optional syntax highlighter). KonsolePart, used up to
+2026-09-18, is no longer a dependency.
 
 ## Test inventory
 
@@ -58,7 +59,7 @@ accounts, quotas, billing or model behavior.
 |---|---|
 | `.github/workflows/ci.yml` `ubuntu-qt5` | Ubuntu 24.04 Qt5/KF5 build, all ctest groups, staged install layout, `desktop-file-validate`, `appstreamcli validate` |
 | `.github/workflows/ci.yml` `debian-qt6` | Debian 13 Qt6/KF6 build, ctest and `.deb` in a container (`packaging/deb/build-deb.sh`) |
-| `.github/workflows/release.yml` | Per tag: `.deb` for Ubuntu 24.04, Debian 13, Ubuntu 26.04 on amd64 and arm64, each installed in a fresh container and smoke-tested (`packaging/smoke-installed.sh`: files, `--version`, worker `ready`, KonsolePart plugin, GUI start under Xvfb offscreen and xcb) |
+| `.github/workflows/release.yml` | Per tag: `.deb` for Ubuntu 24.04, Debian 13, Ubuntu 26.04 on amd64 and arm64, each installed in a fresh container and smoke-tested (`packaging/smoke-installed.sh`: files, `--version`, worker `ready`, GUI start under Xvfb offscreen and xcb) |
 
 These workflows exist in the repository. Their results on GitHub were not checked when this
 page was written, and no release tag has been pushed.
@@ -119,7 +120,8 @@ Bugs found only by running the real app:
 
 | Area | Why it matters |
 |---|---|
-| **Qt6/KF6 app on a real KDE Plasma desktop** | All GUI checks ran on Qt5/KF5 under Xvfb. The inline-output D-Bus hook, clipboard slots, hidden scrollbar and profile loading depend on KonsolePart internals that may differ in Konsole 24.02+. |
+| **Qt 6 at all** | Every check ran on Qt 5. Nothing has been built against Qt 6 since KonsolePart was retired, and the build stops at `qsizetype` narrowing (`src/ScreenPrompt.cpp`). |
+| **A real KDE Plasma desktop** | All GUI checks ran under Xvfb. |
 | **Wayland** | No Wayland session was tested: focus, Alt+Tab, notifications, clipboard, IME. The frameless window's move and resize go through `startSystemMove` / `startSystemResize`, which is the only supported path there. |
 | **Window manager drags** | The frameless title bar was exercised under Xvfb, which has no WM, so only Relay's own fallback move/resize ran. WM snapping, tiling, minimize and real maximizing are unchecked. |
 | **Real systemd-oomd kill** | Isolation was tested with scope `MemoryMax` limits and a manual `systemctl kill`, not with systemd-oomd acting under real memory pressure. |
@@ -129,7 +131,7 @@ Bugs found only by running the real app:
 | Zsh, Fish, SSH, tmux as the pane shell | Native input only; rich integration is Bash only |
 | User prompt frameworks | Only a pre-existing DEBUG trap (native fallback) is tested |
 | `glm` standard endpoint; other OpenAI-compatible providers | Not live-tested |
-| Relay's own launch path for inherited `SIG_IGN` | The spike found this bug class in its launcher (see [ENGINE-SPIKE.md](ENGINE-SPIKE.md)); Relay's KonsolePart path was not checked |
+| Inherited `SIG_IGN` outside the engine's own launcher | The spike found this bug class (see [ENGINE-SPIKE.md](ENGINE-SPIKE.md)); `PtyUnix.cpp` resets dispositions and is tested, other launch paths are not |
 
 ## Security boundaries
 

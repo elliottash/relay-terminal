@@ -21,12 +21,12 @@ Packaging pieces:
   icons, desktop file, `share/metainfo/org.relayterminal.Relay.metainfo.xml`,
   `share/doc/relay/{README.md,copyright}`.
 - `packaging/cpack.cmake`: CPack DEB settings. `dpkg-shlibdeps` computes library dependencies;
-  the file adds `konsole-kpart` (pinned below or above Gear 24.02 to match KF5 or KF6),
-  `python3 (>= 3.10)` and `bash`, and recommends `libsecret-tools` and `xdg-utils`.
+  the file adds `python3 (>= 3.10)` and `bash`, and recommends `libsecret-tools` and
+  `xdg-utils`.
 - `packaging/deb/build-deb.sh`: installs build deps, builds out of tree, runs ctest, runs cpack.
 - `packaging/deb/smoke-test.sh` + `packaging/smoke-installed.sh`: installs a `.deb` with apt
   in a fresh container and checks the installed files, `relay --version/--help`, the backend
-  worker's `ready` event, the KonsolePart plugin, and a 10-second GUI start under Xvfb
+  worker's `ready` event, and a 10-second GUI start under Xvfb
   (offscreen and xcb) that must spawn the Bash integration shell and the agent worker.
 - `packaging/deb/docker-build-all.sh [OUT] [SUFFIX] [IMAGE...]`: the same as CI, locally.
 

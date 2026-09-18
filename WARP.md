@@ -1,6 +1,6 @@
 # Relay — project instructions for agents
 
-Relay is a Linux terminal (C++/Qt + KonsolePart today; own engine in progress) with a composer,
+Relay is a Linux terminal (C++/Qt, with its own terminal engine) with a composer,
 per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/README.md`
 (index), `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` before large changes.
 
@@ -13,7 +13,8 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
   Verify GUI changes live under Xvfb with an isolated `XDG_CONFIG_HOME`.
 - **Protocol:** GUI ↔ worker messages are specified in `docs/AGENT-SESSIONS-PROTOCOL.md`;
   update it when adding messages or events.
-- **Decisions already made:** no Konsole fork; no per-action tool approvals; BYOK only; no
+- **Decisions already made:** no Konsole fork (and KonsolePart itself retired 2026-09-18);
+  no per-action tool approvals; BYOK only; no
   telemetry. See `docs/ROADMAP.md`.
 
 ## Shortcut hints (standing rule)

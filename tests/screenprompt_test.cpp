@@ -205,7 +205,7 @@ private Q_SLOTS:
         QVERIFY(!detection.actionable());
     }
 
-    // ----- the signal-only fallback (KonsolePart without ScreenText) --------------------------
+    // ----- the signal-only fallback (a backend without ScreenText) ----------------------------
     void withoutScreenTextTheProcSignalsStillDecide() {
         Signals blind = asking(true);
         blind.screenReadable = false;

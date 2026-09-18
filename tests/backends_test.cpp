@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Per-pane terminal engine selection (--engine / RELAY_ENGINE and --engine-core) and the terminal
+// The terminal engine's core selection (--engine-core / RELAY_ENGINE_CORE) and the terminal
 // pane's right-click menu (issue #X2F1).
 #include "TerminalBackends.h"
 
 #include <QStringList>
 #include <QTest>
-
-using relay::EngineKind;
 
 namespace {
 // The non-separator ids of a right-click menu, in order.
@@ -32,8 +30,10 @@ relay::TerminalMenuState relayEngineState() {
     return state;
 }
 
-// What a KonsolePart pane reports: no selection query, no hit-testing, no scrollback export.
-relay::TerminalMenuState konsoleState() {
+// What a backend that cannot answer every question reports. KonsolePart was the one that did
+// this until it was retired (2026-09-18); the menu still has to degrade for any future backend
+// that cannot hit-test, export its scrollback or zoom.
+relay::TerminalMenuState limitedState() {
     relay::TerminalMenuState state;
     state.selectionKnown = false;
     state.canSearch = true;       // Relay's own find bar, not the engine's
@@ -48,60 +48,6 @@ relay::TerminalMenuState konsoleState() {
 class BackendsTests : public QObject {
     Q_OBJECT
 private Q_SLOTS:
-    void namesRoundTrip() {
-        QCOMPARE(relay::engineKindName(EngineKind::Konsole), QStringLiteral("konsole"));
-        QCOMPARE(relay::engineKindName(EngineKind::Relay), QStringLiteral("relay"));
-        EngineKind kind = EngineKind::Relay;
-        QVERIFY(relay::parseEngineKind(relay::engineKindName(EngineKind::Konsole), &kind));
-        QCOMPARE(int(kind), int(EngineKind::Konsole));
-        QVERIFY(relay::parseEngineKind(relay::engineKindName(EngineKind::Relay), &kind));
-        QCOMPARE(int(kind), int(EngineKind::Relay));
-    }
-
-    void parsesAliasesAndRejectsJunk() {
-        EngineKind kind = EngineKind::Konsole;
-        QVERIFY(relay::parseEngineKind(QStringLiteral("  KONSOLE "), &kind));
-        QCOMPARE(int(kind), int(EngineKind::Konsole));
-        QVERIFY(relay::parseEngineKind(QStringLiteral("kpart"), &kind));
-        QCOMPARE(int(kind), int(EngineKind::Konsole));
-        for (const QString &alias : {QStringLiteral("relay"), QStringLiteral("vterm"), QStringLiteral("Engine"),
-                                     QStringLiteral("own")}) {
-            kind = EngineKind::Konsole;
-            QVERIFY2(relay::parseEngineKind(alias, &kind), qPrintable(alias));
-            QCOMPARE(int(kind), int(EngineKind::Relay));
-        }
-        QVERIFY(!relay::parseEngineKind(QString(), nullptr));
-        QVERIFY(!relay::parseEngineKind(QStringLiteral("xterm"), nullptr));
-    }
-
-    // The Relay engine is the default while it is being tested (owner, 2026-09-17);
-    // the command line still wins over the environment.
-    void resolutionOrder() {
-        QCOMPARE(int(relay::resolveEngineKind(QString(), QString())),
-                 int(relay::engineAvailable() ? EngineKind::Relay : EngineKind::Konsole));
-        QCOMPARE(int(relay::resolveEngineKind(QString(), QStringLiteral("konsole"))), int(EngineKind::Konsole));
-        const EngineKind fromEnv = relay::resolveEngineKind(QString(), QStringLiteral("relay"));
-        QCOMPARE(int(fromEnv), int(relay::engineAvailable() ? EngineKind::Relay : EngineKind::Konsole));
-        // --engine=konsole beats RELAY_ENGINE=relay.
-        QCOMPARE(int(relay::resolveEngineKind(QStringLiteral("konsole"), QStringLiteral("relay"))), int(EngineKind::Konsole));
-    }
-
-    void reportsUnknownValuesAndFallsBack() {
-        QString warning;
-        QCOMPARE(int(relay::resolveEngineKind(QStringLiteral("xterm"), QString(), &warning)),
-                 int(relay::engineAvailable() ? EngineKind::Relay : EngineKind::Konsole));
-        QVERIFY(warning.contains(QStringLiteral("xterm")));
-        // An unusable command-line value still lets the environment decide.
-        warning.clear();
-        QCOMPARE(int(relay::resolveEngineKind(QStringLiteral("nope"), QStringLiteral("konsole"), &warning)),
-                 int(EngineKind::Konsole));
-        QVERIFY(!warning.isEmpty());
-        warning.clear();
-        QCOMPARE(int(relay::resolveEngineKind(QString(), QString(), &warning)),
-                 int(relay::engineAvailable() ? EngineKind::Relay : EngineKind::Konsole));
-        QVERIFY(warning.isEmpty());
-    }
-
     void coreSelection() {
         QVERIFY(relay::resolveEngineCore(QString(), QString()).isEmpty());
         QVERIFY(relay::resolveEngineCore(QStringLiteral("sixel"), QString()).isEmpty());
@@ -110,15 +56,10 @@ private Q_SLOTS:
         QCOMPARE(relay::resolveEngineCore(QStringLiteral("libvterm"), QStringLiteral("ghostty")), QStringLiteral("libvterm"));
     }
 
-    void processDefaultIsRelayEngine() {
-        QCOMPARE(int(relay::defaultEngineKind()), int(EngineKind::Relay));
-        relay::setDefaultEngineKind(EngineKind::Konsole);
-        QCOMPARE(int(relay::defaultEngineKind()), int(EngineKind::Konsole));
-        relay::setDefaultEngineKind(EngineKind::Relay);
-        QCOMPARE(int(relay::defaultEngineKind()), int(EngineKind::Relay));
+    void processDefaultCoreIsRemembered() {
+        QVERIFY(relay::defaultEngineCore().isEmpty());
         relay::setDefaultEngineCore(QStringLiteral("libvterm"));
         QCOMPARE(relay::defaultEngineCore(), QStringLiteral("libvterm"));
-        relay::setDefaultEngineKind(EngineKind::Konsole);
         relay::setDefaultEngineCore(QString());
         QVERIFY(relay::defaultEngineCore().isEmpty());
     }
@@ -137,7 +78,7 @@ private Q_SLOTS:
         QCOMPARE(menuIds(relay::terminalContextMenu(state)).value(0), QStringLiteral("takeControl"));
     }
 
-    void menuCarriesTheKonsoleItemsWorthKeeping() {
+    void menuCarriesTheTerminalItemsWorthKeeping() {
         const QStringList ids = menuIds(relay::terminalContextMenu(relayEngineState()));
         for (const QString &id : {QStringLiteral("copy"), QStringLiteral("paste"), QStringLiteral("selectAll"),
                                   QStringLiteral("find"), QStringLiteral("clearScrollback"), QStringLiteral("reset"),
@@ -147,22 +88,22 @@ private Q_SLOTS:
             QVERIFY2(ids.contains(id), qPrintable(id));
     }
 
-    // Both engines offer the same menu; only what an engine cannot do is missing.
-    void menuIsTheSameOnBothEnginesExceptForCapabilities() {
+    // A backend that can do less offers the same menu minus what it cannot do.
+    void menuIsTheSameOnAnyBackendExceptForCapabilities() {
         const QStringList relayIds = menuIds(relay::terminalContextMenu(relayEngineState()));
-        const QStringList konsoleIds = menuIds(relay::terminalContextMenu(konsoleState()));
+        const QStringList limitedIds = menuIds(relay::terminalContextMenu(limitedState()));
         QStringList missing;
         for (const QString &id : relayIds)
-            if (!konsoleIds.contains(id)) missing << id;
+            if (!limitedIds.contains(id)) missing << id;
         QCOMPARE(missing, (QStringList{QStringLiteral("saveOutput"), QStringLiteral("zoomIn"),
                                        QStringLiteral("zoomOut"), QStringLiteral("zoomReset")}));
-        for (const QString &id : konsoleIds)
+        for (const QString &id : limitedIds)
             QVERIFY2(relayIds.contains(id), qPrintable(id));
         // The order of the shared entries is the same in both menus.
         QStringList shared;
         for (const QString &id : relayIds)
-            if (konsoleIds.contains(id)) shared << id;
-        QCOMPARE(shared, konsoleIds);
+            if (limitedIds.contains(id)) shared << id;
+        QCOMPARE(shared, limitedIds);
     }
 
     void menuGreysCopyOnlyWhenTheEngineKnowsTheSelection() {
@@ -170,8 +111,8 @@ private Q_SLOTS:
         QVERIFY(!enabledOf(relay::terminalContextMenu(state), QStringLiteral("copy")));
         state.hasSelection = true;
         QVERIFY(enabledOf(relay::terminalContextMenu(state), QStringLiteral("copy")));
-        // KonsolePart cannot answer the question, so its Copy stays live.
-        QVERIFY(enabledOf(relay::terminalContextMenu(konsoleState()), QStringLiteral("copy")));
+        // A backend that cannot answer the question keeps its Copy live.
+        QVERIFY(enabledOf(relay::terminalContextMenu(limitedState()), QStringLiteral("copy")));
     }
 
     void menuOffersLinkAndFileEntriesOnlyWhenThereIsOneUnderThePointer() {

@@ -27,8 +27,9 @@ void EngineBackend::applySettings()
         v->setCopyOnSelect(QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool());
 }
 
-// Relay ships one Konsole profile in data/theme/konsole; engine panes read its font and
-// spacing so both engines look the same side by side. Colour comes from the theme below.
+// Font, spacing and cursor defaults come from data/theme/terminal.conf; colour comes from the
+// theme below. (The file was Relay's Konsole profile until KonsolePart was retired, which is why
+// its keys are still grouped the way Konsole grouped them.)
 void EngineBackend::applyRelayProfile()
 {
     TerminalView *v = view();
@@ -38,12 +39,11 @@ void EngineBackend::applyRelayProfile()
     if (dir.isEmpty())
         return;
 
-    const QSettings profile(dir + QStringLiteral("/konsole/Relay.profile"), QSettings::IniFormat);
+    const QSettings profile(dir + QStringLiteral("/terminal.conf"), QSettings::IniFormat);
     const QString fontSpec = profile.value(QStringLiteral("Appearance/Font")).toString();
     QFont font;
     if (!fontSpec.isEmpty() && font.fromString(fontSpec))
         v->setTerminalFont(font);
-    // Konsole's own spacing keys: without them engine panes look tighter than Konsole panes.
     v->setLineSpacing(profile.value(QStringLiteral("Appearance/LineSpacing"), 0).toInt());
     v->setPadding(profile.value(QStringLiteral("Appearance/TerminalMargin"), 2).toInt());
     v->setUnfocusedCursorVisible(profile.value(QStringLiteral("Cursor Options/ShowUnfocusedCursor"), true).toBool());
@@ -52,8 +52,7 @@ void EngineBackend::applyRelayProfile()
 }
 
 // Colour comes from the selected theme (issue 0JA7) rather than from a checked-in .colorscheme:
-// data/theme/themes/<id>.toml is the single source of truth, and the Konsole scheme KonsolePart
-// panes read is generated from the same file.
+// data/theme/themes/<id>.toml is the single source of truth.
 void EngineBackend::applyThemeColors()
 {
     TerminalView *v = view();

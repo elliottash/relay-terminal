@@ -2,9 +2,9 @@
      edit the card files and regenerate. -->
 # Board
 
-88 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+96 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
-## Features (74)
+## Features (75)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -36,6 +36,7 @@
 | `#2JY7` | [Backend: subagents and agent definitions from all tools](features/needs_qa_llm/2026-09-17-backend-subagents.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, backend B worktree), 2026-09-17 |  |  |
 | `#4C94` | [One combined queue for terminal commands and agent prompts](features/needs_qa_llm/2026-09-17-combined-terminal-agent-queue.md) | needs-qa-llm | implemented by Claude Opus 5 (GUI D subagent), 2026-09-17 |  |  |
 | `#VSDH` | [Ctrl+I toggles terminal command vs agent prompt](features/needs_qa_llm/2026-09-17-ctrl-i-input-toggle.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
+| `#94V5` | [Wrong-mode error hints (flash mode chip + Ctrl+I toast)](features/needs_qa_llm/2026-09-17-wrong-mode-hints.md) | needs-qa-llm | implemented by Warp agent (auto), 2026-09-17/18 |  |  |
 | `#9VXF` | [Relay's own terminal engine, selectable per pane](features/needs_qa_llm/2026-09-17-engine-integration.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-17 |  |  |
 | `#CCKY` | [Conversation list with full-text search](features/needs_qa_llm/2026-09-17-conversation-list-and-search.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code, conversation-search worktree), 2026-09-17 |  |  |
 | `#QQK4` | [Folder explorer and file preview panes (plain Qt)](features/needs_qa_llm/2026-09-17-file-explorer-and-preview-panes.md) | needs-qa-llm | widgets implemented by Claude Opus 5 (Claude Code subagent), 2026-09-17; integration into windows, tabs and panes is done by the main session |  |  |
@@ -83,11 +84,15 @@
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | Claude Opus 5 research subagent, 2026-09-16 |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | implemented by Claude Opus 5 (Claude Code session), 2026-09-16 |  |  |
 
-## Bugs (14)
+## Bugs (19)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
+| `#GDWE` | [@ file completion runs synchronous git on the GUI thread (multi-second block)](changes/2026-09-17-file-completion-runs-synchronous-git-on-the-gui.md) | ready |  |  | [2](threads/GDWE.md) |
+| `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | ready |  |  | [2](threads/72NR.md) |
+| `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | ready |  |  | [2](threads/9MYY.md) |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17 |  |  |
+| `#XXP5` | [Retire KonsolePart: Relay's own engine is the only terminal](changes/needs_qa_llm/2026-09-18-retire-konsolepart.md) | needs-qa-llm | implemented by Claude Opus 5 (Claude Code session), 2026-09-18 |  |  |
 | `#90JF` | [Check that a terminal command will run before it is sent](changes/needs_qa_llm/2026-09-17-pre-submit-run-check.md) | needs-qa-llm |  |  |  |
 | `#AHS5` | [The prompt box is the only input; clicking the terminal does not type into it](changes/needs_qa_llm/2026-09-17-terminal-not-directly-typable.md) | needs-qa-llm | implemented by Claude Opus 5 (1M context) (Claude Code session), 2026-09-17 |  |  |
 | `#Q7MK` | [Numpad Enter submits like Return instead of inserting a newline](changes/needs_qa_llm/2026-09-17-keypad-enter-submits.md) | needs-qa-llm | implemented by Claude (Relay agent session), 2026-09-17 |  |  |
@@ -101,3 +106,11 @@
 | `#G152` | [Ctrl+H shrinks a pane to almost nothing](changes/needs_qa_llm/2026-09-17-ctrl-h-shrinks-pane.md) | needs-qa-llm | agent |  |  |
 | `#0C7V` | [Single click opens folders in the explorer pane (Dolphin style)](changes/needs_qa_llm/2026-09-17-single-click-folders.md) | needs-qa-llm | agent |  |  |
 | `#SQAM` | [Provider stalls have no visible progress, no retry and no log](changes/needs_qa_llm/2026-09-17-provider-stalls-and-no-logs.md) | needs-qa-llm | implemented by Claude Opus 5 (1M context), Claude Code session, 2026-09-17 |  |  |
+| `#FW3Z` | [Cleanup quick wins: dead-code removal, logging for silent failures, stale build dirs, docs index, deploy.sh](changes/needs_qa_llm/2026-09-17-cleanup-quick-wins-dead-code-removal-logging-for.md) | needs-qa-llm |  |  | [3](threads/FW3Z.md) |
+
+## Planning (2)
+
+| Card | Title | Status | Assignee | Tasks | Thread |
+|---|---|---|---|---|---|
+| `#XZZB` | [Improve the options (Settings) menu](planning/2026-09-17-improve-the-options-settings-menu.md) | inbox |  |  | [5](threads/XZZB.md) |
+| `#265N` | [Cleanup audit follow-ups: judgment-call dead code, deprecated spike alias, unscanned areas](planning/2026-09-17-cleanup-audit-follow-ups-judgment-call-dead-code.md) | ready |  | 0/7 | [2](threads/265N.md) |

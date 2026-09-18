@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-// Relay's live design tokens, the application stylesheet built from them, and the Konsole/engine
+// Relay's live design tokens, the application stylesheet built from them, and the engine
 // colour schemes generated from the same theme file.
 //
 // The tokens below are **variables, not constants**: picking another theme in Settings assigns
@@ -91,20 +91,7 @@ void repolishAll();
 
 // Name-based hooks for widgets that the stylesheet targets by object name.
 void polishWindow(QWidget *window);
-// Directory containing relayrc, themes/ and konsole/ data, or empty when not found.
+// Directory containing themes/, icons/ and terminal.conf, or empty when not found.
 // Safe to call before QApplication exists.
 QString themeDataDir();
-// Where the generated Konsole profiles and colour schemes are written
-// ($XDG_CACHE_HOME/relay/theme). Safe to call before QApplication exists.
-QString runtimeThemeDir();
-// The Konsole profile name generated for a theme id; KonsoleBackend hands it to Session::setProfile.
-QString konsoleProfileName(const QString &themeId);
-// Prepend the generated theme directory and the packaged one to XDG_CONFIG_DIRS and
-// XDG_DATA_DIRS so KonsolePart finds Relay's profiles. Call before QApplication. This also
-// writes one generated profile and colour scheme per known theme, because Konsole loads the
-// profile list once: a theme added to ~/.config/relay/themes while Relay runs needs a restart.
-// Returns false when no theme data directory was found.
-bool exposeKonsoleProfile();
-// Restore the original XDG variables so the user's shell does not inherit Relay's paths.
-void restoreXdgEnvironment();
 }

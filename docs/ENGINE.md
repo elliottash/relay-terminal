@@ -1,11 +1,13 @@
 # Relay terminal engine
 
-Relay's own terminal engine (owner decision: no Konsole fork; KonsolePart stays the Linux default
-until parity). Long-term targets: Linux, macOS, Windows. Status on 2026-09-17: a reusable library
-with two emulator cores, a threaded PTY, a QPainter view, `TerminalBackend` implemented, 97 passing
-test-case runs in `relay-engine-tests` (both cores), and GUI checks with vim, less, htop and tmux.
-**Wired into the app behind a per-pane flag**: `--engine=relay`, `RELAY_ENGINE=relay` or the palette's
-"New pane (Relay engine)"; KonsolePart remains the default. See
+Relay's own terminal engine (owner decision: no Konsole fork). Long-term targets: Linux, macOS,
+Windows. A reusable library with two emulator cores, a threaded PTY, a QPainter view,
+`TerminalBackend` implemented, 97 passing test-case runs in `relay-engine-tests` (both cores),
+and GUI checks with vim, less, htop and tmux.
+
+**It is the terminal.** It became every pane's default on 2026-09-17 and the only one on
+2026-09-18, when the owner retired KonsolePart ("relay engine is working great, so konsole is no
+longer needed"). `--engine-core=ghostty|libvterm` still picks the emulator core. See
 [ARCHITECTURE.md](ARCHITECTURE.md) section 16, `src/EngineBackend.*` and the remaining gaps in
 `issues/features/needs_qa_llm/2026-09-17-engine-integration.md`.
 
@@ -145,11 +147,12 @@ Documented fallbacks, not implemented: alacritty_terminal (Rust FFI), xterm.js i
 | Callbacks | `onLinkActivated(target, line, column)` (OSC 8 URI, URL, or absolute path with `:line:col`), `onTitleChanged`, `onCwdChanged`, `onAltScreenChanged`, `onBell`, `onPromptMark(kind 'A'..'D', exitCode)`, `onOutput(bytes)` (opt-in via `setOutputCallbackEnabled`), `onFinished(exitCode)` |
 
 Capabilities reported by `VTermBackend`: ScreenText, Scrollback, AltScreenState, LinkClicks,
-Osc8Links, PromptMarks, CwdTracking, DisplayInjection, Search, ScrollControl, LinkWalk. A KonsolePart adapter
-would report DisplayInjection (private D-Bus slot) and ScrollControl (hidden scrollbar), ScreenText
-only on KF6 (D-Bus `getDisplayedText`), and none of the others.
+Osc8Links, PromptMarks, CwdTracking, DisplayInjection, Search, ScrollControl, LinkWalk.
 
-## Status vs KonsolePart (as Relay uses it)
+## Status, with KonsolePart as the comparison it replaced
+
+The KonsolePart column is kept as the bar this engine had to clear; it is history, not a
+configuration Relay still ships.
 
 Legend: ✅ done and tested, 🟡 partial, ❌ missing. "Tests" names `relay-engine-tests` cases or the
 GUI scenario (`engine/scripts/gui/scenarios.sh`).
@@ -194,10 +197,10 @@ GUI scenario (`engine/scripts/gui/scenarios.sh`).
 
 ## Remaining work
 
-### Before making the engine the Linux default
+### Open (the engine is already the Linux default)
 
-1. ~~KonsolePart adapter + `--engine` switch~~ — done: `src/KonsoleBackend`, `src/EngineBackend`,
-   `src/TerminalBackends` (per-pane, default KonsolePart).
+1. ~~KonsolePart adapter + `--engine` switch~~ — done, then removed with KonsolePart itself
+   (2026-09-18): `src/EngineBackend` and `src/TerminalBackends` are what is left.
 2. ~~Shell integration: emit OSC 7 and OSC 133 A/B/C/D~~ — done, opt-in:
    `shell/relay-integration.bash` / `.zsh`. Driving waiting-for-input and command blocks from
    `onPromptMark` (instead of Relay's `/proc` polling and Bash bridge) is still open.
@@ -244,10 +247,8 @@ GUI scenario (`engine/scripts/gui/scenarios.sh`).
    file panes at `line:column`; `screenText`/`scrollbackText` into agent context;
    composer PageUp/PageDown -> `scrollPages`; Relay's global shortcuts through
    `TerminalView::setShortcutFilter` (replaces `overrideShortcut`).
-4. **Gate (open).** `relay-engine-tests`, `engine/scripts/gui/scenarios.sh` and the
-   perf/interrupt scripts with `--engine=relay` inside Relay, plus Relay's own backend-and-bash
-   tests. Then make the engine the default where there is no KonsolePart (macOS, Windows builds)
-   and flip Linux when the "Before making the engine the Linux default" list is done.
+4. ~~Gate~~ — the engine became the default on 2026-09-17 and the only backend on 2026-09-18;
+   `src/KonsoleBackend.*`, `--engine`, `RELAY_ENGINE` and the two palette entries are gone.
 
 ## History: the spike (2026-09-17 morning)
 

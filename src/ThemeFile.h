@@ -4,9 +4,8 @@
 // terminal palette and the UI tokens the stylesheet is built from.
 //
 // Built-in themes live in `data/theme/themes/`, the user's own in `~/.config/relay/themes/`;
-// a user file wins over a built-in of the same id. The Konsole/engine `.colorscheme` is
-// generated from the theme at runtime (konsoleSchemeText()), so a theme file is the only
-// source of truth for colour.
+// a user file wins over a built-in of the same id. The engine takes its colours straight from
+// the theme, so a theme file is the only source of truth for colour.
 //
 // Everything here is plain QtGui so the rules can be tested without a window; src/Theme.cpp
 // turns a ThemeSpec into the live QPalette, stylesheet and terminal colours.
@@ -108,21 +107,5 @@ QStringList themeSearchDirs(const QString &dataDir, const QString &configHome);
 // Every *.toml in `dirs`, keyed by file stem. Earlier directories win, so a user file of the same
 // id shadows the built-in. The result is sorted by id (QMap).
 QMap<QString, QString> discoverThemeFiles(const QStringList &dirs);
-
-// --- generated Konsole scheme ---------------------------------------------------------------
-
-// A Konsole `.colorscheme` (INI) built from the theme: Background/Foreground, Color0..Color7 with
-// their Faint and Intense variants, and the General block. This is what both KonsolePart and
-// Relay's own engine read, so there is no second source of truth for terminal colour.
-QString konsoleSchemeText(const ThemeSpec &spec);
-// A Konsole `.profile` pointing at that scheme, built from Relay's shipped profile text so the
-// font, margins and link settings stay in one place.
-QString konsoleProfileText(const QString &baseProfile, const QString &profileName, const QString &schemeName);
-// The Konsole profile/scheme name a theme id generates ("relay-dark" -> "RelayThemeRelayDark").
-QString konsoleNameFor(const QString &themeId);
-
-// The colour Konsole shows for a "faint" cell: the colour mixed a third of the way into the
-// background. Exposed for the tests.
-QColor faintOf(const QColor &color, const QColor &background);
 
 }  // namespace relay::theme

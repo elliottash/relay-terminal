@@ -81,7 +81,7 @@ no inheriting one from the fallback theme. Every rule above is then measured **a
 just at the top (`theAuditionedThemesMeetTheirContrastContract` walks both), because text lands on
 the bottom edge as often as the top. Only the default ground is shaded: a cell carrying its own
 background colour still paints solid, so `\e[41m` is the same red everywhere on the page. The
-Konsole engine has no gradient and takes `background` flat.
+gradient is the engine's own, drawn by `TerminalView::paintEvent`.
 
 **Distinctness** (the rule WCAG does not have): `accent` and `border_strong` against `warning` and
 `error`; `surface_raised` against `warning`; `border` against `error`; and `shell` against

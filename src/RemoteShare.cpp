@@ -200,9 +200,7 @@ bool RemoteShare::sharePane(const QString &paneId, const PaneHooks &hooks, QStri
 {
     if (!hooks.view) {
         if (error) {
-            *error = QStringLiteral(
-                "Only panes on Relay's own engine can be shared: KonsolePart cannot hand over its "
-                "screen. Open a pane with the palette's \"New pane (Relay engine)\" and share that.");
+            *error = QStringLiteral("This pane has no screen to share.");
         }
         return false;
     }

@@ -8,7 +8,7 @@ pkgdesc="Linux terminal with a rich prompt and bring-your-own-key agents (develo
 arch=('x86_64' 'aarch64')
 url="https://github.com/elliottash/relay-terminal"
 license=('GPL-3.0-or-later')
-depends=('konsole' 'kparts' 'kcoreaddons' 'syntax-highlighting' 'qt6-base' 'python' 'bash'
+depends=('syntax-highlighting' 'qt6-base' 'python' 'bash'
          'gcc-libs' 'glibc' 'hicolor-icon-theme')
 makedepends=('cmake' 'ninja' 'git')
 checkdepends=('git')

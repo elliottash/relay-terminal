@@ -240,22 +240,12 @@
 
         <div class="grid install">
           <article>
-            <h3>Ubuntu 24.04 LTS (Qt 5 / KF 5)</h3>
-            <p>The Konsole part and the two optional viewers can be left out.</p>
+            <h3>Ubuntu 24.04 LTS</h3>
+            <p>Qt and Python. The two optional viewers can be left out.</p>
             <pre><code>sudo apt install build-essential cmake ninja-build python3 \
-  libsecret-tools qtbase5-dev libkf5parts-dev libkf5coreaddons-dev \
-  libkf5syntaxhighlighting-dev qtpdf5-dev
-# only if you want the Konsole engine:
-sudo apt install konsole-kpart</code></pre>
-          </article>
-          <article>
-            <h3>Debian 13 or Ubuntu 26.04 (Qt 6 / KF 6)</h3>
-            <p>Same shape, KDE Frameworks 6 package names.</p>
-            <pre><code>sudo apt install build-essential cmake ninja-build python3 \
-  libsecret-tools qt6-base-dev libkf6parts-dev libkf6coreaddons-dev \
-  libkf6syntaxhighlighting-dev
-# only if you want the Konsole engine:
-sudo apt install konsole-kpart</code></pre>
+  libsecret-tools qtbase5-dev
+# optional: file-preview highlighting and PDF preview
+sudo apt install libkf5syntaxhighlighting-dev qtpdf5-dev</code></pre>
           </article>
           <article>
             <h3>Build and run</h3>
@@ -268,17 +258,14 @@ cmake --install build      # optional, installs to ~/.local</code></pre>
           </article>
           <article>
             <h3>What it needs</h3>
-            <p>CMake 3.22+, a C++17 compiler, Qt with KDE Frameworks Parts and CoreAddons, Python 3.10+ and
-              Bash. Relay picks Qt 6 + KF 6 when both are installed and falls back to Qt 5 + KF 5; force one
-              with <code>./scripts/build.sh -DRELAY_QT_MAJOR=5</code>. Syntax highlighting and PDF preview are
-              optional, and <code>konsole-kpart</code> is only needed for <code>--engine=konsole</code>.</p>
+            <p>CMake 3.22+, a C++17 compiler, Qt 5, Python 3.10+ and Bash. KDE Frameworks is not required:
+              Relay's terminal is its own. Syntax highlighting and PDF preview are optional.</p>
           </article>
           <article>
-            <h3>Choosing an engine</h3>
-            <p>Relay's engine is the default and is built into every build. The libvterm core needs nothing
-              extra; the libghostty-vt core is optional and needs Zig to build.</p>
-            <pre><code>relay                      # Relay's engine
-relay --engine=konsole     # KonsolePart instead
+            <h3>Choosing a core</h3>
+            <p>Relay's engine runs every pane. The libvterm core needs nothing extra; the libghostty-vt core
+              is optional and needs Zig to build.</p>
+            <pre><code>relay                          # the default core
 relay --engine-core=libvterm   # pick the emulator core</code></pre>
           </article>
           <article>
@@ -344,11 +331,10 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
               fewer marks.</p>
           </div>
           <div>
-            <p><strong>Platforms.</strong> Linux, built against Qt 6 + KDE Frameworks 6 or Qt 5 + KF 5. Relay's
-              own engine is the step towards macOS and Windows; those builds also need the rest of the app off
-              KDE Frameworks, and are on the roadmap rather than in this beta.</p>
-            <p><strong>License.</strong> GPL-3.0-or-later. Relay is not a Konsole fork and changes no Konsole
-              settings; it can load Konsole's part, as installed on your system, as an alternative engine.</p>
+            <p><strong>Platforms.</strong> Linux, built against Qt 5. Relay's own engine is the step towards
+              macOS and Windows; those builds are on the roadmap rather than in this beta.</p>
+            <p><strong>License.</strong> GPL-3.0-or-later. Relay is not a Konsole fork and reads or changes no
+              Konsole settings.</p>
           </div>
         </div>
       </div>
