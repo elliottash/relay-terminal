@@ -6,7 +6,7 @@ agent       'yeah.'
 agent       'ok.'                                                        
 agent       'ok, go ahead'                                               
 agent       'okay: do it'                                                
-agent       'hmm; not sure'                                              
+agent  NOTE 'hmm; not sure'                                              command not found: hmm
 agent       'really?'                                                    
 agent       'ready?'                                                     
 agent       'done!'                                                      
@@ -35,7 +35,7 @@ agent       'yeah—do it'
 agent       'ok -- do it'                                                
 agent       'yeah - do it'                                               
 agent       'nah, leave it'                                              
-agent       '"yeah" is fine'                                             
+agent  NOTE '"yeah" is fine'                                             command not found: yeah
 agent       'yep: ship it'                                               
 agent       'sounds good.'                                               
 agent       'Sounds good!'                                               
@@ -63,7 +63,7 @@ agent       'stop'
 agent       'yes'                                                        
 agent       'Yes'                                                        
 agent       'nice'                                                       
-agent       'wait'                                                       
+shell       'wait'                                                       
 agent       'Wait'                                                       
 agent       'really?!'                                                   
 agent       "it's fine, isn't it"                                        
@@ -71,18 +71,18 @@ agent       'don’t break it'
 agent       'ok go'                                                      
 agent       'Great, thanks.'                                             
 agent       '“yeah” works'                                               
-agent       'hmm;'                                                       
-agent       'ok; thanks'                                                 
-agent       'no; the other one'                                          
-agent       'nope; try again'                                            
-agent       'ok; let me think'                                           
-agent       'Hmm; no idea'                                               
-agent       "hmm; don't know"                                            
+agent  NOTE 'hmm;'                                                       command not found: hmm
+agent  NOTE 'ok; thanks'                                                 command not found: ok
+agent  NOTE 'no; the other one'                                          command not found: no
+agent  NOTE 'nope; try again'                                            command not found: nope
+agent  NOTE 'ok; let me think'                                           command not found: ok
+agent  NOTE 'Hmm; no idea'                                               command not found: Hmm
+agent  NOTE "hmm; don't know"                                            syntax error: unexpected EOF while looking for matching `''
 agent       "'ok' then"                                                  
-agent       '"yeah", sure'                                               
-agent       'true'                                                       
-agent       'false'                                                      
-agent       'done'                                                       
+agent  NOTE '"yeah", sure'                                               command not found: yeah,
+shell       'true'                                                       
+shell       'false'                                                      
+agent  NOTE 'done'                                                       syntax error: syntax error near unexpected token `done'
 == TYPO
 agent  NOTE 'gti status'                                                 command not found: gti
 agent  NOTE 'pyton -m x'                                                 command not found: pyton

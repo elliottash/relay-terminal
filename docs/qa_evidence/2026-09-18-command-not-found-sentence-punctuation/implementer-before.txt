@@ -71,6 +71,18 @@ agent  NOTE 'don’t break it'                                             comma
 agent  NOTE 'ok go'                                                      command not found: ok
 agent  NOTE 'Great, thanks.'                                             command not found: Great,
 agent  NOTE '“yeah” works'                                               command not found: “yeah”
+agent  NOTE 'hmm;'                                                       command not found: hmm
+agent  NOTE 'ok; thanks'                                                 command not found: ok
+agent  NOTE 'no; the other one'                                          command not found: no
+agent  NOTE 'nope; try again'                                            command not found: nope
+agent  NOTE 'ok; let me think'                                           command not found: ok
+agent  NOTE 'Hmm; no idea'                                               command not found: Hmm
+agent  NOTE "hmm; don't know"                                            syntax error: unexpected EOF while looking for matching `''
+agent       "'ok' then"                                                  
+agent  NOTE '"yeah", sure'                                               command not found: yeah,
+shell       'true'                                                       
+shell       'false'                                                      
+agent  NOTE 'done'                                                       syntax error: syntax error near unexpected token `done'
 == TYPO
 agent  NOTE 'gti status'                                                 command not found: gti
 agent  NOTE 'pyton -m x'                                                 command not found: pyton
@@ -96,3 +108,24 @@ agent  NOTE 'gti --'                                                     command
 shell       'yes | head -3'                                              
 agent  NOTE 'Gti'                                                        command not found: Gti
 agent  NOTE 'pyton,'                                                     command not found: pyton,
+agent  NOTE 'hmm; ls'                                                    command not found: hmm
+agent  NOTE 'gti; ls'                                                    command not found: gti
+agent  NOTE 'cd /tmp; mkae'                                              command not found: mkae
+agent  NOTE 'ok; Docker ps'                                              command not found: ok
+agent  NOTE 'xyzzy; frob'                                                command not found: xyzzy
+agent  NOTE '"gti" status'                                               command not found: gti
+agent  NOTE '"./run.sh"'                                                 no such file: ./run.sh
+agent  NOTE '"yeah" is "fine"'                                           command not found: yeah
+== SHELL
+shell       'echo hi; ls'                                                
+shell       '"ls" -la'                                                   
+shell       'wait %1'                                                    
+shell       'wait $!'                                                    
+shell       'true && ls'                                                 
+shell       'ls'                                                         
+shell       'pwd'                                                        
+shell       'clear'                                                      
+shell       'history'                                                    
+shell       'jobs'                                                       
+shell       'times'                                                      
+shell       'nice -n 10 ls'                                              

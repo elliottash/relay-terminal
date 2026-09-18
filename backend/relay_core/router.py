@@ -542,17 +542,23 @@ def _looks_mistyped(word: str, known: set[str], path: str) -> bool:
 
 # Replies and sentence openers nobody types meaning a program. The typo test below cannot tell them
 # from slips — "ok" is one edit from `od`, "no" from `nl`, "cool" from `col`, "lets" from `let` —
-# and they are the commonest short lines there are (card #W954). "wait" is also a real command:
-# spelt right and alone it still runs; this only keeps the note quiet for "Wait" or "wait!".
+# and they are the commonest short lines there are (card #W954). "wait" is also a real command; a
+# lone "wait" goes to the agent through LONE_REPLY, and this keeps the note quiet for "Wait" or "wait!".
 REPLY_WORDS = frozenset("""
 ok okay k kk yes yep yeah yea yup ya no nope nah sure cool good great fine nice perfect awesome
 thanks thx ty hi hey hello sorry right alright agreed lgtm hmm oh oops well go stop wait
 lets maybe also actually anyway btw
 """.split())
-# Commands that, typed alone, are a reply rather than an invocation: a lone `yes` prints "y" until
-# interrupted, a lone `nice` prints the niceness. Sent to the agent like LOOP_ONLY; with any argument
-# (`yes | rm -i *`, `nice -n 5 make`) they are shell again.
-LONE_REPLY = frozenset("yes nice".split())
+# Words that, typed alone, are a reply rather than an invocation: a lone `yes` prints "y" until
+# interrupted, a lone `nice` prints the niceness. `wait`, `true` and `false` are builtins that do
+# nothing a person can see at a prompt (`wait` returns at once without background jobs, the other two
+# only set $?), while "wait", "true" and "false" are everyday answers to the agent. `done` alone is
+# a bash syntax error, and "done" is the commonest way to say a step is finished. Sent to the agent
+# like LOOP_ONLY; with any argument (`yes | rm -i *`, `nice -n 5 make`, `wait %1`, `true && ls`) they
+# are shell again, and an explicit terminal destination still runs them. Left in the shell on
+# purpose: `times`, `test`, `exit` and friends, which are not replies — and `ls`, `pwd`, `clear`,
+# `history`, `jobs`, which print something useful on their own (card #W954).
+LONE_REPLY = frozenset("yes nice wait true false done".split())
 # Sentence punctuation that sticks to a word: "yeah,", "ok.", "wait...", "hmm…", "really?!".
 SENTENCE_TAIL = ",.:;?!…\"'”’)"
 DASHES = "—–"
@@ -592,6 +598,61 @@ def _bare_word(word: str) -> tuple[str, bool]:
     return bare, punctuated
 
 
+# A first word in straight quotes with nothing but sentence punctuation after it: "yeah" is fine.
+QUOTED_FIRST = re.compile(r"""^(["'])([^\W\d_]+)\1(?=[,.:;?!…]*(?:\s|$))""")
+# A semicolon written as punctuation: a space or the end of the line after it ("hmm; not sure").
+PROSE_SEMICOLON = re.compile(r";(?=\s|$)")
+
+
+def _unquote_first_word(text: str) -> str:
+    """The line with straight quotes around its first word removed, when that word is letters only.
+
+    `"yeah" is fine` and `'ok' then` quote a word the way prose does; the shell reads the same
+    command name either way, so the line is judged as if unquoted — the typo test and the
+    real-command test still apply (`"gti" status` is still a slip). A quoted path or a name with
+    other characters (`"./run.sh"`, `"pip4" x`) does not match and keeps today's behaviour (card #W954)."""
+    match = QUOTED_FIRST.match(text)
+    return match.group(2) + text[match.end():] if match else text
+
+
+def _semicolon_prose(text: str, known: Iterable[str], path: str | None) -> bool:
+    """True for a line whose only shell syntax is sentence semicolons, when no segment reads as an
+    attempted command: "hmm; not sure", "ok; let me think".
+
+    Each `;`-segment must start with something that is not a command — a reply word, a function
+    word (SIGNAL_WORDS, SENTENCE_LEAD), or a first word explain_invalid would stay quiet about on
+    its own ("try again", "don't know") — or with an English-word command in a sentence
+    (assist_signals clears the threshold: "let me think").
+    A segment that starts with a real command or a near-typo of one (`hmm; ls`, `gti; ls`,
+    `cd /tmp; mkae`) means a command was meant, and the note stays. The whole line must also carry
+    at least one reply or function word, so `xyzzy; frob` is not a sentence (card #W954)."""
+    if not PROSE_SEMICOLON.search(text) or ";" in PROSE_SEMICOLON.sub("", text):
+        return False
+    rest = CONTRACTION.sub("", PROSE_SEMICOLON.sub("", text))
+    if "\n" in rest or "'" in rest or '"' in rest or SHELLISH.search(rest) or GLOBBISH.search(rest):
+        return False
+    known = set(known)
+    path = path or os.environ.get("PATH") or os.defpath
+    function_words = REPLY_WORDS | LOOP_ONLY | SENTENCE_LEAD | SIGNAL_WORDS.keys()
+    for segment in (s.strip() for s in text.split(";")):
+        words = segment.split()
+        if not words:
+            continue
+        if any(w.startswith(("-", "+")) and w not in {"-", "--"} for w in words[1:]):
+            return False                        # flags: a command was meant
+        first = words[0]
+        if first in known or first in BUILTINS or first in KEYWORDS or on_path(first, path):
+            if assist_signals(segment)[0] < ASSIST_THRESHOLD:
+                return False                    # "hmm; ls": ls would run, so a command was meant
+            continue                            # "ok; let me think": a command word in a sentence
+        if _bare_word(first)[0].lower() in function_words:
+            continue                            # "not sure", "the other one": "not" is no slip of `nl`
+        if explain_invalid(segment, f"command not found: {first}", known, path):
+            return False                        # "gti; ls", "cd /tmp; mkae", "ok; Docker ps"
+    words = (_bare_word(w)[0].lower() for w in text.replace(";", " ").split())
+    return any(w in function_words for w in words)
+
+
 def explain_invalid(text: str, reason: str, known: Iterable[str] = (), path: str | None = None) -> bool:
     """Whether the GUI should print `reason` under a line auto-routed to the agent.
 
@@ -601,12 +662,21 @@ def explain_invalid(text: str, reason: str, known: Iterable[str] = (), path: str
     sentence whose first word happens not to be a program — and naming its first word reads as the
     failure of a command the user never ran (owner reports, 2026-09-18).
 
+    Two kinds of shell syntax are read as writing too (card #W954): a first word in straight quotes
+    (`"yeah" is fine`, judged as the unquoted line) and semicolons in a sentence none of whose parts
+    starts with a command or a slip of one (`hmm; not sure`, see _semicolon_prose).
+
     Sentence punctuation is language too (card #W954, "yeah, see if there is a clear issue…" got
     "command not found: yeah,"): a comma, full stop, colon, question or exclamation mark, ellipsis,
     closing quote or dash stuck to the first word, an apostrophe inside a word ("let's", "don't"),
     and a capitalised first word ("Yeah", "Sure") are how people write, not how commands look.
     """
     trimmed = text.strip()
+    unquoted = _unquote_first_word(trimmed)
+    if unquoted != trimmed:
+        return explain_invalid(unquoted, reason, known, path)   # '"yeah" is fine' reads as 'yeah is fine'
+    if reason and _semicolon_prose(trimmed, known, path):
+        return False                            # "hmm; not sure": a semicolon in a sentence
     if reason and _contractions_only(trimmed):
         return False                            # "don't break the build": the quote is English
     prefix = "command not found: "
@@ -740,7 +810,8 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
         return Decision("agent", text, f"“{trimmed}” means nothing outside a loop; sent to the agent",
                         agent_signal=True, explain_invalid=False)
     if trimmed in LONE_REPLY:
-        # A lone "yes" would print y until interrupted: at a prompt it is an answer, not a command.
+        # A lone "yes" would print y until interrupted, a lone "wait" does nothing: at a prompt
+        # they are answers, not commands.
         return Decision("agent", text, f"“{trimmed}” on its own is a reply; sent to the agent",
                         agent_signal=True, explain_invalid=False)
     if NATURAL.match(trimmed):

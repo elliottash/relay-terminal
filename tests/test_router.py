@@ -236,14 +236,57 @@ class ValidityTests(unittest.TestCase):
 
     def test_a_lone_yes_is_a_reply(self):
         # Card #W954: a lone "yes" ran `yes`, which prints y until interrupted.
-        for text in ["yes", "nice"]:
+        # A lone "wait", "true" or "false" ran a builtin that does nothing visible; a lone "done"
+        # printed a bash syntax error under the agent's answer.
+        for text in ["yes", "nice", "wait", "true", "false", "done", " wait "]:
             with self.subTest(text=text):
                 result = self.check(text)
                 self.assertEqual(result.route, "agent", text)
                 self.assertTrue(result.agent_signal, text)
                 self.assertFalse(result.explain_invalid, text)
-        self.assertValid("yes | head -3")
-        self.assertValid("nice -n 10 ls")
+                self.assertIn("on its own is a reply", result.reason)
+        for text in ["yes | head -3", "nice -n 10 ls", "wait %1", "wait $pid", "true && ls", "false || ls"]:
+            self.assertValid(text)
+        # Commands that do something on their own stay in the shell.
+        for text in ["ls", "pwd", "clear", "history", "jobs", "times"]:
+            with self.subTest(text=text):
+                self.assertEqual(self.check(text).route, "shell", text)
+        self.assertEqual(classify("wait", "shell", path=PATH).route, "shell")
+
+    def test_a_semicolon_in_a_sentence_is_not_a_command(self):
+        # Card #W954: "hmm; not sure" went to the agent with "command not found: hmm" under it. A
+        # `;` is shell syntax, but the note needs some part of the line to look like a command.
+        for text in ["hmm; not sure", "hmm;", "ok; thanks", "no; the other one", "nope; try again",
+                     "ok; let me think", "hmm; don't know", "Hmm; no idea", "sure; ship it", "ok ; sure"]:
+            with self.subTest(text=text):
+                result = self.check(text)
+                self.assertEqual(result.route, "agent", text)
+                self.assertFalse(result.explain_invalid, f"{text!r}: {result.invalid_reason}")
+        # A part that starts with a real command, a slip of one, flags or a name keeps the note:
+        # "hmm; ls" would have run `ls`, so the line is a command with a stray word before it.
+        for text in ["hmm; ls", "hmm;ls", "gti; ls", "cd /tmp; mkae", "ok; Docker ps",
+                     "hmm; not sure -v", "yeah; kubectl2 get", "ok; pyton script.py", "xyzzy; frob"]:
+            with self.subTest(text=text):
+                result = self.check(text)
+                self.assertEqual(result.route, "agent", text)
+                self.assertTrue(result.explain_invalid, text)
+        self.assertValid("echo hi; ls")
+
+    def test_a_quoted_first_word_is_a_quotation(self):
+        # Card #W954: '"yeah" is fine' printed "command not found: yeah". A quoted plain word is
+        # judged as the unquoted line would be.
+        for text in ['"yeah" is fine', "'ok' then", '"yeah", sure', '"Sure" works']:
+            with self.subTest(text=text):
+                result = self.check(text)
+                self.assertEqual(result.route, "agent", text)
+                self.assertFalse(result.explain_invalid, f"{text!r}: {result.invalid_reason}")
+        self.assertValid('"ls" -la')
+        for text in ['"gti" status', '"pip4" install x', '"yeah" is "fine"']:
+            with self.subTest(text=text):
+                self.assertTrue(self.check(text).explain_invalid, text)
+        with tempfile.TemporaryDirectory() as d:
+            result = self.check('"./run.sh"', cwd=d)
+            self.assertEqual((result.route, result.explain_invalid), ("agent", True))
 
     def test_one_edit_apart(self):
         for typed, command in [("gti", "git"), ("pyton", "python"), ("docekr", "docker"),
