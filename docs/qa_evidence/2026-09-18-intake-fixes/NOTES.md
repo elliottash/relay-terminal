@@ -23,3 +23,11 @@ Both Markdown paths were exercised before anything was changed.
 | `3w58-already-fine-md-preview-from-the-explorer.png` | `README.md` clicked in the explorer: rendered, with the view button offering "Source". Not the broken path either. |
 | `3w58-before-md-line-link-shows-source-labelled-source.png` | Ctrl+click on `README.md:9` in `grep -rn` output: **raw Markdown**, while the button still offered "Source". This is the report. |
 | `3w58-after-md-line-link-offers-rendered.png` | The same click after the fix: still the source (a line number is a position in the source, and line 9 is highlighted), but the button now offers "Rendered", so the render is one click away. |
+
+## #VXTF — the view buttons name the format
+
+| Shot | What it shows |
+|---|---|
+| `vxtf-before-source-unlabelled-and-under-the-pane-buttons.png` | The header before: "Source", and half of it under the pane's ⬓+ ◫+ ⇱ × row, which swallowed the click. |
+| `vxtf-after-source-md-clear-of-the-pane-buttons.png` | "Source (MD)" on the rendered view, clear of the pane buttons; the explorer's folder line is inset too. |
+| `vxtf-after-rendered-md.png` | After clicking it: the source, and the button now offers "Rendered (MD)". |

@@ -8,6 +8,7 @@
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QToolButton>
 #include <QTreeView>
 
 using relay::FileExplorer;
@@ -170,6 +171,27 @@ private slots:
         QVERIFY(!preview.showingSource());
         preview.goToLine(0);
         QVERIFY(!preview.showingSource());
+    }
+
+    // Issue #VXTF: the view button names the format, so "Source" cannot be read as the source of
+    // whatever else the pane might be holding. The image preview's Fit/100% button is untouched.
+    void markdownViewButtonNamesTheFormat() {
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("doc.md"));
+        writeFile(path, "# Title\n\nBody\n");
+        QImage image(4, 3, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(temp.filePath(QStringLiteral("shot.png"))));
+
+        FilePreview preview;
+        auto *mode = preview.findChild<QToolButton *>(QStringLiteral("filePreviewMode"));
+        QVERIFY(mode);
+        QVERIFY(preview.open(path));
+        QCOMPARE(mode->text(), QStringLiteral("Source (MD)"));
+        preview.goToLine(3);
+        QCOMPARE(mode->text(), QStringLiteral("Rendered (MD)"));
+        QVERIFY(preview.open(temp.filePath(QStringLiteral("shot.png"))));
+        QCOMPARE(mode->text(), QStringLiteral("100%"));
     }
 
     void largeTextIsTruncatedWithNotice() {

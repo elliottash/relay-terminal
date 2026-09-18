@@ -8247,8 +8247,14 @@ public:
         if (auto *pane = dynamic_cast<Pane *>(parentWidget()))
             pane->setHeaderRightInset(isVisible() ? m_fullWidth + 10 : 0);
         // The Switchboard's first row is its tab bar, which these buttons would otherwise cover.
-        else if (auto *tool = dynamic_cast<ToolPane *>(parentWidget()); tool && tool->board())
-            tool->board()->setHeaderRightInset(isVisible() ? m_fullWidth + 4 : 0);
+        // So is a preview's header, whose view button names the format and so is wide enough to
+        // reach them ("Source (MD)", issue #VXTF), and an explorer's folder line.
+        else if (auto *tool = dynamic_cast<ToolPane *>(parentWidget()); tool) {
+            const int inset = isVisible() ? m_fullWidth + 4 : 0;
+            if (tool->board()) tool->board()->setHeaderRightInset(inset);
+            else if (tool->preview()) tool->preview()->setHeaderRightInset(inset);
+            else if (tool->explorer()) tool->explorer()->setHeaderRightInset(inset);
+        }
     }
 
 protected:

@@ -139,6 +139,7 @@ FileExplorer::FileExplorer(const QString &root, QWidget *parent) : QWidget(paren
     layout->setSpacing(6);
 
     auto *header = new QHBoxLayout;
+    m_header = header;
     header->setSpacing(4);
     m_up = headerButton(QStringLiteral("↑"), QStringLiteral("Parent folder (Backspace)"));
     m_up->setObjectName(QStringLiteral("fileExplorerUp"));
@@ -315,6 +316,12 @@ void FileExplorer::resizeEvent(QResizeEvent *event) {
     m_view->setColumnHidden(3, width() < 460);
     // Elide after the layout has given the label its final width.
     QTimer::singleShot(0, this, [this] { updateHeader(); });
+}
+
+void FileExplorer::setHeaderRightInset(int pixels) {
+    if (!m_header || m_header->contentsMargins().right() == pixels) return;
+    m_header->setContentsMargins(0, 0, pixels, 0);
+    updateHeader();
 }
 
 void FileExplorer::updateHeader() {
@@ -552,6 +559,7 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     layout->setSpacing(6);
 
     auto *header = new QHBoxLayout;
+    m_header = header;
     header->setSpacing(4);
     m_title = new QLabel;
     m_title->setObjectName(QStringLiteral("filePreviewTitle"));
@@ -823,7 +831,10 @@ void FilePreview::updateImage() {
 
 void FilePreview::updateModeButton() {
     if (m_kind == Kind::Markdown) {
-        m_mode->setText(m_markdownSource ? QStringLiteral("Rendered") : QStringLiteral("Source"));
+        // The format is in the label, not only in the tooltip (issue #VXTF, owner 2026-09-18:
+        // "in markdown, it should probably say 'source (MD)' rather than 'source'"): "Source" on
+        // its own reads as the source of whatever the pane happens to hold.
+        m_mode->setText(m_markdownSource ? QStringLiteral("Rendered (MD)") : QStringLiteral("Source (MD)"));
         m_mode->setToolTip(m_markdownSource ? QStringLiteral("Show rendered Markdown") : QStringLiteral("Show Markdown source"));
         m_mode->show();
     } else if (m_kind == Kind::Image) {
@@ -833,6 +844,12 @@ void FilePreview::updateModeButton() {
     } else {
         m_mode->hide();
     }
+}
+
+void FilePreview::setHeaderRightInset(int pixels) {
+    if (!m_header || m_header->contentsMargins().right() == pixels) return;
+    m_header->setContentsMargins(0, 0, pixels, 0);
+    updateTitleText();
 }
 
 void FilePreview::updateTitleText() {

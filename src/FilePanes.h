@@ -10,6 +10,7 @@
 #include <functional>
 
 class QFileSystemModel;
+class QHBoxLayout;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -68,6 +69,10 @@ public:
     bool activateRow(int row);
     QTreeView *view() const { return m_view; }
     QLineEdit *filterEdit() const { return m_filter; }
+    // Room the host's floating pane buttons need at the right of the header row, so the folder
+    // line and the hidden-files button never end up underneath them (the same contract as a
+    // terminal pane's header).
+    void setHeaderRightInset(int pixels);
 
     // Dolphin-style opening (issue #0C7V). On by default; Ctrl+click and Shift+click never open,
     // they extend the selection, and a drag never opens either.
@@ -107,6 +112,7 @@ private:
     Qt::KeyboardModifiers m_clickModifiers = Qt::NoModifier;
     QFileSystemModel *m_model = nullptr;
     QTreeView *m_view = nullptr;
+    QHBoxLayout *m_header = nullptr;
     QLabel *m_path = nullptr;
     QLineEdit *m_filter = nullptr;
     QToolButton *m_up = nullptr, *m_hidden = nullptr;
@@ -137,6 +143,9 @@ public:
     QString notice() const { return m_notice; }
     // Plain text shown by the Text or Markdown source viewer. Mainly for tests.
     QString text() const;
+    // Room the host's floating pane buttons need at the right of the header row, so the view
+    // button ("Source (MD)") never ends up underneath them.
+    void setHeaderRightInset(int pixels);
 
     static constexpr qint64 kMaxTextBytes = 2 * 1024 * 1024;
     static constexpr qint64 kMaxImageBytes = 64 * 1024 * 1024;
@@ -161,6 +170,7 @@ private:
     QString m_path, m_notice;
     Kind m_kind = Kind::None;
     bool m_markdownSource = false, m_imageActualSize = false;
+    QHBoxLayout *m_header = nullptr;
     QLabel *m_title = nullptr, *m_noticeLabel = nullptr, *m_info = nullptr, *m_image = nullptr;
     QToolButton *m_mode = nullptr, *m_reload = nullptr, *m_external = nullptr;
     QStackedWidget *m_stack = nullptr;
