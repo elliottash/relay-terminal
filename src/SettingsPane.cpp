@@ -23,7 +23,6 @@
 #include <QStyle>
 #include <QTabBar>
 #include <QTimer>
-#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -94,15 +93,10 @@ SettingsPane::SettingsPane(std::function<QList<SettingsSection>()> sections,
     m_search->setAccessibleName(QStringLiteral("Search settings and actions"));
     m_search->installEventFilter(this);
     header->addWidget(m_search, 1);
-    m_close = new QToolButton;
-    m_close->setObjectName(QStringLiteral("settingsClose"));
-    m_close->setText(QStringLiteral("✕"));
-    m_close->setToolTip(QStringLiteral("Close settings (Esc)"));
-    m_close->setAccessibleName(QStringLiteral("Close settings"));
-    m_close->setFocusPolicy(Qt::NoFocus);
-    m_close->setCursor(Qt::PointingHandCursor);
-    connect(m_close, &QToolButton::clicked, this, [this] { closeRequested(); });
-    header->addWidget(m_close);
+    // No close button of its own: the pane's × in the chrome row closes it, as it closes every
+    // other pane. It used to keep the ✕ from its days as an overlay, and the two landed on top of
+    // each other in the top-right corner (owner report, 2026-09-18).
+    m_header = header;
     layout->addLayout(header);
 
     m_tabs = new QTabBar;
@@ -522,6 +516,11 @@ void SettingsPane::runAction(const ActionItem &item) {
     if (onRun) { onRun(item); return; }
     if (item.run) item.run();
     if (item.stayOpen) QMetaObject::invokeMethod(this, [this] { rebuild(); }, Qt::QueuedConnection);
+}
+
+// The pane chrome's buttons float over the top right of the pane; the search row gives up that room.
+void SettingsPane::setHeaderRightInset(int pixels) {
+    if (m_header && m_header->contentsMargins().right() != pixels) m_header->setContentsMargins(0, 0, pixels, 0);
 }
 
 void SettingsPane::closeRequested() {

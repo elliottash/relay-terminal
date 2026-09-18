@@ -401,8 +401,6 @@ QLabel#toast { background: @raised; color: @text; border: 1px solid @accentBorde
 QWidget#settingsPane { background: @bg; }
 QLabel#settingsTitle { color: @muted; font-family: "@mono"; font-size: 8pt; font-weight: 600; letter-spacing: 1px; padding: 0 4px; }
 QLineEdit#settingsSearch { padding: 6px 10px; font-size: 10.5pt; }
-QToolButton#settingsClose { color: @muted; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 2px 7px; font-size: 11pt; }
-QToolButton#settingsClose:hover { color: @text; border-color: @border; background: @raised; }
 QTabBar#settingsTabs::tab { padding: 4px 10px; margin: 0 2px 0 0; }
 QScrollArea#settingsPage, QWidget#settingsPageBody { background: transparent; border: none; }
 QLabel#settingsBlurb, QLabel#settingsInfo { color: @muted; }

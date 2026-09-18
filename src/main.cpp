@@ -4711,7 +4711,10 @@ private:
     void placeSubagentOverlay() {
         if (!m_subagentOverlay) return;
         const int w = std::min(width() - 16, std::max(340, width() * 3 / 5));
-        m_subagentOverlay->setGeometry(width() - w - 8, 8, w, std::max(160, height() - 16));
+        // Below the pane's header, like the requests panel: the header's top right is where the
+        // pane chrome's buttons sit, and the overlay's × would land on the pane's own × there.
+        const int top = m_terminalHost ? m_terminalHost->mapTo(this, QPoint(0, 0)).y() : 0;
+        m_subagentOverlay->setGeometry(width() - w - 8, top + 8, w, std::max(160, height() - top - 16));
     }
     // ----- end subagents UI ---------------------------------------------------------------------
 
@@ -8789,6 +8792,9 @@ public:
             if (tool->board()) tool->board()->setHeaderRightInset(inset);
             else if (tool->preview()) tool->preview()->setHeaderRightInset(inset);
             else if (tool->explorer()) tool->explorer()->setHeaderRightInset(inset);
+            // Settings' search row and a subagent transcript's title row are their first rows too.
+            else if (tool->settings()) tool->settings()->setHeaderRightInset(inset);
+            else if (tool->subagent()) tool->subagent()->setHeaderRightInset(inset);
         }
     }
 
@@ -10976,6 +10982,7 @@ private:
                 setActiveLeaf(tool); focusLeaf(tool); return;
             }
         auto *view = new relay::SubagentTranscriptView(id);
+        view->setHostedInPane(true);   // the pane chrome's × closes it
         auto *tool = new ToolPane(view, owner->cwd());
         relay::theme::polishWindow(tool);
         QPointer<ToolPane> guard(tool);
@@ -12339,6 +12346,9 @@ private:
     void closeActive() {
         QWidget *pane = m_activeLeaf;
         if (!pane) return;
+        // The Settings pane closes the way Esc closes it: focus goes back where it was, and it is
+        // never what closes the window. Its × is the chrome's, so that button comes here too.
+        if (auto *tool = dynamic_cast<ToolPane *>(pane); tool && tool->settings()) { closeSettingsPane(tool); return; }
         QWidget *page = pageOf(pane);
         if (leavesIn(page).size() > 1) closePane(pane, true);
         else if (m_tabs->count() > 1) closeTab(m_tabs->indexOf(page), true);

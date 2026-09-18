@@ -7,9 +7,11 @@
 #include <QWidget>
 #include <functional>
 
+class QHBoxLayout;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
+class QToolButton;
 
 namespace relay {
 
@@ -31,6 +33,11 @@ public:
     void appendNote(const QString &text);
     void focusInput();
     QString plainText() const;
+    // In a pane of its own the pane chrome's × closes it, so its own × (which the floating overlay
+    // needs) is hidden; two crosses there landed on top of each other (owner report, 2026-09-18).
+    void setHostedInPane(bool hosted);
+    // Room kept free at the right of the title row for the pane chrome's buttons (PaneChrome).
+    void setHeaderRightInset(int pixels);
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;
@@ -42,6 +49,8 @@ private:
     void toolStarted(const QJsonObject &payload);
     void toolResult(const QJsonObject &payload);
     QString m_id, m_type, m_description;
+    QHBoxLayout *m_header = nullptr;
+    QToolButton *m_close = nullptr;
     QLabel *m_title = nullptr, *m_status = nullptr;
     QPlainTextEdit *m_log = nullptr;
     QLineEdit *m_input = nullptr;

@@ -3,7 +3,7 @@
 // The Settings pane: a full pane in the splitter layout (never a floating strip), with a search
 // box over every setting and every action, one sub-tab per section, and the rows drawn as real
 // controls. Ctrl+Shift+A, the gear in the title bar and Ctrl+, open it; the same key, Esc on an
-// empty search, or the pane's close button put it away and hand focus back.
+// empty search, or the pane's × in the chrome row put it away and hand focus back.
 //
 // Two catalogs feed it and both are the caller's (RelayWindow builds them):
 //
@@ -35,7 +35,7 @@ class QLineEdit;
 class QScrollArea;
 class QStackedWidget;
 class QTabBar;
-class QToolButton;
+class QHBoxLayout;
 class QVBoxLayout;
 
 namespace relay {
@@ -84,7 +84,7 @@ public:
     // The tab that lists actions with their keys; it also carries the shortcut settings rows.
     static QString actionsTabId() { return QStringLiteral("shortcuts"); }
 
-    std::function<void()> onClose;                          // Esc on an empty search, the ✕, Ctrl+Shift+A
+    std::function<void()> onClose;                          // Esc on an empty search, Ctrl+Shift+A
     std::function<void(const ActionItem &)> onRun;          // an action was chosen; the caller runs it
 
     void showTab(const QString &id);
@@ -93,6 +93,8 @@ public:
     QString search() const;
     void focusSearch();
     void scrollToGroup(const QString &key);                 // an action submenu on the Actions tab
+    // Room kept free at the right of the search row for the pane chrome's buttons (PaneChrome).
+    void setHeaderRightInset(int pixels);
     // Re-read both catalogs and redraw, keeping the tab, the scroll position and the focused row.
     void rebuild();
 
@@ -135,7 +137,7 @@ private:
     QStackedWidget *m_pages = nullptr;
     QScrollArea *m_results = nullptr;
     QLabel *m_footer = nullptr;
-    QToolButton *m_close = nullptr;
+    QHBoxLayout *m_header = nullptr;
     QStringList m_tabIds;
     QString m_wantedTab;
     QList<SettingsSection> m_sectionCache;   // the catalogs as of the last build()

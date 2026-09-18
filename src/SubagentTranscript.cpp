@@ -36,15 +36,16 @@ SubagentTranscriptView::SubagentTranscriptView(const QString &id, QWidget *paren
     // application stylesheet (QWidget#subagentTranscript) so a theme switch restyles it.
     auto *layout = new QVBoxLayout(this); layout->setContentsMargins(10, 8, 8, 8); layout->setSpacing(6);
     auto *header = new QHBoxLayout;
+    m_header = header;
     m_title = new QLabel; m_title->setTextFormat(Qt::PlainText);
     m_title->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     QFont bold = m_title->font(); bold.setBold(true); m_title->setFont(bold);
     header->addWidget(m_title, 1);
-    auto *close = new QToolButton; close->setText(QStringLiteral("×")); close->setAutoRaise(true);
-    close->setToolTip(QStringLiteral("Close the transcript (Esc from the message box). The agent keeps running."));
-    close->setFocusPolicy(Qt::NoFocus);
-    connect(close, &QToolButton::clicked, this, [this] { if (onClose) onClose(); });
-    header->addWidget(close);
+    m_close = new QToolButton; m_close->setText(QStringLiteral("×")); m_close->setAutoRaise(true);
+    m_close->setToolTip(QStringLiteral("Close the transcript (Esc from the message box). The agent keeps running."));
+    m_close->setFocusPolicy(Qt::NoFocus);
+    connect(m_close, &QToolButton::clicked, this, [this] { if (onClose) onClose(); });
+    header->addWidget(m_close);
     layout->addLayout(header);
     m_status = new QLabel; m_status->setTextFormat(Qt::PlainText);
     m_status->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
@@ -65,6 +66,14 @@ SubagentTranscriptView::SubagentTranscriptView(const QString &id, QWidget *paren
     layout->addWidget(m_input);
     m_title->setText(title());
     m_status->setText(QStringLiteral("Loading transcript…"));
+}
+
+void SubagentTranscriptView::setHostedInPane(bool hosted) {
+    m_close->setVisible(!hosted);
+}
+
+void SubagentTranscriptView::setHeaderRightInset(int pixels) {
+    if (m_header->contentsMargins().right() != pixels) m_header->setContentsMargins(0, 0, pixels, 0);
 }
 
 QString SubagentTranscriptView::title() const {
