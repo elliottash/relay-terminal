@@ -528,7 +528,8 @@ if(BUILD_TESTING)
     add_test(NAME turntranscript COMMAND relay-turntranscript-tests)
     set_tests_properties(turntranscript PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME backend-and-bash COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -v)
+    # The suite takes ~150 s on this machine (2026-09-18); 120 s made every ctest run report it red.
     # XDG_DATA_HOME keeps session autosaves and the conversation index out of the real profile.
     set_tests_properties(backend-and-bash PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/backend;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-data-home;RELAY_KEYRING=off" TIMEOUT 120)
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/backend;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-data-home;RELAY_KEYRING=off" TIMEOUT 600)
 endif()
