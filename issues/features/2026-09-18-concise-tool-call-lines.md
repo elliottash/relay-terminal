@@ -11,7 +11,7 @@ rank: zz06
 created: '2026-09-18'
 acceptance: every agent tool call prints one concise line ("ran python script · 14 lines · exit 0 · 1.2 s", "wrote x.py · new · 48 lines", "edited x.py · +3 −1"); clicking it folds the full detail open in place; a diff of at most 12 changed lines prints inline and a larger one opens a diff pane; consecutive reads and listings merge into one line
 source: 'owner, 2026-09-18: "agent tool calls are too detailed. rather than seeing a mini python script, i would rather see something like ''executed python'' … you can then click on them to uncollapse the full details. similarly with ''wrote x.py'' or ''edited x.py'' … concise and informative and allow easy access of relevant information."'
-links: {plans: [], commits: [], evidence: [], related: [E4TX], github: null}
+links: {plans: [], commits: [07ad727, 40b785a], evidence: ['docs/qa_evidence/2026-09-18-concise-tool-call-lines/pane-README.md'], related: [E4TX], github: null}
 ---
 # Concise tool-call lines, with the detail one click away
 
@@ -55,7 +55,13 @@ relevant information.
 ## Tasks
 - [x] Package C — backend labels: `tool_labels.py`, the `label` on the tool events and the turn summary, the structured `detail` on the `tool_output_get` reply, and the protocol section the other packages read <!-- t:c1 -->
 - [ ] Package E — the engine fold layer: a terminal line that folds its detail open in place <!-- t:e1 -->
-- [ ] Package G — the GUI: render the label fields, the inline diff, the merged runs, and what a click opens (fold, file, diff pane, subagent, card, plan, todos) <!-- t:g1 -->
+- [x] Package G — the GUI: render the label fields, the inline diff, the merged runs, and what a click opens (fold, file, diff pane, subagent, card, plan, todos) <!-- t:g1 -->
+      The terminal pane: `src/CallLines.{h,cpp}` (the URI, the row and its cut, the
+      rewrite-or-new-row state machine and a fold's rows, all headless in
+      `tests/calllines_test.cpp`) and the glue in `src/Pane.h` that writes the bytes, plus the diff
+      pane (`ToolPane::Kind::Diff` over `relay::DiffView`) the turn pane and the subagent
+      transcript now open too. Commits 07ad727, 40b785a. Evidence:
+      `docs/qa_evidence/2026-09-18-concise-tool-call-lines/pane-README.md`.
 - [x] The other surfaces (web app, remote panes) render the same labels <!-- t:s1 -->
       Package F: `src/ToolLabel.{h,cpp}` (the shared parser, reused by the terminal pane's
       `src/CallLines.h`), the subagent transcript, the turn pane, the Switchboard cleanup's
