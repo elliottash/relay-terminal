@@ -952,6 +952,8 @@ class Host:
                           invite=participant.invite, panes=list(participant.panes))
         for item in self.prompts.for_participant(participant_id):
             self.prompts.drop(item.prompt_id)
+        for pane in list(participant.panes):
+            self.controls.drop(pane, participant_id)
         self.guests.remove(participant_id)          # closes the live session via _guest_changed
         return True
 

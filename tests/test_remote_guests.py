@@ -757,6 +757,15 @@ class RoleTests(unittest.TestCase):
                 self.assertEqual(pending["pane"], "pane-1")
                 self.assertIsNotNone(harness.host.controls.get("pane-1", joined.participant))
                 self.assertIsNone(harness.host.control_holder("pane-1"))
+                # Removing them takes the request with them, so the owner is never asked about
+                # somebody who has already gone.
+                await harness.host.participant_remove(joined.participant)
+                self.assertIsNone(harness.host.controls.get("pane-1", joined.participant))
+                client, joined = await harness.guest(
+                    (await harness.invite(role=wire.EDITOR))[1])
+                await client.expect("panes")
+                await client.send({"t": "control_request", "pane": "pane-1"})
+                await client.expect("control_pending", timeout=10)
                 # And still nobody drives, so typing is refused.
                 await client.send({"t": "keys", "pane": "pane-1", "bytes": "eA"})
                 with self.assertRaises(wire.WireError) as caught:
