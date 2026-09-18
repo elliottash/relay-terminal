@@ -519,6 +519,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-themeswitch-tests PRIVATE relay-highlight ${RELAY_QT}::Test ${RELAY_QT}::Widgets)
     target_compile_definitions(relay-themeswitch-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME themeswitch COMMAND relay-themeswitch-tests)
+    # It builds a QApplication and real widgets, so it needs a platform plugin: without one it does
+    # not fail, it aborts before the first test ("Subprocess aborted", 0.07 s in CI). A developer
+    # running ctest under xvfb-run never sees it; CI has no display at all.
+    set_tests_properties(themeswitch PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The test also reads the shipped theme files, so it runs from the source tree.
     set_tests_properties(theme PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
@@ -592,7 +596,10 @@ if(BUILD_TESTING)
     set_tests_properties(turntranscript PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME backend-and-bash COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -v)
     # The suite takes ~150 s on this machine (2026-09-18); 120 s made every ctest run report it red.
-    # XDG_DATA_HOME keeps session autosaves and the conversation index out of the real profile.
+    # XDG_DATA_HOME keeps session autosaves and the conversation index out of the real profile, and
+    # XDG_CONFIG_HOME keeps the developer's own settings out of the run: with a local model endpoint
+    # configured in the real profile, test_roles read it and the `local` role stopped falling back
+    # to main — two failures that only ever appeared on a machine Relay is actually used on.
     set_tests_properties(backend-and-bash PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/backend;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-data-home;RELAY_KEYRING=off" TIMEOUT 600)
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/backend;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-data-home;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-config-home;RELAY_KEYRING=off" TIMEOUT 600)
 endif()
