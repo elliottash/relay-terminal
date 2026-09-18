@@ -444,6 +444,27 @@ class KnockTests(unittest.TestCase):
                 self.assertEqual(harness.devices.live(), [])
         run(main())
 
+    def test_only_three_knocks_may_wait_at_once(self):
+        async def main():
+            async with Harness(admit=False) as harness:
+                harness.answer_delay = 1.5      # the owner is slow, so they pile up
+                _, url = await harness.invite(uses=guests_mod.MAX_USES)
+                clients = [client_mod.Client(harness.base)
+                           for _ in range(guests_mod.MAX_WAITING_KNOCKS + 1)]
+                results = await asyncio.gather(
+                    *(client.knock(url, name="alice", platform="Chrome") for client in clients),
+                    return_exceptions=True)
+                for client in clients:
+                    await client.close()
+                codes = sorted(error.code for error in results
+                               if isinstance(error, wire.WireError))
+                self.assertEqual(len(codes), guests_mod.MAX_WAITING_KNOCKS + 1)
+                self.assertIn("rate_limited", codes,
+                              "the fourth waiting knock is turned away, not queued")
+                self.assertEqual(len(harness.knocks), guests_mod.MAX_WAITING_KNOCKS,
+                                 "the owner was asked three times, not four")
+        run(main())
+
     def test_a_knock_is_rate_limited_per_invite(self):
         async def main():
             async with Harness(admit=False) as harness:
@@ -595,6 +616,31 @@ class ScopeTests(unittest.TestCase):
                 harness.source._emit("pane-1", {"event": "status", "text": "after"})
                 event = await client.expect("agent", timeout=5)
                 self.assertEqual(event["event"]["event"], "status")
+                await client.close()
+        run(main())
+
+    def test_a_replay_is_filtered_the_same_way_the_first_send_was(self):
+        """Section 7: replayed messages are re-filtered on the way out. A guest who resumes an
+        agent stream for a pane that is not theirs gets the replay dropped, not the ring."""
+        async def main():
+            async with Harness() as harness:
+                _, url = await harness.invite(panes=["pane-1"])
+                client, _ = await harness.guest(url)
+                await client.expect("panes")
+                harness.source._emit("pane-2", {"event": "status", "text": "not yours"})
+                harness.source._emit("pane-1", {"event": "status", "text": "yours"})
+                await asyncio.sleep(0.2)
+                await client.send({"t": "resume",
+                                   "streams": {"agent:pane-1": 0, "agent:pane-2": 0}})
+                seen = []
+                while True:
+                    message = await asyncio.wait_for(client.inbox.get(), 5)
+                    if message["t"] == "resumed":
+                        break
+                    if message["t"] == "agent":
+                        seen.append(message)
+                self.assertEqual([(m["pane"], m["event"]["text"]) for m in seen],
+                                 [("pane-1", "yours")])
                 await client.close()
         run(main())
 
