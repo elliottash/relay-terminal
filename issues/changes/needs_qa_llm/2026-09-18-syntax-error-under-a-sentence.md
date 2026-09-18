@@ -12,7 +12,7 @@ rank: zzzzzx
 created: '2026-09-18'
 acceptance: 'A sentence that bash calls a syntax error (parentheses, quotation marks, a code span, several lines) gets no note under its ✦ echo and no bash complaint in the route line; a broken command keeps both; `tests/test_router.py` passes'
 source: owner, in a Claude Code session, 2026-09-18
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-syntax-error-under-a-sentence/'], related: [W954, T4JV], github: null}
+links: {plans: [], commits: [6c8f0c2], evidence: ['docs/qa_evidence/2026-09-18-syntax-error-under-a-sentence/'], related: [W954, T4JV], github: null}
 ---
 # "syntax error" under a sentence with a parenthesis in it
 
