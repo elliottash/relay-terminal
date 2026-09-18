@@ -206,8 +206,9 @@ public:
     void setModel(Model *model) { m_model = model; }
     // Something changed: rebuild the rows. Cheap enough to call on every line.
     void refresh();
-    // One second passed: the countdowns move, and a row that lapsed goes. Nothing is rebuilt
-    // unless something actually went, so the focus stays where the owner left it.
+    // One second passed: the countdowns move. Nothing is rebuilt, so the focus stays where the
+    // owner left it; a row that has lapsed is removed from the model by whoever owns the clock,
+    // which then calls refresh() on every one of these.
     void tick();
     // Which pane's share to show first. Empty means "all of them, in the order they were shared".
     void focusPane(const QString &pane);

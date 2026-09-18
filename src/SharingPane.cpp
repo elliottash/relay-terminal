@@ -520,11 +520,12 @@ void SharingView::refresh()
     if (onTitleChanged) onTitleChanged();
 }
 
+// Only the numbers: a row that has lapsed is taken out of the model by whoever owns the clock
+// (RemoteShare's own second), which then asks every pane in every window to rebuild.
 void SharingView::tick()
 {
     if (!m_model) return;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    if (!m_model->expire(now).isEmpty()) { refresh(); return; }
     for (const Request &request : m_model->requests()) {
         if (QLabel *clock = m_clocks.value(request.key()))
             clock->setText(QStringLiteral("%1 left").arg(countdown(request.secondsLeft(now))));

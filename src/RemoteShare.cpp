@@ -103,7 +103,12 @@ RemoteShare::RemoteShare()
     // when it reaches zero, which is a moment before the hub gives up on it, never after.
     m_second = new QTimer(this);
     m_second->setInterval(1000);
-    connect(m_second, &QTimer::timeout, this, [this] { emit secondPassed(); });
+    connect(m_second, &QTimer::timeout, this, [this] {
+        // Expiring here rather than in the pane: a lapsed row has to go from every Sharing pane
+        // in every window, and whichever one ticked first would otherwise be the only one told.
+        if (!m_sharing.expire(QDateTime::currentMSecsSinceEpoch()).isEmpty()) emit sharingModelChanged();
+        emit secondPassed();
+    });
     m_second->start();
     // The presence rule for notifications (docs/REMOTE-PROTOCOL.md section 9): the hub must not
     // push to a phone while this window is the active, focused one, because the person is already
