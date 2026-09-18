@@ -996,7 +996,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | Web client | `app/` | Pairing with the confirmation code, inbox, thread, composer, plan cards, reconnect. Installable; the service worker does not cache |
 | Guest web client (§10) | `app/guest.js`, `app/rrp.js`, `/join` | The invite link, the knock and its five digits, the shared pane with the same screen painter and scrollback, presence, the editor's ask-to-type and prompt box, pause, role changes and removal. A guest record stored apart from the paired-device one, so one browser can be an owner here and a guest there. `tests/test_remote_guest_browser.py` |
 | Python client | `remote/client.py` | For tests and scripts; also where the client-side pinning rule is tested |
-| Dev harness | `remote/cli.py` | `python3 -m remote.cli share` shares a real shell; `dev` runs the demo agent. Both print the pairing QR |
+| Dev harness | `remote/cli.py` | `python3 -m remote.cli share` shares a real shell; `dev` runs the demo agent. Both print the pairing QR. `--tls`, `--tailscale` and `--public` are the three addresses, and the first two are the same code the share dialog uses |
 | Screen stream (P2) | `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `app/screen.js` | A real PTY parsed by Relay's own emulator, streamed as styled rows, painted as a cell grid on the phone |
 | Scrollback (§6.5) | `engine/core/VtCore.h` (`historyLines`), `engine/tools/ScreenJson.h`, `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `remote/gui_host.py`, `src/RemoteShare.cpp`, `app/screen.js` | Paging by absolute row, from the bridge and from a GUI pane. Every frame carries `base`, so the client keeps the seam between its history and the live block closed while output arrives. Pages are fetched one ahead of the reader and de-duplicated by row; output arriving while somebody is scrolled back moves nothing and offers a way to live instead; at most 2000 rows are kept on the phone. History is painted by the run painter the live screen uses, because both ends of the wire go through one serializer |
 | Take-over (P3) | `remote/host.py`, `app/app.js` | `keys`, `paste`, `line`, `control_request`/`control_release`, an extra-keys row and a line box, refused at a password prompt |
@@ -1006,10 +1006,36 @@ against **real shells** — including Relay's own panes, from the share button i
 | Security review of P1–P4 | `tests/test_remote_security.py` | Push, password entry, voice and multiplayer reviewed adversarially (2026-09-18). Eight findings, all fixed; the attacks stay in the suite. What is **not** fixed is the per-device connect token of §8, which needs a change to §5 |
 | `transport_switch` (§2) | `remote/host.py`, `remote/client.py` | The handshake, tested. There is no second transport yet |
 | Local attach | `remote/attach.py` | The desktop's own terminal joins the same shell, so both ends drive it |
-| In the app | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` | The share chip beside the microphone, the QR and approval dialog, and a sidecar that carries one of Relay's own panes (`ARCHITECTURE.md` section 19) |
+| In the app | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` | The share chip beside the microphone, the QR and approval dialog, and a sidecar that carries one of Relay's own panes (`ARCHITECTURE.md` section 19). The address picker above the QR offers the tailnet name first |
+| How the phone gets a secure context | `remote/tailnet.py`, `remote/devtls.py`, `remote/httpd.py` | `tailscale serve` with a real certificate, or a self-signed one. Both reach the same `httpd.Server`: it takes several listeners with one set of routes, so the CSP, `/pair` and `/join` behave the same at every origin |
 | Voice (§6.4) | `app/app.js`, `remote/gui_host.py`, `src/Pane.h` (`transcribeForRemote`) | A `MediaRecorder` clip from the phone, carried to the pane and transcribed by its own worker on the desktop's key; the text returns to the phone's prompt box, matched to the clip by id. Tested through a headless browser with Chrome's fake capture device; not yet tried with a real microphone on a real phone |
 
 Every Relay pane is an engine pane, so every pane can be shared.
+
+**How a phone gets a secure context** (2026-09-18). WebCrypto, service workers and the camera are
+only available in one, and plain http on a LAN or tailnet address is not one. Relay offers two
+answers and prefers the first:
+
+* **`tailscale serve`** (`remote/tailnet.py`). Tailscale terminates TLS with a Let's Encrypt
+  certificate for `<machine>.<tailnet>.ts.net` and proxies to a **plain http port on loopback** —
+  so what goes behind it is the ordinary local listener, not the self-signed TLS one; pointing it
+  at the TLS listener would put a proxy in front of a certificate it has no reason to trust. There
+  is no warning to accept, nothing is dropped across an interstitial, and Web Push becomes possible
+  at all, because a browser that has seen a certificate error will not register a service worker.
+  It needs `sudo tailscale set --operator=$USER` once on the desktop, and **Serve** and **HTTPS
+  Certificates** enabled for the tailnet in the Tailscale admin console. The helper detects all of
+  that and returns one readable sentence per failure; the CLI prints it and the share dialog shows
+  it under the address picker, because "there is no such option" and "you have not run one command
+  yet" look identical in an empty list.
+* **A self-signed certificate** (`remote/devtls.py`), which needs nothing and costs a warning.
+
+Both end at the same `httpd.Server`, which takes several listeners over one set of routes, so the
+CSP of section 3, the `/pair` and `/join` client-side routes and the WebSocket upgrade are the same
+code answering at whichever origin the QR names. The Noise session is end-to-end **above** TLS
+(section 4): the phone authenticates the desktop by the key it pinned from the QR, so which of
+these is in front changes nothing it verifies. `python3 -m remote.cli share --tailscale` and the
+share dialog's first address are the same `tailnet.publish()`, and both run `tailscale serve reset`
+when sharing stops or the address is changed.
 
 Section 10 is part built. What exists (2026-09-18): guest identity and the participant store
 (`remote/guests.py`, `guests.json` beside `devices.json`), invite links and their rendezvous rooms,

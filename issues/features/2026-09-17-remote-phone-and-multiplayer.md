@@ -38,7 +38,10 @@ open — see "What is left".
 **In the app:** click the share chip beside the microphone in the composer strip (or the palette's
 "Share this pane with a phone", `pane.share`). A dialog shows a QR; scan it, check the five-digit
 code matches the one on the phone, and choose **Allow viewing** or **Allow typing**. The picker
-above the QR chooses which of this machine's addresses the link points at — the phone has to be on
+above the QR chooses where the link points. Its first entry is the tailnet name behind
+`tailscale serve` — a real certificate, no warning, reachable from anywhere the phone is signed in
+— and under it the picker says in one sentence why that is not on offer when it is not. The others
+are this machine's own addresses behind the self-signed certificate, and the phone has to be on
 that network.
 
 **On the phone or tablet:** one prompt box, like Relay's own. What you type is routed — a command
@@ -74,6 +77,7 @@ python3 -m remote.cli share --tls    # prints a QR; scan it, confirm the five-di
 | The share button, dialog and GUI sidecar | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` |
 | Multiplayer, the owner's desktop: "Invite someone to this pane", and the Sharing pane where knocks, control requests and guest prompts are answered | `src/SharingPane.{h,cpp}`, `src/RemoteShare.{h,cpp}`, `tests/sharingpane_test.cpp` |
 | Dev harness with the QR and self-signed TLS | `remote/cli.py`, `remote/devtls.py` |
+| A warning-free address over `tailscale serve`, from the CLI and from the dialog | `remote/tailnet.py`, `remote/gui_host.py`, `src/RemoteShare.cpp` |
 
 ## What is left (refreshed 2026-09-18, 15:00, against `dd35ead`)
 
@@ -197,6 +201,16 @@ Related work: take-over shares the control token with `#C1HH`; `#YR21` improves 
   now that it is retired, every pane can be shared.
 - Owner (2026-09-17): "the no account / cloud / etc are not strict constraints. ideally it could be done in a browser on relay-terminal.ai as a first version, later on we make android / phone apps." A Relay-operated service and accounts are acceptable; v1 is a browser client on relay-terminal.ai, native apps later. Content should stay end-to-end encrypted.
 - Agent tools run without approval today; remote-originated prompts need a security review.
+- **The certificate warning is no longer the only option** (2026-09-18). The share dialog's first
+  address is now the tailnet name behind `tailscale serve` (`remote/tailnet.py`): a real
+  certificate, nothing for the phone to accept, the pairing fragment not dropped across an
+  interstitial, and Web Push testable at last, because a browser that has seen a certificate error
+  will not register a service worker. Confirmed against this machine's own tailnet:
+  `https://spark-dcc9.tail6fb70c.ts.net` answers 200 behind a Let's Encrypt certificate, and
+  `serve reset` takes it down again. On a machine without tailscale — or where `sudo tailscale set
+  --operator=$USER` has not been run, or MagicDNS or Serve are off for the tailnet — it is still
+  the self-signed certificate and the one warning, and the dialog says in one sentence which of
+  the two it is and why.
 
 ## What was found by using it (2026-09-18)
 
