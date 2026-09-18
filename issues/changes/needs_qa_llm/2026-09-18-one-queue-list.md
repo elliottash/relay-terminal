@@ -12,7 +12,7 @@ rank: b
 created: '2026-09-18'
 acceptance: 'The queue strip is one list in delivery order: steers waiting for the next tool call are selectable rows at the top, reached with ↑, withdrawn with Shift+Delete or ×, taken back into the prompt box by editing, moved back to the queue with Ctrl+↓; Ctrl+↑ on the head queued prompt makes it a steer; queued rows edit, reorder and remove as before; `Pane::removeRow` and `Pane::queueRows` exist; queuenav tests pass'
 source: 'owner, bug intake 2026-09-18, and the approved one-list design'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-one-queue-list/'], related: [Y4GE], github: null}
+links: {plans: [], commits: [69b091d], evidence: ['docs/qa_evidence/2026-09-18-one-queue-list/'], related: [Y4GE], github: null}
 ---
 # The queue strip is one list: steers are rows like the rest
 
