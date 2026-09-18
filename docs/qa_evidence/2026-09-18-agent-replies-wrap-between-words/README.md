@@ -13,8 +13,8 @@ columns). One prompt typed into the composer.
 edge dropped, streamed one character at a time equal to whole, SGR and OSC 8 zero-width, hanging
 indent for `•`/`◦`/`12.`/indented code, over-long words left to the terminal, wide characters.
 
-Seen during the run and **not** caused by this change: a row of the reply occasionally vanishes
-mid-stream (visible in both screenshots' source scrollback — "once a / of output" in the after
-run). It happens with the wrapper off too; Relay's own writes to the terminal were logged and are
-complete and in order, so something else (likely the shell redrawing its two-row prompt) writes
-over that row. Reported to the owner in chat; not fixed here.
+Seen during the run and **not** caused by this change: a row of the reply occasionally vanished
+mid-stream, with the wrapper off too. Fixed in 0a7dbd6 — two causes, both triggered when the
+reasoning panel resizes the terminal: Readline's SIGWINCH redraw ("\r\x1b[K") blanked the row
+being written, and libvterm's reflow put the cursor on the row above when that row was exactly
+full. After the fix the rendered reply matches the model's text exactly.
