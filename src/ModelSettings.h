@@ -77,7 +77,10 @@ private:
     void chooseProvider(const QString &presetId);
     bool hasKey(const QString &presetId) const;
     QString presetLabel(const QString &presetId) const;
+    QString providerName(const QString &presetId) const;
+    QString providerChoice(const QString &presetId) const;
     QString shortProviderLabel(const QString &presetId) const;
+    QJsonArray choosableProviders() const;
     QStringList effortsFor(const QString &presetId) const;
     QJsonObject tierDefault(const QString &tier) const;
     void buildTierRow(QVBoxLayout *into, const QString &tier, const QJsonObject &spec);

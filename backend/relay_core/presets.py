@@ -86,6 +86,10 @@ class Preset:
     group: str = "payg"
     key_url: str = ""          # where the user gets a key; shown as a hint, never fetched
     note: str = ""             # one line under the row in the keys modal
+    # The company, not the model: the roles modal picks a *provider*, and "Kimi · K3" read as if the
+    # tier were pinned to K3. `plan` tells two presets of the same provider apart when both are listed.
+    provider: str = ""
+    plan: str = ""
 
     @property
     def vision(self) -> bool:
@@ -96,7 +100,8 @@ class Preset:
         return {"id": self.id, "label": self.label, "base_url": self.base_url,
                 "model": self.model, "extra": dict(self.extra), "context_window": self.context_window,
                 "efforts": distinct_efforts(self.effort_style), "group": self.group,
-                "key_url": self.key_url, "note": self.note, "vision": self.vision}
+                "key_url": self.key_url, "note": self.note, "vision": self.vision,
+                "provider": self.provider or self.label.split(" · ")[0], "plan": self.plan}
 
 
 GLM_EXTRA = {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
@@ -108,19 +113,23 @@ GLM_FAST_EXTRA = {"thinking": {"type": "enabled"}, "reasoning_effort": "low"}
 PRESETS: dict[str, Preset] = {p.id: p for p in [
     Preset("kimi", "Kimi · K3", "https://api.moonshot.ai/v1", "kimi-k3", {"reasoning_effort": "high"},
            1_048_576, "kimi", "payg", "https://platform.kimi.ai/console/api-keys",
-           "Moonshot platform, pay-as-you-go."),
+           "Moonshot platform, pay-as-you-go.",
+           provider="Kimi", plan="Pay-as-you-go"),
     # Kimi Code subscription (https://www.kimi.com/code/docs/en/): OpenAI-compatible base
     # https://api.kimi.ai/coding/v1; model ids k3, k3-256k, kimi-for-coding, kimi-for-coding-highspeed.
     Preset("kimi-code", "Kimi Code · K3", "https://api.kimi.ai/coding/v1", "k3", {"reasoning_effort": "high"},
            1_048_576, "kimi", "subscription", "https://www.kimi.com/code/console",
-           "Kimi Code subscription key (not a Moonshot platform key)."),
+           "Kimi Code subscription key (not a Moonshot platform key).",
+           provider="Kimi", plan="Coding Plan"),
     Preset("glm", "Z.AI · GLM-5.3 · standard API", "https://api.z.ai/api/paas/v4", "glm-5.3", GLM_EXTRA,
            1_000_000, "glm", "payg", "https://z.ai/manage-apikey/apikey-list",
-           "Z.AI open platform, pay-as-you-go."),
+           "Z.AI open platform, pay-as-you-go.",
+           provider="Z.AI (GLM)", plan="standard API"),
     # https://docs.z.ai/devpack/quick-start lists the Coding Plan's OpenAI base verbatim.
     Preset("glm-coding", "Z.AI · GLM-5.3 · Coding Plan", "https://api.z.ai/api/coding/paas/v4", "glm-5.3", GLM_EXTRA,
            1_000_000, "glm", "subscription", "https://z.ai/manage-apikey/apikey-list",
-           "GLM Coding Plan subscription; subscribe at z.ai/subscribe."),
+           "GLM Coding Plan subscription; subscribe at z.ai/subscribe.",
+           provider="Z.AI (GLM)", plan="Coding Plan"),
     # MiniMax renamed the Coding Plan to the Token Plan and it shares the pay-as-you-go base URL; only the
     # key differs and the two kinds of key are not interchangeable.
     # https://platform.minimax.io/docs/token-plan/other-tools.md, .../token-plan/quickstart
@@ -128,27 +137,32 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
     # MiniMax-M2.7-highspeed, M2.5, M2.1, …). M3 is 1,000,000 tokens; the M2.x family is 204,800.
     Preset("minimax", "MiniMax · M3 · Coding/Token Plan", "https://api.minimax.io/v1", "MiniMax-M3", {},
            1_000_000, "none", "subscription", "https://platform.minimax.io/user-center/payment/token-plan",
-           "MiniMax Coding Plan is now the Token Plan; the same base URL serves both key kinds."),
+           "MiniMax Coding Plan is now the Token Plan; the same base URL serves both key kinds.",
+           provider="MiniMax", plan="Token Plan"),
     # https://openrouter.ai/api/v1/models (fetched 2026-09-17): deepseek/deepseek-v4.1-flash exists,
     # a non-flash deepseek/deepseek-v4.1 does not.
     Preset("openrouter", "OpenRouter · DeepSeek V4.1 Flash", "https://openrouter.ai/api/v1",
            "deepseek/deepseek-v4.1-flash", {}, 1_048_576, "openrouter", "aggregator",
-           "https://openrouter.ai/keys", "One key for every model; also Relay's router and chores model."),
+           "https://openrouter.ai/keys", "One key for every model; also Relay's router and chores model.",
+           provider="OpenRouter"),
     # https://developers.openai.com/api/docs/api-reference/chat/create
     Preset("openai", "OpenAI · GPT-6 Astra", "https://api.openai.com/v1", "gpt-6-astra",
            {"reasoning_effort": "high"}, 1_050_000, "openai", "payg",
-           "https://platform.openai.com/api-keys", "Pay-as-you-go OpenAI API key (not a ChatGPT login)."),
+           "https://platform.openai.com/api-keys", "Pay-as-you-go OpenAI API key (not a ChatGPT login).",
+           provider="OpenAI (ChatGPT)", plan="Pay-as-you-go"),
     # https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk — the OpenAI-compatible
     # layer lives at https://api.anthropic.com/v1 and accepts the key as an Authorization: Bearer header.
     # It ignores reasoning_effort, so Relay sends no effort parameters to it.
     Preset("anthropic", "Anthropic · Claude Opus 5", "https://api.anthropic.com/v1", "claude-opus-5", {},
            1_000_000, "none", "payg", "https://console.anthropic.com/settings/keys",
-           "Anthropic's OpenAI-compatible endpoint; effort is the model's own default."),
+           "Anthropic's OpenAI-compatible endpoint; effort is the model's own default.",
+           provider="Anthropic (Claude)", plan="Pay-as-you-go"),
     # https://ai.google.dev/gemini-api/docs/openai — base URL is .../v1beta/openai (stored without the
     # trailing slash because Relay appends /chat/completions).
     Preset("gemini", "Google · Gemini 3.1 Pro", "https://generativelanguage.googleapis.com/v1beta/openai",
            "gemini-3.1-pro-preview", {"reasoning_effort": "high"}, 1_048_576, "gemini", "payg",
-           "https://aistudio.google.com/apikey", "Gemini API key from AI Studio."),
+           "https://aistudio.google.com/apikey", "Gemini API key from AI Studio.",
+           provider="Google (Gemini)", plan="Pay-as-you-go"),
 ]}
 
 # --- Main / Flash / Lite tiers (docs/AGENT-SESSIONS-PROTOCOL.md section 13.7) ----------------------
@@ -211,6 +225,23 @@ def validate_tier(tier) -> str:
 def tier_default(preset_id: str | None, tier: str) -> tuple[str, str, dict] | None:
     """The (preset, model, extra) a provider uses for a tier, or None for an unknown provider."""
     return TIER_DEFAULTS.get(preset_id or "", {}).get(validate_tier(tier))
+
+
+def provider_tier_model(preset_id: str, tier: str) -> tuple[str, dict]:
+    """That provider's own (model, extra) for a tier.
+
+    Naming a provider for a tier means "your Flash model on Z.AI", not "Z.AI's headline model":
+    picking Z.AI for Flash must give glm-5.3-flash, not glm-5.3. A tier whose built-in entry points at
+    another provider (Lite is Gemini through OpenRouter for everyone) does not drag that provider in
+    when the user asked for this one; the nearest tier that stays on the provider is used instead, and
+    a provider with no tier table at all falls back to its preset model.
+    """
+    for candidate in tier_fallbacks(tier):          # this tier first, then towards Main
+        entry = tier_default(preset_id, candidate)
+        if entry is not None and entry[0] == preset_id:
+            return entry[1], dict(entry[2])
+    preset = PRESETS[preset_id]
+    return preset.model, dict(preset.extra)
 
 
 def tier_fallbacks(tier: str) -> tuple[str, ...]:

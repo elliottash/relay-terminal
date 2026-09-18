@@ -16,7 +16,8 @@ import copy
 from dataclasses import dataclass
 
 from .presets import (PRESETS, TIER_LABELS, TIERS, apply_effort, effort_style, match_preset,
-                      tier_default, tier_fallbacks, validate_effort, validate_tier)
+                      provider_tier_model, tier_default, tier_fallbacks, validate_effort,
+                      validate_tier)
 from .provider import ProviderConfig
 
 # Protocol names. "switchboard" is stored and resolved even though the Switchboard itself is not
@@ -324,8 +325,18 @@ class RoleResolver:
         if override:
             preset = PRESETS.get(override.get("preset") or "")
             base_url = override.get("base_url") or (preset.base_url if preset else "")
-            model = override.get("model") or (preset.model if preset else "")
-            extra = override["extra"] if override.get("extra") is not None else (dict(preset.extra) if preset else {})
+            model = override.get("model") or ""
+            extra = override["extra"] if override.get("extra") is not None else None
+            if preset and not model:
+                # An override that names a provider and no model means that provider's model *for this
+                # tier* (presets.provider_tier_model): "Flash on Z.AI" is glm-5.3-flash, not glm-5.3.
+                model, tier_extra = provider_tier_model(preset.id, tier)
+                if extra is None:
+                    extra = tier_extra
+            if not model and preset:
+                model = preset.model
+            if extra is None:
+                extra = dict(preset.extra) if preset else {}
             match = match_preset(base_url, model)
             return (preset.id if preset else (match.id if match else None)), base_url, model, extra, override.get("effort")
         entry = tier_default(self.main_preset_id, tier)

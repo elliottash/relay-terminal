@@ -51,6 +51,13 @@ target_link_libraries(relay-board PUBLIC relay-editor ${RELAY_QT}::Widgets)
 target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
 
 # Folder explorer and file preview panes: plain Qt, with optional syntax highlighting and PDF.
+# The two provider modals (API keys, model roles): a static library so the roles dialog's lists can be
+# tested headlessly, exactly like the settings pane below.
+add_library(relay-modelsettings STATIC src/ModelSettings.cpp src/ModelSettings.h)
+target_include_directories(relay-modelsettings PUBLIC src)
+target_link_libraries(relay-modelsettings PUBLIC ${RELAY_QT}::Widgets)
+target_compile_options(relay-modelsettings PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-settings STATIC src/SettingsPane.cpp src/SettingsPane.h)
 target_include_directories(relay-settings PUBLIC src)
 target_link_libraries(relay-settings PUBLIC ${RELAY_QT}::Widgets)
@@ -245,11 +252,10 @@ if(RELAY_BUILD_APP)
         message(FATAL_ERROR "Relay v0.1 targets Linux (/proc and the Bash integration).")
     endif()
     add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/Hints.cpp src/Hints.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
-        src/ModelSettings.cpp src/ModelSettings.h
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
-    target_link_libraries(relay PRIVATE relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-slash relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-slash relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -277,6 +283,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-editor-tests PRIVATE relay-editor ${RELAY_QT}::Test)
     add_test(NAME editor COMMAND relay-editor-tests)
     set_tests_properties(editor PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-modelsettings-tests tests/modelsettings_test.cpp)
+    target_link_libraries(relay-modelsettings-tests PRIVATE relay-modelsettings ${RELAY_QT}::Test)
+    add_test(NAME modelsettings COMMAND relay-modelsettings-tests)
+    set_tests_properties(modelsettings PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-settings-tests tests/settingspane_test.cpp)
     target_link_libraries(relay-settings-tests PRIVATE relay-settings ${RELAY_QT}::Test)
     add_test(NAME settings COMMAND relay-settings-tests)

@@ -391,10 +391,10 @@ private:
         add("agent.modelRoles", "agent", "Model roles: default provider and the Main / Flash / Lite models", {});
         add("app.settings", "window", "Settings pane, General tab", {QStringLiteral("Ctrl+,")});
         add("agent.flashAgent", "agent", "Switch this pane between the Main agent and the Flash agent", {QStringLiteral("Alt+F")});   // model roles
-        add("input.modeAuto", "agent", "Input mode: auto detect", {});
+        add("input.modeAuto", "agent", "Input mode: auto", {});
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
         add("input.modeAgent", "agent", "Input mode: agent", {});
-        add("input.toggle", "agent", "Cycle input: auto detect → terminal → agent (from the prompt box)",
+        add("input.toggle", "agent", "Cycle input: auto → terminal → agent (from the prompt box)",
             {QStringLiteral("Ctrl+I"), QStringLiteral("Ctrl+Shift+I")});
         add("agent.planToggle", "agent", "Toggle plan mode (from the prompt box)", {QStringLiteral("Shift+Tab")});
         add("agent.effortUp", "agent", "Raise reasoning effort (from the prompt box)", {QStringLiteral("Alt+.")});
@@ -1022,7 +1022,7 @@ public:
         setMode(next);
         toast(next == QStringLiteral("agent") ? QStringLiteral("Input: Agent · ! runs one line in the terminal")
               : next == QStringLiteral("shell") ? QStringLiteral("Input: Terminal · * sends one line to the agent")
-                                                : QStringLiteral("Input: Auto detect"));
+                                                : QStringLiteral("Input: Auto"));
     }
 
     // ----- control policy for programs --------------------------------------------------
@@ -2119,7 +2119,7 @@ private:
         m_modeChip->setPopupMode(QToolButton::InstantPopup);
         {
             auto *menu = new QMenu(m_modeChip);
-            for (const auto &pair : {std::pair<const char *, const char *>{"auto", "auto detect"},
+            for (const auto &pair : {std::pair<const char *, const char *>{"auto", "auto"},
                                      {"shell", "terminal"}, {"agent", "agent"}}) {
                 const QString value = QString::fromLatin1(pair.first);
                 menu->addAction(QString::fromLatin1(pair.second), this, [this, value] { setMode(value); focusInput(); });
@@ -10334,7 +10334,7 @@ private:
                                     QStringLiteral("Default input for new sessions"),
                                     QStringLiteral("Ctrl+I cycles auto → terminal → agent; ! and * override one line"),
                                     {QStringLiteral("auto"), QStringLiteral("shell"), QStringLiteral("agent")},
-                                    {QStringLiteral("Auto detect"), QStringLiteral("Terminal"), QStringLiteral("Agent")},
+                                    {QStringLiteral("Auto"), QStringLiteral("Terminal"), QStringLiteral("Agent")},
                                     current, [](const QString &value) {
                 QSettings().setValue(QStringLiteral("input/default"), value);
             });
@@ -10561,10 +10561,10 @@ private:
                                 QStringLiteral("agent.flashAgent"), flash);
         }
         const QString mode = pane ? pane->mode() : QStringLiteral("auto");
-        const QString modeName = mode == QStringLiteral("shell") ? QStringLiteral("Terminal") : mode == QStringLiteral("agent") ? QStringLiteral("Agent") : QStringLiteral("Auto detect");
+        const QString modeName = mode == QStringLiteral("shell") ? QStringLiteral("Terminal") : mode == QStringLiteral("agent") ? QStringLiteral("Agent") : QStringLiteral("Auto");
         items << submenu(QStringLiteral("menu:mode"), agent, QStringLiteral("Input mode"), modeName, [this, mode] {
             return QList<PaletteItem>{
-                actionItem(QStringLiteral("Input mode"), QStringLiteral("Auto detect"), QStringLiteral("Commands to the terminal, everything else to the agent"), QStringLiteral("input.modeAuto"), mode == QStringLiteral("auto")),
+                actionItem(QStringLiteral("Input mode"), QStringLiteral("Auto"), QStringLiteral("Commands to the terminal, everything else to the agent"), QStringLiteral("input.modeAuto"), mode == QStringLiteral("auto")),
                 actionItem(QStringLiteral("Input mode"), QStringLiteral("Terminal"), QStringLiteral("Always the terminal; the agent fixes failures"), QStringLiteral("input.modeTerminal"), mode == QStringLiteral("shell")),
                 actionItem(QStringLiteral("Input mode"), QStringLiteral("Agent"), QStringLiteral("Always the agent"), QStringLiteral("input.modeAgent"), mode == QStringLiteral("agent"))};
         });

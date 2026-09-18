@@ -391,6 +391,24 @@ class TierTests(unittest.TestCase):
         # Main-tier roles are untouched.
         self.assertEqual(made.resolve("subagent").model, "glm-5.3")
 
+    def test_a_tier_that_names_only_a_provider_uses_that_providers_tier_model(self):
+        # The owner's case: Main on Kimi, Flash on the GLM Coding Plan, chosen as a provider with no
+        # model typed. Flash must be glm-5.3-flash — picking the provider used to hand over glm-5.3,
+        # the Main-grade model, at Main-grade prices.
+        made = self.tiered("kimi", ("kimi", "glm-coding"), tiers={"flash": {"preset": "glm-coding"}})
+        flash = made.resolve("flash")
+        self.assertEqual((flash.preset_id, flash.model), ("glm-coding", "glm-5.3-flash"))
+        self.assertEqual(flash.config.extra["reasoning_effort"], "low")   # GLM_FAST_EXTRA, not GLM_EXTRA
+        self.assertEqual(made.resolve("main").model, "kimi-k3")
+        # Lite on Z.AI: Z.AI's own Lite entry is Gemini through OpenRouter, and asking for Z.AI must not
+        # drag OpenRouter in — it steps to the nearest tier that stays on the provider.
+        lite = self.tiered("kimi", ("kimi", "glm-coding"), tiers={"lite": {"preset": "glm-coding"}}).resolve("chores")
+        self.assertEqual((lite.preset_id, lite.model), ("glm-coding", "glm-5.3-flash"))
+        # A model typed by hand still wins.
+        typed = self.tiered("kimi", ("kimi", "glm-coding"),
+                            tiers={"flash": {"preset": "glm-coding", "model": "glm-5.3"}})
+        self.assertEqual(typed.resolve("flash").model, "glm-5.3")
+
     def test_tier_summary_reports_models_notes_and_no_keys(self):
         made = self.tiered("kimi", ("kimi",))
         summary = made.tier_summary()

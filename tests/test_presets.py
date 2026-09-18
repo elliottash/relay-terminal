@@ -51,6 +51,29 @@ class PresetTableTests(unittest.TestCase):
         self.assertEqual(by_group["aggregator"], ["openrouter"])
         self.assertEqual(sorted(by_group["payg"]), ["anthropic", "gemini", "glm", "kimi", "openai"])
 
+    def test_every_preset_names_its_company_and_its_plan(self):
+        # The roles modal picks a provider, so it shows the company, never the preset's model name.
+        expected = {"kimi": "Kimi", "kimi-code": "Kimi", "glm": "Z.AI (GLM)", "glm-coding": "Z.AI (GLM)",
+                    "minimax": "MiniMax", "openrouter": "OpenRouter", "openai": "OpenAI (ChatGPT)",
+                    "anthropic": "Anthropic (Claude)", "gemini": "Google (Gemini)"}
+        self.assertEqual({p.id: p.to_dict()["provider"] for p in P.PRESETS.values()}, expected)
+        # Two presets of one company are told apart by their plan, so neither can be nameless.
+        shared = {name for name in expected.values() if list(expected.values()).count(name) > 1}
+        for preset in P.PRESETS.values():
+            if expected[preset.id] in shared:
+                self.assertTrue(preset.plan, preset.id)
+
+    def test_a_provider_serves_a_tier_with_its_own_model_for_that_tier(self):
+        self.assertEqual(P.provider_tier_model("glm-coding", "flash"), ("glm-5.3-flash", P.GLM_FAST_EXTRA))
+        self.assertEqual(P.provider_tier_model("glm-coding", "main")[0], "glm-5.3")
+        # Z.AI's Lite is Gemini on OpenRouter; asking for Z.AI stays on Z.AI.
+        self.assertEqual(P.provider_tier_model("glm", "lite")[0], "glm-5.3-flash")
+        self.assertEqual(P.provider_tier_model("openrouter", "lite")[0], "google/gemini-3.5-flash-lite")
+        for preset_id in P.PRESETS:
+            for tier in P.TIERS:
+                model, _ = P.provider_tier_model(preset_id, tier)
+                self.assertTrue(model, (preset_id, tier))
+
     def test_providers_without_an_effort_knob_send_no_effort_fields(self):
         # Anthropic's compat layer ignores reasoning_effort and MiniMax has no such field.
         for preset_id in ("anthropic", "minimax"):

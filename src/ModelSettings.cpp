@@ -374,13 +374,55 @@ QString RolesDialog::presetLabel(const QString &presetId) const {
     return presetId;
 }
 
-// Preset labels name the provider and its default model ("OpenRouter · DeepSeek V4.1 Flash"). A tier
-// usually runs a different model on that provider, so rows and the recommended line name the provider
-// and its plan only: "OpenRouter", "Z.AI Coding Plan".
+// Preset labels name the provider and its default model ("OpenRouter · DeepSeek V4.1 Flash"), which
+// is the right thing in the keys modal — you hold a key per plan — and the wrong thing here: these
+// rows choose a *provider*, and the model beside it is the tier's, not the preset's. So everything in
+// this dialog names the company (presets.py `provider`): Kimi, Z.AI (GLM), OpenAI (ChatGPT)…
+QString RolesDialog::providerName(const QString &presetId) const {
+    for (const auto &value : std::as_const(m_presets)) {
+        const QJsonObject preset = value.toObject();
+        if (str(preset, "id") != presetId) continue;
+        const QString name = str(preset, "provider");
+        return name.isEmpty() ? presetLabel(presetId).split(QStringLiteral(" · ")).first() : name;
+    }
+    return presetId;
+}
+
+// The same company can be offered twice — a Kimi Code key and a Moonshot platform key are different
+// keys on different endpoints — and then, and only then, the plan tells the two entries apart.
+QString RolesDialog::providerChoice(const QString &presetId) const {
+    const QString name = providerName(presetId);
+    int sharing = 0;
+    for (const auto &value : choosableProviders())
+        if (providerName(str(value.toObject(), "id")) == name) ++sharing;
+    if (sharing < 2) return name;
+    const QString plan = [&] {
+        for (const auto &value : std::as_const(m_presets))
+            if (str(value.toObject(), "id") == presetId) return str(value.toObject(), "plan");
+        return QString();
+    }();
+    return plan.isEmpty() ? name : name + QStringLiteral(" · ") + plan;
+}
+
 QString RolesDialog::shortProviderLabel(const QString &presetId) const {
-    const QStringList parts = presetLabel(presetId).split(QStringLiteral(" · "));
-    if (parts.size() >= 3) return parts.first() + ' ' + parts.last();
-    return parts.isEmpty() ? presetId : parts.first();
+    return providerChoice(presetId);
+}
+
+// Only providers you hold a key for are worth offering: picking one you cannot reach just moves the
+// pane onto a row that falls back. The exception is the provider already in use (and, on a fresh
+// install where nothing has a key, every provider — otherwise the dialog would offer nothing at all
+// and the API keys… button beside it would have nothing to come back to).
+QJsonArray RolesDialog::choosableProviders() const {
+    QJsonArray keyed, all;
+    for (const auto &value : std::as_const(m_presets)) {
+        const QJsonObject preset = value.toObject();
+        all.append(preset);
+        if (preset.value(QStringLiteral("has_stored_key")).toBool() || str(preset, "id") == m_provider)
+            keyed.append(preset);
+    }
+    for (const auto &value : std::as_const(keyed))
+        if (value.toObject().value(QStringLiteral("has_stored_key")).toBool()) return keyed;
+    return all;
 }
 
 QJsonObject RolesDialog::tierDefault(const QString &tier) const {
@@ -390,13 +432,18 @@ QJsonObject RolesDialog::tierDefault(const QString &tier) const {
 
 void RolesDialog::chooseProvider(const QString &presetId) {
     if (presetId.isEmpty() || presetId == m_provider) return;
+    const QString previous = m_provider;
     m_provider = presetId;
-    // Switching the default provider re-derives every tier, so hand-made tier overrides are dropped:
-    // a Flash model from the old provider would not exist on the new one.
+    // Switching the default provider re-derives the tiers that followed it, and drops an override that
+    // named the *old* provider: its model does not exist on the new one. An override pointing somewhere
+    // else is the whole point of the row — Main on Kimi with Flash on Z.AI — so it is kept.
     QSettings settings;
-    for (const QString &tier : tierIds())
+    for (const QString &tier : tierIds()) {
+        const QString pinned = settings.value(tierSetting(tier, QStringLiteral("preset"))).toString();
+        if (!pinned.isEmpty() && pinned != previous && pinned != presetId) continue;
         for (const QString &field : {QStringLiteral("preset"), QStringLiteral("model"), QStringLiteral("effort")})
             settings.remove(tierSetting(tier, field));
+    }
     if (onProviderChosen) onProviderChosen(presetId);
     if (onRolesChanged) onRolesChanged();
     rebuild();
@@ -465,14 +512,20 @@ void RolesDialog::buildTierRow(QVBoxLayout *into, const QString &tier, const QJs
         box->addWidget(edit);
 
         auto *provider = new QComboBox;
-        provider->setToolTip(QStringLiteral("Which provider serves this tier."));
+        provider->setToolTip(QStringLiteral("Which provider serves this tier. Choosing one alone gives "
+                                            "that provider's own %1 model.").arg(label));
         provider->addItem(QStringLiteral("Default provider"), QString());
+        const QString override = settings.value(tierSetting(tier, QStringLiteral("preset"))).toString();
         for (const auto &value : std::as_const(m_presets)) {
             const QJsonObject item = value.toObject();
-            if (!item.value(QStringLiteral("has_stored_key")).toBool()) continue;
-            provider->addItem(str(item, "label"), str(item, "id"));
+            const QString id = str(item, "id");
+            const bool stored = item.value(QStringLiteral("has_stored_key")).toBool();
+            // A tier still shows the provider it is pinned to after that key goes away: the row would
+            // otherwise read "Default provider" while the worker reports the fallback underneath it.
+            if (!stored && id != override) continue;
+            provider->addItem(stored ? providerChoice(id)
+                                     : providerChoice(id) + QStringLiteral("  (no key)"), id);
         }
-        const QString override = settings.value(tierSetting(tier, QStringLiteral("preset"))).toString();
         const int index = provider->findData(override);
         provider->setCurrentIndex(index >= 0 ? index : 0);
         connect(provider, QOverload<int>::of(&QComboBox::activated), this, [this, provider, tier](int i) {
@@ -672,7 +725,7 @@ void RolesDialog::pinRole(const QString &role) {
     for (const auto &value : std::as_const(m_presets)) {
         const QJsonObject preset = value.toObject();
         if (!preset.value(QStringLiteral("has_stored_key")).toBool()) continue;
-        labels << str(preset, "label");
+        labels << providerChoice(str(preset, "id"));
         ids << str(preset, "id");
     }
     if (ids.isEmpty()) {
@@ -707,23 +760,33 @@ void RolesDialog::rebuild() {
     m_filling = true;
 
     m_providerBox->clear();
-    for (const auto &value : std::as_const(m_presets)) {
+    for (const auto &value : choosableProviders()) {
         const QJsonObject preset = value.toObject();
         const bool stored = preset.value(QStringLiteral("has_stored_key")).toBool();
-        m_providerBox->addItem(stored ? str(preset, "label")
-                                      : str(preset, "label") + QStringLiteral("  (no key)"),
-                               str(preset, "id"));
+        const QString id = str(preset, "id");
+        m_providerBox->addItem(stored ? providerChoice(id)
+                                      : providerChoice(id) + QStringLiteral("  (no key)"), id);
         m_providerBox->setItemData(m_providerBox->count() - 1, stored, Qt::UserRole + 1);
     }
     const int index = m_providerBox->findData(m_provider);
     if (index >= 0) m_providerBox->setCurrentIndex(index);
 
+    // The recommendation names a plan to go and buy, so here — unlike the pick lists — the plan is
+    // always spelled out, whether or not you happen to hold the other key from the same company.
+    auto recommend = [this](const QString &id) {
+        for (const auto &value : std::as_const(m_presets)) {
+            const QJsonObject preset = value.toObject();
+            if (str(preset, "id") != id || str(preset, "plan").isEmpty()) continue;
+            return providerName(id) + QStringLiteral(" · ") + str(preset, "plan");
+        }
+        return providerName(id);
+    };
     QStringList pairs;
     for (const auto &value : m_catalog.value(QStringLiteral("recommended")).toArray()) {
         const QJsonArray pair = value.toArray();
         if (pair.size() == 2)
-            pairs << QStringLiteral("%1 + %2").arg(shortProviderLabel(pair.at(0).toString()),
-                                                   shortProviderLabel(pair.at(1).toString()));
+            pairs << QStringLiteral("%1 + %2").arg(recommend(pair.at(0).toString()),
+                                                   recommend(pair.at(1).toString()));
     }
     m_recommended->setText(pairs.isEmpty()
         ? QString()

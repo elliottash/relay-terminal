@@ -773,6 +773,14 @@ rejected — it is the pane's own model. Each value is `null` (restore the provi
 additionally accepts `{"tier": "main"|"flash"|"lite", "effort"?}`, which is exclusive with
 `preset`/`base_url`/`model`/`extra`; giving both is an error.
 
+**A tier that names only a provider** (`{"preset": "glm-coding"}`, which is what the roles modal writes
+when you pick a provider for a row) runs **that provider's model for that tier**, not its headline model:
+Flash on Z.AI is `glm-5.3-flash`, not `glm-5.3` (`presets.provider_tier_model`). Main on Kimi with Flash
+on the GLM Coding Plan is therefore two choices and no typing. When that provider's own entry for the tier
+points elsewhere — Lite is Gemini through OpenRouter for every provider — the named provider is kept and
+the nearest tier that stays on it is used instead (Lite on Z.AI → `glm-5.3-flash`). An override that also
+names `model` still wins outright.
+
 **Fallback.** A tier whose provider has no stored key steps one tier towards Main — Lite → Flash → Main —
 and the Main tier is the pane's own model, so resolution never hard-fails. The step-down is expected, not a
 misconfiguration, so it appears as `note` on the tier and the role (`"No stored key for the Lite model;
@@ -821,10 +829,14 @@ them). An OAuth login is not an API key and is never imported: Claude Code and C
 OAuth by default, and those tokens do not work on the OpenAI-compatible endpoints Relay talks to.
 
 The `presets` event gains, per preset, `group` (`subscription` / `aggregator` / `payg`), `key_url` (where
-the user gets a key), `note`, and `key_source` (`env` / `keyring` / `""`), so the modal can show
+the user gets a key), `note`, `provider` (the company: "Kimi", "Z.AI (GLM)", "OpenAI (ChatGPT)"…) and
+`plan` ("Coding Plan", "Pay-as-you-go", … — empty when the provider has one entry), and `key_source`
+(`env` / `keyring` / `""`), so the modal can show
 "From RELAY_OPENROUTER_API_KEY" and refuse to offer Remove for something it cannot remove. The event also
 gains `tier_defaults` (13.7) and `role_actions` — the Advanced list, one row per job — so the GUI never
-keeps a second copy of the backend's tables.
+keeps a second copy of the backend's tables. The keys modal lists a preset per plan and so uses `label`
+("Kimi · K3"); the roles modal chooses a *provider* and uses `provider`, adding `· <plan>` only when two
+presets of the same company are both offered.
 
 ## 16. Voice transcription (v1.6, 2026-09-17)
 
