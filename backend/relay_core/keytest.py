@@ -14,7 +14,7 @@ import time
 
 from . import localmodels
 from .presets import PRESETS, apply_effort
-from .provider import ChatProvider, ProviderConfig
+from .provider import ChatProvider, ProviderConfig, ProviderError, ProviderTruncated
 
 SYSTEM = "Reply with the single word: ok"
 USER = "ping"
@@ -23,11 +23,11 @@ USER = "ping"
 # tenths of a cent, and a truncated answer counts as a pass anyway (see _TRUNCATED below).
 MAX_TOKENS = 1024
 TIMEOUT_S = 30
-# provider.py raises this when the model hit the output limit. For an ordinary turn that is a real
-# failure; for the key test it is a pass, because the request was authenticated, routed and answered
-# — the only thing it did not do is finish a sentence nobody reads. There is no error code to match
-# on, so this matches the message, which is a literal in provider.py.
-_TRUNCATED = "truncated or filtered"
+# provider.py raises ProviderTruncated when the model hit the output limit. For an ordinary turn that
+# is a real failure; for the key test it is a pass, because the request was authenticated, routed and
+# answered — the only thing it did not do is finish a sentence nobody reads. It is matched by type:
+# matching the message read the wording of a sentence written for the user, and broke the moment that
+# sentence was rewritten.
 
 
 def _preset(preset_id: str):
@@ -64,13 +64,15 @@ def check(preset_id: str, key: str, factory=_provider) -> dict:
         result["reply_chars"] = len(reply)
     except Exception as exc:                       # ProviderError, timeouts, DNS, bad JSON
         text = str(exc)
-        if type(exc).__name__ == "ProviderError" and _TRUNCATED in text:
+        if isinstance(exc, ProviderTruncated):
             result["ok"] = True
             result["truncated"] = True
             result["reply_chars"] = 0
         else:
             result["ok"] = False
-            result["error"] = text[:300] if type(exc).__name__ in ("ProviderError", "ValueError", "OSError") \
+            # A ProviderError subclass (a stall, say) says the useful thing in its message, and none
+            # of them ever carry the provider's body or the key.
+            result["error"] = text[:300] if isinstance(exc, (ProviderError, ValueError, OSError)) \
                 else f"Test failed ({type(exc).__name__})."
     result["elapsed_ms"] = int((time.monotonic() - started) * 1000)
     return result

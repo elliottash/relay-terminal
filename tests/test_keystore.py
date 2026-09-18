@@ -262,15 +262,23 @@ class KeysModalTests(unittest.TestCase):
         self.assertEqual(tools, [])
 
     def test_a_truncated_answer_still_proves_the_key(self):
-        # Reasoning models spend the budget on thinking; that is not a key problem.
-        from relay_core.provider import ProviderError
+        # Reasoning models spend the budget on thinking; that is not a key problem. Matched by type,
+        # so rewording the sentence the user reads cannot turn every such test into a failure.
+        from relay_core.provider import ProviderTruncated
         provider = mock.Mock()
-        provider.complete.side_effect = ProviderError(
-            "Response was truncated or filtered; partial tools were not executed.")
+        provider.complete.side_effect = ProviderTruncated("length", keytest.MAX_TOKENS)
         result = keytest.check("openrouter", "k", lambda preset_id, key: provider)
         self.assertTrue(result["ok"])
         self.assertTrue(result["truncated"])
         self.assertNotIn("error", result)
+
+    def test_a_stalled_test_says_so_instead_of_naming_the_exception(self):
+        from relay_core.provider import ProviderStalled
+        provider = mock.Mock()
+        provider.complete.side_effect = ProviderStalled(30.0)
+        result = keytest.check("openrouter", "k", lambda preset_id, key: provider)
+        self.assertFalse(result["ok"])
+        self.assertIn("30 s", result["error"])
 
     def test_the_test_call_asks_for_the_least_thinking_the_provider_allows(self):
         seen = {}

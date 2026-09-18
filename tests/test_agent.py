@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 from relay_core.agent import Agent
-from relay_core.provider import ProviderConfig, ProviderStalled
+from relay_core.provider import ProviderConfig, ProviderStalled, ProviderTruncated
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ProviderConfig('http://127.0.0.1:12345/v1', 'mock', '')
@@ -155,6 +155,78 @@ class StallRetryTests(unittest.TestCase):
         self.assertEqual(agent.set_options({'stall_timeout_s': 120})['stall_timeout_s'], 120.0)
         with self.assertRaises(ValueError):
             agent.set_options({'stall_timeout_s': 0})
+
+
+class TruncationRetryTests(unittest.TestCase):
+    """A step that spends its whole output budget without producing anything is taken again once.
+
+    Owner report, 2026-09-18 (session 270a38a3): GLM-5.3 at effort `high` thought for 108 s on one
+    step, hit the 32768-token limit with no text and no tool call, and the four-minute turn behind
+    it - nine tool results - was thrown away.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.root = Path(self.temp.name)
+    def tearDown(self): self.temp.cleanup()
+
+    class CutOffProvider:
+        """Truncates the first `cuts` calls, then answers. Records what it was asked to send."""
+        def __init__(self, cuts=1, produced=False, partial=None, reason='length'):
+            self.cuts, self.produced, self.partial, self.reason = cuts, produced, partial, reason
+            self.calls, self.sent = 0, []
+        def complete(self, messages, tools, emit, cancel):
+            self.calls += 1
+            self.sent.append(json.loads(json.dumps(messages)))
+            if self.calls <= self.cuts:
+                emit({'event': 'thinking_delta', 'text': 'reasoning that fills the budget'})
+                raise ProviderTruncated(self.reason, 32768, self.produced, self.partial)
+            emit({'event': 'delta', 'text': 'Finished.'})
+            return {'role': 'assistant', 'content': 'Finished.'}
+        def cancel(self): pass
+
+    def agent(self, provider, events):
+        return Agent(CONFIG, self.temp.name, events.append, provider=provider)
+
+    def test_retried_once_with_a_note_that_says_why(self):
+        provider = self.CutOffProvider(cuts=1); events = []
+        agent = self.agent(provider, events); agent.ask('do the thing')
+        self.assertEqual(provider.calls, 2)
+        note = provider.sent[1][-1]        # the retry carries one more message than the first try
+        self.assertEqual(len(provider.sent[1]), len(provider.sent[0]) + 1)
+        self.assertEqual(note['relay_kind'], 'note')
+        self.assertIn('32768-token output limit', note['content'])
+        self.assertIn('Reasoning is spent from that same budget', note['content'])
+        retries = [e for e in events if e['event'] == 'provider_retry']
+        self.assertEqual([r['reason'] for r in retries], ['truncated'])
+        self.assertEqual(retries[0]['attempt'], 1)
+        self.assertEqual(events[-1]['event'], 'done')
+        # The thinking block of the cut-off step is closed, so the overlay does not stay open.
+        self.assertTrue(any(e['event'] == 'thinking_done' for e in events))
+
+    def test_a_second_cut_off_fails_the_turn_and_keeps_the_request_open(self):
+        provider = self.CutOffProvider(cuts=2); events = []
+        agent = self.agent(provider, events); agent.ask('do the thing')
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(events[-1]['event'], 'error')
+        self.assertIn('whole 32768-token output budget', events[-1]['text'])
+        self.assertEqual(agent.requests.open_count(), 1)
+
+    def test_an_answer_that_started_is_not_retried_but_is_kept(self):
+        partial = {'role': 'assistant', 'content': 'Half an ans'}
+        provider = self.CutOffProvider(cuts=1, produced=True, partial=partial); events = []
+        agent = self.agent(provider, events); agent.ask('do the thing')
+        self.assertEqual(provider.calls, 1)
+        self.assertFalse(any(e['event'] == 'provider_retry' for e in events))
+        self.assertEqual(events[-1]['event'], 'error')
+        # What the user watched arrive is still in the conversation to carry on from.
+        self.assertIn('Half an ans', [m.get('content') for m in agent.messages])
+
+    def test_a_filtered_response_is_not_retried(self):
+        provider = self.CutOffProvider(cuts=1, reason='content_filter'); events = []
+        agent = self.agent(provider, events); agent.ask('do the thing')
+        self.assertEqual(provider.calls, 1)
+        self.assertFalse(any(e['event'] == 'provider_retry' for e in events))
+        self.assertIn('filtered this response', events[-1]['text'])
 
 
 class WorkerTests(unittest.TestCase):

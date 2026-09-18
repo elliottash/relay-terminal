@@ -32,7 +32,7 @@ from .presets import (apply_effort, context_window_for, effort_style, infer_effo
 from .program_input import DEFAULT_MAX_WRITES, clip_screen, validate_grant
 from .terminal_handoff import validate_ceiling
 from .provider import (DEFAULT_STALL_TIMEOUT, Cancelled, ChatProvider, ProviderConfig, ProviderError,
-                       ProviderStalled, message_images, validate_stall_timeout)
+                       ProviderStalled, ProviderTruncated, message_images, validate_stall_timeout)
 from .requests import OPEN as REQUEST_OPEN
 from .requests import AUDIT_MAX_TOKENS, RequestLedger, run_audit
 from .sessions import STATE_VERSION, SessionStore, validate_messages
@@ -60,6 +60,10 @@ OPEN_ITEM_PREVIEW = 120
 # A stalled model call is retried once per turn, and only when nothing of the answer arrived
 # (issue SQAM). See _model_call for why that is the whole safety argument.
 MAX_STALL_RETRIES = 1
+# A step cut off at the output limit is taken again once per turn, and only when nothing of it
+# reached the user. A reasoning model can spend the whole budget thinking and deliver neither text
+# nor a tool call; failing the turn there throws away every tool result already in it.
+MAX_TRUNCATION_RETRIES = 1
 
 _log = logs.get("agent")
 
@@ -1342,11 +1346,39 @@ class Agent:
         cleared for the retry.
         """
         attempts = 0
+        cut_off = 0
         while True:
             call_started = time.monotonic()
             try:
                 return self.provider.complete(self.messages, self.tools(), self._provider_emit,
                                               self.cancel_event)
+            except ProviderTruncated as exc:
+                retry = (exc.reason == "length" and cut_off < MAX_TRUNCATION_RETRIES
+                         and not exc.produced and not self.cancel_event.is_set())
+                logs.event(_log, "provider_truncated", level_name="error", session=self.session_id,
+                           turn=record["turn_id"], step=step, model=self.config.model,
+                           host=_host(self.config.base_url), reason=exc.reason,
+                           max_tokens=exc.max_tokens, produced=exc.produced,
+                           kept_chars=len((exc.partial or {}).get("content") or ""), retry=retry)
+                self._ensure_no_open_response(record["turn_id"], "truncated")
+                self._close_thinking(record)
+                if not retry:
+                    # A partial answer the user watched arrive stays in the conversation, so the
+                    # turn that follows can carry on from it instead of starting blind.
+                    if exc.partial is not None:
+                        self.messages.append(exc.partial)
+                        record["messages"].append(exc.partial)
+                    raise
+                cut_off += 1
+                record["retries"] = record.get("retries", 0) + 1
+                note = {"role": "user", "relay_kind": "note",
+                        "content": self._truncation_note(exc)}
+                self.messages.append(note)
+                record["messages"].append(note)
+                self.emit({"event": "provider_retry", "turn_id": record["turn_id"], "reason": "truncated",
+                           "attempt": cut_off, "max_attempts": MAX_TRUNCATION_RETRIES, "step": step,
+                           "text": f"{exc} Taking that step again once, with less to do."})
+                self.emit({"event": "status", "text": "Output limit reached with nothing produced · retrying once"})
             except ProviderStalled as exc:
                 waited = int((time.monotonic() - call_started) * 1000)
                 retry = attempts < MAX_STALL_RETRIES and not exc.produced and not self.cancel_event.is_set()
@@ -1477,6 +1509,20 @@ class Agent:
         out += [{"kind": "todo", "id": t["id"], "status": t["status"], "preview": t["text"][:OPEN_ITEM_PREVIEW],
                  "request_ids": list(t["request_ids"])} for t in todos]
         return out
+
+    @staticmethod
+    def _truncation_note(exc: ProviderTruncated) -> str:
+        """What the model is told before its cut-off step is taken again.
+
+        It names the budget and the fact that reasoning spends it, because the model has no other
+        way to know why its last response vanished: nothing of it was kept, so from the
+        conversation's side the step simply did not happen.
+        """
+        return (f"[Relay note: your previous response reached the {exc.max_tokens}-token output "
+                "limit before it produced any answer text or tool call, so none of it was kept and "
+                "nothing from it ran. Reasoning is spent from that same budget. Think briefly this "
+                "time and take one small step - a single tool call, or a short answer - rather than "
+                "working the whole problem out in one response.]")
 
     @staticmethod
     def _completion_reminder(open_items: list[dict], number: int) -> str:

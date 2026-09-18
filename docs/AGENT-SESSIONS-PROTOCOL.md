@@ -970,10 +970,34 @@ started answer does not, because that text is already on the user's screen.
 
 New event, emitted before the retried model call:
 
-`provider_retry {turn_id, reason: "stall", attempt, max_attempts, seconds, step, text}`
+`provider_retry {turn_id, reason: "stall" | "truncated", attempt, max_attempts, seconds, step, text}`
+(`seconds` only for `"stall"`).
 
 `turn_summary` is unchanged; the retry is not a new turn and the ledger entry stays `in_progress`.
 The GUI prints `text` as a note line.
+
+### 15.2.1 A step cut off at the output limit
+
+`max_tokens` is the budget for one model call, and on every provider that streams reasoning the
+thinking is spent from it. A reasoning model can therefore use the whole budget on one step and
+return `finish_reason: "length"` with no answer text and no tool call — four minutes of work that
+delivers nothing (owner report, 2026-09-18, GLM-5.3 at effort `high` with the limit at its 32768
+ceiling).
+
+That step is now taken **once** again, on the same terms as a stall: only when nothing of the
+response reached the user, and only for `"length"` (a `"content_filter"` refusal would repeat).
+Before the retry a note joins the conversation naming the budget, saying that reasoning is spent
+from it, and asking for one small step; without it the retry is the same request and truncates the
+same way. The note is an ordinary `relay_kind: "note"` user message and is saved with the turn.
+
+When the response is not retried, whatever answer text did arrive is **kept** in the conversation,
+so the next turn can carry on from what the user watched appear. A cut-off response carrying tool
+calls is never kept: the arguments are truncated JSON, and an assistant message with tool calls and
+no results is not a conversation a provider accepts.
+
+Usage is reported for a cut-off response before the failure, so the tokens it spent are counted in
+the session total and by the context tracker. They used to be dropped, which left the accounting
+short by the single largest request of the turn.
 
 ### 15.3 Socket hygiene
 

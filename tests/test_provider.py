@@ -7,8 +7,9 @@ import time
 import unittest
 from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from relay_core.provider import (CONNECT_TIMEOUT, ChatProvider, ProviderConfig, ProviderError,
-                                 ProviderStalled, Cancelled, validate_stall_timeout)
+from relay_core.provider import (CONNECT_TIMEOUT, MAX_OUTPUT_TOKENS, ChatProvider, ProviderConfig,
+                                 ProviderError, ProviderStalled, ProviderTruncated, Cancelled,
+                                 validate_stall_timeout)
 
 
 def event(delta=None, finish=None):
@@ -51,7 +52,54 @@ class StreamTests(unittest.TestCase):
 
     def test_truncated_stream_rejected(self):
         with self.assertRaises(ProviderError): self.parse(event({'content':'unfinished'}))
-        with self.assertRaises(ProviderError): self.parse(event(finish='length') + b'data: [DONE]\n\n')
+        with self.assertRaises(ProviderTruncated): self.parse(event(finish='length') + b'data: [DONE]\n\n')
+
+    # --- a step cut off at the output limit (owner report, 2026-09-18) -------------------------
+    def usage_event(self, usage):
+        return ('data: ' + json.dumps({'choices': [], 'usage': usage}) + '\n\n').encode()
+
+    def test_a_cut_off_step_says_what_it_spent_and_keeps_no_partial_tool_call(self):
+        data = self.usage_event({'prompt_tokens': 48000, 'completion_tokens': MAX_OUTPUT_TOKENS})
+        data += event({'reasoning_content': 'thinking that fills the budget'})
+        data += event({'tool_calls': [{'index': 0, 'id': 'c1', 'type': 'function',
+                                       'function': {'name': 'run_command', 'arguments': '{"comm'}}]})
+        data += event(finish='length') + b'data: [DONE]\n\n'
+        with self.assertRaises(ProviderTruncated) as caught:
+            self.parse(data)
+        exc = caught.exception
+        self.assertEqual(exc.reason, 'length')
+        self.assertTrue(exc.produced)                 # a tool-call fragment reached the user
+        self.assertIsNone(exc.partial)                # cut-off arguments are never kept
+        self.assertIn(str(MAX_OUTPUT_TOKENS), str(exc))
+        self.assertIn("already at Relay's maximum", str(exc))
+        # The tokens it spent are reported before the failure, not dropped with it.
+        self.assertEqual([e for e in self.events if e['event'] == 'usage'][-1]['usage']['completion_tokens'],
+                         MAX_OUTPUT_TOKENS)
+
+    def test_a_cut_off_answer_keeps_the_text_the_user_already_saw(self):
+        data = event({'reasoning_content': 'some thinking'}) + event({'content': 'Half an ans'})
+        with self.assertRaises(ProviderTruncated) as caught:
+            self.parse(data + event(finish='length') + b'data: [DONE]\n\n')
+        self.assertEqual(caught.exception.partial['content'], 'Half an ans')
+        self.assertEqual(caught.exception.partial['role'], 'assistant')
+        self.assertEqual(caught.exception.partial['reasoning_content'], 'some thinking')
+
+    def test_reasoning_alone_is_not_produced_and_a_filtered_response_reads_differently(self):
+        with self.assertRaises(ProviderTruncated) as caught:
+            self.parse(event({'reasoning_content': 'only thinking'}) + event(finish='length') + b'data: [DONE]\n\n')
+        self.assertFalse(caught.exception.produced)   # nothing was on the user's screen: retryable
+        self.assertIsNone(caught.exception.partial)
+        with self.assertRaises(ProviderTruncated) as caught:
+            self.parse(event(finish='content_filter') + b'data: [DONE]\n\n')
+        self.assertEqual(caught.exception.reason, 'content_filter')
+        self.assertIn('filtered this response', str(caught.exception))
+
+    def test_a_lower_output_limit_is_told_to_raise_it(self):
+        provider = ChatProvider(ProviderConfig('http://127.0.0.1:1234/v1', 'mock', '', max_tokens=8192))
+        with self.assertRaises(ProviderTruncated) as caught:
+            provider._stream(io.BytesIO(event(finish='length') + b'data: [DONE]\n\n'),
+                             self.events.append, self.cancel)
+        self.assertIn('Raise the output token limit', str(caught.exception))
 
     def test_malformed_duplicate_and_error(self):
         with self.assertRaises(ProviderError): self.parse(b'data: {"error":{}}\n\n')

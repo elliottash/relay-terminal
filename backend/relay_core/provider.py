@@ -30,6 +30,10 @@ CONNECT_TIMEOUT = 30.0           # floor for DNS/TLS/headers; the deadline below
 DEFAULT_STALL_TIMEOUT = 60.0     # reasoning models go quiet for a long time between chunks
 MIN_STALL_TIMEOUT = 1.0
 MAX_STALL_TIMEOUT = 1800.0
+# The output budget one model call may ask for. Reasoning counts towards it on every provider that
+# streams reasoning, so the ceiling is also the ceiling on how long a model may think in one step.
+MIN_OUTPUT_TOKENS = 256
+MAX_OUTPUT_TOKENS = 32768
 WATCHDOG_TICK = 0.5
 # Environment override for the deadline, kept from the 2026-09-17 stopgap that widened the raw
 # socket timeout. It wins over the agent option, so a pane that needs more room needs no settings
@@ -302,6 +306,39 @@ def repair_tool_calls(calls) -> list:
         repaired.append(call)
     return repaired
 
+class ProviderTruncated(ProviderError):
+    """The response stopped at the output limit (``length``) or was filtered (``content_filter``).
+
+    ``produced`` says whether any of it reached the user (answer text or a tool-call fragment); as
+    with a stall, a response that produced nothing can be asked for again without showing the user
+    the same text twice. Reasoning alone does not count as produced, and a reasoning model that
+    spends its whole budget thinking is exactly the case this carries: the step cost four minutes
+    and delivered nothing.
+
+    ``partial`` is the answer text that did arrive, when it can be kept — a message with no tool
+    calls. A truncated tool call is never kept: its arguments are cut-off JSON, and an assistant
+    message carrying tool calls without their results is not a conversation a provider will accept.
+    """
+    def __init__(self, reason: str, max_tokens: int, produced: bool = False,
+                 partial: dict | None = None):
+        if reason == "content_filter":
+            text = ("The provider filtered this response; partial tools were not executed. "
+                    "Rephrase the request, or send it to another model.")
+        else:
+            at_ceiling = max_tokens >= MAX_OUTPUT_TOKENS
+            text = (f"The model used its whole {max_tokens}-token output budget on one step without "
+                    "finishing, so nothing of it was used; reasoning counts towards that budget. "
+                    + ("The output token limit is already at Relay's maximum: lower the effort in "
+                       "Options › Models, or ask for a smaller step."
+                       if at_ceiling else
+                       "Raise the output token limit in Options › Models, or ask for a smaller step."))
+        super().__init__(text)
+        self.reason = reason
+        self.max_tokens = max_tokens
+        self.produced = produced
+        self.partial = partial
+
+
 class ProviderStalled(ProviderError):
     """Nothing usable arrived from the provider for ``seconds``; the socket was closed.
 
@@ -362,8 +399,8 @@ class ProviderConfig:
         allowed = {"thinking", "reasoning", "reasoning_effort", "temperature", "top_p"}
         if set(self.extra) - allowed:
             raise ValueError("Extra parameters may only contain thinking, reasoning, reasoning_effort, temperature, and top_p.")
-        if not 256 <= self.max_tokens <= 32768:
-            raise ValueError("Output token limit must be between 256 and 32768.")
+        if not MIN_OUTPUT_TOKENS <= self.max_tokens <= MAX_OUTPUT_TOKENS:
+            raise ValueError(f"Output token limit must be between {MIN_OUTPUT_TOKENS} and {MAX_OUTPUT_TOKENS}.")
         if self.local and not loopback_http(self.base_url):
             raise ValueError("Only plain HTTP to a loopback host is a local model server.")
         if self.tool_arguments_as_object and not self.local:
@@ -687,6 +724,20 @@ class ChatProvider:
         return message
 
     @staticmethod
+    def _partial(message: dict, calls: dict) -> dict | None:
+        """The keepable part of a cut-off response: its answer text, and only when no tool call
+        was being written. Kept so a partial answer the user watched arrive is still in the
+        conversation afterwards, and "carry on" has something to carry on from."""
+        if calls or not message.get("content"):
+            return None
+        partial = {"role": "assistant", "content": message["content"]}
+        if message.get("reasoning_content"):
+            partial["reasoning_content"] = message["reasoning_content"]
+        if message.get("reasoning"):
+            partial["reasoning"] = message["reasoning"]
+        return partial
+
+    @staticmethod
     def _normalize(message: dict) -> dict:
         normalized = {"role": "assistant", "content": message.get("content") or ""}
         if message.get("reasoning_content") is not None:
@@ -838,12 +889,16 @@ class ChatProvider:
             finish_thinking()
         if cancel.is_set():
             raise Cancelled("Stopped.")
+        # Usage is reported before any refusal below: a cut-off response still spent its tokens, and
+        # dropping them leaves the session total and the context tracker short by the largest request
+        # of the turn (owner report, 2026-09-18).
+        if usage is not None:
+            emit({"event": "usage", "usage": usage})
         if not got_done and finish_reason not in {"stop", "tool_calls"}:
             raise ProviderError("Provider stream ended unexpectedly; partial tools were not executed.")
         if finish_reason in {"length", "content_filter"}:
-            raise ProviderError("Response was truncated or filtered; partial tools were not executed. Increase output limit or narrow the task.")
-        if usage is not None:
-            emit({"event": "usage", "usage": usage})
+            raise ProviderTruncated(finish_reason, self.config.max_tokens, self._produced,
+                                    self._partial(message, calls))
         if calls:
             message["tool_calls"] = [calls[i] for i in sorted(calls)]
         if self.config.local:
