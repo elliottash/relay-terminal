@@ -216,6 +216,65 @@ to today's first-prompt title when no model is configured or the call fails.
 - `/rename-tab <name>`, or a double click on the tab, names the tab by hand; it too is fixed until
   the field is cleared, and it follows the tab into a new window.
 
+### Pane types, pane states and remote sessions
+
+Cards #SPBN and #XM0T. The rules are in `src/PaneStatus.{h,cpp}` (library `relay-panestatus`, tests
+`tests/panestatus_test.cpp`); the painting is in `src/PaneChrome.h` (`relay::chrome`,
+`PaneTypeBand`, the status widgets in `PaneChrome`); the poll and the tab icons are
+`RelayWindow::refreshPaneStatus()`.
+
+**The `paneType` property is the contract.** A leaf in the splitter says what it is with one dynamic
+property on the leaf widget (the `ToolPane`), read at paint time:
+
+| `paneType` | Band | By type | By group |
+|---|---|---|---|
+| unset, `terminal`, `explorer`, `preview`, `plan`, `diff` | none — plain | | |
+| `board` | jacks, SWITCHBOARD | brass (`warning`) | tools: brass |
+| `options` (and `settings`, until nothing sets it) | gear (as on the title-bar button), OPTIONS | green (`success`) | tools: brass |
+| `actions` | bolt, ACTIONS | green, shared with Options | tools: brass |
+| `sessions` | list, SESSIONS | the shell blue (`shell`) | tools: brass |
+| `subagent` | tree, SUBAGENT | violet (`agent`) | agents: violet |
+| `turn` | bubble, AGENT TURN | violet (`agent`) | agents: violet |
+| anything else | a square, the type's own name | brass | tools: brass |
+
+`paneLabel`, when set, replaces the band's text. `ToolPane` gives a pane that set nothing the
+default for its kind when it is first polished, and reacts to a change of either property by itself
+(`ToolPane::event`), so a new pane type needs `tool->setProperty("paneType", "…")` and nothing else:
+the band is inserted at the top of the pane's layout, the chrome's buttons move onto it, and the
+view's own first row gets its full width back (`PaneChrome::syncHeaderInset`). Tints are a 10–13 %
+mix of the hue into the pane's background, the glyph at least 3:1 and the label at least 4.5:1 on
+it in every shipped theme (the test checks). `appearance/pane_colours` = `type` (default) | `group` |
+`off`; `off` keeps the band in neutral ink, because the band is the pane's name (the Options pane
+draws no title of its own). It is cached: whoever writes it calls `PaneChrome::refreshAll()`.
+The focused pane keeps its outline; the band is inside it and never recolours it.
+
+**States.** A terminal pane is in exactly one `relay::panestatus::State`, least urgent first:
+idle (ring), running (triangle), subagents working (star and two dots), agent working (four-point
+star), recommends a command (prompt chevron), done (tick), failed (disc with a cross), needs you
+(diamond with `!`). Each has its own shape, so none depends on colour. `Pane::statusFacts()` reads
+what the pane already keeps — `m_agentBusy`, the subagent model's live count, `processBusy()`, the
+screen prompt / waiting / password state, a `run_in_terminal` prefill in the prompt box — and the
+last finished turn (`m_finishSerial`, its outcome, and whether the reply ended on a question or left
+a command the agent waits on). "Needs you" is a program asking for input, a handed command the
+agent's next turn waits on, or an unseen turn that asked you something. Done, failed and asked are
+news until the pane has been the focused pane of the current tab in the active window for 1.5 s
+(`PaneChrome::seenSerial`). The header shows the pane's own state as a glyph before the title; the
+tab icon is the most urgent state among its panes (a tab with no terminal shows its first special
+pane's type glyph). The poll runs every 400 ms and repaints a tab icon only when it changes.
+
+**Remote sessions** are a safety signal and ignore the colour setting. `Pane::remoteCommandLine()`
+is the foreground process group's command line while it is `ssh`, `mosh`, `mosh-client`, `telnet`
+or `autossh` — read live, so it is right when ssh was started with the prompt box hidden and clears
+the moment ssh exits or is suspended; ssh run inside a local tmux is not visible from here. The
+title row gets a hatched band in the error hue with a firm line under it and a `⇄ user@host` chip
+(`relay::panestatus::remoteHost` reads the destination out of the arguments), and the tab icon gets
+a red corner mark, or the ⇄ itself when nothing more urgent is going on. The pane also carries
+`remoteSession` = the host, for anything else that wants to know.
+
+**Shared with a phone** (Relay's remote share, section 19) is a different state and gets a
+different mark: a `phone` chip in the title row in the shell blue, beside the share chip under the
+prompt box that already said so.
+
 ### Notification centre
 
 `relay::NotificationCenter` (`src/Notifications.*`, the `relay-notifications` library) is one
@@ -227,8 +286,11 @@ in-memory list per process, shared by every window: newest first, a kind per ent
 `QApplication::alert()` still only fire when Relay is not the active window and
 `notifications/desktop` is on. What posts: a command that ran longer than 30 s, a shell or command
 killed for memory, a password prompt waiting, a finished subagent, and the pane's own agent turn
-finishing or failing — except that a turn finished in the pane the user is watching
-(`Pane::watched()`) posts nothing. Each entry carries the pane's session token, so clicking it
+finishing, failing, or ending on a question ("Agent needs you", also when it left a command in the
+prompt box that its next turn waits on) — only when the user is not watching that pane
+(`Pane::watched()`: the active window, the current tab, the focused pane); #XM0T. Working, running,
+subagents and a suggested command are glyphs only (see "Pane types, pane states and remote
+sessions"). Each entry carries the pane's session token, so clicking it
 calls `WindowManager::focusPane()` → `RelayWindow::revealPane()` and lands on that pane in
 whatever window it now lives.
 
@@ -1575,6 +1637,8 @@ of the platform and of the engine itself.
 | `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |
 | `src/RuntimeDirs.*` | the private `$TMPDIR/relay-XXXXXX` directories: the pid+starttime owner mark, and the startup sweep of the ones a crash left behind (section 2) |
 | `src/PaneTitles.*` | pane titles and the tab labels made from them: tidying a title, the offline "same work" rule, joining and shortening |
+| `src/PaneStatus.*` | pane types (`paneType`, the band's tints by type or group), pane states and their urgency order, the host of an ssh/mosh/telnet session |
+| `src/SshConfig.*` | SSH: the concrete hosts of `~/.ssh/config` and its Includes, the recent hosts, and the ssh/mosh command line that Split on the same host re-runs |
 | `src/InputPolicy.*` | who may type where: the prompt-box-only rules, passwords, and whether the agent may type into the program |
 | `src/ScreenPrompt.*` | the screen-text classifier: is the foreground program waiting for input, and for what (section 9.1) |
 | `src/Aliases.*` | aliases (saved commands and prompts): the composer's `{{parameter}}` fields and Tab, re-reading the values out of an edited line, and whether a typed line names an alias |

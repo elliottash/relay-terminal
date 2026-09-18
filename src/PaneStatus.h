@@ -6,7 +6,7 @@
 //  * Pane types (card #SPBN). A leaf in the splitter says what it is with one dynamic property,
 //    `paneType` ("board", "options", "actions", "sessions", "subagent", ...). Special types get a header
 //    band with a low-strength tint and a glyph; terminal panes and file panes stay plain. The
-//    band's colours follow "appearance/pane_colours": by type, by group, or off.
+//    band's colours follow "appearance/pane_colours": by type, by group, or off (a neutral band).
 //  * Pane states (card #XM0T). A terminal pane is in exactly one State at a time, read off facts
 //    the pane already keeps. The pane header shows its own state; a tab shows the most urgent state
 //    among its panes, so a background tab can say "needs you" without being opened.
@@ -84,7 +84,7 @@ struct Tokens {
 };
 
 struct TypeStyle {
-    bool band = false;   // false: the pane stays plain (terminals, files, and every type with "off")
+    bool band = false;   // false: the pane stays plain (terminals and file panes)
     QString label;       // engraved in the band: "SWITCHBOARD"
     Glyph glyph = Glyph::None;
     QString group;       // "tools" or "agents"

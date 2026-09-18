@@ -39,6 +39,7 @@
 #include "WindowState.h"
 #include "RuntimeDirs.h"
 #include "RemoteShare.h"
+#include "PaneStatus.h"
 #include "backend/VTermBackend.h"
 #include "Voice.h"
 #include "Images.h"
@@ -278,6 +279,34 @@ public:
     bool isNative() const { return m_native; }
     void toggleNative() { setNative(!m_native); }
     bool agentBusy() const { return m_agentBusy; }
+    // ----- pane chrome (src/PaneChrome.h): status glyph (#XM0T) and remote session (#SPBN) -----
+    QHBoxLayout *headerLayout() const { return m_headerLayout; }
+    QWidget *headerWidget() const { return m_headerWidget; }
+    relay::panestatus::Facts statusFacts() const {
+        relay::panestatus::Facts facts;
+        facts.agentBusy = m_agentBusy;
+        facts.liveSubagents = m_subagents.liveCount();
+        facts.processBusy = processBusy();
+        facts.programAsking = facts.processBusy && (m_waiting || m_secretMode || m_screenPrompt.actionable());
+        const bool boxHoldsIt = m_handoffOffered && !m_editor->toPlainText().trimmed().isEmpty();
+        facts.handoffWaiting = boxHoldsIt && m_handoffPrefill && !m_agentBusy;
+        facts.handoffOffered = boxHoldsIt && !m_handoffPrefill;
+        facts.finishSerial = m_finishSerial;
+        facts.lastOutcome = m_lastOutcome;
+        facts.lastAsked = m_lastAsked;
+        return facts;
+    }
+    // The foreground program's command line while it is ssh, mosh or telnet; empty otherwise.
+    // Read live from the terminal's foreground process group, so it is true exactly while the
+    // session runs (and also when it was started with the prompt box hidden), and clears when
+    // it exits or is suspended. ssh run inside a local tmux is not visible from here.
+    QString remoteCommandLine() const {
+        if (!processBusy()) return {};
+        const QString line = foregroundCommandLine();
+        const QString program = line.isEmpty() ? QString() : QFileInfo(line.section(' ', 0, 0)).fileName();
+        return remoteSessionProgram(program) || relay::panestatus::isRemoteProgram(program) ? line : QString();
+    }
+    bool sharedWithPhone() const { return relay::RemoteShare::instance().isSharing(m_token); }
     bool processBusy() const {
         if (!m_backend) return false;
         const int foreground = foregroundPid();   // an ioctl: asked once, this runs on every poll
@@ -5500,13 +5529,21 @@ private:
             if (m_currentItem == event.value(QStringLiteral("id")).toString()) m_currentItem.clear();
             m_agentBusy = !m_runningItem.isEmpty() && m_runningItem != event.value(QStringLiteral("id")).toString();
             if (!m_agentBusy) { stopTurnClock(); m_idleTip.start(); }
+            // Status glyphs (#XM0T): the window reads these to show done / failed / needs you
+            // until the user has looked at the pane.
+            ++m_finishSerial; m_lastOutcome = outcome;
+            // "Asked" also covers a command the agent left in the prompt box and waits on.
+            m_lastAsked = outcome == QStringLiteral("done")
+                          && (relay::panestatus::endsWithQuestion(m_turnText) || (m_handoffOffered && m_handoffPrefill));
+            // Notified only for news the user was not watching (#XM0T): a turn that ended by
+            // asking them something, a finished turn, a failed one.
             if (outcome == QStringLiteral("done")) {
                 ++m_turnsCompleted;
                 if (window() && !window()->isActiveWindow()) m_finishedWhileAway = true;
-                // A finished turn is only news when the user was not watching this pane.
                 if (!watched() && !moreTurnsPending())
-                    notify(QStringLiteral("Agent finished"), turnSummary(), relay::NotificationCenter::kindSuccess);
-            } else if (outcome == QStringLiteral("error")) {
+                    notify(m_lastAsked ? QStringLiteral("Agent needs you") : QStringLiteral("Agent finished"), turnSummary(),
+                           m_lastAsked ? relay::NotificationCenter::kindWarning : relay::NotificationCenter::kindSuccess);
+            } else if (outcome == QStringLiteral("error") && !watched()) {
                 notify(QStringLiteral("Agent turn failed"), turnSummary(), relay::NotificationCenter::kindError);
             }
             if (!m_agentBusy && !moreTurnsPending()) { ensureLineStart(); closeInline(); }
@@ -5682,7 +5719,7 @@ private:
         // A command the agent put in the prompt box (protocol 22): its exit goes back to the agent,
         // which replaces the fix loop for this one submission.
         const bool handoff = m_handoffPrefill;
-        m_handoffPrefill = false; m_handoffPrefix = false;
+        m_handoffPrefill = false; m_handoffPrefix = false; m_handoffOffered = false;
         if (route == QStringLiteral("shell")) {
             const bool valid = decision.value(QStringLiteral("valid")).toBool(decision.value(QStringLiteral("syntax_ok")).toBool(true));
             const QString problem = decision.value(QStringLiteral("invalid_reason")).toString(
@@ -6409,6 +6446,7 @@ private:
             if (prefix) setPrefixMode(QStringLiteral("shell"));   // this submission only
             setComposerText(command);
             m_handoffPrefill = report; m_handoffPrefix = prefix;
+            m_handoffOffered = true;   // status glyph (#XM0T): "recommends", or "needs you" with report_back
             answerTerminalCommand(true, QStringLiteral("prefilled"));
             return;
         }
@@ -8670,6 +8708,10 @@ private:
     // Armed: the running command reports when it exits. Chain: runs since the user last typed.
     QString m_handoffId, m_handoffCommand, m_handoffOutput;
     bool m_handoffPrefill = false, m_handoffPrefix = false, m_handoffNext = false, m_handoffArmed = false;
+    // Status glyphs (#XM0T): a prefill of any kind is in the box; the last finished turn and how.
+    bool m_handoffOffered = false, m_lastAsked = false;
+    quint64 m_finishSerial = 0;
+    QString m_lastOutcome;
     bool m_captureForAgent = false, m_remoteSubmit = false;
     int m_handoffChain = 0;
     // Wrong-mode hints (2026-09-17): a terminal submission that reads like a request

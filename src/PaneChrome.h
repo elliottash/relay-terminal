@@ -16,8 +16,20 @@
 #include "SubagentTranscript.h"
 #include "OutputLinks.h"
 
+#include "PaneStatus.h"
+#include "Theme.h"
+
+#include <QApplication>
+#include <QDynamicPropertyChangeEvent>
 #include <QFileInfo>
 #include <QFrame>
+#include <QFontDatabase>
+#include <QIcon>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPixmap>
+#include <QSettings>
+#include <QTimer>
 #include <QHBoxLayout>
 #include <QJsonObject>
 #include <QShowEvent>
@@ -27,6 +39,288 @@
 #include <QTreeView>
 
 #include <functional>
+
+// ----- pane types and pane states: the painting (cards #SPBN, #XM0T) ----------------------------
+// The rules (which type gets which tint, which state wins) are in src/PaneStatus.{h,cpp}; this is
+// how they look. Everything reads the live theme tokens at paint time, so a theme switch needs no
+// rebuild, and every glyph is painted, not typed, for the reason ChromeButton gives.
+namespace relay::chrome {
+namespace ps = relay::panestatus;
+
+inline ps::Tokens tokens() {
+    namespace t = relay::theme;
+    return {t::Background, t::Text, t::TextMuted, t::Shell, t::Agent, t::Success, t::Warning, t::Error};
+}
+
+// "appearance/pane_colours": type (default), group or off. Read once and cached; the Options pane
+// writes the key and then calls PaneChrome::refreshAll(), which reloads it.
+inline ps::ColourMode &colourModeCache() {
+    static ps::ColourMode mode = ps::colourModeFrom(QSettings().value(QStringLiteral("appearance/pane_colours")).toString());
+    return mode;
+}
+inline ps::ColourMode colourMode() { return colourModeCache(); }
+inline void reloadColourMode() {
+    colourModeCache() = ps::colourModeFrom(QSettings().value(QStringLiteral("appearance/pane_colours")).toString());
+}
+
+inline ps::TypeStyle styleOf(const QWidget *leaf) {
+    if (!leaf) return {};
+    return ps::typeStyle(leaf->property("paneType").toString(), colourMode(), tokens(), leaf->property("paneLabel").toString());
+}
+
+// The pane's frame, so a band painted inside it meets the outline and the rounded corners exactly.
+inline qreal paneRadius() { return relay::theme::active().flag(QStringLiteral("square")) ? 0.0 : 7.0; }
+
+// A rectangle with only its top corners rounded: the top of a pane.
+inline QPainterPath topBand(const QRectF &r, qreal radius) {
+    QPainterPath path;
+    radius = std::min(radius, r.height() / 2);
+    path.moveTo(r.left(), r.bottom());
+    path.lineTo(r.left(), r.top() + radius);
+    path.arcTo(QRectF(r.left(), r.top(), 2 * radius, 2 * radius), 180, -90);
+    path.lineTo(r.right() - radius, r.top());
+    path.arcTo(QRectF(r.right() - 2 * radius, r.top(), 2 * radius, 2 * radius), 90, -90);
+    path.lineTo(r.right(), r.bottom());
+    path.closeSubpath();
+    return path;
+}
+
+inline QPainterPath fourPointStar(const QPointF &c, qreal outer, qreal inner) {
+    QPainterPath star;
+    for (int i = 0; i < 8; ++i) {
+        const qreal angle = -M_PI / 2 + i * M_PI / 4;
+        const qreal r = i % 2 ? inner : outer;
+        const QPointF p = c + QPointF(std::cos(angle), std::sin(angle)) * r;
+        if (i == 0) star.moveTo(p); else star.lineTo(p);
+    }
+    star.closeSubpath();
+    return star;
+}
+
+// A pane type's glyph, drawn for a 14 px box and scaled from there.
+inline void paintTypeGlyph(QPainter &p, const QRectF &box, ps::Glyph glyph, const QColor &ink) {
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    const qreal u = std::min(box.width(), box.height()) / 14.0;
+    const QPointF c = box.center();
+    auto at = [&](qreal x, qreal y) { return c + QPointF(x, y) * u; };
+    const QPen pen(ink, std::max(1.0, 1.25 * u), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    p.setPen(pen); p.setBrush(Qt::NoBrush);
+    switch (glyph) {
+    case ps::Glyph::Switchboard:
+        // Two rows of jacks, two of them patched.
+        for (int row = 0; row < 2; ++row)
+            for (int col = 0; col < 3; ++col) {
+                const bool patched = (row == 0 && col == 0) || (row == 1 && col == 2);
+                p.setBrush(patched ? QBrush(ink) : Qt::NoBrush);
+                p.drawEllipse(at(-4.5 + col * 4.5, -2.6 + row * 5.2), 1.7 * u, 1.7 * u);
+            }
+        break;
+    case ps::Glyph::Options: {
+        // The gear, as on the title-bar button that opens Options (ChromeButton::paintGear): six
+        // teeth around a ring, one outline, and the hub.
+        constexpr int teeth = 6;
+        const qreal inner = 4.6 * u, outer = 6.4 * u, half = M_PI / teeth;
+        QPolygonF cog;
+        for (int i = 0; i < teeth; ++i) {
+            const qreal base = i * 2 * half;
+            const qreal angle[4] = {base - half * 0.60, base - half * 0.34, base + half * 0.34, base + half * 0.60};
+            const qreal radius[4] = {inner, outer, outer, inner};
+            for (int k = 0; k < 4; ++k) cog << c + QPointF(std::cos(angle[k]), std::sin(angle[k])) * radius[k];
+        }
+        p.drawPolygon(cog);
+        p.drawEllipse(c, 2.2 * u, 2.2 * u);
+        break;
+    }
+    case ps::Glyph::Actions: {
+        // A bolt: the pane that runs things.
+        const QPolygonF bolt(QVector<QPointF>{at(1.5, -6.2), at(-4.2, 0.8), at(-0.2, 0.8), at(-1.5, 6.2), at(4.2, -0.8), at(0.2, -0.8)});
+        p.setBrush(ink);
+        p.drawPolygon(bolt);
+        break;
+    }
+    case ps::Glyph::Sessions:
+        // A list of conversations.
+        for (int i = 0; i < 3; ++i) {
+            const qreal y = -4.2 + i * 4.2;
+            p.setBrush(ink);
+            p.drawEllipse(at(-4.6, y), 1.1 * u, 1.1 * u);
+            p.drawLine(at(-1.8, y), at(5.4, y));
+        }
+        break;
+    case ps::Glyph::Subagent: {
+        // A parent and the two agents it started.
+        QPainterPath tree;
+        tree.moveTo(at(-3.6, -3.2)); tree.lineTo(at(-3.6, 4.0)); tree.lineTo(at(1.6, 4.0));
+        tree.moveTo(at(-3.6, 0.4)); tree.lineTo(at(1.6, 0.4));
+        p.drawPath(tree);
+        p.setBrush(ink);
+        p.drawPath(fourPointStar(at(-3.6, -3.6), 2.9 * u, 1.0 * u));
+        p.drawEllipse(at(3.6, 0.4), 1.6 * u, 1.6 * u);
+        p.drawEllipse(at(3.6, 4.0), 1.6 * u, 1.6 * u);
+        break;
+    }
+    case ps::Glyph::Turn: {
+        // A speech bubble with two lines of text.
+        QPainterPath bubble;
+        bubble.addRoundedRect(QRectF(at(-6, -5.2), at(6, 3.0)), 2.2 * u, 2.2 * u);
+        p.drawPath(bubble);
+        p.drawLine(at(-3.2, 5.8), at(-1.2, 3.0));
+        p.drawLine(at(-3.2, -2.2), at(3.2, -2.2));
+        p.drawLine(at(-3.2, 0.2), at(1.2, 0.2));
+        break;
+    }
+    case ps::Glyph::Remote:
+        // ⇄: what you type goes out, what it prints comes back.
+        p.drawLine(at(-5.5, -2.6), at(5.5, -2.6));
+        p.drawPolyline(QPolygonF(QVector<QPointF>{at(2.6, -5.2), at(5.5, -2.6), at(2.6, 0.0)}));
+        p.drawLine(at(5.5, 2.6), at(-5.5, 2.6));
+        p.drawPolyline(QPolygonF(QVector<QPointF>{at(-2.6, 0.0), at(-5.5, 2.6), at(-2.6, 5.2)}));
+        break;
+    case ps::Glyph::Phone:
+        p.drawRoundedRect(QRectF(at(-3.8, -6.2), at(3.8, 6.2)), 1.6 * u, 1.6 * u);
+        p.setBrush(ink);
+        p.drawEllipse(at(0, 3.9), 0.9 * u, 0.9 * u);
+        break;
+    case ps::Glyph::Tool:
+        p.drawRoundedRect(QRectF(at(-5, -5), at(5, 5)), 2 * u, 2 * u);
+        p.setBrush(ink);
+        p.drawEllipse(c, 1.6 * u, 1.6 * u);
+        break;
+    case ps::Glyph::None: break;
+    }
+    p.restore();
+}
+
+// A pane state's glyph. Each has its own shape so it reads without colour: a ring (idle), a
+// triangle (running), a four-point star (the agent), a star with two dots (subagents), a prompt
+// chevron (a suggested command), a tick (done), a disc with a cross (failed) and a diamond with an
+// exclamation mark (needs you). `ground` is what is under it, for the marks cut into a filled shape.
+inline void paintStateGlyph(QPainter &p, const QRectF &box, ps::State state, const QColor &ink, const QColor &ground) {
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    const qreal u = std::min(box.width(), box.height()) / 14.0;
+    const QPointF c = box.center();
+    auto at = [&](qreal x, qreal y) { return c + QPointF(x, y) * u; };
+    QPen pen(ink, std::max(1.0, 1.4 * u), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    p.setPen(pen); p.setBrush(Qt::NoBrush);
+    switch (state) {
+    case ps::State::Idle:
+        p.drawEllipse(c, 3.6 * u, 3.6 * u);
+        break;
+    case ps::State::Running: {
+        p.setBrush(ink);
+        p.drawPolygon(QPolygonF(QVector<QPointF>{at(-3.2, -4.6), at(4.6, 0), at(-3.2, 4.6)}));
+        break;
+    }
+    case ps::State::Working:
+        p.setPen(Qt::NoPen); p.setBrush(ink);
+        p.drawPath(fourPointStar(c, 6.2 * u, 1.9 * u));
+        break;
+    case ps::State::Subagents:
+        p.setPen(Qt::NoPen); p.setBrush(ink);
+        p.drawPath(fourPointStar(at(-2.2, -1.6), 4.8 * u, 1.5 * u));
+        p.drawEllipse(at(3.6, 3.6), 1.5 * u, 1.5 * u);
+        p.drawEllipse(at(-0.6, 5.0), 1.2 * u, 1.2 * u);
+        break;
+    case ps::State::Recommends:
+        p.drawPolyline(QPolygonF(QVector<QPointF>{at(-5, -4), at(-1, 0), at(-5, 4)}));
+        p.drawLine(at(1, 4.2), at(5.5, 4.2));
+        break;
+    case ps::State::Done:
+        pen.setWidthF(std::max(1.2, 1.8 * u)); p.setPen(pen);
+        p.drawPolyline(QPolygonF(QVector<QPointF>{at(-4.8, 0.4), at(-1.4, 3.8), at(5.0, -3.6)}));
+        break;
+    case ps::State::Failed:
+        p.setPen(Qt::NoPen); p.setBrush(ink);
+        p.drawEllipse(c, 6.0 * u, 6.0 * u);
+        p.setPen(QPen(ground, std::max(1.2, 1.6 * u), Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(at(-2.5, -2.5), at(2.5, 2.5));
+        p.drawLine(at(2.5, -2.5), at(-2.5, 2.5));
+        break;
+    case ps::State::NeedsYou:
+        p.setPen(Qt::NoPen); p.setBrush(ink);
+        p.drawPolygon(QPolygonF(QVector<QPointF>{at(0, -6.6), at(6.6, 0), at(0, 6.6), at(-6.6, 0)}));
+        p.setPen(QPen(ground, std::max(1.2, 1.7 * u), Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(at(0, -3.2), at(0, 0.8));
+        p.drawPoint(at(0, 3.3));
+        break;
+    }
+    p.restore();
+}
+
+// The tab's icon: the most urgent state among its terminals, with a red corner mark when one of
+// them is in a remote session (the ⇄ itself when nothing more urgent is going on). A tab with no
+// terminal shows its first special pane's type glyph instead.
+inline QIcon tabIcon(bool hasTerminal, ps::State state, bool remote, ps::Glyph typeGlyph, const QColor &typeInk, qreal dpr) {
+    const int size = 16;
+    QPixmap pixmap(QSize(size, size) * dpr);
+    pixmap.setDevicePixelRatio(dpr);
+    pixmap.fill(Qt::transparent);
+    QPainter p(&pixmap);
+    const ps::Tokens t = tokens();
+    const QRectF box(1, 1, size - 2, size - 2);
+    if (!hasTerminal) {
+        if (typeGlyph == ps::Glyph::None) return {};
+        paintTypeGlyph(p, box, typeGlyph, typeInk);
+    } else if (remote && ps::urgency(state) <= ps::urgency(ps::State::Running)) {
+        paintTypeGlyph(p, box, ps::Glyph::Remote, t.error);
+    } else {
+        paintStateGlyph(p, box, state, ps::stateInk(state, t), t.background);
+        if (remote) {
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setPen(QPen(t.background, 1.5));
+            p.setBrush(t.error);
+            p.drawEllipse(QPointF(size - 3.5, size - 3.5), 3.0, 3.0);
+        }
+    }
+    p.end();
+    return QIcon(pixmap);
+}
+}  // namespace relay::chrome
+
+// The header band of a special pane (#SPBN): a low-strength tint of the type's colour, its glyph
+// and its name, engraved like the Switchboard's section headers. The pane chrome's buttons sit on
+// its right, so the band is the pane's header in the way a terminal's title row is. It is a plain
+// widget, so pressing on it and dragging moves the pane (RelayWindow::toolHeaderDrag).
+class PaneTypeBand final : public QWidget {
+public:
+    explicit PaneTypeBand(QWidget *leaf) : QWidget(leaf), m_leaf(leaf) {
+        setObjectName(QStringLiteral("paneTypeBand"));
+        setFixedHeight(26);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        setCursor(Qt::OpenHandCursor);
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        const relay::panestatus::TypeStyle style = relay::chrome::styleOf(m_leaf);
+        if (!style.band) return;
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        const QRectF r = rect();
+        p.fillPath(relay::chrome::topBand(r, relay::chrome::paneRadius()), style.fill);
+        p.setPen(QPen(style.line, 1));
+        p.drawLine(QPointF(r.left(), r.bottom() - 0.5), QPointF(r.right(), r.bottom() - 0.5));
+        const QRectF glyph(9, (height() - 14) / 2.0, 14, 14);
+        relay::chrome::paintTypeGlyph(p, glyph, style.glyph, style.ink);
+        QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+        font.setPointSizeF(8);
+        font.setWeight(QFont::DemiBold);
+        font.setLetterSpacing(QFont::AbsoluteSpacing, 1);
+        p.setFont(font);
+        p.setPen(style.text);
+        const QRectF text(glyph.right() + 7, 0, width() - glyph.right() - 7 - m_rightInset, height());
+        p.drawText(text, Qt::AlignLeft | Qt::AlignVCenter, QFontMetrics(font).elidedText(style.label, Qt::ElideRight, int(text.width())));
+    }
+
+public:
+    void setRightInset(int pixels) { if (m_rightInset != pixels) { m_rightInset = pixels; update(); } }
+
+private:
+    QWidget *m_leaf;
+    int m_rightInset = 0;
+};
 
 // A non-terminal pane: a folder explorer or a file preview. Lives in the same splitter layout
 // as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
@@ -128,7 +422,53 @@ public:
         else m_preview->setFocus(Qt::OtherFocusReason);
     }
 
+    // ----- pane type and header band (#SPBN) ------------------------------------------------
+    // The `paneType` property is the whole contract (docs/ARCHITECTURE.md, "Pane types"): set it
+    // on the pane and the band appears, tinted and labelled. A pane that has not set one gets the
+    // default for its kind when it is first polished. `paneLabel` overrides the band's text.
+    QString defaultPaneType() const {
+        switch (m_kind) {
+        case Kind::Board: return QStringLiteral("board");
+        case Kind::Settings:
+            return m_settingsView && m_settingsView->mode() == relay::SettingsPane::Mode::Actions ? QStringLiteral("actions") : QStringLiteral("options");
+        case Kind::Subagent: return QStringLiteral("subagent");
+        case Kind::Turn: return QStringLiteral("turn");
+        case Kind::Explorer: return QStringLiteral("explorer");
+        case Kind::Preview: return QStringLiteral("preview");
+        case Kind::Plan: return QStringLiteral("plan");
+        default: return {};   // a kind added later is plain until it sets paneType itself
+        }
+    }
+    PaneTypeBand *band() const { return m_band; }
+    bool bandShown() const { return m_band && !m_band->isHidden(); }
+    std::function<void()> onBandChanged;   // PaneChrome re-places its buttons on the band
+
+    // Shows, hides or repaints the band after the type, the label or the colour setting changed.
+    void refreshBand() {
+        const bool want = relay::chrome::styleOf(this).band;
+        if (want && !m_band) {
+            auto *box = qobject_cast<QVBoxLayout *>(layout());
+            if (!box) { QTimer::singleShot(0, this, [this] { refreshBand(); }); return; }
+            m_band = new PaneTypeBand(this);
+            box->insertWidget(0, m_band);
+        }
+        if (m_band) { m_band->setVisible(want); m_band->update(); }
+        if (onBandChanged) onBandChanged();
+    }
+
+protected:
+    bool event(QEvent *event) override {
+        if (event->type() == QEvent::Polish && !property("paneType").isValid())
+            setProperty("paneType", defaultPaneType());   // arrives below as a property change
+        if (event->type() == QEvent::DynamicPropertyChange) {
+            const QByteArray name = static_cast<QDynamicPropertyChangeEvent *>(event)->propertyName();
+            if (name == "paneType" || name == "paneLabel") refreshBand();
+        }
+        return QWidget::event(event);
+    }
+
 private:
+    PaneTypeBand *m_band = nullptr;
     Kind m_kind;
     relay::FileExplorer *m_explorer = nullptr;
     relay::FilePreview *m_preview = nullptr;
@@ -166,14 +506,79 @@ public:
         // never re-elide.
         adjustSize();
         m_fullWidth = width();
+        // A special pane's buttons sit on its type band (#SPBN); a terminal gets its status glyph
+        // and the remote-session marks in its title row (#XM0T).
+        if (auto *tool = dynamic_cast<ToolPane *>(leaf)) {
+            QPointer<PaneChrome> guard(this);
+            tool->onBandChanged = [guard] { if (guard) guard->place(); };
+        }
+        if (auto *pane = dynamic_cast<Pane *>(leaf)) buildStatus(pane);
     }
 
     void place() {
-        const auto *leaf = parentWidget();
+        auto *leaf = parentWidget();
         adjustSize();
-        move(leaf->width() - width() - 6, 4);
+        // Buttons added after construction (the sessions ⓘ, say) widen the room the header keeps.
+        m_fullWidth = std::max(m_fullWidth, width());
+        int y = 4;
+        if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->bandShown()) {
+            PaneTypeBand *band = tool->band();
+            band->setFixedHeight(std::max(24, height() + 2));
+            band->setRightInset(m_fullWidth + 10);
+            const int top = band->geometry().isValid() && band->y() > 0 ? band->y() : 1;
+            y = top + (band->height() - height()) / 2;
+        }
+        move(leaf->width() - width() - 6, y);
         raise();
         syncHeaderInset();
+        placeBackdrop();
+    }
+
+    // Repaints every pane's type band, status glyph and remote marks in every window: after
+    // "appearance/pane_colours" changed (the Options pane calls this), or anything else that
+    // changes how they look without a theme switch.
+    static void refreshAll() {
+        relay::chrome::reloadColourMode();
+        for (QWidget *top : QApplication::topLevelWidgets())
+            for (QWidget *widget : top->findChildren<QWidget *>()) {
+                if (auto *tool = dynamic_cast<ToolPane *>(widget)) tool->refreshBand();
+                else if (auto *chrome = dynamic_cast<PaneChrome *>(widget)) { chrome->place(); chrome->update(); }
+            }
+    }
+
+    // ----- status (#XM0T) and remote session (#SPBN), terminal panes only ------------------------
+    // RelayWindow::refreshPaneStatus() calls this on its poll. `seenSerial` / `watchedSince` are
+    // the window's bookkeeping for "news the user has not looked at yet".
+    quint64 seenSerial = 0;
+    qint64 watchedSince = 0;
+    relay::panestatus::State state() const { return m_state; }
+    bool remote() const { return m_remote; }
+
+    void setStatus(relay::panestatus::State state, const QString &remoteCommand, bool phone) {
+        if (!m_glyph) return;
+        const bool remote = !remoteCommand.isEmpty();
+        const QString host = remote ? relay::panestatus::remoteHost(remoteCommand) : QString();
+        const QString program = remote ? QFileInfo(remoteCommand.section(' ', 0, 0)).fileName() : QString();
+        if (state != m_state) {
+            m_state = state;
+            m_glyph->setToolTip(relay::panestatus::stateLabel(state));
+            m_glyph->setProperty("paneState", relay::panestatus::stateName(state));
+            m_glyph->update();
+        }
+        if (remote != m_remote || host != m_remoteHost) {
+            m_remote = remote; m_remoteHost = host;
+            m_remoteChip->setText(host.isEmpty() ? program : host);
+            m_remoteChip->setToolTip(QStringLiteral("Remote session · %1\nWhat you type here goes to %2, not this machine.")
+                                         .arg(remoteCommand, host.isEmpty() ? QStringLiteral("another machine") : host));
+            m_remoteChip->setVisible(remote);
+            m_backdrop->setVisible(remote);
+            if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->setProperty("remoteSession", remote ? host : QString());
+            placeBackdrop();
+        }
+        if (phone != m_phone) {
+            m_phone = phone;
+            m_phoneChip->setVisible(phone);
+        }
     }
 
     // Pane title (issue JRWQ): the header's right-hand directory must not end up under these
@@ -185,7 +590,8 @@ public:
         // So is a preview's header, whose view button names the format and so is wide enough to
         // reach them ("Source (MD)", issue #VXTF), and an explorer's folder line.
         else if (auto *tool = dynamic_cast<ToolPane *>(parentWidget()); tool) {
-            const int inset = isVisible() ? m_fullWidth + 4 : 0;
+            // On a type band the buttons are in the band, and the view's first row has it all.
+            const int inset = isVisible() && !tool->bandShown() ? m_fullWidth + 4 : 0;
             if (tool->board()) tool->board()->setHeaderRightInset(inset);
             else if (tool->preview()) tool->preview()->setHeaderRightInset(inset);
             else if (tool->explorer()) tool->explorer()->setHeaderRightInset(inset);
@@ -218,6 +624,138 @@ private:
         return b;
     }
 
+    void buildStatus(Pane *pane) {
+        QHBoxLayout *row = pane->headerLayout();
+        QWidget *header = pane->headerWidget();
+        if (!row || !header) return;
+        m_glyph = new PaneStateGlyph(this);
+        m_remoteChip = new PaneHeaderChip(relay::panestatus::Glyph::Remote);
+        m_phoneChip = new PaneHeaderChip(relay::panestatus::Glyph::Phone);
+        m_phoneChip->setText(QStringLiteral("phone"));
+        m_phoneChip->setToolTip(QStringLiteral("Shared with your phone: it sees this pane and can type into it.\n"
+                                               "The share chip under the prompt box shows the code or stops it."));
+        m_remoteChip->hide(); m_phoneChip->hide();
+        row->insertWidget(0, m_glyph);
+        row->insertWidget(1, m_remoteChip);
+        row->insertWidget(2, m_phoneChip);
+        m_backdrop = new RemoteBackdrop(pane);
+        m_backdrop->hide();
+        m_backdrop->lower();
+        header->installEventFilter(this);
+        pane->installEventFilter(this);
+    }
+
+    // The remote band covers the pane's title row, inside the frame, down to half the gap below it.
+    void placeBackdrop() {
+        if (!m_backdrop || m_backdrop->isHidden()) return;
+        auto *pane = dynamic_cast<Pane *>(parentWidget());
+        QWidget *header = pane ? pane->headerWidget() : nullptr;
+        if (!header) return;
+        const int inset = relay::theme::active().flag(QStringLiteral("bevel")) ? 2 : 1;
+        m_backdrop->setGeometry(inset, inset, pane->width() - 2 * inset, header->geometry().bottom() + 4 - inset);
+        m_backdrop->lower();
+    }
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override {
+        if (event->type() == QEvent::Resize || event->type() == QEvent::Move || event->type() == QEvent::LayoutRequest)
+            if (watched == parentWidget() || (m_backdrop && watched != this)) placeBackdrop();
+        return QFrame::eventFilter(watched, event);
+    }
+
+private:
+    // The state glyph at the start of a terminal's title row.
+    class PaneStateGlyph final : public QWidget {
+    public:
+        explicit PaneStateGlyph(PaneChrome *chrome) : m_chrome(chrome) {
+            setObjectName(QStringLiteral("paneStateGlyph"));
+            setFixedSize(14, 14);
+            setToolTip(relay::panestatus::stateLabel(relay::panestatus::State::Idle));
+        }
+    protected:
+        void paintEvent(QPaintEvent *) override {
+            QPainter p(this);
+            const relay::panestatus::Tokens t = relay::chrome::tokens();
+            const relay::panestatus::State s = m_chrome->state();
+            // The ground under a filled glyph's cut-out mark: the remote band when there is one.
+            const QColor ground = m_chrome->remote() ? relay::panestatus::remoteStyle(t).fill : t.background;
+            relay::chrome::paintStateGlyph(p, QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), s, relay::panestatus::stateInk(s, t), ground);
+        }
+    private:
+        PaneChrome *m_chrome;
+    };
+
+    // "⇄ me@box" and "phone" in the title row: a glyph and a word on a small outlined chip.
+    class PaneHeaderChip final : public QWidget {
+    public:
+        explicit PaneHeaderChip(relay::panestatus::Glyph glyph) : m_glyph(glyph) {
+            setObjectName(glyph == relay::panestatus::Glyph::Remote ? QStringLiteral("paneRemoteChip") : QStringLiteral("panePhoneChip"));
+            setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        }
+        void setText(const QString &text) { m_text = text; updateGeometry(); update(); }
+        QSize sizeHint() const override {
+            QFont bold = font(); bold.setWeight(QFont::DemiBold);
+            const int text = std::min(220, QFontMetrics(bold).horizontalAdvance(m_text));
+            return {7 + 12 + 5 + text + 8, 18};
+        }
+        QSize minimumSizeHint() const override { return {7 + 12 + 8, 18}; }
+    protected:
+        void paintEvent(QPaintEvent *) override {
+            const relay::panestatus::Tokens t = relay::chrome::tokens();
+            const bool remote = m_glyph == relay::panestatus::Glyph::Remote;
+            const relay::panestatus::TypeStyle style = remote ? relay::panestatus::remoteStyle(t) : relay::panestatus::phoneStyle(t);
+            QPainter p(this);
+            p.setRenderHint(QPainter::Antialiasing);
+            const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+            const qreal radius = relay::chrome::paneRadius() > 0 ? 5 : 0;
+            p.setPen(QPen(remote ? style.line : style.ink, 1));
+            p.setBrush(remote ? relay::panestatus::mix(t.error, t.background, 0.26) : style.fill);
+            p.drawRoundedRect(r, radius, radius);
+            relay::chrome::paintTypeGlyph(p, QRectF(7, (height() - 12) / 2.0, 12, 12), m_glyph, remote ? style.text : style.ink);
+            QFont bold = font(); bold.setWeight(QFont::DemiBold);
+            p.setFont(bold);
+            p.setPen(remote ? t.text : style.text);
+            const QRectF text(7 + 12 + 5, 0, width() - (7 + 12 + 5) - 6, height());
+            p.drawText(text, Qt::AlignLeft | Qt::AlignVCenter, QFontMetrics(bold).elidedText(m_text, Qt::ElideMiddle, int(text.width())));
+        }
+    private:
+        relay::panestatus::Glyph m_glyph;
+        QString m_text;
+    };
+
+    // The remote band behind a terminal's title row: the error hue, hatched, with a firm line under
+    // it. Hatching is a texture no pane type uses, so it reads as "not here" even without colour.
+    class RemoteBackdrop final : public QWidget {
+    public:
+        explicit RemoteBackdrop(QWidget *pane) : QWidget(pane) {
+            setObjectName(QStringLiteral("paneRemoteBand"));
+            setAttribute(Qt::WA_TransparentForMouseEvents);
+        }
+    protected:
+        void paintEvent(QPaintEvent *) override {
+            const relay::panestatus::Tokens t = relay::chrome::tokens();
+            const relay::panestatus::TypeStyle style = relay::panestatus::remoteStyle(t);
+            QPainter p(this);
+            p.setRenderHint(QPainter::Antialiasing);
+            const QRectF r = rect();
+            const QPainterPath band = relay::chrome::topBand(r, relay::chrome::paneRadius());
+            p.fillPath(band, style.fill);
+            p.setClipPath(band);
+            const bool light = relay::panestatus::isLight(t.background);
+            p.setPen(QPen(relay::panestatus::mix(t.error, t.background, light ? 0.17 : 0.24), 3));
+            for (qreal x = -r.height(); x < r.width(); x += 11) p.drawLine(QPointF(x, r.height()), QPointF(x + r.height(), 0));
+            p.setClipping(false);
+            p.setPen(QPen(style.line, 1.5));
+            p.drawLine(QPointF(r.left(), r.bottom() - 0.25), QPointF(r.right(), r.bottom() - 0.25));
+        }
+    };
+
     int m_fullWidth = 0;
+    PaneStateGlyph *m_glyph = nullptr;
+    PaneHeaderChip *m_remoteChip = nullptr, *m_phoneChip = nullptr;
+    RemoteBackdrop *m_backdrop = nullptr;
+    relay::panestatus::State m_state = relay::panestatus::State::Idle;
+    bool m_remote = false, m_phone = false;
+    QString m_remoteHost;
 };
 

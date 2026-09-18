@@ -128,7 +128,12 @@ private Q_SLOTS:
         QVERIFY(!typeStyle(QString(), ColourMode::ByType, t).band);
         QVERIFY(!typeStyle(QStringLiteral("terminal"), ColourMode::ByType, t).band);
         QVERIFY(!typeStyle(QStringLiteral("preview"), ColourMode::ByType, t).band);
-        QVERIFY(!typeStyle(QStringLiteral("board"), ColourMode::Off, t).band);
+        QVERIFY(!typeStyle(QStringLiteral("diff"), ColourMode::ByType, t).band);
+        // Off keeps the band (it is the pane's name) in neutral ink: every type looks the same.
+        const TypeStyle off = typeStyle(QStringLiteral("board"), ColourMode::Off, t);
+        QVERIFY(off.band);
+        QCOMPARE(off.fill, typeStyle(QStringLiteral("subagent"), ColourMode::Off, t).fill);
+        QVERIFY(off.fill != typeStyle(QStringLiteral("board"), ColourMode::ByType, t).fill);
         const TypeStyle board = typeStyle(QStringLiteral("board"), ColourMode::ByType, t);
         QVERIFY(board.band);
         QCOMPARE(board.label, QStringLiteral("SWITCHBOARD"));
@@ -174,7 +179,7 @@ private Q_SLOTS:
             QList<TypeStyle> styles{remoteStyle(t), phoneStyle(t)};
             for (const QString &type : {QStringLiteral("board"), QStringLiteral("options"), QStringLiteral("actions"),
                                         QStringLiteral("settings"), QStringLiteral("sessions"), QStringLiteral("subagent"), QStringLiteral("turn"), QStringLiteral("other")})
-                for (ColourMode mode : {ColourMode::ByType, ColourMode::ByGroup}) styles << typeStyle(type, mode, t);
+                for (ColourMode mode : {ColourMode::ByType, ColourMode::ByGroup, ColourMode::Off}) styles << typeStyle(type, mode, t);
             for (const TypeStyle &s : styles) {
                 const QByteArray where = (spec.id + QLatin1Char(' ') + s.label).toUtf8();
                 QVERIFY2(contrast(s.text, s.fill) >= 4.5, where.constData());

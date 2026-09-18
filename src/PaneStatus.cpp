@@ -199,7 +199,7 @@ const QList<Kind> &kinds() {
 // Plain on purpose: a terminal is the default look, and a file pane's own first row is its header.
 bool plainType(const QString &type) {
     static const QSet<QString> plain{QString(), QStringLiteral("terminal"), QStringLiteral("explorer"),
-                                     QStringLiteral("preview"), QStringLiteral("plan")};
+                                     QStringLiteral("preview"), QStringLiteral("plan"), QStringLiteral("diff")};
     return plain.contains(type);
 }
 
@@ -217,7 +217,7 @@ double tintStrength(const Tokens &t) { return isLight(t.background) ? 0.10 : 0.1
 }  // namespace
 
 TypeStyle typeStyle(const QString &paneType, ColourMode mode, const Tokens &tokens, const QString &label) {
-    if (mode == ColourMode::Off || plainType(paneType)) return {};
+    if (plainType(paneType)) return {};
     Kind kind{paneType, QString(), QStringLiteral("tools"), Glyph::Tool};
     for (const Kind &k : kinds()) if (k.type == paneType) { kind = k; break; }
     if (kind.label.isEmpty()) {
@@ -230,13 +230,16 @@ TypeStyle typeStyle(const QString &paneType, ColourMode mode, const Tokens &toke
     // terminal's own blue for Sessions (they are the terminals' conversations), violet for
     // everything the agent does. A fifth hue would have to come from outside the theme's own
     // colours. By group: every tool pane brass, every agent pane violet.
+    // Off: the band stays, because it is the pane's header and its name (the Options pane draws
+    // no title of its own), but in the theme's neutral ink rather than a hue.
     QColor hue;
-    if (kind.group == QStringLiteral("agents")) hue = tokens.agent;
+    if (mode == ColourMode::Off) hue = tokens.muted;
+    else if (kind.group == QStringLiteral("agents")) hue = tokens.agent;
     else if (mode == ColourMode::ByGroup) hue = tokens.warning;
     else if (kind.glyph == Glyph::Options || kind.glyph == Glyph::Actions) hue = tokens.success;
     else if (kind.type == QStringLiteral("sessions")) hue = tokens.shell;
     else hue = tokens.warning;
-    TypeStyle style = tinted(hue, tokens, tintStrength(tokens));
+    TypeStyle style = tinted(hue, tokens, mode == ColourMode::Off ? 0.06 : tintStrength(tokens));
     style.label = (label.isEmpty() ? kind.label : label).toUpper();
     style.glyph = kind.glyph;
     style.group = kind.group;

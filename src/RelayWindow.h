@@ -36,6 +36,7 @@
 #include "OutputLinks.h"
 
 #include <QAbstractButton>
+#include <QDateTime>
 #include <QAbstractItemView>
 #include <QAbstractScrollArea>
 #include <QAction>
@@ -233,6 +234,9 @@ public:
         // the hint away, whether or not an arrow arrived.
         m_placementTimer.setSingleShot(true);
         connect(&m_placementTimer, &QTimer::timeout, this, [this] { endPlacement(); });
+        // Pane state glyphs and tab icons (#XM0T), and the remote-session header (#SPBN).
+        connect(&m_statusTimer, &QTimer::timeout, this, [this] { refreshPaneStatus(); });
+        m_statusTimer.start(kStatusPollMs);
         // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+A).
         Keymap::instance().listen(this, [this] { syncChromeTooltips(); });
         // The status bar stays out of the layout until something transient needs it, so the
@@ -3206,6 +3210,57 @@ private:
         return nullptr;
     }
 
+    // ----- pane states and tab icons (#XM0T), remote sessions (#SPBN) -------------------------
+    // One poll for every pane in the window. Each terminal's header shows its own state; each tab
+    // shows the most urgent one among its panes, and a red mark when one of them is in an ssh,
+    // mosh or telnet session. A finished turn stays news (done / failed / needs you) until the
+    // pane has been the one you are looking at for kSeenAfterMs, so coming back to the window
+    // still shows what happened for a moment. Notifications are the pane's own (Pane::notify).
+    static constexpr int kStatusPollMs = 400;
+    static constexpr qint64 kSeenAfterMs = 1500;
+
+    void refreshPaneStatus() {
+        namespace ps = relay::panestatus;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const bool focused = isActiveWindow();
+        QSet<QWidget *> pages;
+        for (int i = 0; i < m_tabs->count(); ++i) {
+            QWidget *page = m_tabs->widget(i);
+            pages.insert(page);
+            QList<ps::State> states;
+            bool remote = false, terminal = false;
+            ps::TypeStyle firstType;
+            for (QWidget *leaf : leavesIn(page)) {
+                auto *pane = dynamic_cast<Pane *>(leaf);
+                if (!pane) {
+                    if (!firstType.band) firstType = relay::chrome::styleOf(leaf);
+                    continue;
+                }
+                terminal = true;
+                PaneChrome *chrome = chromeOf(pane);
+                if (!chrome) continue;
+                const ps::Facts facts = pane->statusFacts();
+                const bool watched = focused && i == m_tabs->currentIndex() && leaf == m_activeLeaf;
+                if (!watched) chrome->watchedSince = 0;
+                else if (!chrome->watchedSince) chrome->watchedSince = now;
+                if (watched && now - chrome->watchedSince >= kSeenAfterMs) chrome->seenSerial = facts.finishSerial;
+                const ps::State state = ps::resolve(facts, chrome->seenSerial);
+                const QString remoteLine = pane->remoteCommandLine();
+                chrome->setStatus(state, remoteLine, pane->sharedWithPhone());
+                states << state;
+                remote = remote || !remoteLine.isEmpty();
+            }
+            const ps::State top = ps::mostUrgent(states);
+            const QString key = QStringLiteral("%1|%2|%3|%4|%5|%6").arg(terminal).arg(int(top)).arg(remote)
+                                    .arg(int(firstType.glyph)).arg(firstType.ink.name(), relay::theme::activeThemeId());
+            if (m_tabIconKey.value(page) == key) continue;
+            m_tabIconKey.insert(page, key);
+            m_tabs->setTabIcon(i, relay::chrome::tabIcon(terminal, top, remote, firstType.glyph, firstType.ink, devicePixelRatioF()));
+        }
+        for (auto it = m_tabIconKey.begin(); it != m_tabIconKey.end();)
+            it = pages.contains(it.key()) ? std::next(it) : m_tabIconKey.erase(it);
+    }
+
     enum class Edge { None, Left, Right, Top, Bottom, TabBar };
 
     // Where a drop at `global` would put a pane: an edge of the leaf under the cursor, or a tab bar.
@@ -3618,6 +3673,10 @@ private:
     relay::panes::PlacementWindow m_placement;
     QElapsedTimer m_placementClock;
     QTimer m_placementTimer;
+    // Pane state glyphs and tab icons (#XM0T): the poll, and each tab's last icon so it is only
+    // repainted when what it shows changes.
+    QTimer m_statusTimer;
+    QHash<QWidget *, QString> m_tabIconKey;
     QPointer<QWidget> m_placementPane, m_placementAnchor;
     QPointer<QLabel> m_placementHint;
     QPointer<QToolButton> m_newTabButton;
