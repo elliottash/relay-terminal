@@ -12,7 +12,7 @@ rank: c
 created: '2026-09-18'
 acceptance: 'A model changing an existing file calls `edit_file {path, old_string, new_string, replace_all?}` instead of resending the whole file; the preview is a `EDIT FILE` diff in the same shape as `WRITE FILE`; every refusal says what to do instead; the edit is undone by `rewind` and refused in plan mode; `tests/test_tools.py`, `tests/test_sessions.py`, `tests/test_subagents.py`, `tests/test_agents_defs.py`, evidence in `docs/qa_evidence/2026-09-18-edit-file-tool/`'
 source: 'owner, 2026-09-18: a real edit tool "as part of this" tool-call-notifications work'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-edit-file-tool/'], related: [], github: null}
+links: {plans: [], commits: [d3f5624], evidence: ['docs/qa_evidence/2026-09-18-edit-file-tool/'], related: [], github: null}
 ---
 # edit_file: a change to an existing file is one string, not the whole file
 
