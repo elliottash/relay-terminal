@@ -30,6 +30,10 @@
   --mono: "IBM Plex Mono", ui-monospace, "DejaVu Sans Mono", monospace;
   --sans: "Space Grotesk", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
   --gutter: 2.25rem;
+  /* Lit from above, the way Linear treats panels: a hairline that brightens along the top edge
+     instead of a shadow underneath. */
+  --edge: linear-gradient(to bottom, rgba(230, 232, 236, 0.16), rgba(230, 232, 236, 0.03) 22%, transparent 60%);
+  --band: #12151b;
   color-scheme: dark;
 }
 
@@ -76,21 +80,21 @@ code { font-size: 0.92em; }
 @media (max-width: 560px) { .top nav ul { gap: 14px; } .top nav li:nth-child(3) { display: none; } }
 
 /* ---- hero: the copy beside a session ------------------------------------------------------ */
-.hero { padding: 72px 0 64px; }
+.hero { padding: 104px 0 96px; }
 .hero-grid { display: grid; gap: 44px; align-items: start; }
 @media (min-width: 980px) { .hero-grid { grid-template-columns: minmax(0, 34rem) minmax(0, 1fr); gap: 56px; } }
 
 h1 {
   font-family: var(--sans);
-  font-size: clamp(1.9rem, 1.1rem + 2.7vw, 2.85rem);
+  font-size: clamp(2.1rem, 1.1rem + 3.3vw, 3.3rem);
   font-weight: 600;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-  margin: 0 0 20px;
-  max-width: 20ch;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  margin: 0 0 22px;
+  max-width: 18ch;
   text-wrap: balance;
 }
-.lede { color: var(--muted); font-size: 1.06rem; margin: 0 0 26px; }
+.lede { color: var(--muted); font-size: 1.08rem; line-height: 1.6; margin: 0 0 30px; max-width: 54ch; }
 .lede strong { color: var(--text); font-weight: 600; }
 
 .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
@@ -106,12 +110,18 @@ h1 {
 
 /* The session block: the most characteristic thing in the product, so it carries the page. */
 .screen {
+  position: relative;
   background: var(--raised);
   border: 1px solid var(--line);
   font-family: var(--mono);
   font-size: 0.86rem;
   line-height: 1.7;
 }
+.screen::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: var(--edge);
+}
+.screen > * { position: relative; }
 .screen-body { padding: 18px 20px 16px; }
 .screen .ln + .ln { margin-top: 2px; }
 .screen .ln { margin: 0; max-width: none; overflow-wrap: anywhere; }
@@ -138,11 +148,12 @@ h1 {
 .ag-chip { color: var(--agent); border-color: rgba(180, 142, 247, 0.4); }
 
 /* ---- sections: a gutter carries the section mark ------------------------------------------ */
-section { padding: 60px 0; scroll-margin-top: 16px; }
-section + section { border-top: 1px solid var(--line); }
+section { padding: 96px 0; scroll-margin-top: 16px; }
+section:nth-of-type(even) { background: var(--band); }
+.hero { background: radial-gradient(120% 60% at 50% -10%, rgba(62, 197, 240, 0.06), transparent 60%); }
 h2 {
-  font-family: var(--sans); font-weight: 600; font-size: clamp(1.25rem, 1.05rem + 0.9vw, 1.6rem);
-  letter-spacing: -0.01em; margin: 0 0 32px; padding-left: var(--gutter); position: relative;
+  font-family: var(--sans); font-weight: 600; font-size: clamp(1.4rem, 1.1rem + 1.2vw, 1.95rem);
+  letter-spacing: -0.025em; margin: 0 0 36px; padding-left: var(--gutter); position: relative;
 }
 h2::before { content: "──"; position: absolute; left: 0; color: var(--line); }
 h3 { font-family: var(--mono); font-size: 1rem; font-weight: 600; margin: 0 0 6px; }
@@ -168,7 +179,12 @@ h3 { font-family: var(--mono); font-size: 1rem; font-weight: 600; margin: 0 0 6p
 .gallery { display: grid; gap: 28px; margin-top: 48px; grid-template-columns: 1fr 1fr; }
 .gallery .shot:first-child { grid-column: 1 / -1; }
 .gallery .shot { display: flex; flex-direction: column; margin: 0; }
+.shot { position: relative; }
 .shot img { border: 1px solid var(--line); background: var(--raised); }
+.shot::after {
+  content: ""; position: absolute; inset: 0 0 auto; height: 40%; pointer-events: none;
+  background: var(--edge);
+}
 .shot figcaption { color: var(--muted); font-size: 0.86rem; margin-top: 10px; padding-top: 0; }
 .gallery figcaption { margin-top: auto; padding-top: 10px; }
 @media (max-width: 660px) { .gallery { grid-template-columns: 1fr; } }
@@ -210,3 +226,51 @@ footer a:hover { color: var(--text); }
   .screen { font-size: 0.78rem; }
   pre { font-size: 0.76rem; padding: 12px; }
 }
+
+/* ---- the patch panel -----------------------------------------------------------------------
+   Relay's name, its tracker and its behaviour are all one idea: a line patched to a destination.
+   The hero says so literally. Brass and bakelite for the board; the product's own cyan and violet
+   for whichever line is live. */
+.stage { display: grid; gap: 18px; }
+.board { margin: 0; }
+.board-face {
+  position: relative; height: 150px;
+  background: linear-gradient(180deg, #1a1712 0%, #141210 100%);
+  border: 1px solid #2c2620;
+}
+.board-face::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(to bottom, rgba(200, 164, 92, 0.16), transparent 30%);
+}
+.cords { position: absolute; inset: 0; width: 100%; height: 100%; }
+.cord { fill: none; stroke: #6b5a3c; stroke-width: 2.4; stroke-linecap: round; opacity: 0; }
+.board[data-line="shell"] .cord-shell,
+.board[data-line="agent"] .cord-agent { opacity: 1; stroke: #c8a45c; }
+@media (prefers-reduced-motion: no-preference) { .cord { transition: opacity 220ms ease; } }
+
+.jack-in { position: absolute; left: 20px; top: 22px; display: flex; align-items: center; gap: 10px; }
+.jacks { position: absolute; left: 20px; bottom: 26px; right: 20px; display: flex; gap: 62px; }
+.jack {
+  display: flex; align-items: center; gap: 10px; padding: 0; background: none; border: 0;
+  color: var(--muted); font: inherit; cursor: pointer;
+}
+.jack-ring {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: radial-gradient(circle at 50% 35%, #2a2520 0 45%, #7d6738 46%, #c8a45c 62%, #6b5637 100%);
+  box-shadow: inset 0 1px 1px rgba(255, 233, 186, 0.35);
+  flex: none;
+}
+.jack-label { font-family: var(--mono); font-size: 0.8rem; letter-spacing: 0.02em; }
+.jack-in .jack-label { color: var(--muted); }
+.board[data-line="shell"] .jack-shell .jack-ring,
+.board[data-line="agent"] .jack-agent .jack-ring { box-shadow: inset 0 1px 1px rgba(255, 233, 186, 0.35), 0 0 0 3px rgba(62, 197, 240, 0.25); }
+.board[data-line="agent"] .jack-agent .jack-ring { box-shadow: inset 0 1px 1px rgba(255, 233, 186, 0.35), 0 0 0 3px rgba(180, 142, 247, 0.28); }
+.board[data-line="shell"] .jack-shell .jack-label { color: var(--shell); }
+.board[data-line="agent"] .jack-agent .jack-label { color: var(--agent); }
+.jack:hover .jack-label { color: var(--text); }
+.jack:focus-visible { outline: 2px solid var(--shell); outline-offset: 4px; }
+.board-note { color: var(--muted); font-size: 0.85rem; margin: 10px 0 0; }
+
+/* The caret takes the colour of whatever is patched. */
+.board[data-line="agent"] ~ .screen .caret { background: var(--agent); }
+.input-text { color: var(--text); }
