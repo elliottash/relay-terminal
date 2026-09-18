@@ -41,7 +41,15 @@ class PaneSource:
     def has_pane(self, pane: str) -> bool:
         return any(item["id"] == pane for item in self.snapshot())
 
-    async def compose(self, pane: str, text: str, *, to_agent: bool, when: str, origin: str) -> None:
+    async def compose(self, pane: str, text: str, *, to_agent: bool, when: str, origin: str,
+                      origin_name: str = "") -> None:
+        """A prompt, tagged with where it came from.
+
+        ``origin`` is what the transcript and the queue row record (``remote:<device>`` or, for a
+        guest the owner approved, ``guest:<participant>``); ``origin_name`` is the display name
+        that goes with it, so the desktop's queue row can say *alice* rather than a hex id. It is
+        desktop-side only and never reaches another guest — see `Host.guest_view`.
+        """
         raise NotImplementedError
 
     async def agent_stop(self, pane: str) -> None:
@@ -243,13 +251,15 @@ class DemoPaneSource(PaneSource):
 
     # ---- actions -----------------------------------------------------------------------------
 
-    async def compose(self, pane: str, text: str, *, to_agent: bool, when: str, origin: str) -> None:
+    async def compose(self, pane: str, text: str, *, to_agent: bool, when: str, origin: str,
+                      origin_name: str = "") -> None:
         item = self._pane(pane)
         if item is None:
             raise wire.WireError("no_such_pane", "no such pane.")
         if when == "queue" and pane in self._running:
             item["queue"] += 1
-            self._emit(pane, {"event": "queued", "text": text, "origin": origin})
+            self._emit(pane, {"event": "queued", "text": text, "origin": origin,
+                              **({"author": origin_name} if origin_name else {})})
             self._changed()
             return
         if pane in self._running:

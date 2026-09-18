@@ -20,10 +20,6 @@ links: {plans: [], commits: [fac5dac, 6eb00d0], evidence: ['docs/qa_evidence/202
 
 some of the fonts seem hard to read, eg in subagent panes
 
-> This card was filed as `#LG7T`, which the format forbids (L is not a Crockford base32
-> character), so no board tool could address it. It is `#N50J` since c01078a; commits fac5dac and
-> 6eb00d0, and the QA evidence they name, still say `#LG7T`.
-
 ## Change
 
 What made text hard to read was the same few things in many places. The rules are now written

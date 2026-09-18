@@ -532,3 +532,7 @@ class ControlQueue:
     def for_pane(self, pane: str) -> list[PendingControl]:
         self.expire()
         return [item for item in self.pending.values() if item.pane == pane]
+
+    def for_participant(self, participant: str) -> list[PendingControl]:
+        self.expire()
+        return [item for item in self.pending.values() if item.participant == participant]

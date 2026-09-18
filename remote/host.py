@@ -30,8 +30,9 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Awaitable, Callable
 
-from . import audit as audit_mod, envelope, guests as guests_mod, identity as identity_mod, noise, \
-    notify as notify_mod, pairing, panes as panes_mod, push as push_mod, wire, ws
+from . import audit as audit_mod, control as control_mod, envelope, guests as guests_mod, \
+    identity as identity_mod, noise, notify as notify_mod, pairing, panes as panes_mod, \
+    push as push_mod, wire, ws
 
 log = logging.getLogger("relay.host")
 
@@ -44,6 +45,11 @@ SECRET_NONCE_TTL = 45.0            # a password nonce is minted to be used now, 
 MAX_SECRET_BYTES = 1024
 MAX_HISTORY_ROWS = 200             # section 6.5: one page, so a phone cannot ask for the world
 DEFAULT_HISTORY_ROWS = 60
+# Section 10.5, "only while I am present": how long the desktop window may be unfocused before the
+# share behaves as paused. Short enough to mean something, long enough that alt-tabbing to read a
+# stack trace does not take the keyboard off whoever is typing.
+PRESENCE_GRACE = 20.0
+HOUSEKEEPING = 1.0                 # how often lapsed prompts and control requests are swept
 
 # Per-device inbound budget: (messages, seconds). Everything not named gets DEFAULT_LIMIT.
 LIMITS = {
@@ -113,6 +119,58 @@ KnockApprover = Callable[[KnockRequest], Awaitable[tuple[bool, str]]]
 async def admit_nobody(request: KnockRequest) -> tuple[bool, str]:
     """The default: a hub nobody wired an owner to admits no guests at all."""
     return False, wire.VIEWER
+
+
+@dataclass
+class PromptRequest:
+    """A guest's prompt waiting for the owner (section 10.4).
+
+    The owner sees the name, not only the id, and the **whole** text: approving a prompt is
+    approving everything the agent will then do with the owner's keys, so a preview would be the
+    wrong thing to decide on.
+    """
+    prompt_id: str
+    participant: str
+    name: str
+    pane: str
+    text: str
+    when: str = "now"
+    plan_id: str = ""
+
+
+PromptApprover = Callable[[PromptRequest], Awaitable[bool]]
+
+
+async def approve_no_prompts(request: PromptRequest) -> bool:
+    """The default. A hub with nobody to ask refuses rather than runs: the whole of 10.4 is that
+    a guest's words reach the agent only because a person said so."""
+    return False
+
+
+@dataclass
+class ControlRequest:
+    """An editor asking for the keyboard (section 10.3)."""
+    pane: str
+    participant: str
+    name: str
+
+
+ControlApprover = Callable[[ControlRequest], Awaitable[bool]]
+
+
+async def grant_control_to_nobody(request: ControlRequest) -> bool:
+    return False
+
+
+@dataclass
+class ShareOptions:
+    """The per-share switches of section 10.5, per pane.
+
+    Both are off by default, and both are the owner's alone: they arrive as the `share_options`
+    sidecar line, which is in ``wire.OWNER_ONLY``.
+    """
+    prompts_immediate: bool = False     # 10.4: a guest's prompt runs without being asked about
+    present_only: bool = False          # 10.5: an unfocused desktop window behaves as a pause
 
 
 @dataclass
@@ -405,7 +463,10 @@ class Host:
                  source: panes_mod.PaneSource, *, app_base: str,
                  approver: Approver = approve_nothing, name: str = "this desktop",
                  guests: guests_mod.GuestStore | None = None,
-                 knock_approver: KnockApprover = admit_nobody):
+                 knock_approver: KnockApprover = admit_nobody,
+                 prompt_approver: PromptApprover = approve_no_prompts,
+                 control_approver: ControlApprover = grant_control_to_nobody,
+                 clock: Callable[[], float] = time.monotonic):
         self.identity = identity
         self.devices = devices
         self.source = source
@@ -417,8 +478,32 @@ class Host:
         self.guests = guests if guests is not None else \
             guests_mod.GuestStore(devices.directory, devices=devices)
         self.knock_approver = knock_approver
+        # The two owner seams of 10.3 and 10.4, shaped exactly like `knock_approver`: a coroutine
+        # the GUI (or the CLI, or a test double) answers. A hub nobody wired one to refuses.
+        self.prompt_approver = prompt_approver
+        self.control_approver = control_approver
         self.prompts = guests_mod.PromptQueue()
         self.controls = guests_mod.ControlQueue()
+        # Who is driving each pane: **one** state across the owner's devices, the agent and the
+        # participants (section 10.3, remote/control.py).
+        self.control = control_mod.ControlBook(self._control_changed)
+        # The desktop watches the same handoffs the phones are told about, so its own "alice is
+        # typing" indicator cannot drift from theirs.
+        self._control_watchers: list[Callable[[str, str, str], None]] = []
+        self._state_watchers: list[Callable[[str, bool, str], None]] = []
+        self.options: dict[str, ShareOptions] = {}      # per pane; "" is the default for all
+        self.paused: set[str] = set()                   # panes the owner paused; "" is all of them
+        self._share_state: dict[str, tuple[bool, str]] = {}   # what each pane was last told
+        # The presence rule of 10.5 reads the **same** `window_active` signal section 9's
+        # notifications do; `window_active` below feeds both. The default differs on purpose: the
+        # notifier assumes the window is *not* focused (a missed push is worse than a spare one),
+        # and the hub assumes it is, because a hub nobody ever tells — `remote.cli share` — must
+        # not sit permanently paused.
+        self.clock = clock
+        self._window_active = True
+        self._away_since: float | None = None
+        self._housekeeping: asyncio.Task | None = None
+        self._in_control_change = False
         self.limiter = Limiter()
         self.audit = audit_mod.AuditLog(devices.directory)   # beside devices.json, 0700/0600
         # Notifications live in remote/notify.py; everything below the "---- push" line is the
@@ -487,6 +572,11 @@ class Host:
     async def serve(self) -> None:
         """Hold the rendezvous socket open, reconnecting until ``stop`` is called."""
         self._running = True
+        if self._housekeeping is None:
+            # A parked prompt and a parked control request both lapse (10.4, 10.3) and somebody
+            # has to notice; the queues' clocks are injected, so a test calls `expire_pending`
+            # instead of waiting ten minutes.
+            self._housekeeping = asyncio.create_task(self._housekeep())
         delay = 1.0
         while self._running:
             try:
@@ -508,6 +598,9 @@ class Host:
 
     async def stop(self) -> None:
         self._running = False
+        if self._housekeeping is not None:
+            self._housekeeping.cancel()
+            self._housekeeping = None
         for channel in list(self.channels.values()):
             await channel.close("shutting down")
         if self.socket is not None:
@@ -557,6 +650,8 @@ class Host:
             await channel.run()
         finally:
             self.channels.pop(channel.id, None)
+            if channel.device_id:
+                self.control.drop_device(channel.device_id)
             if self.screens and channel.device_id:
                 self.source.release_device(channel.device_id)
             if channel.participant_id:
@@ -591,6 +686,9 @@ class Host:
 
     def _panes_changed(self) -> None:
         message = self.stream("panes", limit=64).add({"t": "panes", "items": self._items()})
+        live = {item.get("id") for item in message["items"]}
+        for pane in [p for p in self.control.holders if p not in live]:
+            self.control.forget(pane)       # a pane that is gone is driven by nobody
         self._fan_out(message, needed=wire.VIEW)
         self.notifier.on_panes(message["items"])
 
@@ -602,6 +700,13 @@ class Host:
         `panes` message carrying an old nonce is harmless for the same reason.
         """
         items = [dict(item) for item in self.source.snapshot()]
+        for item in items:
+            # One control state (section 10.3): the source's own answer is folded in — the agent
+            # taking a program is the desktop's business and reaches us this way — and what every
+            # client then reads is the book's, in section 6.3's spelling.
+            pane = item.get("id", "")
+            self.control.observe(pane, str(item.get("control") or "human"))
+            item["control"] = self.control.field(pane)
         now = time.monotonic()
         self.secret_nonces = {pane: nonce for pane, nonce in self.secret_nonces.items()
                               if nonce.expires > now}
@@ -682,16 +787,27 @@ class Host:
         Called on **every** outbound message on a participant's channel (``Channel.send``), which
         is why the rules are here rather than at each sender:
 
+        * the **type** is in ``GUEST_SERVER_TYPES`` — outbound is an allow-list too (section
+          10.1). This used to be the other way round, everything passing unless it was named, and
+          that made every desktop→client message somebody adds later a guest-visible leak on the
+          day it lands rather than the day somebody decided it;
         * a `panes` list is cut down to the panes of their invite, and the desktop-minted password
           nonce is stripped — a guest is never offered the password field (section 10.3);
         * anything naming a pane they are not on is dropped;
         * an `agent` message is dropped unless its event is in ``GUEST_EVENTS``, which is a strict
           subset of what a device may see;
-        * everything else — `welcome`, `admitted`, `participants`, `error`, `pong`, `bye` — passes.
+        * a queue event keeps only the prompts this guest wrote themselves: `queued` carries the
+          text and `queue_changed` carries a preview of every waiting item, so a share with two
+          editors would otherwise show each of them what the other asked for, and both of them
+          what the owner is asking (section 10.4);
+        * everything else — `welcome`, `admitted`, `participants`, `control`, `share_state`,
+          `prompt_decided`, `error`, `pong`, `bye` — passes.
         """
         if participant is None:
             return None
         kind = message.get("t")
+        if not wire.may_send_to_guest(kind if isinstance(kind, str) else ""):
+            return None
         if kind == "panes":
             items = [{name: value for name, value in item.items() if name != "secret_nonce"}
                      for item in message.get("items", []) if participant.may_see(item.get("id"))]
@@ -703,32 +819,99 @@ class Host:
             event = (message.get("event") or {}).get("event", "")
             if not wire.may_forward_to_guest(event):
                 return None
+            scrubbed = self._guest_queue_view(participant, message.get("event") or {})
+            if scrubbed is not message.get("event"):
+                return {**message, "event": scrubbed}
         return message
+
+    def _guest_queue_view(self, participant: guests_mod.Participant, event: dict) -> dict:
+        """A queue event with other people's prompt text taken out, and the author named.
+
+        The queue is the one guest-visible event that carries what somebody *typed*: `queued` has
+        the prompt and `queue_changed` a preview of each waiting item. A guest may see that a row
+        exists, whose it is and what happens to it — that is what makes a shared queue legible —
+        but the words belong to whoever wrote them. Their own rows are left whole, matched on the
+        `guest:<id>` origin the hub itself puts on an approved prompt.
+        """
+        name = event.get("event")
+        if name not in ("queued", "queue_changed"):
+            return event
+        mine = f"guest:{participant.participant_id}"
+
+        def author(origin) -> str:
+            origin = origin if isinstance(origin, str) else ""
+            if origin == mine:
+                return "you"
+            if origin.startswith("guest:"):
+                other = self.guests.participants.get(origin.split(":", 1)[1])
+                return other.name if other is not None else "a guest"
+            return "the owner"
+
+        if name == "queued":
+            if event.get("origin") == mine:
+                return {**event, "author": "you"}
+            out = {key: value for key, value in event.items() if key not in ("text", "prompt")}
+            out["author"] = author(event.get("origin"))
+            return out
+        out = dict(event)
+        for field in ("items", "steering"):
+            rows = event.get(field)
+            if not isinstance(rows, list):
+                continue
+            kept = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                origin = row.get("origin")
+                if origin == mine:
+                    kept.append({**row, "author": "you"})
+                    continue
+                kept.append({key: value for key, value in row.items()
+                             if key not in ("preview", "text", "prompt")}
+                            | {"author": author(origin)})
+            out[field] = kept
+        return out
 
     # ---- presence (section 10.3) ----------------------------------------------------------------
 
     def participants_on(self, pane: str) -> list[dict]:
-        """Who is on a pane, shaped for the `participants` message.
+        """Who is on a pane, shaped for the `participants` message (section 10.3).
 
-        This is the enumeration the next piece of section 10 builds presence on. ``driving`` comes
-        from :meth:`control_holder`, which has nothing to say yet.
+        ``driving`` is read from the one control book, so it cannot disagree with the `control`
+        message or with the pane item's ``control`` field — they are three spellings of one state.
+        A participant who is connected right now is marked ``online``: the record outlives the
+        socket, and presence is about the socket.
         """
         holder = self.control_holder(pane)
+        online = {channel.participant_id for channel in self.channels.values()
+                  if channel.participant_id and not channel.closed}
         return [{"id": p.participant_id, "name": p.name, "role": p.role,
-                 "driving": holder == p.participant_id}
+                 "driving": holder == p.participant_id,
+                 "online": p.participant_id in online}
                 for p in self.guests.on_pane(pane)]
 
     def control_holder(self, pane: str) -> str | None:
-        """The participant id currently driving ``pane``, or None for the owner or the agent.
+        """The participant id currently driving ``pane``, or None for the owner or the agent."""
+        return self.control.participant(pane)
 
-        **A seam.** Control handoff is the next agent's piece (section 10.3); until it exists no
-        participant ever holds the keyboard, so this answers None and `keys`, `paste` and `line`
-        from a guest are refused with `not_driving`.
-        """
-        return None
+    def holder_name(self, pane: str) -> str:
+        """What to show beside `control`: the desktop's name for the owner, the guest's for a
+        guest. A device id is never sent — an owner's own phone driving *is* the owner."""
+        holder = self.control.holder(pane)
+        if holder.kind == control_mod.PARTICIPANT:
+            participant = self.guests.participant(holder.who)
+            return participant.name if participant else holder.name
+        if holder.kind == control_mod.AGENT:
+            return "the agent"
+        return self.name
+
+    def control_message(self, pane: str) -> dict:
+        return {"t": "control", "pane": pane, "holder": self.control.label(pane),
+                "name": self.holder_name(pane)}
 
     def send_participants(self, pane: str) -> None:
-        """Tell everyone on a pane who is on it. Called on join, role change and removal."""
+        """Tell everyone on a pane who is on it. Called on join, leave, role change, removal and
+        every handoff."""
         items = self.participants_on(pane)
         for channel in list(self.channels.values()):
             if channel.participant_id is None:
@@ -739,9 +922,277 @@ class Host:
             mine = [{**item, "you": item["id"] == channel.participant_id} for item in items]
             self._spawn(channel.send({"t": "participants", "pane": pane, "items": mine}))
 
+    def _to_pane(self, pane: str, message: dict) -> None:
+        """Everyone on a pane: every participant scoped to it, and every device watching it.
+
+        Not :meth:`_fan_out`, because a participant is *on* the pane whether or not they have
+        sent `pane_focus` — the pane is the whole of what they were invited to — while a device
+        sees only what it subscribed to.
+        """
+        for channel in list(self.channels.values()):
+            if channel.participant_id is not None:
+                participant = channel.participant
+                if participant is None or not participant.may_see(pane):
+                    continue
+                self._spawn(channel.send(message))
+                continue
+            capability = channel.capability()
+            if capability is None or not wire.allows(capability, wire.VIEW):
+                continue
+            if pane not in channel.subscribed:
+                continue
+            self._spawn(channel.send(message))
+
+    # ---- control handoff (section 10.3) ---------------------------------------------------------
+
+    def on_control(self, callback: Callable[[str, str, str], None]) -> None:
+        """``callback(pane, holder, name)`` on every handoff, for the desktop's own display."""
+        self._control_watchers.append(callback)
+
+    def on_share_state(self, callback: Callable[[str, bool, str], None]) -> None:
+        """``callback(pane, paused, reason)`` whenever a pane's guests stop or start being able
+        to act — including the presence rule deciding the owner has been away long enough."""
+        self._state_watchers.append(callback)
+
+    def _control_changed(self, pane: str, old: control_mod.Holder,
+                         new: control_mod.Holder) -> None:
+        """One handoff, told to everyone once. Called by the book, never by hand."""
+        if self.screens and old.who:
+            # The source keeps its own driver — a device id, or `guest:<id>` for a participant —
+            # and letting it go is part of the handoff rather than a second state that has to be
+            # kept in step with this one.
+            was = old.who if old.kind == control_mod.OWNER else f"guest:{old.who}"
+            with contextlib.suppress(Exception):
+                self.source.release(pane, was)
+        self._to_pane(pane, self.control_message(pane))
+        self.send_participants(pane)
+        for watcher in list(self._control_watchers):
+            with contextlib.suppress(Exception):
+                watcher(pane, self.control.label(pane), self.holder_name(pane))
+        if not self._in_control_change:
+            # The pane item's `control` field is derived from the book (section 6.3), so the pane
+            # list is stale the moment a handoff happens. The guard is because `_items` observes
+            # the source's own field and can therefore land back here.
+            self._in_control_change = True
+            try:
+                self._panes_changed()
+            finally:
+                self._in_control_change = False
+
+    def grant_control(self, pane: str, participant_id: str) -> bool:
+        """Hand a guest the keyboard. The owner's decision, from the desktop only."""
+        participant = self.guests.participant(participant_id)
+        if participant is None or not wire.role_allows(participant.role, wire.EDITOR):
+            return False
+        if not participant.may_see(pane):
+            return False
+        if self.share_state(pane)[0]:
+            return False                      # a paused share hands the keyboard to nobody
+        self.audit.record("control_grant", participant=participant_id, pane=pane,
+                          was=self.control.label(pane))
+        self.control.grant(pane, participant_id, participant.name)
+        self.controls.drop(pane, participant_id)
+        return True
+
+    def take_control(self, pane: str, *, by: str = "keystroke") -> bool:
+        """The owner's physical keystroke in the pane (section 10.3): control comes back with
+        nobody asked. Whoever was typing is told with `control`, and anything of theirs already
+        in flight is refused with `not_driving` by the ordinary gate."""
+        holder = self.control.holder(pane)
+        if holder == control_mod.THE_OWNER:
+            return False
+        self.audit.record("control_take", pane=pane, by=by, was=self.control.label(pane),
+                          participant=self.control.participant(pane))
+        return self.control.take(pane)
+
+    def revoke_control(self, pane: str) -> bool:
+        """The owner taking it back from the desktop's sharing panel rather than by typing."""
+        holder = self.control.holder(pane)
+        if holder.kind != control_mod.PARTICIPANT:
+            return False
+        self.audit.record("control_revoke", pane=pane, participant=holder.who)
+        return self.control.take(pane)
+
+    async def ask_owner_about_control(self, channel: Channel,
+                                      participant: guests_mod.Participant,
+                                      pane: str) -> guests_mod.PendingControl:
+        """Park a guest's request for the keyboard, tell them it is waiting, and ask the owner
+        (section 10.3). The answer is `control_answer {pane, participant, grant}`; sixty seconds
+        with no answer is a refusal, which :meth:`expire_pending` applies.
+        """
+        item = self.controls.park(participant.participant_id, pane)
+        self.audit.record("control_request", participant=participant.participant_id, pane=pane)
+        await channel.send({"t": "control_pending", "pane": pane})
+        self._spawn(self._decide_control(item, participant.name))
+        return item
+
+    async def _decide_control(self, item: guests_mod.PendingControl, name: str) -> None:
+        request = ControlRequest(pane=item.pane, participant=item.participant, name=name)
+        try:
+            granted = bool(await asyncio.wait_for(self.control_approver(request),
+                                                  self.controls.lifetime))
+        except asyncio.TimeoutError:
+            granted = False
+        except Exception:
+            log.exception("the owner's answer about control failed")
+            granted = False
+        if self.controls.get(item.pane, item.participant) is not item:
+            return              # it lapsed, or they were removed: the answer is too late to apply
+        self.controls.drop(item.pane, item.participant)
+        if granted and self.grant_control(item.pane, item.participant):
+            # The handoff itself told them, and told everyone else on the pane the same thing.
+            # A second, private "yes" would be one more message saying what they can already see.
+            return
+        self.audit.record("control_refused", participant=item.participant, pane=item.pane)
+        self._tell_one(item.participant, {**self.control_message(item.pane),
+                                          "reason": "refused"})
+
+    def _tell_one(self, participant_id: str, message: dict) -> None:
+        for channel in list(self.channels.values()):
+            if channel.participant_id == participant_id:
+                self._spawn(channel.send(message))
+
+    # ---- pause and "only while I am present" (section 10.5) -------------------------------------
+
+    def options_for(self, pane: str) -> ShareOptions:
+        """This pane's switches, falling back to the ones set for the whole share."""
+        return self.options.get(pane) or self.options.get("") or ShareOptions()
+
+    def set_share_options(self, pane: str, **changes) -> ShareOptions:
+        """``share_options {pane, prompts_immediate, present_only}``. A pane of "" is the default
+        for every shared pane, which is how a desktop with one switch in its sharing panel sets
+        it."""
+        current = self.options.get(pane) or ShareOptions()
+        options = ShareOptions(
+            prompts_immediate=bool(changes.get("prompts_immediate",
+                                               current.prompts_immediate)),
+            present_only=bool(changes.get("present_only", current.present_only)))
+        self.audit.record("share_options", pane=pane or None,
+                          prompts_immediate=options.prompts_immediate,
+                          present_only=options.present_only)
+        self.options[pane] = options
+        self.refresh_presence()
+        return options
+
+    def share_pause(self, pane: str, on: bool) -> None:
+        """``share_pause {pane?, on}``: refuse every participant's input and prompt while the
+        screen keeps streaming. A paused holder keeps nothing — control goes back to the owner,
+        because "paused" that left somebody able to type would not be a pause."""
+        self.audit.record("share_pause", pane=pane or None, on=bool(on))
+        if on:
+            self.paused.add(pane)
+        else:
+            self.paused.discard(pane)
+        for name in self._shared_panes():
+            if self.share_state(name)[0]:
+                self.take_control(name, by="pause")
+        self.refresh_presence()
+
+    def present(self) -> bool:
+        """Is the owner at the desktop? False only once the grace period has run out."""
+        if self._window_active or self._away_since is None:
+            return True
+        return self.clock() - self._away_since < PRESENCE_GRACE
+
+    def window_active(self, active: bool) -> None:
+        """The `window_active` line of section 9, shared by the notifications rule and 10.5's
+        "only while I am present". One signal, two readers; there is no second line."""
+        self.notifier.window_active(active)
+        self._window_active = bool(active)
+        self._away_since = None if active else self.clock()
+        if not active:
+            # Nothing is paused yet; something may be once the grace has passed, and the guests
+            # are owed the `share_state` that says so. `_housekeep` would find it a second later
+            # anyway; this is so the phone hears at the moment it becomes true.
+            with contextlib.suppress(RuntimeError):
+                asyncio.get_running_loop().call_later(PRESENCE_GRACE + 0.05,
+                                                      self.refresh_presence)
+        self.refresh_presence()
+
+    def share_state(self, pane: str) -> tuple[bool, str]:
+        """Whether a pane's guests may act, and why not (section 10.5).
+
+        ``("owner")`` is the pause switch; ``("away")`` is *guests can act only while I am
+        present* with the desktop window unfocused for longer than the grace period.
+        """
+        if "" in self.paused or pane in self.paused:
+            return True, "owner"
+        if self.options_for(pane).present_only and not self.present():
+            return True, "away"
+        return False, ""
+
+    def _shared_panes(self) -> list[str]:
+        panes = {pane for p in self.guests.live() for pane in p.panes}
+        panes.update(self.control.holders)
+        panes.update(self.options)
+        panes.discard("")
+        return sorted(panes)
+
+    def refresh_presence(self) -> None:
+        """Tell the guests of every pane whose state changed, and drop a holder who may no longer
+        drive. Idempotent, so it is safe on a timer and safe to call from anywhere."""
+        for pane in self._shared_panes():
+            paused, reason = self.share_state(pane)
+            known = self._share_state.get(pane)
+            if known == (paused, reason):
+                continue
+            self._share_state[pane] = (paused, reason)
+            if known is None and not paused:
+                continue        # the first look at an ordinary pane is not news; a pause is
+            if paused:
+                self.take_control(pane, by=f"pause:{reason}")
+            self._to_pane(pane, {"t": "share_state", "pane": pane, "paused": paused,
+                                 "reason": reason})
+            for watcher in list(self._state_watchers):
+                with contextlib.suppress(Exception):
+                    watcher(pane, paused, reason)
+
+    # ---- lapses (10.3's minute and 10.4's ten) ---------------------------------------------------
+
+    def expire_pending(self) -> None:
+        """Drop what has run out of time and tell whoever was waiting.
+
+        Driven by the queues' own injected clocks, so a test advances a number rather than
+        sleeping for ten minutes, and by :meth:`_housekeep` in a running hub.
+        """
+        for item in self.prompts.expire():
+            self.audit.record("prompt_decided", participant=item.participant, pane=item.pane,
+                              prompt=item.prompt_id, approved=False, reason="lapsed")
+            self._tell_one(item.participant, {"t": "prompt_decided", "id": item.prompt_id,
+                                              "pane": item.pane, "approved": False,
+                                              "reason": "lapsed"})
+        for item in self.controls.expire():
+            self._tell_one(item.participant, {**self.control_message(item.pane),
+                                              "reason": "lapsed"})
+        # A holder who is no longer a live editor — expired, removed, demoted — drives nothing.
+        for pane in list(self.control.holders):
+            participant_id = self.control.participant(pane)
+            if participant_id is None:
+                continue
+            participant = self.guests.participant(participant_id)
+            if participant is None or not participant.may_see(pane) or \
+                    not wire.role_allows(participant.role, wire.EDITOR):
+                self.audit.record("control_revoke", pane=pane, participant=participant_id,
+                                  reason="no longer an editor here")
+                self.control.take(pane)
+        self.refresh_presence()
+
+    async def _housekeep(self) -> None:
+        while self._running:
+            await asyncio.sleep(HOUSEKEEPING)
+            with contextlib.suppress(Exception):
+                self.expire_pending()
+
     async def _participant_left(self, channel: Channel) -> None:
         participant = self.guests.participants.get(channel.participant_id or "")
         self.audit.record("leave", participant=channel.participant_id)
+        # A dropped socket is a lost keyboard: the next person to ask should not be told somebody
+        # who is not here is driving (section 10.3).
+        for pane in self.control.drop_participant(channel.participant_id or ""):
+            self.audit.record("control_release", participant=channel.participant_id, pane=pane,
+                              reason="disconnected")
+        for item in self.controls.for_participant(channel.participant_id or ""):
+            self.controls.drop(item.pane, item.participant)
         if participant is not None:
             for pane in list(participant.panes):
                 self.send_participants(pane)
@@ -758,6 +1209,28 @@ class Host:
                 continue
             if participant is None or not participant.live:
                 self._spawn(self._drop_participant(channel))
+        # Removed, expired or demoted to viewer: they hold no keyboard and no prompt of theirs
+        # runs. Sections 10.3 and 10.4 both say this, and `expire_pending` is the same rule on a
+        # timer for the case nothing announced — an expiry.
+        gone = participant is None or not participant.live
+        demoted = participant is not None and not wire.role_allows(participant.role, wire.EDITOR)
+        if gone or demoted:
+            for pane in self.control.drop_participant(participant_id):
+                self.audit.record("control_revoke", participant=participant_id, pane=pane,
+                                  reason="removed" if gone else "no longer an editor")
+            for item in self.controls.for_participant(participant_id):
+                self.controls.drop(item.pane, item.participant)
+            for item in self.prompts.for_participant(participant_id):
+                self.prompts.drop(item.prompt_id)
+                self.audit.record("prompt_decided", participant=participant_id, pane=item.pane,
+                                  prompt=item.prompt_id, approved=False,
+                                  reason="removed" if gone else "no longer an editor")
+                # A guest who is merely demoted is still connected and still watching their
+                # prompt spin; one who was removed is already being closed, and `Channel.send`
+                # drops everything but the goodbye for them.
+                self._tell_one(participant_id, {"t": "prompt_decided", "id": item.prompt_id,
+                                                "pane": item.pane, "approved": False,
+                                                "reason": "removed"})
         if participant is not None:
             for pane in list(participant.panes):
                 self.send_participants(pane)
@@ -781,6 +1254,7 @@ class Host:
                 continue
             if device is None or device.revoked:
                 self.audit.record("revoke", device=device_id)
+                self.control.drop_device(device_id)
                 if self.screens:
                     self.source.release_device(device_id)
                 self._spawn(self._revoke_channel(channel))
@@ -955,6 +1429,7 @@ class Host:
         for pane in list(participant.panes):
             self.controls.drop(pane, participant_id)
         self.guests.remove(participant_id)          # closes the live session via _guest_changed
+        self.control.drop_participant(participant_id)
         return True
 
     async def share_end(self, pane: str) -> int:
@@ -966,6 +1441,12 @@ class Host:
         for item in self.controls.for_pane(pane):
             self.controls.drop(pane, item.participant)
         gone = self.guests.end_share(pane)
+        # The pane is not shared any more: nobody remote drives it, it is not paused, and its
+        # switches go with it rather than surprising the next share of the same pane.
+        self.control.forget(pane)
+        self.paused.discard(pane)
+        self.options.pop(pane, None)
+        self._share_state.pop(pane, None)
         return len(gone)
 
     async def _on_knock(self, channel: Channel, message: dict) -> None:
@@ -1052,12 +1533,12 @@ class Host:
                             "panes": list(participant.panes),
                             "expires": round(participant.expires, 3),
                             "hub_epoch": self.epoch, "code": code,
+                            "features": self.guest_features(),
                             "desktop": {"id": self.identity.desktop_id, "name": self.name,
                                         "fingerprint": self.identity.fingerprint}})
         await channel.send(self.stream("panes", limit=64).add(
             {"t": "panes", "items": self._items()}))
-        for pane in participant.panes:
-            self.send_participants(pane)
+        await self._tell_pane_state(channel, participant)
 
     async def _welcome_participant(self, channel: Channel) -> None:
         """A guest reconnecting with an ordinary `hello` (section 10.2)."""
@@ -1080,61 +1561,140 @@ class Host:
             "hub_epoch": self.epoch,
             # No `capability` and no `password_entry`: those belong to a device record, and a
             # guest has none. A client that looks for them finds nothing, which is the point.
-            "features": (["panes", "agent"]
-                         + (["screen"] if self.screens else [])
-                         + (["history"] if self.scrollback else [])),
+            "features": self.guest_features(),
             "server_time": time.time(),
         })
         await channel.send(self.stream("panes", limit=64).add(
             {"t": "panes", "items": self._items()}))
+        await self._tell_pane_state(channel, participant)
+
+    def guest_features(self) -> list[str]:
+        """What a participant's client may rely on, for `admitted` and for `welcome` alike.
+
+        Both greetings compute it here rather than each writing its own list: a guest admitted
+        for the first time would otherwise have to assume a screen and scrollback exist until
+        their first reconnect told them otherwise.
+        """
+        return (["panes", "agent"]
+                + (["screen"] if self.screens else [])
+                + (["history"] if self.scrollback else []))
+
+    async def _tell_pane_state(self, channel: Channel,
+                               participant: guests_mod.Participant) -> None:
+        """Presence, who is driving and whether typing is on — for every pane they are on.
+
+        A guest who has just joined, or come back after a tunnel, must not have to guess any of
+        the three: `participants` says who is here, `control` who has the keyboard, `share_state`
+        why nothing they type would land.
+        """
         for pane in participant.panes:
             self.send_participants(pane)
+            paused, reason = self.share_state(pane)
+            await channel.send(self.control_message(pane))
+            await channel.send({"t": "share_state", "pane": pane, "paused": paused,
+                                "reason": reason})
 
-    # -- the two seams the next agent fills in ----------------------------------------------------
-    # Both of these park a request and answer "pending". Nothing drains the queues but expiry, on
-    # purpose: approving a guest prompt (10.4) and handing over the keyboard (10.3) are the next
-    # piece of section 10. Replace the bodies of these two methods — the plumbing around them,
-    # the wire types, the roles and the audit lines, is done.
+    # -- guest prompts (section 10.4) --------------------------------------------------------------
 
     async def ask_owner_about_prompt(self, channel: Channel,
                                      participant: guests_mod.Participant, pane: str, text: str, *,
                                      when: str = "now",
                                      plan_id: str = "") -> guests_mod.PendingPrompt:
-        """Park a guest's prompt and tell them it is waiting (section 10.4).
+        """Park a guest's prompt, tell them it is waiting, and ask the owner (section 10.4).
 
-        **Seam.** Today: the prompt goes into ``self.prompts`` and lapses after ten minutes; it
-        never reaches the pane. Next: ask the owner (``prompt_ask`` → ``prompt_answer`` in
-        section 10.5), and on approval call ``self.source.compose(pane, text, to_agent=True,
-        when=when, origin=f"guest:{participant.participant_id}")`` — never the router, whatever
-        the text says — then answer ``prompt_decided``.
+        The owner answers `prompt_answer {id, approve}`; ten minutes with no answer is a refusal,
+        applied by :meth:`expire_pending`. An approved prompt goes to the pane's **agent** and
+        never to the router, whatever the text says, carrying `origin: guest:<id>`.
         """
+        if self.share_state(pane)[0]:
+            raise wire.WireError("paused", "this share is paused; the owner is not taking "
+                                           "prompts right now.")
         item = self.prompts.park(participant.participant_id, pane, text, when=when,
                                  plan_id=plan_id)
         self.audit.record("guest_prompt", participant=participant.participant_id, pane=pane,
-                          prompt=item.prompt_id, text=text)
+                          prompt=item.prompt_id, text=text, plan=plan_id or None,
+                          immediate=self.options_for(pane).prompts_immediate or None)
         await channel.send({"t": "prompt_pending", "id": item.prompt_id, "pane": pane})
+        if self.options_for(pane).prompts_immediate:
+            # The owner's "guest prompts run immediately" (10.5). Still parked, still audited,
+            # still agent-only: what it skips is the question, not the record or the routing.
+            self._spawn(self._run_prompt(item, participant.name, approved=True,
+                                         reason="immediate"))
+        else:
+            self._spawn(self._decide_prompt(item, participant.name))
         return item
 
-    async def ask_owner_about_control(self, channel: Channel,
-                                      participant: guests_mod.Participant,
-                                      pane: str) -> guests_mod.PendingControl:
-        """Park a guest's request for the keyboard and tell them it is waiting (section 10.3).
+    async def _decide_prompt(self, item: guests_mod.PendingPrompt, name: str) -> None:
+        request = PromptRequest(prompt_id=item.prompt_id, participant=item.participant, name=name,
+                                pane=item.pane, text=item.text, when=item.when,
+                                plan_id=item.plan_id)
+        try:
+            approved = bool(await asyncio.wait_for(self.prompt_approver(request),
+                                                   self.prompts.lifetime))
+        except asyncio.TimeoutError:
+            approved = False
+        except Exception:
+            log.exception("the owner's answer to a guest prompt failed")
+            approved = False
+        await self._run_prompt(item, name, approved=approved, reason="refused")
 
-        **Seam.** Today: the request goes into ``self.controls`` and lapses after a minute;
-        nobody is asked and no participant ever drives. Next: ask the owner (``control_ask`` →
-        ``control_answer``), and on a grant make :meth:`control_holder` answer this participant's
-        id and fan out ``control {pane, holder, name}`` to everyone on the pane.
+    async def _run_prompt(self, item: guests_mod.PendingPrompt, name: str, *, approved: bool,
+                          reason: str) -> None:
+        """Apply the owner's answer, if the prompt is still there to apply it to.
+
+        A prompt whose guest was removed, demoted or whose share ended is **gone** from the queue
+        by then, and a decision about it does nothing: that is the one rule that keeps "approve"
+        from running something the owner took the right to ask for away five minutes ago.
         """
-        item = self.controls.park(participant.participant_id, pane)
-        self.audit.record("control_request", participant=participant.participant_id, pane=pane)
-        await channel.send({"t": "control_pending", "pane": pane})
-        return item
+        if self.prompts.get(item.prompt_id) is not item:
+            return
+        self.prompts.drop(item.prompt_id)
+        if approved and self.share_state(item.pane)[0]:
+            approved, reason = False, "paused"
+        self.audit.record("prompt_decided", participant=item.participant, pane=item.pane,
+                          prompt=item.prompt_id, approved=approved,
+                          reason=None if approved else reason)
+        if not approved:
+            self._tell_one(item.participant, {"t": "prompt_decided", "id": item.prompt_id,
+                                              "pane": item.pane, "approved": False,
+                                              "reason": reason})
+            return
+        self._tell_one(item.participant, {"t": "prompt_decided", "id": item.prompt_id,
+                                          "pane": item.pane, "approved": True})
+        origin = f"guest:{item.participant}"
+        try:
+            if item.plan_id:
+                # A guest's `plan_execute` is a prompt (10.4), and an approved one is still the
+                # plan flow: the id is resolved against the desktop's own table, never a path.
+                await self.source.plan_execute(item.pane, item.plan_id, origin=origin)
+            else:
+                await self.source.compose(item.pane, item.text, to_agent=True, when=item.when,
+                                          origin=origin, origin_name=name)
+        except wire.WireError as error:
+            self._tell_one(item.participant, wire.error(error.code, error.message))
+        except Exception:
+            log.exception("running an approved guest prompt on %s", item.pane)
+            self._tell_one(item.participant,
+                           wire.error("internal", "the desktop could not run that prompt."))
+
+    def decide_prompt(self, prompt_id: str, approve: bool) -> bool:
+        """``prompt_answer {id, approve}`` from the desktop, for a hub driven by hand or by the
+        sidecar's own queue rather than by an awaited approver."""
+        item = self.prompts.get(prompt_id)
+        if item is None:
+            return False
+        participant = self.guests.participant(item.participant)
+        self._spawn(self._run_prompt(item, participant.name if participant else "",
+                                     approved=approve, reason="refused"))
+        return True
 
     def guest_drives(self, channel: Channel, pane: str) -> bool:
-        """Whether this guest may type into ``pane`` right now. Reads :meth:`control_holder`, so
-        the next agent's handoff turns typing on without touching the input handlers."""
-        return (channel.participant_id is not None
-                and self.control_holder(pane) == channel.participant_id)
+        """Whether this guest may type into ``pane`` right now: the one control book says so, and
+        the record behind the channel is still a live editor's."""
+        participant = channel.participant
+        if participant is None or not wire.role_allows(participant.role, wire.EDITOR):
+            return False
+        return self.control_holder(pane) == channel.participant_id
 
     # -- panes -----------------------------------------------------------------------------------
 
@@ -1276,41 +1836,98 @@ class Host:
         return self._pane_of(message)
 
     def _typing_pane(self, channel: Channel, message: dict) -> str:
+        """The pane this input may reach, or the refusal that says why not.
+
+        For a participant, in this order: the share is not paused (10.5), they hold the pane's
+        control token (10.3), and only then anything about whether this desktop streams a
+        terminal — a guest who is not driving is refused for that reason and not for some detail
+        of the desktop's plumbing.
+        """
         if channel.participant_id is not None:
-            # One driver per pane (section 10.3), checked before anything about the terminal:
-            # whether this desktop streams a screen is not why a guest who is not driving is
-            # refused. Until control handoff exists no participant is ever the holder.
             pane = self._pane_of(message)
+            paused, reason = self.share_state(pane)
+            if paused:
+                raise wire.WireError("paused", self._pause_message(reason))
             if not self.guest_drives(channel, pane):
                 raise wire.WireError("not_driving", "you are not driving this pane.")
+            self._check_not_secret(pane)
             return self._screen_pane(channel, message)
-        return self._screen_pane(channel, message)
+        pane = self._screen_pane(channel, message)
+        self._check_not_secret(pane)
+        if channel.device_id:
+            # One of the owner's own devices typing *is* taking control (section 6.6 has no
+            # separate claim), and it is the same state a guest's turn at the keyboard uses.
+            self.control.claim_device(pane, channel.device_id,
+                                      name=(channel.device.name if channel.device else ""))
+        return pane
+
+    def _check_not_secret(self, pane: str) -> None:
+        """Ordinary input is refused while the pane is at a password prompt (section 6.6).
+
+        The sources refuse it again at the write, from a fresh termios read, which is the check
+        that matters; this one is here so the rule holds for **every** source rather than for the
+        two that happen to implement it, and so a participant holding the keyboard meets it in
+        the same place a `full` device does.
+        """
+        if self.source.secret_prompt(pane):
+            raise wire.WireError("not_permitted",
+                                 "that pane is at a password prompt; ordinary input is refused.")
+
+    @staticmethod
+    def _pause_message(reason: str) -> str:
+        if reason == "away":
+            return "the owner is away from the desktop; typing resumes when they are back."
+        return "this share is paused."
+
+    def _typist(self, channel: Channel) -> str:
+        """Who to name in the audit line and to the source: a device id, or a guest's."""
+        if channel.participant_id is not None:
+            return f"guest:{channel.participant_id}"
+        return channel.device_id or ""
+
+    def _audit_input(self, channel: Channel, kind: str, pane: str, **fields) -> None:
+        """Section 10.6, written before the write. A participant's line is recorded with its
+        text; keys and pastes as byte counts, because a password typed at a prompt this desktop
+        did not detect must not be sitting in the log in full."""
+        who = ({"participant": channel.participant_id} if channel.participant_id
+               else {"device": channel.device_id})
+        self.audit.record(kind, pane=pane, **who, **fields)
 
     async def _on_keys(self, channel: Channel, message: dict) -> None:
         pane = self._typing_pane(channel, message)
         raw = wire.decode_bytes(message.get("bytes"), 8192, "keys")
-        await self.source.send_keys(pane, raw, device=channel.device_id)
+        self._audit_input(channel, "keys", pane, bytes=len(raw))
+        await self.source.send_keys(pane, raw, device=self._typist(channel))
 
     async def _on_line(self, channel: Channel, message: dict) -> None:
         pane = self._typing_pane(channel, message)
         text = message.get("text")
         if not isinstance(text, str) or len(text) > 4096:
             raise wire.WireError("unknown_type", "line needs text.")
-        await self.source.send_line(pane, text, device=channel.device_id)
+        self._audit_input(channel, "line", pane, text=text)
+        await self.source.send_line(pane, text, device=self._typist(channel))
 
     async def _on_paste(self, channel: Channel, message: dict) -> None:
         pane = self._typing_pane(channel, message)
         text = message.get("text")
         if not isinstance(text, str) or len(text) > 64_000:
             raise wire.WireError("unknown_type", "paste needs text.")
-        await self.source.paste(pane, text, device=channel.device_id)
+        self._audit_input(channel, "paste", pane, bytes=len(text.encode()))
+        await self.source.paste(pane, text, device=self._typist(channel))
 
     async def _on_control_request(self, channel: Channel, message: dict) -> None:
         participant = channel.participant
         if participant is not None:
-            # For a participant this is a request, not a grant (section 10.3). It parks and the
-            # guest is told it is waiting; the owner is asked by the next piece of section 10.
-            await self.ask_owner_about_control(channel, participant, self._pane_of(message))
+            # For a participant this is a request, not a grant (section 10.3): it parks, the
+            # guest is told it is waiting, and the owner is asked.
+            pane = self._pane_of(message)
+            paused, reason = self.share_state(pane)
+            if paused:
+                raise wire.WireError("paused", self._pause_message(reason))
+            if self.control_holder(pane) == channel.participant_id:
+                await channel.send(self.control_message(pane))
+                return
+            await self.ask_owner_about_control(channel, participant, pane)
             return
         pane = self._typing_pane(channel, message)
         await self.source.send_keys(pane, b"", device=channel.device_id)
@@ -1321,8 +1938,14 @@ class Host:
         if channel.participant_id is not None:
             pane = self._pane_of(message)
             self.controls.drop(pane, channel.participant_id)
+            if self.control_holder(pane) == channel.participant_id:
+                self.audit.record("control_release", participant=channel.participant_id,
+                                  pane=pane)
+                self.control.release(pane, control_mod.PARTICIPANT, channel.participant_id)
             return
         pane = self._typing_pane(channel, message)
+        self.audit.record("control_release", device=channel.device_id, pane=pane)
+        self.control.release(pane, control_mod.OWNER, channel.device_id or "")
         self.source.release(pane, channel.device_id)
 
     async def _on_screen_get(self, channel: Channel, message: dict) -> None:

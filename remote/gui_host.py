@@ -32,6 +32,12 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"role_set","participant":"<id>","role":"editor"}
     {"t":"participant_remove","participant":"<id>"}
     {"t":"share_end","pane":"p1"}     {"t":"participants"}
+    {"t":"prompt_answer","id":"<prompt id>","approve":true}      the answer to a `prompt_ask`
+    {"t":"control_answer","pane":"p1","participant":"<id>","grant":true}   ...to a `control_ask`
+    {"t":"control_take","pane":"p1"}    the owner typed in the pane: control comes straight back
+    {"t":"control_revoke","pane":"p1"}  the same, from the sharing panel rather than the keyboard
+    {"t":"share_pause","pane":"p1","on":true}   pane omitted or "" pauses the whole share
+    {"t":"share_options","pane":"p1","prompts_immediate":false,"present_only":true}
 
   here → GUI
     {"t":"started","base":"...","fingerprint":"...","note":"...",
@@ -57,7 +63,15 @@ the GUI never links a crypto library and this process never touches a widget.
      "panes":["p1"],"invite":"<id>"}                        someone at the door; answer with
                                                             `knock_answer` within two minutes
     {"t":"participants","items":[{"id","name","platform","role","panes","invite",
-     "fingerprint","expires"}],"invites":[{"id","panes","role","uses","expires"}]}
+     "fingerprint","expires","online","driving"}],"invites":[{"id","panes","role","uses",
+     "expires"}]}
+    {"t":"prompt_ask","id":"<prompt id>","participant":"<id>","name":"alice","pane":"p1",
+     "text":"the whole prompt","when":"now","plan":""}      a guest's prompt, waiting for you
+    {"t":"control_ask","pane":"p1","participant":"<id>","name":"alice"}   ...for the keyboard
+    {"t":"control","pane":"p1","holder":"participant:<id>","name":"alice"}   who is driving now;
+                                              `holder` is "owner", "agent" or "participant:<id>"
+    {"t":"share_state","pane":"p1","paused":true,"reason":"away"}   why guests cannot act:
+                                              "owner" (you paused) or "away" (present-only)
 
 Input arrives here as RRP messages and leaves as `input`: the GUI writes the bytes into the pane's
 own session, so a phone drives the pane exactly as the keyboard does, and every capability and
@@ -247,16 +261,22 @@ class GuiPaneSource(panes_mod.PaneSource):
 
     # ---- the agent half belongs to the GUI's own composer --------------------------------------
 
-    async def compose(self, pane: str, text: str, *, to_agent: bool, when: str, origin: str) -> None:
+    async def compose(self, pane: str, text: str, *, to_agent: bool, when: str, origin: str,
+                      origin_name: str = "") -> None:
         """A prompt from a client. `route` asks the desktop to decide shell or agent, the way its
         own composer does; without it the text can only reach the agent.
 
         The host has already applied the rule that routing needs a `full` device: an `agent`
         device's compose always arrives with to_agent set, so it cannot reach the shell.
+
+        ``origin_name`` rides along so the queue row can name its author (section 10.4): the
+        origin itself is `guest:<id>`, which is what the transcript keeps, and the name is what
+        the desktop shows. It crosses this stdio line only — no client is ever sent another
+        guest's prompt, with or without a name on it.
         """
         self._pane(pane)
         self.send({"t": "compose", "pane": pane, "text": text, "when": when, "origin": origin,
-                   "route": not to_agent})
+                   "origin_name": origin_name, "route": not to_agent})
 
     def agent_event(self, pane: str, event: dict) -> None:
         """A worker event the GUI forwarded. The allow-list in the hub decides what leaves."""
@@ -412,6 +432,11 @@ class Sidecar:
         # (section 10.5). Keyed by that id rather than a counter of our own, so the `knock` line,
         # the `knock_answer` that follows and every audit line name the same person.
         self.knocks: dict[str, asyncio.Future] = {}
+        # The same pattern for the two questions of 10.3 and 10.4: keyed by the id the hub minted
+        # for the prompt, and by (pane, participant) for the keyboard, so an answer cannot be
+        # applied to somebody else's question.
+        self.prompts: dict[str, asyncio.Future] = {}
+        self.controls: dict[tuple[str, str], asyncio.Future] = {}
         # The presence rule (section 9). Until the GUI says otherwise this process assumes the
         # window is not the focused one, which is the safe default: a missed push is worse than
         # one you did not need.
@@ -476,7 +501,7 @@ class Sidecar:
         elif kind == "window_active":
             self.window_active = bool(message.get("active"))
             if self.host is not None:
-                self.host.notifier.window_active(self.window_active)
+                self.host.window_active(self.window_active)
         elif kind == "password_entry":
             if self.devices:
                 self.devices.set_password_entry(message.get("device", ""),
@@ -510,6 +535,34 @@ class Sidecar:
                 self.report_participants()
         elif kind == "participants":
             self.report_participants()
+        elif kind == "prompt_answer":
+            future = self.prompts.pop(str(message.get("id", "")), None)
+            if future is not None and not future.done():
+                future.set_result(bool(message.get("approve")))
+            elif self.host is not None:
+                # The dialog answered something this process is no longer waiting on — it was
+                # restarted, or the answer came from the panel rather than the dialog. The hub
+                # still knows the prompt, so apply it there.
+                self.host.decide_prompt(str(message.get("id", "")), bool(message.get("approve")))
+        elif kind == "control_answer":
+            key = (str(message.get("pane", "")), str(message.get("participant", "")))
+            future = self.controls.pop(key, None)
+            if future is not None and not future.done():
+                future.set_result(bool(message.get("grant")))
+        elif kind == "control_take":
+            if self.host is not None:
+                self.host.take_control(str(message.get("pane", "")))
+        elif kind == "control_revoke":
+            if self.host is not None:
+                self.host.revoke_control(str(message.get("pane", "")))
+        elif kind == "share_pause":
+            if self.host is not None:
+                self.host.share_pause(str(message.get("pane") or ""), bool(message.get("on")))
+        elif kind == "share_options":
+            if self.host is not None:
+                changes = {name: bool(message[name]) for name in
+                           ("prompts_immediate", "present_only") if name in message}
+                self.host.set_share_options(str(message.get("pane") or ""), **changes)
         elif kind == "stop":
             await self.stop()
 
@@ -544,8 +597,15 @@ class Sidecar:
 
         self.host = host_mod.Host(self.identity, self.devices, self.source, app_base=self.base,
                                   approver=self.ask, name=message.get("name", "this desktop"),
-                                  knock_approver=self.knock)
-        self.host.notifier.window_active(self.window_active)
+                                  knock_approver=self.knock, prompt_approver=self.prompt,
+                                  control_approver=self.control)
+        self.host.on_control(lambda pane, holder, name: self.emit(
+            {"t": "control", "pane": pane, "holder": holder, "name": name}))
+        self.host.on_share_state(lambda pane, paused, reason: self.emit(
+            {"t": "share_state", "pane": pane, "paused": paused, "reason": reason}))
+        # One `window_active` signal, two readers: the notification presence rule of section 9 and
+        # "guests can act only while I am present" (10.5). The hub passes it on to the notifier.
+        self.host.window_active(self.window_active)
         await self.host.register(local)
         self.serving = asyncio.create_task(self.host.serve())
         for _ in range(100):
@@ -644,14 +704,47 @@ class Sidecar:
             self.loop.call_later(0.2, self.report_participants)
         return admit, role
 
+    async def prompt(self, request: host_mod.PromptRequest) -> bool:
+        """``prompt_ask {id, participant, name, pane, text}`` → ``prompt_answer {id, approve}``.
+
+        The owner sees the guest's name and the whole text (section 10.4). No answer is not an
+        approval: the hub's own ten-minute lapse refuses it, and so does this.
+        """
+        future = self.loop.create_future()
+        self.prompts[request.prompt_id] = future
+        self.emit({"t": "prompt_ask", "id": request.prompt_id, "participant": request.participant,
+                   "name": request.name, "pane": request.pane, "text": request.text,
+                   "when": request.when, "plan": request.plan_id})
+        try:
+            return bool(await future)
+        finally:
+            self.prompts.pop(request.prompt_id, None)
+
+    async def control(self, request: host_mod.ControlRequest) -> bool:
+        """``control_ask {pane, participant, name}`` → ``control_answer {pane, participant,
+        grant}``. The hub gives up after a minute (section 10.3) and this waits on it."""
+        key = (request.pane, request.participant)
+        future = self.loop.create_future()
+        self.controls[key] = future
+        self.emit({"t": "control_ask", "pane": request.pane, "participant": request.participant,
+                   "name": request.name})
+        try:
+            return bool(await future)
+        finally:
+            self.controls.pop(key, None)
+
     def report_participants(self) -> None:
         """``participants {items}``: who is on which pane, for the sharing dialog."""
         if self.host is None:
             return
+        online = {channel.participant_id for channel in self.host.channels.values()
+                  if channel.participant_id and not channel.closed}
         self.emit({"t": "participants", "items": [
             {"id": p.participant_id, "name": p.name, "platform": p.platform, "role": p.role,
              "panes": p.panes, "invite": p.invite, "fingerprint": p.fingerprint,
-             "expires": round(p.expires, 3)}
+             "expires": round(p.expires, 3), "online": p.participant_id in online,
+             "driving": [pane for pane in p.panes
+                         if self.host.control_holder(pane) == p.participant_id]}
             for p in self.host.guests.live()],
             "invites": [
             {"id": invite.invite_id, "panes": invite.panes, "role": invite.role,

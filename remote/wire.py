@@ -96,6 +96,10 @@ CLIENT_TYPES: dict[str, str | None] = {
 OWNER_ONLY = frozenset({
     "invite_create", "invite_revoke", "knock_answer", "role_set", "participant_remove",
     "share_pause", "share_end", "control_answer", "prompt_answer",
+    # Handing the keyboard back to the desktop (10.3) and the two per-share switches (10.4,
+    # 10.5). `control_take` is the owner's *physical* keystroke, so a message that claimed to be
+    # one, arriving over the wire, would be exactly the thing it exists to outrank.
+    "control_take", "control_revoke", "share_options",
 })
 
 # Named so a reader can see they were considered and refused, and so a test can assert it.
@@ -165,7 +169,35 @@ SERVER_TYPES = frozenset({
     # `admitted` the participant's own record, `participants` the presence list for a pane, and
     # the two `*_pending` replies say the owner has been asked.
     "knock_pending", "admitted", "participants", "prompt_pending", "control_pending",
+    # The answers and the state that follow them: how the owner decided a guest's prompt (10.4),
+    # who is driving now (10.3), and why typing is refused when it is (10.5). All desktop →
+    # client; nothing new is accepted *from* a client, because 10.3's two requests
+    # (`control_request`, `control_release`) already existed in section 6.6.
+    "prompt_decided", "control", "share_state",
 })
+
+# What a **participant** may be sent, which is an allow-list for the same reason `GUEST_TYPES` is
+# one: a desktop→client type added next month reaches a guest only when somebody decides it may.
+# The alternative — letting everything through unless it is named — has already been tried in
+# `Host.guest_view`, and it means every new message about the owner's panes, their models or their
+# other sessions is a guest-visible leak from the day it lands.
+#
+# Absent on purpose: `paired` and `revoked` (a guest has no device record), `push_state`
+# (notifications belong to a paired device) and `transport_switched` (a guest cannot ask for one).
+GUEST_SERVER_TYPES = frozenset({
+    "welcome", "knock_pending", "admitted", "bye", "error", "ping", "pong", "resumed",
+    "panes", "participants", "control", "control_pending", "prompt_pending", "prompt_decided",
+    "share_state",
+    # The shared pane itself: its screen, its scrollback, and the agent events of GUEST_EVENTS.
+    "agent", "screen_snapshot", "screen_diff", "history",
+})
+
+
+def may_send_to_guest(kind: str) -> bool:
+    return kind in GUEST_SERVER_TYPES
+
+
+
 
 # ---- worker events --------------------------------------------------------------------------
 # Forwarded to a phone, wrapped in an `agent` message.

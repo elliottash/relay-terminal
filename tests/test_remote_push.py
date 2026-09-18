@@ -924,7 +924,11 @@ class SidecarPresenceTests(unittest.TestCase):
             try:
                 notifier = notify.Notifier(devices.store, None,
                                            spawn=lambda coroutine: coroutine.close())
-                sidecar.host = SimpleNamespace(notifier=notifier)
+                # The line goes to the hub, which passes it on to the notifier and reads it
+                # itself for "guests can act only while I am present" (section 10.5): one signal,
+                # two readers, so the double routes it exactly as `Host.window_active` does.
+                sidecar.host = SimpleNamespace(notifier=notifier,
+                                               window_active=notifier.window_active)
                 await sidecar.handle({"t": "window_active", "active": False})
                 self.assertFalse(notifier.active)
                 await sidecar.handle({"t": "window_active", "active": True})

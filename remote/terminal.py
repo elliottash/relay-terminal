@@ -411,7 +411,8 @@ class TerminalPaneSource(panes_mod.PaneSource):
 
     # ---- the agent half is not wired to a worker in this harness -------------------------------
 
-    async def compose(self, pane: str, text: str, *, to_agent: bool, when: str, origin: str) -> None:
+    async def compose(self, pane: str, text: str, *, to_agent: bool, when: str, origin: str,
+                      origin_name: str = "") -> None:
         if to_agent:
             raise wire.WireError("not_permitted",
                                  "this terminal is shared without an agent; use the Terminal tab.")

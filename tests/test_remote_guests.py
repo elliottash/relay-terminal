@@ -698,8 +698,16 @@ class RoleTests(unittest.TestCase):
         run(main())
 
     def test_an_editor_s_compose_parks_and_never_reaches_the_pane(self):
+        """The prompt waits for the owner; a hub with nobody to ask never runs it.
+
+        The approval flow itself is `tests/test_remote_control.py`; what this pins is the half
+        that belongs here — a guest's `compose` is parked, recorded with its text, and reaches
+        the pane only through a decision.
+        """
         async def main():
             async with Harness() as harness:
+                asked = asyncio.get_event_loop().create_future()
+                harness.host.prompt_approver = lambda request: asked   # nobody answers
                 _, url = await harness.invite(role=wire.EDITOR)
                 client, joined = await harness.guest(url)
                 await client.expect("panes")
@@ -710,9 +718,10 @@ class RoleTests(unittest.TestCase):
                 self.assertIsNotNone(parked)
                 self.assertEqual(parked.text, "ship it")
                 self.assertEqual(parked.participant, joined.participant)
-                # Nothing drains it but expiry: the pane never ran a turn.
+                # Un-answered, it never reaches the pane: no turn ran.
                 self.assertNotIn("pane-1", harness.source._running)
                 self.assertIn("guest_prompt", harness.audit_kinds())
+                asked.cancel()
                 await client.close()
         run(main())
 
@@ -752,6 +761,8 @@ class RoleTests(unittest.TestCase):
                 _, url = await harness.invite(role=wire.EDITOR)
                 client, joined = await harness.guest(url)
                 await client.expect("panes")
+                asked = asyncio.get_event_loop().create_future()
+                harness.host.control_approver = lambda request: asked   # nobody answers
                 await client.send({"t": "control_request", "pane": "pane-1"})
                 pending = await client.expect("control_pending", timeout=10)
                 self.assertEqual(pending["pane"], "pane-1")
@@ -766,11 +777,12 @@ class RoleTests(unittest.TestCase):
                 await client.expect("panes")
                 await client.send({"t": "control_request", "pane": "pane-1"})
                 await client.expect("control_pending", timeout=10)
-                # And still nobody drives, so typing is refused.
+                # And until the owner says yes nobody drives, so typing is refused.
                 await client.send({"t": "keys", "pane": "pane-1", "bytes": "eA"})
                 with self.assertRaises(wire.WireError) as caught:
                     await client.expect("never", timeout=5)
                 self.assertEqual(caught.exception.code, "not_driving")
+                asked.cancel()
                 await client.close()
         run(main())
 
