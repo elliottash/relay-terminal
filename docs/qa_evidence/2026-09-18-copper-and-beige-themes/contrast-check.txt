@@ -1,0 +1,80 @@
+    relay-dark       59 pairs  worst  2.40 (border_strong on background, UI)  worst AA  4.57 (syntax.operator on surface_raised)  1 FAIL
+      FAIL border_strong on background: 2.40:1 < 3.0:1 (UI) — the focused pane's outline
+NEW dark-copper      59 pairs  worst  3.32 (ansi8 on term.bg, UI)  worst AA  5.24 (error on surface_raised)  ok
+    gruvbox-dark     59 pairs  worst  2.69 (ansi1 on term.bg, AA)  worst AA  2.69 (ansi1 on term.bg)  17 FAIL
+      FAIL text_muted on surface_raised: 4.17:1 < 4.5:1 (AA) — chip labels: the whole status strip
+      FAIL shell on surface_raised: 4.31:1 < 4.5:1 (AA) — the mode chip reading TERMINAL
+      FAIL agent on surface_raised: 4.23:1 < 4.5:1 (AA) — the mode chip reading AGENT
+      FAIL error on surface_raised: 3.37:1 < 4.5:1 (AA) — an error on a chip
+      FAIL error on background: 4.29:1 < 4.5:1 (AA) — an error dot on a notification row
+      FAIL syntax.command on surface_raised: 4.31:1 < 4.5:1 (AA) — composer command, focused (you are typing)
+      FAIL syntax.unknown on surface: 3.82:1 < 4.5:1 (AA) — composer unknown, idle
+      FAIL syntax.unknown on surface_raised: 3.37:1 < 4.5:1 (AA) — composer unknown, focused (you are typing)
+      FAIL syntax.operator on surface: 3.58:1 < 4.5:1 (AA) — composer operator, idle
+      FAIL syntax.operator on surface_raised: 3.16:1 < 4.5:1 (AA) — composer operator, focused (you are typing)
+      FAIL syntax.variable on surface_raised: 4.23:1 < 4.5:1 (AA) — composer variable, focused (you are typing)
+      FAIL syntax.agent on surface_raised: 4.23:1 < 4.5:1 (AA) — composer agent, focused (you are typing)
+      FAIL syntax.token on surface_raised: 4.31:1 < 4.5:1 (AA) — composer token, focused (you are typing)
+      FAIL ansi1 on term.bg: 2.69:1 < 4.5:1 (AA) — ANSI 1 as text
+      FAIL ansi4 on term.bg: 3.48:1 < 4.5:1 (AA) — ANSI 4 as text
+      FAIL ansi5 on term.bg: 3.48:1 < 4.5:1 (AA) — ANSI 5 as text
+      FAIL ansi9 on term.bg: 4.29:1 < 4.5:1 (AA) — ANSI 9 as text
+    solarized-dark   59 pairs  worst  1.00 (ansi8 on term.bg, UI)  worst AA  1.96 (syntax.operator on surface_raised)  42 FAIL
+      FAIL text on surface_raised: 3.95:1 < 4.5:1 (AA) — text on chips, menus, the focused composer
+      FAIL text_muted on background: 3.37:1 < 4.5:1 (AA) — cwd, hints, notification bodies
+      FAIL text_muted on surface: 2.92:1 < 4.5:1 (AA) — secondary text on the text surface
+      FAIL text_muted on surface_raised: 2.37:1 < 4.5:1 (AA) — chip labels: the whole status strip
+      FAIL shell on surface_raised: 3.34:1 < 4.5:1 (AA) — the mode chip reading TERMINAL
+      FAIL agent on surface_raised: 2.41:1 < 4.5:1 (AA) — the mode chip reading AGENT
+      FAIL agent on background: 3.43:1 < 4.5:1 (AA) — the agent destination as text; agent prompt echo
+      FAIL on.shell on shell: 2.94:1 < 4.5:1 (AA) — the agent prefix chip (ink on the shell fill)
+      FAIL on.agent on agent: 3.76:1 < 4.5:1 (AA) — the plan chip (ink on the agent fill)
+      FAIL on.warning on warning: 3.00:1 < 4.5:1 (AA) — the shell prefix chip (ink on amber)
+      FAIL on.caution on caution: 3.45:1 < 4.5:1 (AA) — the secret chip
+      FAIL success on surface_raised: 3.29:1 < 4.5:1 (AA) — the tasks chip, done
+      FAIL warning on surface_raised: 3.29:1 < 4.5:1 (AA) — the tasks chip, attention; warn labels
+      FAIL error on surface_raised: 2.28:1 < 4.5:1 (AA) — an error on a chip
+      FAIL error on background: 3.25:1 < 4.5:1 (AA) — an error dot on a notification row
+      FAIL border_strong on background: 2.79:1 < 3.0:1 (UI) — the focused pane's outline
+      FAIL syntax.command on surface: 4.12:1 < 4.5:1 (AA) — composer command, idle
+      FAIL syntax.command on surface_raised: 3.34:1 < 4.5:1 (AA) — composer command, focused (you are typing)
+      FAIL syntax.unknown on surface: 2.81:1 < 4.5:1 (AA) — composer unknown, idle
+      FAIL syntax.unknown on surface_raised: 2.28:1 < 4.5:1 (AA) — composer unknown, focused (you are typing)
+      FAIL syntax.flag on surface: 4.05:1 < 4.5:1 (AA) — composer flag, idle
+      FAIL syntax.flag on surface_raised: 3.29:1 < 4.5:1 (AA) — composer flag, focused (you are typing)
+      FAIL syntax.string on surface: 4.06:1 < 4.5:1 (AA) — composer string, idle
+      FAIL syntax.string on surface_raised: 3.29:1 < 4.5:1 (AA) — composer string, focused (you are typing)
+      FAIL syntax.path on surface: 3.53:1 < 4.5:1 (AA) — composer path, idle
+      FAIL syntax.path on surface_raised: 2.87:1 < 4.5:1 (AA) — composer path, focused (you are typing)
+      FAIL syntax.operator on surface: 2.42:1 < 4.5:1 (AA) — composer operator, idle
+      FAIL syntax.operator on surface_raised: 1.96:1 < 4.5:1 (AA) — composer operator, focused (you are typing)
+      FAIL syntax.variable on surface: 2.97:1 < 4.5:1 (AA) — composer variable, idle
+      FAIL syntax.variable on surface_raised: 2.41:1 < 4.5:1 (AA) — composer variable, focused (you are typing)
+      FAIL syntax.agent on surface: 2.97:1 < 4.5:1 (AA) — composer agent, idle
+      FAIL syntax.agent on surface_raised: 2.41:1 < 4.5:1 (AA) — composer agent, focused (you are typing)
+      FAIL syntax.token on surface: 4.12:1 < 4.5:1 (AA) — composer token, idle
+      FAIL syntax.token on surface_raised: 3.34:1 < 4.5:1 (AA) — composer token, focused (you are typing)
+      FAIL ansi1 on term.bg: 3.25:1 < 4.5:1 (AA) — ANSI 1 as text
+      FAIL ansi4 on term.bg: 4.08:1 < 4.5:1 (AA) — ANSI 4 as text
+      FAIL ansi5 on term.bg: 3.30:1 < 4.5:1 (AA) — ANSI 5 as text
+      FAIL ansi9 on term.bg: 3.26:1 < 4.5:1 (AA) — ANSI 9 as text
+      FAIL ansi10 on term.bg: 2.79:1 < 4.5:1 (AA) — ANSI 10 as text
+      FAIL ansi11 on term.bg: 3.37:1 < 4.5:1 (AA) — ANSI 11 as text
+      FAIL ansi13 on term.bg: 3.43:1 < 4.5:1 (AA) — ANSI 13 as text
+      FAIL ansi8 on term.bg: 1.00:1 < 3.0:1 (UI) — ANSI 8, the dim colour
+    relay-light      59 pairs  worst  2.54 (border_strong on background, UI)  worst AA  3.85 (shell on surface_raised)  14 FAIL
+      FAIL accent on background: 4.48:1 < 4.5:1 (AA) — accent used as text (the route label, the running queue)
+      FAIL shell on surface_raised: 3.85:1 < 4.5:1 (AA) — the mode chip reading TERMINAL
+      FAIL shell on background: 4.48:1 < 4.5:1 (AA) — the shell destination as text
+      FAIL on.shell on shell: 4.22:1 < 4.5:1 (AA) — the agent prefix chip (ink on the shell fill)
+      FAIL success on surface_raised: 4.47:1 < 4.5:1 (AA) — the tasks chip, done
+      FAIL border_strong on background: 2.54:1 < 3.0:1 (UI) — the focused pane's outline
+      FAIL syntax.command on surface: 4.18:1 < 4.5:1 (AA) — composer command, idle
+      FAIL syntax.command on surface_raised: 3.85:1 < 4.5:1 (AA) — composer command, focused (you are typing)
+      FAIL syntax.string on surface_raised: 4.47:1 < 4.5:1 (AA) — composer string, focused (you are typing)
+      FAIL syntax.operator on surface: 4.32:1 < 4.5:1 (AA) — composer operator, idle
+      FAIL syntax.operator on surface_raised: 3.98:1 < 4.5:1 (AA) — composer operator, focused (you are typing)
+      FAIL syntax.token on surface: 4.18:1 < 4.5:1 (AA) — composer token, idle
+      FAIL syntax.token on surface_raised: 3.85:1 < 4.5:1 (AA) — composer token, focused (you are typing)
+      FAIL ansi7 on term.bg: 4.40:1 < 4.5:1 (AA) — ANSI 7 as text
+NEW ibm-beige        59 pairs  worst  4.11 (border_strong on background, UI)  worst AA  4.65 (warning on background)  ok

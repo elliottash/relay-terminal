@@ -1,0 +1,83 @@
+# Dark Copper (issue 0JA7): charcoal ground, aged copper in the chrome.
+#
+# The owner's "rusty metal, but more charcoal than oxide", taken from their reference: a 1950s
+# operator headset on a manual switchboard (docs/qa_evidence/2026-09-18-copper-and-beige-themes/
+# ref-switchboard.jpg). Once the tungsten white point is discounted, the board metal is copper
+# (hue 0-16, dim), not brass, and the one cool metal in the scene is the operator's nickel
+# headband. So: a cool charcoal ground, copper for the chrome, nickel for the focus ring.
+#
+# THE TRAP, and how this file avoids it. Copper sits between amber (warning) and red (error) on
+# the colour wheel. The theme keeps them apart two ways, both measured by the evidence script:
+#   * the structural copper (border, surface_raised) is dim: 1.37:1 and 1.62:1 against the
+#     ground, where warning is 11.10:1 and error 6.00:1. A rule can never read as a lit flag;
+#   * the one bright copper, the accent, is CIELAB dE 28.5 from warning and 31.2 from error.
+# warning and error are Relay Dark's, unchanged: the meaning colours do not move per theme.
+#
+# The destination pair (shell cyan, agent violet) stays the destination pair. It is no longer
+# also the accent: here the accent is copper, so the focus ring, the selected tab and the primary
+# button are chrome, and cyan/violet only ever mean "where this line goes".
+
+[theme]
+name = "Dark Copper"
+variant = "dark"
+description = "Charcoal ground, aged copper chrome, a nickel focus ring; switchboard, not rust."
+
+[ui]
+background = "#0e0f12"
+# The text surface stays cool and near-neutral: syntax colour sits on it.
+surface = "#15161a"
+# Copper-tinted: chips, menus, the pane header, the focused composer.
+surface_raised = "#241c18"
+border = "#3a2822"
+# Nickel, from the headband: the only cool metal in the theme, so the focused pane's outline
+# has a hue that appears nowhere else. 3.76:1 on the ground (WCAG 1.4.11 wants 3:1).
+border_strong = "#666f7a"
+text = "#ece6e0"
+text_muted = "#a2968c"
+accent = "#c07a4a"
+accent_text = "#1a0f08"
+accent_hover = "#d08a58"
+selection = "#5a3a26"
+disabled = "#6b625b"
+success = "#7ec88c"
+warning = "#e5c07b"
+error = "#e06c75"
+shell = "#45c8ee"
+# About 8 degrees bluer than Relay Dark's #b48ef7: on a copper-chromed ground the eye adapts
+# warm and a red-leaning violet drifts toward brown. Moving it away from red keeps it clear of
+# both the chrome and the error colour, and it gains contrast (7.76:1 against 7.44:1).
+agent = "#ab97f7"
+
+[syntax]
+command = "#45c8ee"
+unknown = "#f07178"
+flag = "#e5c07b"
+string = "#7ec88c"
+path = "#66d0c0"
+operator = "#9a938a"
+variable = "#ab97f7"
+agent = "#ab97f7"
+token = "#45c8ee"
+
+[terminal]
+# The grid stays plain: no copper reaches it (docs/SWITCHBOARD-AESTHETIC.md 2.2).
+background = "#0e0f12"
+foreground = "#dad4ce"
+cursor = "#f4efe9"
+background_intense = "#15161a"
+foreground_intense = "#f4efe9"
+palette = [
+  "#1f1815", "#f2777a", "#7dd399", "#ecc476", "#61afef", "#c09ae9", "#56c8d8", "#cbc3bb",
+  "#6e645c", "#ff8c8f", "#98e5b0", "#f8d58e", "#81c4ff", "#d2b0f5", "#78ddea", "#f4efe9",
+]
+
+[board]
+# The switchboard materials (docs/SWITCHBOARD-AESTHETIC.md 3.4). Nothing paints these yet; they
+# ride along in ThemeSpec::extra so the board widgets can read them when they are built. Brass
+# becomes copper here, straight off the reference: 5.91:1 metal on face, legible as enamel text.
+face = "#1a1210"
+metal = "#c08556"
+metal_dim = "#6b4a33"
+
+[flags]
+board_material = true

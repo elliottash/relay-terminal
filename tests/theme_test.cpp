@@ -10,6 +10,10 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <algorithm>
+#include <array>
+#include <cmath>
+
 using namespace relay::theme;
 
 namespace {
@@ -24,6 +28,47 @@ void write(const QString &path, const QString &text) {
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
     file.write(text.toUtf8());
+}
+
+// --- contrast (WCAG 2.1) and colour difference (CIELAB dE76) -----------------------------------
+// The same arithmetic as docs/qa_evidence/2026-09-18-copper-and-beige-themes/contrast.py, which
+// additionally measures the ink-on-fill pairs Theme.cpp derives; these are the direct pairs.
+
+double channel(int v) {
+    const double s = v / 255.0;
+    return s <= 0.03928 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4);
+}
+
+double luminance(const QColor &c) {
+    return 0.2126 * channel(c.red()) + 0.7152 * channel(c.green()) + 0.0722 * channel(c.blue());
+}
+
+double contrast(const QColor &a, const QColor &b) {
+    const double la = luminance(a), lb = luminance(b);
+    return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
+}
+
+double deltaE(const QColor &a, const QColor &b) {
+    const auto lab = [](const QColor &c) {
+        const auto lin = [](int v) {
+            const double s = v / 255.0;
+            return s <= 0.04045 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4);
+        };
+        const double r = lin(c.red()), g = lin(c.green()), bl = lin(c.blue());
+        const double x = (0.4124 * r + 0.3576 * g + 0.1805 * bl) / 0.95047;
+        const double y = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+        const double z = (0.0193 * r + 0.1192 * g + 0.9505 * bl) / 1.08883;
+        const auto f = [](double t) { return t > 0.008856 ? std::cbrt(t) : 7.787 * t + 16.0 / 116.0; };
+        return std::array<double, 3>{116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))};
+    };
+    const auto p = lab(a), q = lab(b);
+    return std::sqrt(std::pow(p[0] - q[0], 2) + std::pow(p[1] - q[1], 2) + std::pow(p[2] - q[2], 2));
+}
+
+ThemeSpec shipped(const QString &id) {
+    QString error;
+    return parseTheme(read(QStringLiteral("data/theme/themes/") + id + QStringLiteral(".toml")), id,
+                      builtinDark(), &error);
 }
 }  // namespace
 
@@ -256,6 +301,119 @@ private Q_SLOTS:
             QVERIFY(text.contains(QStringLiteral("Description=") + spec.name));
             // 8 ANSI colours x (base, faint, intense) + a background and a foreground trio.
             QCOMPARE(text.count(QStringLiteral("\nColor=")), 30);
+        }
+    }
+
+    // --- the auditioned themes: Dark Copper and IBM Beige (owner, 2026-09-18) --------------------
+    // Every text/background pair a person reads, at WCAG AA (4.5:1) or, for an edge a person
+    // must find, 3:1 (WCAG 1.4.11). The incumbents are measured by the evidence script but not
+    // asserted here: they are not this change's to alter.
+
+    void theAuditionedThemesMeetTheirContrastContract_data() {
+        QTest::addColumn<QString>("id");
+        QTest::newRow("dark-copper") << QStringLiteral("dark-copper");
+        QTest::newRow("ibm-beige") << QStringLiteral("ibm-beige");
+    }
+    void theAuditionedThemesMeetTheirContrastContract() {
+        QFETCH(QString, id);
+        const ThemeSpec spec = shipped(id);
+        QVERIFY2(isComplete(spec), qPrintable(id + QStringLiteral(" is not complete")));
+        struct Pair { QColor fg, bg; double min; const char *what; };
+        const auto ui = [&spec](const char *t) { return spec.uiColor(QString::fromLatin1(t)); };
+        QList<Pair> pairs;
+        for (const char *ground : {"background", "surface", "surface_raised"}) {
+            pairs << Pair{ui("text"), ui(ground), 4.5, "text"} << Pair{ui("text_muted"), ui(ground), 4.5, "text_muted"};
+        }
+        pairs << Pair{ui("accent"), ui("background"), 4.5, "accent as text"}
+              << Pair{ui("accent_text"), ui("accent"), 4.5, "primary button label"}
+              << Pair{ui("border_strong"), ui("background"), 3.0, "focused pane outline (UI)"};
+        for (const char *dest : {"shell", "agent"})
+            for (const char *ground : {"background", "surface_raised"})
+                pairs << Pair{ui(dest), ui(ground), 4.5, dest};
+        for (const char *state : {"success", "warning", "error"})
+            for (const char *ground : {"background", "surface_raised"})
+                pairs << Pair{ui(state), ui(ground), 4.5, state};
+        // The idle composer is `surface`, the focused one `surface_raised`: syntax is read on both.
+        for (const QString &token : syntaxTokenNames())
+            for (const char *ground : {"surface", "surface_raised"})
+                pairs << Pair{spec.syntaxColor(token), ui(ground), 4.5, "syntax"};
+        pairs << Pair{spec.terminalForeground, spec.terminalBackground, 4.5, "terminal text"}
+              << Pair{spec.terminalCursor, spec.terminalBackground, 3.0, "cursor (UI)"};
+        // ANSI 0 is a background in practice; ANSI 8 is the deliberately dim one (UI 3:1).
+        for (int i = 1; i < 16; ++i)
+            pairs << Pair{spec.ansi.value(i), spec.terminalBackground, i == 8 ? 3.0 : 4.5, "ANSI"};
+
+        for (const Pair &p : pairs) {
+            const double r = contrast(p.fg, p.bg);
+            QVERIFY2(r >= p.min, qPrintable(QStringLiteral("%1: %2 %3 on %4 is %5:1, needs %6:1")
+                                                .arg(id, QString::fromLatin1(p.what), p.fg.name(), p.bg.name())
+                                                .arg(r, 0, 'f', 2).arg(p.min, 0, 'f', 1)));
+        }
+    }
+
+    // The trap the owner's brief named: copper sits between amber (warning) and red (error).
+    void copperStaysClearOfAmberAndRed() {
+        const ThemeSpec spec = shipped(QStringLiteral("dark-copper"));
+        const auto ui = [&spec](const char *t) { return spec.uiColor(QString::fromLatin1(t)); };
+        // The bright copper, the accent, has to be a different colour, not merely a darker one.
+        for (const char *meaning : {"warning", "error"}) {
+            const double d = deltaE(ui("accent"), ui(meaning));
+            QVERIFY2(d >= 20.0, qPrintable(QStringLiteral("accent vs %1: dE %2 < 20")
+                                               .arg(QString::fromLatin1(meaning)).arg(d, 0, 'f', 1)));
+        }
+        // The structural copper has to stay dim: a rule must never read as a lit warning.
+        const double warning = contrast(ui("warning"), ui("background"));
+        for (const char *chrome : {"border", "surface_raised"}) {
+            const double c = contrast(ui(chrome), ui("background"));
+            QVERIFY2(c * 2 < warning, qPrintable(QStringLiteral("%1 is %2:1 on the ground, too close to warning's %3:1")
+                                                     .arg(QString::fromLatin1(chrome)).arg(c, 0, 'f', 2)
+                                                     .arg(warning, 0, 'f', 2)));
+        }
+        // The meaning colours are Relay Dark's, unchanged.
+        QCOMPARE(ui("warning"), builtinDark().uiColor(QStringLiteral("warning")));
+        QCOMPARE(ui("error"), builtinDark().uiColor(QStringLiteral("error")));
+    }
+
+    // The owner asked for a greyed pair on IBM Beige; it must still be two colours.
+    void theDestinationPairStaysTwoColours_data() {
+        QTest::addColumn<QString>("id");
+        QTest::newRow("dark-copper") << QStringLiteral("dark-copper");
+        QTest::newRow("ibm-beige") << QStringLiteral("ibm-beige");
+    }
+    void theDestinationPairStaysTwoColours() {
+        QFETCH(QString, id);
+        const ThemeSpec spec = shipped(id);
+        const QColor shell = spec.uiColor(QStringLiteral("shell")), agent = spec.uiColor(QStringLiteral("agent"));
+        const double d = deltaE(shell, agent);
+        QVERIFY2(d >= 20.0, qPrintable(QStringLiteral("%1: shell %2 vs agent %3 is dE %4 < 20")
+                                           .arg(id, shell.name(), agent.name()).arg(d, 0, 'f', 1)));
+        // Shell is the cooler of the two in every theme; violet is never the bluer.
+        QVERIFY(shell.blue() - shell.red() > agent.blue() - agent.red());
+    }
+
+    void theBeigeTerminalInvertsTheAnsiRamp() {
+        // On a light ground ANSI 7 and 15 must be the dark end, or \e[37m text vanishes.
+        const ThemeSpec spec = shipped(QStringLiteral("ibm-beige"));
+        QVERIFY(spec.isLight());
+        const QColor bg = spec.terminalBackground;
+        QVERIFY(contrast(spec.ansi.value(15), bg) > contrast(spec.ansi.value(8), bg));
+        QVERIFY(contrast(spec.ansi.value(7), bg) >= 4.5);
+    }
+
+    void theChromeFlagsAndBevelColoursAreRead() {
+        const ThemeSpec beige = shipped(QStringLiteral("ibm-beige"));
+        QVERIFY(beige.flag(QStringLiteral("bevel")));
+        QVERIFY(beige.flag(QStringLiteral("square")));
+        QCOMPARE(QColor(beige.extra.value(QStringLiteral("bevel.light")).value(0)), QColor(QStringLiteral("#f0e4d4")));
+        QCOMPARE(QColor(beige.extra.value(QStringLiteral("bevel.dark")).value(0)), QColor(QStringLiteral("#8e785d")));
+        // Off unless a theme asks: the incumbents' stylesheet must not change.
+        const ThemeSpec copper = shipped(QStringLiteral("dark-copper"));
+        QVERIFY(!copper.flag(QStringLiteral("bevel")));
+        QVERIFY(!copper.flag(QStringLiteral("square")));
+        for (const QString &id : {QStringLiteral("relay-dark"), QStringLiteral("relay-light"),
+                                  QStringLiteral("gruvbox-dark"), QStringLiteral("solarized-dark")}) {
+            const ThemeSpec spec = shipped(id);
+            QVERIFY2(!spec.flag(QStringLiteral("bevel")) && !spec.flag(QStringLiteral("square")), qPrintable(id));
         }
     }
 };
