@@ -32,8 +32,12 @@ MIN_STALL_TIMEOUT = 1.0
 MAX_STALL_TIMEOUT = 1800.0
 # The output budget one model call may ask for. Reasoning counts towards it on every provider that
 # streams reasoning, so the ceiling is also the ceiling on how long a model may think in one step.
+# The ceiling is what the most generous model Relay ships documents (131,072 = 128K); what each one
+# actually gets is its own documented cap, from presets.max_output. 0 means "automatic": that cap,
+# which is what a new install asks for.
 MIN_OUTPUT_TOKENS = 256
-MAX_OUTPUT_TOKENS = 32768
+MAX_OUTPUT_TOKENS = 131072
+AUTOMATIC_OUTPUT_TOKENS = 0
 WATCHDOG_TICK = 0.5
 # Environment override for the deadline, kept from the 2026-09-17 stopgap that widened the raw
 # socket timeout. It wins over the agent option, so a pane that needs more room needs no settings
@@ -320,21 +324,25 @@ class ProviderTruncated(ProviderError):
     message carrying tool calls without their results is not a conversation a provider will accept.
     """
     def __init__(self, reason: str, max_tokens: int, produced: bool = False,
-                 partial: dict | None = None):
+                 partial: dict | None = None, model_cap: int | None = None):
         if reason == "content_filter":
             text = ("The provider filtered this response; partial tools were not executed. "
                     "Rephrase the request, or send it to another model.")
         else:
-            at_ceiling = max_tokens >= MAX_OUTPUT_TOKENS
+            # Telling someone to raise a limit they cannot raise is the thing this message got
+            # wrong before: it is spent either when Relay will take no larger number, or when the
+            # model itself documents no larger number (Gemini 3.1 Pro stops at 65,536).
+            spent = max_tokens >= MAX_OUTPUT_TOKENS or (model_cap is not None and max_tokens >= model_cap)
             text = (f"The model used its whole {max_tokens}-token output budget on one step without "
                     "finishing, so nothing of it was used; reasoning counts towards that budget. "
-                    + ("The output token limit is already at Relay's maximum: lower the effort in "
+                    + ("That is as much as this model gives for one call: lower the effort in "
                        "Options › Models, or ask for a smaller step."
-                       if at_ceiling else
+                       if spent else
                        "Raise the output token limit in Options › Models, or ask for a smaller step."))
         super().__init__(text)
         self.reason = reason
         self.max_tokens = max_tokens
+        self.model_cap = model_cap
         self.produced = produced
         self.partial = partial
 
@@ -371,7 +379,7 @@ class ProviderConfig:
     model: str
     api_key: str = field(repr=False)
     extra: dict = field(default_factory=dict)
-    max_tokens: int = 32768
+    max_tokens: int = AUTOMATIC_OUTPUT_TOKENS   # 0: ask for what this model documents
     # A model server on this machine (localmodels.py). Everything the transport does differently
     # for one is behind this flag, so a hosted provider's request and its failures are unchanged.
     local: bool = False
@@ -383,6 +391,23 @@ class ProviderConfig:
     # turn of every tool conversation otherwise. The outgoing copy only (``wire_messages``).
     tool_arguments_as_object: bool = False
     context_window: int | None = None          # the served window, for the overflow message only
+
+    def __post_init__(self) -> None:
+        """Settle ``max_tokens`` at construction, so everything downstream — the request, the
+        compaction reserve, the model-switch ceiling — reads one number.
+
+        0 means automatic: the model's own documented output cap (``presets.max_output``). A number
+        the user pinned is kept, but never above that cap, because a request over it is refused
+        rather than trimmed. An endpoint Relay cannot name keeps whatever it was given: the user
+        typed that base URL and knows what it takes.
+        """
+        from .presets import match_preset, resolve_max_tokens
+        preset = None if self.local else match_preset(self.base_url, self.model)
+        self.max_tokens = resolve_max_tokens(self.max_tokens, preset)
+        if self.local and self.context_window:
+            # A server on this machine promises the whole window to the reply otherwise; the quarter
+            # is localmodels.clamp_max_tokens's rule, applied here too so no path can miss it.
+            self.max_tokens = max(MIN_OUTPUT_TOKENS, min(self.max_tokens, self.context_window // 4))
 
     def validate(self) -> None:
         url = urllib.parse.urlsplit(self.base_url)
@@ -723,6 +748,14 @@ class ChatProvider:
                 message["content"] = ""
         return message
 
+    def _model_cap(self) -> int | None:
+        """What this endpoint documents for one call, or None when Relay cannot know."""
+        from .presets import match_preset
+        if self.config.local:
+            return max(MIN_OUTPUT_TOKENS, self.config.context_window // 4) if self.config.context_window else None
+        preset = match_preset(self.config.base_url, self.config.model)
+        return preset.max_output if preset is not None else None
+
     @staticmethod
     def _partial(message: dict, calls: dict) -> dict | None:
         """The keepable part of a cut-off response: its answer text, and only when no tool call
@@ -898,7 +931,7 @@ class ChatProvider:
             raise ProviderError("Provider stream ended unexpectedly; partial tools were not executed.")
         if finish_reason in {"length", "content_filter"}:
             raise ProviderTruncated(finish_reason, self.config.max_tokens, self._produced,
-                                    self._partial(message, calls))
+                                    self._partial(message, calls), self._model_cap())
         if calls:
             message["tool_calls"] = [calls[i] for i in sorted(calls)]
         if self.config.local:

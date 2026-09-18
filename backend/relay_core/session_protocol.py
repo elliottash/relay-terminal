@@ -21,7 +21,7 @@ from .agent import validate_turn_options
 from .requests import check_ledger_id
 from .context import validate_threshold, validate_window
 from .presets import PRESETS, match_preset, resolve_preset, validate_effort
-from .provider import ProviderConfig, ProviderError
+from .provider import AUTOMATIC_OUTPUT_TOKENS, ProviderConfig, ProviderError
 from . import sessions as session_files
 from .sessions import SessionStore, check_id, default_session_dir
 
@@ -101,7 +101,7 @@ def provider_config(request: dict) -> ProviderConfig:
             raise ValueError(f"No stored key for {provider_name(preset_id, base_url)}. "
                              "Import from Warp or enter a key.")
     config = ProviderConfig(base_url, model, api_key, extra,
-                            localmodels.clamp_max_tokens(request.get("max_tokens", 32768), local), **local)
+                            localmodels.clamp_max_tokens(request.get("max_tokens", AUTOMATIC_OUTPUT_TOKENS), local), **local)
     config.validate()
     return config
 

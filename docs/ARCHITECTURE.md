@@ -1284,7 +1284,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   (`local:<id>`), the probe and the worker messages are `backend/relay_core/localmodels.py`; a
   hosted provider's request is unchanged. See [LOCAL-MODELS.md](LOCAL-MODELS.md).
 - Extra request keys are limited to `thinking`, `reasoning`, `reasoning_effort`,
-  `temperature`, `top_p`. `max_tokens` 256–32768, default 32768 (the Options pane, the provider dialog and every fallback when `provider/max_tokens` is unset).
+  `temperature`, `top_p`. `max_tokens` is **0 or 256–131072**, and 0 — the default, and every fallback when `provider/max_tokens` is unset — means *automatic*: the model's own documented output cap (`presets.max_output`; GLM-5.3 and Kimi K3 131072, GPT-6 Astra 128000, Gemini 3.1 Pro **65536**, an aggregator or an endpoint Relay cannot name 32768, a local server a quarter of its served window). A pinned number is kept but never sent above that cap, because a request over it is refused rather than trimmed. Output caps are published per model and are not a share of the context window: Gemini has a larger window than GLM-5.3 and half the output.
 - Limits: 8 MiB request and response, 2 MiB per SSE event, 16 tool calls per response,
   30 s socket timeout. Cancel closes the response from another thread.
 - Tool-call fragments are assembled by index. `reasoning_content` and OpenRouter's

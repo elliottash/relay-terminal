@@ -1495,7 +1495,9 @@ private:
         models.rows << toggleRow(QStringLiteral("agent/panes_flash"), QStringLiteral("New panes use the Flash agent"),
                                  QStringLiteral("Off: every pane starts on the main agent. On: the first pane of a window keeps it"), false);
         models.rows << numberRow(QStringLiteral("provider/max_tokens"), QStringLiteral("Output token limit"),
-                                 QStringLiteral("Per model call; applies to the next conversation"), 32768, 256, 32768);
+                                 QStringLiteral("Per model call, reasoning included. 0 = automatic: each model's own "
+                                                "documented limit (GLM 131072, Gemini 65536). Applies to the next conversation"),
+                                 0, 0, 131072);
         models.rows << buttonRow(QStringLiteral("agent.provider"), QStringLiteral("Advanced provider settings"),
                                  QStringLiteral("Base URL, model id, extra request JSON and the agent workspace"),
                                  QStringLiteral("Open…"), [this] { runAction(QStringLiteral("agent.provider")); });
@@ -2991,7 +2993,7 @@ public:
                               {QStringLiteral("agent_role"), QStringLiteral("switchboard")},
                               {QStringLiteral("use_stored_key"), true},
                               {QStringLiteral("api_key"), QString()},
-                              {QStringLiteral("max_tokens"), settings.value(QStringLiteral("provider/max_tokens"), 32768).toInt()}};
+                              {QStringLiteral("max_tokens"), settings.value(QStringLiteral("provider/max_tokens"), 0).toInt()}};
         if (!preset.isEmpty()) configure.insert(QStringLiteral("preset"), preset);
         if (!named) {
             configure.insert(QStringLiteral("base_url"), settings.value(QStringLiteral("provider/base")).toString());

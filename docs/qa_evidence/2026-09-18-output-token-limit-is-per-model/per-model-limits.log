@@ -1,0 +1,23 @@
+== what each preset asks for ==
+preset           window  automatic  pinned 131072  pinned 8192
+kimi          1,048,576    131,072        131,072        8,192
+kimi-code     1,048,576    131,072        131,072        8,192
+glm           1,000,000    131,072        131,072        8,192
+glm-coding    1,000,000    131,072        131,072        8,192
+minimax       1,000,000    131,072        131,072        8,192
+openrouter    1,048,576     32,768         32,768        8,192
+openai        1,050,000    128,000        128,000        8,192
+anthropic     1,000,000    131,072        131,072        8,192
+gemini        1,048,576     65,536         65,536        8,192
+
+custom endpoint                32,768        131,072   (a number the user typed for their own server is theirs)
+local 131072    131,072     32,768                     (a quarter of the served window)
+
+fallback for anything Relay cannot name: 32,768
+10% of the window would be: kimi 104,857, kimi-code 104,857, glm 100,000 …
+
+== what the endpoint receives ==
+  glm-coding   request body max_tokens = 131,072
+  gemini       request body max_tokens = 65,536
+  openai       request body max_tokens = 128,000
+  openrouter   request body max_tokens = 32,768

@@ -59,6 +59,9 @@ class StreamTests(unittest.TestCase):
         return ('data: ' + json.dumps({'choices': [], 'usage': usage}) + '\n\n').encode()
 
     def test_a_cut_off_step_says_what_it_spent_and_keeps_no_partial_tool_call(self):
+        # Pinned at Relay's ceiling on an endpoint it cannot name, so there is nothing left to raise.
+        self.provider = ChatProvider(ProviderConfig('http://127.0.0.1:1234/v1', 'mock', '',
+                                                    max_tokens=MAX_OUTPUT_TOKENS))
         data = self.usage_event({'prompt_tokens': 48000, 'completion_tokens': MAX_OUTPUT_TOKENS})
         data += event({'reasoning_content': 'thinking that fills the budget'})
         data += event({'tool_calls': [{'index': 0, 'id': 'c1', 'type': 'function',
@@ -71,7 +74,7 @@ class StreamTests(unittest.TestCase):
         self.assertTrue(exc.produced)                 # a tool-call fragment reached the user
         self.assertIsNone(exc.partial)                # cut-off arguments are never kept
         self.assertIn(str(MAX_OUTPUT_TOKENS), str(exc))
-        self.assertIn("already at Relay's maximum", str(exc))
+        self.assertIn("as much as this model gives", str(exc))
         # The tokens it spent are reported before the failure, not dropped with it.
         self.assertEqual([e for e in self.events if e['event'] == 'usage'][-1]['usage']['completion_tokens'],
                          MAX_OUTPUT_TOKENS)
@@ -93,6 +96,20 @@ class StreamTests(unittest.TestCase):
             self.parse(event(finish='content_filter') + b'data: [DONE]\n\n')
         self.assertEqual(caught.exception.reason, 'content_filter')
         self.assertIn('filtered this response', str(caught.exception))
+
+    def test_a_model_at_its_own_documented_cap_is_not_told_to_raise_the_limit(self):
+        """Gemini stops at 65,536 with Relay's ceiling at 131,072: raising it would change nothing."""
+        from relay_core.presets import PRESETS
+        gemini = PRESETS['gemini']
+        provider = ChatProvider(ProviderConfig(gemini.base_url, gemini.model, 'k'))
+        self.assertEqual(provider.config.max_tokens, 65_536)      # automatic: the model's own cap
+        with self.assertRaises(ProviderTruncated) as caught:
+            provider._stream(io.BytesIO(event(finish='length') + b'data: [DONE]\n\n'),
+                             self.events.append, self.cancel)
+        self.assertEqual(caught.exception.model_cap, 65_536)
+        self.assertIn('65536-token output budget', str(caught.exception))
+        self.assertIn('as much as this model gives', str(caught.exception))
+        self.assertNotIn('Raise the output token limit', str(caught.exception))
 
     def test_a_lower_output_limit_is_told_to_raise_it(self):
         provider = ChatProvider(ProviderConfig('http://127.0.0.1:1234/v1', 'mock', '', max_tokens=8192))
@@ -118,13 +135,41 @@ class StreamTests(unittest.TestCase):
         with self.assertRaises(ValueError): ProviderConfig('https://example.com/v1','m','k',{'messages':[]}).validate()
         ProviderConfig('https://api.z.ai/api/paas/v4','glm-5.3','k',{'thinking':{'type':'enabled'},'reasoning_effort':'high'}).validate()
 
-    def test_the_output_token_limit_defaults_to_32k(self):
-        # The owner's default (2026-09-18), also the top of the allowed range; the GUI falls back to the same.
+    def test_an_unnamed_endpoint_keeps_the_conservative_default(self):
+        # An endpoint Relay cannot name may cap output far below what its window suggests, so
+        # automatic stays at 32768 there — and a number the user typed for their own server stands.
         from relay_core.session_protocol import provider_config
         self.assertEqual(ProviderConfig('https://example.com/v1', 'm', 'k').max_tokens, 32768)
         request = {'base_url': 'https://example.com/v1', 'model': 'm', 'api_key': 'k'}
         self.assertEqual(provider_config(request).max_tokens, 32768)
-        self.assertEqual(provider_config({**request, 'max_tokens': 4096}).max_tokens, 4096)  # a saved value stands
+        self.assertEqual(provider_config({**request, 'max_tokens': 4096}).max_tokens, 4096)
+        self.assertEqual(provider_config({**request, 'max_tokens': MAX_OUTPUT_TOKENS}).max_tokens,
+                         MAX_OUTPUT_TOKENS)
+
+    def test_automatic_asks_each_model_for_what_it_documents(self):
+        """Card #Z79Y: the default is the model's own cap, not one number for every provider."""
+        from relay_core.presets import PRESETS
+        from relay_core.session_protocol import provider_config
+        for preset_id, expected in (('glm-coding', 131_072), ('gemini', 65_536),
+                                    ('openai', 128_000), ('openrouter', 32_768)):
+            preset = PRESETS[preset_id]
+            with self.subTest(preset_id):
+                self.assertEqual(ProviderConfig(preset.base_url, preset.model, 'k').max_tokens, expected)
+                # Pinning Relay's ceiling never sends a model more than it takes: Gemini would
+                # refuse the request outright rather than answer at its own limit.
+                self.assertEqual(ProviderConfig(preset.base_url, preset.model, 'k',
+                                                max_tokens=MAX_OUTPUT_TOKENS).max_tokens, expected)
+                # A smaller number is the user's own choice and is left alone.
+                self.assertEqual(ProviderConfig(preset.base_url, preset.model, 'k',
+                                                max_tokens=4096).max_tokens, 4096)
+        self.assertEqual(provider_config({'preset': 'gemini', 'api_key': 'k'}).max_tokens, 65_536)
+
+    def test_a_local_server_still_gets_a_quarter_of_its_window(self):
+        config = ProviderConfig('http://127.0.0.1:8080/v1', 'bonsai-2-27b', '', local=True,
+                                context_window=131_072)
+        self.assertEqual(config.max_tokens, 32_768)              # automatic, clamped to the quarter
+        self.assertEqual(ProviderConfig('http://127.0.0.1:8080/v1', 'm', '', local=True,
+                                        context_window=32_768).max_tokens, 8_192)
 
 class HTTPTests(unittest.TestCase):
     @classmethod

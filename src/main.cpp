@@ -217,6 +217,17 @@ static void migrateFastRoleSettings() {
     }
 }
 
+// The output token limit stopped being a number and became a ceiling: 0 means "as much as this
+// model documents", which is what a new install asks for (card #Z79Y). 32768 used to be both the
+// default and the top of the range, so anyone holding it wanted all there was — and would otherwise
+// keep a quarter of what GLM-5.3 allows for ever, because a value once saved is never re-defaulted.
+// A smaller number was chosen on purpose and is left alone.
+static void migrateOutputTokenCeiling() {
+    QSettings settings;
+    const QString key = QStringLiteral("provider/max_tokens");
+    if (settings.value(key).toInt() == 32768) settings.setValue(key, 0);
+}
+
 // ----- quitting on a signal ----------------------------------------------------------------------
 //
 // Qt does nothing about SIGTERM: left alone, `kill`, `pkill relay`, a systemd stop and a logout
@@ -261,6 +272,7 @@ int main(int argc, char **argv) {
     QCoreApplication::setApplicationName(QStringLiteral("relay"));
     QCoreApplication::setApplicationVersion(QStringLiteral(RELAY_VERSION));
     migrateFastRoleSettings();   // "fast" -> "flash", once, before anything reads these keys
+    migrateOutputTokenCeiling(); // the old 32768 ceiling -> 0, "the model's own limit" (#Z79Y)
     // From here on, stderr is no longer the only record: a launcher-started Relay keeps one too.
     relay::log::installMessageHandler();
     relay::log::info(QStringLiteral("gui_start version=%1 pid=%2 level=%3")

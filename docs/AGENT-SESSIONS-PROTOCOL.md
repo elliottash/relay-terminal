@@ -979,7 +979,9 @@ The GUI prints `text` as a note line.
 ### 15.2.1 A step cut off at the output limit
 
 `max_tokens` is the budget for one model call, and on every provider that streams reasoning the
-thinking is spent from it. A reasoning model can therefore use the whole budget on one step and
+thinking is spent from it. Since 2026-09-18 it defaults to *automatic* (`0`), which asks each model
+for what its own documentation allows — 131,072 on GLM-5.3, 65,536 on Gemini 3.1 Pro — instead of
+one number for every provider; see section 13.10. A reasoning model can therefore use the whole budget on one step and
 return `finish_reason: "length"` with no answer text and no tool call — four minutes of work that
 delivers nothing (owner report, 2026-09-18, GLM-5.3 at effort `high` with the limit at its 32768
 ceiling).
@@ -1135,6 +1137,42 @@ gains `tier_defaults` (13.7) and `role_actions` — the Advanced list, one row p
 keeps a second copy of the backend's tables. The keys modal lists a preset per plan and so uses `label`
 ("Kimi · K3"); the roles modal chooses a *provider* and uses `provider`, adding `· <plan>` only when two
 presets of the same company are both offered.
+
+### 13.10 The output token limit is per model (v2.9, 2026-09-18)
+
+`max_tokens` on `configure` and `set_model` is **0, or 256–131072**. `0` is the default and means
+*automatic*: ask this model for what its own documentation allows. `ProviderConfig` settles the
+number once, at construction, so the request, the compaction reserve (`window − max_tokens − 24K`)
+and the model-switch ceiling all read the same value.
+
+| Endpoint | Automatic asks for | Source |
+|---|---|---|
+| GLM-5.3 (`glm`, `glm-coding`) | 131,072 | https://docs.z.ai/guides/llm/glm-5.3 |
+| Kimi K3 (`kimi`, `kimi-code`) | 131,072 | https://platform.kimi.ai/docs/guide/kimi-k3-quickstart |
+| Claude Opus 5 (`anthropic`) | 131,072 | https://platform.claude.com/docs/en/models/opus-5/overview |
+| MiniMax M3 (`minimax`) | 131,072 | https://platform.minimax.io/docs/guides/text-generation |
+| GPT-6 Astra (`openai`) | 128,000 | https://developers.openai.com/api/docs/models/gpt-6-astra |
+| Gemini 3.1 Pro (`gemini`) | **65,536** | https://ai.google.dev/gemini-api/docs/gemini-3 |
+| `openrouter`, and any endpoint Relay cannot name | 32,768 | route caps differ per request and are not published |
+| a model server on this machine | a quarter of its served window | `localmodels.clamp_max_tokens` |
+
+**Why not one number, and why not a share of the window.** Output caps are published per model and
+have no fixed relationship to the context window. Gemini 3.1 Pro has a *larger* window than GLM-5.3
+(1,048,576 against 1,000,000) and half the output cap, so a flat 128K default and "10% of the
+window" both ask it for roughly twice what it takes — and a request over the cap is refused, not
+trimmed. The conservative fallback exists for the same reason in the other direction: an aggregator
+picks the endpoint per request and the caps differ across them (OpenRouter's DeepInfra route for
+Kimi K3 allows 16,384). A provider whose gateway rebuilds the request and owns its own output cap
+gets the fallback for the same reason.
+
+A number the user pinned is kept, but never sent above the model's cap. On an endpoint Relay cannot
+name it is sent as given: the user typed that base URL and knows what it takes. A pane at its
+model's cap that still runs out is told to lower the effort rather than to raise a limit that would
+change nothing (#G5MK).
+
+`presets` rows carry `max_output` so the GUI can show it. A stored `provider/max_tokens` of 32768 —
+the old default, which was also the old top of the range — migrates to 0 once at startup
+(`migrateOutputTokenCeiling`); any other stored number was chosen on purpose and is left alone.
 
 ## 16. Voice transcription (v1.6, 2026-09-17)
 

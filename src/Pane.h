@@ -499,7 +499,7 @@ public:
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
               {"model", preset.value(QStringLiteral("model")).toString()},
               {"extra", preset.value(QStringLiteral("extra")).toObject()},
-              {"max_tokens", QSettings().value(QStringLiteral("provider/max_tokens"), 32768).toInt()}});
+              {"max_tokens", QSettings().value(QStringLiteral("provider/max_tokens"), 0).toInt()}});
         rememberPreset(id);
         m_currentPreset = id; changed();
     }
@@ -8083,7 +8083,7 @@ private:
         if (preset.isEmpty()) return;
         if (m_workspace.isEmpty()) m_workspace = QDir::currentPath();
         QSettings settings;
-        const int tokens = settings.value(QStringLiteral("provider/max_tokens"), 32768).toInt();
+        const int tokens = settings.value(QStringLiteral("provider/max_tokens"), 0).toInt();
         settings.setValue("provider/preset", id);
         settings.setValue("provider/base", preset.value(QStringLiteral("base_url")).toString());
         settings.setValue("provider/model", preset.value(QStringLiteral("model")).toString());
@@ -10416,7 +10416,11 @@ private:
         auto *key = new QLineEdit(m_apiKey); key->setEchoMode(QLineEdit::Password);
         auto *extra = new QPlainTextEdit(settings.value(QStringLiteral("provider/extra"), QStringLiteral("{\"reasoning_effort\":\"high\"}")).toString());
         extra->setMaximumHeight(90);
-        auto *tokens = new QSpinBox; tokens->setRange(256, 32768); tokens->setValue(settings.value("provider/max_tokens", 32768).toInt());
+        // 0 is the automatic setting: the model's own documented output cap, which the worker
+        // resolves per endpoint (presets.max_output). The spin box shows a word, not a zero.
+        auto *tokens = new QSpinBox; tokens->setRange(0, 131072);
+        tokens->setSpecialValueText(QStringLiteral("Automatic (the model's own limit)"));
+        tokens->setValue(settings.value("provider/max_tokens", 0).toInt());
         auto *workspace = new QLineEdit(m_workspace);
         auto *workspaceRow = new QWidget; auto *workspaceLayout = new QHBoxLayout(workspaceRow); workspaceLayout->setContentsMargins(0, 0, 0, 0);
         auto *browse = new QPushButton(QStringLiteral("Choose…")); workspaceLayout->addWidget(workspace); workspaceLayout->addWidget(browse);

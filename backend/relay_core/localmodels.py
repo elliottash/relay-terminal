@@ -261,11 +261,14 @@ def provider_fields(preset_id=None, base_url: str = "", model: str = "") -> dict
 def clamp_max_tokens(max_tokens: int, fields: dict) -> int:
     """The output limit a local server can honour: a quarter of the served window at most.
 
-    Relay's default is 32768. On a 32K server that promises the whole window to the reply, and
-    compaction (80% of the window) would leave 6.5K for an answer that was promised 32K.
+    On a 32K server, an unclamped limit promises the whole window to the reply, and compaction
+    (80% of the window) would leave 6.5K for an answer that was promised 32K.
+
+    0 is "automatic" and passes straight through: ``ProviderConfig`` settles it, and applies this
+    same quarter afterwards, so a local endpoint gets the quarter either way.
     """
     window = fields.get("context_window") if fields else None
-    if not window or isinstance(max_tokens, bool) or not isinstance(max_tokens, int):
+    if not window or isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens <= 0:
         return max_tokens
     return max(256, min(max_tokens, window // 4))
 

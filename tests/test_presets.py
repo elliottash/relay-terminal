@@ -43,6 +43,45 @@ class PresetTableTests(unittest.TestCase):
             preset = P.PRESETS[preset_id]
             self.assertEqual((preset.base_url, preset.model), (base_url, model), preset_id)
 
+    # ----- output limits (card #Z79Y) ---------------------------------------------------------
+    def test_every_preset_documents_an_output_cap_that_fits_its_window(self):
+        for preset in P.PRESETS.values():
+            with self.subTest(preset.id):
+                self.assertGreaterEqual(preset.max_output, P.DEFAULT_MAX_OUTPUT)
+                # A cap above the window would be unaskable; a cap above a quarter of it would leave
+                # the reply fighting the compaction reserve.
+                self.assertLessEqual(preset.max_output, preset.context_window // 4)
+
+    def test_the_output_cap_is_the_providers_number_not_a_share_of_the_window(self):
+        """Verified 2026-09-18; the doc URL for each sits next to the entry in presets.py."""
+        self.assertEqual(P.PRESETS["glm-coding"].max_output, 131_072)      # docs.z.ai: 128K
+        self.assertEqual(P.PRESETS["kimi"].max_output, 131_072)            # platform.kimi.ai
+        self.assertEqual(P.PRESETS["anthropic"].max_output, 131_072)       # platform.claude.com
+        self.assertEqual(P.PRESETS["openai"].max_output, 128_000)          # developers.openai.com
+        self.assertEqual(P.PRESETS["gemini"].max_output, 65_536)           # ai.google.dev: "1M / 64k"
+        # Gemini is why: a larger window than GLM-5.3 and half the output cap. Any rule that derives
+        # output from the window — a flat 128K, or a share of it — gets this model wrong.
+        gemini, glm = P.PRESETS["gemini"], P.PRESETS["glm-coding"]
+        self.assertGreater(gemini.context_window, glm.context_window)
+        self.assertLessEqual(gemini.max_output * 2, glm.max_output)
+        # An aggregator picks the endpoint and the caps differ across them, so it claims no number
+        # Relay cannot check.
+        self.assertEqual(P.PRESETS["openrouter"].max_output, P.DEFAULT_MAX_OUTPUT)
+
+    def test_automatic_means_the_models_own_cap_and_a_pinned_number_never_exceeds_it(self):
+        gemini = P.PRESETS["gemini"]
+        self.assertEqual(P.resolve_max_tokens(0, gemini), 65_536)          # automatic
+        self.assertEqual(P.resolve_max_tokens(None, gemini), 65_536)       # nothing sent
+        self.assertEqual(P.resolve_max_tokens(131_072, gemini), 65_536)    # pinned too high: clamped
+        self.assertEqual(P.resolve_max_tokens(8_192, gemini), 8_192)       # pinned lower: kept
+        # An endpoint Relay cannot name: automatic is conservative, but a number the user typed for
+        # their own server is theirs to choose.
+        self.assertEqual(P.resolve_max_tokens(0, None), P.DEFAULT_MAX_OUTPUT)
+        self.assertEqual(P.resolve_max_tokens(131_072, None), 131_072)
+
+    def test_the_gui_is_told_each_models_output_cap(self):
+        self.assertEqual(P.PRESETS["gemini"].to_dict()["max_output"], 65_536)
+
     def test_subscriptions_aggregator_and_payg_are_all_represented(self):
         by_group = {}
         for preset in P.PRESETS.values():

@@ -42,6 +42,20 @@ EFFORT_MAP: dict[str, dict[str, str]] = {
 # only offer ~262K; the openrouter preset here is DeepSeek, which is 1,048,576 on every endpoint).
 DEFAULT_CONTEXT_WINDOW = 128_000  # conservative fallback for unknown/custom models
 
+# --- output limits ------------------------------------------------------------------------------
+# What one model call may be asked to produce, per model, from the provider's own documentation
+# (verified 2026-09-18; the URL sits next to each entry below). This is *not* a fraction of the
+# context window: the two are published independently, and Gemini 3.1 Pro is the proof — a larger
+# window than GLM-5.3 and half the output cap (65,536 against 131,072). Reasoning is spent from this
+# budget on every provider that streams it, so it is also the ceiling on how long a model may think
+# in one step (card #G5MK).
+#
+# The fallback is deliberately conservative: an endpoint Relay cannot name — a custom base URL, an
+# aggregator route, anything behind a gateway — may cap output far lower than its window suggests
+# (OpenRouter's DeepInfra route for Kimi K3 allows 16,384), and a request over the cap is refused
+# outright rather than trimmed.
+DEFAULT_MAX_OUTPUT = 32_768
+
 # --- image (vision) support -------------------------------------------------------------------
 # Which models can read images, by model-id prefix (issue EM1E, owner decision 2026-09-17). An
 # OpenRouter-style slug is matched on its last segment, so "google/gemini-3.8-flash" counts as Gemini.
@@ -94,6 +108,9 @@ class Preset:
     # set on an entry of PRESETS; localmodels.LocalEndpoint.as_preset() is the only producer.
     local: bool = False
     server: str = ""           # llamacpp | ollama | lmstudio | vllm | openai-compatible
+    # Output tokens one call may ask this model for; see DEFAULT_MAX_OUTPUT above. Last in the field
+    # list because every entry below is built positionally up to `server`.
+    max_output: int = DEFAULT_MAX_OUTPUT
 
     @property
     def vision(self) -> bool:
@@ -103,6 +120,7 @@ class Preset:
     def to_dict(self) -> dict:
         return {"id": self.id, "label": self.label, "base_url": self.base_url,
                 "model": self.model, "extra": dict(self.extra), "context_window": self.context_window,
+                "max_output": self.max_output,
                 "efforts": distinct_efforts(self.effort_style), "group": self.group,
                 "key_url": self.key_url, "note": self.note, "vision": self.vision,
                 "provider": self.provider or self.label.split(" · ")[0], "plan": self.plan,
@@ -119,22 +137,25 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
     Preset("kimi", "Kimi · K3", "https://api.moonshot.ai/v1", "kimi-k3", {"reasoning_effort": "high"},
            1_048_576, "kimi", "payg", "https://platform.kimi.ai/console/api-keys",
            "Moonshot platform, pay-as-you-go.",
-           provider="Kimi", plan="Pay-as-you-go"),
+           # max_completion_tokens: 131,072 by default, up to the whole window
+           # (https://platform.kimi.ai/docs/guide/kimi-k3-quickstart).
+           provider="Kimi", plan="Pay-as-you-go", max_output=131_072),
     # Kimi Code subscription (https://www.kimi.com/code/docs/en/): OpenAI-compatible base
     # https://api.kimi.ai/coding/v1; model ids k3, k3-256k, kimi-for-coding, kimi-for-coding-highspeed.
     Preset("kimi-code", "Kimi Code · K3", "https://api.kimi.ai/coding/v1", "k3", {"reasoning_effort": "high"},
            1_048_576, "kimi", "subscription", "https://www.kimi.com/code/console",
            "Kimi Code subscription key (not a Moonshot platform key).",
-           provider="Kimi", plan="Coding Plan"),
+           provider="Kimi", plan="Coding Plan", max_output=131_072),
     Preset("glm", "Z.AI · GLM-5.3 · standard API", "https://api.z.ai/api/paas/v4", "glm-5.3", GLM_EXTRA,
            1_000_000, "glm", "payg", "https://z.ai/manage-apikey/apikey-list",
            "Z.AI open platform, pay-as-you-go.",
-           provider="Z.AI (GLM)", plan="standard API"),
+           # Output 128K (https://docs.z.ai/guides/llm/glm-5.3).
+           provider="Z.AI (GLM)", plan="standard API", max_output=131_072),
     # https://docs.z.ai/devpack/quick-start lists the Coding Plan's OpenAI base verbatim.
     Preset("glm-coding", "Z.AI · GLM-5.3 · Coding Plan", "https://api.z.ai/api/coding/paas/v4", "glm-5.3", GLM_EXTRA,
            1_000_000, "glm", "subscription", "https://z.ai/manage-apikey/apikey-list",
            "GLM Coding Plan subscription; subscribe at z.ai/subscribe.",
-           provider="Z.AI (GLM)", plan="Coding Plan"),
+           provider="Z.AI (GLM)", plan="Coding Plan", max_output=131_072),
     # MiniMax renamed the Coding Plan to the Token Plan and it shares the pay-as-you-go base URL; only the
     # key differs and the two kinds of key are not interchangeable.
     # https://platform.minimax.io/docs/token-plan/other-tools.md, .../token-plan/quickstart
@@ -143,31 +164,42 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
     Preset("minimax", "MiniMax · M3 · Coding/Token Plan", "https://api.minimax.io/v1", "MiniMax-M3", {},
            1_000_000, "none", "subscription", "https://platform.minimax.io/user-center/payment/token-plan",
            "MiniMax Coding Plan is now the Token Plan; the same base URL serves both key kinds.",
-           provider="MiniMax", plan="Token Plan"),
+           # Recommended output limit 131,072, hard maximum 524,288, and input plus output must fit
+           # the window (https://platform.minimax.io/docs/guides/text-generation).
+           provider="MiniMax", plan="Token Plan", max_output=131_072),
     # https://openrouter.ai/api/v1/models (fetched 2026-09-17): deepseek/deepseek-v4.1-flash exists,
     # a non-flash deepseek/deepseek-v4.1 does not.
     Preset("openrouter", "OpenRouter · DeepSeek V4.1 Flash", "https://openrouter.ai/api/v1",
            "deepseek/deepseek-v4.1-flash", {}, 1_048_576, "openrouter", "aggregator",
            "https://openrouter.ai/keys", "One key for every model; also Relay's router and chores model.",
-           provider="OpenRouter"),
+           # DeepSeek documents 384,000 output, but an aggregator picks the endpoint and the caps
+           # differ across them (OpenRouter's DeepInfra route for Kimi K3 allows 16,384), so this
+           # one keeps the conservative fallback rather than a number one route may refuse.
+           provider="OpenRouter", max_output=DEFAULT_MAX_OUTPUT),
     # https://developers.openai.com/api/docs/api-reference/chat/create
     Preset("openai", "OpenAI · GPT-6 Astra", "https://api.openai.com/v1", "gpt-6-astra",
            {"reasoning_effort": "high"}, 1_050_000, "openai", "payg",
            "https://platform.openai.com/api-keys", "Pay-as-you-go OpenAI API key (not a ChatGPT login).",
-           provider="OpenAI (ChatGPT)", plan="Pay-as-you-go"),
+           # 1,050,000 context, 128,000 output (https://developers.openai.com/api/docs/models/gpt-6-astra).
+           provider="OpenAI (ChatGPT)", plan="Pay-as-you-go", max_output=128_000),
     # https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk — the OpenAI-compatible
     # layer lives at https://api.anthropic.com/v1 and accepts the key as an Authorization: Bearer header.
     # It ignores reasoning_effort, so Relay sends no effort parameters to it.
     Preset("anthropic", "Anthropic · Claude Opus 5", "https://api.anthropic.com/v1", "claude-opus-5", {},
            1_000_000, "none", "payg", "https://console.anthropic.com/settings/keys",
            "Anthropic's OpenAI-compatible endpoint; effort is the model's own default.",
-           provider="Anthropic (Claude)", plan="Pay-as-you-go"),
+           # 1M context, 128k max output (https://platform.claude.com/docs/en/models/opus-5/overview);
+           # the 300k output beta is the Message Batches API, not this one.
+           provider="Anthropic (Claude)", plan="Pay-as-you-go", max_output=131_072),
     # https://ai.google.dev/gemini-api/docs/openai — base URL is .../v1beta/openai (stored without the
     # trailing slash because Relay appends /chat/completions).
     Preset("gemini", "Google · Gemini 3.1 Pro", "https://generativelanguage.googleapis.com/v1beta/openai",
            "gemini-3.1-pro-preview", {"reasoning_effort": "high"}, 1_048_576, "gemini", "payg",
            "https://aistudio.google.com/apikey", "Gemini API key from AI Studio.",
-           provider="Google (Gemini)", plan="Pay-as-you-go"),
+           # "1M / 64k" — a larger window than GLM-5.3 and half the output cap, which is why Relay
+           # reads this per model instead of as a share of the window
+           # (https://ai.google.dev/gemini-api/docs/gemini-3).
+           provider="Google (Gemini)", plan="Pay-as-you-go", max_output=65_536),
 ]}
 
 # --- Main / Flash / Lite tiers (docs/AGENT-SESSIONS-PROTOCOL.md section 13.7) ----------------------
@@ -371,3 +403,22 @@ def infer_effort(style: str, extra: dict | None) -> str | None:
 
 def context_window_for(preset: Preset | None) -> int:
     return preset.context_window if preset is not None else DEFAULT_CONTEXT_WINDOW
+
+
+def max_output_for(preset: Preset | None) -> int:
+    return preset.max_output if preset is not None else DEFAULT_MAX_OUTPUT
+
+
+def resolve_max_tokens(requested, preset: Preset | None) -> int:
+    """The output budget to send for one call.
+
+    ``requested`` of 0 (or nothing) means *automatic*: ask for what this model documents, which is
+    what a new install does. A number the user pinned is kept, but never above the model's own cap
+    when Relay knows it — asking Gemini for 131,072 is a refused request, not a longer answer. An
+    endpoint Relay cannot name is left alone at whatever the user set: they configured that base URL
+    themselves and know what it takes.
+    """
+    cap = max_output_for(preset)
+    if not isinstance(requested, int) or isinstance(requested, bool) or requested <= 0:
+        return cap
+    return min(requested, cap) if preset is not None else requested
