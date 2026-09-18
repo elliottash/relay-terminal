@@ -1,3 +1,24 @@
-relay: could not save the window layout: No such file or directory
-Could not remove our own lock file "/tmp/tmp.JM7ABHVakT/run/relay/windows.lock" maybe permissions changed meanwhile?
-QProcess: Destroyed while process ("python3") is still running.
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/elliott/repos/relay-terminal/remote/gui_host.py", line 915, in <module>
+  File "/home/elliott/repos/relay-terminal/remote/gui_host.py", line 909, in main
+    return 0
+           ^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/elliott/repos/relay-terminal/remote/gui_host.py", line 901, in main_async
+    
+  File "/home/elliott/repos/relay-terminal/remote/gui_host.py", line 881, in stop
+    
+  File "/home/elliott/repos/relay-terminal/remote/gui_host.py", line 469, in emit
+    sys.stdout.flush()
+    ^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [Errno 32] Broken pipe

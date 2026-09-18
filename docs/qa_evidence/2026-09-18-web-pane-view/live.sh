@@ -43,7 +43,8 @@ python3 "$fake" "$port" "$out/live-requests.jsonl" &
 fake_pid=$!
 Xvfb "$display" -screen 0 1500x950x24 >/dev/null 2>&1 &
 xvfb_pid=$!
-trap 'kill "${relay_pid:-0}" "$xvfb_pid" "$fake_pid" 2>/dev/null; rm -rf "$jail"' EXIT
+# `tailscale serve` is tailnet-wide state, not this jail's: take it down however the run ends.
+trap 'kill "${relay_pid:-0}" "$xvfb_pid" "$fake_pid" 2>/dev/null; tailscale serve reset >/dev/null 2>&1; rm -rf "$jail"' EXIT
 sleep 1
 export DISPLAY=$display
 

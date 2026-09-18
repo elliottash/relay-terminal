@@ -57,17 +57,32 @@ The owner has an iPad, an iPhone, a Lenovo Android tablet, a Pixel and the lapto
 - **Plain `http://192.168.x.x` is not an option** and should not become one: `app/rrp.js` needs
   WebCrypto, which a browser only offers in a secure context.
 
-### The recommendation: Tailscale, which is already on both machines
+### Done, and verified (2026-09-18, later the same day)
+
+The owner ran `sudo tailscale set --operator=$USER` and enabled Serve for the tailnet, and the
+whole path now works with a **real** certificate:
+
+- `tailscale cert spark-dcc9.tail6fb70c.ts.net` issues one;
+- `remote/tailnet.py`'s `publish()` puts the app on `https://spark-dcc9.tail6fb70c.ts.net`, and
+  `curl` fetches it with verification on and no flags;
+- `docs/qa_evidence/2026-09-18-web-pane-view/live.sh` drives the whole feature over that address
+  with a browser that **verifies the certificate** (no exception, unlike the LAN run), and the
+  pane view, the withdraw and the request log all behave as they do on the LAN;
+- and the thing that had never been testable: over the tailnet the client's service worker
+  **registers** (`registered: https://spark-dcc9.tail6fb70c.ts.net/`), `PushManager` is present and
+  `isSecureContext` is true. Web Push can be tried on a real device for the first time.
+
+Two things were in the way and are fixed. Serve was not enabled for the tailnet, which
+`tailscale serve --bg` reports by waiting rather than failing; and when that wait timed out,
+`remote/tailnet.py` put Python's `b'...'` bytes repr in front of the person instead of Tailscale's
+own sentence — which contains the one-click link that turns the feature on. Both are in
+`remote/tailnet.py` now, and the link leads the message.
+
+### Why Tailscale, over the alternatives
 
 `tailscale status` shows spark (100.114.207.124) and sphinxpad (100.116.24.28) on the same tailnet,
-and the iPhone is already a node on it. `tailscale cert` issues a real certificate for
-`<machine>.<tailnet>.ts.net`, so:
-
-1. `sudo tailscale set --operator=$USER` once on the desktop (`remote/devtls.py` already documents
-   this as the path to a warning-free certificate);
-2. share a pane and pick the tailnet address in the share dialog;
-3. each device joins the tailnet (the iPhone is already on it) and opens the link with no warning,
-   which also unblocks push and the microphone.
+and the iPhone is already a node on it. What a device needs: be signed in to the tailnet, then open
+the pairing link with the tailnet address — the share dialog offers it first.
 
 The alternatives, for the record: **mkcert** (not installed on either machine) means trusting a new
 root on each of the four devices, including the Lenovo tablet, where installing a user CA is the

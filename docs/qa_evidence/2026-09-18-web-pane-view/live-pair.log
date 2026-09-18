@@ -1,4 +1,5 @@
-phone shows code 29833
+certificate: real (tailnet)
+phone shows code 65039
 paired
 pane open; waiting for the desktop's turn and its waiting message
 phone sees rows: [["steer:steer-2", "steer", "\u21aa next tool call  \u2726 LIVESTEER also check the readme"]]
@@ -8,4 +9,7 @@ phone sees reasoning: Reasoning sentence number 1 about the plan. Reasoning sent
 phone withdrew: steer:steer-2
 row gone from the phone: True
 rows after: []
+service worker: registered: https://spark-dcc9.tail6fb70c.ts.net/
+push API: True
+secure context: True
 console problems: []

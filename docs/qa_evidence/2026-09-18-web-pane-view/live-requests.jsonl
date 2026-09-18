@@ -1,4 +1,4 @@
 {"tools": true, "messages": 2, "last_role": "user", "users": ["w without them.\n[End of Relay context]\n\nplease plan this out"]}
 {"tools": true, "messages": 4, "last_role": "tool", "users": ["w without them.\n[End of Relay context]\n\nplease plan this out"]}
-{"tools": false, "messages": 2, "last_role": "user", "users": ["his out\nAssistant: [tools: run_command]\nAssistant: Finished."]}
 {"tools": false, "messages": 2, "last_role": "user", "users": ["00), or end it with stop_command.\"}\n\n### ASSISTANT\nFinished."]}
+{"tools": false, "messages": 2, "last_role": "user", "users": ["his out\nAssistant: [tools: run_command]\nAssistant: Finished."]}

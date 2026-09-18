@@ -25,7 +25,13 @@ async def shot(browser: Browser, out: Path, name: str) -> None:
 
 
 async def main(url: str, out: Path) -> None:
-    browser = Browser(insecure=True)     # the desktop's development certificate
+    # A ts.net address is served by `tailscale serve` with a real Let's Encrypt certificate, so the
+    # browser verifies it exactly as a phone would — no exception, which is also the only way a
+    # service worker (and so Web Push) can ever register. Any other address is the desktop's own
+    # development certificate, which needs the exception.
+    real_cert = ".ts.net" in url.split("/")[2] if "//" in url else False
+    browser = Browser(insecure=not real_cert)
+    print("certificate:", "real (tailnet)" if real_cert else "development (exception needed)", flush=True)
     await browser.start()
     try:
         # A phone-sized window, so the view draws the phone layout.
@@ -79,6 +85,16 @@ async def main(url: str, out: Path) -> None:
         after = json.loads(await browser.evaluate(
             "JSON.stringify([...document.querySelectorAll('.rp-row')].map(e => e.dataset.rowId))"))
         print("rows after:", json.dumps(after), flush=True)
+        # What a real certificate buys beyond the pane: a browser refuses to register a service
+        # worker on a certificate error, and without one there is no Web Push at all. Over the
+        # tailnet there is no error, so this is the first time it can be asked.
+        worker = await browser.evaluate(
+            "(async () => { if (!('serviceWorker' in navigator)) return 'no serviceWorker API';"
+            " const reg = await navigator.serviceWorker.getRegistration();"
+            " return reg ? `registered: ${reg.scope}` : 'none registered'; })()", timeout=30)
+        print("service worker:", worker, flush=True)
+        print("push API:", await browser.evaluate("'PushManager' in window"), flush=True)
+        print("secure context:", await browser.evaluate("window.isSecureContext"), flush=True)
         print("console problems:", [line for line in browser.console if "EXCEPTION" in line], flush=True)
     finally:
         await browser.stop()
