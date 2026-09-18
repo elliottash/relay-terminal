@@ -21,11 +21,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-import json
 import logging
 import os
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -37,6 +34,7 @@ from remote import devtls
 from remote import host as host_mod
 from remote import identity as identity_mod
 from remote import panes as panes_mod
+from remote import tailnet as tailnet_mod
 from remote import terminal as terminal_mod
 from remote import wire
 from rendezvous.server import Store, build
@@ -66,41 +64,6 @@ def print_qr(url: str) -> bool:
             line.append("█" if upper and lower else "▀" if upper else "▄" if lower else " ")
         print("".join(line))
     return True
-
-
-# ---- tailscale --------------------------------------------------------------------------------
-
-def tailscale_dns_name() -> str | None:
-    if not shutil.which("tailscale"):
-        return None
-    try:
-        status = json.loads(subprocess.run(["tailscale", "status", "--json"], capture_output=True,
-                                           timeout=15, check=True).stdout)
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
-    name = (status.get("Self") or {}).get("DNSName") or ""
-    return name.rstrip(".") or None
-
-
-def tailscale_serve(port: int) -> tuple[str | None, str]:
-    """Publish the local port on the tailnet over HTTPS. Returns (base URL, message)."""
-    name = tailscale_dns_name()
-    if not name:
-        return None, "tailscale is not running here."
-    done = subprocess.run(["tailscale", "serve", "--bg", str(port)], capture_output=True, text=True)
-    if done.returncode != 0:
-        detail = (done.stderr or done.stdout).strip().splitlines()
-        hint = detail[0] if detail else "tailscale serve failed."
-        if "HTTPS" in hint or "cert" in hint.lower():
-            hint += ("\n  Enable HTTPS certificates for the tailnet in the Tailscale admin console "
-                     "(DNS → HTTPS Certificates), then run this again.")
-        return None, hint
-    return f"https://{name}", f"tailscale serve is publishing port {port} at https://{name}"
-
-
-def tailscale_reset() -> None:
-    with contextlib.suppress(OSError, subprocess.SubprocessError):
-        subprocess.run(["tailscale", "serve", "reset"], capture_output=True, timeout=15)
 
 
 # ---- approving a device -----------------------------------------------------------------------
@@ -235,7 +198,9 @@ async def publish(server, args, directory) -> tuple[str, str, bool]:
     if args.public:
         return args.public, "", False
     if args.tailscale:
-        public, message = tailscale_serve(server.port)
+        # tailscale terminates TLS and proxies to a plain http port, so this is the loopback
+        # listener rather than the self-signed one.
+        public, message = tailnet_mod.publish(server.port)
         print(message)
         if public is None:
             raise SystemExit(2)
@@ -374,7 +339,7 @@ async def share(args) -> int:
         await server.close()
         store.close()
         if served_by_tailscale:
-            tailscale_reset()
+            tailnet_mod.unpublish()
     return 0
 
 
@@ -428,7 +393,7 @@ async def dev(args) -> int:
         await server.close()
         store.close()
         if served_by_tailscale:
-            tailscale_reset()
+            tailnet_mod.unpublish()
     return 0
 
 

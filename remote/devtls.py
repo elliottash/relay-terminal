@@ -5,8 +5,12 @@ WebCrypto is only available in a **secure context**, and a phone on a LAN or tai
 one over plain http. There are two honest ways out:
 
 * ``tailscale serve`` gives a real certificate for ``<machine>.<tailnet>.ts.net`` and no warning,
-  but it needs ``sudo tailscale set --operator=$USER`` once on this machine;
-* this, which needs nothing, but the phone shows a certificate warning the first time.
+  but it needs ``sudo tailscale set --operator=$USER`` once on this machine. That is
+  `remote/tailnet.py`, and it is what both the CLI's ``--tailscale`` and the share dialog's first
+  address offer;
+* this, which needs nothing, but the phone shows a certificate warning the first time — and a
+  browser that has seen a certificate error will not register a service worker, so notifications
+  cannot be tried behind it.
 
 Neither weakens RRP itself: the Noise session inside is authenticated by the key the phone pinned
 from the QR code, so TLS here is only what the browser demands before it will hand out WebCrypto.
