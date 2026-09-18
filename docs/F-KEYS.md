@@ -32,7 +32,7 @@ As *alternates*, never replacing the Ctrl chords people already have:
 | F2 | `agent.thinkingPanel` — reasoning panel (Alt+R) | mc rename, nano write-out |
 | F3 | `agent.requests` — tasks panel (Ctrl+Shift+K) | mc view, nano find |
 | F4 | `files.explorer` — explorer pane (Ctrl+B) | mc edit, nano replace |
-| F6 | `palette.open` — Settings pane (Ctrl+Shift+A) | mc move |
+| F6 | `palette.open` — Actions, in the Settings pane (Ctrl+Shift+A) | mc move |
 
 One row of keys, one idea: each shows or hides a panel, in the order the panels sit in the window.
 F12 already fits — native input is a toggle.

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-// Conversation list with full-text search (Ctrl+Shift+O, /conversations) and the Ctrl+F
+// Conversation list with full-text search (/conversations) and the Ctrl+F
 // find-in-view bar. Plain Qt, no KDE dependencies; the worker does the searching
 // (docs/AGENT-SESSIONS-PROTOCOL.md section 14).
 //

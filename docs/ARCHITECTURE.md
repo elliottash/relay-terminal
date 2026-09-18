@@ -348,18 +348,21 @@ Default window shortcuts:
 |---|---|---|---|
 | New window | Ctrl+N | Close pane → tab → window | Ctrl+W |
 | Next / previous window | Alt+Tab / Alt+Shift+Tab | Restore closed | Ctrl+Shift+W |
-| New tab | Ctrl+T | Settings pane (settings and every action) | Ctrl+Shift+A |
+| New tab | Ctrl+T | Actions (Settings pane, Actions tab) / Options | Ctrl+Shift+A / Ctrl+Shift+O |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Take control (from composer) | Ctrl+H |
 | Split right / down | Ctrl+P / Ctrl+Shift+P | Back to the prompt | Ctrl+Shift+H |
 | Focus neighbor pane | Alt+Arrows | Native input toggle (same hand-over as Ctrl+H) | F12 |
 | Toggle terminal/agent input | Ctrl+I | Restart stopped shell/agent | Ctrl+Shift+R |
 | Interrupt agent with prompt | Ctrl+Alt+Enter | Step through links in the output | Ctrl+Shift+L |
 
-Unbound by default: `files.explorer`, `files.open`, `terminal.interrupt`, `agent.newChat`,
+Resume a saved session (`/resume`) is Ctrl+Shift+Y, Warp's key for its conversations menu. Options and
+resume have no plain-Ctrl twin (owner, 2026-09-18): Ctrl+O and Ctrl+Y belong to the shell.
+
+Unbound by default: `conversations.open`, `files.open`, `terminal.interrupt`, `agent.newChat`,
 `agent.stop`, `agent.clearQueue`, `agent.resumeQueue`, `agent.provider`, `input.mode*`,
 `keybindings.edit`, `keybindings.reload`.
 
-**Actions** (Ctrl+Shift+A, the gear, or Ctrl+?). The action catalog (`rootItems()` in
+**Actions** (Ctrl+Shift+A or Ctrl+?). The action catalog (`rootItems()` in
 `src/main.cpp`) is the same list the palette overlay used to render: items with a stable key and
 either a run function or a submenu (Model, Input mode, Reasoning effort, Aliases, Agents, Log
 detail). Since 2026-09-18 it is rendered by the Settings pane (section 12, "Settings pane"): the
@@ -881,7 +884,7 @@ window, cut at the next `OSC 133;A` so the redrawn prompt is not part of the out
 sequences stripped by `relay::conversations::stripAnsi`). Commands typed straight into the terminal
 in native mode never pass through Relay and are not indexed.
 
-The GUI side is `src/Conversations.{h,cpp}`: the list dialog (Ctrl+Shift+O, `/conversations`,
+The GUI side is `src/Conversations.{h,cpp}`: the list dialog (`/conversations`,
 Actions › Conversations…), which asks the worker through callbacks and is fed `conversations` and
 `conversation` events, and the Ctrl+F find bar, which searches the terminal through
 `TerminalBackend::find()` and counts matches in the pane's conversation with
@@ -1213,8 +1216,9 @@ Non-secret provider settings live in QSettings (`provider/preset`, `base`, `mode
 ### Settings pane
 
 `src/SettingsPane.{h,cpp}` (`relay-settings`, `tests/settingspane_test.cpp`), hosted by a
-`ToolPane` of kind `Settings`. Ctrl+Shift+A (`palette.open`), the gear in the title bar and Ctrl+,
-(`app.settings`) open one Settings pane beside the focused pane, in the splitter layout like the
+`ToolPane` of kind `Settings`. Ctrl+Shift+A (`palette.open`) opens it on the Actions tab; Ctrl+Shift+O,
+Ctrl+, (`app.settings`) and the gear in the title bar open it on the options. Either key moves an open
+pane to its side and, pressed on its own side, closes it. It is one Settings pane beside the focused pane, in the splitter layout like the
 explorer and the Switchboard — a full pane, not a strip over the right edge (owner, 2026-09-18).
 Pressed again on the pane, the same key closes it; so do Esc on an empty search and the ✕. Closing
 returns focus exactly where it was (vim in the terminal, or the prompt box). The pane is transient:
@@ -1431,7 +1435,7 @@ of the platform and of the engine itself.
 | `src/ModelSettings.*` | the API-keys and model-roles modals |
 | `src/SettingsPane.*` | the Settings pane: search, sub-tabs, rows as controls, the Actions tab |
 | `src/AgentUi.*` | pickers and instructions dialog |
-| `src/Conversations.*` | conversation list with search (Ctrl+Shift+O) and the Ctrl+F find bar |
+| `src/Conversations.*` | conversation list with search (`/conversations`) and the Ctrl+F find bar |
 | `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |
 | `src/PaneTitles.*` | pane titles and the tab labels made from them: tidying a title, the offline "same work" rule, joining and shortening |
 | `src/InputPolicy.*` | who may type where: the prompt-box-only rules, passwords, and whether the agent may type into the program |

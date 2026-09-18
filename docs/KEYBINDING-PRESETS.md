@@ -36,7 +36,7 @@ Sources:
 | palette.open | Ctrl+Shift+P | W1 Toggle Command Palette |
 | terminal.native | F12 | none in Warp. Kept Relay default: an F-key still works inside programs |
 | terminal.interrupt | — | Warp uses contextual Ctrl+C (W4). Unbound: Ctrl+C already reaches the shell |
-| agent.newChat | Ctrl+Shift+Y | **adapt.** Warp: Ctrl+Shift+Enter (W4) and Ctrl+Shift+N (W5). The first is Relay's send-to-terminal key, the second is window.new. Ctrl+Shift+Y opens Warp's Conversations menu, which has "New Conversation" (W5) |
+| agent.newChat | — | Superseded 2026-09-18: Ctrl+Shift+Y opens Warp's Conversations menu (W5), and Relay's default for `agent.resume` is now that same key, so the preset leaves it to resume. Warp's own new-conversation keys are taken: Ctrl+Shift+Enter is Relay's send-to-terminal key, Ctrl+Shift+N is window.new |
 | agent.stop | — | Warp: Ctrl+C while the agent responds (W4). Left unbound (same reason as interrupt) |
 | agent.provider | — | none (a Settings page in Warp) |
 | input.modeAuto | — | none (auto-detection is a setting, W4) |
@@ -127,7 +127,7 @@ Sources:
     "pane.focusLeft": ["Ctrl+Alt+Left"], "pane.focusRight": ["Ctrl+Alt+Right"], "pane.focusUp": ["Ctrl+Alt+Up"], "pane.focusDown": ["Ctrl+Alt+Down"],
     "pane.close": ["Ctrl+Shift+W"], "closed.restore": ["Ctrl+Alt+T"], "palette.open": ["Ctrl+Shift+P"],
     "terminal.native": ["F12"], "terminal.interrupt": [],
-    "agent.newChat": ["Ctrl+Shift+Y"], "agent.stop": [], "agent.provider": [],
+    "agent.newChat": [], "agent.stop": [], "agent.provider": [],
     "input.modeAuto": [], "input.modeTerminal": ["Ctrl+Shift+I"], "input.modeAgent": [], "input.toggle": ["Ctrl+I"],
     "keybindings.edit": ["Ctrl+,"], "keybindings.reload": []
   },
@@ -165,7 +165,8 @@ program binds; the JSON is what Relay ships.
 ## 5. Collisions, pass-through and desktop grabs
 
 **Collisions resolved (no preset has a duplicate key):**
-- Warp new conversation: its Ctrl+Shift+N is also Warp's new window (the docs list both on Linux), and its Ctrl+Shift+Enter is Relay's send-to-terminal key. Used Ctrl+Shift+Y instead.
+- Options: `app.settings` is Ctrl+Shift+O in every preset (2026-09-18). The Relay default also keeps Ctrl+,; the Warp and VS Code presets give Ctrl+, to `keybindings.edit`, so there it is Ctrl+Shift+O alone.
+- Warp new conversation: its Ctrl+Shift+N is also Warp's new window (the docs list both on Linux), and its Ctrl+Shift+Enter is Relay's send-to-terminal key. Ctrl+Shift+Y was used until 2026-09-18, when it became the default for `agent.resume` in every preset; new chat is unbound in the Warp preset (`/new`, or Actions).
 - Warp Esc (back to terminal mode) is Relay's native-input key. Used Ctrl+Shift+I.
 - Warp and VS Code Ctrl+C (interrupt, stop agent) and VS Code Ctrl+L (new chat): left unbound so they still reach the shell.
 - VS Code F1: dropped.

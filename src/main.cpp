@@ -360,7 +360,7 @@ private:
         add("tab.moveToNewWindow", "tab", "Move tab to a new window (keeps its panes)", {});
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+Z")});
         add("windows.fresh", "window", "Start a fresh window set (forget the saved window layout)", {});
-        add("palette.open", "palette", "Settings and actions: open the Settings pane (again to close it)", {QStringLiteral("Ctrl+Shift+A")});
+        add("palette.open", "palette", "Actions: every action and its keys, in a filterable list (again to close it)", {QStringLiteral("Ctrl+Shift+A")});
         // One key opens and closes the explorer (issue #D60R). Ctrl+B is VS Code's sidebar key and
         // is free in all four Relay presets; Ctrl+Shift+B is the twin a program cannot swallow.
         add("files.explorer", "pane", "File explorer: open or close this pane's folder in an explorer pane",
@@ -395,7 +395,10 @@ private:
         add("agent.provider", "agent", "Provider and API keys (advanced endpoint settings)", {});
         add("agent.modelKeys", "agent", "API keys for model providers", {});
         add("agent.modelRoles", "agent", "Model roles: default provider and the Main / Flash / Lite models", {});
-        add("app.settings", "window", "Settings pane, General tab", {QStringLiteral("Ctrl+,")});
+        // O for options (owner, 2026-09-18). No plain Ctrl+O twin: one key per surface, and Ctrl+Shift
+        // is the one a program cannot swallow. Ctrl+, stays as the key other apps taught.
+        add("app.settings", "window", "Options: the Settings pane, General tab (again to close it)",
+            {QStringLiteral("Ctrl+Shift+O"), QStringLiteral("Ctrl+,")});
         add("agent.flashAgent", "agent", "Switch this pane between the Main agent and the Flash agent", {QStringLiteral("Alt+F")});   // model roles
         add("input.modeAuto", "agent", "Input mode: auto", {});
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
@@ -409,10 +412,11 @@ private:
         add("agent.rewind", "agent", "Rewind chat to an earlier turn; files are not changed (Esc Esc in an empty prompt box)", {});
         add("agent.rewindCode", "agent", "Rewind code: restore files the agent changed since an earlier turn (/rewind-code)", {});
         add("agent.fork", "agent", "Fork the conversation into a new pane", {});
-        add("agent.resume", "agent", "Resume a saved agent session", {});
+        // Ctrl+Shift+Y is Warp's key for its conversations menu (owner, 2026-09-18). No plain
+        // Ctrl+Y twin: that is yank in the shell.
+        add("agent.resume", "agent", "Resume a saved agent session (/resume)", {QStringLiteral("Ctrl+Shift+Y")});
         // Conversation list with full-text search, and find-in-view for this pane.
-        add("conversations.open", "agent", "Conversations: list and search every saved conversation and Relay's terminal history",
-            {QStringLiteral("Ctrl+Shift+O")});
+        add("conversations.open", "agent", "Conversations: list and search every saved conversation and Relay's terminal history", {});
         add("find.inView", "agent", "Find in this pane: the conversation and the terminal scrollback (from the prompt box)",
             {QStringLiteral("Ctrl+F"), QStringLiteral("Ctrl+Shift+F")});
         add("agent.recap", "agent", "Recap this agent session", {});
@@ -502,7 +506,7 @@ private:
 
     // Filled from docs/KEYBINDING-PRESETS.md research. Missing actions fall back to Relay defaults.
     static QByteArray presetJson() {
-        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"app.settings":[],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.moveLeft":[],"pane.moveRight":[],"pane.moveUp":[],"pane.moveDown":[],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+Shift+Y"],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":["Ctrl+Shift+I"],"input.modeAgent":[],"input.toggle":["Ctrl+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"vscode":{"app.settings":[],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+N"],"agent.stop":["Ctrl+Esc"],"agent.provider":["Ctrl+Alt+."],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"konsole":{"app.settings":[],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[],"agent.requests":[]}})PRESETS");
+        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.moveLeft":[],"pane.moveRight":[],"pane.moveUp":[],"pane.moveDown":[],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":["Ctrl+Shift+I"],"input.modeAgent":[],"input.toggle":["Ctrl+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"vscode":{"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+N"],"agent.stop":["Ctrl+Esc"],"agent.provider":["Ctrl+Alt+."],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"konsole":{"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"agent.provider":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[],"agent.requests":[]}})PRESETS");
     }
     QFileSystemWatcher m_watcher;
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_listeners;
@@ -4044,7 +4048,7 @@ private:
 
     // ===== conversation list and full-text search (protocol section 14) =====================
 public:
-    // Ctrl+Shift+O, /conversations, palette: every saved conversation and Relay's terminal
+    // /conversations and the Actions list: every saved conversation and Relay's terminal
     // history, searchable. The worker searches the index; this only shows what comes back.
     void openConversations(const QString &initialQuery = QString()) {
         if (!m_workerReady) { status(QStringLiteral("The agent worker is still starting.")); return; }
@@ -4468,8 +4472,11 @@ private:
         } else if (name == QStringLiteral("rewind")) openRewind();
         else if (name == QStringLiteral("rewind-code")) openRewind(QStringLiteral("code"));
         else if (name == QStringLiteral("fork")) requestFork();
-        else if (name == QStringLiteral("resume")) openResume();
-        else if (name == QStringLiteral("conversations")) {
+        else if (name == QStringLiteral("resume")) {
+            openResume();
+            if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.resume")); !keys.isEmpty())
+                hint(QStringLiteral("resume.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("resume a session")));
+        } else if (name == QStringLiteral("conversations")) {
             openConversations(args);
             if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("conversations.open")); !keys.isEmpty())
                 hint(QStringLiteral("conversations.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("conversations")));
@@ -4852,7 +4859,6 @@ public:
             row(QStringLiteral("@"), QStringLiteral("attach files and folders"));
             row(QStringLiteral("#"), QStringLiteral("reference a Switchboard card"));
             row(keys.shortcutText(QStringLiteral("input.toggle")), QStringLiteral("switch terminal / agent"));
-            row(keys.shortcutText(QStringLiteral("palette.open")), QStringLiteral("settings and every action"));
             row(keys.shortcutText(QStringLiteral("board.open")), QStringLiteral("Switchboard: cards and threads"));
             // The explorer is one of the keys people reach for most and it was only in the full
             // list (owner, 2026-09-17). One key opens and closes it, which the wording has to say.
@@ -4860,7 +4866,11 @@ public:
             row(keys.shortcutText(QStringLiteral("agent.requests")).isEmpty() ? QStringLiteral("/tasks")
                                                                              : keys.shortcutText(QStringLiteral("agent.requests")),
                 QStringLiteral("tasks in this session"));
-            row(QStringLiteral("Ctrl+Shift+O"), QStringLiteral("search past conversations"));
+            row(keys.shortcutText(QStringLiteral("palette.open")), QStringLiteral("every action, in a list you can filter"));
+            row(keys.shortcutText(QStringLiteral("app.settings")), QStringLiteral("options"));
+            row(keys.shortcutText(QStringLiteral("agent.resume")).isEmpty() ? QStringLiteral("/resume")
+                                                                           : keys.shortcutText(QStringLiteral("agent.resume")),
+                QStringLiteral("resume a saved session"));
             row(keys.shortcutText(QStringLiteral("control.human")), QStringLiteral("type into the terminal"));
             row(QStringLiteral("Esc"), QStringLiteral("stop the agent or the program"));
             // Ctrl+? is Ctrl+Shift+/ on most keyboards, so the card names every key that works
@@ -9828,10 +9838,10 @@ private:
             if (!file.isEmpty()) openPath(file, 0, m_activeLeaf);
         }
         else if (id == QStringLiteral("board.open")) toggleBoardPane();
-        else if (id == QStringLiteral("palette.open")) toggleSettingsPane();
+        else if (id == QStringLiteral("palette.open")) toggleSettingsPane(true);
         else if (id == QStringLiteral("keybindings.reload")) Keymap::instance().reload();
         else if (id == QStringLiteral("help.shortcuts")) openShortcutsTab();
-        else if (id == QStringLiteral("app.settings")) openSettingsPane(QStringLiteral("general"));
+        else if (id == QStringLiteral("app.settings")) toggleSettingsPane(false);
         else if (id == QStringLiteral("keybindings.edit")) {
             Keymap::instance().ensureFile();
             const QString editor = qEnvironmentVariable("VISUAL", qEnvironmentVariable("EDITOR", QStringLiteral("nano")));
@@ -9901,10 +9911,11 @@ private:
     using PaletteItem = relay::ActionItem;
 
     // ----- Settings pane (src/SettingsPane.h) ---------------------------------------------------
-    // Ctrl+Shift+A, the gear in the title bar and Ctrl+, open one Settings pane beside the focused
-    // pane (owner, 2026-09-18: a full pane, not a strip over the right edge): every setting as a
-    // real control, one tab per section, and every action with its keys on the Actions tab. One
-    // search box covers both, so "Ctrl+Shift+A, type, Enter" still runs an action. The pane is
+    // One Settings pane beside the focused pane (owner, 2026-09-18: a full pane, not a strip over
+    // the right edge), with two ways in. Ctrl+Shift+A opens it on the Actions tab: every action
+    // with its keys, the things you do now and switch back and forth. Ctrl+Shift+O, Ctrl+, and the
+    // gear open it on the options: every persistent setting as a real control, one tab per section.
+    // One search box covers both, so "Ctrl+Shift+A, type, Enter" still runs an action. The pane is
     // transient: it is not saved with the layout, and closing it returns focus to the widget that
     // had it (vim in the terminal, or the prompt box).
     static ToolPane *settingsPaneIn(QWidget *page) {
@@ -9956,10 +9967,15 @@ private:
         updateTitles();
     }
 
-    // The palette key and the gear: open the pane, focus it, or, pressed on it, close it.
-    void toggleSettingsPane() {
-        if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data()); tool && tool->settings()) { closeSettingsPane(tool); return; }
-        openSettingsPane();
+    // Two keys, one pane: Ctrl+Shift+A is Actions (things to do now), Ctrl+Shift+O and the gear are
+    // Options (what persists). Each opens the pane on its side or moves an open pane there;
+    // pressed while its own side is showing, it closes the pane.
+    void toggleSettingsPane(bool actions) {
+        const QString actionsTab = relay::SettingsPane::actionsTabId();
+        if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data()); tool && tool->settings()) {
+            if ((tool->settings()->currentTab() == actionsTab) == actions) { closeSettingsPane(tool); return; }
+        }
+        openSettingsPane(actions ? actionsTab : QStringLiteral("general"));
     }
 
     void openShortcutsTab() {
@@ -11819,8 +11835,8 @@ private:
         rightRow->addWidget(m_bell);
         m_settingsButton = new ChromeButton(ChromeButton::Glyph::Gear);
         connect(m_settingsButton, &QToolButton::clicked, this, [this] {
-            toggleSettingsPane();
-            hint(QStringLiteral("chrome.settings"), relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("palette.open")), QStringLiteral("settings and every action")));
+            toggleSettingsPane(false);
+            hint(QStringLiteral("chrome.settings"), relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("app.settings")), QStringLiteral("options")));
         });
         rightRow->addWidget(m_settingsButton);
         if (!m_nativeFrame) {
@@ -11849,9 +11865,9 @@ private:
 
     void syncChromeTooltips() {
         if (!m_settingsButton) return;
-        const QString keys = Keymap::instance().shortcutText(QStringLiteral("palette.open"));
-        m_settingsButton->setToolTip(keys.isEmpty() ? QStringLiteral("Settings and actions")
-                                                    : QStringLiteral("Settings and actions  (%1)").arg(keys));
+        const QString keys = Keymap::instance().shortcutText(QStringLiteral("app.settings"));
+        m_settingsButton->setToolTip(keys.isEmpty() ? QStringLiteral("Options")
+                                                    : QStringLiteral("Options  (%1)").arg(keys));
     }
 
     void updateBell() {

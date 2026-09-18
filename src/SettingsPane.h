@@ -2,8 +2,9 @@
 #pragma once
 // The Settings pane: a full pane in the splitter layout (never a floating strip), with a search
 // box over every setting and every action, one sub-tab per section, and the rows drawn as real
-// controls. Ctrl+Shift+A, the gear in the title bar and Ctrl+, open it; the same key, Esc on an
-// empty search, or the pane's × in the chrome row put it away and hand focus back.
+// controls. Ctrl+Shift+A opens it on the Actions tab; Ctrl+Shift+O, Ctrl+, and the gear in the
+// title bar open it on the options. The same key, Esc on an empty search, or the pane's × in the
+// chrome row put it away and hand focus back.
 //
 // Two catalogs feed it and both are the caller's (RelayWindow builds them):
 //

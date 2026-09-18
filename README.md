@@ -80,9 +80,11 @@ Shortcut presets: **Relay** (Chrome-style, default), **Warp**, **VS Code**, **Ko
 `~/.config/RelayTerminal/relay/keybindings.json` (Settings › Shortcuts › Edit keyboard shortcuts),
 which reloads live. Copy on select is off by default (Settings › Terminal).
 
-**Settings** (Ctrl+Shift+A, the gear at the top right, or Ctrl+,) is a full pane beside the one you
-are in, with a tab per section — General, Appearance, Models, Terminal, Agent, Voice, Privacy,
-Actions — and a search box over all of them plus every action. Type, ↑ ↓, Enter changes the row or
+**Settings** is a full pane beside the one you are in, with two ways in. **Ctrl+Shift+A** opens it
+on **Actions**: everything you can do now, with its keys, in a list you can filter. **Ctrl+Shift+O**
+(also the gear at the top right, and Ctrl+,) opens it on the **options**: what persists, a tab per
+section — General, Appearance, Models, Terminal, Agent, Voice, Privacy. One search box covers all
+of it. Type, ↑ ↓, Enter changes the row or
 runs the action; Esc closes and puts focus back where it was, so nothing there needs the mouse.
 
 ## Feature tour
@@ -164,8 +166,8 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   (switch provider), `/help` (the card `?` shows). A `/command` Relay does not have is answered by
   Relay, not by the shell: it names the closest real commands and points at `/` and `/help`. Coming back to the window after 3 minutes, with a finished
   turn and an empty prompt, prints a short recap (Settings › General turns it off).
-- **Conversations: list and full-text search.** Ctrl+Shift+O (also `/conversations` and Actions ›
-  Conversations…) opens every saved conversation, grouped by project and newest first, with a
+- **Conversations: list and full-text search.** `/conversations` (also Actions › Conversations…;
+  Ctrl+Shift+Y is `/resume`, this workspace's saved sessions) opens every saved conversation, grouped by project and newest first, with a
   search field that filters as you type. The search covers **both** agent threads (your prompts,
   the agent's replies, its tool calls and their output) and **Relay's terminal history** (the
   commands Relay ran, their exit status and, on the Relay engine, their output); every hit says
