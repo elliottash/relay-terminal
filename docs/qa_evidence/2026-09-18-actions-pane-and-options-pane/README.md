@@ -20,6 +20,16 @@ working tree at the time; this change only sets the `paneType` it reads.
 | implementer-10-moved-verb-found.png | type `reset hints` | "Reset shortcut hints", moved out of Options › General, is under Relay; the option it relates to is offered below it as a jump row |
 | implementer-11-esc-esc-closes.png | Esc Esc | First Esc clears the search, the second closes |
 
+Title-bar buttons (second run, same harness, clicks sent with `xdotool mousemove … click 1`):
+
+| File | What it shows |
+|---|---|
+| implementer-12-title-bar-tool-buttons-3x.png | The right end of the title bar at 3×: bell, then Actions (bolt), Sessions (list), Switchboard (jacks), Options (gear), then the window buttons |
+| implementer-13-actions-button.png | The bolt opens the Actions pane and the hint teaches Ctrl+Shift+A; a second click closed it |
+| implementer-14-switchboard-button.png | The jacks open the Switchboard. A second click hands focus back to the terminal and leaves the board open, which is what Ctrl+Shift+S does |
+| implementer-15-sessions-button.png | The list opens the Sessions pane (card #R6J0, uncommitted in the working tree at the time) through `agent.resume` |
+| implementer-16-pane-colours-type-then-off.png | Options › Appearance › Pane colours, run from a build of the staged tree alone: the Options header tinted (by type, above) and, after choosing Off, plain, at once; the profile's config then held `pane_colours=off`. The Options band wears the gear (f1ff47a) |
+
 Tests: `relay-settings-tests` 15 pass (modes, swap in place, jump rows, ranking, several-word
 search, scattered letters rejected). `ctest --test-dir build`: every C++ suite passes;
 `backend-and-bash` hit the 5-minute ctest timeout with several other sessions building on the

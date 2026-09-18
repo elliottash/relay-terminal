@@ -1259,6 +1259,21 @@ private:
                 notice(QStringLiteral("Theme: %1.").arg(relay::theme::active().name), 4000);
             });
         }
+        {
+            // Pane header colours (#SPBN): the pane chrome reads the key; refreshAll() repaints.
+            relay::SettingRow colours = choiceRow(QStringLiteral("option:pane_colours"), QStringLiteral("Pane colours"),
+                                                  QStringLiteral("Tint a pane's header by what it is: each type its own, one per "
+                                                                 "group (tools, agents), or none. A remote shell is always marked"),
+                                                  relay::panestatus::colourModeIds(), relay::panestatus::colourModeLabels(),
+                                                  relay::panestatus::colourModeId(relay::panestatus::colourModeFrom(
+                                                      QSettings().value(QStringLiteral("appearance/pane_colours")).toString())),
+                                                  [](const QString &id) {
+                QSettings().setValue(QStringLiteral("appearance/pane_colours"), id);
+                PaneChrome::refreshAll();
+            });
+            colours.aliases = QStringLiteral("color colors colour header tint band pane type group");
+            appearance.rows << colours;
+        }
         sections << appearance;
 
         relay::SettingsSection models;
@@ -2945,6 +2960,22 @@ private:
         m_bell = new ChromeButton(ChromeButton::Glyph::Bell);
         connect(m_bell, &QToolButton::clicked, this, [this] { toggleNotifications(); });
         rightRow->addWidget(m_bell);
+        rightRow->addSpacing(6);
+        // The tool panes, one button each, ending in the gear (owner, 2026-09-18). A button runs
+        // the pane's own action, so it opens and closes exactly as the key does, and the hint
+        // after a click teaches that key.
+        const auto toolButton = [this, rightRow](relay::panestatus::Glyph glyph, const QString &action, const QString &what) {
+            auto *button = new ChromeButton(glyph);
+            connect(button, &QToolButton::clicked, this, [this, action, what] {
+                runAction(action);
+                hint(QStringLiteral("chrome.") + action, relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(action), what));
+            });
+            rightRow->addWidget(button);
+            return button;
+        };
+        m_actionsButton = toolButton(relay::panestatus::Glyph::Actions, QStringLiteral("palette.open"), QStringLiteral("actions"));
+        m_sessionsButton = toolButton(relay::panestatus::Glyph::Sessions, QStringLiteral("agent.resume"), QStringLiteral("sessions"));
+        m_boardButton = toolButton(relay::panestatus::Glyph::Switchboard, QStringLiteral("board.open"), QStringLiteral("the Switchboard"));
         m_settingsButton = new ChromeButton(ChromeButton::Glyph::Gear);
         connect(m_settingsButton, &QToolButton::clicked, this, [this] {
             toggleSettingsPane(false);
@@ -2977,9 +3008,15 @@ private:
 
     void syncChromeTooltips() {
         if (!m_settingsButton) return;
-        const QString keys = Keymap::instance().shortcutText(QStringLiteral("app.settings"));
-        m_settingsButton->setToolTip(keys.isEmpty() ? QStringLiteral("Options")
-                                                    : QStringLiteral("Options  (%1)").arg(keys));
+        const auto tip = [](ChromeButton *button, const QString &label, const QString &action) {
+            if (!button) return;
+            const QString keys = Keymap::instance().shortcutText(action);
+            button->setToolTip(keys.isEmpty() ? label : QStringLiteral("%1  (%2)").arg(label, keys));
+        };
+        tip(m_actionsButton, QStringLiteral("Actions: everything you can do now"), QStringLiteral("palette.open"));
+        tip(m_sessionsButton, QStringLiteral("Sessions: resume and search"), QStringLiteral("agent.resume"));
+        tip(m_boardButton, QStringLiteral("Switchboard: cards, threads and plans"), QStringLiteral("board.open"));
+        tip(m_settingsButton, QStringLiteral("Options"), QStringLiteral("app.settings"));
     }
 
     void updateBell() {
@@ -3686,7 +3723,7 @@ private:
     // Window header (see buildWindowChrome). m_nativeFrame: this window kept the system title bar.
     static constexpr int kFrameMargin = 5;
     bool m_nativeFrame = false;
-    QPointer<ChromeButton> m_bell, m_settingsButton, m_minimize, m_maximize, m_close;
+    QPointer<ChromeButton> m_bell, m_actionsButton, m_sessionsButton, m_boardButton, m_settingsButton, m_minimize, m_maximize, m_close;
     QPointer<NotificationsPopup> m_notifications;
     Qt::Edges m_manualEdges;
     QPoint m_manualFrom;

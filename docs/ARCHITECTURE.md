@@ -178,7 +178,7 @@ title bar, with two `QTabWidget` corner widgets on it (`buildWindowChrome`):
 | Corner | Holds |
 |---|---|
 | Top left | The Relay icon |
-| Top right | Bell (notification centre), gear (opens Options), then minimize, maximize/restore and close |
+| Top right | Bell (notification centre); then one button per tool pane — Actions, Sessions, Switchboard, and the gear for Options — each drawn with its pane's own header glyph (`relay::chrome::paintTypeGlyph`) and running the pane's action, so it behaves exactly as the key does and its tooltip and "Next time" hint name that key; then minimize, maximize/restore and close |
 
 `ChromeButton` paints each glyph with `QPainter` instead of using a font character, so the header
 does not depend on an emoji font and hover, disabled and close-button colours come from the theme.

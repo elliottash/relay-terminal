@@ -6,6 +6,7 @@
 // so they all sit at one stroke weight, and NotificationsPopup is the list behind the bell.
 
 #include "Theme.h"
+#include "PaneChrome.h"   // relay::chrome::paintTypeGlyph: a tool pane's button wears its pane's glyph
 #include "Notifications.h"
 
 #include <QFrame>
@@ -53,6 +54,11 @@ public:
         setFixedSize(size, size);
     }
 
+    // A button that opens a tool pane (Actions, Sessions, the Switchboard) draws that pane's own
+    // glyph, the one on its header band (src/PaneStatus.h), so the two are recognisably one thing.
+    explicit ChromeButton(relay::panestatus::Glyph paneGlyph, QWidget *parent = nullptr, int size = kSize)
+        : ChromeButton(Glyph::Gear, parent, size) { m_paneGlyph = paneGlyph; }
+
     void setGlyph(Glyph glyph) { if (m_glyph == glyph) return; m_glyph = glyph; update(); }
     // Unseen notifications, drawn as a dot on the bell. 0 hides it.
     void setBadge(int count) { if (m_badge == count) return; m_badge = count; update(); }
@@ -82,6 +88,12 @@ protected:
         painter.setPen(QPen(ink, 1.3 * std::max(0.85, unit), Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         painter.setBrush(Qt::NoBrush);
         const QPointF centre(width() / 2.0, height() / 2.0);
+        if (m_paneGlyph != relay::panestatus::Glyph::None) {
+            // Drawn for a 14 px box in a 26 px button, like the other glyphs' ±6 px reach.
+            const qreal side = 14 * unit;
+            relay::chrome::paintTypeGlyph(painter, QRectF(centre.x() - side / 2, centre.y() - side / 2, side, side), m_paneGlyph, ink);
+            return;
+        }
         switch (m_glyph) {
         case Glyph::Bell: paintBell(painter, centre, unit); break;
         case Glyph::Gear: paintGear(painter, centre, unit); break;
@@ -170,6 +182,7 @@ public:
 
 private:
     Glyph m_glyph;
+    relay::panestatus::Glyph m_paneGlyph = relay::panestatus::Glyph::None;
     int m_badge = 0;
     bool m_dim = false;
 };

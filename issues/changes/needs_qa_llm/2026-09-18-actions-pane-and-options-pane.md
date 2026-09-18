@@ -50,8 +50,20 @@ Instructions, Skills, keybindings.json).
 - The Options tab "Actions" is **Keyboard**: Shortcut preset, Shortcuts inside programs, Edit
   keyboard shortcuts…, and the note on what the mouse does.
 - Ctrl+? opens the Actions pane.
+- Options › Appearance has **Pane colours** (by type, by group, off; `appearance/pane_colours`), the
+  control for the header tints of #SPBN, asked for by session relay-terminal-93; it calls
+  `PaneChrome::refreshAll()`, so it went in once that was on main (f1ff47a).
 - Every user-facing "Settings › X" is "Options › X": GUI status lines, two worker messages, README,
   architecture doc, site.
+
+## Title-bar buttons (added the same day)
+
+Owner: "by the gear, add buttons for action — should we also have buttons for session manager and
+switchboard?" Yes to all three: with Options they are the four tool panes, and a row of four reads as
+one family where a lone extra button would not. Each draws the glyph its pane wears on its header
+band (`relay::chrome::paintTypeGlyph`), runs the pane's own action (`palette.open`, `agent.resume`,
+`board.open`) so a click behaves exactly as the key does, and has the key in its tooltip and in the
+"Next time" hint after a click. Order: bell · Actions, Sessions, Switchboard, gear · window buttons.
 
 ## Deliberately left
 
@@ -60,9 +72,6 @@ Instructions, Skills, keybindings.json).
 - **Theme is an option only.** Light/dark is something people do flip back and forth, so a Theme
   submenu in Actions is defensible; but it persists and applies everywhere, and "theme" typed in
   Actions reaches it in one Enter. Owner's call if that is one step too many.
-- **Pane colours option** (`appearance/pane_colours`, asked for by relay-terminal-93): written, but
-  it calls `PaneChrome::refreshAll()`, which was not on main when this was committed. It follows in
-  its own commit once that lands.
 
 ## QA checklist
 
@@ -83,3 +92,6 @@ Instructions, Skills, keybindings.json).
    "Reasoning effort".
 9. Ctrl+? opens Actions and says which key you pressed.
 10. Nothing in the app says "Settings ›".
+11. Title bar: bolt, list, jacks, gear, in that order after the bell. Each tooltip names its pane and
+    key. The bolt and the gear open and close their pane; the list opens Sessions; the jacks open the
+    Switchboard and, clicked again, give focus back to the terminal (as Ctrl+Shift+S does).
