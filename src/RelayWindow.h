@@ -539,9 +539,13 @@ public:
     static void applySingleClickSetting() {
         const bool on = relay::FileExplorer::singleClickDefault();
         const auto tops = QApplication::topLevelWidgets();
+        // FileExplorer has no Q_OBJECT, so findChildren<relay::FileExplorer *> matches every
+        // QWidget child (Qt 5 casts them all; Qt 6 refuses to compile it). dynamic_cast is the
+        // honest test, the same way chromeOf() finds a PaneChrome.
         for (QWidget *top : tops)
-            for (relay::FileExplorer *explorer : top->findChildren<relay::FileExplorer *>())
-                explorer->setSingleClick(on);
+            for (QWidget *child : top->findChildren<QWidget *>())
+                if (auto *explorer = dynamic_cast<relay::FileExplorer *>(child))
+                    explorer->setSingleClick(on);
     }
 
     // The terminal pane an explorer's right-click menu acts on: the one that was last active in

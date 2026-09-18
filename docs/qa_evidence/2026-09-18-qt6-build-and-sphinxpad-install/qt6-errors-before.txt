@@ -1,0 +1,4 @@
+src/ModelSettings.cpp:780:33: error: no matching function for call to ‘max(int, qsizetype)’
+src/ScreenPrompt.cpp:190:48: error: no matching function for call to ‘max(int, qsizetype)’
+src/SettingsPane.cpp:259:25: error: no matching function for call to ‘max(int, qsizetype)’
+src/SettingsPane.cpp:647:28: error: no matching function for call to ‘clamp(int, int, qsizetype)’

@@ -777,7 +777,7 @@ void RolesDialog::pinRole(const QString &role) {
     }
     bool ok = false;
     const QString stored = QSettings().value(roleSetting(role, QStringLiteral("preset"))).toString();
-    const int current = std::max(0, ids.indexOf(stored));
+    const int current = std::max(0, int(ids.indexOf(stored)));
     const QString label = QInputDialog::getItem(this, QStringLiteral("Pin a model"),
                                                 QStringLiteral("Provider for this job"), labels, current,
                                                 false, &ok);

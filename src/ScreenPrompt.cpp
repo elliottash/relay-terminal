@@ -187,7 +187,7 @@ Detection detect(const QStringList &rows, const Signals &sig) {
     if (sig.altScreen) return detection;
 
     QStringList tail;
-    for (const QString &row : rows.mid(std::max(0, rows.size() - kInspectRows)))
+    for (const QString &row : rows.mid(std::max(0, int(rows.size()) - kInspectRows)))
         tail.append(rstrip(sanitize(row)));
     while (!tail.isEmpty() && tail.constLast().isEmpty()) tail.removeLast();
     if (tail.isEmpty()) return detection;

@@ -256,7 +256,7 @@ void SettingsPane::build() {
     m_pages->addWidget(m_results);
     m_rows.clear();
 
-    int index = std::max(0, m_tabIds.indexOf(tab));
+    int index = std::max(0, int(m_tabIds.indexOf(tab)));
     {
         const QSignalBlocker blocker(m_tabs);
         m_tabs->setCurrentIndex(index);
@@ -643,8 +643,8 @@ void SettingsPane::setCurrent(int index, bool scroll) {
 void SettingsPane::moveCurrent(int steps) {
     if (m_rows.isEmpty()) return;
     int index = m_current;
-    if (index < 0) index = steps > 0 ? 0 : m_rows.size() - 1;
-    else index = std::clamp(index + steps, 0, m_rows.size() - 1);
+    if (index < 0) index = steps > 0 ? 0 : int(m_rows.size()) - 1;
+    else index = std::clamp(index + steps, 0, int(m_rows.size()) - 1);
     setCurrent(index, true);
 }
 

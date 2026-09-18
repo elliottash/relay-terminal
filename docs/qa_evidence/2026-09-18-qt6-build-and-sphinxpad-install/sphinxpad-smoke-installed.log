@@ -1,0 +1,37 @@
+
+== installed files
+ok /usr/bin/relay
+ok /usr/share/relay/backend/worker.py
+ok /usr/share/relay/shell/integration.bash
+ok /usr/share/relay/shell/event.py
+ok /usr/share/relay/scripts/relay-open
+ok /usr/share/relay/theme/terminal.conf
+ok /usr/share/applications/org.relayterminal.Relay.desktop
+ok /usr/share/metainfo/org.relayterminal.Relay.metainfo.xml
+ok /usr/share/icons/hicolor/scalable/apps/org.relayterminal.Relay.svg
+ok /usr/share/icons/hicolor/256x256/apps/org.relayterminal.Relay.png
+
+== relay --version / --help
+relay 0.1.0
+Usage: relay [options]
+Terminal with rich input and BYOK agents.
+
+Options:
+  -h, --help              Displays help on commandline options.
+
+== backend worker protocol
+{"event": "ready", "version": "0.1.0"}
+
+== GUI start under Xvfb (offscreen and xcb)
+[offscreen] exit status 124 (124 = still running at timeout)
+This plugin does not support raise()
+--- processes
+ 573968  573961 /usr/bin/python3 -S -u /home/elliott/.local/share/relay/backend/worker.py
+ 573969  573961 /bin/bash --noprofile --rcfile /home/elliott/.local/share/relay/shell/integration.bash -i
+[xcb] exit status 124 (124 = still running at timeout)
+--- processes
+ 574585  574576 /usr/bin/python3 -S -u /home/elliott/.local/share/relay/backend/worker.py
+ 574586  574576 /bin/bash --noprofile --rcfile /home/elliott/.local/share/relay/shell/integration.bash -i
+--- windows
+     0x200007 "Relay — /tmp": ("relay" "relay")  1152x720+0+0  +0+0
+smoke test passed
