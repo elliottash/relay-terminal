@@ -21,6 +21,8 @@ let sticky = { ctrl: false, alt: false };
 let directKeys = false;
 let passwordEntry = false;  // the owner's per-device switch (welcome.password_entry)
 let answerNode = null;      // the answer being streamed, without a terminal to print into
+let recorder = null;        // the MediaRecorder while a voice clip is being recorded
+let voiceRequest = '';      // the id of the clip waiting for the desktop's transcript
 const models = new Map();   // pane -> {model, waiting}: the model indicator (issue 3ES1)
 
 const $ = (id) => document.getElementById(id);
@@ -248,6 +250,7 @@ function updateDriveUi() {
   // reports "not permitted". With direct typing on, the keys go straight through instead.
   const canCompose = capability === 'agent' || capability === 'full';
   $('composer').hidden = !canCompose || (driving && directKeys);
+  updateVoiceUi();
   $('composer-text').placeholder = driving ? 'Type a line for the program…' : 'Ask or run…';
   if (!allowed) {
     $('term-note').textContent = 'This device is paired for viewing only.';
@@ -329,6 +332,12 @@ function toggleSticky(name) {
 // prompt box needs: whether a turn is running, and anything it wants to say.
 function onAgent(message) {
   const event = message.event || {};
+  // A transcript answers one clip by its id, so it is taken before the open-pane check: it must
+  // land in the prompt box even if the inbox was opened while the desktop was transcribing.
+  if (voiceRequest && message.id === voiceRequest && event.event === 'transcribed') {
+    voiceDone(event.text || '');
+    return;
+  }
   // Every pane's model, not just the open one's, so the indicator is right when it is opened.
   trackModel(message.pane, event);
   if (message.pane !== current) return;
@@ -686,6 +695,163 @@ function transcribe(event) {
   if (stick) body.scrollTop = body.scrollHeight;
 }
 
+// ---- voice ------------------------------------------------------------------------------------
+//
+// Hold the thought, not the phone: tap the microphone, speak, tap it again. The clip is recorded
+// here and sent inside the session to the desktop, which transcribes it with the key it already
+// has and sends back the words. No provider is contacted from this device, no key ever reaches
+// it, and nothing is kept: the recorder's chunks are dropped as soon as the clip has gone. The
+// text lands in the prompt box rather than being sent, because a transcript is a draft.
+
+const VOICE_MAX_MS = 60000;
+const VOICE_MAX_BYTES = 700000;   // MAX_VOICE_BYTES in remote/host.py
+const VOICE_BITS = 32000;         // 60s of speech well inside the frame the hub will accept
+// Containers the hub accepts. Safari on iOS records audio/mp4, which is what it calls m4a.
+const VOICE_CONTAINERS = {
+  'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/aac': 'm4a',
+  'audio/x-m4a': 'm4a', 'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/wave': 'wav',
+  'audio/x-wav': 'wav',
+};
+
+function voiceSupported() {
+  return typeof MediaRecorder !== 'undefined'
+    && !!navigator.mediaDevices?.getUserMedia
+    && !!window.isSecureContext;
+}
+
+// The container to ask for. Chrome and Firefox take webm; Safari ignores the option and records
+// audio/mp4, which is why the format is read back off the recorder rather than assumed.
+function voiceMimeType() {
+  for (const type of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus',
+                      'audio/mp4']) {
+    if (MediaRecorder.isTypeSupported?.(type)) return type;
+  }
+  return '';
+}
+
+function voiceFormat(mimeType) {
+  return VOICE_CONTAINERS[(mimeType || '').split(';')[0].trim().toLowerCase()] || '';
+}
+
+// The button is there when the desktop offers voice, this device may compose, and the browser
+// can actually record. A device paired for viewing never sees it.
+function updateVoiceUi() {
+  const button = $('composer-mic');
+  if (!button) return;
+  const allowed = features.includes('voice') && (capability === 'agent' || capability === 'full');
+  button.hidden = !allowed || !voiceSupported();
+  button.classList.toggle('recording', !!recorder);
+  button.classList.toggle('busy', !recorder && !!voiceRequest);
+  button.disabled = !recorder && !!voiceRequest;
+  button.title = recorder ? 'Stop recording and transcribe'
+    : voiceRequest ? 'Transcribing on the desktop…' : 'Record a voice clip';
+  button.setAttribute('aria-pressed', recorder ? 'true' : 'false');
+}
+
+function voiceNote(text) {
+  $('term-note').textContent = text;
+}
+
+function toggleVoice() {
+  if (recorder) stopVoice();
+  else startVoice();
+}
+
+async function startVoice() {
+  if (recorder || voiceRequest || !current) return;
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (error) {
+    voiceNote(error?.name === 'NotAllowedError'
+      ? 'This browser refused the microphone. Allow it for this site and try again.'
+      : 'No microphone is available on this device.');
+    return;
+  }
+  const mimeType = voiceMimeType();
+  try {
+    recorder = new MediaRecorder(stream, {
+      ...(mimeType ? { mimeType } : {}), audioBitsPerSecond: VOICE_BITS,
+    });
+  } catch {
+    recorder = new MediaRecorder(stream);
+  }
+  const chunks = [];
+  const done = () => {
+    for (const track of stream.getTracks()) track.stop();
+    recorder = null;
+    updateVoiceUi();
+  };
+  recorder.addEventListener('dataavailable', (event) => {
+    if (event.data?.size) chunks.push(event.data);
+  });
+  recorder.addEventListener('error', () => { done(); voiceNote('The recording failed.'); });
+  recorder.addEventListener('stop', () => {
+    const type = recorder?.mimeType || mimeType;
+    done();
+    sendClip(new Blob(chunks, { type }), type);
+    chunks.length = 0;
+  });
+  recorder.start();
+  // A clip has to fit one frame, so the recorder stops itself rather than the person finding out
+  // afterwards that nothing was sent.
+  setTimeout(() => { if (recorder) stopVoice(); }, VOICE_MAX_MS);
+  updateVoiceUi();
+  voiceNote('Listening… tap the microphone again to transcribe.');
+}
+
+function stopVoice() {
+  if (!recorder) return;
+  try {
+    recorder.stop();
+  } catch {
+    recorder = null;
+    updateVoiceUi();
+  }
+}
+
+async function sendClip(blob, mimeType) {
+  const format = voiceFormat(mimeType);
+  if (!blob.size) { voiceNote('Nothing was recorded.'); return; }
+  if (!format) { voiceNote(`This browser records ${mimeType || 'an unknown format'}, which the desktop cannot read.`); return; }
+  if (blob.size > VOICE_MAX_BYTES) { voiceNote('That clip is too long to send; keep it under a minute.'); return; }
+  const pane = current;
+  const id = `v${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  voiceRequest = id;
+  updateVoiceUi();
+  voiceNote('Transcribing on the desktop…');
+  try {
+    const data = new Uint8Array(await blob.arrayBuffer());
+    await rrp.send({ t: 'voice', pane, format, data: b64(data), id });
+  } catch (error) {
+    voiceFailed(error.message);
+  }
+}
+
+// The words come back as a `transcribed` event carrying the id the clip went out with, so a
+// second clip cannot be answered with the first one's text.
+function voiceDone(text) {
+  voiceRequest = '';
+  updateVoiceUi();
+  if (!text) { voiceNote('Nothing was said.'); return; }
+  const box = $('composer-text');
+  // Appended, never replacing: whatever was already typed is still the person's.
+  const before = box.value;
+  const join = !before || /\s$/.test(before) ? '' : ' ';
+  box.value = before + join + text;
+  box.style.height = 'auto';
+  box.style.height = `${box.scrollHeight}px`;
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+  voiceNote('Transcribed · check it, then send.');
+}
+
+function voiceFailed(message) {
+  voiceRequest = '';
+  updateVoiceUi();
+  voiceNote(message || 'The clip could not be transcribed.');
+}
+
 // ---- the one prompt box ---------------------------------------------------------------------
 
 // What you type is routed the way Relay's own prompt box routes it: a command runs in the shell,
@@ -721,6 +887,7 @@ rrp.addEventListener('welcome', (event) => {
   features = event.detail.features || [];
   passwordEntry = !!event.detail.password_entry;
   $('capability').textContent = capability;
+  updateVoiceUi();
 });
 
 rrp.addEventListener('screen_snapshot', (event) => onScreen(event.detail));
@@ -748,6 +915,7 @@ rrp.addEventListener('agent', (event) => onAgent(event.detail));
 
 rrp.addEventListener('error', (event) => {
   const detail = event.detail || {};
+  if (voiceRequest && detail.id === voiceRequest) { voiceFailed(detail.message); return; }
   if (current) append(el('div', 'note error', detail.message || 'Refused.'));
 });
 
@@ -780,6 +948,7 @@ document.addEventListener('visibilitychange', () => {
 
 window.addEventListener('DOMContentLoaded', () => {
   $('composer-send').addEventListener('click', sendPrompt);
+  $('composer-mic').addEventListener('click', toggleVoice);
   $('composer-text').addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();

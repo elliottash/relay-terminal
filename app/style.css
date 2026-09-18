@@ -160,6 +160,19 @@ details.tool > summary::marker { color: var(--muted); }
   border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
   font: inherit; max-height: 160px;
 }
+/* The microphone. Big enough for a thumb, and loud about which of its three states it is in. */
+#composer-mic {
+  flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%; cursor: pointer;
+  background: var(--bg); color: var(--text); border: 1px solid var(--line);
+  font-size: 18px; line-height: 1; padding: 0;
+}
+#composer-mic.recording { background: var(--bad); border-color: var(--bad); color: #10131a; }
+#composer-mic.busy { background: var(--line); color: var(--muted); }
+#composer-mic[disabled] { cursor: default; }
+@media (prefers-reduced-motion: no-preference) {
+  #composer-mic.recording { animation: mic-pulse 1.2s ease-in-out infinite; }
+}
+@keyframes mic-pulse { 50% { opacity: 0.55; } }
 
 /* ---- terminal view ---------------------------------------------------------------------- */
 :root { --term-bg: #0d0f13; --term-fg: #d8dce4; }

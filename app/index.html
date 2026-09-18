@@ -91,9 +91,14 @@
              spellcheck="false" placeholder="Password for this pane&hellip;" aria-label="Password">
       <button type="button" id="secret-send">Send</button>
     </div>
+    <!-- Speak instead of typing. The clip is recorded here and transcribed on the desktop,
+         which holds the key; this device never talks to a transcription provider, and the words
+         come back into the box above so they can be read before they are sent. -->
     <div id="composer">
       <textarea id="composer-text" rows="1" placeholder="Ask or run…"
                 autocapitalize="sentences" autocomplete="off"></textarea>
+      <button type="button" id="composer-mic" hidden aria-label="Record a voice clip"
+              title="Record a voice clip">&#127908;</button>
       <button type="button" id="composer-stop" hidden>Stop</button>
       <button type="button" id="composer-send">Send</button>
     </div>

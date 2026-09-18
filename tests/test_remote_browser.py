@@ -228,6 +228,58 @@ class BrowserClientTests(unittest.TestCase):
                     await browser.stop()
         asyncio.run(asyncio.wait_for(main(), 180))
 
+    def test_a_voice_clip_is_recorded_here_and_transcribed_on_the_desktop(self):
+        # Issue W5N2: the phone records, the desktop transcribes with the key it already has, and
+        # the words come back into the prompt box for the person to read before sending. Chrome's
+        # fake capture device stands in for a microphone; everything else is the real path.
+        async def main():
+            async with Harness() as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser(microphone=True)
+                await browser.start()
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=60)
+                    await browser.wait_for("document.querySelectorAll('.pane-row').length > 0")
+                    await browser.evaluate("""[...document.querySelectorAll('.pane-row')].find(
+                        row => row.querySelector('.pane-title')?.textContent === 'relay-terminal').click()""")
+                    await browser.wait_for(shown('screen-thread'))
+
+                    # An `agent` device that can record sees the button; a `view` device would not
+                    # get a composer at all.
+                    await browser.wait_for(shown('composer-mic'), timeout=20)
+
+                    # Something already typed must survive the transcript.
+                    await browser.evaluate(
+                        "(() => { document.getElementById('composer-text').value = 'note:'; "
+                        "return true; })()")
+
+                    await browser.evaluate("document.getElementById('composer-mic').click()")
+                    await browser.wait_for(
+                        "document.getElementById('composer-mic').classList.contains('recording')",
+                        timeout=20)
+                    await asyncio.sleep(1.0)            # let the fake device produce a clip
+                    await browser.evaluate("document.getElementById('composer-mic').click()")
+
+                    # The clip crossed the session, DemoPaneSource transcribed it, and the words
+                    # were appended to what was already in the box rather than replacing it.
+                    text = await browser.wait_for(
+                        "document.getElementById('composer-text').value.includes('demo transcript')"
+                        " ? document.getElementById('composer-text').value : ''", timeout=40)
+                    self.assertTrue(text.startswith("note: "), text)
+                    self.assertIn("of webm]", text)     # the container Chrome recorded
+
+                    # And the button is idle again, ready for the next clip.
+                    await browser.wait_for(
+                        "!document.getElementById('composer-mic').classList.contains('busy')"
+                        " && !document.getElementById('composer-mic').disabled", timeout=20)
+                    problems = [line for line in browser.console
+                                if "EXCEPTION" in line or "error:" in line.lower()]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 180))
+
     def test_a_refused_device_shows_the_reason_and_stores_nothing(self):
         async def main():
             async with Harness(approve=False) as harness:
