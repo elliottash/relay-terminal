@@ -867,6 +867,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | Rendezvous | `rendezvous/server.py` | Registry with proof of possession, derived desktop ids, pairing rooms, the ciphertext relay, metadata with 7-day retention. `/v1/push/key` and a `/v1/push/send` that signs with VAPID and delivers bytes it cannot read; rooms may be opened with a `ttl` for invites |
 | Desktop hub | `remote/host.py`, `remote/identity.py`, `remote/panes.py` | Pairing, capabilities, live revoke and downgrade, streams and resume, the event allow-list, rate limits. `PaneSource` is the seam the GUI will implement; `DemoPaneSource` stands in |
 | Web client | `app/` | Pairing with the confirmation code, inbox, thread, composer, plan cards, reconnect. Installable; the service worker does not cache |
+| Guest web client (§10) | `app/guest.js`, `app/rrp.js`, `/join` | The invite link, the knock and its five digits, the shared pane with the same screen painter and scrollback, presence, the editor's ask-to-type and prompt box, pause, role changes and removal. A guest record stored apart from the paired-device one, so one browser can be an owner here and a guest there. `tests/test_remote_guest_browser.py` |
 | Python client | `remote/client.py` | For tests and scripts; also where the client-side pinning rule is tested |
 | Dev harness | `remote/cli.py` | `python3 -m remote.cli share` shares a real shell; `dev` runs the demo agent. Both print the pairing QR |
 | Screen stream (P2) | `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `app/screen.js` | A real PTY parsed by Relay's own emulator, streamed as styled rows, painted as a cell grid on the phone |
@@ -892,8 +893,22 @@ fan-out, the `GUEST_EVENTS` allow-list, the owner's controls as desktop-only sid
 What is **not** built, and is the next piece: presence beyond the initial `participants` list,
 control handoff (10.3) — so an editor's `keys`, `paste` and `line` are refused `not_driving` — guest
 prompt approval (10.4) — so an editor's `compose` is answered `prompt_pending` and parked in a queue
-nothing drains but its ten-minute expiry — `share_pause`, and the desktop UI and web client for any
-of it. The two seams are `Host.ask_owner_about_prompt` and `Host.ask_owner_about_control`.
+nothing drains but its ten-minute expiry — `share_pause`, and the desktop UI for any of it.
+The two seams are `Host.ask_owner_about_prompt` and `Host.ask_owner_about_control`.
+
+**The guest's web client is built** (`app/guest.js`, served at `/join`). It is a separate
+session from the owner's phone rather than that one with buttons hidden: `app/app.js` hands
+the page over before wiring any of its own controls, and the editor's half — the extra-keys
+row, the line box, the key handler — is built only once the session's role first says
+`editor`, so a viewer's page has no key handler at all. The record it stores holds a
+participant id and a role and no device id and no capability, under its own key, and neither
+loader will return the other's row — the client-side half of `remote/guests.py`'s rule, so a
+browser can be the owner of one desktop and somebody's guest on another. The client handles
+`knock_pending`, `admitted`, `participants`, `control`, `control_pending`, `prompt_pending`,
+`prompt_decided`, `share_state` and `bye {discard}`; it follows a role change live from the
+`you` row of `participants`, because a role belongs to the person rather than the pane.
+`admitted` carries no `features` list, so the client assumes a screen and scrollback and
+degrades on the refusal; a `features` field there would be a small improvement.
 
 `history_get` now works from both sources. The engine's `VtCore::historyLines` is const and moves
 nothing — not the viewport, the dirty state, the selection or the search — so a phone paging back
