@@ -1,0 +1,2 @@
+relay: could not save this pane's scrollback: No such file or directory
+Could not remove our own lock file "/tmp/relay-local-models-3839403/run/relay/windows.lock" maybe permissions changed meanwhile?

@@ -11,12 +11,16 @@
 # RELAY_*_API_KEY is exported: has_stored_key is false for every built-in preset. The only usable
 # model is RELAY_LOCAL_MODELS's one endpoint, llama-server's bonsai-2-27b on 127.0.0.1:8080.
 #
+# With no key at all:
 #   a  the pane as it opens: the model chip reads "bonsai-2-27b · local"
 #   b  the model dropdown open: the Bonsai row, and no other preset (none has a key)
 #   c  the keys modal: the local endpoint is not in it — it is not a key to hold
 #   d  the roles modal: "Bonsai 2 27B" is the default provider, offered with no key
-#   e  a real agent turn on the local model that made a list_directory tool call
-#   f  the same turn scrolled to the answer
+# Then again with one fake RELAY_KIMI_API_KEY, so one built-in preset has a key:
+#   e  the pane opened on Kimi: a local row never wins the automatic choice over a key
+#   f  the dropdown: the keyed preset and, after it, "bonsai-2-27b · local"
+#   g  the local row picked by hand: the chip is on it
+#   h  a real agent turn on the local model that made a list_directory tool call
 #
 # Needs Xvfb, xdotool and ImageMagick.
 set -uo pipefail
@@ -134,17 +138,42 @@ k ctrl+shift+a; sleep 2
 t 'api keys'; sleep 1.5
 k Return; sleep 3
 find_window "API keys"
-[[ -n $win ]] && { xdotool windowmove "$win" 40 40; sleep 1; shot c-keys-modal-has-no-local-row "$win"; xdotool windowkill "$win"; }
-sleep 1.5
+[[ -z $win ]] && { echo "no keys dialog"; exit 1; }
+xdotool windowmove "$win" 40 40; sleep 1
+shot c-keys-modal-has-no-local-row "$win"
+kill -9 "$relay_pid" 2>/dev/null; relay_pid=; sleep 3
 
 # ---- the roles modal: the local endpoint is the default provider ---------------------------
+# A fresh Relay per modal. Closing one dialog and opening the next from the palette in the same
+# process lost the X connection under Xvfb, and the shot after it was of nothing.
+prepare
+start local-only-roles
 xdotool windowfocus "$main_win"; sleep 0.5
 k ctrl+shift+a; sleep 2
 t 'model roles'; sleep 1.5
 k Return; sleep 3
 find_window "Model roles"
-[[ -n $win ]] && { xdotool windowmove "$win" 40 40; sleep 1; shot d-roles-modal-local-provider "$win"; xdotool windowkill "$win"; }
-sleep 1.5
+[[ -z $win ]] && { echo "no roles dialog"; exit 1; }
+xdotool windowmove "$win" 40 40; sleep 1
+shot d-roles-modal-local-provider "$win"
+kill -9 "$relay_pid" 2>/dev/null; relay_pid=; sleep 3
+
+# ---- one keyed provider beside the local endpoint -------------------------------------------
+# A fake Kimi key, so exactly one built-in preset has one. Nothing is ever sent to Kimi: the pane
+# only ever configures on it (no network call), and the one prompt is asked after the switch.
+export RELAY_KIMI_API_KEY=not-a-real-key-kimi
+prepare
+start one-key-and-local
+# The pane auto-configured on Kimi, not on the local endpoint: a local row is never the automatic
+# "first stored" choice ahead of a provider a key can reach.
+shot e-a-key-wins-the-automatic-choice "$main_win"
+
+# Now select the local row by hand: the chip goes to it and the conversation is kept (set_model).
+eval "$(xdotool getwindowgeometry --shell "$main_win")"
+xdotool mousemove $((X + 1192)) $((Y + 864)) click 1; sleep 2
+shot f-dropdown-with-a-key-and-the-local-row
+k Down Return; sleep 4
+shot g-switched-to-the-local-model "$main_win"
 
 # ---- a real turn on the local model, with a tool call ---------------------------------------
 xdotool windowfocus "$main_win"; sleep 1
@@ -152,9 +181,7 @@ t '*list the files in the workspace directory and tell me their names'
 sleep 1
 k Return
 # A 27B model on this machine, woken from idle: give it room.
-sleep "${TURN_WAIT:-240}"
-shot e-agent-turn-with-tool-call "$main_win"
-k Prior; sleep 2
-shot f-agent-turn-scrolled "$main_win"
+sleep "${TURN_WAIT:-180}"
+shot h-agent-turn-with-tool-call "$main_win"
 
 printf 'done: %s\n' "$out"
