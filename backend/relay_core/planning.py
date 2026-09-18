@@ -10,7 +10,7 @@ from pathlib import Path
 
 MODES = ("build", "plan")
 # The only file write in plan mode is the plan itself, through write_plan.
-PLAN_BLOCKED_TOOLS = {"write_file", "set_keybinding"}
+PLAN_BLOCKED_TOOLS = {"write_file", "edit_file", "set_keybinding"}
 MAX_PLAN_BYTES = 131072
 MAX_TITLE = 200
 

@@ -125,3 +125,84 @@ class ToolTests(unittest.TestCase):
         self.tools.execute(self.tools.prepare('write_file', {'path': 'created.txt', 'content': 'hello'}))
         result = self.tools.execute(self.tools.prepare('list_directory', {'path': '.'}))
         self.assertEqual(result['entries'][0]['name'], 'created.txt')
+
+    def test_write_file_reports_created_and_diff_counts(self):
+        created = self.tools.execute(self.tools.prepare('write_file', {'path': 'new.txt', 'content': 'a\nb\n'}))
+        self.assertTrue(created['created'])
+        self.assertEqual((created['added'], created['removed']), (2, 0))
+        changed = self.tools.execute(self.tools.prepare('write_file', {'path': 'new.txt', 'content': 'a\nc\n'}))
+        self.assertFalse(changed['created'])
+        self.assertEqual((changed['added'], changed['removed']), (1, 1))
+
+    # ----- edit_file: one exact string, not the whole file -------------------------------
+    def test_edit_file_unique_replacement(self):
+        path = self.root / 'code.txt'
+        path.write_text('alpha\nbeta\ngamma\n')
+        path.chmod(0o640)
+        prepared = self.tools.prepare('edit_file', {'path': 'code.txt', 'old_string': 'beta', 'new_string': 'BETA'})
+        self.assertTrue(prepared.preview.startswith(f'EDIT FILE\n\n{path}\n\n'))
+        self.assertIn('--- a/code.txt', prepared.preview)
+        self.assertIn('-beta', prepared.preview)
+        self.assertIn('+BETA', prepared.preview)
+        self.assertTrue(prepared.preview.endswith('Old bytes: 17; new bytes: 17.'))
+        self.assertEqual(path.read_text(), 'alpha\nbeta\ngamma\n')  # preparing never writes
+        result = self.tools.execute(prepared)
+        self.assertEqual(path.read_text(), 'alpha\nBETA\ngamma\n')
+        self.assertEqual(path.stat().st_mode & 0o777, 0o640)  # the file keeps its mode
+        self.assertEqual(result['replacements'], 1)
+        self.assertEqual((result['added'], result['removed']), (1, 1))
+        self.assertEqual(result['written_bytes'], 17)
+        self.assertNotIn('created', result)
+
+    def test_edit_file_ambiguous_then_replace_all(self):
+        path = self.root / 'code.txt'
+        path.write_text('x = 1\ny = x\nz = x\n')
+        with self.assertRaisesRegex(ValueError, 'occurs 3 times'):
+            self.tools.prepare('edit_file', {'path': 'code.txt', 'old_string': 'x', 'new_string': 'w'})
+        self.assertEqual(path.read_text(), 'x = 1\ny = x\nz = x\n')
+        result = self.tools.execute(self.tools.prepare(
+            'edit_file', {'path': 'code.txt', 'old_string': 'x', 'new_string': 'w', 'replace_all': True}))
+        self.assertEqual(path.read_text(), 'w = 1\ny = w\nz = w\n')
+        self.assertEqual(result['replacements'], 3)
+        self.assertEqual((result['added'], result['removed']), (3, 3))
+
+    def test_edit_file_refuses_what_it_cannot_apply(self):
+        (self.root / 'code.txt').write_text('alpha\n')
+        cases = [({'old_string': 'delta', 'new_string': 'x'}, 'not found'),
+                 ({'old_string': '', 'new_string': 'x'}, 'must not be empty'),
+                 ({'old_string': 'alpha', 'new_string': 'alpha'}, 'identical'),
+                 ({'old_string': 'alpha', 'new_string': 'x', 'replace_all': 'yes'}, 'true or false')]
+        for arguments, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    self.tools.prepare('edit_file', {'path': 'code.txt', **arguments})
+        with self.assertRaisesRegex(ValueError, 'use write_file'):
+            self.tools.prepare('edit_file', {'path': 'missing.txt', 'old_string': 'a', 'new_string': 'b'})
+        with self.assertRaises(ValueError):  # unexpected argument
+            self.tools.prepare('edit_file', {'path': 'code.txt', 'old_string': 'a', 'new_string': 'b', 'mode': '644'})
+        self.assertEqual((self.root / 'code.txt').read_text(), 'alpha\n')
+
+    def test_refuse_stale_edit(self):
+        path = self.root / 'code.txt'; path.write_text('alpha\n')
+        prepared = self.tools.prepare('edit_file', {'path': 'code.txt', 'old_string': 'alpha', 'new_string': 'omega'})
+        path.write_text('alpha\nuser line\n')
+        with self.assertRaisesRegex(ValueError, 'changed while the write was prepared'):
+            self.tools.execute(prepared)
+        self.assertEqual(path.read_text(), 'alpha\nuser line\n')
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, 'appeared or disappeared'):
+            self.tools.execute(prepared)
+
+    def test_edit_file_keeps_the_path_guards(self):
+        (self.root / 'link.txt').symlink_to('/etc/passwd')
+        for path in ['link.txt', '.env', '.ssh/id_rsa', '../etc/passwd', '.git/config']:
+            with self.subTest(path=path):
+                with self.assertRaises((ValueError, FileNotFoundError)):
+                    self.tools.prepare('edit_file', {'path': path, 'old_string': 'root', 'new_string': 'relay'})
+
+    def test_cancel_before_edit(self):
+        path = self.root / 'code.txt'; path.write_text('alpha\n')
+        prepared = self.tools.prepare('edit_file', {'path': 'code.txt', 'old_string': 'alpha', 'new_string': 'omega'})
+        self.cancel.set()
+        with self.assertRaises(Cancelled): self.tools.execute(prepared)
+        self.assertEqual(path.read_text(), 'alpha\n')

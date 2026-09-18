@@ -67,7 +67,7 @@ Verify against provider docs before shipping; keep the table in `backend/relay_c
 
 ## 5. Checkpoints, rewind, fork, sessions, recaps
 
-- A checkpoint is recorded at the start of each user turn: `{turn, prompt_preview, time, message_index}`, and stamped with `ended` (wall clock) when the turn reaches any end state (done, cancelled, error, limit). `time`/`ended` are what a recap's span is computed from; sessions saved before this version have no `ended`, and fall back to turn starts. Before any agent file write, the file's previous bytes (or "absent") are saved under the session's checkpoint store, keyed by turn.
+- A checkpoint is recorded at the start of each user turn: `{turn, prompt_preview, time, message_index}`, and stamped with `ended` (wall clock) when the turn reaches any end state (done, cancelled, error, limit). `time`/`ended` are what a recap's span is computed from; sessions saved before this version have no `ended`, and fall back to turn starts. Before any agent file write (`write_file` or `edit_file`), the file's previous bytes (or "absent") are saved under the session's checkpoint store, keyed by turn.
 - `checkpoints` → `checkpoints {items: [{turn, prompt_preview, time, files: [paths]}]}`.
 - `rewind {turn, restore: "conversation"|"files"|"both"}` → restores; files changed since (hash mismatch) are skipped and reported. Event `rewound {turn, restored_files: [...], conflicts: [...], note}`. Shell side effects are never undone; the note says so.
 - `fork {turn?}` → `fork_state {state}` where `state` is an opaque JSON object (messages up to `turn`, model, effort, mode, instructions). GUI starts a new pane and sends `load_state {state}` → `state_loaded {session_id, turns}`.
@@ -79,7 +79,7 @@ Verify against provider docs before shipping; keep the table in `backend/relay_c
 ## 6. Plan mode (Warp-style)
 
 - `set_mode {mode: "build"|"plan"}` → `mode_changed {mode}`.
-- Plan mode: run_command, read_file, list_directory, load_skill, read_skill_file stay available for investigation; write_file and set_keybinding are removed from the tool list; the system prompt says to investigate without changing anything and to finish by calling `write_plan`.
+- Plan mode: run_command, read_file, list_directory, load_skill, read_skill_file stay available for investigation; write_file, edit_file and set_keybinding are removed from the tool list; the system prompt says to investigate without changing anything and to finish by calling `write_plan`.
 - Tool `write_plan {title, content}` (plan mode only) writes `plans_dir/<YYYY-MM-DD-HHMM>-<slug>.md` and emits `plan_written {path, title}`. The GUI opens it in an editable pane.
 - The GUI executes a plan by sending `set_mode build` then `ask` with text referencing the plan path; "execute in fresh context" sends `reset` first.
 
@@ -136,6 +136,24 @@ answer text only.
 `tool_output_get {turn_id, call_id}` → `tool_output {turn_id, call_id, name, preview, result}`
 (the worker keeps results for the last 50 turns). `turn_transcript_get {turn_id}` →
 `turn_transcript {turn_id, items: [...]}` in the same shape as `subagent_transcript`.
+
+**File writes and their previews (`edit_file`, v2.3, 2026-09-18).** Two tools change files.
+`write_file {path, content}` creates a file or replaces one in full; `edit_file {path, old_string,
+new_string, replace_all?}` replaces an exact string in a file that already exists, and is what a
+model should use to change a file it has read — before it, every edit resent the whole file. Both
+run under the same guards (workspace resolution and the secret-file guard, regular UTF-8 files of
+at most 128 KiB, the file's SHA-256 rechecked between the preview and an atomic replace that keeps
+its mode), both are recorded in the turn's checkpoint and undone by `rewind`, and both are removed
+from the tool list in plan mode.
+`tool_started.preview` is the title line — `WRITE FILE` or `EDIT FILE`, which the GUI reads to name
+the verb — a blank line, the absolute path, a blank line, the unified diff (`(No text changes)`
+when there is none), a blank line, and `Old bytes: N; new bytes: M.`
+Results: `write_file` → `{path, written_bytes, sha256, added, removed, created}`; `edit_file` →
+the same with `replacements` in place of `created`. `added`/`removed` count the diff's `+`/`-`
+lines. `edit_file` fails, with wording the model can act on, when the file does not exist (it is
+told to use `write_file`), when `old_string` is empty or equal to `new_string`, when `old_string`
+is not in the file, and when it occurs more than once without `replace_all: true` (the message says
+how many times). Nothing is written in any of those cases.
 
 **Skills.** `skills_list` → `skills {items: [{name, description, path, source, excluded, refined_from?}]}`.
 `refine_skills {names: [...], target_dir?}` (default `~/.config/relay/skills`) writes refined copies

@@ -228,6 +228,7 @@ class ForegroundTests(Base):
         self.assertNotIn('agent', tools)
         self.assertNotIn('agent_message', tools)
         self.assertNotIn('write_file', tools)
+        self.assertNotIn('edit_file', tools)
         self.assertIn('read_file', tools)
         nested_result = json.loads([m for m in self.hub.seen[1][1] if m['role'] == 'tool'][0]['content'])
         self.assertIn('not available', nested_result['error'])

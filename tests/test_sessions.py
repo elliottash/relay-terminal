@@ -193,6 +193,17 @@ class CheckpointTests(Base):
         self.assertEqual(sorted(items[1]['files']), sorted([str(self.root / 'a.txt'), str(self.root / 'new.txt')]))
         self.assertTrue(items[0]['conversation'])
 
+    def test_rewind_undoes_an_edit_file(self):
+        (self.root / 'a.txt').write_text('alpha\nbeta\n')
+        provider = ScriptedProvider([
+            tools_msg(call('edit_file', {'path': 'a.txt', 'old_string': 'beta', 'new_string': 'BETA'})), text('ok')])
+        agent = self.agent(provider)
+        agent.ask('edit it')
+        self.assertEqual((self.root / 'a.txt').read_text(), 'alpha\nBETA\n')
+        self.assertEqual(agent.checkpoint_listing()[0]['files'], [str(self.root / 'a.txt')])
+        agent.rewind(1, 'files')
+        self.assertEqual((self.root / 'a.txt').read_text(), 'alpha\nbeta\n')
+
     def test_rewind_files_both_turns(self):
         agent = self.write_turns()
         event = agent.rewind(1, 'files')
@@ -337,6 +348,7 @@ class PlanModeTests(Base):
         tools = provider.requests[0][1]
         self.assertIn('write_plan', tools)
         self.assertNotIn('write_file', tools)
+        self.assertNotIn('edit_file', tools)
         self.assertIn('run_command', tools)
         self.assertIn('PLAN MODE', provider.requests[0][0][0]['content'])
         self.assertEqual((self.root / 'a.txt').read_text(), 'keep\n')

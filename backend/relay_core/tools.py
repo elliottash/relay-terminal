@@ -44,8 +44,13 @@ TOOLS = [
          {"path": {"type": "string"}}, ["path"]),
     spec("list_directory", "List at most 200 entries in a workspace directory.",
          {"path": {"type": "string"}}, ["path"]),
-    spec("write_file", "Create or replace one UTF-8 file. The diff is shown to the user. Fails if the file changes while the write is prepared.",
+    spec("write_file", "Create a new UTF-8 file, or replace an existing one in full. To change part of a file that already exists, use edit_file instead: it does not resend the whole file. The diff is shown to the user. Fails if the file changes while the write is prepared.",
          {"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]),
+    spec("edit_file", "Change an existing UTF-8 file by replacing an exact string. Preferred over write_file for editing a file you have read. old_string must match the file byte for byte, including whitespace and indentation, and must appear exactly once unless replace_all is true: include enough surrounding lines to make it unique. The diff is shown to the user. Fails if the file changes while the edit is prepared.",
+         {"path": {"type": "string"}, "old_string": {"type": "string", "description": "The exact text to replace, copied from the file."},
+          "new_string": {"type": "string", "description": "The text to put in its place; empty deletes the old text."},
+          "replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring a unique match; default false."}},
+         ["path", "old_string", "new_string"]),
 ]
 
 @dataclass(frozen=True)
@@ -56,6 +61,13 @@ class Prepared:
     path: Path | None = None
     old_sha: str | None = None
     existed: bool = False
+    # write_file and edit_file: the exact text the write puts on disk (edit_file works it out from
+    # old_string/new_string while preparing, so the preview and the write are the same computation),
+    # how many occurrences it replaced, and the diff's +/- line counts the result reports.
+    content: str | None = None
+    replacements: int = 0
+    added: int = 0
+    removed: int = 0
 
 
 class Workspace:
@@ -186,7 +198,8 @@ class ToolExecutor:
             normalized, preview = catalog.prepare(args)
             return Prepared(name, normalized, preview, catalog.path)
         allowed = {"run_command": {"command", "cwd", "timeout_seconds"},
-                   "read_file": {"path"}, "list_directory": {"path"}, "write_file": {"path", "content"}}
+                   "read_file": {"path"}, "list_directory": {"path"}, "write_file": {"path", "content"},
+                   "edit_file": {"path", "old_string", "new_string", "replace_all"}}
         if name not in allowed or set(args) - allowed[name]:
             raise ValueError("Unknown tool or unexpected argument.")
         if name == "run_command":
@@ -202,23 +215,59 @@ class ToolExecutor:
                 raise ValueError("Timeout must be an integer from 1 to 120 seconds.")
             args["timeout_seconds"] = timeout
             return Prepared(name, args, f"RUN COMMAND\n\nWorking directory: {cwd}\nTimeout: {timeout}s\n\n{command}", cwd)
-        path = self.workspace.resolve(self._text(args, "path", maximum=4096), allow_missing=name == "write_file")
+        path = self.workspace.resolve(self._text(args, "path", maximum=4096),
+                                      allow_missing=name in ("write_file", "edit_file"))
         if name == "read_file":
             return Prepared(name, args, f"READ FILE\n\n{path}", path)
         if name == "list_directory":
             return Prepared(name, args, f"LIST DIRECTORY\n\n{path}", path)
-        content = self._text(args, "content")
-        if not path.parent.is_dir():
-            raise ValueError("Parent directory must already exist. Relay does not create directory trees automatically.")
         existed = path.exists()
-        old = self.workspace.read_bytes(path) if existed else b""
+        if name == "edit_file":
+            if not existed:
+                raise ValueError("edit_file needs a file that already exists; use write_file to create one.")
+            old = self.workspace.read_bytes(path)
+            content, replacements = self._edited(args, old)
+        else:
+            content, replacements = self._text(args, "content"), 0
+            if not path.parent.is_dir():
+                raise ValueError("Parent directory must already exist. Relay does not create directory trees automatically.")
+            old = self.workspace.read_bytes(path) if existed else b""
         old_sha = hashlib.sha256(old).hexdigest()
         diff = "".join(difflib.unified_diff(old.decode("utf-8").splitlines(keepends=True),
                      content.splitlines(keepends=True), fromfile=f"a/{args['path']}" if existed else "/dev/null",
                      tofile=f"b/{args['path']}"))
+        added = sum(1 for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++"))
+        removed = sum(1 for line in diff.splitlines() if line.startswith("-") and not line.startswith("---"))
         # Preserve reviewability for files whose only change is a trailing newline.
-        preview = f"WRITE FILE\n\n{path}\n\n{diff or '(No text changes)'}\n\nOld bytes: {len(old)}; new bytes: {len(content.encode('utf-8'))}."
-        return Prepared(name, args, preview, path, old_sha, existed)
+        title = "EDIT FILE" if name == "edit_file" else "WRITE FILE"
+        preview = f"{title}\n\n{path}\n\n{diff or '(No text changes)'}\n\nOld bytes: {len(old)}; new bytes: {len(content.encode('utf-8'))}."
+        return Prepared(name, args, preview, path, old_sha, existed, content, replacements, added, removed)
+
+    def _edited(self, args: dict, old: bytes) -> tuple[str, int]:
+        """The whole new text of an edit_file, and how many occurrences it replaces.
+
+        Computed while preparing, so the diff the user sees is the bytes the write puts on disk.
+        Every error says what the model should do instead."""
+        old_string, new_string = self._text(args, "old_string"), self._text(args, "new_string")
+        replace_all = args.get("replace_all", False)
+        if type(replace_all) is not bool:
+            raise ValueError("replace_all must be true or false.")
+        if not old_string:
+            raise ValueError("old_string must not be empty. Use write_file to create a file or replace one in full.")
+        if old_string == new_string:
+            raise ValueError("old_string and new_string are identical; the edit would change nothing.")
+        text = old.decode("utf-8")
+        found = text.count(old_string)
+        if found == 0:
+            raise ValueError("old_string was not found in the file. Read the file again and copy the exact text, "
+                             "including whitespace and indentation.")
+        if found > 1 and not replace_all:
+            raise ValueError(f"old_string occurs {found} times in the file. Add surrounding lines so it matches "
+                             f"once, or set replace_all: true to change all {found}.")
+        content = text.replace(old_string, new_string) if replace_all else text.replace(old_string, new_string, 1)
+        if len(content.encode("utf-8")) > MAX_FILE:
+            raise ValueError("The edited file would exceed the 128 KiB limit.")
+        return content, found if replace_all else 1
 
     def execute(self, prepared: Prepared) -> dict:
         if self.cancel.is_set():
@@ -239,7 +288,7 @@ class ToolExecutor:
             # Recheck paths at execution time.
             cwd = self.workspace.resolve(args.get("cwd", "."))
             return self._run(args["command"], cwd, args["timeout_seconds"])
-        path = self.workspace.resolve(args["path"], allow_missing=name == "write_file")
+        path = self.workspace.resolve(args["path"], allow_missing=name in ("write_file", "edit_file"))
         if name == "read_file":
             data = self.workspace.read_bytes(path)
             return {"path": args["path"], "content": data.decode("utf-8"), "sha256": hashlib.sha256(data).hexdigest()}
@@ -258,12 +307,14 @@ class ToolExecutor:
         old = self.workspace.read_bytes(path) if path.exists() else b""
         if hashlib.sha256(old).hexdigest() != prepared.old_sha:
             raise ValueError("File changed while the write was prepared. Nothing was overwritten; request a fresh diff.")
+        # edit_file computed its whole new text while preparing; write_file carries the model's.
+        data = (prepared.content if prepared.content is not None else args["content"]).encode("utf-8")
         mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
         fd, tempname = tempfile.mkstemp(prefix=".relay-write-", dir=path.parent)
         try:
             with os.fdopen(fd, "wb") as out:
                 os.fchmod(out.fileno(), mode)
-                out.write(args["content"].encode("utf-8"))
+                out.write(data)
                 out.flush()
                 os.fsync(out.fileno())
             if self.cancel.is_set():
@@ -272,8 +323,13 @@ class ToolExecutor:
         finally:
             if os.path.exists(tempname):
                 os.unlink(tempname)
-        return {"path": args["path"], "written_bytes": len(args["content"].encode('utf-8')),
-                "sha256": hashlib.sha256(args["content"].encode('utf-8')).hexdigest()}
+        result = {"path": args["path"], "written_bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                  "added": prepared.added, "removed": prepared.removed}
+        if name == "edit_file":
+            result["replacements"] = prepared.replacements
+        else:
+            result["created"] = not prepared.existed
+        return result
 
     def _run(self, command: str, cwd: Path, timeout: int) -> dict:
         env = {key: value for key, value in os.environ.items()

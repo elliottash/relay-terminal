@@ -80,7 +80,8 @@ class RestrictedExecutor(ToolExecutor):
 
 def subagent_prompt(definition: AgentDefinition, agent_id: str) -> str:
     read_only = ("\nThis agent is read-only: do not modify files, and use run_command only for commands that "
-                 "do not change state.") if definition.read_only or "write_file" not in definition.tools else ""
+                 "do not change state.") if definition.read_only or not ({"write_file", "edit_file"}
+                                                                        & set(definition.tools)) else ""
     body = definition.prompt.strip()
     section = (f"\n\n[Relay subagent]\nYou are subagent {agent_id} ({definition.name}), started by the main Relay "
                "agent for one task. You cannot see the main conversation or the user's terminal; the task message "

@@ -150,6 +150,12 @@ class FormatTests(unittest.TestCase):
         self.assertIn("full shell", joined)
         self.assertIn("patterns cannot be enforced", joined)
         self.assertIn("mcp__x__y", joined)
+        # Foreign edit tools are Relay's edit_file; only names that create whole files add write_file.
+        write(self.ws / ".claude/agents/e.md", md("e", extra="tools: Edit, MultiEdit\n"))
+        write(self.ws / ".gemini/agents/g.md", "---\nname: g\ndescription: g\ntools:\n  - replace\n---\ng\n")
+        catalog = self.load()
+        self.assertEqual(catalog.definitions["e"].tools, ("edit_file",))
+        self.assertEqual(catalog.definitions["g"].tools, ("write_file", "edit_file"))
 
     def test_opencode_markdown(self):
         write(self.ws / ".opencode/agent/review/security.md", """
@@ -174,7 +180,9 @@ class FormatTests(unittest.TestCase):
         catalog = self.load()
         definition = catalog.definitions["review/security"]
         self.assertEqual(definition.tool, "opencode")
-        self.assertEqual(definition.tools, ("read_file", "list_directory", "load_skill", "read_skill_file"))
+        # `write: false` turns off opencode's write tool only, so the agent keeps edit_file; a
+        # permission short of "allow" (bash, here) withholds its tools entirely.
+        self.assertEqual(definition.tools, ("read_file", "list_directory", "edit_file", "load_skill", "read_skill_file"))
         self.assertEqual((definition.model, definition.effort, definition.max_steps), ("moonshot/kimi-k3", "high", 9))
         self.assertTrue(any("per-pattern" in w for w in definition.warnings))
         self.assertNotIn("main", catalog.definitions)

@@ -1,0 +1,94 @@
+===== tool_started.preview =====
+EDIT FILE
+
+/tmp/tmpkiwv024a/greet.py
+
+--- a/greet.py
++++ b/greet.py
+@@ -3,4 +3,4 @@
+ 
+ 
+ def farewell(name):
+-    print("hello, " + name)
++    print("goodbye, " + name)
+
+
+Old bytes: 95; new bytes: 97.
+
+===== result =====
+{
+  "path": "greet.py",
+  "written_bytes": 97,
+  "sha256": "c3d36a2b2e2534a024fce226f2e04c735ff991a42d91d57d44330add865b23ae",
+  "added": 1,
+  "removed": 1,
+  "replacements": 1
+}
+
+===== file after =====
+def greet(name):
+    print("hello, " + name)
+
+
+def farewell(name):
+    print("goodbye, " + name)
+
+
+===== refused: '    print(' =====
+old_string occurs 2 times in the file. Add surrounding lines so it matches once, or set replace_all: true to change all 2.
+
+===== refused: 'def missing(' =====
+old_string was not found in the file. Read the file again and copy the exact text, including whitespace and indentation.
+
+===== refused: '' =====
+old_string must not be empty. Use write_file to create a file or replace one in full.
+
+===== refused: 'def greet' =====
+old_string and new_string are identical; the edit would change nothing.
+
+===== refused: file does not exist =====
+edit_file needs a file that already exists; use write_file to create one.
+
+===== replace_all preview =====
+EDIT FILE
+
+/tmp/tmpkiwv024a/greet.py
+
+--- a/greet.py
++++ b/greet.py
+@@ -1,6 +1,6 @@
+ def greet(name):
+-    print("hello, " + name)
++    log("hello, " + name)
+ 
+ 
+ def farewell(name):
+-    print("goodbye, " + name)
++    log("goodbye, " + name)
+
+
+Old bytes: 97; new bytes: 93.
+
+===== replace_all result =====
+{
+  "path": "greet.py",
+  "written_bytes": 93,
+  "sha256": "d95d522e648894f119a17a99b94267766ef38f3da2adb353db6c1f05f630a444",
+  "added": 2,
+  "removed": 2,
+  "replacements": 2
+}
+
+===== refused at execute: the file changed =====
+File changed while the write was prepared. Nothing was overwritten; request a fresh diff.
+
+===== write_file result (for comparison) =====
+{
+  "path": "notes.md",
+  "written_bytes": 8,
+  "sha256": "c3f9c8c283a2b1f2f1896f27a01cbe3cddc0c9d93f752e4639035a0f5b36f6e8",
+  "added": 2,
+  "removed": 0,
+  "created": true
+}
+

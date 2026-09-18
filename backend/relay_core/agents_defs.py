@@ -40,7 +40,7 @@ EFFORTS = ("low", "medium", "high", "max")
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
 
 # Tools a subagent may ever receive. Never agent tools (no nesting) or set_keybinding.
-SUBAGENT_TOOLS = ("run_command", "read_file", "list_directory", "write_file", "load_skill", "read_skill_file")
+SUBAGENT_TOOLS = ("run_command", "read_file", "list_directory", "write_file", "edit_file", "load_skill", "read_skill_file")
 READ_ONLY_TOOLS = ("run_command", "read_file", "list_directory", "load_skill", "read_skill_file")
 
 # Lower-cased tool names from Claude Code, opencode, Gemini CLI and Relay itself.
@@ -50,12 +50,14 @@ TOOL_MAP: dict[str, tuple[str, ...]] = {
     # Claude Code / opencode
     "read": ("read_file",), "bash": ("run_command",), "grep": ("run_command",),
     "glob": ("list_directory",), "ls": ("list_directory",), "list": ("list_directory",),
-    "write": ("write_file",), "edit": ("write_file",), "multiedit": ("write_file",),
-    "notebookedit": ("write_file",), "patch": ("write_file",),
+    # A string-replacing edit tool is Relay's edit_file; a name that also creates or rewrites whole
+    # files (opencode's patch, Gemini's replace with an empty old_string) grants write_file too.
+    "write": ("write_file",), "edit": ("edit_file",), "multiedit": ("edit_file",),
+    "notebookedit": ("write_file",), "patch": ("edit_file", "write_file"),
     "skill": ("load_skill", "read_skill_file"),
     # Gemini CLI
     "run_shell_command": ("run_command",), "grep_search": ("run_command",), "search_file_content": ("run_command",),
-    "read_many_files": ("read_file",), "replace": ("write_file",), "activate_skill": ("load_skill", "read_skill_file"),
+    "read_many_files": ("read_file",), "replace": ("edit_file", "write_file"), "activate_skill": ("load_skill", "read_skill_file"),
 }
 # Names that grant the full shell although the source tool treats them as read-only searches.
 SHELL_WIDENING = {"grep", "grep_search", "search_file_content"}
@@ -353,7 +355,10 @@ def _ordered(tools) -> tuple[str, ...]:
 
 
 def _opencode_permissions(tools: set[str], permission, warnings: list[str]) -> set[str]:
-    keys = {"edit": ("write_file",), "write": ("write_file",), "patch": ("write_file",),
+    # A permission short of "allow" withholds the tool, so each file-changing key withholds both
+    # write_file and edit_file: opencode's edit/write/patch permissions all gate changing a file.
+    keys = {"edit": ("write_file", "edit_file"), "write": ("write_file", "edit_file"),
+            "patch": ("write_file", "edit_file"),
             "bash": ("run_command",), "read": ("read_file",), "list": ("list_directory",)}
     if isinstance(permission, str):
         permission = {key: permission for key in ("edit", "bash")}
@@ -442,7 +447,7 @@ def definition_from_fields(fields: dict, body: str, *, name: str, source: str, t
 
     read_only = fields.get("readonly") is True or fields.get("sandbox_mode") == "read-only"
     if read_only:
-        tools.discard("write_file")
+        tools -= {"write_file", "edit_file"}
 
     background = fields.get("background", fields.get("is_background"))
     effort = _effort(fields.get("effort", fields.get("model_reasoning_effort", fields.get("variant"))), warnings)
