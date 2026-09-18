@@ -12,7 +12,7 @@ rank: zzzzzz
 created: '2026-09-18'
 source: issues/feature_intake.txt, 2026-09-18
 acceptance: '`tests/test_todo_subagents.py`, `tests/requests_test.cpp` (ctest `requests`), `tests/subagents_test.cpp` (ctest `subagents`), live run in `docs/qa_evidence/2026-09-18-tasks-mappable-to-subagents/`'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-18-tasks-mappable-to-subagents/], related: [WD83, M9T4], github: null}
+links: {plans: [], commits: [3515be4], evidence: [docs/qa_evidence/2026-09-18-tasks-mappable-to-subagents/], related: [WD83, M9T4], github: null}
 ---
 # Tasks mappable to subagents
 
