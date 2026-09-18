@@ -265,3 +265,55 @@ class VoiceTests(unittest.TestCase):
                 self.assertIn("no_key", caught.exception.message)   # the worker's own code
                 await client.close()
         run(main())
+
+    # The two below go straight at the source: one channel reads its own messages in order, so
+    # two clips only overlap when they come from two devices, and the failure they are about is
+    # the sidecar's bookkeeping rather than the hub's.
+
+    def source(self):
+        lines: list[dict] = []
+        source = gui_host.GuiPaneSource(lines.append)
+        source.set_pane({"id": "p1", "title": "relay-terminal", "cwd": "/home/elliott",
+                         "rows": 24, "cols": 80, "status": "idle"})
+        return source, lines
+
+    def test_two_clips_in_flight_get_their_own_answers(self):
+        """An iPad and a phone record at once; neither may be given the other's words."""
+        async def main():
+            source, lines = self.source()
+            first = asyncio.ensure_future(source.transcribe("p1", b"one", "webm"))
+            second = asyncio.ensure_future(source.transcribe("p1", b"two", "m4a"))
+            for _ in range(100):
+                await asyncio.sleep(0.01)
+                if len([line for line in lines if line["t"] == "voice"]) == 2:
+                    break
+            clips = [line for line in lines if line["t"] == "voice"]
+            self.assertEqual(len(clips), 2)
+            self.assertNotEqual(clips[0]["id"], clips[1]["id"])
+            # Answered out of order, as two workers finishing at their own pace would.
+            source.voice_reply({"t": "transcribed", "pane": "p1", "id": clips[1]["id"],
+                                "ok": True, "text": "the second clip"})
+            source.voice_reply({"t": "transcribed", "pane": "p1", "id": clips[0]["id"],
+                                "ok": True, "text": "the first clip"})
+            self.assertEqual(await first, "the first clip")
+            self.assertEqual(await second, "the second clip")
+            # An answer for an id nobody is waiting on is dropped, not given to the next clip.
+            source.voice_reply({"t": "transcribed", "pane": "p1", "id": "v99", "ok": True,
+                                "text": "stale"})
+            self.assertEqual(source._voice, {})
+        run(main())
+
+    def test_a_clip_the_gui_never_answers_times_out(self):
+        """A wedged desktop is an error the phone can show, not a spinner that never stops."""
+        async def main():
+            source, _ = self.source()
+            original = gui_host.VOICE_TIMEOUT
+            gui_host.VOICE_TIMEOUT = 0.2
+            try:
+                with self.assertRaises(wire.WireError) as caught:
+                    await source.transcribe("p1", b"clip", "webm")
+            finally:
+                gui_host.VOICE_TIMEOUT = original
+            self.assertIn("in time", caught.exception.message)
+            self.assertEqual(source._voice, {}, "the pending clip must not be left behind")
+        run(main())

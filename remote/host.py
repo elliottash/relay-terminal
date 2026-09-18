@@ -699,10 +699,28 @@ class Host:
         if audio_format not in ("webm", "ogg", "wav", "mp3", "m4a"):
             raise wire.WireError("unknown_type", "unsupported audio format.")
         audio = wire.decode_bytes(message.get("data"), MAX_VOICE_BYTES * 4 // 3 + 8, "the clip")
-        text = await self.source.transcribe(pane, audio, audio_format)
-        await channel.send({"t": "agent", "pane": pane,
-                            "event": {"event": "transcribed", "text": text},
-                            "id": message.get("id")})
+        request_id = message.get("id")
+
+        # Transcribing is a network round trip on the desktop, seconds long. Awaiting it here
+        # would stop reading this device's other messages until it finished, so the phone would
+        # freeze for the whole clip; the reply carries the request's id, so it can come back
+        # whenever it is ready. The per-device rate limit above still caps how many are in flight.
+        async def answer() -> None:
+            try:
+                text = await self.source.transcribe(pane, audio, audio_format)
+            except wire.WireError as error:
+                await channel.send(wire.error(error.code, error.message, request_id))
+                return
+            except Exception:                       # the phone gets an answer either way
+                log.exception("transcribing a clip for %s", pane)
+                await channel.send(wire.error("internal", "the clip could not be transcribed.",
+                                              request_id))
+                return
+            await channel.send({"t": "agent", "pane": pane,
+                                "event": {"event": "transcribed", "text": text},
+                                "id": request_id})
+
+        self._spawn(answer())
 
     async def _on_turn_transcript_get(self, channel: Channel, message: dict) -> None:
         pane = self._pane_of(message)

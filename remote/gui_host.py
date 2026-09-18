@@ -16,6 +16,8 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"address","value":"192.168.1.9"}                    serve the QR on another address
     {"t":"revoke","device":"..."}   {"t":"devices"}   {"t":"stop"}
     {"t":"password_entry","device":"...","allow":true}   per-device switch (section 6.7)
+    {"t":"transcribed","pane":"p1","id":"v1","ok":true,"text":"..."}   the answer to a `voice`
+                                                            (`ok:false` carries `error` instead)
 
   here → GUI
     {"t":"started","base":"...","fingerprint":"...","note":"...",
@@ -27,6 +29,7 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"input","pane":"p1","bytes":"<base64>"}             keys from a phone
     {"t":"secret_input","pane":"p1","bytes":"<base64>"}      a password line, nonce already checked
     {"t":"compose","pane":"p1","text":"...","route":bool,"origin":"remote:<id>"}   a prompt
+    {"t":"voice","pane":"p1","id":"v1","format":"webm","data":"<base64>"}   a clip to transcribe
     {"t":"error","message":"..."}
 
 Input arrives here as RRP messages and leaves as `input`: the GUI writes the bytes into the pane's
@@ -53,6 +56,11 @@ from rendezvous.server import Store, build
 log = logging.getLogger("relay.gui_host")
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
 
+# How long a clip may wait for the GUI's answer. Transcription is a network round trip on the
+# desktop, so this is generous; what it must never be is unbounded, because the phone is holding
+# a spinner open until it hears something.
+VOICE_TIMEOUT = 90.0
+
 
 class GuiPaneSource(panes_mod.PaneSource):
     """Panes owned by the GUI. Screen state comes in over stdio; input goes back the same way."""
@@ -64,6 +72,10 @@ class GuiPaneSource(panes_mod.PaneSource):
         self._panes_callbacks: list = []
         self._agent_callbacks: list = []
         self._screen_callbacks: list = []
+        # Voice clips waiting for the GUI: request id -> (pane, future). The id is minted here,
+        # so two clips in flight cannot be answered with each other's text.
+        self._voice: dict[str, tuple[str, asyncio.Future]] = {}
+        self._voice_seq = 0
 
     # ---- observation -------------------------------------------------------------------------
 
@@ -220,7 +232,52 @@ class GuiPaneSource(panes_mod.PaneSource):
         raise wire.WireError("not_permitted", "plans are not shared yet.")
 
     async def transcribe(self, pane: str, audio: bytes, audio_format: str) -> str:
-        raise wire.WireError("not_permitted", "voice from a phone is not wired up yet.")
+        """A clip from a phone, transcribed by the pane's own worker.
+
+        The audio crosses the stdio line to the GUI, which hands it to the same `transcribe`
+        request the microphone beside the prompt box uses; the text comes back here and goes to
+        the phone that spoke. No transcription key is held in this process and none leaves the
+        desktop, which is the whole point of doing it this way round.
+        """
+        self._pane(pane)
+        self._voice_seq += 1
+        request = f"v{self._voice_seq}"
+        future = asyncio.get_event_loop().create_future()
+        self._voice[request] = (pane, future)
+        self.send({"t": "voice", "pane": pane, "id": request, "format": audio_format,
+                   "data": base64.b64encode(audio).decode()})
+        try:
+            reply = await asyncio.wait_for(future, VOICE_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise wire.WireError("unavailable",
+                                 "the desktop did not answer that clip in time.") from None
+        finally:
+            # Every path: a timeout, a cancelled client, or the answer itself.
+            self._voice.pop(request, None)
+        if not reply.get("ok"):
+            # The worker's own words, so the phone reads what the desktop would have shown.
+            detail = str(reply.get("error") or reply.get("code") or "")
+            raise wire.WireError("unavailable", detail or "the clip could not be transcribed.")
+        return str(reply.get("text") or "")
+
+    def voice_reply(self, message: dict) -> None:
+        """The GUI's answer to a `voice` line: `ok` with the text, or the worker's error.
+
+        Matched on the id this process minted. A reply with no id belongs to the oldest clip
+        still waiting on that pane; an id we no longer know is dropped rather than handed to
+        someone else's clip.
+        """
+        request = message.get("id")
+        if isinstance(request, str) and request:
+            entry = self._voice.get(request)
+        else:
+            pane = message.get("pane")
+            entry = next((item for item in self._voice.values() if item[0] == pane), None)
+        if entry is None:
+            return
+        _, future = entry
+        if not future.done():
+            future.set_result(message)
 
     # ---- password prompts (section 6.7) ---------------------------------------------------------
     # The GUI's pane message carries the shell's pid, so this sidecar can make the same fresh
@@ -303,6 +360,8 @@ class Sidecar:
             self.source.set_frame(message)
         elif kind == "agent":
             self.source.agent_event(message.get("pane", ""), message.get("event") or {})
+        elif kind == "transcribed":
+            self.source.voice_reply(message)
         elif kind == "pair":
             await self.pair()
         elif kind == "address":
