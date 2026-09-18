@@ -10,8 +10,53 @@ bool secretPrompt(const State &state) {
 }
 
 bool lineRequested(const State &state) {
-    return state.programRunning && !state.altScreen && state.programReading
-        && state.mode == TerminalMode::Echoing;
+    // Canonical input with echo means the terminal is collecting a line for somebody. Who that
+    // is, is either proved by /proc (a process of the command blocked in read() on the tty) or
+    // shown on the screen ("Do you want to continue? [Y/n]"). `sudo` runs its child in its own
+    // pseudo-terminal, so for the case this feature exists for only the screen can tell.
+    return state.programRunning && !state.altScreen && state.mode == TerminalMode::Echoing
+        && (state.programReading || state.screenAsking);
+}
+
+TypeRefusal agentTypeRefusal(const State &state, bool delegated) {
+    if (state.native) return TypeRefusal::UserInControl;
+    // A masked prompt outranks every other reason, so the agent is always told the true one:
+    // Relay drops the delegation the moment a password prompt appears, and "not asked" would
+    // hide why. Either way nothing is typed.
+    if (state.screenMasked || secretPrompt(state)) return TypeRefusal::Password;
+    // "Nothing is running" outranks "you were not asked": a program that exited while the agent
+    // was thinking should not be reported as a permission problem.
+    if (!state.programRunning) return TypeRefusal::NoProgram;
+    if (!delegated) return TypeRefusal::NotAsked;
+    return TypeRefusal::None;
+}
+
+QString typeRefusalText(TypeRefusal refusal, const QString &program) {
+    const QString who = program.isEmpty() ? QStringLiteral("the program") : program;
+    switch (refusal) {
+    case TypeRefusal::None:
+        return {};
+    case TypeRefusal::UserInControl:
+        return QStringLiteral("The user took control of the terminal; nothing was typed.");
+    case TypeRefusal::NotAsked:
+        return QStringLiteral("The user has not asked you to drive the program in the terminal pane; "
+                              "nothing was typed. Tell them what to type, or ask them to delegate it.");
+    case TypeRefusal::NoProgram:
+        return QStringLiteral("No program is running in the user's terminal pane; nothing was typed.");
+    case TypeRefusal::Password:
+        return QStringLiteral("%1 is asking for a password. Relay never types into a password prompt; "
+                              "nothing was typed. Ask the user to type it.").arg(who);
+    }
+    return {};
+}
+
+QString typedLine(const QString &text) {
+    QString shown = text;
+    shown.replace(QLatin1Char('\n'), QStringLiteral("⏎"));
+    shown.replace(QLatin1Char('\t'), QStringLiteral("⇥"));
+    shown = shown.simplified();
+    if (shown.size() > 120) shown = shown.left(119) + QStringLiteral("…");
+    return shown.isEmpty() ? QStringLiteral("✦ typed: ⏎") : QStringLiteral("✦ typed: %1").arg(shown);
 }
 
 LineTarget targetFor(const State &state, const QString &mode) {

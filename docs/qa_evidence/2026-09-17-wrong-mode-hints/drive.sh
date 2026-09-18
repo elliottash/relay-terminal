@@ -85,6 +85,15 @@ configure_pane() {
         || { echo "OCR lost the consent checkbox ($tag)"; exit 1; }
     xdotool mousemove --sync ${xy% *} ${xy#* } click 1; sleep 0.5
     k Return; sleep 4
+    # Return can land on the focused checkbox instead of the dialog's Save button, leaving the
+    # dialog open (a modal window would swallow the scenarios' typing). Verify it closed; retry.
+    shot "tmp-provider-dialog-$tag"
+    if word_xy "$out/implementer-tmp-provider-dialog-$tag.png" Cancel >/dev/null 2>&1; then
+        k Return; sleep 3
+        shot "tmp-provider-dialog-$tag"
+        word_xy "$out/implementer-tmp-provider-dialog-$tag.png" Cancel >/dev/null 2>&1 \
+            && { echo "provider dialog stayed open ($tag)"; exit 1; }
+    fi
     xdotool windowfocus "$win"
 }
 

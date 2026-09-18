@@ -279,6 +279,23 @@ def main():
                       "effort": agent.effort, "agent_role": state["agent_role"],
                       **({"warning": resolved.warning} if resolved.warning else {})})
                 emit(agent.context_event())
+            # --- the agent typing into the program in the visible pane (protocol 17) ---
+            elif kind == "program_state":
+                # The pane's live view: who owns the terminal, what it is asking, and whether the
+                # user has handed it over. A take-over arrives here as granted: false.
+                agent = turns.agent
+                if agent is None:
+                    raise ValueError("Configure a provider and workspace first.")
+                summary = agent.executor.program.update(request)
+                if request.get("id") is not None:
+                    emit({"event": "program_control", "id": request.get("id"), **summary})
+            elif kind == "program_input_result":
+                # The pane's answer to a `program_input`; the waiting turn thread picks it up.
+                agent = turns.agent
+                if agent is None:
+                    raise ValueError("Configure a provider and workspace first.")
+                agent.executor.program.resolve(request)
+            # --- end program control ---
             elif kind == "agents_status":
                 emit({"event": "agents_status", "items": subagents.list()})
             # --- end subagents ---

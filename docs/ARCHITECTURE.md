@@ -275,6 +275,7 @@ mode → `input.toggle`, with the mode chip flashing), dropping an image on the 
 paste shortcut) and "Screenshot this pane" from the palette (→ `agent.screenshotPane`,
 Ctrl+Shift+G), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
 and rotating idle tips 4 s after a finished agent turn with an
+from the link or palette (→ `/continue` or `agent.continue`), the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
 in `WARP.md`); tests in `tests/hints_test.cpp`.
 
@@ -565,6 +566,7 @@ native mode.
 | Program exits (`ready`) | Automatic human control ends; the composer returns; masked input and the button are cleared |
 | Ctrl+H from the composer, or the button | Human control: composer hidden, keys go to the terminal. Started from a full-screen or remote program, the prompt box comes back when the program exits |
 | Ctrl+Shift+H | Composer back. While a program runs, submissions go to the agent |
+| Ctrl+Shift+J (`program.delegate`), the banner button, the palette | Hands the running program to the agent (section 9.2). With text in the prompt box it sends that request too. Pressed again, or Ctrl+H, takes it back |
 | F12 (`terminal.native`) | Toggles native input, unchanged, for people who want the old behaviour |
 
 Policy lives in QSettings: `control/default` (`agent`, the default — the prompt box keeps the
@@ -616,8 +618,66 @@ same way.
 (`agent.validate_context`) and prepends a labelled note saying the agent cannot see or type
 into that program and that `run_command` uses a separate shell.
 
-The agent cannot type into running programs. That is planned
-(`issues/features/2026-09-17-agent-delegate-and-take-over.md`).
+### 9.1 Reading the screen: what is the program asking?
+
+`src/ScreenPrompt.{h,cpp}` (library `relay-screen`, tests `tests/screenprompt_test.cpp` over
+recorded screens in `tests/fixtures/screen/`) answers "is the foreground program waiting for me
+to type something?" from the last rows of the screen. It is a pure function: rows in, a
+`Detection {kind, question, options, defaultAnswer, confidence, masked}` out, with the `/proc`
+signals of `relay::input::State` as one input rather than the whole answer — `sudo` runs its
+child in its own pseudo-terminal, so for the very case this exists for nothing Relay may inspect
+is blocked in `read()`.
+
+The rules, in order, over the **last non-blank row** (with the row above it when the question
+wrapped), after escape sequences and control bytes are stripped:
+
+| Kind | Matched by |
+|---|---|
+| (none) | the alternate screen: a full-screen program has no "last line" |
+| `password` | `password` / `passphrase` … `:` at end of line, or canonical input with echo off |
+| `yes_no` | a bracketed option list at the end: `[Y/n]`, `(yes/no)`, `(yes/no/[fingerprint])`. The capitalized alternative is the default |
+| `choice` | a line ending in “selection”, “choice”, “option” or “number” plus `:`, stronger with numbered rows above |
+| `press_key` | "Press ENTER/RETURN/any key", `--More--`, `(END)` |
+| `shell_prompt` | a trailing `$ # % ❯ ➜ »` with something host- or path-shaped in front: the command ended, and this is **not** a question |
+| `free_text` | anything else ending in `: ? > #` — `read -p`, `input()`, `>>> `, `relay=# ` |
+
+Confidence starts from the pattern (0.80 for a password or an option list, 0.70 press-key, 0.45
+free text), gains 0.15 for canonical input with echo, 0.15 for a process blocked in `read()`, and
+loses 0.30 when nothing is running. At 0.60 the pane acts on it. That is what keeps a `grep` hit
+quoting `[Y/n]`, or a question that scrolled past during a download, from raising a hint.
+
+Where it is used: the floating banner over the terminal ("apt is asking: Do you want to continue?
+[Y/n]"), the composer row's line, and `relay::input::State::screenAsking` / `screenMasked`, which
+let `lineRequested` send a submitted line to a program the `/proc` rules cannot see. The pane
+polls it four times a second while a command runs and needs two agreeing ticks before the hint
+appears. **Only an engine that reports `TerminalBackend::ScreenText` gets any of this**; a pane
+without it keeps the `/proc`-only behaviour and the banner says "… is asking for input" with no
+question.
+
+### 9.2 Handing a program to the agent, and taking it back
+
+The agent can type into the program in the **visible** pane, and only after the user hands it
+over. `Ctrl+Shift+J` (`program.delegate`), the banner's "Let the agent drive" button and the
+palette action turn it on; with text in the prompt box the same key also sends that text to the
+agent. The pane then prints `✦ <program> handed to the agent · Ctrl+H takes it back`, the banner
+becomes "Agent driving apt · 3 keystroke(s) · apt is asking: …" with a "Take over" button, and
+every prompt submitted for that program carries `context.program_control` (protocol section 17),
+including the screen.
+
+Every write is a round trip: the worker's `type_into_program` emits `program_input`, the pane
+checks `relay::input::agentTypeRefusal` *again* at that instant, performs it
+(`TerminalBackend::sendText`, or a fixed name→bytes table for named keys) and answers with the
+screen the keystroke produced. The pane prints `✦ typed: y   · <the agent's intent line>` for
+every one, so nothing the agent types is invisible.
+
+It ends — for good, not paused — when the user takes control (Ctrl+H, the button, F12), when a
+password prompt appears, or when the program exits; each reason is sent to the worker so the
+agent is told the true one. The agent never types into a masked prompt: the worker refuses before
+the pane is even asked, and the pane refuses again. Panes whose engine cannot read the screen
+cannot delegate at all and say so.
+
+The agent's `run_command` is still a separate non-interactive Bash process; it has nothing to do
+with the pane's terminal.
 
 ## 10. File panes and `relay open`
 
@@ -1125,6 +1185,12 @@ are real, so the pane only offers what its engine supports.
 Capabilities a KonsolePart pane does not report, so the actions behind them are only offered
 in engine panes: `ScreenText`, `Scrollback`, `LinkClicks`, `Osc8Links`, `PromptMarks`,
 `CwdTracking`, `Search` and `LinkWalk` (the `Ctrl+Shift+L` walk over the output's links).
+Two features are gated on `ScreenText` and degrade honestly without it (section 9.1): the
+screen-text input detection falls back to the `/proc` signals alone, so the banner says
+"apt is asking for input" instead of naming the question; and a program cannot be handed to the
+agent at all, with "Let the agent drive" disabled and a status line saying why. On KF5,
+KonsolePart has no `getDisplayedText`, so a KonsolePart pane there behaves exactly as it did
+before this work.
 
 `src/TerminalBackends.{h,cpp}` holds the selection rules (unit-tested in
 `tests/backends_test.cpp`); `src/BackendFactory.cpp` is the only file that knows both
@@ -1193,11 +1259,14 @@ Other limits:
 | `src/Conversations.*` | conversation list with search (Ctrl+Shift+O) and the Ctrl+F find bar |
 | `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |
 | `src/PaneTitles.*` | pane titles and the tab labels made from them: tidying a title, the offline "same work" rule, joining and shortening |
+| `src/InputPolicy.*` | who may type where: the prompt-box-only rules, passwords, and whether the agent may type into the program |
+| `src/ScreenPrompt.*` | the screen-text classifier: is the foreground program waiting for input, and for what (section 9.1) |
 | `src/Voice.*` | voice transcription: capture tool and arguments, the hold key, the transcript's place in the composer, WAV repair |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
 | `backend/relay_core/` | `router`, `provider`, `presets`, `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keybindings`, `skills`, `roles` (model roles), `conv_index` (conversation index and search), `logs` (rotating `worker.log`) |
 | `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `titles` (pane titles and tab labels), `voice` (transcription) |
+| `backend/relay_core/` | `router`, `provider`, `presets` (providers and the Main/Flash/Lite tiers), `agent`, `tools`, `queue`, `requests` (ledger, audit), `todos`, `context` (compaction), `keystore`, `keytest` (the keys modal's Test button), `keybindings`, `skills`, `roles` (model roles), `voice` (transcription), `program_input` (the agent typing into the visible pane) |
 | `scripts/` | `build.sh`, `test.sh`, `relay-open`, `relay-agent.py` |
 | `src/KonsoleBackend.*`, `src/EngineBackend.*` | the two `TerminalBackend` implementations |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |

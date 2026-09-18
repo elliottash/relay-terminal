@@ -447,6 +447,7 @@ void TerminalView::pullFrame()
     const bool changed = m_session->withCore([&](VtCore &c) { return c.updateFrame(&m_frame, force); });
     if (!changed)
         return;
+    emit frameChanged();
 
     // A link underline belongs to the content it was computed for.
     if (m_hoverRow >= 0 && !m_linkCursor.active()

@@ -1,0 +1,9 @@
+There are 3 choices for the alternative editor (providing /usr/bin/editor).
+
+  Selection    Path                 Priority   Status
+------------------------------------------------------------
+* 0            /usr/bin/vim.basic    50        auto mode
+  1            /bin/ed              -100       manual mode
+  2            /bin/nano             40        manual mode
+
+Press <enter> to keep the current choice[*], or type selection number:

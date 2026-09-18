@@ -32,6 +32,20 @@ struct State {
     bool programReading = false;   // a process of it is blocked in read() on the terminal
     bool altScreen = false;        // full-screen program: only native input types into it
     bool native = false;           // the user took control; the prompt box is hidden
+    // What the screen-text classifier (src/ScreenPrompt.h) makes of the last rows. Both are
+    // false on engines that cannot read the screen, which leaves the /proc-only rules below
+    // exactly as they were.
+    bool screenAsking = false;     // a program is visibly asking for a line ("[Y/n]", "Continue? ")
+    bool screenMasked = false;     // ... and it is a password prompt
+};
+
+// Why the agent may not type into the foreground program right now.
+enum class TypeRefusal {
+    None,           // it may
+    UserInControl,  // the user took the keyboard (Ctrl+H, the button, or typing)
+    NotAsked,       // the user has not handed this program to the agent for this turn
+    NoProgram,      // nothing is running in the pane's terminal
+    Password,       // a masked prompt: the agent never types a password
 };
 
 // A password prompt: the program kept canonical (line) input but turned echo off.
@@ -45,6 +59,16 @@ bool lineRequested(const State &state);
 // The rule for a line submitted from the prompt box. `mode` is the pane's routing mode
 // ("auto", "shell" or "agent"); an agent submission is never diverted to a program.
 LineTarget targetFor(const State &state, const QString &mode);
+
+// May the agent type into the foreground program? `delegated` is the user's consent for this
+// turn (the delegate action, the banner button, or "let the agent answer this"); it is never
+// inferred. Checked again in the Pane immediately before every write, so a take-over that
+// lands mid-turn stops the next keystroke.
+TypeRefusal agentTypeRefusal(const State &state, bool delegated);
+// The sentence the agent (and the pane) is told when a write is refused.
+QString typeRefusalText(TypeRefusal refusal, const QString &program);
+// "✦ typed: y" — the inline line printed in the pane for every write the agent makes.
+QString typedLine(const QString &text);
 
 // True when a full-screen (or remote) program owns the terminal and the prompt box still has
 // the keyboard: the pane offers "Take control" instead of switching by itself.

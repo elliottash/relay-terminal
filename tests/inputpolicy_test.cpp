@@ -165,6 +165,94 @@ private Q_SLOTS:
         wipe(empty);
         QVERIFY(empty.isEmpty());
     }
+
+    // ----- the screen classifier as a second source of "a program is waiting" ---------------
+    void screenTextCanStandInForTheProcProof() {
+        // `sudo apt` runs apt in its own pseudo-terminal, so no process Relay can inspect is
+        // blocked in read(). The screen still says "Do you want to continue? [Y/n]".
+        State sudoApt;
+        sudoApt.mode = TerminalMode::Echoing;
+        sudoApt.programRunning = true;
+        sudoApt.programReading = false;
+        QVERIFY(!lineRequested(sudoApt));
+        sudoApt.screenAsking = true;
+        QVERIFY(lineRequested(sudoApt));
+        QCOMPARE(targetFor(sudoApt, QStringLiteral("auto")), LineTarget::Program);
+        // An agent submission still reaches the agent.
+        QCOMPARE(targetFor(sudoApt, QStringLiteral("agent")), LineTarget::Agent);
+    }
+
+    void screenTextNeverOverridesTheLineDiscipline() {
+        // Raw mode (a full-screen program, Readline) is not a line prompt whatever the screen
+        // shows, and the alternate screen is never answered with a line.
+        State raw;
+        raw.mode = TerminalMode::Raw;
+        raw.programRunning = true;
+        raw.screenAsking = true;
+        QVERIFY(!lineRequested(raw));
+        State alt = questionPrompt();
+        alt.altScreen = true;
+        alt.screenAsking = true;
+        QVERIFY(!lineRequested(alt));
+        // Nothing running: an old question still on the screen is not a prompt.
+        State idle;
+        idle.mode = TerminalMode::Echoing;
+        idle.screenAsking = true;
+        QVERIFY(!lineRequested(idle));
+    }
+
+    // ----- the agent typing into the visible program ------------------------------------------
+    void theAgentTypesOnlyWhenTheUserAsked() {
+        State running = questionPrompt();
+        QCOMPARE(agentTypeRefusal(running, false), TypeRefusal::NotAsked);
+        QCOMPARE(agentTypeRefusal(running, true), TypeRefusal::None);
+        QVERIFY(typeRefusalText(TypeRefusal::None, QStringLiteral("apt")).isEmpty());
+        QVERIFY(typeRefusalText(TypeRefusal::NotAsked, QString()).contains(QStringLiteral("has not asked")));
+    }
+
+    void takingControlStopsTheAgentEvenWhenDelegated() {
+        State takenOver = questionPrompt();
+        takenOver.native = true;
+        QCOMPARE(agentTypeRefusal(takenOver, true), TypeRefusal::UserInControl);
+    }
+
+    void theAgentNeverTypesAPassword() {
+        // Proved by the line discipline …
+        QCOMPARE(agentTypeRefusal(passwordPrompt(), true), TypeRefusal::Password);
+        // … and by the screen, before the termios poll has caught up.
+        State seen = questionPrompt();
+        seen.screenMasked = true;
+        QCOMPARE(agentTypeRefusal(seen, true), TypeRefusal::Password);
+        QVERIFY(typeRefusalText(TypeRefusal::Password, QStringLiteral("sudo"))
+                    .startsWith(QStringLiteral("sudo is asking for a password")));
+    }
+
+    void aPasswordOutranksEveryOtherReason() {
+        // The pane drops the delegation as soon as a password prompt appears, so "not asked" and
+        // "password" are true at once; the agent must be told the real one.
+        State masked = passwordPrompt();
+        QCOMPARE(agentTypeRefusal(masked, false), TypeRefusal::Password);
+    }
+
+    void theAgentNeedsAProgramToTypeInto() {
+        State idle = shellPrompt();
+        QCOMPARE(agentTypeRefusal(idle, true), TypeRefusal::NoProgram);
+        // A program that exited while the agent was thinking is "nothing is running", not
+        // "you were not asked": the agent is told the truth about why its write failed.
+        QCOMPARE(agentTypeRefusal(idle, false), TypeRefusal::NoProgram);
+        // A full-screen program is a valid target: that is the vim case.
+        QCOMPARE(agentTypeRefusal(fullScreenProgram(), true), TypeRefusal::None);
+    }
+
+    void everyWriteIsShownInThePane() {
+        QCOMPARE(typedLine(QStringLiteral("y")), QStringLiteral("✦ typed: y"));
+        QCOMPARE(typedLine(QStringLiteral("\n")), QStringLiteral("✦ typed: ⏎"));
+        QCOMPARE(typedLine(QString()), QStringLiteral("✦ typed: ⏎"));
+        QCOMPARE(typedLine(QStringLiteral(":wq\n")), QStringLiteral("✦ typed: :wq⏎"));
+        const QString long_ = typedLine(QString(400, QLatin1Char('x')));
+        QCOMPARE(long_.size(), QStringLiteral("✦ typed: ").size() + 120);
+        QVERIFY(long_.endsWith(QChar(u'…')));
+    }
 };
 
 QTEST_APPLESS_MAIN(InputPolicyTests)

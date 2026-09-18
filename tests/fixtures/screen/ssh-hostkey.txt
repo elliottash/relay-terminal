@@ -1,0 +1,4 @@
+The authenticity of host 'build.example.net (203.0.113.7)' can't be established.
+ED25519 key fingerprint is SHA256:9Zt8Q1n4bJq0mV5xUeR7sLpKcWfYoAdIhG2TrNmEuXk.
+This key is not known by any other names.
+Are you sure you want to continue connecting (yes/no/[fingerprint])?

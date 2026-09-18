@@ -129,6 +129,10 @@ public:
 
     QString debugDump();
     quint64 paintCount() const { return m_paints; }
+    // The frame this view last pulled. Anything else that needs screen state — remote sharing,
+    // for one — reads this instead of calling VtCore::updateFrame, which consumes the dirty
+    // state and therefore tolerates exactly one consumer per session.
+    const ViewportFrame &frame() const { return m_frame; }
     QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
 
 signals:
@@ -136,6 +140,8 @@ signals:
     void linkActivated(const QString &target, int line, int column);
     void scrollPositionChanged(int viewportTop, int historyRows, int rows);
     void gridSizeChanged(int rows, int columns);
+    // A new frame() is available. Emitted after the view has taken it, before it repaints.
+    void frameChanged();
     void bellRang();
     void dumpRequested();
 

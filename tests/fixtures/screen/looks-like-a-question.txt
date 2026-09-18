@@ -1,0 +1,4 @@
+src/main.cpp:4521:        // Do you want to continue? [Y/n] is apt's wording, not ours.
+docs/ARCHITECTURE.md:88:Password: the program kept canonical input but turned echo off.
+tests/inputpolicy_test.cpp:17:    // Are you sure you want to continue connecting (yes/no)?
+3 matches in 3 files.

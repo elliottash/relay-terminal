@@ -268,6 +268,12 @@ QLabel#secretChip { color: #2a1206; background: #e5a06b; border-radius: 4px; pad
 QLineEdit#secretEditor { background: @bg; color: @text; border: 1px solid #e5a06b; border-radius: 6px; padding: 8px; font-family: "@mono"; font-size: 10pt; }
 QPushButton#takeControlChip { color: @text; background: @raised; border: 1px solid @accentBorder; border-radius: 6px; padding: 3px 10px; font-size: 9pt; }
 QPushButton#takeControlChip:hover { border-color: @accent; }
+/* The floating banner over the terminal: what the program is asking, and who answers it */
+QFrame#programBanner { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
+QLabel#programBannerLabel { color: @text; font-size: 9pt; }
+QPushButton#delegateChip { color: @text; background: @raised; border: 1px solid @accentBorder; border-radius: 6px; padding: 3px 10px; font-size: 9pt; }
+QPushButton#delegateChip:hover { border-color: @accent; }
+QPushButton#delegateChip:disabled { color: @muted; border-color: @border; }
 /* Turn details pane */
 QLabel#turnHeader { color: @text; font-weight: 600; padding: 4px 6px; }
 QTreeWidget#turnTools { background: @bg; color: @text; border: 1px solid @border; border-radius: 6px; outline: none; }

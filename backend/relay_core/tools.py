@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Callable
 
 from .keybindings import KeybindingCatalog
+from .program_input import ProgramControl
 from .skills import TOOL_SPECS as SKILL_TOOLS, SkillIndex
 from .provider import Cancelled
 
@@ -113,6 +114,9 @@ class ToolExecutor:
         self.keybindings = keybindings
         self.emit = emit
         self.cancel = cancel
+        # Typing into the program in the user's visible pane. Offered only for a turn the user
+        # handed the program over for; see relay_core/program_input.py.
+        self.program = ProgramControl(emit, cancel)
         # Where run_command runs when the model gives no cwd: the directory the user's terminal is in.
         self.default_cwd = "."
         self._process: subprocess.Popen | None = None
@@ -155,6 +159,9 @@ class ToolExecutor:
         tools = TOOLS + [catalog.tool_spec()] if catalog is not None else list(TOOLS)
         if self.skills is not None:
             tools += SKILL_TOOLS
+        # Read at every model call, so a take-over removes the tool from the next one.
+        if self.program.available():
+            tools = tools + [self.program.tool_spec()]
         return tools
 
     def prepare(self, name: str, arguments: dict) -> Prepared:
@@ -170,6 +177,9 @@ class ToolExecutor:
             if not isinstance(args.get("path"), str):
                 raise ValueError("path must be text.")
             return Prepared(name, {"name": skill.id, "path": args["path"]}, f"READ SKILL FILE\n\n{skill.id}/{args['path']}")
+        if name == "type_into_program":
+            payload, preview = self.program.prepare(args)
+            return Prepared(name, payload, preview)
         if name == "set_keybinding":
             catalog = self.keybindings
             if catalog is None:
@@ -219,6 +229,8 @@ class ToolExecutor:
             return self.skills.load_skill(args["name"])
         if name == "read_skill_file":
             return self.skills.read_file(args["name"], args["path"])
+        if name == "type_into_program":
+            return self.program.execute(args)
         if name == "set_keybinding":
             catalog = self.keybindings
             if catalog is None or args["action"] not in catalog.actions:

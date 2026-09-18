@@ -31,6 +31,7 @@
 //
 //   <row> is {"row":N,"segs":[[text,fg,bg,attrs],...]} — runs of identical style, so the client
 //   needs no index arithmetic and no second emulator. fg/bg are packed relay::CellColor.
+#include "ScreenJson.h"
 #include "session/TerminalSession.h"
 
 #include <QByteArray>
@@ -61,58 +62,6 @@ void writeLine(const QJsonObject &object)
     const QByteArray line = QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n';
     ::fwrite(line.constData(), 1, size_t(line.size()), stdout);
     ::fflush(stdout);
-}
-
-QJsonObject cursorOf(const ViewportFrame &frame)
-{
-    QJsonObject cursor;
-    cursor["row"] = frame.cursor.row;
-    cursor["col"] = frame.cursor.col;
-    cursor["visible"] = frame.cursor.visible && frame.cursorInViewport;
-    cursor["shape"] = int(frame.cursor.shape);
-    return cursor;
-}
-
-// One row as runs of identical style. Wide tails contribute nothing: the wide glyph before them
-// already occupies two columns in a monospace grid.
-QJsonObject rowOf(const Line &line, int row)
-{
-    QJsonArray segments;
-    QString text;
-    uint32_t fg = 0, bg = 0;
-    uint16_t attrs = 0;
-    bool open = false;
-
-    const auto flush = [&]() {
-        if (!open || text.isEmpty()) return;
-        QJsonArray segment;
-        segment.append(text);
-        segment.append(double(fg));
-        segment.append(double(bg));
-        segment.append(int(attrs));
-        segments.append(segment);
-        text.clear();
-    };
-
-    for (const Cell &cell : line.cells) {
-        if (cell.ch == kWideTail) continue;
-        const uint16_t style = uint16_t(cell.attrs & ~AttrCluster);
-        if (!open || cell.fg != fg || cell.bg != bg || style != attrs) {
-            flush();
-            fg = cell.fg;
-            bg = cell.bg;
-            attrs = style;
-            open = true;
-        }
-        text += line.cellText(cell);
-    }
-    flush();
-
-    QJsonObject object;
-    object["row"] = row;
-    object["segs"] = segments;
-    if (line.marks) object["marks"] = int(line.marks);
-    return object;
 }
 
 class Bridge : public QObject {
@@ -179,23 +128,7 @@ private:
         if (!changed && !full) return;
         m_forceSnapshot = false;
 
-        QJsonArray lines;
-        const bool everything = full || m_frame.full;
-        for (int row = 0; row < int(m_frame.lines.size()); ++row) {
-            if (!everything && row < int(m_frame.dirty.size()) && !m_frame.dirty[row]) continue;
-            lines.append(rowOf(m_frame.lines[size_t(row)], row));
-        }
-
-        QJsonObject message;
-        message["t"] = everything ? "snapshot" : "diff";
-        message["cursor"] = cursorOf(m_frame);
-        message["lines"] = lines;
-        if (everything) {
-            message["rows"] = m_frame.rows;
-            message["cols"] = m_frame.columns;
-            message["alt"] = m_frame.altScreen;
-        }
-        writeLine(message);
+        writeLine(relay::screenjson::frameOf(m_frame, full));
     }
 
     void sendStatus()

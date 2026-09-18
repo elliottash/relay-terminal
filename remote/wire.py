@@ -98,6 +98,9 @@ FORWARDED_EVENTS = frozenset({
     "vision_route", "vision_route_ended", "vision_unavailable",
     # Pane titles and tab labels: what a phone needs to label the panes it is showing.
     "session_title", "tab_label",
+    # The agent typing into the visible program: a phone watching a pane must see every keystroke
+    # the agent sends and every refusal, for the same reason the desktop prints them inline.
+    "program_input", "program_input_refused",
 })
 
 # Never forwarded, with the reason. Key material, provider configuration, desktop-local
@@ -131,6 +134,9 @@ WITHHELD_EVENTS: dict[str, str] = {
     "rewound": "desktop-local administration",
     "fork_state": "opaque conversation state",
     "state_loaded": "opaque conversation state",
+    # Consent to drive a program is granted by a gesture on the desktop pane that owns the
+    # keyboard; a remote client is not that pane, so the grant's state is desktop-local.
+    "program_control": "desktop-local control state",
     "route": "routing internals the phone does not render",
     "route_assisted": "routing internals the phone does not render",
 }
