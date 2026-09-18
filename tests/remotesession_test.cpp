@@ -101,16 +101,20 @@ private slots:
     void bootstrapDecodes() {
         const QByteArray script = "echo relay-bootstrap-ok \"$RELAY_R\"\n";
         const QString line = bootstrapLine(script, 18, 80);
-        QVERIFY(line.startsWith(QStringLiteral(" RELAY_R=")));
-        const int rows = line.section('=', 1, 1).section(' ', 0, 0).toInt();
-        QCOMPARE(rows, rowsFor(18, line.size(), 80));
+        // Nothing in front of `eval`: a shell that is not bash or zsh must be able to parse the
+        // line, or it prints the payload back at the user (#S5SH).
+        QVERIFY(line.startsWith(QStringLiteral(" eval \"$(printf")));
+        QVERIFY(!line.contains(QStringLiteral("RELAY_R=")));   // it is inside the payload now
         if (QStandardPaths::findExecutable("bash").isEmpty() || QStandardPaths::findExecutable("gzip").isEmpty()
             || QStandardPaths::findExecutable("base64").isEmpty())
             QSKIP("bash, gzip and base64 are needed to decode the line");
         QProcess bash;
         bash.start("bash", {"--noprofile", "--norc", "-c", line});
         QVERIFY(bash.waitForFinished(5000));
-        QCOMPARE(bash.readAllStandardOutput(), QByteArray("relay-bootstrap-ok \n").replace(" \n", " " + QByteArray::number(rows) + "\n"));
+        const QByteArray printed = bash.readAllStandardOutput().trimmed();
+        QVERIFY2(printed.startsWith("relay-bootstrap-ok "), printed.constData());
+        // The erase count the script was given is the one the line itself occupies.
+        QCOMPARE(printed.mid(printed.lastIndexOf(' ') + 1).toInt(), rowsFor(18, line.size(), 80));
         // A larger script, so the deflate stream has more than one block to get right.
         QByteArray big;
         for (int i = 0; i < 400; ++i) big += "x=" + QByteArray::number(i * 7919) + "\n";

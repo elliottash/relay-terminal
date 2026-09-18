@@ -211,13 +211,23 @@ int rowsFor(int column, int length, int columns) {
 }
 
 QString bootstrapLine(const QByteArray &script, int promptColumn, int columns) {
-    const QString payload = QString::fromLatin1(gzip(script).toBase64());
+    // The row count lives inside the payload, not in front of the line as `RELAY_R=3 eval …`: a
+    // shell that is not bash or zsh has to be able to *parse* what Relay types, or it answers by
+    // printing the two kilobytes back at the user. fish reads `eval "$(…)"` and then fails on the
+    // sh inside it, in one short message; a prefix assignment it cannot parse at all (#S5SH).
     const auto line = [&](int rows) {
-        return QStringLiteral(" RELAY_R=%1 eval \"$(printf %s '%2' | base64 -d | gzip -dc)\"").arg(rows).arg(payload);
+        const QByteArray payload = "RELAY_R=" + QByteArray::number(rows) + "\n" + script;
+        return QStringLiteral(" eval \"$(printf %s '%1' | base64 -d | gzip -dc)\"")
+            .arg(QString::fromLatin1(gzip(payload).toBase64()));
     };
-    // The row count is part of the line it counts; two passes settle it (the digits change once).
+    // The count is part of what it counts: compressing a longer number can move the line by a byte,
+    // so it settles rather than being computed once. It converges in one or two turns.
     int rows = rowsFor(promptColumn, line(1).size(), columns);
-    rows = rowsFor(promptColumn, line(rows).size(), columns);
+    for (int i = 0; i < 4; ++i) {
+        const int again = rowsFor(promptColumn, line(rows).size(), columns);
+        if (again == rows) break;
+        rows = again;
+    }
     return line(rows);
 }
 

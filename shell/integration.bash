@@ -84,7 +84,10 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
                         fi
                         case $opt in
                             [OSQW]) return 1 ;;
-                            o) case ${value,,} in control[mp]*) return 1 ;; esac ;;
+                            # ssh accepts "-o ' ControlMaster=auto'", so the value is trimmed
+                            # before it is read: Relay's own options go first and first wins.
+                            o) case ${value,,} in [[:space:]]*) value=${value#"${value%%[![:space:]]*}"} ;; esac
+                               case ${value,,} in control[mp]*) return 1 ;; esac ;;
                         esac
                         ;;
                     *) return 1 ;;
@@ -92,16 +95,61 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
             done
         done
         [[ -n $host ]] || return 1
-        # Local only: -G prints the configuration ssh would use, without connecting.
-        config=$(command ssh -G "${args[@]}" 2>/dev/null < /dev/null) || return 1
+        # `ssh -G` prints the configuration ssh would use without connecting — but it is not free:
+        # it runs the user's `Match exec` hooks (a VPN probe, a token touch) and canonicalisation
+        # can make it resolve names, so asking on every ssh would double their hooks and add their
+        # latency. It is only needed to find a ControlMaster or ControlPath the user set, so it is
+        # asked only when their configuration mentions one at all, under a timeout, and the answer
+        # is remembered for the rest of this shell.
+        if [[ -z ${__relay_ssh_configured+set} ]]; then
+            __relay_ssh_configured=
+            local file line pattern
+            local -a files=("$HOME/.ssh/config" /etc/ssh/ssh_config)
+            # An Include can hold the keywords too, so the files it names join the list; one level
+            # is enough in practice and keeps this to a couple of greps (/etc/ssh/ssh_config.d/*).
+            for file in "${files[@]}"; do
+                [[ -r $file ]] || continue
+                while read -r _ line; do
+                    for pattern in $line; do
+                        [[ $pattern == ~* ]] && pattern=$HOME${pattern#\~}
+                        [[ $pattern == /* ]] || pattern=$HOME/.ssh/$pattern
+                        files+=($pattern)
+                    done
+                done < <(grep -iE '^[[:space:]]*include[[:space:]]' "$file" 2>/dev/null)
+            done
+            for file in "${files[@]}"; do
+                [[ -r $file ]] || continue
+                if grep -qiE '^[[:space:]]*(controlmaster|controlpath|match)' "$file" 2>/dev/null; then
+                    __relay_ssh_configured=1
+                    break
+                fi
+            done
+        fi
+        [[ -n $__relay_ssh_configured ]] || return 0
+        if [[ -n ${__relay_ssh_asked[$host]+set} ]]; then
+            return "${__relay_ssh_asked[$host]}"
+        fi
+        # A hook that never returns must not take the shell with it; without `timeout`, no ssh -G.
+        if ! type -P timeout > /dev/null; then
+            __relay_ssh_asked[$host]=0
+            return 0
+        fi
+        config=$(command timeout 5 ssh -G "${args[@]}" 2>/dev/null < /dev/null) || {
+            __relay_ssh_asked[$host]=1
+            return 1
+        }
         while read -r opt value; do
             case $opt in
-                controlmaster) [[ $value == false || $value == no ]] || return 1 ;;
-                controlpath) [[ $value == none ]] || return 1 ;;
+                controlmaster) [[ $value == false || $value == no ]] || { __relay_ssh_asked[$host]=1; return 1; } ;;
+                controlpath) [[ $value == none ]] || { __relay_ssh_asked[$host]=1; return 1; } ;;
+                controlpersist) [[ $value == no || $value == false ]] || { __relay_ssh_asked[$host]=1; return 1; } ;;
             esac
         done <<< "$config"
+        __relay_ssh_asked[$host]=0
         return 0
     }
+
+    declare -A __relay_ssh_asked=()
 
     # `function name` rather than `name()`: an alias called ssh must not expand here.
     function ssh {
@@ -116,6 +164,11 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
     # `-S none` to ssh, which turns sharing off, and it cannot work over a shared connection anyway
     # (the proxy that reports the address never runs). So an unspecified mode becomes `remote`,
     # which reads the address from $SSH_CONNECTION on the server; an explicit `proxy` is left alone.
+    #
+    # `remote` is the server's own idea of its address, which is not reachable from here when the
+    # host is behind NAT or reached through a forwarded port: mosh then sits waiting for UDP that
+    # never comes. Sharing is not worth breaking a session that worked before Relay, so a shared
+    # mosh that dies quickly is run again exactly as the user typed it, with a line saying so.
     function mosh {
         local -a extra=()
         local arg next= mode=
@@ -141,7 +194,19 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
                 esac
             fi
         fi
-        command mosh ${extra[@]+"${extra[@]}"} "$@"
+        if [[ ${#extra[@]} -eq 0 ]]; then
+            command mosh "$@"
+            return
+        fi
+        local started=$SECONDS status=0
+        command mosh "${extra[@]}" "$@" || status=$?
+        # A session that lived a while and then ended is the user's business, whatever its status.
+        if (( status != 0 && SECONDS - started < 20 )); then
+            printf 'relay: mosh could not use the shared connection; retrying as you typed it\n' >&2
+            command mosh "$@"
+            return
+        fi
+        return "$status"
     }
 fi
 

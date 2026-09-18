@@ -4,6 +4,10 @@ case ${RELAY_R-} in ''|0*|*[!0-9]*) ;; *) printf '\033[%sA\r\033[J' "$RELAY_R";;
 if [ -z "${__relay_r-}" ]; then
 __relay_r=1
 __relay_r_h=${HOSTNAME:-${HOST:-$(hostname 2>/dev/null)}}
+# The host names itself; a name with an escape in it would close the OSC early and hand the
+# terminal a sequence of the host's choosing, so only a host name's own characters survive.
+case $__relay_r_h in *[!A-Za-z0-9.-]*) __relay_r_h=$(printf %s "$__relay_r_h" | tr -cd 'A-Za-z0-9.-');; esac
+[ -n "$__relay_r_h" ] || __relay_r_h=remote
 # A multiplexer eats an unwrapped OSC. All we send is ESC+OSC+BEL, so tmux's ESC doubling is one
 # more ESC in the prefix, decided once here, spelt as printf, PS1 and PS0 all expand it.
 __relay_r_e= __relay_r_f= __relay_r_l=

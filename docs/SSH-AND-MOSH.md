@@ -51,12 +51,23 @@ sharing so the agent can reuse the login:
   socket path short. The wrappers only use it when it exists, is absolute, is at most 48 bytes (a
   Unix socket path is 108, and ssh adds `/`, 40 for `%C` and a 17-byte temporary suffix) and has no
   character ssh's `%` expansion or mosh's word splitting would read (`[-A-Za-z0-9_.+@/]` only).
-- `command ssh` / `\ssh` bypass it, as with any shell function.
+- `command ssh` bypasses it, as with any shell function — `\ssh` does not, because a backslash
+  suppresses an alias, not a function.
+- Asking `ssh -G` what the user configured is not free: it runs their `Match exec` hooks (a VPN
+  probe, a token touch) and can resolve names, so it is asked only when their configuration
+  mentions `ControlMaster`, `ControlPath` or `Match` at all (`Include`s are followed one level),
+  under `timeout 5`, and the answer is kept for the rest of that shell. A user with none of those
+  keywords — most users — pays nothing.
+- mosh's shared connection needs `--experimental-remote-ip=remote`, which reads the server's own
+  idea of its address. That address is unreachable for a host behind NAT or a forwarded port, so a
+  shared mosh that dies within twenty seconds is run again exactly as the user typed it, with one
+  line saying so. An explicit `--ssh` or `--experimental-remote-ip` is always left alone.
 
 ### 2. The GUI's picture of a remote session (`src/Pane.h`)
 
 When the foreground program is `ssh`/`mosh`/`mosh-client` (after 300 ms, as before), the pane runs
-`ssh -G <the program's own arguments>` once, locally and without network, and keeps a
+`ssh -G <the program's own arguments>` once per login (capped at three seconds, since the user's
+`Match exec` hooks run inside it), and keeps a
 `RemoteLogin` (`Pane::beginLogin`, rules in `src/RemoteSession.h`): the destination as typed,
 resolved hostname, user, port, control path, whether that socket exists (`reachable`), the remote
 cwd (any OSC 7 while the login runs), whether the remote shell integration is live (OSC 133 marks
@@ -77,11 +88,18 @@ host is not this machine no longer moves the pane's directory either (ssh inside
 ### 3. The remote integration (`shell/remote-integration.sh`)
 
 A small bash/zsh script: OSC 7 with the real hostname, OSC 133 A/B/C/D, and a `Ctrl+X Ctrl+P` no-op
-binding so Relay can ask the remote line editor to redraw its prompt. It installs nothing and edits
+binding so Relay can ask the remote line editor to redraw its prompt. The host's own name is
+stripped to a host name's characters before it goes into OSC 7, so a name with an escape in it
+cannot close the sequence early and hand the terminal one of the host's choosing (the iTerm2
+`it2ssh` class, in the research notes). It installs nothing and edits
 no file. Relay types it into the remote shell once per login as one line with a leading space
 (kept out of history by `HISTCONTROL=ignorespace`/`HIST_IGNORE_SPACE`, which the script also sets):
 
-    ␠RELAY_R=<rows> eval "$(printf %s '<base64 of gzip of the script>' | base64 -d | gzip -dc)"
+    ␠eval "$(printf %s '<base64 of gzip of RELAY_R=<rows> and the script>' | base64 -d | gzip -dc)"
+
+The row count travels inside the payload rather than in front of the line: a shell that is neither
+bash nor zsh must at least be able to parse what Relay types, or it answers by printing the two
+kilobytes back at the user. fish reads `eval "$(…)"` and then fails on the sh inside it, briefly.
 
 The script first erases the rows the typed line and the old prompt took, so the session looks as if
 the prompt had simply been redrawn. Nothing happens on shells other than bash and zsh, or in a
