@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Relay Terminal</title>
-  <meta name="description" content="Relay is a Linux terminal with its own terminal engine, one prompt box for commands and requests, and bring-your-own-key agents. No telemetry, no accounts.">
+  <title>Relay Terminal — one prompt for your shell and your coding agent</title>
+  <meta name="description" content="A Linux terminal for agentic coding on your own API keys. One prompt box: commands run in your shell, everything else goes to the agent. No account, no cloud, no telemetry.">
   <meta name="theme-color" content="#0f1115">
-  <meta property="og:title" content="Relay Terminal">
-  <meta property="og:description" content="A Linux terminal with its own engine, one prompt box for commands and requests, and bring-your-own-key agents.">
+  <meta property="og:title" content="Relay Terminal — one prompt for your shell and your coding agent">
+  <meta property="og:description" content="A Linux terminal for agentic coding on your own API keys.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="assets/agent-inline.png">
   <link rel="icon" href="assets/relay.svg" type="image/svg+xml">
@@ -35,77 +35,91 @@
 
   <main id="main">
     <section class="hero" aria-labelledby="hero-title">
-      <div class="wrap hero-inner">
-        <img class="hero-logo" src="assets/relay.svg" alt="" width="88" height="88">
-        <p class="badge"><span class="dot" aria-hidden="true"></span>Beta · Linux</p>
-        <h1 id="hero-title">One box: type a command, or ask in plain English</h1>
-        <p class="lede">Relay runs your shell commands and sends your questions to a coding agent on
-          <strong>your own API key</strong> — and shows you which it picked before you press Enter. The agent's
-          commands, diffs and answers print in the terminal, in a real terminal Relay renders itself.</p>
-        <div class="cta">
-          <a class="button primary" href="#install">Build from source</a>
-          <a class="button" href="https://github.com/elliottash/relay-terminal">Source on GitHub</a>
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <h1 id="hero-title">One prompt for your shell and your coding agent</h1>
+          <p class="lede">A Linux terminal for agentic coding that runs on your own API keys. Commands go to
+            your shell, everything else goes to the agent, and Relay shows you which before you press Enter.
+            No account, no cloud, no telemetry.</p>
+          <div class="cta">
+            <a class="button primary" href="#install">Build from source</a>
+            <a class="button" href="https://github.com/elliottash/relay-terminal">Source on GitHub</a>
+          </div>
+          <p class="cta-note">Packaged builds (<code>.deb</code>, AUR) exist but are not published yet, so
+            today it is a source build. The agent runs commands as your user without asking each time —
+            <a href="#privacy">read this first</a>.</p>
         </div>
-        <p class="cta-note">Packaged builds (<code>.deb</code>, AUR) are prepared but not published yet —
-          for now it is a source build. The agent runs commands as your user, without asking each time:
-          <a href="#privacy">read this first</a>.</p>
-      </div>
-      <div class="wrap">
-        <figure class="shot hero-shot">
-          <img src="assets/agent-inline.png" width="1320" height="860"
-               alt="Relay window: make fails, the request 'why does the build fail?' goes to the agent, which runs make, writes a diff for greet.c and answers, all printed in the terminal above the prompt box.">
-        </figure>
+
+        <div class="screen" role="img" aria-label="A Relay session: the command make fails, the question 'why does the build fail?' goes to the agent, which runs make, patches greet.c and explains the missing semicolon. The prompt box below shows the destination changing from terminal to agent.">
+          <div class="screen-body">
+            <p class="ln"><span class="sh">$</span> make</p>
+            <p class="ln out">greet.c:7:3: error: expected ';' before 'return'</p>
+            <p class="ln out dim">make: *** [greet] Error 1</p>
+            <p class="ln"><span class="ag">✦</span> why does the build fail?</p>
+            <p class="ln ag-out">Missing semicolon after <code>printf(...)</code> on line 6. Patched <code>greet.c</code> and rebuilt — it compiles.</p>
+            <p class="ln dim">2 tool calls · 1.4 s</p>
+          </div>
+          <div class="screen-input">
+            <p class="input-line"><span class="caret caret-shell" aria-hidden="true"></span> git status</p>
+            <p class="input-meta"><span class="chip">~/project</span><span class="chip sh-chip">terminal</span></p>
+          </div>
+          <div class="screen-input">
+            <p class="input-line"><span class="caret caret-agent" aria-hidden="true"></span> rebase this onto main and fix the conflicts</p>
+            <p class="input-meta"><span class="chip">~/project</span><span class="chip ag-chip">agent</span></p>
+          </div>
+        </div>
       </div>
     </section>
 
     <section id="features" aria-labelledby="features-title">
       <div class="wrap">
         <h2 id="features-title">What it does</h2>
-        <ul class="grid features">
-          <li>
+        <p class="legend"><span class="sh">›</span> the terminal half <span class="ag">✦</span> the agent half</p>
+        <ul class="features">
+          <li class="sh">
             <h3>A real terminal, rendered by Relay</h3>
             <p>vim, htop, ssh, tmux, Claude Code and Codex run in it as they do anywhere else. Relay renders
               the terminal itself instead of embedding someone else's: 200 MB of output takes about 1.3 s
               against Konsole's 3.6 s on the same machine. Shell integration (OSC 7 and OSC 133) tracks the
               working directory and marks prompts, commands and exit codes.</p>
           </li>
-          <li>
+          <li class="sh">
             <h3>The prompt box is the only input</h3>
             <p>Clicking the terminal selects text, scrolls and follows links; it never takes the keyboard.
               Full-screen programs such as vim, less and ssh offer <strong>Take control (Ctrl+H)</strong>
               instead of grabbing it.</p>
           </li>
-          <li>
+          <li class="ag">
             <h3>The agent acts for real</h3>
             <p>It runs commands as your user, unsandboxed, without asking for each one, and writes files inside
               the workspace. Every action prints as it happens and Esc stops it, but nothing is rolled back.
               Start with a project you can afford to break.</p>
           </li>
-          <li>
+          <li class="sh">
             <h3>Passwords stay in the box</h3>
             <p>When a program turns echo off, the prompt box becomes a masked field and writes the line
               straight to that program. The text never enters prompt history, the queue, session files, logs
               or any model prompt, and it is wiped as soon as it is sent.</p>
           </li>
-          <li>
+          <li class="ag">
             <h3>Command or request, decided locally</h3>
             <p><code>git status</code> runs in the shell; <code>why is this build failing?</code> goes to the
               agent. Type <code>!</code> or <code>*</code> to force one line, Ctrl+I to cycle auto → terminal →
               agent. The caret and the syntax colouring show where the line is going before you press Enter.</p>
           </li>
-          <li>
+          <li class="ag">
             <h3>Nothing is silently dropped</h3>
             <p>Every request you make is tracked, and multi-part asks are split into tasks. A chip counts them
               — <code>Tasks 3/5 (1 deferred, 1 failed)</code> — and the list shows your words next to what the
               agent actually did.</p>
           </li>
-          <li>
+          <li class="ag">
             <h3>Search what you have already done</h3>
             <p>Ctrl+Shift+O searches every saved conversation <em>and</em> Relay's terminal history: prompts,
               answers, tool calls, the commands Relay ran and their output. Ctrl+F searches the pane in front
               of you. The index is a local SQLite file.</p>
           </li>
-          <li>
+          <li class="ag">
             <h3>One provider choice, three models</h3>
             <p>Pick a provider and Relay fills in three tiers from its own line-up — on GLM that is
               <strong>glm-5.3</strong> for agent turns, <strong>glm-5.3-flash</strong> for quick work and a
@@ -113,31 +127,31 @@
               key for GLM, Kimi, Kimi Code, MiniMax, OpenRouter, OpenAI, Anthropic or Gemini; the API keys
               window has a Test button and keeps keys in your system keyring.</p>
           </li>
-          <li>
+          <li class="sh">
             <h3>Reopen where you left off</h3>
             <p>Quit and start again: windows, tabs and panes come back in their directories, on the same
               models, with their conversations reattached. The shells are new; nothing is re-run.</p>
           </li>
-          <li>
+          <li class="ag">
             <h3>Dictate a prompt</h3>
             <p>Hold Right Alt, or click the microphone chip, and Relay records with whatever capture tool your
               desktop has. The transcript (an OpenRouter key does the work) is inserted at the cursor and never
               submitted for you.</p>
           </li>
-          <li>
+          <li class="sh">
             <h3>Bash today, other shells through the terminal</h3>
             <p>Relay's prompt box starts Bash in each pane, and the optional integration script ships for Bash
               and Zsh. Fish and other shells run the usual way — start them in the terminal and take the
               keyboard with Ctrl+H; you lose the routing and the marks, not the shell.</p>
           </li>
-          <li>
+          <li class="sh">
             <h3>Panes, tabs and the keyboard</h3>
             <p>Each pane has its own shell, prompt and conversation. Move panes by dragging the grip or with
               Ctrl+Alt+arrows, open folders and file previews beside the terminal, and drive everything from
               the actions palette. Keymap presets for Relay, Warp, VS Code and Konsole; Ctrl+? lists every
               shortcut.</p>
           </li>
-          <li>
+          <li class="plain">
             <h3>No telemetry, no account</h3>
             <p>No analytics, no crash reporting, no sign-in and no Relay server. The only network traffic is to
               the provider whose key you entered. GPL-3.0-or-later.</p>
