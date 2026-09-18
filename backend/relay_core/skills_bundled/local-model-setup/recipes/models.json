@@ -1,0 +1,394 @@
+{
+  "verified": "2026-09-18",
+  "how_to_read_this": [
+    "Every listing was checked against the publisher's own page on the `verified` date. A catalog of",
+    "local models is out of date in weeks: before you propose one, open its Ollama library page or its",
+    "Hugging Face repo and confirm the tag and the size are still there, and say that you did.",
+    "status 'verified-here' means the model was actually run on this machine, through Relay, and passed",
+    "scripts/relay-local.py smoke. status 'unverified-listing' means the page says so and nothing more.",
+    "The smoke test decides, not this file. download_gb is what comes down the wire; memory_gb is what",
+    "the weights hold once loaded and is null wherever the publisher does not state it - the context",
+    "window (-c / num_ctx) often costs more than the weights do.",
+    "tiers are the machine's usable memory in GB (unified memory counts; leave the desktop 40-60 GB on a",
+    "128 GB machine). A model in a lower tier runs on a bigger machine too."
+  ],
+  "tiers": {
+    "8": [
+      {
+        "name": "Granite 4.2 8B",
+        "publisher": "IBM",
+        "ollama": "granite4.2:8b",
+        "huggingface": "ibm-granite/granite-4.2-8b-GGUF",
+        "quant": "Q4_K_M",
+        "download_gb": 5.3,
+        "memory_gb": null,
+        "licence": "Apache-2.0",
+        "context": 131072,
+        "runtimes": [
+          "ollama",
+          "llamacpp",
+          "vllm",
+          "sglang"
+        ],
+        "flags": {
+          "vllm": "--enable-auto-tool-choice --tool-call-parser qwen3_coder",
+          "note": "Tool calls are emitted as XML (<tool_call><function=...><parameter=...>), not JSON. Reasoning needs the granite_thinking_parser.py plugin on vLLM."
+        },
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "warning": "The ollama.com/library/granite4.2 page shows no `tools` capability badge, unlike granite4 and granite4.1. Run the smoke test before promising tool calling through Ollama.",
+        "sources": [
+          "https://huggingface.co/ibm-granite/granite-4.2-8b",
+          "https://ollama.com/library/granite4.2"
+        ],
+        "status": "unverified-listing",
+        "verified": "2026-09-18"
+      },
+      {
+        "name": "Ornith 1.5 9B",
+        "publisher": "ornith-ai",
+        "ollama": "ornith-1.5:9b",
+        "huggingface": "ornith-ai/Ornith-1.5-9B-GGUF",
+        "quant": "Q4_K_M",
+        "download_gb": 5.8,
+        "memory_gb": null,
+        "licence": "MIT (frontmatter; the repo ships no LICENSE file and the license_link 404s)",
+        "context": 262144,
+        "runtimes": [
+          "ollama",
+          "llamacpp",
+          "vllm",
+          "sglang"
+        ],
+        "flags": {
+          "vllm": "--enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3",
+          "note": "Tool arguments are XML per-parameter tags, not JSON. Thinking is on by default and lands in content as <think> unless a reasoning parser splits it (llama.cpp: --reasoning-format deepseek)."
+        },
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "top_k": 20,
+          "min_p": 0.0,
+          "presence_penalty": 1.5
+        },
+        "warning": "ollama.com has a separate, older `ornith` entry as well as `ornith-1.5`. Pull the tag deliberately.",
+        "sources": [
+          "https://huggingface.co/ornith-ai/Ornith-1.5-9B",
+          "https://ollama.com/library/ornith-1.5"
+        ],
+        "status": "unverified-listing",
+        "verified": "2026-09-18"
+      }
+    ],
+    "16": [
+      {
+        "name": "gpt-oss-20b",
+        "publisher": "OpenAI",
+        "ollama": "gpt-oss:20b",
+        "huggingface": "ggml-org/gpt-oss-20b-GGUF",
+        "quant": "MXFP4 (the weights ship quantised; this is not a quant choice)",
+        "download_gb": 14,
+        "memory_gb": 16,
+        "licence": "Apache-2.0",
+        "context": 131072,
+        "runtimes": [
+          "ollama",
+          "llamacpp",
+          "vllm",
+          "lmstudio"
+        ],
+        "flags": {
+          "note": "Trained on OpenAI's harmony response format and, in the card's words, will not work correctly without it. Ollama, vLLM, llama.cpp and Transformers apply it for you; a hand-rolled client must not. Reasoning effort is low/medium/high."
+        },
+        "sampling": null,
+        "sources": [
+          "https://huggingface.co/openai/gpt-oss-20b",
+          "https://github.com/openai/harmony",
+          "https://ollama.com/library/gpt-oss"
+        ],
+        "status": "unverified-listing",
+        "verified": "2026-09-18"
+      },
+      {
+        "name": "Ternary Bonsai 2 27B",
+        "publisher": "Prism ML",
+        "ollama": null,
+        "huggingface": "prism-ml/Ternary-Bonsai-2-27B-gguf",
+        "file": "Ternary-Bonsai-2-27B-PQ2_0.gguf",
+        "quant": "PQ2_0 (2.13 bpw); PTQ1_0 is 5.95 GB",
+        "download_gb": 7.2,
+        "memory_gb": 17,
+        "licence": "Apache-2.0",
+        "context": 262144,
+        "runtimes": [
+          "llamacpp-prism-fork"
+        ],
+        "flags": {
+          "llamacpp": "--jinja --reasoning-format deepseek -np 1",
+          "note": "Runs on the PrismML fork only. Stock llama.cpp rejects PQ2_0/PTQ1_0 outright, and loads a plain Q2_0 build of the same weights without a warning and produces garbage. Upstream support is an open PR, not merged."
+        },
+        "sampling": {
+          "instruct": {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 1.5
+          },
+          "thinking": {
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "top_k": 20,
+            "min_p": 0.0
+          }
+        },
+        "measured_here": "DGX Spark (GB10, aarch64), -c 131072: ~17 GiB resident awake, ~3 GiB asleep, 1.6 s to wake, ~24 tok/s decode. smoke 2026-09-18: checks 1,2,3,5 pass, check 4 fails (the server's parser turns a literal <tool_call> in prose into a tool call).",
+        "sources": [
+          "https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf",
+          "https://github.com/PrismML-Eng/llama.cpp"
+        ],
+        "status": "verified-here",
+        "verified": "2026-09-18"
+      }
+    ],
+    "24": [
+      {
+        "name": "Muse Glimmer 30B",
+        "publisher": "Meta (huggingface.co/meta-models)",
+        "ollama": "muse-glimmer:30b",
+        "huggingface": "meta-models/Muse-Glimmer-30B-GGUF",
+        "quant": "Q4_K_M",
+        "download_gb": 18,
+        "memory_gb": 17,
+        "licence": "Apache-2.0",
+        "context": 131072,
+        "runtimes": [
+          "ollama",
+          "llamacpp",
+          "vllm",
+          "sglang"
+        ],
+        "flags": {
+          "llamacpp": "--jinja (the card calls it non-optional); needs a build of b10353 or newer; never stop on <|eom|>; register with --tool-arguments-as-object: the model's chat template raises \"requires tool_call.function.arguments to be a dict (mapping)\" on the JSON-string arguments a client replays, so the second turn of a tool conversation fails without it",
+          "note": "Reasoning cannot be turned off, only tuned with reasoning_strength. Dense, ~29.6B, with a vision tower that needs the separate mmproj file only for images. One tool call per turn: Meta's prompting guide says parallel tool calls are not supported, which matches Relay's default of parallel_tool_calls: false.",
+          "ollama": "no endpoint flags (Ollama renders the template itself)"
+        },
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "top_k": 64
+        },
+        "measured_here": "Through Ollama (muse-glimmer:latest, 18 GB, ~17 GiB resident, CONTEXT 131072) on 2026-09-18: smoke 5/5, no endpoint flags needed. Slow on this machine: 18-100 s per check. Not run here on llama.cpp: the --tool-arguments-as-object requirement comes from the template's own text, not from a run.",
+        "sources": [
+          "https://huggingface.co/meta-models/Muse-Glimmer-30B",
+          "https://ollama.com/library/muse-glimmer",
+          "https://developer.meta.com/ai/models/muse-glimmer/",
+          "https://dev.meta.ai/docs/muse-glimmer/prompting",
+          "https://huggingface.co/meta-models/Muse-Glimmer-30B/blob/main/chat_template.jinja"
+        ],
+        "status": "verified-here",
+        "verified": "2026-09-18"
+      },
+      {
+        "name": "Qwen3.8 27B",
+        "publisher": "Qwen",
+        "ollama": "qwen3.8:27b",
+        "huggingface": "Qwen/Qwen3.8-27B",
+        "quant": "Q4_K_M (Ollama tag; the Qwen org publishes no official GGUF for this generation)",
+        "download_gb": 18,
+        "memory_gb": null,
+        "licence": "Apache-2.0",
+        "context": 262144,
+        "runtimes": [
+          "ollama",
+          "vllm",
+          "sglang"
+        ],
+        "flags": {
+          "note": "The model card documents thinking (enable_thinking, reasoning_effort xhigh/medium/low) but says nothing at all about tool calling: no parser flag, no argument format. Multimodal. Treat tool use as unproven until the smoke test says otherwise."
+        },
+        "sampling": {
+          "instruct": {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "presence_penalty": 1.5
+          },
+          "thinking": {
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "top_k": 20
+          }
+        },
+        "sources": [
+          "https://huggingface.co/Qwen/Qwen3.8-27B",
+          "https://ollama.com/library/qwen3.8/tags"
+        ],
+        "status": "unverified-listing",
+        "verified": "2026-09-18"
+      },
+      {
+        "name": "Ornith 1.5 35B-A3B",
+        "publisher": "ornith-ai",
+        "ollama": "ornith-1.5:35b",
+        "huggingface": "ornith-ai/Ornith-1.5-35B-A3B-GGUF",
+        "quant": "Q4_K_M",
+        "download_gb": 21.7,
+        "memory_gb": null,
+        "licence": "MIT (frontmatter; no LICENSE file in the repo)",
+        "context": 262144,
+        "runtimes": [
+          "ollama",
+          "llamacpp",
+          "vllm",
+          "sglang"
+        ],
+        "flags": {
+          "vllm": "--enable-auto-tool-choice --tool-call-parser qwen3_xml --reasoning-parser qwen3",
+          "note": "3B active of 35B: fast for its size. XML tool arguments, as the 9B."
+        },
+        "sampling": {
+          "temperature": 0.6,
+          "top_p": 0.95,
+          "top_k": 20
+        },
+        "warning": "The 9B and the 35B have different publisher sampling recipes. Do not copy one to the other.",
+        "sources": [
+          "https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B",
+          "https://ollama.com/library/ornith-1.5"
+        ],
+        "status": "unverified-listing",
+        "verified": "2026-09-18"
+      }
+    ],
+    "48": [
+      {
+        "name": "Nemotron 3.5 Lightning 30B-A3B",
+        "publisher": "NVIDIA",
+        "ollama": "nemotron-3.5-lightning:30b",
+        "huggingface": "ggml-org/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF",
+        "quant": "Q4_0 (18.9 GB) on Hugging Face; the Ollama tag is 25 GB",
+        "download_gb": 25,
+        "memory_gb": null,
+        "licence": "OpenMDW-1.1 (not Apache-2.0, not the NVIDIA Open Model License)",
+        "context": 1048576,
+        "runtimes": [
+          "ollama",
+          "llamacpp",
+          "vllm",
+          "sglang"
+        ],
+        "flags": {
+          "vllm": "--enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser nemotron_v3 (vLLM 0.27.1+, --mamba-backend flashinfer)",
+          "note": "Interleaved Mamba-2 + MoE, 3B active. The 1M window is the reason for the tier: the weights are small, the KV cache is not. Serve it at 256K unless the user asks for more."
+        },
+        "sampling": {
+          "temperature": 1.0,
+          "top_p": 0.95
+        },
+        "sources": [
+          "https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+          "https://ollama.com/library/nemotron-3.5-lightning"
+        ],
+        "status": "unverified-listing",
+        "verified": "2026-09-18"
+      }
+    ],
+    "128": [
+      {
+        "name": "Laguna S 2.1",
+        "publisher": "poolside",
+        "ollama": "laguna-s-2.1:nvfp4",
+        "huggingface": "poolside/Laguna-S-2.1-GGUF",
+        "quant": "NVFP4 (66 GB). Q4_K_M is 96 GB - poolside's own README table says 68 GB, and the blob listing, the tree and Ollama all say 96 GB.",
+        "download_gb": 66,
+        "memory_gb": null,
+        "licence": "OpenMDW-1.1",
+        "context": 262144,
+        "runtimes": [
+          "ollama",
+          "vllm",
+          "sglang",
+          "llamacpp (poolside fork, branch laguna)"
+        ],
+        "flags": {
+          "vllm": "--enable-auto-tool-choice --tool-call-parser poolside_v1 --reasoning-parser poolside_v1",
+          "llamacpp": "--jinja",
+          "note": "118B total, ~8B active, built for agentic coding. The GGUFs ship configured for 256K and poolside recommends staying there; 1M needs YaRN flags and costs quality. Ollama states a 128 GB unified-memory minimum, 13-18 tok/s, and OLLAMA_LOAD_TIMEOUT=20m. Mainline llama.cpp support for S 2.1 specifically is unconfirmed."
+        },
+        "sampling": {
+          "1M_config_only": {
+            "temperature": 0.7,
+            "top_p": 0.95
+          }
+        },
+        "sources": [
+          "https://huggingface.co/poolside/Laguna-S-2.1",
+          "https://ollama.com/library/laguna-s-2.1"
+        ],
+        "status": "unverified-listing",
+        "verified": "2026-09-18"
+      },
+      {
+        "name": "Qwen3.8-Flash-Next",
+        "publisher": "Qwen",
+        "ollama": "qwen3.8-flash-next:125b-a6b-nvfp4",
+        "huggingface": "Qwen/Qwen3.8-Flash-Next",
+        "quant": "NVFP4 (105 GB). Q4_K_M is 120 GB, which leaves a 128 GB machine nothing.",
+        "download_gb": 105,
+        "memory_gb": null,
+        "licence": "qwen-community-1.0 (license: other - NOT Apache-2.0)",
+        "context": 262144,
+        "runtimes": [
+          "ollama",
+          "vllm",
+          "sglang"
+        ],
+        "flags": {
+          "note": "125B with 6B activated, plus n-gram embeddings. The card documents thinking but not tool calling. Ollama calls it an experimental preview of the architecture behind Qwen4. At 105 GB on a 128 GB machine the desktop has almost nothing left: warn the user and check free memory first."
+        },
+        "sampling": {
+          "instruct": {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 20,
+            "presence_penalty": 1.5
+          },
+          "thinking": {
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "top_k": 20
+          }
+        },
+        "sources": [
+          "https://huggingface.co/Qwen/Qwen3.8-Flash-Next",
+          "https://ollama.com/library/qwen3.8-flash-next"
+        ],
+        "status": "unverified-listing",
+        "verified": "2026-09-18"
+      }
+    ]
+  },
+  "excluded": [
+    {
+      "name": "Llama 4",
+      "why": "The Llama 4 Community License is not an open licence (700M-MAU trigger, naming and attribution rules) and the repos are gated; the smallest local build is 67 GB and neither the card nor the Ollama page mentions tool calling."
+    },
+    {
+      "name": "Phi-4",
+      "why": "MIT and small, but the card never mentions tool or function calling and its chat template defines no tool role: there is no native tool calling to build an agent on."
+    },
+    {
+      "name": "BitNet b1.58 2B-4T",
+      "why": "4K context, no tool calling documented, and the efficiency only exists in the separate bitnet.cpp runtime, which offers no OpenAI-compatible server."
+    }
+  ],
+  "left_out_as_unverified": [
+    "Whether llama.cpp's raw-text fallback for Muse Glimmer (its issue 27025, about one tool call in five) keeps the <atem:function_calls> wrapper: the issue shows the error, not the text. Relay's recovery accepts it with or without.",
+    "Memory held while loaded, for most entries: publishers give download sizes and sometimes a VRAM target, rarely a resident figure.",
+    "Tool-calling mechanics for both Qwen3.8 models, and general sampling for gpt-oss-20b and Laguna S 2.1: absent from the cards.",
+    "Minimum llama.cpp and Ollama versions for Ornith 1.5, Granite 4.2 and Nemotron 3.5 Lightning."
+  ]
+}

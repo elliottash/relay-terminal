@@ -1,0 +1,25 @@
+# relay-local.py smoke against the two model servers on this machine, 2026-09-18
+# Implementer run for the local-model-setup skill. Registry: ~/.config/relay/local-models.json
+
+$ scripts/relay-local.py smoke http://127.0.0.1:8080 --model bonsai-2-27b
+http://127.0.0.1:8080/v1  bonsai-2-27b
+  [pass] the server answers at all 2.0s
+  [pass] a native tool call with valid JSON arguments 2.9s
+  [pass] two consecutive tool calls, then a plain answer 6.0s
+  [FAIL] tool and reasoning tags survive inside an answer 3.6s
+         the tags in the question were parsed as a tool call, lookup_number({"key":"key"}): the server's parser fires on text the user can type
+  [pass] token usage is reported and plausible
+  note: last turn: 385 prompt tokens for 631 characters
+4/5 checks passed. Read the failures above before registering it.
+exit=1
+
+$ scripts/relay-local.py smoke http://127.0.0.1:11434 --model muse-glimmer:latest
+http://127.0.0.1:11434/v1  muse-glimmer:latest
+  [pass] the server answers at all 18.8s
+  [pass] a native tool call with valid JSON arguments 11.2s
+  [pass] two consecutive tool calls, then a plain answer 20.4s
+  [pass] tool and reasoning tags survive inside an answer 43.9s
+  [pass] token usage is reported and plausible
+  note: last turn: 442 prompt tokens for 631 characters
+5/5 checks passed.
+exit=0

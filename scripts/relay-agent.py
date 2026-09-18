@@ -6,7 +6,7 @@ import getpass
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
-from relay_core import keystore, localmodels
+from relay_core import keystore, localmodels, skills as skills_index
 from relay_core.agent import Agent
 from relay_core.presets import PRESETS
 from relay_core.session_protocol import provider_config
@@ -24,6 +24,8 @@ parser.add_argument('--save-key', action='store_true', help='save an entered key
 parser.add_argument('--list', action='store_true', help='list presets and whether a key is stored')
 parser.add_argument('--prompt', help='ask this once and exit, instead of reading prompts from the terminal')
 parser.add_argument('--yes', action='store_true', help='skip the confirmation (for scripted checks)')
+parser.add_argument('--no-skills', action='store_true',
+                    help='do not offer the user and bundled skills (load_skill / read_skill_file)')
 args = parser.parse_args()
 local = localmodels.find(args.provider)
 if args.provider not in PRESETS and args.provider != 'custom' and local is None:
@@ -85,7 +87,13 @@ def emit(event):
     elif kind in {'error','status','done','cancelled'}:
         print('\n[' + kind + '] ' + event.get('text',''))
 
-agent = Agent(config, args.workspace, emit, preset_id=args.provider if args.provider != 'custom' else None)
+# The same skill index a pane gets (the user's directories plus Relay's bundled ones), so a skill
+# can be checked here without the GUI.
+index = None if args.no_skills else skills_index.from_request(None, args.workspace)
+if index is not None and index.skills:
+    print(f'Skills: {len(index.skills)} available ({", ".join(list(index.skills)[:6])}…)')
+agent = Agent(config, args.workspace, emit, skills=index,
+              preset_id=args.provider if args.provider != 'custom' else None)
 if args.prompt:
     agent.ask(args.prompt)
     print()

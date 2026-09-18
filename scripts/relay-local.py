@@ -7,6 +7,7 @@
   relay-local.py list                   the saved endpoints
   relay-local.py add --base-url URL     save one; --detect fills model, server and window
   relay-local.py remove ID
+  relay-local.py smoke [URL]            five checks that decide whether it can drive the agent
   relay-local.py unit                   print a systemd user unit for llama-server (installs nothing)
 
 The registry is $XDG_CONFIG_HOME/relay/local-models.json, the file the worker reads. Nothing here
@@ -17,7 +18,7 @@ import json
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
-from relay_core import localmodels
+from relay_core import localmodels, localsmoke
 
 UNIT = """\
 # ~/.config/systemd/user/llama-server@.service
@@ -81,8 +82,18 @@ def main() -> int:
     add.add_argument('--top-p', type=float)
     add.add_argument('--tool-text-recovery', action='store_true',
                      help='recover tool calls the model writes as text (off by default; see the docs)')
+    add.add_argument('--tool-arguments-as-object', action='store_true',
+                     help='the model writes tool arguments as a JSON object instead of a string')
     add.add_argument('--detect', action='store_true', help='ask the server for model, kind and window')
     sub.add_parser('remove').add_argument('id')
+    smoke = sub.add_parser('smoke')
+    smoke.add_argument('url', nargs='?', default='http://127.0.0.1:8080/v1')
+    smoke.add_argument('--model', help='the served model id; taken from the endpoint or the probe when omitted')
+    smoke.add_argument('--id', help='a saved endpoint id, so its own settings are the ones tested')
+    smoke.add_argument('--max-tokens', type=int, default=localsmoke.DEFAULT_MAX_TOKENS)
+    smoke.add_argument('--timeout', type=float, default=localsmoke.DEFAULT_STALL_S,
+                       help='idle deadline in seconds (default %(default)s)')
+    smoke.add_argument('--json', action='store_true')
     sub.add_parser('unit')
     args = parser.parse_args()
 
@@ -112,6 +123,11 @@ def main() -> int:
         if not items and not args.json:
             print(f'No local endpoints saved ({localmodels.config_path()}).')
         return 0
+    if args.command == 'smoke':
+        result = localsmoke.smoke(args.url, args.model or '', endpoint_id=args.id,
+                                  max_tokens=args.max_tokens, stall_timeout=args.timeout)
+        print(json.dumps(result, indent=2)) if args.json else print(localsmoke.report(result))
+        return localsmoke.exit_code(result)
     if args.command == 'remove':
         removed = localmodels.delete(localmodels.make_id(args.id))
         print('Removed.' if removed else 'No such endpoint.')
@@ -127,6 +143,8 @@ def main() -> int:
         spec['extra'] = extra
     if args.tool_text_recovery:
         spec['tool_text_recovery'] = True
+    if args.tool_arguments_as_object:
+        spec['tool_arguments_as_object'] = True
     try:
         if args.detect:
             spec, found = localmodels.detect(spec, wait=localmodels.DETECT_WAIT_S)

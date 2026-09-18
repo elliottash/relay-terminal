@@ -250,7 +250,10 @@ class DiscoveryTests(unittest.TestCase):
             write(ws / '.claude/skills/claude-project/SKILL.md', skill.format('claude project'))
             with mock.patch.dict(os.environ, {'HOME': str(home)}):
                 index = skills.from_request(None, str(ws))
-                self.assertEqual(sorted(index.skills), ['bundled-only', 'claude-project', 'claude-user', 'shared'])
+                # Relay's own bundled skills are in the default search too, after everything of the
+                # user's; this test is about the user's tree, so they are taken out again here.
+                found = sorted(set(index.skills) - set(skills.SkillIndex.load([skills.bundled_dir()]).skills))
+                self.assertEqual(found, ['bundled-only', 'claude-project', 'claude-user', 'shared'])
                 self.assertEqual(index.skills['shared'].description, 'user copy')
                 self.assertTrue(any(r.startswith('shared: duplicate') for r in index.skipped))
                 self.assertTrue(any(r.startswith('warpctrl: excluded') for r in index.skipped))
@@ -275,6 +278,52 @@ class DefaultDirectoryTests(unittest.TestCase):
                 index = SkillIndex.load(skills.default_directories(), defaults=True)
         self.assertIn('nested', index.skills)
         self.assertIn('plain', index.skills)
+
+
+class BundledSkillTests(unittest.TestCase):
+    """The skills Relay ships itself: relay_core/skills_bundled/<name>/SKILL.md."""
+
+    def test_bundled_skills_are_indexed_and_readable(self):
+        index = skills.SkillIndex.load([skills.bundled_dir()])
+        self.assertEqual(index.skipped, [])
+        self.assertIn('local-model-setup', index.skills)
+        loaded = index.load_skill('local-model-setup')
+        self.assertFalse(loaded['truncated'])
+        self.assertIn('recipes/models.json', loaded['files'])
+        for path in loaded['files']:
+            self.assertTrue(index.read_file('local-model-setup', path)['content'])
+        # Every recipe the SKILL.md names by path has to exist, or the agent loads a dead reference.
+        for path in loaded['files']:
+            self.assertIn(path, loaded['content'], path)
+        self.assertLessEqual(len(index.skills['local-model-setup'].description), skills.MAX_DESCRIPTION)
+
+    def test_the_model_catalog_parses_and_dates_itself(self):
+        index = skills.SkillIndex.load([skills.bundled_dir()])
+        catalog = json.loads(index.read_file('local-model-setup', 'recipes/models.json')['content'])
+        self.assertEqual(sorted(catalog['tiers']), ['128', '16', '24', '48', '8'])
+        for tier, entries in catalog['tiers'].items():
+            for entry in entries:
+                self.assertIn(entry['status'], ('verified-here', 'unverified-listing'), entry['name'])
+                self.assertTrue(entry['verified'], entry['name'])
+                self.assertTrue(entry['sources'], entry['name'])
+
+    def test_they_are_named_as_relays_own_in_the_skills_list(self):
+        from relay_core import skill_manage
+        rows = {item['name']: item for item in skill_manage.list_skills([skills.bundled_dir()])}
+        self.assertEqual(rows['local-model-setup']['source'], 'relay-bundled')
+
+    def test_the_default_search_includes_them_last(self):
+        # Last, so a skill of the user's own with the same name wins (first directory wins).
+        directories = skills.default_directories(None)
+        self.assertEqual(directories[-1], skills.bundled_dir())
+
+    def test_a_users_own_copy_wins(self):
+        with tempfile.TemporaryDirectory() as temp:
+            mine = Path(temp) / 'skills'
+            write(mine / 'local-model-setup' / 'SKILL.md', '---\ndescription: my own version\n---\nMine.\n')
+            index = SkillIndex.load([mine, skills.bundled_dir()])
+            self.assertEqual(index.skills['local-model-setup'].description, 'my own version')
+            self.assertTrue(any('duplicate' in reason for reason in index.skipped))
 
 
 class RealSkillsTest(unittest.TestCase):

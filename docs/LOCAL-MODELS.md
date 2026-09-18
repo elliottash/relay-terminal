@@ -138,6 +138,69 @@ Installed 2026-09-18 under `/home/elliott/data/llms/` (nothing machine-specific 
   tools and thinking. A turn that listed a directory, read a file and answered took 17.5 s with
   usage on every step. Evidence: `docs/qa_evidence/2026-09-18-local-models/`.
 
+## Setting one up with the agent
+
+The workflow above was done by hand once. It is now a skill the user's own agent follows:
+`local-model-setup`, bundled with Relay in `backend/relay_core/skills_bundled/`. Bundled skills are
+the last directory in `skills.default_directories()`, so they are in every pane's skill list without
+anything being copied into `~/.config`, and a skill of the user's own with the same name wins.
+
+"Set up a local model on this machine for me" (or `/local-model-setup`) puts the agent through six
+phases, each ending in a report to the user:
+
+1. **Survey**, read-only: arch (`uname -m` decides which binaries exist at all), GPU and compute
+   capability, driver, RAM (unified-memory machines report `memory.total [N/A]`, so `free -h` is the
+   budget), free disk, which runtimes are installed, what `relay-local.py scan` already finds
+   serving, and what is already downloaded.
+2. **Propose** two or three options that fit, from the skill's own catalog, with download size,
+   memory held, licence and what must be installed. Reuse beats installing: a server already running
+   costs nothing. The user chooses. Anything over 5 GB is confirmed, over 20 GB explicitly.
+3. **Install and serve** per a runtime recipe, under standing rules: loopback only, no sudo without
+   asking, never touch a service the user already has, pin the commit of anything built from source,
+   a systemd *user* unit that is not enabled at boot, idle unload on.
+4. **Gates**, in order, stopping at the first failure: a one-sentence generation check (a wrong
+   quant or build writes fluent nonsense instead of failing), then `relay-local.py smoke`, then
+   `ollama ps` for the CONTEXT column on Ollama.
+5. **Register** with `add --detect` and prove it with a real `relay-agent.py` turn that calls a tool.
+6. **Write it down** in a README next to the models: versions, commits, start and stop commands.
+
+The recipes are data files the agent reads with `read_skill_file` only when it needs them —
+`recipes/runtimes/{ollama,llamacpp,llamacpp-prism-fork,vllm,detect-only}.md` and
+`recipes/models.json` — each carrying a `verified` date, the source URLs it was checked against, and
+for a model a `status` that is `verified-here` only for the two models actually run through Relay on
+this machine. The skill says outright that the catalog ages fast, that the agent must check the live
+listing before proposing anything, and that the smoke test decides, not the catalog.
+
+### `relay-local.py smoke`
+
+```sh
+scripts/relay-local.py smoke http://127.0.0.1:8080 --model bonsai-2-27b [--json]
+```
+
+`backend/relay_core/localsmoke.py`. Five checks against a loopback endpoint, through
+`ChatProvider` with the `ProviderConfig` that `localmodels.provider_fields` builds for it — so what
+passes is what the agent gets, envelope repair, reasoning split, deadlines and all. Nothing is
+written and no tool is executed: the tools exist only in the request.
+
+1. **It answers.** A two-word prompt, no tools.
+2. **A native tool call.** One tool offered; `tool_calls` must come back with a name that was
+   offered and arguments that parse as a JSON object. A call written into `content` instead fails
+   here and says so, with `tool_text_recovery` as the fallback.
+3. **Two consecutive calls.** The first tool result goes back, a second well-formed call must
+   follow, then a plain answer. Templates that handle one call and corrupt the next only fail here.
+4. **Tags in prose.** The model is asked to explain the literal strings `<tool_call>` and
+   `</think>`. The explanation must arrive in `content`, with no tool call and nothing in the wrong
+   field.
+5. **Usage.** Token counts arrived, and `prompt_tokens` is plausible for what was sent.
+
+Exit code 0 when all five pass, 1 when a check failed, 2 when nothing was run at all: a non-loopback
+URL is refused before a socket is opened, and a server that serves more than one model is asked for
+a `--model` rather than guessed at. Measured on this machine
+2026-09-18 (`docs/qa_evidence/2026-09-18-local-models/implementer-smoke.txt`): Bonsai 2 on the
+PrismML fork passes 1, 2, 3 and 5 and **fails 4** — asked to explain the tags, the server's parser
+turns them into a `lookup_number` call and the answer never arrives. `muse-glimmer:latest` through
+Ollama passes all five.
+
 ## Worker protocol (section 23)
 
 Four messages, handled by `localmodels.handle`. Each gets exactly one event back. All four events

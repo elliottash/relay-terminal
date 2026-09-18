@@ -1,0 +1,42 @@
+# The bundled local-model-setup skill, loaded by a real agent turn on the local model, 2026-09-18
+#
+# Registry: a temp file with only local:bonsai (llama-server, PrismML fork, 127.0.0.1:8080).
+# Workspace: a temp directory. The prompt asks for the phases only, with no commands run.
+#
+$ RELAY_KEYRING=off RELAY_LOCAL_MODELS=<temp>/local-models.json scripts/relay-agent.py \
+    --provider local:bonsai --workspace <temp>/ws --yes \
+    --prompt "Load the local-model-setup skill and list its phases in one line each. Do not run any commands."
+
+Provider: http://127.0.0.1:8080/v1
+Model: bonsai-2-27b
+Workspace: /tmp/claude-1000/-home-elliott-repos-relay-terminal/bd16323d-10af-4958-8167-5dd09fe94128/scratchpad/ws
+Submitted prompts and tool results go to this provider. Tools run WITHOUT confirmation and shell commands are NOT sandboxed.
+Local model server: no key is needed or sent.
+Skills: 55 available (ash-house-style, beam-rent, blinded-model-review, clean-commit, code-cleanup, conference-paper-eval…)
+
+[status] Requesting model · step 1/256
+
+[status] Model is reasoning…
+
+
+[running] LOAD SKILL
+
+local-model-setup
+
+[tool result] completed
+
+[status] Requesting model · step 2/256
+
+[status] Model is reasoning…
+Phases of `local-model-setup`:
+
+1. **Phase 1 — Survey (read-only):** inspect machine, accelerator, memory, disk, installed tools, and anything already serving; report findings.
+2. **Phase 2 — Propose, and let the user choose:** offer 2–3 fitting options from `recipes/models.json`; the user decides, with size-based confirmations before downloading.
+3. **Phase 3 — Install and serve:** follow the runtime recipe under strict rules (loopback only, no unasked sudo, never touch existing services, pinned builds, user systemd unit, idle unload).
+4. **Phase 4 — The gates, in order; stop at first failure:** (a) one-sentence coherence test, (b) five-check tool-call smoke test, (c) Ollama-only context check.
+5. **Phase 5 — Register it, then prove it:** `relay-local.py add --detect`, run the end-to-end agent proof with a real tool call, and hand over start/stop instructions.
+6. **Phase 6 — Write it down:** create or extend a `README.md` next to the models documenting model source, runtime/version, launcher, port, context, measured memory/speed, and dates.
+[done] 
+
+
+exit=0

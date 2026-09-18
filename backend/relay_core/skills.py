@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Index and read Warp-style skills: <dir>/<name>/SKILL.md with YAML frontmatter.
 
-Skills are reusable instructions the user keeps in ~/.warp/skills (and Claude Code's ~/.claude/skills).
+Skills are reusable instructions the user keeps in ~/.warp/skills (and Claude Code's ~/.claude/skills),
+plus the few Relay ships itself in relay_core/skills_bundled (see bundled_dir).
 The agent sees a compact list of names and descriptions and loads a skill's full text with a tool
 before following it. Only the default locations (see default_directories; this includes the
 workspace's .claude/skills at the owner's request) or configured directories are read, and every
@@ -309,6 +310,17 @@ def imports_root() -> Path:
     return Path(base) / "relay" / "skill-imports"
 
 
+def bundled_dir() -> Path:
+    """Skills that ship with Relay: ``relay_core/skills_bundled/<name>/SKILL.md``.
+
+    Beside the package rather than in the user's config, so a checkout and an install both have
+    them (CMake installs the whole ``backend`` directory) and nothing has to be copied into
+    ``~/.config`` on first run. They come last in the search order, so a user's own skill of the
+    same name wins, and a user who wants one gone can exclude it by name like any other.
+    """
+    return Path(__file__).resolve().parent / "skills_bundled"
+
+
 def import_directories() -> list[Path]:
     """Every <repo>@<commit> folder of imported skills, newest first."""
     root = imports_root()
@@ -329,6 +341,7 @@ def default_directories(workspace=None) -> list[Path]:
        (owner report, 2026-09-18: every skill under ~/.claude/skills was being skipped as "no SKILL.md",
        because the folder there holds more folders of skills rather than skills).
     5. imported skills, ~/.local/share/relay/skill-imports/<repo>@<commit> (newest import first).
+    6. the skills Relay ships with (bundled_dir): last, so anything of the user's own wins.
     """
     home = Path.home()
     directories = [refined_dir(), home / ".warp" / "skills", home / ".claude" / "skills"]
@@ -338,6 +351,7 @@ def default_directories(workspace=None) -> list[Path]:
     for root in (home / ".warp", home / ".claude"):
         directories += [b for b in discover_bases(root) if b not in first and b not in directories]
     directories += import_directories()
+    directories.append(bundled_dir())
     return directories
 
 

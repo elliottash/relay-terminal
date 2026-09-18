@@ -458,7 +458,10 @@ class RefineTests(SkillsHome):
     def test_excluded_skills_are_listed(self):
         write(self.home / '.warp/skills/warpctrl/SKILL.md', SKILL.format(name='warpctrl', description='d', body='b'))
         items = skill_manage.list_skills(*skill_manage.index_settings(None, str(self.ws)))
-        self.assertEqual([(i['name'], i['excluded']) for i in items], [('warpctrl', True)])
+        # The default search also covers the skills Relay ships with; this is about the user's tree.
+        bundled = set(skills.SkillIndex.load([skills.bundled_dir()]).skills)
+        self.assertEqual([(i['name'], i['excluded']) for i in items if i['name'] not in bundled],
+                         [('warpctrl', True)])
 
 
 def git(*args, cwd):

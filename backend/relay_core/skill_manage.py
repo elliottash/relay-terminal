@@ -24,8 +24,8 @@ import time
 from pathlib import Path
 
 from . import sidecall
-from .skills import (MAX_SKILL_BYTES, NAME, SkillError, SkillIndex, default_directories, imports_root,
-                     parse_frontmatter, refined_dir)
+from .skills import (MAX_SKILL_BYTES, NAME, SkillError, SkillIndex, bundled_dir, default_directories,
+                     imports_root, parse_frontmatter, refined_dir)
 
 ALLOW_FILE_URLS = False      # tests only
 GIT_TIMEOUT = 120
@@ -53,8 +53,8 @@ def source_label(directory: Path, workspace=None) -> str:
         resolved = directory.resolve()
     except OSError:
         resolved = directory
-    known = [(refined_dir(), "relay-refined"), (home / ".warp" / "skills", "warp"),
-             (home / ".claude" / "skills", "claude")]
+    known = [(refined_dir(), "relay-refined"), (bundled_dir(), "relay-bundled"),
+             (home / ".warp" / "skills", "warp"), (home / ".claude" / "skills", "claude")]
     if workspace:
         known += [(Path(workspace) / ".claude" / "skills", "project-claude"),
                   (Path(workspace) / ".warp" / "skills", "project-warp")]
