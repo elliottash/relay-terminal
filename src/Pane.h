@@ -1076,6 +1076,10 @@ public:
                                       : QStringLiteral("Relay engine (%1)").arg(m_engineCore);
     }
     bool runCommand(const QString &command) { return runInTerminal(command, false, 0); }
+    // Run `command` once this pane's shell is at its prompt: now if it is, else queued like a
+    // command typed while the terminal is busy. "Connect to host…" and "Split on the same host"
+    // (#S5SH) start their fresh pane with it.
+    void queueCommand(const QString &command) { submitTerminal(command, false); }
     void sendKeybindings() { if (m_configured) send(QJsonObject{{"type", "keybindings"}, {"path", Keymap::instance().path()}, {"actions", Keymap::instance().catalog().value(QStringLiteral("actions"))}}); }
 
     // "Navigate here" in the explorer's right-click menu: change this pane's shell into `path`.
@@ -1110,6 +1114,7 @@ public:
         state.canReadOutput = terminalCan(relay::TerminalBackend::ScreenText) || terminalCan(relay::TerminalBackend::Scrollback);
         state.canInject = terminalCan(relay::TerminalBackend::DisplayInjection);
         state.canZoom = terminalCan(relay::TerminalBackend::FontZoom);
+        state.remoteHost = relay::panestatus::remoteHost(remoteCommandLine());   // "New pane on <host>" (#S5SH)
         if (m_backend) {
             state.hasSelection = !m_backend->selectedText().isEmpty();
             int line = -1, column = -1;
@@ -1154,6 +1159,7 @@ public:
             {QStringLiteral("find"), QStringLiteral("find.inView")},
             {QStringLiteral("splitRight"), QStringLiteral("pane.splitRight")},
             {QStringLiteral("splitDown"), QStringLiteral("pane.splitDown")},
+            {QStringLiteral("splitSameHost"), QStringLiteral("ssh.split_same_host")},
             {QStringLiteral("close"), QStringLiteral("pane.close")},
         };
         const QString action = actions.value(id);
@@ -1196,7 +1202,7 @@ public:
             if (!m_backend->zoom(step)) status(QStringLiteral("This engine cannot change its font size."));
             return;
         }
-        if (onWindowAction) onWindowAction(id);   // splitRight, splitDown, close
+        if (onWindowAction) onWindowAction(id);   // splitRight, splitDown, splitSameHost, close
     }
 
     // "Save output as…": the scrollback and the visible screen as plain text.

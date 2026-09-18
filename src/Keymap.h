@@ -205,6 +205,10 @@ private:
         add("tab.new", "tab", "New tab", {QStringLiteral("Ctrl+T"), QStringLiteral("Ctrl+Shift+T")});
         add("tab.next", "tab", "Next tab", {QStringLiteral("Ctrl+Tab")});
         add("tab.previous", "tab", "Previous tab", {QStringLiteral("Ctrl+Shift+Tab")});
+        // SSH (#S5SH). No default keys: of the Ctrl+Shift letters still free, U belongs to the
+        // input method's Unicode entry, Q quits other terminals and M says nothing about hosts.
+        // Bind one in keybindings.json and the shortcut hints start teaching it.
+                add("ssh.connect", "tab", "Connect to host…: a new tab running ssh to a host from ~/.ssh/config or a recent one", {});
         // Ctrl+E, not Ctrl+P: one-handed (owner, 2026-09-17). Ctrl+D is left alone because it is
         // end-of-input for a running program. Ctrl+Shift+E is the twin that programs cannot swallow.
         // One key is now the whole of "new pane": it makes one on the right, and Left, Up or Down
@@ -216,6 +220,7 @@ private:
         add("pane.splitDown", "pane", "New pane below", {});
         add("pane.splitLeft", "pane", "New pane to the left", {});
         add("pane.splitUp", "pane", "New pane above", {});
+        add("ssh.split_same_host", "pane", "Split on the same host: a new pane running this pane's ssh or mosh command again", {});
         add("pane.focusLeft", "pane", "Focus pane to the left", {QStringLiteral("Alt+Left")});
         add("pane.focusRight", "pane", "Focus pane to the right", {QStringLiteral("Alt+Right")});
         add("pane.focusUp", "pane", "Focus pane above", {QStringLiteral("Alt+Up")});

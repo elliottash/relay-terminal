@@ -85,6 +85,9 @@ QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state)
     separate();
     add("splitRight", QStringLiteral("New pane to the right"));
     add("splitDown", QStringLiteral("New pane below"));
+    // The same ssh command line again, beside this one; with connection sharing, no second login.
+    if (!state.remoteHost.isEmpty())
+        add("splitSameHost", QStringLiteral("New pane on %1").arg(state.remoteHost));
     add("close", QStringLiteral("Close pane"), state.canClosePane);
 
     while (!items.isEmpty() && items.last().isSeparator())

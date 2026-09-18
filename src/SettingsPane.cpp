@@ -542,6 +542,16 @@ void SettingsPane::buildResults(const QString &needle) {
         if (score > 0) hits.append({actionsMode ? score : score / 2, order++, {}, item, item.section, true, {}});
     }
     std::stable_sort(hits.begin(), hits.end(), [](const Hit &a, const Hit &b) { return a.score > b.score; });
+    // Rows made from the search text itself come first: the text was typed to mean exactly them.
+    QList<Hit> typedHits;
+    for (const ActionItem &item : std::as_const(m_actionCache)) {
+        if (!item.typed) continue;
+        for (ActionItem row : item.typed(needle)) {
+            row.label = item.label + QStringLiteral(" › ") + row.label;
+            typedHits.append({0, order++, {}, row, item.section, true, {}});
+        }
+    }
+    hits = typedHits + hits;
     if (hits.size() > kMaxResults) hits = hits.mid(0, kMaxResults);
 
     QScrollArea *scroll = m_results;

@@ -60,6 +60,7 @@ struct TerminalMenuState {
     bool hasTurn = false;            // the pane has a finished agent turn to open
     bool canTakeControl = false;     // the terminal is running, so the keyboard can be handed over
     bool canClosePane = true;
+    QString remoteHost;              // the host of the ssh/mosh session in the pane, or empty (#S5SH)
 };
 
 // The entries for one right-click, in order, with separators as items whose id is "-". Never

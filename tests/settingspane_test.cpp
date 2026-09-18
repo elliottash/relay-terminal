@@ -137,6 +137,21 @@ QList<ActionItem> actions(State *state) {
     flash.label = QStringLiteral("Flash agent for this pane"); flash.stayOpen = true;
     flash.run = [state] { state->ran << QStringLiteral("agent.flashAgent"); };
     items << flash;
+    ActionItem hosts;
+    hosts.key = QStringLiteral("menu:ssh"); hosts.section = QStringLiteral("Panes and tabs");
+    hosts.label = QStringLiteral("Connect to host…");
+    hosts.children = [] { return QList<ActionItem>(); };
+    hosts.typed = [state](const QString &search) {
+        QList<ActionItem> rows;
+        if (!search.contains(QLatin1Char('@'))) return rows;
+        ActionItem row;
+        row.key = QStringLiteral("ssh:") + search; row.section = QStringLiteral("Panes and tabs");
+        row.label = QStringLiteral("ssh ") + search;
+        row.run = [state, search] { state->ran << QStringLiteral("ssh:") + search; };
+        rows << row;
+        return rows;
+    };
+    items << hosts;
     return items;
 }
 
@@ -265,6 +280,19 @@ private slots:
         pane.onRun = nullptr;
         press(search, Qt::Key_Return);
         QCOMPARE(state.ran, QStringList{QStringLiteral("pane.splitRight")});
+    }
+
+    void aSubmenuAnswersWhatWasTyped() {
+        State state;
+        SettingsPane pane(SettingsPane::Mode::Actions, [&] { return catalog(&state); }, [&] { return actions(&state); });
+        pane.show();
+        pane.setSearch(QStringLiteral("me@newbox"));
+        QCOMPARE(pane.visibleRowIds().value(0), QStringLiteral("ssh:me@newbox"));
+        pane.activateCurrent();
+        QCOMPARE(state.ran, QStringList{QStringLiteral("ssh:me@newbox")});
+        // A search the submenu does not recognise adds nothing.
+        pane.setSearch(QStringLiteral("right"));
+        for (const QString &id : pane.visibleRowIds()) QVERIFY2(!id.startsWith(QStringLiteral("ssh:")), qPrintable(id));
     }
 
     void actionsListsRecentThenSections() {

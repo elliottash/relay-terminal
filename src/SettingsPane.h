@@ -78,12 +78,16 @@ struct SettingsSection {
 };
 
 // A runnable action, or a submenu of them. `checked` marks the current choice; `stayOpen` says
-// running it changes state the pane should show at once rather than closing.
+// running it changes state the pane should show at once rather than closing. `typed` lets a
+// submenu answer what was typed in the search box with rows of its own, listed first: "Connect to
+// host…" offers `ssh me@newbox` for a host that is in no list yet (#S5SH). It returns nothing for
+// a search it does not recognise.
 struct ActionItem {
     QString key, section, label, detail, shortcut, aliases;
     bool checked = false, stayOpen = false;
     std::function<void()> run;
     std::function<QList<ActionItem>()> children;
+    std::function<QList<ActionItem>(const QString &search)> typed;
 };
 
 class SettingsPane final : public QWidget {

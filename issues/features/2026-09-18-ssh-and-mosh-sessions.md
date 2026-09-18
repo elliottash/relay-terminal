@@ -46,8 +46,8 @@ Owner, 2026-09-18, asked in the session:
 - [ ] Remote password prompts mask the prompt box
 - [ ] Agent reply prints into the terminal at a remote prompt
 - [x] Agent context `remote_session`; `run_command` `host` over the shared connection (`backend/relay_core/remote_session.py`, protocol section 24.2–24.3; the GUI still has to send it)
-- [ ] Connect to host (palette, from `~/.ssh/config`), split on the same host
-- [ ] Options › Terminal › SSH sessions: auto / ask / off
+- [x] Connect to host (palette, from `~/.ssh/config`), split on the same host
+- [x] Options › Terminal › SSH sessions: auto / ask / off
 - [ ] Clickable paths in a remote pane do not open local files
 
 Design: [`docs/SSH-AND-MOSH.md`](../../docs/SSH-AND-MOSH.md).

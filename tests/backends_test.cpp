@@ -132,6 +132,18 @@ private Q_SLOTS:
             if (item.id == QStringLiteral("openFile")) QVERIFY(item.label.contains(QStringLiteral("notes.md")));
     }
 
+    // A pane in an ssh or mosh session offers a split that logs in to the same host (#S5SH).
+    void menuOffersANewPaneOnTheSameHostOnlyInARemotePane() {
+        relay::TerminalMenuState state = relayEngineState();
+        QVERIFY(!menuIds(relay::terminalContextMenu(state)).contains(QStringLiteral("splitSameHost")));
+        state.remoteHost = QStringLiteral("filly");
+        const auto items = relay::terminalContextMenu(state);
+        const QStringList ids = menuIds(items);
+        QCOMPARE(ids.indexOf(QStringLiteral("splitSameHost")), ids.indexOf(QStringLiteral("splitDown")) + 1);
+        for (const relay::TerminalMenuItem &item : items)
+            if (item.id == QStringLiteral("splitSameHost")) QCOMPARE(item.label, QStringLiteral("New pane on filly"));
+    }
+
     void menuOffersACardReferenceUnderThePointer() {
         relay::TerminalMenuState state = relayEngineState();
         QVERIFY(!menuIds(relay::terminalContextMenu(state)).contains(QStringLiteral("openCard")));

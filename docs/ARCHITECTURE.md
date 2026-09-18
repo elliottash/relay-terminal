@@ -1447,6 +1447,26 @@ are halved). In Options an action found this way runs like any other. In Actions
 drawn as its control: it is an "Options › Appearance › Theme" row, and Enter swaps the pane to
 Options on that tab with that row highlighted (`revealOption()`).
 
+A submenu can also answer the search text with rows of its own (`ActionItem::typed`), listed
+before every scored hit. **SSH** (card #S5SH, [SSH-AND-MOSH.md](SSH-AND-MOSH.md) section 8) uses it:
+
+- **Connect to host…** (`menu:ssh`, action `ssh.connect`, no default key) lists the recently used
+  hosts (QSettings `ssh/recent`, most recent first, at most 20) and then every concrete `Host` of
+  `~/.ssh/config` and its `Include`s, each with the `user@hostname:port` its block writes
+  (`src/SshConfig.*`, `relay-sshconfig`, `tests/sshconfig_test.cpp`). Typing `user@host` or
+  `ssh <host>` offers exactly that host too. Choosing one opens a new tab whose pane runs
+  `ssh <host>` once its shell is at the prompt (`Pane::queueCommand`, the pane's command queue).
+- **Split on the same host** (`ssh.split_same_host`, no default key; also "New pane on <host>" in the
+  terminal's right-click menu) is listed while the focused pane is in an ssh or mosh login. It reads
+  the session's argv from `/proc/<pid>/cmdline`, so quoting survives, drops the connection-sharing
+  options Relay's own wrapper added (the new pane's wrapper adds them back), refuses anything that is
+  not a login (`-O`, `-G`, `-N`, `-f`, telnet, …), and runs the line in a new pane to the right.
+- **Options › Terminal › SSH**: `ssh/enhance` = `auto` (default) | `ask` | `off`, and the host lists
+  `ssh/hosts_never` and `ssh/hosts_always` (QStringLists, edited as one comma-separated line).
+- Hints: a new tab (`tab.new`) in which an ssh starts within 12 s teaches `ssh.connect` when it has a
+  key (none by default, so no hint then); a split from a remote pane in which the same host is
+  reached by hand within 60 s teaches Split on the same host, by its key or by name.
+
 Keyboard, from the search box: ↑ ↓ (and Ctrl+N/P) move a highlight, Enter runs or changes the
 highlighted row (runs an action, flips a toggle, opens a choice, focuses a field, clicks a button),
 ← → switch Options tabs while the search is empty, Esc clears the search and then closes; Esc
