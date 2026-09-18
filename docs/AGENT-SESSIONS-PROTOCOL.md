@@ -2184,3 +2184,79 @@ as a job keeps "ran …" and gains "still running as job-2".
   outcome and duration.
 - **`tool_labels.py` has no I/O**, so it can say "wrote" or "edited" only from what the caller
   knows: the prepared call before execution, the result's `created` after it.
+
+## 24. SSH and mosh sessions: the router and the agent on the host (v2.6, 2026-09-18)
+
+Card #S5SH; design and the GUI half in `docs/SSH-AND-MOSH.md` (sections 4 and 7). While the pane's
+foreground program is `ssh`/`mosh`, the prompt box types commands into the remote shell and the
+agent can run commands on the host over the user's own login. Everything here is additive: a GUI
+that sends none of it gets exactly the v2.5 behaviour, byte for byte.
+
+### 24.1 `route {..., remote?}`
+
+`remote: {host}` says the terminal is at a prompt on that ssh host (`host` is the alias the user
+typed, 1–255 printable characters, no whitespace; other keys are ignored). A malformed `remote` is
+an `error` event, like a bad `known_commands`.
+
+With `remote`, the local `path`, `known_commands` and `cwd` are ignored — they describe the wrong
+machine — and nothing is ever "command not found":
+
+- `/shell`, `/agent` and the fixed modes route as before; the shell decision is always
+  `valid: true` (the remote shell reports its own errors) and its `reason` says
+  "typed on <host>". `agent_signal` still reads the text.
+- Auto mode decides only shell vs agent, by the shape of the line: a lone `continue`/`break`/
+  `return` or a lone reply (`yes`, `wait`, `done`…), a natural-language opener (`why`, `can you`,
+  `explain`…), an English-word command in a sentence (`needs_assist`, as in 11), or a line that
+  reads as prose (sentence punctuation on the first word, a reply word, a contraction, a capitalised
+  sentence, a trailing question, mostly sentence words) goes to the agent. Anything command-shaped
+  — a bare word, a path, flags, operators — is `route: "shell"`, `reason: "Shell command · typed on
+  <host>."`. The assist signal that looks at local files (a bare operand that is no file here) is
+  left out.
+- Every decision made with `remote` carries `remote_host: "<host>"`; without `remote` the field is
+  absent.
+
+### 24.2 `ask {context: {remote_session}}`
+
+    "remote_session": {"program": "ssh", "host": "filly", "hostname": "65.109.126.152",
+                       "user": "elliott", "port": 22,
+                       "control_path": "/run/user/1000/relay-ssh/956d…", "reachable": true,
+                       "cwd": "/srv/archive/tracelaw", "shell_integration": true, "at_prompt": true}
+
+`host` is required (one word, not starting with `-`). Strings are capped (`program` 64; `host`,
+`hostname`, `user` 255; `control_path`, `cwd` 4096), `control_path` must be absolute, `port` is
+1–65535, the three flags are booleans; a wrong type or an over-long string is an `error`, and
+unknown keys are dropped. `reachable` is the GUI's `ssh -O check` on the control socket.
+
+The context note tells the model which machine is which: the user's terminal is logged into
+`user@host (hostname)` via ssh/mosh, the remote cwd (or "unknown"), that plain `run_command` and
+the file tools run on this machine, and — when `reachable` and `control_path` is set — that
+`run_command` with `host` runs on the host over the user's connection; otherwise that the connection
+cannot be shared and it should ask the user or use `run_in_terminal`. The old "you cannot see that
+program's screen … run_command cannot interact with the program" line is replaced for ssh by one
+about the session's screen only. `foreground_program` and `terminal_cwd` keep their meaning
+(`terminal_cwd` is still where plain `run_command` runs). Subagents never get `remote_session`.
+
+### 24.3 `run_command {..., host?}`
+
+The property is in the tool schema only for a turn whose context has `remote_session`. With `host`:
+
+- `host` must equal `remote_session.host`, and the session must be `reachable` with a
+  `control_path`; otherwise the call fails with an error the model can act on
+  (`host "X" is not the host the user's terminal is logged into (filly)…`,
+  `the ssh connection to filly can't be shared…`). At execution the socket must still exist, or
+  nothing runs (without it `ssh -S` would quietly open a new connection).
+- `cwd` is a path on the host (not workspace-checked), defaulting to `remote_session.cwd`, else
+  the remote home. The job runs, locally,
+
+      ssh -S <control_path> -o ControlMaster=no -o BatchMode=yes -o ConnectTimeout=10 -T <host> -- \
+          'cd <cwd> || exit 1
+      <command>'
+
+  (cwd quoted with `shlex.quote`; the string goes to the remote user's login shell).
+- Everything else is a local `run_command`: the same job table, timeout hand-back, `background`,
+  output caps, Stop, and the same stripped environment (no `SSH_AUTH_SOCK`: the master connection
+  needs none). The result and `command_output`/`stop_command` results for that job carry
+  `host`; exit 255 adds a `note` that the connection failed or closed. Stop ends the local ssh
+  client; a remote process that ignores its closed output may outlive it.
+- `jobs` entries for such a job carry `host`. Labels (section 23) say "ran ls -la on filly",
+  "running … on filly", "started job: … on filly"; the fold's `detail` gains a `host` section.

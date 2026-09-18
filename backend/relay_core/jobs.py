@@ -54,6 +54,8 @@ class Job:
     # Called with each chunk of text while a tool call is waiting on this job (the live stream
     # the pane shows under the call); None otherwise.
     live: Callable[[str], None] | None = None
+    # The ssh host it runs on over the user's connection (card #S5SH); None for a local command.
+    host: str | None = None
 
     @property
     def total(self) -> int:
@@ -89,7 +91,10 @@ class JobTable:
         self._next = 1
         _TABLES.add(self)
 
-    def start(self, command: str, cwd, env: dict) -> Job:
+    def start(self, command: str, cwd, env: dict, *, argv: list[str] | None = None,
+              host: str | None = None) -> Job:
+        """Run `command` with bash, or run `argv` (ssh to `host`, card #S5SH) and keep `command` as
+        the job's name. Either way it is one process group, stopped and read the same."""
         with self._lock:
             running = sum(1 for job in self._jobs.values() if job.running)
             if running >= MAX_RUNNING:
@@ -100,11 +105,11 @@ class JobTable:
             finished = [job for job in self._jobs.values() if not job.running]
             for old in finished[:max(0, len(finished) - KEEP_FINISHED + 1)]:
                 del self._jobs[old.id]
-        process = subprocess.Popen(["/bin/bash", "--noprofile", "--norc", "-c", command],
+        process = subprocess.Popen(argv or ["/bin/bash", "--noprofile", "--norc", "-c", command],
                                    cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    start_new_session=True, bufsize=0)
-        job = Job(job_id, command, process, time.monotonic())
+        job = Job(job_id, command, process, time.monotonic(), host=host)
         with self._lock:
             self._jobs[job_id] = job
         threading.Thread(target=self._pump, args=(job,), name=f"relay-{job_id}", daemon=True).start()
@@ -215,7 +220,8 @@ class JobTable:
             jobs = [job for job in self._jobs.values() if job.handed_back]
         return [{"job_id": job.id, "command": job.command[:300], "running": job.running,
                  "exit_code": job.exit_code, "stopped": job.stopped,
-                 "elapsed_ms": int(((job.finished or now) - job.started) * 1000)} for job in jobs]
+                 "elapsed_ms": int(((job.finished or now) - job.started) * 1000),
+                 **({"host": job.host} if job.host else {})} for job in jobs]
 
     def peek(self, job: Job, limit: int = PEEK_BYTES) -> dict:
         """The newest `limit` bytes of kept output, for the user. The model's read position stays."""

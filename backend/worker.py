@@ -115,8 +115,11 @@ def main():
                 cwd = request.get("cwd")
                 if cwd is not None and (not isinstance(cwd, str) or not os.path.isdir(cwd)):
                     cwd = None
+                # remote: the terminal is at a prompt on this ssh host (card #S5SH); the router then
+                # ignores the local PATH, aliases and cwd.
                 decision = classify(request.get("text", ""), request.get("mode", "auto"), known,
-                                    request.get("path", os.environ.get("PATH", os.defpath)), cwd)
+                                    request.get("path", os.environ.get("PATH", os.defpath)), cwd,
+                                    remote=request.get("remote"))
                 emit({"event": "route", "id": request.get("id"), **decision.to_dict()})
             elif kind == "configure":
                 if turns.busy:

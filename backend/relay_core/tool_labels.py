@@ -361,6 +361,10 @@ def _base(name, args: dict, existed) -> dict:
     """kind, present tense, past tense, the failed form, and the fixed half of merge/path."""
     if name == "run_command":
         command = command_label(args.get("command"))
+        host = _short(args.get("host"), 40)
+        if host:
+            # Card #S5SH: run on the ssh host over the user's connection — "ran ls on filly".
+            command = f"{command} on {host}"
         if args.get("background"):
             return _row("job", f"starting {command}", f"started job: {command}",
                         f"start job: {command}")
@@ -626,6 +630,9 @@ def detail(name, args, result, *, preview: str = "", diff=None) -> list[dict]:
         command = args.get("command")
         if isinstance(command, str) and command.strip():
             sections.append(_section("command", "code", command))
+        host = args.get("host")
+        if name == "run_command" and isinstance(host, str) and host.strip():
+            sections.append(_section("host", "text", f"{host} (over your ssh connection)"))
         cwd = args.get("cwd")
         if isinstance(cwd, str) and cwd not in ("", "."):
             sections.append(_section("working directory", "text", cwd))

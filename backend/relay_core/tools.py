@@ -27,6 +27,7 @@ from .skills import TOOL_SPECS as SKILL_TOOLS, SkillIndex
 from .terminal_handoff import TerminalHandoff
 from .provider import Cancelled
 from .jobs import JobTable
+from . import remote_session
 
 MAX_FILE = 131072
 MAX_OUTPUT = 32768
@@ -66,6 +67,25 @@ TOOLS = [
           "replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring a unique match; default false."}},
          ["path", "old_string", "new_string"]),
 ]
+
+# run_command's `host` (card #S5SH): offered only while the user's terminal is logged into a host
+# over ssh (the turn's context has remote_session), so a local-only turn never sees it.
+HOST_PROPERTY = {"type": "string", "description":
+                 "Run on the ssh host the user's terminal is logged into (the Relay context names it), over "
+                 "the user's own connection, instead of on this machine. cwd is then a path on that host "
+                 "(default: the remote shell's directory). Omit to run locally."}
+
+
+def run_command_spec(with_host: bool) -> dict:
+    tool = TOOLS[0]
+    if not with_host:
+        return tool
+    function = dict(tool["function"])
+    parameters = dict(function["parameters"])
+    parameters["properties"] = {**parameters["properties"], "host": HOST_PROPERTY}
+    function["parameters"] = parameters
+    return {**tool, "function": function}
+
 
 @dataclass(frozen=True)
 class Prepared:
@@ -150,6 +170,9 @@ class ToolExecutor:
         self.terminal = TerminalHandoff(emit, cancel)
         # Where run_command runs when the model gives no cwd: the directory the user's terminal is in.
         self.default_cwd = "."
+        # The ssh session the user's terminal is logged into this turn (remote_session.validate's
+        # copy), or None. run_command's `host` reaches that host and no other.
+        self.remote_session: dict | None = None
         # Every command is a job; the one a tool call is waiting on is what Stop ends. The ones
         # handed back are listed in the pane (`jobs` events); a subagent's executor turns that off.
         self.announce_jobs = True
@@ -172,6 +195,10 @@ class ToolExecutor:
         except ValueError:
             return
         self.default_cwd = candidate
+
+    def set_remote_session(self, session: dict | None) -> None:
+        """Follow the user's terminal onto an ssh host (card #S5SH); None when it is local."""
+        self.remote_session = session if isinstance(session, dict) and session.get("host") else None
 
     def stop_process(self):
         """Stop: end the command this turn is waiting on. Jobs it handed back keep running."""
@@ -201,6 +228,8 @@ class ToolExecutor:
     def tools(self) -> list[dict]:
         catalog = self.keybindings
         tools = TOOLS + [catalog.tool_spec()] if catalog is not None else list(TOOLS)
+        if self.remote_session is not None:
+            tools[0] = run_command_spec(True)
         tools += JOB_TOOLS
         if self.skills is not None:
             tools += SKILL_TOOLS
@@ -245,7 +274,7 @@ class ToolExecutor:
             wait = clamp_seconds(args.get("wait_seconds", 0), 0, 0, MAX_WAIT)
             return Prepared(name, {"job_id": job.id, "wait_seconds": wait},
                             f"COMMAND OUTPUT\n\n{job.id}: {job.command}\nWait: up to {wait}s")
-        allowed = {"run_command": {"command", "cwd", "timeout_seconds", "background"},
+        allowed = {"run_command": {"command", "cwd", "timeout_seconds", "background", "host"},
                    "read_file": {"path"}, "list_directory": {"path"}, "write_file": {"path", "content"},
                    "edit_file": {"path", "old_string", "new_string", "replace_all"}}
         if name not in allowed or set(args) - allowed[name]:
@@ -254,10 +283,11 @@ class ToolExecutor:
             command = self._text(args, "command", maximum=16384)
             if not command.strip():
                 raise ValueError("Command must not be empty.")
-            args["cwd"] = args.get("cwd") or self.default_cwd
-            cwd = self.workspace.resolve(args["cwd"])
-            if not cwd.is_dir():
-                raise ValueError("Command working directory must be a directory.")
+            host = args.get("host")
+            if host is not None and not isinstance(host, str):
+                raise ValueError("host must be text: the host the user's terminal is logged into.")
+            if not host:
+                args.pop("host", None)
             background = args.get("background", False)
             if not isinstance(background, bool):
                 raise ValueError("background must be true or false.")
@@ -265,6 +295,12 @@ class ToolExecutor:
             timeout = clamp_seconds(args.get("timeout_seconds", DEFAULT_WAIT), DEFAULT_WAIT, 1, MAX_WAIT)
             args["timeout_seconds"] = timeout
             wait = "Background" if background else f"Waits: {timeout}s, then continues as a job"
+            if host:
+                return self._prepare_remote(args, command, host, wait)
+            args["cwd"] = args.get("cwd") or self.default_cwd
+            cwd = self.workspace.resolve(args["cwd"])
+            if not cwd.is_dir():
+                raise ValueError("Command working directory must be a directory.")
             return Prepared(name, args, f"RUN COMMAND\n\nWorking directory: {cwd}\n{wait}\n\n{command}", cwd)
         path = self.workspace.resolve(self._text(args, "path", maximum=4096),
                                       allow_missing=name in ("write_file", "edit_file"))
@@ -294,6 +330,25 @@ class ToolExecutor:
         preview = f"{title}\n\n{path}\n\n{diff or '(No text changes)'}\n\nOld bytes: {len(old)}; new bytes: {len(content.encode('utf-8'))}."
         return Prepared(name, args, preview, path, old_sha, existed, content, replacements, added, removed,
                         diff=diff)
+
+    def _prepare_remote(self, args: dict, command: str, host: str, wait: str) -> Prepared:
+        """run_command with `host`: the same call, run over the user's ssh connection (card #S5SH).
+
+        cwd is a path on the host, so it is not resolved against the workspace; it defaults to the
+        remote shell's directory, and without one the command starts in the remote home."""
+        session = remote_session.check_host(self.remote_session, host)
+        cwd = args.get("cwd") or session.get("cwd") or ""
+        if not isinstance(cwd, str) or len(cwd) > 4096 or any(c in cwd for c in "\x00\n\r"):
+            raise ValueError("cwd must be a directory path on the remote host, one line of at most 4096 characters.")
+        if cwd:
+            args["cwd"] = cwd
+        else:
+            args.pop("cwd", None)
+        user = session.get("user")
+        who = f"{user}@{host}" if user else host
+        preview = (f"RUN COMMAND ON {host}\n\nHost: {who} (over the user's ssh connection)\n"
+                   f"Working directory: {cwd or 'the remote home directory'}\n{wait}\n\n{command}")
+        return Prepared("run_command", args, preview)
 
     def _edited(self, args: dict, old: bytes) -> tuple[str, int]:
         """The whole new text of an edit_file, and how many occurrences it replaces.
@@ -338,6 +393,15 @@ class ToolExecutor:
             if catalog is None or args["action"] not in catalog.actions:
                 raise ValueError("Keybinding catalog changed; the action is no longer available.")
             return catalog.apply(args)
+        if name == "run_command" and args.get("host"):
+            # Recheck the session at execution time: the user may have logged out since.
+            session = remote_session.check_host(self.remote_session, args["host"])
+            if not remote_session.socket_alive(session):
+                raise ValueError(f"the ssh connection to {session['host']} has closed (its connection-sharing "
+                                 "socket is gone), so nothing ran. Ask the user whether they are still logged in.")
+            argv = remote_session.ssh_argv(session, args["command"], args.get("cwd"))
+            return self._run(args["command"], self.workspace.root, args["timeout_seconds"],
+                             args.get("background", False), argv=argv, host=session["host"])
         if name == "run_command":
             # Recheck paths at execution time.
             cwd = self.workspace.resolve(args.get("cwd", "."))
@@ -392,13 +456,16 @@ class ToolExecutor:
             result["created"] = not prepared.existed
         return result
 
-    def _run(self, command: str, cwd: Path, timeout: int, background: bool = False) -> dict:
+    def _run(self, command: str, cwd: Path, timeout: int, background: bool = False, *,
+             argv: list[str] | None = None, host: str | None = None) -> dict:
+        """Start `command` as a job and wait for it. `argv`/`host`: the same job, run as ssh over
+        the user's connection (card #S5SH); everything else — env, waiting, output — is shared."""
         env = {key: value for key, value in os.environ.items()
                if not SECRET_NAME.search(key) and not key.startswith("RELAY_")
                and key not in {"BASH_ENV", "ENV", "PYTHONPATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "SSH_AUTH_SOCK"}
                and not key.startswith("BASH_FUNC_")}
         env.update({"TERM": "dumb", "PAGER": "cat", "GIT_TERMINAL_PROMPT": "0"})
-        job = self.jobs.start(command, cwd, env)
+        job = self.jobs.start(command, cwd, env, argv=argv, host=host)
         # A background job still gets a moment: a server that fails at once says so in this result.
         return self._await(job, BACKGROUND_GLANCE if background else timeout)
 
@@ -428,6 +495,8 @@ class ToolExecutor:
     def _job_result(self, job) -> dict:
         result = self.jobs.take_output(job, MAX_OUTPUT)
         result["job_id"] = job.id
+        if job.host:
+            result["host"] = job.host
         result["duration_seconds"] = round((job.finished or time.monotonic()) - job.started, 3)
         if job.running:
             self.jobs.hand_back(job)
@@ -438,6 +507,9 @@ class ToolExecutor:
             result["exit_code"] = job.exit_code
             if job.stopped:
                 result["stopped"] = True
+            elif job.host and job.exit_code == 255:
+                result["note"] = (f"ssh exited 255: the connection to {job.host} failed or closed, so the "
+                                  "command may not have run. The user's ssh session may have ended; ask them.")
         return result
 
 

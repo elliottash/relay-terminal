@@ -42,9 +42,10 @@ Owner, 2026-09-18, asked in the session:
 - [ ] Engine keeps OSC 7's host; a remote `cd` no longer moves the local cwd
 - [ ] Pane: remote session model from `ssh -G`, remote prompt detection
 - [ ] Prompt box types commands into the remote shell; router `remote` flag
+  - [x] Router half: `route {remote: {host}}` decides shell vs agent by shape, never "not found" locally; `remote_host` on the decision (`backend/relay_core/router.py`, protocol section 24.1)
 - [ ] Remote password prompts mask the prompt box
 - [ ] Agent reply prints into the terminal at a remote prompt
-- [ ] Agent context `remote_session`; `run_command` `host` over the shared connection
+- [x] Agent context `remote_session`; `run_command` `host` over the shared connection (`backend/relay_core/remote_session.py`, protocol section 24.2–24.3; the GUI still has to send it)
 - [ ] Connect to host (palette, from `~/.ssh/config`), split on the same host
 - [ ] Options › Terminal › SSH sessions: auto / ask / off
 - [ ] Clickable paths in a remote pane do not open local files

@@ -54,9 +54,15 @@ class Decision:
     # the failure of a command the user never meant to run (owner report, 2026-09-18:
     # "symlink from ~/projects to here" answered fine, with "command not found: symlink" under it).
     explain_invalid: bool = True
+    # Card #S5SH: the ssh host the user's terminal is at a prompt on, when the route request named
+    # one. Left out of to_dict when empty, so a local decision is the same object it always was.
+    remote_host: str = ""
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        if not data["remote_host"]:
+            del data["remote_host"]
+        return data
 
 
 def validate_input(text: str) -> str:
@@ -426,11 +432,20 @@ SHELLISH = re.compile(r"[|&;<>()`$\\{}=]")
 GLOBBISH = re.compile(r"[*\[\]]")
 
 
-def assist_signals(text: str, cwd: str | None = None) -> tuple[int, list[str], str | None]:
+# "look for cleanup opportunities", "search for the leak", "check on the build": an English-word
+# command followed straight away by one of these is a sentence, not an invocation.
+LEAD_IN = frozenset({"for", "at", "into", "through", "about", "the", "a", "an", "my", "our",
+                     "these", "those", "whether", "why", "how", "what"})
+
+
+def assist_signals(text: str, cwd: str | None = None, *,
+                   local_files: bool = True) -> tuple[int, list[str], str | None]:
     """Score how much a runnable input reads like an English request.
 
     Returns (score, reasons, first_word). Score 0 means no ambiguity: the first word is not an
     English-word command, or the input uses flags, operators, expansions, globs or quotes.
+    `local_files=False` (the terminal is on an ssh host, card #S5SH) leaves out the one signal that
+    looks at this machine's files: whether a bare operand names a file in `cwd`.
     """
     trimmed = text.strip()
     if not trimmed or "\n" in trimmed or SHELLISH.search(trimmed) or '"' in trimmed:
@@ -469,10 +484,8 @@ def assist_signals(text: str, cwd: str | None = None) -> tuple[int, list[str], s
     # English-word command followed straight away by a preposition or an article is a sentence,
     # not an invocation — no command takes one of these as its first operand (owner report,
     # 2026-09-17: "look for cleanup opportunities" ran in the shell).
-    # Only words no command takes as an operand. "all", "up", "out", "in" and "on" are left out:
-    # `make all`, `look up`, `git in` and friends are real.
-    LEAD_IN = {"for", "at", "into", "through", "about", "the", "a", "an", "my", "our",
-               "these", "those", "whether", "why", "how", "what"}
+    # Only words no command takes as an operand (LEAD_IN). "all", "up", "out", "in" and "on" are
+    # left out: `make all`, `look up`, `git in` and friends are real.
     if args and args[0].strip("?.,!:").lower() in LEAD_IN and "lead-in" not in reasons:
         score += 2
         reasons.append("lead-in")
@@ -483,12 +496,12 @@ def assist_signals(text: str, cwd: str | None = None) -> tuple[int, list[str], s
     if args:
         operand = args[0].strip("?.,!")
         plain = operand.isalpha()
-        exists = plain and os.path.exists(os.path.join(cwd or os.getcwd(), operand))
+        exists = plain and local_files and os.path.exists(os.path.join(cwd or os.getcwd(), operand))
         if plain and not exists:
             if first == "go" and operand not in GO_SUBCOMMANDS:
                 score += 2
                 reasons.append(f"go {operand} is not a go subcommand")
-            elif first in BARE_WORD_ODD and len(args) <= 3:
+            elif first in BARE_WORD_ODD and len(args) <= 3 and local_files:
                 score += 2
                 reasons.append(f"{first} with a bare word")
     return score, reasons, first
@@ -774,11 +787,123 @@ def _reads_like_request(trimmed: str, known: set[str], valid: bool, cwd: str | N
     return True
 
 
+# ----- The terminal is at a prompt on an ssh host (card #S5SH, docs/SSH-AND-MOSH.md section 4) -------
+MAX_HOST = 255
+
+
+def remote_host(remote) -> str:
+    """The host named by a route request's `remote` object, "" when there is none.
+
+    `{"host": "filly"}`; other keys are ignored so the GUI can grow the object. The host is only
+    shown in text (the route line), never run, but it must still be printable and one word."""
+    if remote is None:
+        return ""
+    if not isinstance(remote, dict):
+        raise ValueError("remote must be an object.")
+    host = remote.get("host")
+    if not isinstance(host, str) or not host.strip() or len(host) > MAX_HOST \
+            or any(not ch.isprintable() or ch.isspace() for ch in host):
+        raise ValueError(f"remote.host must be a host name of 1–{MAX_HOST} printable characters.")
+    return host
+
+
+def _remote_prose(trimmed: str) -> str:
+    """Why a line typed at a remote prompt reads as a sentence, or "" when it is command-shaped.
+
+    At an ssh prompt nothing here can say whether a word is a command over there: this machine's
+    PATH, aliases, functions and files describe the wrong machine. So a line goes to the remote
+    shell unless its *shape* is a sentence — the language half of explain_invalid, without the
+    typo and PATH tests. Flags, paths, operators, quotes and globs are command-shaped outright."""
+    if "\n" in trimmed:
+        return ""
+    if _contractions_only(trimmed):
+        return "an apostrophe inside a word"
+    if SHELLISH.search(trimmed) or GLOBBISH.search(trimmed) or '"' in trimmed:
+        return ""
+    try:
+        words = shlex.split(trimmed, posix=True)
+    except ValueError:
+        return ""
+    if not words or any(w.startswith(("-", "+")) and w not in {"-", "--"} for w in words[1:]):
+        return ""
+    first = words[0]
+    if first in LITERAL_TEXT:
+        return ""                                   # `echo the build is done`
+    bare, punctuated = _bare_word(first)
+    if not bare.isalpha():
+        return ""                                   # ./run.sh, pip3, /usr/bin/env
+    lowered = bare.lower()
+    if punctuated:
+        return "sentence punctuation"               # "yeah,", "ok.", "really?"
+    if lowered in REPLY_WORDS and lowered not in ENGLISH_COMMANDS:
+        return "a reply"                            # "ok do it", "thanks", "hmm"
+    if lowered in SIGNAL_WORDS and lowered not in ENGLISH_COMMANDS:
+        return "starts like a sentence"             # "the build is broken", "is nginx up"
+    args = [w.lower() for w in words[1:]]
+    if bare != lowered and args and all(a.strip(SENTENCE_TAIL).isalpha() for a in args):
+        return "a capitalised sentence"             # "Sounds good", "Try again later"
+    if len(args) >= 1 and args[-1].endswith("?") and args[-1].rstrip("?!").isalpha():
+        return "a question"                         # "nginx running?"
+    signals = {a.strip(SENTENCE_TAIL) for a in args} & SIGNAL_WORDS.keys()
+    score = sum(SIGNAL_WORDS[w] for w in signals)
+    if len(args) >= 3 and 2 * len(signals) >= len(args) and score >= ASSIST_THRESHOLD + 1:
+        return "mostly sentence words"              # "disk is full on this box"
+    return ""
+
+
+def _classify_remote(text: str, trimmed: str, forced: str | None, host: str) -> Decision:
+    """classify() for a terminal sitting at a prompt on `host`: shell (typed into ssh) or agent.
+
+    Nothing is checked against this machine, so a shell decision is always `valid` (the remote
+    shell reports its own errors) and nothing is ever "not found"."""
+    typed = f"typed on {host}"
+    prose = _remote_prose(trimmed)
+    signal = bool(prose) or trimmed in LOOP_ONLY or bool(NATURAL.match(trimmed)) \
+        or assist_signals(trimmed, local_files=False)[0] >= ASSIST_THRESHOLD
+    if forced == "agent":
+        return Decision("agent", text, f"Explicit agent destination; nothing is typed on {host}.",
+                        agent_signal=signal, remote_host=host)
+    if forced == "shell":
+        return Decision("shell", text, f"Explicit terminal destination · {typed}.",
+                        agent_signal=signal, remote_host=host)
+    if trimmed in LOOP_ONLY:
+        return Decision("agent", text, f"“{trimmed}” means nothing outside a loop; sent to the agent",
+                        agent_signal=True, explain_invalid=False, remote_host=host)
+    if trimmed in LONE_REPLY:
+        return Decision("agent", text, f"“{trimmed}” on its own is a reply; sent to the agent",
+                        agent_signal=True, explain_invalid=False, remote_host=host)
+    if NATURAL.match(trimmed):
+        try:
+            first = shlex.split(trimmed, posix=True)[0]
+        except (ValueError, IndexError):
+            first = trimmed.split(maxsplit=1)[0]
+        if first in ENGLISH_COMMANDS and first not in KEYWORDS and "\n" not in trimmed:
+            why = f"“{first}” is a command and an English word; reads like a request"
+            return Decision("agent", text, why + " · best guess: agent request", needs_assist=True,
+                            assist_reason=why, remote_host=host)
+        return Decision("agent", text, "Natural-language request. Sent only after you submit.",
+                        agent_signal=True, remote_host=host)
+    score, signals, first = assist_signals(trimmed, local_files=False)
+    if score >= ASSIST_THRESHOLD:
+        guess = "shell" if first in LITERAL_TEXT else "agent"
+        why = f"“{first}” is a command and an English word; reads like a sentence ({', '.join(signals[:4])})"
+        return Decision(guess, text, why + (" · best guess: agent request" if guess == "agent"
+                                              else f" · best guess: shell command, {typed}"),
+                        needs_assist=True, assist_reason=why, remote_host=host)
+    if prose:
+        return Decision("agent", text, f"Reads like a request ({prose}) · sent to the agent",
+                        agent_signal=True, explain_invalid=False, remote_host=host)
+    return Decision("shell", text, f"Shell command · {typed}.", remote_host=host)
+
+
 def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
-             path: str | None = None, cwd: str | None = None) -> Decision:
+             path: str | None = None, cwd: str | None = None, remote: dict | None = None) -> Decision:
+    """Where a submitted line goes. `remote` ({"host": …}) says the terminal is at a prompt on that
+    ssh host: the local PATH, aliases and cwd are then ignored (card #S5SH)."""
     text = validate_input(text)
     if mode not in {"auto", "shell", "agent"}:
         raise ValueError("Unknown input mode.")
+    host = remote_host(remote)
     # Prefixes are only interpreted at the start of the composer, not inside scripts.
     explicit = None
     for prefix, destination in (("/shell ", "shell"), ("/agent ", "agent")):
@@ -789,6 +914,8 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
     trimmed = text.strip()
     if not trimmed:
         return Decision("empty", text, "Type a shell command or an agent request.")
+    if host:
+        return _classify_remote(text, trimmed, forced, host)
     known = set(known_commands)
     if forced in {"agent", "shell"}:
         # Fixed modes get the full picture so the GUI can flag a wrong-mode submission:

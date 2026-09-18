@@ -121,7 +121,9 @@ The ask context gains `remote_session`:
 `run_command` takes an optional `host`. When it equals `remote_session.host` and the session is
 `reachable`, the command runs as
 
-    ssh -S <control_path> -o ControlMaster=no -o BatchMode=yes -T <host> -- 'cd <cwd> && <command>'
+    ssh -S <control_path> -o ControlMaster=no -o BatchMode=yes -o ConnectTimeout=10 -T <host> -- \
+        'cd <cwd> || exit 1
+    <command>'
 
 reusing the user's login. Any other host is refused with a message the model can act on. The system
 prompt tells the model that plain `run_command` runs on the local machine and `host` runs on the
