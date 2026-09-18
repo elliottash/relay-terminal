@@ -11305,10 +11305,12 @@ private:
         leftRow->setSpacing(0);
         auto *icon = new QLabel;
         icon->setObjectName(QStringLiteral("windowIcon"));
-        // The bare mark, not the app icon: the icon's dark tile vanishes into the chrome and
-        // leaves only a speck of chevron at this size.
-        const QString markPath = relay::theme::themeDataDir() + QStringLiteral("/icons/relay-mark.svg");
-        const QIcon appIcon = QFileInfo::exists(markPath) ? QIcon(markPath) : QApplication::windowIcon();
+        // The app icon itself, the same one the launcher and the task bar show (owner, 2026-09-18:
+        // "i want this icon everywhere"). It used to be the bare mark from the theme directory,
+        // drawn without its tile on the grounds that the tile vanishes into the chrome at this
+        // size; on a light theme the tile is what makes it read as the app's icon rather than a
+        // stray chevron, and one icon in every place beats a better one in each.
+        const QIcon appIcon = QApplication::windowIcon();
         if (appIcon.isNull()) icon->setText(QStringLiteral("◈"));
         else {
             // QIcon::pixmap() ignores the screen's scale factor, so ask for the device pixels.
