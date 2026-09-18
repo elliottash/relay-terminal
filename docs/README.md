@@ -33,7 +33,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [SWITCHBOARD-FORMAT.md](SWITCHBOARD-FORMAT.md) | The Switchboard file format reference (phase 0): card front matter per type, task markers, threads, ids, ranks, board.yaml, `relay-board.py` check/index/migrate |
 | [TERMINAL-ENGINE-OPTIONS.md](TERMINAL-ENGINE-OPTIONS.md) | Permissively licensed, cross-platform terminal cores and widgets compared (libghostty-vt, Contour, alacritty_terminal, xterm.js, libvterm, GPL references) |
 | [AGENT-FEATURES-RESEARCH.md](AGENT-FEATURES-RESEARCH.md) | Session, planning, model/effort, command and subagent UX in Warp, opencode, Claude Code and Codex; recommendations and a subagent design for Relay |
-| [PALETTE-RESEARCH.md](PALETTE-RESEARCH.md) | Palette designs in other tools; recommended two palettes, later merged into one actions palette |
+| [PALETTE-RESEARCH.md](PALETTE-RESEARCH.md) | Palette designs in other tools; recommended two palettes, later merged into one actions palette, since 2026-09-18 the Actions tab and search of the Settings pane |
 | [REMOTE-AND-MULTIPLAYER-DESIGN.md](REMOTE-AND-MULTIPLAYER-DESIGN.md) | Warp Remote Control, Blink, sshx and others compared; the phone-first design, phases, threat model and owner decisions behind `#W5N2` |
 | [OPENCODE-NOTES.md](OPENCODE-NOTES.md) | What Relay's agent could adopt from opencode, ranked |
 | [RESEARCH.md](RESEARCH.md) | Historical: primary sources checked for the first build (KonsolePart, Qt editor, Warp licensing, Kimi and Z.AI endpoints) |

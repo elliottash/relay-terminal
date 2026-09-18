@@ -95,7 +95,7 @@ QString bevelStylesheet(const ThemeSpec &spec) {
     const QString dark = hex(extraColor(spec, QStringLiteral("bevel.dark"), SurfaceRaised.darker(160)));
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
-QFrame#paneChrome[hot="true"], QWidget#sidebar, QFrame#helpCard, QMenu, QFrame#notificationsPopup {
+QFrame#paneChrome[hot="true"], QFrame#helpCard, QMenu, QFrame#notificationsPopup {
     border-top: 2px solid %1; border-left: 2px solid %1; border-bottom: 2px solid %2; border-right: 2px solid %2; }
 QPushButton:pressed, QToolButton#stripChip:pressed {
     border-top: 2px solid %2; border-left: 2px solid %2; border-bottom: 2px solid %1; border-right: 2px solid %1; }
@@ -157,7 +157,7 @@ QPushButton:disabled { background: %3; }
 /* The chassis the panes are bolted to: one sheet, with a shallower sheen than a chip, so the
    chips read as raised out of it rather than as a second set of buttons. The tab row and the
    toolbar are cleared so that sheet runs behind them unbroken. */
-QMainWindow#relayWindow, QDialog, QWidget#sidebar {
+QMainWindow#relayWindow, QDialog {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %5, stop:1 %6); }
 QTabBar, QToolBar { background: transparent; }
 )");
@@ -186,7 +186,7 @@ QPushButton:disabled { background: %3; }
 /* The case: the largest moulded surface here, and the one that has to read as a machine rather
    than a light grey web page. One gentle top light across the whole window and the deck the
    panes sit on, with the tab row and toolbar cleared so the moulding runs behind them. */
-QMainWindow#relayWindow, QDialog, QWidget#sidebar, QWidget#pane {
+QMainWindow#relayWindow, QDialog, QWidget#pane {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %5, stop:1 %6); }
 QTabBar, QToolBar { background: transparent; }
 )");
@@ -387,11 +387,23 @@ QLabel#transcriptHeader { color: @muted; }
 QPlainTextEdit#transcriptView { background: transparent; border: none; }
 QPlainTextEdit#thinkingView { background: transparent; border: none; color: @muted; font-family: "@mono"; font-size: 10pt; }
 QLabel#toast { background: @raised; color: @text; border: 1px solid @accentBorder; border-radius: 8px; padding: 6px 12px; }
-QWidget#sidebar { background: @surface; border: 1px solid @border; border-radius: 10px; }
-QLabel#paletteTitle { color: @muted; font-weight: 600; letter-spacing: 1px; padding: 2px 4px; }
-QTreeWidget#paletteList { background: transparent; border: none; outline: none; font-size: 10pt; }
-QTreeWidget#paletteList::item { padding: 6px 4px; color: @text; }
-QTreeWidget#paletteList::item:selected { background: @raised; color: @text; }
+/* Settings pane (src/SettingsPane.cpp): a full pane, engraved headers like the Switchboard's,
+   rows that light up under the pointer and under the keyboard highlight. */
+QWidget#settingsPane { background: @bg; }
+QLabel#settingsTitle { color: @muted; font-family: "@mono"; font-size: 8pt; font-weight: 600; letter-spacing: 1px; padding: 0 4px; }
+QLineEdit#settingsSearch { padding: 6px 10px; font-size: 10.5pt; }
+QToolButton#settingsClose { color: @muted; background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 2px 7px; font-size: 11pt; }
+QToolButton#settingsClose:hover { color: @text; border-color: @border; background: @raised; }
+QTabBar#settingsTabs::tab { padding: 4px 10px; margin: 0 2px 0 0; }
+QScrollArea#settingsPage, QWidget#settingsPageBody { background: transparent; border: none; }
+QLabel#settingsBlurb, QLabel#settingsInfo { color: @muted; }
+QLabel#settingsHeading { color: @muted; font-family: "@mono"; font-size: 8pt; font-weight: 600; letter-spacing: 1px; padding: 10px 10px 2px 10px; }
+QFrame#settingsRow { background: transparent; border: 1px solid transparent; border-radius: 8px; }
+QFrame#settingsRow:hover { background: @surface; }
+QFrame#settingsRow[current="true"] { background: @surface; border-color: @accentBorder; }
+QLabel#settingsRowLabel { color: @text; }
+QLabel#settingsRowDetail { color: @muted; font-size: 11px; }
+QLabel#settingsFooter { color: @muted; font-size: 11px; padding-top: 6px; border-top: 1px solid @border; }
 /* The requests ledger and a subagent transcript float over a pane; both are opaque on purpose. */
 QWidget#requestsPanel, QWidget#subagentTranscript { background: @bg; border: 1px solid @border; border-radius: 8px; }
 QWidget#requestsPanel QLabel#panelKeys, QWidget#subagentTranscript QLabel#panelKeys { color: @muted; }

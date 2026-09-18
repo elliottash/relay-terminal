@@ -15,6 +15,7 @@
 #include "PaneTitles.h"            // model-written pane titles and the tab labels made from them
 #include "TurnTranscript.h"
 #include "ModelSettings.h"
+#include "SettingsPane.h"
 #include "SkillsDialog.h"
 #include "SubagentTranscript.h"   // subagents UI
 #include "SubagentsPanel.h"
@@ -350,7 +351,7 @@ private:
         add("tab.moveToNewWindow", "tab", "Move tab to a new window (keeps its panes)", {});
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+Z")});
         add("windows.fresh", "window", "Start a fresh window set (forget the saved window layout)", {});
-        add("palette.open", "palette", "Open the Relay actions palette", {QStringLiteral("Ctrl+Shift+A")});
+        add("palette.open", "palette", "Settings and actions: open the Settings pane (again to close it)", {QStringLiteral("Ctrl+Shift+A")});
         // One key opens and closes the explorer (issue #D60R). Ctrl+B is VS Code's sidebar key and
         // is free in all four Relay presets; Ctrl+Shift+B is the twin a program cannot swallow.
         add("files.explorer", "pane", "File explorer: open or close this pane's folder in an explorer pane",
@@ -385,7 +386,7 @@ private:
         add("agent.provider", "agent", "Provider and API keys (advanced endpoint settings)", {});
         add("agent.modelKeys", "agent", "API keys for model providers", {});
         add("agent.modelRoles", "agent", "Model roles: default provider and the Main / Flash / Lite models", {});
-        add("app.settings", "window", "Settings: models, terminal, agent, privacy, shortcuts", {QStringLiteral("Ctrl+,")});
+        add("app.settings", "window", "Settings pane, General tab", {QStringLiteral("Ctrl+,")});
         add("agent.fastAgent", "agent", "Switch this pane between the main agent and the fast agent", {QStringLiteral("Alt+F")});   // model roles
         add("input.modeAuto", "agent", "Input mode: auto detect", {});
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
@@ -418,7 +419,7 @@ private:
         // Key_Question on a US layout and as Key_Slash on others and on the keypad, with Shift
         // held either way, so all of them are bound: Ctrl+Shift+? reaches Ctrl+? and Ctrl+Shift+/
         // on a Key_Slash layout reaches Ctrl+/ through match()'s shifted-symbol fallback.
-        add("help.shortcuts", "palette", "Show all keyboard shortcuts",
+        add("help.shortcuts", "palette", "Settings › Actions: every action and the keys it answers to",
             {QStringLiteral("Ctrl+?"), QStringLiteral("Ctrl+Shift+/"), QStringLiteral("Ctrl+/"), QStringLiteral("F1")});
         add("keybindings.edit", "terminal", "Edit keyboard shortcuts", {});
         add("keybindings.reload", "terminal", "Reload keyboard shortcuts", {});
@@ -2716,7 +2717,7 @@ public:
     }
 
     // ----- aliases: saved commands and prompts (issue G8DK, protocol 20) ----------------------
-    // An alias runs three ways — the actions palette, `/name`, and the name typed in terminal mode.
+    // An alias runs three ways — the Settings pane (search or the Actions tab), `/name`, and the name typed in terminal mode.
     // All three end here: the template's `{{parameters}}` become fields in the prompt box, Tab moves
     // between them, and submitting sends the values to the worker, which does the substitution and
     // hands back the exact line. Relay never runs an alias without it passing through the prompt
@@ -4526,7 +4527,7 @@ public:
             row(QStringLiteral("@"), QStringLiteral("attach files and folders"));
             row(QStringLiteral("#"), QStringLiteral("reference a Switchboard card"));
             row(keys.shortcutText(QStringLiteral("input.toggle")), QStringLiteral("switch terminal / agent"));
-            row(keys.shortcutText(QStringLiteral("palette.open")), QStringLiteral("actions palette"));
+            row(keys.shortcutText(QStringLiteral("palette.open")), QStringLiteral("settings and every action"));
             row(keys.shortcutText(QStringLiteral("board.open")), QStringLiteral("Switchboard: cards and threads"));
             // The explorer is one of the keys people reach for most and it was only in the full
             // list (owner, 2026-09-17). One key opens and closes it, which the wording has to say.
@@ -8056,7 +8057,7 @@ private:
 // as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
 class ToolPane final : public QWidget {
 public:
-    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board };
+    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings };
 
     ToolPane(Kind kind, const QString &path, bool planActions = true) : m_kind(kind) {
         setObjectName(QStringLiteral("pane"));
@@ -8096,6 +8097,15 @@ public:
     }
     relay::BoardView *board() const { return m_board; }
 
+    // The Settings pane (src/SettingsPane.h). Transient: not saved with the layout (node() is empty).
+    ToolPane(relay::SettingsPane *view, const QString &cwd) : m_kind(Kind::Settings), m_settingsView(view), m_subagentCwd(cwd) {
+        setObjectName(QStringLiteral("pane"));
+        setAttribute(Qt::WA_StyledBackground);
+        auto *layout = new QVBoxLayout(this); layout->setContentsMargins(1, 1, 1, 1);
+        layout->addWidget(view);
+    }
+    relay::SettingsPane *settings() const { return m_settingsView; }
+
     // A finished agent turn: tool calls and transcript, opened from the inline summary line.
     ToolPane(relay::TurnTranscriptView *view, const QString &cwd) : m_kind(Kind::Turn), m_turn(view), m_subagentCwd(cwd) {
         setObjectName(QStringLiteral("pane"));
@@ -8110,9 +8120,10 @@ public:
     relay::FilePreview *preview() const { return m_preview; }
     relay::PlanEditor *plan() const { return m_plan; }
     relay::SubagentTranscriptView *subagent() const { return m_subagent; }
-    QString path() const { return (m_subagent || m_turn || m_board) ? QString() : m_explorer ? m_explorer->root() : m_plan ? m_plan->path() : m_preview->path(); }
-    QString cwd() const { return (m_subagent || m_turn || m_board) ? m_subagentCwd : m_explorer ? m_explorer->root() : QFileInfo(path()).absolutePath(); }
+    QString path() const { return (m_subagent || m_turn || m_board || m_settingsView) ? QString() : m_explorer ? m_explorer->root() : m_plan ? m_plan->path() : m_preview->path(); }
+    QString cwd() const { return (m_subagent || m_turn || m_board || m_settingsView) ? m_subagentCwd : m_explorer ? m_explorer->root() : QFileInfo(path()).absolutePath(); }
     QString title() const {
+        if (m_settingsView) return QStringLiteral("Settings");
         if (m_board) return m_board->title();
         if (m_subagent) return m_subagent->title();
         if (m_turn) return m_turn->title();
@@ -8122,12 +8133,13 @@ public:
     }
     QJsonObject node() const {
         if (m_board) return {{"board", QJsonObject{{"workspace", m_board->workspace()}, {"tab", m_board->currentTab()}}}};
-        if (m_subagent || m_turn) return {};
+        if (m_subagent || m_turn || m_settingsView) return {};
         if (m_plan) return {{"plan", QJsonObject{{"path", path()}}}};
         return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};
     }
     void focusInput() {
-        if (m_board) m_board->focusInput();
+        if (m_settingsView) m_settingsView->focusSearch();
+        else if (m_board) m_board->focusInput();
         else if (m_subagent) m_subagent->focusInput();
         else if (m_turn) m_turn->focusInput();
         else if (m_plan) m_plan->editor()->setFocus(Qt::OtherFocusReason);
@@ -8143,6 +8155,7 @@ private:
     relay::SubagentTranscriptView *m_subagent = nullptr;
     relay::TurnTranscriptView *m_turn = nullptr;
     relay::BoardView *m_board = nullptr;
+    relay::SettingsPane *m_settingsView = nullptr;
     QString m_subagentCwd;
 };
 
@@ -8745,17 +8758,12 @@ public:
         auto *row = new QHBoxLayout(central); row->setContentsMargins(0, 0, 0, 0); row->setSpacing(0);
         row->addWidget(m_tabs, 1);
         setCentralWidget(central);
-        // The palette floats over the right edge instead of resizing the terminal, so programs
-        // such as vim do not redraw every time it opens.
-        buildSidebar();
-        m_sidebar->setParent(central);
-        central->installEventFilter(this);
         Keymap::instance().listen(this, [this] {
             for (Pane *pane : allPanes()) pane->sendKeybindings();
             const auto conflicts = Keymap::instance().conflicts();
             notice(conflicts.isEmpty() ? QStringLiteral("Keyboard shortcuts reloaded.")
                                                          : QStringLiteral("Keyboard shortcuts: ") + conflicts.join(QStringLiteral("; ")));
-            if (m_sidebar->isVisible()) renderPalette();
+            refreshSettingsPanes();
         });
         connect(m_tabs, &QTabWidget::currentChanged, this, [this](int) {
             QWidget *page = m_tabs->currentWidget();
@@ -9080,7 +9088,6 @@ protected:
         }
         if (headerDrag(object, event)) return true;
         if (toolHeaderDrag(object, event)) return true;
-        if (event->type() == QEvent::Resize && object == centralWidget()) placeSidebar();
         if (event->type() == QEvent::Resize && isLeaf(qobject_cast<QWidget *>(object)))
             if (auto *chrome = chromeOf(static_cast<QWidget *>(object))) chrome->place();
         if (object == m_tabs->tabBar() && (event->type() == QEvent::Resize || event->type() == QEvent::MouseMove || event->type() == QEvent::Leave
@@ -9097,23 +9104,11 @@ protected:
         auto *widget = qobject_cast<QWidget *>(object);
         if (!widget || widget->window() != this) return QMainWindow::eventFilter(object, event);
         auto *key = static_cast<QKeyEvent *>(event);
-        if (widget == m_filter && event->type() == QEvent::KeyPress && paletteKey(key)) return true;
-        if (widget == m_filter && event->type() == QEvent::ShortcutOverride) {
-            const int k = key->key();
-            if (k == Qt::Key_Escape || k == Qt::Key_Return || k == Qt::Key_Enter || k == Qt::Key_Up || k == Qt::Key_Down
-                || k == Qt::Key_Left || k == Qt::Key_Right || k == Qt::Key_PageUp || k == Qt::Key_PageDown
-                || ((key->modifiers() & Qt::ControlModifier) && (k == Qt::Key_N || k == Qt::Key_P))) { event->accept(); return true; }
-        }
-        // Palette keys stay inside the palette.
-        if (m_sidebar->isVisible() && (widget == m_filter || widget == m_list)) {
-            // Only the palette key itself (to close) acts while the palette has focus.
-            if (Keymap::instance().match(key) != QStringLiteral("palette.open")) return QMainWindow::eventFilter(object, event);
-        }
         // Keyboard walk over the links in the output (issue GWXM). While it runs, Enter opens
         // the highlighted link, Esc leaves and the arrows move; the keys are taken here, so the
         // walk works with the prompt box focused, which is the normal state. Anything else ends
         // the walk and is handled as usual, so typing is never swallowed.
-        if (m_active && m_active->outputLinkWalkActive() && !m_sidebar->isVisible()) {
+        if (m_active && m_active->outputLinkWalkActive()) {
             Pane *walking = m_active;
             switch (key->key()) {
             case Qt::Key_Return: case Qt::Key_Enter:
@@ -9257,64 +9252,6 @@ private:
     }
 
     // Ctrl+? (or F1): every action and its keys, so the window itself needs no shortcut bar.
-    void showShortcutsOverlay() {
-        QDialog dialog(this);
-        dialog.setWindowTitle(QStringLiteral("Keyboard shortcuts"));
-        dialog.resize(720, std::min(760, height() - 80));
-        auto *layout = new QVBoxLayout(&dialog);
-        auto *filter = new QLineEdit; filter->setPlaceholderText(QStringLiteral("Search shortcuts…"));
-        layout->addWidget(filter);
-        auto *tree = new QTreeWidget;
-        tree->setColumnCount(2);
-        tree->setHeaderLabels({QStringLiteral("Action"), QStringLiteral("Keys")});
-        tree->setRootIsDecorated(false);
-        tree->setAlternatingRowColors(true);
-        layout->addWidget(tree, 1);
-        // Which keys reach this overlay, and which one just did. "Ctrl+?" is Ctrl+Shift+/ on most
-        // keyboards, so naming the key that worked is the answer to "Ctrl+? does nothing" (#T9ZS).
-        const QStringList openKeys = Keymap::instance().shortcutTexts(QStringLiteral("help.shortcuts"));
-        QString opened = QStringLiteral("Opens with %1, or from the palette (%2).")
-                             .arg(openKeys.isEmpty() ? QStringLiteral("no key") : openKeys.join(QStringLiteral(", ")),
-                                  Keymap::instance().shortcutText(QStringLiteral("palette.open")));
-        if (m_lastShortcut.first == QStringLiteral("help.shortcuts") && !m_lastShortcut.second.isEmpty())
-            opened += QStringLiteral("  You pressed %1.").arg(m_lastShortcut.second);
-        m_lastShortcut = {};
-        auto *opensWith = new QLabel(opened);
-        opensWith->setWordWrap(true); opensWith->setObjectName(QStringLiteral("transcriptHeader"));
-        layout->addWidget(opensWith);
-        auto *note = new QLabel(QStringLiteral("Unbound actions run from the palette (%1). Edit shortcuts: Actions › Edit keyboard shortcuts.")
-                                    .arg(Keymap::instance().shortcutText(QStringLiteral("palette.open"))));
-        note->setWordWrap(true); note->setObjectName(QStringLiteral("transcriptHeader"));
-        layout->addWidget(note);
-        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close);
-        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-        layout->addWidget(buttons);
-
-        auto fill = [tree](const QString &query) {
-            tree->clear();
-            QString section;
-            QTreeWidgetItem *group = nullptr;
-            for (const ActionDef &action : Keymap::instance().actions()) {
-                const QString keys = Keymap::instance().shortcutText(action.id);
-                if (!query.isEmpty() && !action.description.contains(query, Qt::CaseInsensitive)
-                    && !keys.contains(query, Qt::CaseInsensitive) && !action.id.contains(query, Qt::CaseInsensitive))
-                    continue;
-                if (action.category != section) {
-                    section = action.category;
-                    group = new QTreeWidgetItem(tree, {section.left(1).toUpper() + section.mid(1), QString()});
-                    QFont bold = group->font(0); bold.setBold(true); group->setFont(0, bold);
-                    group->setFirstColumnSpanned(true);
-                }
-                auto *row = new QTreeWidgetItem(tree, {action.description, keys.isEmpty() ? QStringLiteral("—") : keys});
-                row->setToolTip(0, action.id);
-            }
-            tree->resizeColumnToContents(0);
-        };
-        fill(QString());
-        connect(filter, &QLineEdit::textChanged, tree, [fill](const QString &text) { fill(text); });
-        filter->setFocus();
-        dialog.exec();
-    }
 
     void hint(const QString &id, const QString &text, int limit = 3) {
         if (text.isEmpty() || !relay::ShortcutHints::instance().shouldShow(id, limit)) return;
@@ -9385,10 +9322,10 @@ private:
             if (!file.isEmpty()) openPath(file, 0, m_activeLeaf);
         }
         else if (id == QStringLiteral("board.open")) toggleBoardPane();
-        else if (id == QStringLiteral("palette.open")) togglePalette();
+        else if (id == QStringLiteral("palette.open")) toggleSettingsPane();
         else if (id == QStringLiteral("keybindings.reload")) Keymap::instance().reload();
-        else if (id == QStringLiteral("help.shortcuts")) showShortcutsOverlay();
-        else if (id == QStringLiteral("app.settings")) openSettings();
+        else if (id == QStringLiteral("help.shortcuts")) openShortcutsTab();
+        else if (id == QStringLiteral("app.settings")) openSettingsPane(QStringLiteral("general"));
         else if (id == QStringLiteral("keybindings.edit")) {
             Keymap::instance().ensureFile();
             const QString editor = qEnvironmentVariable("VISUAL", qEnvironmentVariable("EDITOR", QStringLiteral("nano")));
@@ -9454,69 +9391,132 @@ private:
     }
 
     // ----- palette ----------------------------------------------------------------------------
-    // One Relay actions palette (Ctrl+Shift+A). Sections: Recent, then Agent / Terminal ordered by
-    // where focus was, then Panes and tabs, then Shortcuts. Typing searches everything, including
-    // submenu entries ("deep" finds Model › DeepSeek). Right or Enter opens a submenu; Left or
-    // Backspace on an empty filter goes back; Esc clears the filter, goes back, then closes.
-    struct PaletteItem {
-        QString key, section, label, detail, shortcut, aliases;
-        bool checked = false, stayOpen = false;
-        std::function<void()> run;
-        std::function<QList<PaletteItem>()> children;
-    };
+    using PaletteItem = relay::ActionItem;
 
-    void buildSidebar() {
-        m_sidebar = new QWidget;
-        m_sidebar->setObjectName(QStringLiteral("sidebar"));
-        m_sidebar->setAttribute(Qt::WA_StyledBackground);
-        auto *layout = new QVBoxLayout(m_sidebar); layout->setContentsMargins(12, 12, 12, 12); layout->setSpacing(8);
-        m_paletteTitle = new QLabel; m_paletteTitle->setObjectName(QStringLiteral("paletteTitle"));
-        layout->addWidget(m_paletteTitle);
-        m_filter = new QLineEdit; m_filter->setPlaceholderText(QStringLiteral("Search actions · ↑↓ select · → open · Enter run · Esc back"));
-        layout->addWidget(m_filter);
-        m_list = new QTreeWidget; m_list->setObjectName(QStringLiteral("paletteList"));
-        m_list->setColumnCount(2); m_list->setHeaderHidden(true); m_list->setRootIsDecorated(false);
-        m_list->setIndentation(0); m_list->setUniformRowHeights(true); m_list->setFocusPolicy(Qt::NoFocus);
-        m_list->header()->setStretchLastSection(false);
-        m_list->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-        m_list->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-        layout->addWidget(m_list, 1);
-        m_sidebar->hide();
-        connect(m_filter, &QLineEdit::textChanged, this, [this] { renderPalette(); });
-        connect(m_list, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *row) { if (row && row->data(0, Qt::UserRole).toInt() >= 0) { m_list->setCurrentItem(row); activateSelected(false); } });
-        m_filter->installEventFilter(this);
+    // ----- Settings pane (src/SettingsPane.h) ---------------------------------------------------
+    // Ctrl+Shift+A, the gear in the title bar and Ctrl+, open one Settings pane beside the focused
+    // pane (owner, 2026-09-18: a full pane, not a strip over the right edge): every setting as a
+    // real control, one tab per section, and every action with its keys on the Actions tab. One
+    // search box covers both, so "Ctrl+Shift+A, type, Enter" still runs an action. The pane is
+    // transient: it is not saved with the layout, and closing it returns focus to the widget that
+    // had it (vim in the terminal, or the prompt box).
+    static ToolPane *settingsPaneIn(QWidget *page) {
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->settings()) return tool;
+        return nullptr;
     }
 
-    void togglePalette() {
-        if (m_sidebar->isVisible()) { closePalette(); return; }
-        m_returnPane = m_active;
-        m_returnFocus = QApplication::focusWidget();
-        m_terminalContext = m_active && m_active->ownsTerminalWidget(m_returnFocus);
-        // Aliases are files: one may have arrived from an agent, a git pull or an editor since the
-        // list was last read, so ask again on the way in (issue G8DK).
-        if (m_active) m_active->refreshAliases();
-        m_stack.clear();
-        m_filter->clear();
-        renderPalette();
-        placeSidebar();
-        m_sidebar->show();
-        m_sidebar->raise();
-        m_filter->setFocus(Qt::ShortcutFocusReason);
+    ToolPane *createSettingsPane() {
+        auto *view = new relay::SettingsPane([this] { return settingsSections(); }, [this] { return searchableActions(); });
+        auto *tool = new ToolPane(view, m_manager->workspace());
+        relay::theme::polishWindow(tool);
+        tool->setObjectName(QStringLiteral("pane"));
+        QPointer<ToolPane> guard(tool);
+        view->onClose = [guard] { if (auto *w = windowOf(guard)) w->closeSettingsPane(guard); };
+        view->onRun = [guard](const relay::ActionItem &item) { if (auto *w = windowOf(guard)) w->runFromSettings(guard, item); };
+        return tool;
     }
 
-    void placeSidebar() {
-        if (!m_sidebar || !centralWidget()) return;
-        const QRect area = centralWidget()->rect();
-        const int width = std::min(420, area.width() - 40);
-        m_sidebar->setGeometry(area.right() - width - 8, area.top() + 36, width, std::max(200, area.height() - 48));
+    // The action catalog for the pane's search and its Actions tab, with the hidden search words
+    // folded into each item so the pane needs no table of its own.
+    QList<PaletteItem> searchableActions() {
+        QList<PaletteItem> items = rootItems();
+        for (PaletteItem &item : items) item.aliases = (item.aliases + ' ' + paletteAliases(item)).trimmed();
+        return items;
     }
 
-    void closePalette() {
-        m_sidebar->hide();
-        m_stack.clear();
-        // Return focus exactly where it was, e.g. to vim in the terminal, not to the composer.
-        if (m_returnFocus && m_returnFocus->window() == this && m_returnFocus != m_filter) m_returnFocus->setFocus(Qt::OtherFocusReason);
-        else if (Pane *pane = m_returnPane ? m_returnPane.data() : m_active.data()) pane->focusInput();
+    // Open the pane in this tab, or bring the one it has to the front; `tab` picks the section.
+    void openSettingsPane(const QString &tab = QString(), const QString &search = QString()) {
+        QWidget *page = m_tabs->currentWidget();
+        ToolPane *tool = page ? settingsPaneIn(page) : nullptr;
+        if (!tool) {
+            m_returnPane = m_active;
+            m_returnFocus = QApplication::focusWidget();
+            // Aliases are files: one may have arrived from an agent, a git pull or an editor since
+            // the list was last read, so ask again on the way in (issue G8DK).
+            if (m_active) m_active->refreshAliases();
+            QWidget *anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
+            tool = createSettingsPane();
+            if (anchor) insertBeside(anchor, tool, Qt::Horizontal, false);
+            else if (page && page->layout()) page->layout()->addWidget(tool);
+        } else {
+            tool->settings()->rebuild();
+        }
+        if (!tab.isEmpty()) tool->settings()->showTab(tab);
+        tool->settings()->setSearch(search);
+        setActiveLeaf(tool);
+        tool->settings()->focusSearch();
+        updateTitles();
+    }
+
+    // The palette key and the gear: open the pane, focus it, or, pressed on it, close it.
+    void toggleSettingsPane() {
+        if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data()); tool && tool->settings()) { closeSettingsPane(tool); return; }
+        openSettingsPane();
+    }
+
+    void openShortcutsTab() {
+        openSettingsPane(relay::SettingsPane::actionsTabId());
+        // "Ctrl+?" is Ctrl+Shift+/ on most keyboards, so name the key that worked (#T9ZS).
+        if (m_lastShortcut.first == QStringLiteral("help.shortcuts") && !m_lastShortcut.second.isEmpty())
+            notice(QStringLiteral("Every action and its keys. You pressed %1.").arg(m_lastShortcut.second), 6000);
+        m_lastShortcut = {};
+    }
+
+    void closeSettingsPane(ToolPane *tool) {
+        if (!tool) return;
+        QWidget *page = pageOf(tool);
+        // Esc must never close the window: when the pane is the last leaf of the last tab, put a
+        // terminal pane beside it first.
+        if (page && leavesIn(page).size() <= 1 && m_tabs->count() <= 1) {
+            try { insertBeside(tool, createPane(paneNode(m_manager->workspace())), Qt::Horizontal, true); }
+            catch (const std::exception &error) { notice(QString::fromUtf8(error.what())); }
+        }
+        QPointer<QWidget> back = m_returnFocus;
+        QPointer<Pane> pane = m_returnPane;
+        m_returnFocus = nullptr;
+        m_returnPane = nullptr;
+        closePane(tool, false);
+        // Focus goes back exactly where it was, e.g. to vim in the terminal, not to the composer.
+        if (back && back->window() == this && back->isVisible()) {
+            if (QWidget *leaf = leafOf(back)) setActiveLeaf(leaf);
+            back->setFocus(Qt::OtherFocusReason);
+        } else if (Pane *target = pane ? pane.data() : m_active.data()) {
+            setActiveLeaf(target);
+            target->focusInput();
+        }
+    }
+
+    // An action chosen in the pane: the bookkeeping the palette did (the recent list, the hint that
+    // teaches its key), then the pane closes and the action runs against the pane that had focus
+    // before it opened. A toggle (`stayOpen`) runs in place and the pane shows its new state.
+    void runFromSettings(ToolPane *tool, const PaletteItem &item) {
+        if (!item.run) return;
+        const QString hintId = QStringLiteral("palette.") + item.key;
+        const QString hintText = item.shortcut.isEmpty()
+            ? QString() : relay::ShortcutHints::nextTime(item.shortcut, item.label.toLower());
+        QStringList recent = QSettings().value(QStringLiteral("palette/recent")).toStringList();
+        recent.removeAll(item.key); recent.prepend(item.key);
+        QSettings().setValue(QStringLiteral("palette/recent"), QStringList(recent.mid(0, 12)));
+        if (item.stayOpen) {
+            hint(hintId, hintText);
+            item.run();
+            QPointer<ToolPane> guard(tool);
+            QTimer::singleShot(150, this, [guard] { if (guard && guard->settings()) guard->settings()->rebuild(); });
+            return;
+        }
+        closeSettingsPane(tool);
+        item.run();
+        // The hint comes after anything the action says itself ("Pane screenshot attached…"), so
+        // the shortcut is what stays on screen.
+        if (!hintText.isEmpty())
+            QTimer::singleShot(400, this, [this, hintId, hintText] { hint(hintId, hintText); });
+    }
+
+    // Something a setting depends on changed elsewhere (a keymap reload, a theme file): redraw.
+    void refreshSettingsPanes() {
+        for (int i = 0; i < m_tabs->count(); ++i)
+            if (ToolPane *tool = settingsPaneIn(m_tabs->widget(i))) tool->settings()->rebuild();
     }
 
     PaletteItem actionItem(const QString &section, const QString &label, const QString &detail, const QString &action, bool checked = false) {
@@ -9536,16 +9536,12 @@ private:
 
     // ----- settings ---------------------------------------------------------------------------
     //
-    // One catalog, two front ends. The compact Settings window (src/ModelSettings.h) renders these
-    // sections with real controls; the actions palette renders the same rows as menu entries, so
-    // every setting keeps its keyboard path. Values live in QSettings under exactly the keys they
-    // used before, because several of them are read straight from QSettings elsewhere.
+    // One catalog, one front end: the Settings pane (src/SettingsPane.h) renders these sections
+    // as tabs of real controls and searches them together with the actions, so every setting keeps
+    // its keyboard path. Values live in QSettings under exactly the keys they used before, because
+    // several of them are read straight from QSettings elsewhere.
     //
-    // Sections: General, Models, Terminal, Agent, Privacy, Shortcuts.
-    static QStringList settingsSectionIds() {
-        return {QStringLiteral("general"), QStringLiteral("models"), QStringLiteral("terminal"),
-                QStringLiteral("agent"), QStringLiteral("privacy"), QStringLiteral("shortcuts")};
-    }
+    // Sections: General, Appearance, Models, Terminal, Agent, Voice, Privacy, Actions.
 
     relay::SettingRow toggleRow(const QString &key, const QString &label, const QString &detail,
                                 bool fallback, std::function<void(bool)> extra = {}) {
@@ -9599,6 +9595,14 @@ private:
         return row;
     }
 
+    static relay::SettingRow headingRow(const QString &label) {
+        relay::SettingRow row;
+        row.kind = relay::SettingRow::Heading;
+        row.id = QStringLiteral("heading:") + label;
+        row.label = label;
+        return row;
+    }
+
     relay::SettingRow buttonRow(const QString &id, const QString &label, const QString &detail,
                                 const QString &buttonText, std::function<void()> run) {
         relay::SettingRow row;
@@ -9636,6 +9640,19 @@ private:
         general.blurb = QStringLiteral("What Relay shows while it works.");
         general.rows << toggleRow(QStringLiteral("agent/show_thinking"), QStringLiteral("Show thinking"),
                                   QStringLiteral("Stream reasoning above the prompt; a one-line summary always prints"), true);
+        general.rows << toggleRow(QStringLiteral("agent/show_tool_output"), QStringLiteral("Show tool output"),
+                                  QStringLiteral("Print what each tool returned, not only the one-line summary"), false);
+        {
+            relay::SettingRow desktop;
+            desktop.kind = relay::SettingRow::Toggle;
+            desktop.id = QStringLiteral("option:notifications/desktop");
+            desktop.label = QStringLiteral("Desktop notifications");
+            desktop.detail = QStringLiteral("When the agent finishes or needs you and this window is not in front");
+            desktop.aliases = QStringLiteral("notify alerts popup bell toast");
+            desktop.checked = relay::NotificationCenter::desktopEnabled();
+            desktop.onToggle = [](bool on) { relay::NotificationCenter::setDesktopEnabled(on); };
+            general.rows << desktop;
+        }
         {
             relay::SettingRow hints;
             hints.kind = relay::SettingRow::Toggle;
@@ -9683,11 +9700,42 @@ private:
         general.rows << buttonRow(QStringLiteral("windows.fresh"), QStringLiteral("Start a fresh window set"),
                                   QStringLiteral("Forget the saved layout; the next start opens one new window"),
                                   QStringLiteral("Forget"), [this] { startFreshWindowSet(); });
+        // Diagnostics (issue SQAM) used to live only in the palette; the pane is the complete list.
+        general.rows << headingRow(QStringLiteral("Diagnostics"));
+        {
+            QStringList ids, labels;
+            QString about;
+            const QString current = relay::log::levelName(relay::log::level());
+            for (const QStringList &choice : relay::log::levelChoices()) {
+                ids << choice.at(0); labels << choice.at(1);
+                if (choice.at(0) == current) about = choice.at(2);
+            }
+            relay::SettingRow level = choiceRow(QStringLiteral("option:log_level"), QStringLiteral("Log detail"),
+                                                about + (current == QStringLiteral("verbose")
+                                                             ? QStringLiteral(" · prompts are written to the log file")
+                                                             : QStringLiteral(" · agent workers pick it up when they restart")),
+                                                ids, labels, current, [](const QString &id) { relay::log::setLevel(id); });
+            level.aliases = QStringLiteral("log logs diagnostics debug verbose troubleshoot");
+            general.rows << level;
+        }
+        {
+            relay::SettingRow open = buttonRow(QStringLiteral("logs.open"), QStringLiteral("Log folder"),
+                                               relay::log::directory().isEmpty() ? QStringLiteral("No writable data directory")
+                                                                                 : relay::log::directory(),
+                                               QStringLiteral("Open…"), [this] {
+                const QString dir = relay::log::directory();
+                if (dir.isEmpty()) { notice(QStringLiteral("No writable data directory for logs."), 6000); return; }
+                QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+                notice(dir, 8000);
+            });
+            open.aliases = QStringLiteral("log logs diagnostics debug troubleshoot relay.log worker.log");
+            general.rows << open;
+        }
         sections << general;
 
         // Colour themes (issue 0JA7). One theme file carries the UI tokens and the 16-colour
         // terminal palette, so the picker restyles the chrome, both terminal engines and the
-        // prompt box's syntax colours at once. The actions palette renders these rows too.
+        // prompt box's syntax colours at once. The Settings pane's search reaches these rows too.
         relay::SettingsSection appearance;
         appearance.id = QStringLiteral("appearance");
         appearance.title = QStringLiteral("Appearance");
@@ -9715,7 +9763,6 @@ private:
                                      QStringLiteral("Reload"), [this] {
             relay::theme::refreshThemes();
             relay::theme::setActiveTheme(relay::theme::activeThemeId());
-            if (m_settings) m_settings->rebuild();
             notice(QStringLiteral("Themes reloaded. A theme added while Relay runs reaches new terminal panes; "
                                   "restart to give it to the ones already open."), 8000);
         });
@@ -9789,6 +9836,7 @@ private:
         agent.title = QStringLiteral("Agent");
         agent.blurb = QStringLiteral("Instructions, skills and the limits of one turn. Most of these apply to the "
                                      "next conversation; the turn limits apply at once.");
+        agent.rows << headingRow(QStringLiteral("Instructions and skills"));
         {
             // Where a new pane's prompt box starts; Ctrl+I cycles auto → terminal → agent in the pane.
             const QString current = Pane::defaultInputMode();
@@ -9821,6 +9869,7 @@ private:
         agent.rows << textRow(QStringLiteral("agent/plans_dir"), QStringLiteral("Plans folder"),
                               QStringLiteral("Absolute folder for plans (empty: <project>/.relay/plans)"),
                               QStringLiteral("<project>/.relay/plans"));
+        agent.rows << headingRow(QStringLiteral("Turn limits"));
         agent.rows << textRow(QStringLiteral("agent/compact_threshold"), QStringLiteral("Compaction threshold"),
                               QStringLiteral("Fraction of the model window, 0.50–0.98 (empty: 80% minus output room)"),
                               QStringLiteral("0.80"), [](const QString &value) {
@@ -9837,6 +9886,15 @@ private:
                                 QStringLiteral("Model calls, then the turn stops with Continue"), 50, 1, 500);
         agent.rows << numberRow(QStringLiteral("agent/max_tool_calls"), QStringLiteral("Tool-call limit per turn"),
                                 QStringLiteral("Tool calls in one turn"), 150, 1, 2000);
+        // Idle deadline for a model call (protocol 15). Applies to the running agent at once.
+        {
+            relay::SettingRow stall = numberRow(QStringLiteral("agent/stall_timeout_s"), QStringLiteral("Stop a silent model after"),
+                                                QStringLiteral("No output for this long ends the turn: retried once, then a message. "
+                                                               "Reasoning models can be quiet for a while; 60 s is the default"),
+                                                60, 1, 1800, QStringLiteral(" s"));
+            stall.aliases = QStringLiteral("stall timeout hang stuck thinking silent retry");
+            agent.rows << stall;
+        }
         agent.rows << toggleRow(QStringLiteral("agent/audit_requests"), QStringLiteral("Audit requests after each turn"),
                                 QStringLiteral("A small side call flags asks that may be unaddressed"), false);
         sections << agent;
@@ -9850,6 +9908,7 @@ private:
                                      "transcript is inserted into the prompt box. Recordings are sent to OpenRouter "
                                      "(and from there to the model's provider) and are deleted as soon as they come "
                                      "back as text; voice needs an OpenRouter key whatever model your panes use.");
+        voice.rows << headingRow(QStringLiteral("Capture"));
         voice.rows << toggleRow(QStringLiteral("voice/enabled"), QStringLiteral("Voice transcription"),
                                 QStringLiteral("The microphone chip and the voice key"), true);
         {
@@ -9862,28 +9921,12 @@ private:
                 if (m_active) m_active->agentOptionsChanged(QStringLiteral("voice/hold_key"));
             });
         }
-        {
-            // The three that were live-tested (issue NY7Z); the ids match backend/relay_core/voice.py.
-            const QStringList ids{QStringLiteral("google/gemini-3.5-flash-lite"), QStringLiteral("google/gemini-3.8-flash"),
-                                  QStringLiteral("openai/whisper-1")};
-            const QStringList labels{QStringLiteral("Gemini 3.5 Flash-Lite — fastest, ~$0.00006 a clip"),
-                                     QStringLiteral("Gemini 3.8 Flash — most accurate, ~$0.0004 a clip"),
-                                     QStringLiteral("Whisper — transcription endpoint, ~$0.0003 a clip")};
-            voice.rows << choiceRow(QStringLiteral("option:voice_model"), QStringLiteral("Transcription model"),
-                                    QStringLiteral("Runs on OpenRouter with your OpenRouter key"),
-                                    ids, labels, Pane::voiceModel(), [](const QString &value) {
-                QSettings().setValue(QStringLiteral("voice/model"), value);
-            });
-        }
         voice.rows << numberRow(QStringLiteral("voice/max_seconds"), QStringLiteral("Longest recording"),
                                 QStringLiteral("Recording stops by itself after this many seconds"),
                                 relay::voice::kDefaultSeconds, 5, 600, QStringLiteral(" s"));
         voice.rows << textRow(QStringLiteral("voice/device"), QStringLiteral("Microphone"),
                               QStringLiteral("The capture tool's own source name (empty: the desktop default)"),
                               QStringLiteral("default"));
-        voice.rows << buttonRow(QStringLiteral("agent.modelKeys"), QStringLiteral("OpenRouter key"),
-                                QStringLiteral("Voice needs one of its own, whatever model your panes run"),
-                                QStringLiteral("API keys…"), [this] { runAction(QStringLiteral("agent.modelKeys")); });
         {
             relay::SettingRow info;
             info.kind = relay::SettingRow::Info;
@@ -9897,6 +9940,23 @@ private:
                                  "as text.").arg(tool);
             voice.rows << info;
         }
+        voice.rows << headingRow(QStringLiteral("Model"));
+        {
+            // The three that were live-tested (issue NY7Z); the ids match backend/relay_core/voice.py.
+            const QStringList ids{QStringLiteral("google/gemini-3.5-flash-lite"), QStringLiteral("google/gemini-3.8-flash"),
+                                  QStringLiteral("openai/whisper-1")};
+            const QStringList labels{QStringLiteral("Gemini 3.5 Flash-Lite — fastest, ~$0.00006 a clip"),
+                                     QStringLiteral("Gemini 3.8 Flash — most accurate, ~$0.0004 a clip"),
+                                     QStringLiteral("Whisper — transcription endpoint, ~$0.0003 a clip")};
+            voice.rows << choiceRow(QStringLiteral("option:voice_model"), QStringLiteral("Transcription model"),
+                                    QStringLiteral("Runs on OpenRouter with your OpenRouter key"),
+                                    ids, labels, Pane::voiceModel(), [](const QString &value) {
+                QSettings().setValue(QStringLiteral("voice/model"), value);
+            });
+        }
+        voice.rows << buttonRow(QStringLiteral("agent.modelKeys"), QStringLiteral("OpenRouter key"),
+                                QStringLiteral("Voice needs one of its own, whatever model your panes run"),
+                                QStringLiteral("API keys…"), [this] { runAction(QStringLiteral("agent.modelKeys")); });
         sections << voice;
 
         relay::SettingsSection privacy;
@@ -9928,12 +9988,10 @@ private:
         sections << privacy;
 
         relay::SettingsSection shortcuts;
-        shortcuts.id = QStringLiteral("shortcuts");
-        shortcuts.title = QStringLiteral("Shortcuts");
-        shortcuts.blurb = QStringLiteral("Keys are read from keybindings.json; your own overrides sit on top of the preset.");
-        shortcuts.rows << buttonRow(QStringLiteral("help.shortcuts"), QStringLiteral("Keyboard shortcuts"),
-                                    QStringLiteral("Every action and the keys it answers to"),
-                                    QStringLiteral("Show…"), [this] { runAction(QStringLiteral("help.shortcuts")); });
+        shortcuts.id = relay::SettingsPane::actionsTabId();
+        shortcuts.title = QStringLiteral("Actions");
+        shortcuts.blurb = QStringLiteral("Every action and the keys it answers to; Enter or a click runs one. Keys are "
+                                         "read from keybindings.json, and your own overrides sit on top of the preset.");
         {
             const QString presetId = Keymap::instance().preset();
             QStringList values, labels;
@@ -9962,115 +10020,26 @@ private:
         shortcuts.rows << buttonRow(QStringLiteral("keybindings.reload"), QStringLiteral("Reload keyboard shortcuts"),
                                     QStringLiteral("Re-read keybindings.json now"),
                                     QStringLiteral("Reload"), [this] { runAction(QStringLiteral("keybindings.reload")); });
+        {
+            // What the mouse does, which no keybinding can say (owner, 2026-09-18). These are not
+            // actions with keys, so they are one informational row on the tab Ctrl+? opens rather
+            // than rows in a list that offers to run them.
+            relay::SettingRow mouse;
+            mouse.kind = relay::SettingRow::Info;
+            mouse.id = QStringLiteral("info:mouse");
+            mouse.aliases = QStringLiteral("mouse drag click gestures pointer header grip rename explorer");
+            mouse.label = QStringLiteral(
+                "With the mouse: drag a pane's header — or the ⠿ grip on an explorer, preview or Switchboard "
+                "pane — onto another pane's edge to move it there, or onto the tab bar to give it a tab of its "
+                "own; Esc during the drag puts it back. Double click a pane's title to rename it. Click the "
+                "folder line on the right of the header to open that folder in an explorer pane, and again to "
+                "close it. Ctrl+click a path, a URL or a “tool calls” line in the terminal to open it. Right "
+                "click in the terminal for Relay's menu.");
+            shortcuts.rows << mouse;
+        }
         sections << shortcuts;
         return sections;
     }
-
-    void openSettings(const QString &section = QString()) {
-        if (!m_settings) {
-            m_settings = new relay::SettingsWindow([this] { return settingsSections(); }, this);
-            m_settings->setAttribute(Qt::WA_DeleteOnClose);
-        } else {
-            m_settings->rebuild();
-        }
-        if (!section.isEmpty()) m_settings->showSection(section);
-        m_settings->show();
-        m_settings->raise();
-        m_settings->activateWindow();
-    }
-
-    // The palette renders the same catalog: one submenu per section, one entry per row, so every
-    // setting is still reachable and searchable from the keyboard.
-    QList<PaletteItem> settingsRowItems(const relay::SettingsSection &section) {
-        QList<PaletteItem> items;
-        for (const relay::SettingRow &row : section.rows) {
-            if (row.kind == relay::SettingRow::Info) continue;
-            PaletteItem item;
-            item.key = QStringLiteral("set:") + section.id + ':' + row.id;
-            item.section = section.title;
-            item.label = row.label;
-            item.aliases = row.aliases;
-            switch (row.kind) {
-            case relay::SettingRow::Toggle:
-                item.detail = (row.checked ? QStringLiteral("On · ") : QStringLiteral("Off · ")) + row.detail;
-                item.checked = row.checked;
-                item.stayOpen = true;
-                item.run = [fn = row.onToggle, on = row.checked] { if (fn) fn(!on); };
-                break;
-            case relay::SettingRow::Choice: {
-                QString current = row.current;
-                for (int i = 0; i < row.options.size(); ++i)
-                    if (row.options.at(i) == row.current && i < row.optionLabels.size()) current = row.optionLabels.at(i);
-                item.detail = current + QStringLiteral(" · ") + row.detail;
-                const QString title = row.label;
-                item.children = [row, title] {
-                    QList<PaletteItem> children;
-                    for (int i = 0; i < row.options.size(); ++i) {
-                        PaletteItem child;
-                        const QString value = row.options.at(i);
-                        child.key = QStringLiteral("set:") + row.id + ':' + value;
-                        child.section = title;
-                        child.label = i < row.optionLabels.size() ? row.optionLabels.at(i) : value;
-                        child.checked = value == row.current;
-                        child.stayOpen = true;
-                        child.run = [fn = row.onChoose, value] { if (fn) fn(value); };
-                        children << child;
-                    }
-                    return children;
-                };
-                break;
-            }
-            case relay::SettingRow::Text:
-                item.label = row.label + QStringLiteral("…");
-                item.detail = row.text.isEmpty() ? row.detail : row.text;
-                item.run = [this, row] {
-                    bool ok = false;
-                    const QString value = QInputDialog::getText(this, row.label, row.detail, QLineEdit::Normal,
-                                                                row.text, &ok);
-                    if (ok && row.onText) row.onText(value.trimmed());
-                };
-                break;
-            case relay::SettingRow::Number:
-                item.label = row.label + QStringLiteral("…");
-                item.detail = QStringLiteral("%1 · %2").arg(row.number).arg(row.detail);
-                item.run = [this, row] {
-                    bool ok = false;
-                    const int value = QInputDialog::getInt(this, row.label, row.detail, row.number,
-                                                           row.minimum, row.maximum, 1, &ok);
-                    if (ok && row.onNumber) row.onNumber(value);
-                };
-                break;
-            case relay::SettingRow::Button:
-                item.label = row.label + QStringLiteral("…");
-                item.detail = row.detail;
-                item.run = row.run;
-                break;
-            case relay::SettingRow::Info:
-                break;
-            }
-            items << item;
-        }
-        return items;
-    }
-
-    QList<PaletteItem> settingsMenuItems() {
-        QList<PaletteItem> items;
-        const QString section = QStringLiteral("Settings");
-        items << actionItem(section, QStringLiteral("Open the Settings window"),
-                            QStringLiteral("General, Models, Terminal, Agent, Privacy, Shortcuts"),
-                            QStringLiteral("app.settings"));
-        for (const relay::SettingsSection &group : settingsSections()) {
-            const QString id = group.id;
-            items << submenu(QStringLiteral("menu:settings:") + id, section, group.title, group.blurb,
-                             [this, id] {
-                for (const relay::SettingsSection &group : settingsSections())
-                    if (group.id == id) return settingsRowItems(group);
-                return QList<PaletteItem>();
-            });
-        }
-        return items;
-    }
-
 
     QList<PaletteItem> rootItems() {
         QList<PaletteItem> items;
@@ -10204,9 +10173,6 @@ private:
         items << actionItem(agent, QStringLiteral("Screenshot this pane"),
                             QStringLiteral("Attach a picture of this pane to your next prompt"),
                             QStringLiteral("agent.screenshotPane"));
-        items << submenu(QStringLiteral("menu:settings"), agent, QStringLiteral("Settings"),
-                         QStringLiteral("Models, keys, terminal, agent, privacy, shortcuts"),
-                         [this] { return settingsMenuItems(); });
         items << actionItem(agent, QStringLiteral("API keys…"),
                             QStringLiteral("Add, replace, remove or test a provider key"),
                             QStringLiteral("agent.modelKeys"));
@@ -10229,7 +10195,6 @@ private:
             items << actionItem(agent, QStringLiteral("Clear queue"), QStringLiteral("%1 queued item(s)").arg(pane->queuedPrompts()), QStringLiteral("agent.clearQueue"));
         if (pane && pane->queuePaused())
             items << actionItem(agent, QStringLiteral("Resume queue"), QStringLiteral("Paused after a stop, failure or edit"), QStringLiteral("agent.resumeQueue"));
-        items << actionItem(QStringLiteral("palette"), QStringLiteral("Keyboard shortcuts…"), QStringLiteral("Every action and its keys"), QStringLiteral("help.shortcuts"));
         items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Stop the running program · Esc in the prompt box") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
         items << actionItem(terminal, QStringLiteral("Take control"),
                             QStringLiteral("Hide the prompt box and type into the terminal · the only way keys reach it"),
@@ -10360,65 +10325,6 @@ private:
             clear.run = [] { Keymap::instance().clearOverrides(); };
             items << clear;
         }
-        items << logItems();
-        return items;
-    }
-
-    // ----- diagnostics log (issue SQAM) --------------------------------------------------------
-    QList<PaletteItem> logItems() {
-        const QString section = QStringLiteral("Diagnostics");
-        QList<PaletteItem> items;
-        {
-            PaletteItem open;
-            open.key = QStringLiteral("logs.open"); open.section = section;
-            open.label = QStringLiteral("Open log folder");
-            open.detail = relay::log::directory().isEmpty() ? QStringLiteral("No writable data directory")
-                                                            : relay::log::directory();
-            open.aliases = QStringLiteral("log logs diagnostics debug troubleshoot relay.log worker.log");
-            open.run = [this] {
-                const QString dir = relay::log::directory();
-                if (dir.isEmpty()) { notice(QStringLiteral("No writable data directory for logs."), 6000); return; }
-                QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
-                notice(dir, 8000);
-            };
-            items << open;
-        }
-        {
-            // Idle deadline for a model call (protocol 15). Applies to the running agent at once.
-            const int seconds = std::clamp(QSettings().value(QStringLiteral("agent/stall_timeout_s"), 60).toInt(), 1, 1800);
-            PaletteItem item;
-            item.key = QStringLiteral("option:stall_timeout"); item.section = section;
-            item.label = QStringLiteral("Stop a silent model after…");
-            item.detail = QStringLiteral("%1 s · the turn is retried once, then it ends with a message").arg(seconds);
-            item.aliases = QStringLiteral("stall timeout hang stuck thinking silent retry");
-            item.run = [this, seconds] {
-                bool ok = false;
-                const int value = QInputDialog::getInt(window(), QStringLiteral("Provider stall timeout"),
-                    QStringLiteral("End a turn when the model sends nothing for this many seconds\n"
-                                   "(reasoning models can be quiet for a while; 60 s is the default):"),
-                    seconds, 1, 1800, 5, &ok);
-                if (!ok) return;
-                QSettings().setValue(QStringLiteral("agent/stall_timeout_s"), value);
-                if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/stall_timeout_s"));
-            };
-            items << item;
-        }
-        const QString current = relay::log::levelName(relay::log::level());
-        QString detail = current + QStringLiteral(" · agent workers pick it up when they restart");
-        if (current == QStringLiteral("verbose")) detail = current + QStringLiteral(" · prompts are written to the log file");
-        items << submenu(QStringLiteral("menu:logLevel"), section, QStringLiteral("Log detail"), detail, [current] {
-            QList<PaletteItem> children;
-            for (const QStringList &choice : relay::log::levelChoices()) {
-                PaletteItem item;
-                const QString id = choice.at(0);
-                item.key = QStringLiteral("logs.level:") + id; item.section = QStringLiteral("Log detail");
-                item.label = choice.at(1); item.detail = choice.at(2);
-                item.checked = id == current; item.stayOpen = true;
-                item.run = [id] { relay::log::setLevel(id); };
-                children << item;
-            }
-            return children;
-        });
         return items;
     }
 
@@ -10476,188 +10382,6 @@ private:
         for (const auto &entry : table)
             if (haystack.contains(entry.first)) words += entry.second + ' ';
         return words;
-    }
-
-    static int fuzzyScore(const QString &needle, const QString &haystack) {
-        if (needle.isEmpty()) return 1;
-        const QString n = needle.toLower(), h = haystack.toLower();
-        const int direct = h.indexOf(n);
-        if (direct >= 0) return 10000 - direct - (direct > 0 && h.at(direct - 1).isLetterOrNumber() ? 500 : 0);
-        int pos = 0, first = -1, last = -1;
-        for (const QChar c : n) {
-            if (c.isSpace()) continue;
-            pos = h.indexOf(c, pos);
-            if (pos < 0) return 0;
-            if (first < 0) first = pos;
-            last = pos++;
-        }
-        return std::max(1, 5000 - (last - first) * 10 - first);
-    }
-
-    void renderPalette() {
-        const bool nested = !m_stack.isEmpty();
-        const QString needle = m_filter->text().trimmed();
-        m_rows.clear();
-        QList<PaletteItem> source = nested ? m_stack.last().second : rootItems();
-        m_paletteTitle->setText(nested ? QStringLiteral("ACTIONS  ›  ") + m_stack.last().first.toUpper() : QStringLiteral("ACTIONS"));
-        if (!nested && !needle.isEmpty()) {
-            // Search reaches into submenus: "deep" finds Model › DeepSeek directly.
-            QList<PaletteItem> flat;
-            for (const auto &item : std::as_const(source)) {
-                flat << item;
-                if (item.children) for (auto child : item.children()) { child.label = item.label + QStringLiteral(" › ") + child.label; flat << child; }
-            }
-            source = flat;
-        }
-        struct Scored { int score; int order; PaletteItem item; };
-        QList<Scored> scored;
-        for (int i = 0; i < source.size(); ++i) {
-            const auto &item = source[i];
-            const QString aliases = item.aliases + ' ' + paletteAliases(item);
-            const int score = std::max({fuzzyScore(needle, item.label), fuzzyScore(needle, item.detail) / 3, fuzzyScore(needle, item.section) / 4,
-                                        needle.size() >= 2 ? fuzzyScore(needle, aliases) / 2 : 0});
-            if (score > 0) scored.append({score, i, item});
-        }
-        m_list->clear();
-        auto addHeader = [this](const QString &text) {
-            auto *row = new QTreeWidgetItem(m_list, {text.toUpper(), QString()});
-            row->setData(0, Qt::UserRole, -1);
-            row->setFlags(Qt::ItemIsEnabled);
-            QFont font = row->font(0); font.setPointSizeF(font.pointSizeF() * 0.85); font.setBold(true); row->setFont(0, font);
-            row->setForeground(0, QColor(relay::theme::TextMuted));
-        };
-        auto addRow = [this](const PaletteItem &item) {
-            QString label = (item.checked ? QStringLiteral("✓ ") : QStringLiteral("   ")) + item.label;
-            if (item.children) label += QStringLiteral("   ›");
-            auto *row = new QTreeWidgetItem(m_list, {label, item.shortcut});
-            row->setToolTip(0, item.detail);
-            if (!item.detail.isEmpty() && item.children) row->setText(0, label + QStringLiteral("   ") + item.detail);
-            row->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
-            row->setForeground(1, QColor(relay::theme::TextMuted));
-            row->setData(0, Qt::UserRole, m_rows.size());
-            m_rows.append(item);
-        };
-        if (!needle.isEmpty()) {
-            std::stable_sort(scored.begin(), scored.end(), [](const Scored &a, const Scored &b) { return a.score > b.score; });
-            for (const auto &entry : std::as_const(scored)) addRow(entry.item);
-        } else if (nested) {
-            for (const auto &entry : std::as_const(scored)) addRow(entry.item);
-        } else {
-            // Recent first, then the section that matches where focus was.
-            const QStringList recent = QSettings().value(QStringLiteral("palette/recent")).toStringList();
-            QList<PaletteItem> recentItems;
-            for (const QString &key : recent)
-                for (const auto &entry : std::as_const(scored))
-                    if (entry.item.key == key && recentItems.size() < 4) recentItems << entry.item;
-            if (!recentItems.isEmpty()) { addHeader(QStringLiteral("Recent")); for (const auto &item : recentItems) addRow(item); }
-            QStringList order{QStringLiteral("Agent"), QStringLiteral("Terminal"), QStringLiteral("Panes and tabs"), QStringLiteral("Shortcuts")};
-            if (m_terminalContext) order = QStringList{QStringLiteral("Terminal"), QStringLiteral("Panes and tabs"), QStringLiteral("Agent"), QStringLiteral("Shortcuts")};
-            for (const QString &section : order) {
-                bool header = false;
-                for (const auto &entry : std::as_const(scored)) {
-                    if (entry.item.section != section) continue;
-                    if (!header) { addHeader(section); header = true; }
-                    addRow(entry.item);
-                }
-            }
-        }
-        selectRow(0, 1);
-    }
-
-    // Move the selection to the nearest selectable row from `index` in `direction`.
-    void selectRow(int index, int direction) {
-        const int count = m_list->topLevelItemCount();
-        if (!count) return;
-        index = std::clamp(index, 0, count - 1);
-        for (int i = index; i >= 0 && i < count; i += direction) {
-            if (m_list->topLevelItem(i)->data(0, Qt::UserRole).toInt() >= 0) { m_list->setCurrentItem(m_list->topLevelItem(i)); return; }
-        }
-        for (int i = index; i >= 0 && i < count; i -= direction) {
-            if (m_list->topLevelItem(i)->data(0, Qt::UserRole).toInt() >= 0) { m_list->setCurrentItem(m_list->topLevelItem(i)); return; }
-        }
-    }
-
-    void moveSelection(int steps) {
-        const int count = m_list->topLevelItemCount();
-        if (!count) return;
-        int index = m_list->indexOfTopLevelItem(m_list->currentItem());
-        const int direction = steps > 0 ? 1 : -1;
-        int moved = 0;
-        for (int i = index + direction; moved < std::abs(steps); i += direction) {
-            if (i < 0) i = count - 1; else if (i >= count) i = 0;   // wrap
-            if (i == index) break;
-            if (m_list->topLevelItem(i)->data(0, Qt::UserRole).toInt() >= 0) { index = i; ++moved; }
-        }
-        if (index >= 0) m_list->setCurrentItem(m_list->topLevelItem(index));
-    }
-
-    void activateSelected(bool openOnly) {
-        QTreeWidgetItem *row = m_list->currentItem();
-        if (!row) return;
-        const int index = row->data(0, Qt::UserRole).toInt();
-        if (index < 0 || index >= m_rows.size()) return;
-        const PaletteItem item = m_rows[index];
-        if (item.children) {
-            m_stack.append({item.label, item.children()});
-            m_filter->clear();
-            renderPalette();
-            return;
-        }
-        if (openOnly || !item.run) return;
-        const QString hintId = QStringLiteral("palette.") + item.key;
-        const QString hintText = item.shortcut.isEmpty()
-            ? QString() : relay::ShortcutHints::nextTime(item.shortcut, item.label.toLower());
-        QStringList recent = QSettings().value(QStringLiteral("palette/recent")).toStringList();
-        recent.removeAll(item.key); recent.prepend(item.key);
-        QSettings().setValue(QStringLiteral("palette/recent"), QStringList(recent.mid(0, 12)));
-        if (item.stayOpen) {
-            hint(hintId, hintText);
-            item.run();
-            // Toggles stay open and show their new state.
-            QTimer::singleShot(150, this, [this] {
-                if (!m_sidebar->isVisible()) return;
-                if (m_stack.isEmpty()) { const int row = m_list->indexOfTopLevelItem(m_list->currentItem()); renderPalette(); selectRow(row, 1); return; }
-                const QString title = m_stack.last().first;
-                m_stack.removeLast();
-                for (const auto &parent : rootItems()) if (parent.label == title && parent.children) m_stack.append({title, parent.children()});
-                renderPalette();
-            });
-            return;
-        }
-        const auto run = item.run;
-        closePalette();
-        QTimer::singleShot(0, this, run);
-        // The hint comes after the action, not before it: an action that says something itself
-        // ("Pane screenshot attached…") used to replace its own hint on the same toast, so the
-        // shortcut was never the thing left on screen.
-        if (!hintText.isEmpty())
-            QTimer::singleShot(400, this, [this, hintId, hintText] { hint(hintId, hintText); });
-    }
-
-    bool paletteKey(QKeyEvent *key) {
-        const bool ctrl = key->modifiers() & Qt::ControlModifier;
-        switch (key->key()) {
-        case Qt::Key_Escape:
-            if (!m_filter->text().isEmpty()) m_filter->clear();
-            else if (!m_stack.isEmpty()) { m_stack.removeLast(); renderPalette(); }
-            else closePalette();
-            return true;
-        case Qt::Key_Return: case Qt::Key_Enter: activateSelected(false); return true;
-        case Qt::Key_Right:
-            if (m_filter->cursorPosition() < m_filter->text().size()) return false;
-            activateSelected(true); return true;
-        case Qt::Key_Left: case Qt::Key_Backspace:
-            if (!m_filter->text().isEmpty() || m_stack.isEmpty()) return false;
-            m_stack.removeLast(); renderPalette(); return true;
-        case Qt::Key_Down: moveSelection(1); return true;
-        case Qt::Key_Up: moveSelection(-1); return true;
-        case Qt::Key_PageDown: moveSelection(8); return true;
-        case Qt::Key_PageUp: moveSelection(-8); return true;
-        default:
-            if (ctrl && key->key() == Qt::Key_N) { moveSelection(1); return true; }
-            if (ctrl && key->key() == Qt::Key_P) { moveSelection(-1); return true; }
-            return false;
-        }
     }
 
     // ----- subagents UI: palette submenu and transcript panes ---------------------------------
@@ -10733,11 +10457,8 @@ private:
     }
 
     void openAgentsMenu() {
-        if (!m_sidebar->isVisible()) togglePalette();
-        m_stack.clear();
-        m_stack.append({QStringLiteral("Agents"), agentsMenuItems()});
-        m_filter->clear();
-        renderPalette();
+        openSettingsPane(relay::SettingsPane::actionsTabId());
+        if (ToolPane *tool = settingsPaneIn(m_tabs->currentWidget())) tool->settings()->scrollToGroup(QStringLiteral("menu:agents"));
     }
 
     void openSubagentPane(Pane *owner, const QString &id) {
@@ -11543,7 +11264,7 @@ private:
         rightRow->addWidget(m_bell);
         m_settingsButton = new ChromeButton(ChromeButton::Glyph::Gear);
         connect(m_settingsButton, &QToolButton::clicked, this, [this] {
-            togglePalette();
+            toggleSettingsPane();
             hint(QStringLiteral("chrome.settings"), relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("palette.open")), QStringLiteral("settings and every action")));
         });
         rightRow->addWidget(m_settingsButton);
@@ -12241,15 +11962,7 @@ private:
     QPointer<relay::BoardWorker> m_boardWorker;
     QTabWidget *m_tabs = nullptr;
     QList<QPair<QAction *, QString>> m_toolbarActions;
-    QPointer<relay::SettingsWindow> m_settings;
-    QWidget *m_sidebar = nullptr;
-    QLabel *m_paletteTitle = nullptr;
-    QLineEdit *m_filter = nullptr;
-    QTreeWidget *m_list = nullptr;
-    QList<QPair<QString, QList<PaletteItem>>> m_stack;
-    QList<PaletteItem> m_rows;
-    bool m_terminalContext = false;
-    QPointer<Pane> m_returnPane;
+    QPointer<Pane> m_returnPane;        // where focus was when the Settings pane opened
     QPointer<QWidget> m_returnFocus;
     QPointer<Pane> m_active;
     QHash<QWidget *, QPointer<QWidget>> m_lastActive;

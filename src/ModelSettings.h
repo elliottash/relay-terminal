@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-// Provider and model configuration: the two modals plus the compact Settings window.
+// Provider and model configuration: the two modals. (The Settings pane is src/SettingsPane.h.)
 //
 //  * KeysDialog    — "API keys…": one row per provider, grouped Subscriptions / Aggregator /
 //                    Pay-as-you-go, with Add/Replace, Remove, Test and a link to the provider's key
@@ -8,8 +8,6 @@
 //                    nothing is echoed back and no key is ever stored in QSettings.
 //  * RolesDialog   — "Model roles…": default provider, the three Main/Flash/Lite rows, and an
 //                    Advanced disclosure with one row per job (protocol 13.7).
-//  * SettingsWindow— sections down the left, rows on the right, built from a catalog the caller
-//                    fills so the same rows also render in the actions palette.
 //
 // Both dialogs talk to the pane's worker through `send` and receive its events through
 // handleEvent(); neither knows anything else about the application.
@@ -23,59 +21,12 @@ class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
-class QListWidget;
 class QPushButton;
-class QStackedWidget;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QVBoxLayout;
 
 namespace relay {
-
-// ----- compact settings window ----------------------------------------------------------------
-// One row of a settings section. The caller supplies the reader and the writer, so QSettings stays
-// the single source of truth and the palette can render the same rows as menu entries.
-struct SettingRow {
-    enum Kind { Toggle, Choice, Text, Number, Button, Info };
-    Kind kind = Toggle;
-    QString id;                 // stable identity, used as the palette key
-    QString label, detail;
-    QString aliases;            // extra palette search terms
-    bool checked = false;                                   // Toggle
-    std::function<void(bool)> onToggle;
-    QStringList options, optionLabels;                      // Choice
-    QString current;
-    std::function<void(const QString &)> onChoose;
-    QString text, placeholder;                              // Text
-    std::function<void(const QString &)> onText;
-    int number = 0, minimum = 0, maximum = 0;               // Number
-    QString suffix;
-    std::function<void(int)> onNumber;
-    QString buttonText;                                     // Button
-    std::function<void()> run;
-};
-
-struct SettingsSection {
-    QString id, title, blurb;
-    QList<SettingRow> rows;
-};
-
-// The window rebuilds itself from `build` after every change, so a row that depends on another
-// (for example a model row that follows the chosen provider) always shows current values.
-class SettingsWindow final : public QDialog {
-public:
-    explicit SettingsWindow(std::function<QList<SettingsSection>()> build, QWidget *parent = nullptr);
-    void showSection(const QString &id);
-    void rebuild();
-
-private:
-    void fillSection(QWidget *page, const SettingsSection &section);
-
-    std::function<QList<SettingsSection>()> m_build;
-    QListWidget *m_sections = nullptr;
-    QStackedWidget *m_pages = nullptr;
-    QString m_wanted;
-};
 
 // ----- API keys ---------------------------------------------------------------------------------
 class KeysDialog final : public QDialog {

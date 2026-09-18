@@ -61,7 +61,7 @@ See [docs/RELEASING.md](docs/RELEASING.md).
 | Shift+Enter | New line |
 | Ctrl+I | Toggle terminal / agent input (from the prompt box; at a password prompt it switches to the agent) |
 | Ctrl+H / Ctrl+Shift+H | Take control of the terminal (the only way keys reach it) / back to the prompt box |
-| Ctrl+Shift+A | Actions palette |
+| Ctrl+Shift+A | Settings pane: every setting and every action, one search (again to close) |
 | Ctrl+T, Ctrl+N | New tab, new window |
 | Ctrl+P, Ctrl+Shift+P | Split right, split down |
 | Alt+Arrows | Move between panes |
@@ -80,9 +80,10 @@ Shortcut presets: **Relay** (Chrome-style, default), **Warp**, **VS Code**, **Ko
 `~/.config/RelayTerminal/relay/keybindings.json` (Settings › Shortcuts › Edit keyboard shortcuts),
 which reloads live. Copy on select is off by default (Settings › Terminal).
 
-**Settings** (Ctrl+, , or Actions › Settings) is one window with six sections — General, Models,
-Terminal, Agent, Privacy, Shortcuts. Every row is also in the actions palette under Settings, so
-nothing there needs the mouse.
+**Settings** (Ctrl+Shift+A, the gear at the top right, or Ctrl+,) is a full pane beside the one you
+are in, with a tab per section — General, Appearance, Models, Terminal, Agent, Voice, Privacy,
+Actions — and a search box over all of them plus every action. Type, ↑ ↓, Enter changes the row or
+runs the action; Esc closes and puts focus back where it was, so nothing there needs the mouse.
 
 ## Feature tour
 
@@ -251,7 +252,8 @@ nothing there needs the mouse.
 - **File panes.** Folder explorer and file preview (code, Markdown, images, optional PDF).
   Open with `relay open PATH`, a click on the pane's directory line, or Ctrl+click on a text
   file in terminal output.
-- **Palette and shortcuts.** One searchable actions palette; it also matches related words
+- **Actions and shortcuts.** The Settings pane's Actions tab lists every action with its keys, and
+  the pane's search finds actions and settings together; it also matches related words
   ("undo" finds Rewind, "reasoning" finds effort, "detach" finds the move actions). Shortcuts
   live in `~/.config/RelayTerminal/relay/keybindings.json`, reload live, and the agent can change
   them.

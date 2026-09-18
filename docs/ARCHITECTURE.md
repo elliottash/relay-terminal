@@ -82,8 +82,7 @@ Options: `--workspace/-w PATH` (initial terminal directory and agent workspace) 
 | Class | Role |
 |---|---|
 | `WindowManager` | Window list, a stack of up to 25 closed items (pane, tab or window), the saved window layout, the `relay open` socket |
-| `RelayWindow` | `QMainWindow`: its own title bar (the tab row), a `QTabWidget`, the actions palette overlay, an application event filter for shortcuts |
-| `RelayWindow` | `QMainWindow`: toolbar (Actions, New chat, Stop agent, Provider / BYOK…), a `QTabWidget`, the actions palette overlay, the Settings window, an application event filter for shortcuts |
+| `RelayWindow` | `QMainWindow`: its own title bar (the tab row), a `QTabWidget`, the Settings pane (a `ToolPane`, section 12), an application event filter for shortcuts |
 | Tab page | One root widget: a leaf or a tree of `QSplitter`s |
 | `Pane` (leaf) | Terminal pane: the engine, a Bash bridge, a composer, its own worker and conversation |
 | `ToolPane` (leaf) | Folder explorer or file preview (section 10) |
@@ -159,7 +158,7 @@ title bar, with two `QTabWidget` corner widgets on it (`buildWindowChrome`):
 | Corner | Holds |
 |---|---|
 | Top left | The Relay icon |
-| Top right | Bell (notification centre), gear (opens the actions palette), then minimize, maximize/restore and close |
+| Top right | Bell (notification centre), gear (opens the Settings pane), then minimize, maximize/restore and close |
 
 `ChromeButton` paints each glyph with `QPainter` instead of using a font character, so the header
 does not depend on an emoji font and hover, disabled and close-button colours come from the theme.
@@ -316,7 +315,7 @@ Default window shortcuts:
 |---|---|---|---|
 | New window | Ctrl+N | Close pane → tab → window | Ctrl+W |
 | Next / previous window | Alt+Tab / Alt+Shift+Tab | Restore closed | Ctrl+Shift+W |
-| New tab | Ctrl+T | Actions palette | Ctrl+Shift+A |
+| New tab | Ctrl+T | Settings pane (settings and every action) | Ctrl+Shift+A |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Take control (from composer) | Ctrl+H |
 | Split right / down | Ctrl+P / Ctrl+Shift+P | Back to the prompt | Ctrl+Shift+H |
 | Focus neighbor pane | Alt+Arrows | Native input toggle (same hand-over as Ctrl+H) | F12 |
@@ -327,12 +326,17 @@ Unbound by default: `files.explorer`, `files.open`, `terminal.interrupt`, `agent
 `agent.stop`, `agent.clearQueue`, `agent.resumeQueue`, `agent.provider`, `input.mode*`,
 `keybindings.edit`, `keybindings.reload`.
 
-**Actions palette** (Ctrl+Shift+A). One overlay child of the central widget, so opening it
-never resizes a terminal. Sections: Recent (up to 4, from `palette/recent`), then Agent and
-Terminal (ordered by where focus was), Panes and tabs, Shortcuts. Items have a stable key and
-either a run function or a submenu (Model, Input mode, Control when a program starts,
-Shortcut preset, Shortcuts inside programs). Typing searches everything, including submenu
-entries. Toggles stay open and re-render. Closing returns focus to the widget that had it.
+**Actions** (Ctrl+Shift+A, the gear, or Ctrl+?). The action catalog (`rootItems()` in
+`src/main.cpp`) is the same list the palette overlay used to render: items with a stable key and
+either a run function or a submenu (Model, Input mode, Reasoning effort, Aliases, Agents, Log
+detail). Since 2026-09-18 it is rendered by the Settings pane (section 12, "Settings pane"): the
+Actions tab lists every item with its keys — Recent (from `palette/recent`) first, then Agent,
+Terminal, Panes and tabs, Shortcuts, submenus opened inline under their own header — and the
+pane's search box reaches every item and every submenu entry ("deep" finds Model › DeepSeek)
+alongside the settings rows. Enter or a click runs one: the pane closes, focus goes back to the
+widget that had it, and the action runs against that pane. Toggles (`stayOpen`) run in place and
+the pane redraws with their new state. The `set:`/`menu:settings` palette entries are gone: a
+setting is now a control in the pane, found by the same search.
 
 **Agent-editable shortcuts.** Each worker receives the action catalog at configure time and
 after every reload. The `set_keybinding` tool (`backend/relay_core/keybindings.py`) validates
@@ -1121,17 +1125,35 @@ Non-secret provider settings live in QSettings (`provider/preset`, `base`, `mode
 `max_tokens`) in `~/.config/RelayTerminal/relay.conf`, alongside the tier and role overrides
 (`tiers/<tier>/…`, `roles/<role>/…`).
 
-### Settings window
+### Settings pane
 
-`src/ModelSettings.h`, `SettingsWindow`. One dialog, a section list down the left (General, Models,
-Terminal, Agent, Privacy, Shortcuts) and rows on the right. `RelayWindow::settingsSections()` builds a
-catalog of `SettingRow`s — toggle, choice, text, number, button or info — each carrying its own reader
-and writer, so QSettings stays the single source of truth and nothing in the window knows how a
-setting is used. The actions palette renders the **same** catalog as submenus and entries
-(`settingsMenuItems()`), so every setting keeps a keyboard path and stays searchable. Changing a row
-rebuilds the window, which keeps rows that describe other rows (a tier's effective model) current.
-Ctrl+, opens it in the Relay preset; presets that already bind Ctrl+, to "edit keyboard shortcuts"
-leave it unbound rather than fight for the key.
+`src/SettingsPane.{h,cpp}` (`relay-settings`, `tests/settingspane_test.cpp`), hosted by a
+`ToolPane` of kind `Settings`. Ctrl+Shift+A (`palette.open`), the gear in the title bar and Ctrl+,
+(`app.settings`) open one Settings pane beside the focused pane, in the splitter layout like the
+explorer and the Switchboard — a full pane, not a strip over the right edge (owner, 2026-09-18).
+Pressed again on the pane, the same key closes it; so do Esc on an empty search and the ✕. Closing
+returns focus exactly where it was (vim in the terminal, or the prompt box). The pane is transient:
+`node()` is empty, so it is never saved with the layout, and closing it when it is the last leaf of
+the last tab puts a terminal pane beside it first rather than closing the window.
+
+Inside: a search box, one sub-tab per section (General, Appearance, Models, Terminal, Agent, Voice,
+Privacy, Actions) and the rows as real controls — a toggle row flips when clicked anywhere on it,
+choices are combo boxes, numbers are spin boxes that write once per finished edit, text writes on
+`editingFinished`. Headings inside a section (`SettingRow::Heading`) group long tabs (Agent:
+Instructions and skills / Turn limits; Voice: Capture / Model; General: Diagnostics).
+`RelayWindow::settingsSections()` builds the catalog of `SettingRow`s, each carrying its own reader
+and writer, so QSettings stays the single source of truth and the pane knows nothing about how a
+value is used; `searchableActions()` hands it the action catalog with the hidden search words folded
+in. Changing a row rebuilds the pane, and the rebuild keeps the tab, the scroll offset, the highlighted
+row and the focused control, so a long tab does not jump back to the top.
+
+Keyboard, from the search box: typing filters settings rows and actions together into one list, best
+match first, each row saying where it lives ("General · …"); ↑ ↓ (and Ctrl+N/P) move a highlight, Enter
+changes or runs the highlighted row (flips a toggle, opens a choice, focuses a field, clicks a button,
+runs an action), ← → switch tabs while the search is empty, Esc clears the search and then closes; Esc
+in a control goes back to the search first. What was taken from the reference apps is written at the
+top of `src/SettingsPane.h`: Warp's search-first sections with instant apply, Claude Code's Enter/Esc
+panel that returns to the prompt, opencode's one command list that carries the toggles too.
 
 ## 13. Per-pane isolation
 
@@ -1192,7 +1214,7 @@ all in one place (issue `0JA7`).
 | User themes | `~/.config/relay/themes/*.toml`; a file of the same id replaces the built-in one |
 | Reader, token contract, discovery | `src/ThemeFile.{h,cpp}` (`relay-theme`, `tests/theme_test.cpp`) |
 | Live palette, stylesheet, the switch | `src/Theme.{h,cpp}` |
-| Picker | Settings › Appearance (built in `src/main.cpp`; the actions palette renders the same row) |
+| Picker | Settings › Appearance (built in `src/main.cpp`; the Settings pane renders and searches it) |
 
 A theme file has `[theme]` (name, variant `dark`/`light`, description), `[ui]`, `[syntax]`,
 `[terminal]` (background, foreground, cursor and a 16-entry `palette`) and `[flags]`. Missing
@@ -1320,7 +1342,8 @@ of the platform and of the engine itself.
 | `src/Notifications.*` | notification centre behind the header bell |
 | `src/TurnTranscript.*` | turn details pane (tool calls, transcript) |
 | `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |
-| `src/ModelSettings.*` | the API-keys and model-roles modals and the compact Settings window |
+| `src/ModelSettings.*` | the API-keys and model-roles modals |
+| `src/SettingsPane.*` | the Settings pane: search, sub-tabs, rows as controls, the Actions tab |
 | `src/AgentUi.*` | pickers and instructions dialog |
 | `src/Conversations.*` | conversation list with search (Ctrl+Shift+O) and the Ctrl+F find bar |
 | `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |

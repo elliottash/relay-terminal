@@ -51,6 +51,11 @@ target_link_libraries(relay-board PUBLIC relay-editor ${RELAY_QT}::Widgets)
 target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
 
 # Folder explorer and file preview panes: plain Qt, with optional syntax highlighting and PDF.
+add_library(relay-settings STATIC src/SettingsPane.cpp src/SettingsPane.h)
+target_include_directories(relay-settings PUBLIC src)
+target_link_libraries(relay-settings PUBLIC ${RELAY_QT}::Widgets)
+target_compile_options(relay-settings PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-filepanes STATIC src/FilePanes.cpp src/FilePanes.h)
 target_include_directories(relay-filepanes PUBLIC src)
 target_link_libraries(relay-filepanes PUBLIC ${RELAY_QT}::Widgets)
@@ -229,7 +234,7 @@ if(RELAY_BUILD_APP)
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
-    target_link_libraries(relay PRIVATE relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-backends relay-windowstate relay-input relay-notifications relay-panes relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -257,6 +262,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-editor-tests PRIVATE relay-editor ${RELAY_QT}::Test)
     add_test(NAME editor COMMAND relay-editor-tests)
     set_tests_properties(editor PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-settings-tests tests/settingspane_test.cpp)
+    target_link_libraries(relay-settings-tests PRIVATE relay-settings ${RELAY_QT}::Test)
+    add_test(NAME settings COMMAND relay-settings-tests)
+    set_tests_properties(settings PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-filepanes-tests tests/filepanes_test.cpp)
     target_link_libraries(relay-filepanes-tests PRIVATE relay-filepanes ${RELAY_QT}::Test)
     add_test(NAME filepanes COMMAND relay-filepanes-tests)
