@@ -48,6 +48,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include "CopyOnSelect.h"
 #include "RichEditor.h"
 #include "Theme.h"
 
@@ -798,6 +799,7 @@ public:
         m_doc->document()->setDocumentMargin(12);
         m_doc->installEventFilter(this);
         m_doc->viewport()->installEventFilter(this);
+        relay::installCopyOnSelect(m_doc);
         layout->addWidget(m_doc, 1);
 
         // Editing the card's own words (`## Issue`). It takes the document's place rather than
@@ -2017,6 +2019,7 @@ void BoardView::buildCleanupPanel(QVBoxLayout *layout)
     m_cleanupBody->setOpenLinks(false);          // a card id opens the card, not a web browser
     m_cleanupBody->setFocusPolicy(Qt::NoFocus);  // the arrows stay with the list
     m_cleanupBody->setMaximumHeight(260);
+    relay::installCopyOnSelect(m_cleanupBody);
     panel->addWidget(m_cleanupBody);
 
     m_cleanupPanel->hide();

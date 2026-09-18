@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "TurnTranscript.h"
+#include "CopyOnSelect.h"
 #include "Theme.h"
 #include <QEvent>
 #include <QFontDatabase>
@@ -48,6 +49,7 @@ TurnTranscriptView::TurnTranscriptView(const QString &turnId, QWidget *parent) :
     m_log->setObjectName(QStringLiteral("turnLog"));
     m_log->setReadOnly(true);
     m_log->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    relay::installCopyOnSelect(m_log);
     split->addWidget(m_log);
     split->setSizes({200, 300});
     layout->addWidget(split, 1);

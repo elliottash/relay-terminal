@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SubagentTranscript.h"
+#include "CopyOnSelect.h"
 #include "Theme.h"
 #include <QApplication>
 #include <QFontDatabase>
@@ -78,6 +79,7 @@ SubagentTranscriptView::SubagentTranscriptView(const QString &id, QWidget *paren
     m_log->setFont(theme::legible(QFontDatabase::systemFont(QFontDatabase::FixedFont), theme::BodyPt));   // QPlainTextEdit#transcriptView sets the face
     m_log->setMaximumBlockCount(6000);
     m_log->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    relay::installCopyOnSelect(m_log);
     // Clicking a tool line folds its detail open in place (protocol § 23, owner 2026-09-18).
     m_log->viewport()->installEventFilter(this);
     m_log->setToolTip(QStringLiteral("Click a ▸ tool line to fold its detail open, and again to fold it shut"));

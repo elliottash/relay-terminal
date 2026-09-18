@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "RequestsPanel.h"
+#include "CopyOnSelect.h"
 #include "Theme.h"
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -95,6 +96,7 @@ RequestsPanel::RequestsPanel(RequestLedgerModel *model, QWidget *parent) : QWidg
     m_detail->setWordWrap(true);
     m_detail->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     m_detail->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    relay::installCopyOnSelect(m_detail);
     auto *scroll = new QScrollArea;
     scroll->setWidget(m_detail);
     scroll->setWidgetResizable(true);

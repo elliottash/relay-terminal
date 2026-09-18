@@ -500,7 +500,45 @@ its window and runs `runAction(id)`, which the toolbar and palette also use.
 - Terminal clipboard: Ctrl+C invokes the display's `copyToClipboard` slot and treats a
   clipboard change as proof of a selection (a backend need not have a selection query); otherwise
   the key reaches the shell. Ctrl+V pastes at a prompt and passes through inside programs.
-  Optional copy-on-select (`terminal/copy_on_select`).
+  Optional copy-on-select (`terminal/copy_on_select`), which is not terminal-only — see
+  "Copy on highlight" below.
+
+### Copy on highlight
+
+One setting, `terminal/copy_on_select` (Options › Terminal, "Copy on select", off by default),
+makes a mouse selection copy itself everywhere text can be highlighted. The key still says
+`terminal` because that is where the feature started; renaming it would turn the setting off for
+everyone who had switched it on, so it is deliberately frozen (owner's request, 2026-09-18:
+"allow copy on highlight in info and other panes").
+
+`src/CopyOnSelect.h` holds the whole behaviour: `relay::copyOnSelectEnabled()` reads the setting,
+and `relay::installCopyOnSelect(widget, notify)` puts a `CopyOnSelectFilter` on a read-only text
+surface. On a left-button release over the widget it copies the selection to PRIMARY where the
+platform has one and to the clipboard, which is what the terminal already did between
+`TerminalView::mouseReleaseEvent` (PRIMARY) and `Pane::copySelection` (clipboard). It is
+header-only because the surfaces live in a dozen static libraries.
+
+Rules the filter keeps:
+
+- **Mouse only.** A keyboard selection never copies; Ctrl+C is still the way to copy that.
+- **Read-only only.** `copyOnSelectText()` returns nothing for an editable `QTextEdit`,
+  `QPlainTextEdit` or `QLineEdit`, so the prompt box, the composer, the plan editor, the settings
+  inputs and a file preview switched to editing (`FilePreview::setEditable`) are never copied from.
+- **Nothing when the setting is off**, and nothing when the selection is empty, so a click that
+  clears a selection does not wipe what was on the clipboard. (X11's PRIMARY is still set by Qt's
+  own text widgets on any selection, as in every Qt and GTK application; that is not Relay's doing
+  and is unchanged by this setting.)
+- **Quiet**, except where a surface passes a `notify`: the pane toasts "N characters copied" for
+  the reasoning bubble and the program transcript, as it always has.
+
+Surfaces that install it: the pane's reasoning bubble and program transcript (`src/Pane.h`), the
+conversation info pane (`src/SessionInfo.cpp`), the conversations pane's preview
+(`src/Conversations.cpp`), the turn log (`src/TurnTranscript.cpp`), a subagent's transcript
+(`src/SubagentTranscript.cpp`), the diff view (`src/DiffView.cpp`), the file explorer's path line
+and the file preview's text, rendered Markdown and info page (`src/FilePanes.cpp`), the Switchboard
+card document and its cleanup panel (`src/BoardPane.cpp`), the tasks panel's detail
+(`src/RequestsPanel.cpp`), the sharing pane's request text (`src/SharingPane.cpp`) and the share
+dialog's address and invite link (`src/RemoteShare.cpp`). Tests: `tests/copyonselect_test.cpp`.
 
 Default window shortcuts:
 
@@ -1885,6 +1923,7 @@ of the platform and of the engine itself.
 | `src/AppPaths.h` | `dataRoot()` (where the backend, shell and scripts are) and `relayFuzzyScore()` (how the palette and the `@` picker rank rows), plus the `RELAY_VERSION` / `RELAY_DATA_DIR` / `RELAY_SOURCE_DIR` fallbacks |
 | `src/Keymap.h` | every window-level shortcut as a named action: defaults, `keybindings.json` overrides, the presets, and the reload (section 12) |
 | `src/Isolation.h` | per-pane systemd scopes: whether they are available, the memory limits, and what systemd says killed one (section 2) |
+| `src/CopyOnSelect.h` | copy on highlight: the one `terminal/copy_on_select` reading and the event filter every read-only text surface installs (section 4, "Copy on highlight"). Header-only, because those surfaces are spread across a dozen libraries |
 | `src/Pane.h` | `Pane` — the terminal pane: its backend, Bash bridge, composer, queue, agent worker and conversation — and `QueueRowDelegate`, which draws the queue rows. `Pane` never names a window; it calls up through `std::function` callbacks |
 | `src/PaneChrome.h` | `ToolPane` (explorer, preview, plan, transcript, Switchboard, settings) and `PaneChrome`, the button row and drag grip in a pane's corner |
 | `src/WindowChrome.h` | `ChromeButton`, the painted header glyphs Relay draws instead of taking the desktop's title bar, and `NotificationsPopup`, the list behind the bell |

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "RemoteShare.h"
+#include "CopyOnSelect.h"
 
 #include "Theme.h"
 #include "core/VtCore.h"
@@ -720,6 +721,7 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     m_url->setTextFormat(Qt::PlainText);
     m_url->setWordWrap(true);
     m_url->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    relay::installCopyOnSelect(m_url);
     // The theme's muted text at the secondary size: palette(mid) is the border colour, about 1.4:1
     // on the dialog (docs/ARCHITECTURE.md, "Legible text").
     m_url->setObjectName(QStringLiteral("shareNote"));
@@ -825,6 +827,7 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     // is the secret. A field scrolls, selects, and answers Ctrl+A and Ctrl+C.
     m_inviteUrl = new QLineEdit;
     m_inviteUrl->setReadOnly(true);
+    relay::installCopyOnSelect(m_inviteUrl);
     m_inviteUrl->setCursorPosition(0);
     m_inviteUrl->setToolTip(QStringLiteral("The whole link. Copy it and send it to one person; "
                                            "anyone who has it can knock."));

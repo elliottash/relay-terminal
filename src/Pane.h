@@ -7,6 +7,7 @@
 // window sets, which is what lets it sit below them here. QueueRowDelegate draws the queue rows.
 
 #include "AppPaths.h"
+#include "CopyOnSelect.h"
 #include "Keymap.h"
 #include "Isolation.h"
 
@@ -1622,13 +1623,9 @@ protected:
             && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && ownsTerminalWidget(qobject_cast<QWidget *>(object))) {
             QTimer::singleShot(0, this, [this] { copySelection(); });
         }
-        // The reasoning bubble never takes the keyboard (the prompt box keeps it), so its
-        // selection is copied here on release when copy on select is on, and by Ctrl+C in the
-        // prompt box otherwise (copyThinkingSelection).
-        if (event->type() == QEvent::MouseButtonRelease && copyOnSelect() && m_thinkingView
-            && object == m_thinkingView->viewport() && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
-            QTimer::singleShot(0, this, [this] { copyThinkingSelection(); });
-        }
+        // The reasoning bubble and the program transcript are read-only text views, so their
+        // copy on select is the shared filter (src/CopyOnSelect.h) installed where they are
+        // built. Ctrl+C in the prompt box still copies the bubble (copyThinkingSelection).
         // A plain click in the terminal (not a selection drag) used to give it the keyboard.
         // It no longer does, so say which key still hands the keyboard over.
         if (event->type() == QEvent::MouseButtonPress && ownsTerminalWidget(qobject_cast<QWidget *>(object)))
@@ -2563,6 +2560,8 @@ private:
             m_thinkingView->setReadOnly(true);
             m_thinkingView->setFocusPolicy(Qt::NoFocus);
             m_thinkingView->setMaximumBlockCount(400);
+            // Highlighting the reasoning copies it, like the terminal above it, and says so.
+            relay::installCopyOnSelect(m_thinkingView, [this](const QString &text) { toastCopied(text); });
             box->addWidget(m_thinkingView, 1);
             m_thinking->hide();
             // Above the queue strip and below the terminal: the order the two had as overlays.
@@ -6948,16 +6947,23 @@ private:
         return line.isEmpty() ? folder : folder + QStringLiteral(" · ") + line.left(160);
     }
 
-    static bool copyOnSelect() { return QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool(); }
+    // The one setting, shared with every other pane's read-only text (src/CopyOnSelect.h).
+    static bool copyOnSelect() { return relay::copyOnSelectEnabled(); }
+
+    // "N characters copied", for a surface that copied something on its own.
+    void toastCopied(const QString &text) {
+        const int count = text.toUcs4().size();
+        if (count > 0)
+            toast(count == 1 ? QStringLiteral("1 character copied") : QStringLiteral("%L1 characters copied").arg(count));
+    }
 
     // What is highlighted in the reasoning bubble, to the clipboard. False when nothing is.
     bool copyThinkingSelection() {
         if (!m_thinkingView || !m_thinking || !m_thinking->isVisible()) return false;
-        const QString text = m_thinkingView->textCursor().selectedText().replace(QChar::ParagraphSeparator, '\n');
+        const QString text = relay::copyOnSelectText(m_thinkingView);
         if (text.isEmpty()) return false;
         QApplication::clipboard()->setText(text);
-        const int count = text.toUcs4().size();
-        toast(count == 1 ? QStringLiteral("1 character copied") : QStringLiteral("%L1 characters copied").arg(count));
+        toastCopied(text);
         return true;
     }
 
@@ -7863,6 +7869,7 @@ private:
         m_transcriptView->setFocusPolicy(Qt::ClickFocus);
         m_transcriptView->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
         m_transcriptView->setMaximumBlockCount(4000);
+        relay::installCopyOnSelect(m_transcriptView, [this](const QString &text) { toastCopied(text); });
         box->addWidget(m_transcriptView, 1);
         m_transcript->hide();
     }

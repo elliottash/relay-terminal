@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SessionInfo.h"
+#include "CopyOnSelect.h"
 
 #include <QApplication>
 #include <QEvent>
@@ -379,6 +380,7 @@ InfoView::InfoView(QWidget *parent) : QWidget(parent) {
     m_body->setOpenLinks(false);
     m_body->setOpenExternalLinks(false);
     m_body->installEventFilter(this);
+    relay::installCopyOnSelect(m_body);
     connect(m_body, &QTextBrowser::anchorClicked, this, [this](const QUrl &url) { linkActivated(url); });
     layout->addWidget(m_body, 1);
     // Alt+I is the fast path since 2026-09-18; /status and /info still open it (docs/ARCHITECTURE.md).

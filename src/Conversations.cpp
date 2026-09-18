@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Conversations.h"
+#include "CopyOnSelect.h"
 
 #include <QAbstractTextDocumentLayout>
 #include <QAction>
@@ -558,6 +559,7 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_preview = new QTextBrowser;
     m_preview->setOpenExternalLinks(false);
     m_preview->setObjectName(QStringLiteral("conversationPreview"));
+    relay::installCopyOnSelect(m_preview);
     m_summarise = new QPushButton(QStringLiteral("Summarise"));
     m_summarise->setObjectName(QStringLiteral("summariseOne"));
     m_summarise->setToolTip(QStringLiteral("Write a short summary of this conversation with the chores model"));

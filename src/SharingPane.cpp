@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SharingPane.h"
+#include "CopyOnSelect.h"
 
 #include <QCheckBox>
 #include <QDateTime>
@@ -584,6 +585,7 @@ QWidget *SharingView::requestRow(const Request &request, bool editorAllowed)
         // exactly these words, so the owner has to be able to read all of them.
         auto *text = plain(request.text, "settingsRowLabel");
         text->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        relay::installCopyOnSelect(text);
         text->setStyleSheet(QStringLiteral("padding: 4px 0;"));
         column->addWidget(text);
         column->addWidget(note(

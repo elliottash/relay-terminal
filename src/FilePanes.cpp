@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "FilePanes.h"
+#include "CopyOnSelect.h"
 #include "Hints.h"
 #include "RemoteFiles.h"
 #include "Theme.h"
@@ -182,6 +183,7 @@ FileExplorer::FileExplorer(const QString &root, QWidget *parent) : QWidget(paren
     m_path->setObjectName(QStringLiteral("fileExplorerPath"));
     m_path->setTextFormat(Qt::PlainText);
     m_path->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    relay::installCopyOnSelect(m_path);
     // Long paths elide instead of forcing the pane wide.
     m_path->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_path->setMinimumWidth(40);
@@ -815,6 +817,9 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     m_textView->setReadOnly(true);
     m_textView->setLineWrapMode(QPlainTextEdit::NoWrap);
     m_textView->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    // Only while it is a preview: setEditable() turns this pane into an editor, and
+    // copyOnSelectText() copies nothing from a widget the user is typing in.
+    relay::installCopyOnSelect(m_textView);
     m_stack->addWidget(m_textView);
 
     m_markdownView = new QTextBrowser;
@@ -826,6 +831,7 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     m_markdownView->setOpenLinks(false);
     m_markdownView->setOpenExternalLinks(false);
     connect(m_markdownView, &QTextBrowser::anchorClicked, this, [this](const QUrl &url) { followLink(url); });
+    relay::installCopyOnSelect(m_markdownView);
     m_stack->addWidget(m_markdownView);
 
     m_imageArea = new QScrollArea;
@@ -866,6 +872,7 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
         m_info->setObjectName(QStringLiteral("filePreviewInfo"));
         m_info->setTextFormat(Qt::PlainText);
         m_info->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        relay::installCopyOnSelect(m_info);
         m_info->setWordWrap(true);
         auto *open = new QPushButton(QStringLiteral("Open externally"));
         open->setObjectName(QStringLiteral("filePreviewOpenExternal"));

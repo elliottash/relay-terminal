@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "DiffView.h"
+#include "CopyOnSelect.h"
 #include "Theme.h"
 
 #include <QFontDatabase>
@@ -253,6 +254,7 @@ DiffTextEdit::DiffTextEdit(QWidget *parent) : QPlainTextEdit(parent) {
     // Diffs are code: wrapping would break the columns the eye follows down a hunk.
     setLineWrapMode(QPlainTextEdit::NoWrap);
     setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    relay::installCopyOnSelect(this);
     m_gutter = new DiffGutter(this);
     connect(this, &QPlainTextEdit::updateRequest, this, [this](const QRect &rect, int dy) {
         if (dy) m_gutter->scroll(0, dy);

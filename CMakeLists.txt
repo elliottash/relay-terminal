@@ -374,7 +374,7 @@ if(RELAY_BUILD_APP)
     # still one translation unit -- main.cpp includes them -- and they are listed so AUTOMOC and
     # IDEs see them.
     add_executable(relay src/main.cpp
-        src/AppPaths.h src/Keymap.h src/Isolation.h src/Pane.h src/PaneChrome.h
+        src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/Pane.h src/PaneChrome.h
         src/WindowChrome.h src/RelayWindow.h src/WindowManagerImpl.h
         src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
@@ -566,6 +566,13 @@ if(BUILD_TESTING)
     target_link_libraries(relay-board-tests PRIVATE relay-board ${RELAY_QT}::Test)
     add_test(NAME board COMMAND relay-board-tests)
     set_tests_properties(board PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # Copy on highlight is header-only (src/CopyOnSelect.h); relay-diffview gives the test one
+    # real pane surface that installs it.
+    add_executable(relay-copyonselect-tests tests/copyonselect_test.cpp)
+    target_include_directories(relay-copyonselect-tests PRIVATE src)
+    target_link_libraries(relay-copyonselect-tests PRIVATE relay-diffview ${RELAY_QT}::Test)
+    add_test(NAME copyonselect COMMAND relay-copyonselect-tests)
+    set_tests_properties(copyonselect PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-diffview-tests tests/diffview_test.cpp)
     target_link_libraries(relay-diffview-tests PRIVATE relay-diffview ${RELAY_QT}::Test)
     add_test(NAME diffview COMMAND relay-diffview-tests)

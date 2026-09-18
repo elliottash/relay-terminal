@@ -1526,8 +1526,10 @@ private:
                 QSettings().setValue(QStringLiteral("control/default"), value);
             });
         }
+        // The key stays `terminal/copy_on_select` although the behaviour is no longer terminal-only
+        // (src/CopyOnSelect.h): renaming it would turn the setting off for everyone who had it on.
         terminal.rows << toggleRow(QStringLiteral("terminal/copy_on_select"), QStringLiteral("Copy on select"),
-                                   QStringLiteral("Selecting terminal text copies it"), false);
+                                   QStringLiteral("Highlighting text copies it, in the terminal and in read-only panes"), false);
         terminal.rows << toggleRow(QStringLiteral("terminal/shell_integration"),
                                    QStringLiteral("Shell integration (OSC 7/133)"),
                                    QStringLiteral("Directory and prompt marks; applies to new panes"), false);
@@ -2237,7 +2239,7 @@ private:
             {QStringLiteral("instruction"), QStringLiteral("rules claude.md agents.md warp.md gemini memory relay.md onboarding")},
             {QStringLiteral("skill"), QStringLiteral("abilities tools refine import skills library")},
             {QStringLiteral("alias"), QStringLiteral("workflow workflows macro snippet saved command saved prompt template shortcut warp")},
-            {QStringLiteral("copy on select"), QStringLiteral("clipboard selection highlight copy")},
+            {QStringLiteral("copy on select"), QStringLiteral("clipboard selection highlight copy primary mouse terminal pane info panes transcript preview diff board")},
             {QStringLiteral("shortcut preset"), QStringLiteral("keymap keybindings hotkeys warp vscode konsole preset")},
             {QStringLiteral("inside programs"), QStringLiteral("vim nano less passthrough program keys")},
             {QStringLiteral("suggest"), QStringLiteral("autocomplete ghost ai suggestions next command prompt")},
