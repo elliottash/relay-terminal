@@ -15,18 +15,26 @@ the card reseeds it, so the file stays the memory and a collaborator continues t
 from __future__ import annotations
 
 import os
+import secrets
 from pathlib import Path
 
 from . import board as B
-from .board_tools import BoardTools, BoardToolError, ToolContext, normalize_id
+from .board_tools import BoardTools, BoardToolError, ToolContext, cleanup_brief, normalize_id
 
 TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
-         "board_move", "board_comment", "board_undo", "board_ask", "board_check"}
+         "board_move", "board_comment", "board_undo", "board_ask", "board_check",
+         "board_cleanup"}
 
 #: How much of a card the Switchboard agent is seeded with (design 5, "Attach").
 SEED_BODY_BYTES = 16384
 SEED_THREAD_ENTRIES = 10
 MAX_ASK_TEXT = 32768
+
+#: `board_cleanup` (protocol 19.9): the roster the brief is sent with, and how much of the
+#: user's own extra instruction is carried.  The roster is one line per card, so even a very
+#: large board fits; the agent reads the cards it cares about with `board_read`.
+MAX_CLEANUP_ROSTER = 400
+MAX_CLEANUP_NOTE = 4000
 
 
 class BoardCommands:
@@ -45,6 +53,11 @@ class BoardCommands:
         self._ask_hash: str | None = None
         self._ask_turn: str | None = None
         self._ask_text: list[str] = []
+        # board_cleanup state (protocol 19.9): the agent's tools while the run owns them, and
+        # the log they write into.  Not None means a cleanup turn is in flight.
+        self._cleanup_tools = None
+        self._cleanup_log = None
+        self._cleanup_id = None
 
     # ---- wiring ---------------------------------------------------------------
     def configure(self, workspace: str, request: dict | None = None) -> dict | None:
@@ -173,6 +186,30 @@ class BoardCommands:
             self.emit(self._changed())
         elif kind == "board_ask":
             self._ask(request, rid)
+        elif kind == "board_cleanup":
+            self._cleanup(request, rid)
+        return True
+
+    # ---- who may start a turn --------------------------------------------------
+    def _busy_error(self, rid, what: str) -> bool:
+        """One agent turn at a time in the Switchboard worker.  True when it refused.
+
+        A card's ask and a whole-board cleanup share the one worker and the one conversation,
+        so the second of them is refused rather than queued: a cleanup that ran while the user
+        was talking to a card would rewrite the card under the conversation.  The GUI shows the
+        refusal and offers Stop; `cancel` stops whichever is running.
+        """
+        busy = bool(getattr(self.turns, "busy", False))
+        running = ("a Switchboard cleanup" if self._cleanup_log is not None else
+                   f"a question on #{self._ask_card}" if self._ask_card and busy else
+                   "an agent turn" if busy else "")
+        if not running:
+            return False
+        self.emit({"event": "error", "id": rid, "code": "board_busy", "agent_busy": True,
+                   "cleanup_running": self._cleanup_log is not None,
+                   "card_id": self._ask_card if self._cleanup_log is None else None,
+                   "text": f"The Switchboard agent is busy with {running}. Stop it first, then "
+                           f"start {what}."})
         return True
 
     def _write(self, kind: str, request: dict, rid) -> None:
@@ -221,6 +258,9 @@ class BoardCommands:
         text = request.get("text")
         if not isinstance(text, str) or not text.strip() or len(text) > MAX_ASK_TEXT:
             raise ValueError(f"board_ask text must be 1-{MAX_ASK_TEXT} characters.")
+        # Checked before the question is appended, so a refused ask leaves no trace on the card.
+        if self._busy_error(rid, "the question"):
+            return
         card = tools.board.card_by_id(card_id)
         if card is None:
             raise ValueError(f"no card #{card_id} on this board.")
@@ -239,8 +279,80 @@ class BoardCommands:
                    "entry_id": entry.entry_id, "author": "owner", "kind": "comment", "text": text})
         self.turns.submit(prompt, "now", rid, None, None)
 
+    # ---- board_cleanup: one agent turn over the whole board ----------------------
+    def _cleanup(self, request: dict, rid) -> None:
+        """`board_cleanup`: the agent tidies the whole board in one turn (protocol 19.9).
+
+        The same machinery as `board_ask` — one turn on the Switchboard worker, the ordinary
+        turn events, `cancel` to stop it — with three differences: the events carry
+        `cleanup: true` and a `run_id` instead of a `card_id`, so the pane draws progress in
+        the board's notice area rather than in a card thread; the agent's tools run on the
+        cleanup's raised ceilings and gain merge/split/sections; and every write is collected
+        into a changelog that the run ends by writing to a dated file and sending as
+        `board_cleanup_summary`.
+        """
+        tools = self._need()
+        agent = getattr(self.turns, "agent", None)
+        if agent is None:
+            raise ValueError("Configure a provider and workspace first.")
+        agent_tools = getattr(agent, "board", None)
+        if agent_tools is None:
+            raise ValueError("The Switchboard agent has no board tools here "
+                             "(issues/board.yaml is missing, or its autonomy is off).")
+        scope = request.get("scope")
+        if scope is not None and (not isinstance(scope, str) or len(scope) > 200):
+            raise ValueError("board_cleanup scope must be a string of at most 200 characters.")
+        note = request.get("note")
+        if note is not None and (not isinstance(note, str) or len(note) > MAX_CLEANUP_NOTE):
+            raise ValueError(f"board_cleanup note must be a string of at most {MAX_CLEANUP_NOTE} characters.")
+        dry_run = bool(request.get("dry_run"))
+        if self._busy_error(rid, "the cleanup"):
+            return
+
+        run_id = f"c-{secrets.token_hex(3)}"
+        self.turns.reset()                 # a cleanup is its own conversation, not a card's
+        self._ask_card = self._ask_hash = self._ask_turn = None
+        self._ask_text = []
+        log = agent_tools.begin_cleanup(run_id, dry_run=dry_run, scope=scope or None,
+                                        note=note or None, limits=request.get("limits"))
+        self._cleanup_tools, self._cleanup_log, self._cleanup_id = agent_tools, log, rid
+        self.emit({"event": "board_cleanup_started", "id": rid, "run_id": run_id,
+                   "dry_run": dry_run, "scope": scope or None, "cards": log.cards_before,
+                   "limits": dict(log.limits), "changelog": log.changelog})
+        try:
+            self.turns.submit(cleanup_prompt(tools, scope or None, note or None, dry_run), "now",
+                              rid, None, None)
+        except Exception:
+            self._finish_cleanup("error")
+            raise
+
+    def _finish_cleanup(self, outcome: str) -> None:
+        """End the run: write the changelog, send the summary, then the board diff."""
+        tools, log, rid = self._cleanup_tools, self._cleanup_log, self._cleanup_id
+        self._cleanup_tools = self._cleanup_log = self._cleanup_id = None
+        if tools is None or log is None:
+            return
+        report = "".join(self._ask_text).strip()
+        self._ask_text = []
+        log = tools.end_cleanup(outcome, report) or log
+        if log.changes or log.refusals:
+            try:
+                log.write(Path(tools.board.repo))
+            except OSError as exc:                          # pragma: no cover - unwritable repo
+                self.emit({"event": "error", "id": rid, "code": "board_cleanup_changelog",
+                           "text": f"The cleanup ran but its changelog could not be written: {exc}"})
+        else:
+            log.changelog = ""       # a run that changed nothing leaves no file behind
+        self.emit({"event": "board_cleanup_summary", "id": rid, **log.summary_event()})
+        try:
+            self.emit(self._changed())
+        except (B.BoardError, OSError):                     # pragma: no cover - unreadable tree
+            pass
+
     def observe(self, event: dict) -> dict:
         """Tag and record the Switchboard agent's turn; called before every emit."""
+        if self._cleanup_log is not None:
+            return self._observe_cleanup(event)
         if self._ask_card is None:
             return event
         name = event.get("event")
@@ -274,6 +386,67 @@ class BoardCommands:
         # The card is unchanged, so the seeded conversation stays valid for the next question.
         self.emit({"event": "board_thread_appended", "card_id": card_id, "author": "agent",
                    "kind": "comment", "text": answer, "turn_id": turn_id})
+
+    def _observe_cleanup(self, event: dict) -> dict:
+        """Tag a cleanup turn's events so the pane shows them on the board, not on a card."""
+        log = self._cleanup_log
+        name = event.get("event")
+        if name == "turn_started" or (name == "status" and self._ask_turn is None):
+            self._ask_turn = event.get("turn_id") or self._ask_turn
+        if name in ("delta", "answer") and isinstance(event.get("text"), str):
+            self._ask_text.append(event["text"])
+        # A cleanup is many steps, and the model says something between most of them. A blank
+        # line at each tool call keeps those remarks apart in the report and the changelog,
+        # instead of running the whole run's commentary into one paragraph.
+        if name == "tool_started" and self._ask_text and not self._ask_text[-1].endswith("\n\n"):
+            self._ask_text.append("\n\n")
+        if name in ("delta", "answer", "done", "error", "cancelled", "turn_summary", "thinking",
+                    "thinking_done", "tool_started", "tool_result", "status", "turn_started"):
+            event = {**event, "cleanup": True, "run_id": log.run_id}
+        if name in ("done", "error", "cancelled"):
+            # `error` before the turn ran (a provider refusal) ends the run just as `done` does;
+            # the changelog is written either way, so a half-finished cleanup is still readable.
+            self._finish_cleanup({"done": "done"}.get(name, name))
+        return event
+
+
+def cleanup_prompt(tools: BoardTools, scope: str | None = None, note: str | None = None,
+                   dry_run: bool = False) -> str:
+    """The whole-board cleanup turn's prompt: the brief, the board's shape, and the roster.
+
+    The brief is `relay_core/board_cleanup_brief.md` — text beside `board_policy.md`, not code —
+    and the roster is one line per card so even a large board fits in the prompt; the agent reads
+    the cards it means to touch with `board_read`.
+    """
+    config = tools.board.config()
+    counts: dict[str, int] = {}
+    lines: list[str] = []
+    for card in sorted(tools.board.cards(), key=lambda c: (B._status_order(c), c.rank or "zzzz")):
+        if card.id is None:
+            continue
+        counts[card.status] = counts.get(card.status, 0) + 1
+        if len(lines) >= MAX_CLEANUP_ROSTER:
+            continue
+        labels = ",".join(str(l) for l in (card.front.get("labels") or [])) or "-"
+        lines.append(f"#{card.id} [{card.status}] {card.title} · labels {labels} · "
+                     f"{card.path.relative_to(tools.board.root)}")
+    head = ["[Switchboard cleanup]",
+            f"Board: {tools.board.root} ({len(lines)} of {sum(counts.values())} cards listed below).",
+            "Sections (board.yaml columns): " + ", ".join(str(c) for c in config.get("columns") or []),
+            "Category folders (board.yaml tabs): "
+            + ", ".join(f"{t.get('id')}={t.get('folder') or t.get('filter')}" for t in tools.board.tabs()),
+            "Cards per status: " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())),
+            ""]
+    if dry_run:
+        head += ["THIS IS A DRY RUN. Every write tool will refuse with `board_cleanup_dry_run` and "
+                 "record what you asked for as a proposal. Call them exactly as you would for a real "
+                 "run, then give the user the plan in your reply.", ""]
+    if scope:
+        head += [f"The user narrowed this run to: {scope}. Leave everything else alone.", ""]
+    if note:
+        head += ["The user added, verbatim:", note.strip(), ""]
+    return "\n".join(head + [cleanup_brief(), "", "--- the board today ---"] + lines
+                     + ["--- end of the board ---"])
 
 
 #: Which statuses each configurable column collects (design 3, "Tabs and columns").

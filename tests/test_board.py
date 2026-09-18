@@ -368,6 +368,24 @@ class ThreadTests(TempBoardTest):
 
 # -------------------------------------------------------------- plans and memory
 
+class IssueSectionTests(TempBoardTest):
+    """The section holding the user's own words (owner, 2026-09-18: call it Issue, not Request)."""
+
+    def test_a_new_card_says_issue(self):
+        card = B.new_card("work", "Voice mode", "inbox", card_id="K7Q2",
+                          request="add voice transcribe mode")
+        self.assertIn("## Issue\nadd voice transcribe mode", card.body)
+        self.assertNotIn("## Request", card.body)
+
+    def test_an_older_card_keeps_its_request_heading_and_is_still_read(self):
+        # Nothing rewrites the cards that are already filed; they are read as they are.
+        body = "# Voice mode\n\n## Request\nadd voice transcribe mode\n"
+        card = B.Card(front={"id": "K7Q2", "type": "work", "status": "inbox"}, body=body)
+        self.assertEqual(card.body, body)
+        self.assertEqual(B.ISSUE_HEADING, "Issue")
+        self.assertIn("request", B.ISSUE_HEADINGS)
+
+
 class CardTypeTests(TempBoardTest):
     def test_plan_card(self):
         card = B.new_card("plan", "Voice mode plan", "draft", card_id="M3XJ",
@@ -748,6 +766,126 @@ class ScriptTests(TempBoardTest):
         self.assertIn("folder_status_mismatch", check.stdout)
         as_json = self.run_script("check", "--json")
         self.assertIn('"code": "folder_status_mismatch"', as_json.stdout)
+
+
+# ---------------------------------------------- merge, split and the board's sections
+
+class MergeTests(TempBoardTest):
+    """`merge_cards`: nothing is deleted and nothing stops resolving (protocol 19.9)."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / B.BOARD_CONFIG).write_text(B.CONFIG_TEXT, encoding="utf-8")
+        self.into = self.card("features/2026-09-17-voice.md", CARD)
+        self.other = self.card("features/2026-09-18-dictation.md", CARD.replace(
+            "id: K7Q2", "id: M3XJ").replace("rank: 0i", "rank: 0j").replace(
+            "status: in-progress", "status: inbox").replace(
+            "# Voice transcription mode", "# Dictation\n\n## Issue\nlet me dictate"))
+        self.board.append_thread("M3XJ", "can we use whisper?", author="owner", kind="comment")
+
+    def merge(self, reason="the same request twice"):
+        return B.merge_cards(self.board, self.into, [self.other], reason=reason)
+
+    def test_the_survivor_keeps_the_merged_text_and_records_where_it_came_from(self):
+        result = self.merge()
+        survivor = B.Card.load(self.into.path)
+        self.assertIn("## Merged in", survivor.body)
+        self.assertIn("#M3XJ", survivor.body)
+        self.assertIn("let me dictate", survivor.body)            # the user's own words, kept
+        self.assertEqual(survivor.front["links"]["merged_from"], ["M3XJ"])
+        self.assertEqual(result["merged"][0]["id"], "M3XJ")
+
+    def test_the_merged_card_is_closed_in_place_and_still_resolves(self):
+        self.merge()
+        merged = self.board.card_by_id("M3XJ")
+        self.assertIsNotNone(merged)                              # #M3XJ still resolves
+        self.assertEqual(merged.status, "dropped")
+        self.assertEqual(B.merged_into(merged), "K7Q2")
+        self.assertIn("features/done/", str(merged.path))
+        self.assertIn("## Resolution", merged.body)
+        self.assertIn("let me dictate", merged.body)              # its own text is untouched
+
+    def test_the_thread_is_carried_over_in_order_and_says_where_it_came_from(self):
+        self.merge()
+        entries = self.board.thread("K7Q2")
+        self.assertEqual([e.text for e in entries], ["can we use whisper?"])
+        self.assertEqual(entries[0].attrs["from"], "M3XJ")
+        self.assertIn("orig", entries[0].attrs)
+        self.assertEqual([e.entry_id for e in entries], sorted(e.entry_id for e in entries))
+        self.assertEqual(self.board.check(), [])
+
+    def test_a_quoted_body_cannot_end_the_section_it_was_quoted_into(self):
+        self.merge()
+        body = B.Card.load(self.into.path).body
+        headings = [line for line in body.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings[-1], "## Merged in")
+
+    def test_merging_a_card_into_itself_or_into_a_merged_card_is_refused(self):
+        with self.assertRaises(B.BoardError):
+            B.merge_cards(self.board, self.into, [self.into], reason="no")
+        self.merge()
+        with self.assertRaises(B.BoardError):
+            B.merge_cards(self.board, self.board.card_by_id("M3XJ"),
+                          [self.board.card_by_id("K7Q2")], reason="no")
+
+
+class SplitTests(TempBoardTest):
+    """`split_card`: one card per piece, and the original stays as the record."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / B.BOARD_CONFIG).write_text(B.CONFIG_TEXT, encoding="utf-8")
+        self.card_file = self.card("features/2026-09-17-voice.md", CARD)
+        self.parts = [{"title": "Voice mode", "request": "add voice transcribe mode"},
+                      {"title": "A clock", "request": "and put a clock in the tab bar"}]
+
+    def test_two_cards_come_out_and_the_original_names_them(self):
+        result = B.split_card(self.board, self.card_file, self.parts, reason="two asks in one card",
+                              category="features")
+        self.assertEqual(len(result["children"]), 2)
+        original = B.Card.load(self.board.repo / result["path"])
+        self.assertIn("## Split", original.body)
+        self.assertEqual(original.front["links"]["split_into"],
+                         [c["id"] for c in result["children"]])
+        self.assertEqual(original.status, "in-progress")          # kept open by default
+        child = B.Card.load(self.board.repo / result["children"][1]["path"])
+        self.assertEqual(child.front["parent"], "K7Q2")
+        self.assertEqual(child.front["links"]["split_from"], "K7Q2")
+        self.assertIn("and put a clock in the tab bar", child.body)
+        self.assertEqual(self.board.check(), [])
+
+    def test_close_moves_the_original_to_done_with_a_resolution(self):
+        result = B.split_card(self.board, self.card_file, self.parts, reason="split",
+                              category="features", close=True)
+        self.assertTrue(result["closed"])
+        original = B.Card.load(self.board.repo / result["path"])
+        self.assertEqual(original.status, "dropped")
+        self.assertIn("features/done/", result["path"])
+        self.assertIn("## Resolution", original.body)
+        self.assertIn("add voice transcribe mode", original.body)  # its own text is still there
+        self.assertEqual(self.board.check(), [])
+
+    def test_a_split_needs_at_least_two_parts_and_a_request_each(self):
+        with self.assertRaises(B.BoardError):
+            B.split_card(self.board, self.card_file, self.parts[:1], reason="x", category="features")
+        with self.assertRaises(B.BoardError):
+            B.split_card(self.board, self.card_file, [{"title": "a"}, {"title": "b"}],
+                         reason="x", category="features")
+
+
+class ConfigWriteTests(TempBoardTest):
+    """`board.yaml` is rewritten in a form it can read back (`board_sections`)."""
+
+    def test_the_default_config_round_trips(self):
+        (self.root / B.BOARD_CONFIG).write_text(B.CONFIG_TEXT, encoding="utf-8")
+        before = self.board.config()
+        B.write_config(self.board, before)
+        self.assertEqual(self.board.config(), before)
+
+    def test_a_scalar_with_flow_punctuation_stays_one_value(self):
+        text = B.render_config({"version": 1, "tabs": [{"id": "done", "filter": "status:done,dropped"}]})
+        self.assertIn("'status:done,dropped'", text)
+        self.assertEqual(B.parse_yaml(text)["tabs"][0]["filter"], "status:done,dropped")
 
 
 if __name__ == "__main__":

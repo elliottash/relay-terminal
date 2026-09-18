@@ -26,7 +26,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 # --------------------------------------------------------------------------- ids
 
@@ -221,6 +221,13 @@ FIELD_ORDER = ("id", "type", "status", "name", "description", "kind", "topic", "
                "acceptance", "source", "links")
 
 TASK_HEADING = {"work": "Tasks", "plan": "Steps", "memory": "Tasks", "alias": "Tasks"}
+
+#: The section holding the user's own words about the card.  It was written `## Request`
+#: until 2026-09-18, when the owner asked for the plainer "Issue"; new and edited cards write
+#: `## Issue` and both spellings are read as the same section, so no existing card file has to
+#: be rewritten (`relay_core.board_tools._section_span`).
+ISSUE_HEADING = "Issue"
+ISSUE_HEADINGS = ("issue", "request")
 
 ITEM_STATUSES = ("open", "in-progress", "blocked", "deferred", "done", "dropped")
 CLOSED_ITEM_STATUSES = ("done", "dropped")
@@ -1316,7 +1323,7 @@ def new_card(card_type: str, title: str, status: str, *, card_id: str | None = N
     front.setdefault("links", {"plans": [], "commits": [], "evidence": [], "related": [], "github": None})
     body = f"# {title}\n"
     if request:
-        body += f"\n## Request\n{request.rstrip()}\n"
+        body += f"\n## {ISSUE_HEADING}\n{request.rstrip()}\n"
     card = Card(front=front, body=body, dirty=True)
     return card
 
@@ -1579,3 +1586,358 @@ def _scaffold(board: Board) -> list[tuple[str, str]]:
         out.append((str(attributes), (existing.rstrip("\n") + "\n\n" if existing.strip() else "")
                     + header + GITATTRIBUTES_LINE + "\n"))
     return out
+
+
+# ------------------------------------------------- whole-board cleanup operations
+#
+# The file half of `board_cleanup` (docs/AGENT-SESSIONS-PROTOCOL.md 19.9): merging two
+# cards into one, splitting one card into several, and changing the board's own sections
+# in `board.yaml`.  Everything here is deliberately *non-destructive*: no card file is ever
+# removed, a merged card stays on disk as a `dropped` card that names its survivor, and the
+# text it held is copied into the survivor before it is closed.  `relay_core.board_tools`
+# wraps these as the agent tools and owns the thread events, the undo snapshots and the
+# changelog; this module owns the bytes.
+
+#: Where a survivor records the cards folded into it, and where a split card records the
+#: cards that came out of it.
+MERGED_HEADING = "Merged in"
+SPLIT_HEADING = "Split"
+RESOLUTION_HEADING = "Resolution"
+
+#: How much of a merged card's body is copied into the survivor.  The whole card stays on
+#: disk either way, so the copy is a convenience, not the record.
+MERGE_BODY_CAP = 8000
+
+#: The column ids a board may list in `board.yaml`'s `columns:` (the sections of the one
+#: list the pane draws).  Anything else is a typo, and a typo would silently hide a lane.
+COLUMN_IDS = ("inbox", "discussing", "ready", "in-progress", "waiting", "needs-qa",
+              "deferred", "done", "draft", "approved", "executing", "active", "retired")
+
+_HEADING_LINE_RE = re.compile(r"^(#{1,5})[ \t]+", re.M)
+
+
+def section_span(body: str, heading: str) -> tuple[int, int] | None:
+    """(start of the section's text, end of the section) for a `## ` heading, or None."""
+    wanted = heading.strip().lower()
+    aliases = set(ISSUE_HEADINGS) if wanted in ISSUE_HEADINGS else {wanted}
+    pattern = re.compile(r"^##[ \t]+(?P<heading>.+?)[ \t]*$", re.M)
+    for match in pattern.finditer(body or ""):
+        if match.group("heading").strip().lower() not in aliases:
+            continue
+        start = match.end() + (1 if body[match.end():match.end() + 1] == "\n" else 0)
+        end = len(body)
+        following = pattern.search(body, match.end())
+        top = _H1_RE.search(body, match.end())
+        for candidate in (following, top):
+            if candidate is not None:
+                end = min(end, candidate.start())
+        return start, end
+    return None
+
+
+def section_text(body: str, heading: str) -> str:
+    span = section_span(body, heading)
+    return body[span[0]:span[1]].strip("\n") if span else ""
+
+
+def append_body_section(body: str, heading: str, text: str) -> str:
+    """Append `text` to a `## ` section, creating the section at the end when it is missing."""
+    block = text.rstrip("\n") + "\n"
+    span = section_span(body, heading)
+    if span is None:
+        prefix = body if body.endswith("\n") else body + "\n"
+        return f"{prefix}\n## {heading}\n{block}"
+    start, end = span
+    kept = body[start:end].rstrip("\n")
+    return body[:start] + (kept + "\n\n" if kept else "") + block + "\n" + body[end:]
+
+
+def demote_headings(text: str, levels: int = 2) -> str:
+    """Push every Markdown heading down, so a card's body can be quoted inside a section
+    without its `## Issue` ending the section it was quoted into."""
+    return _HEADING_LINE_RE.sub(lambda m: "#" * min(6, len(m.group(1)) + levels) + " ", text or "")
+
+
+def merged_into(card: Card) -> str | None:
+    """The id this card was merged into, when it was."""
+    links = card.front.get("links")
+    value = links.get("merged_into") if isinstance(links, dict) else None
+    return str(value).upper() if value else None
+
+
+def _link_list(card: Card, key: str) -> list[str]:
+    links = card.front.get("links")
+    value = links.get(key) if isinstance(links, dict) else None
+    return [str(v).upper() for v in value] if isinstance(value, list) else []
+
+
+def _set_link(card: Card, key: str, value) -> None:
+    links = dict(card.front.get("links") or {})
+    links[key] = value
+    card.set("links", links)
+
+
+def carry_thread(board: "Board", src_id: str, dst_id: str, *, src_private: bool = False,
+                 dst_private: bool = False) -> int:
+    """Copy a merged card's conversation into the survivor's thread, in one locked append.
+
+    The carried entries keep their order, their text and their authorship, and each gains
+    `from=<source card>` and `orig=<its id there>`, so the survivor's thread says where the
+    words came from and the copy can be matched back to the original.  They are given *fresh*
+    ids after the survivor's last one rather than their own: the file stays sorted (`relay-board
+    check` reports an unsorted thread) and the two conversations read as "…and then this one was
+    folded in".  Returns how many were copied.
+    """
+    entries = sorted(board.thread(src_id, src_private), key=lambda e: e.entry_id)
+    if not entries:
+        return 0
+    path = board.thread_path(dst_id, dst_private)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        size = os.lseek(fd, 0, os.SEEK_END)
+        prefix = ""
+        last = None
+        if size:
+            body = path.read_bytes()
+            ids = [e.entry_id for e in parse_thread(body.decode("utf-8", "replace"))]
+            last = max(ids) if ids else None
+            tail = body[-2:]
+            prefix = "\n\n" if not tail.endswith(b"\n") else ("\n" if not tail.endswith(b"\n\n") else "")
+        blocks = []
+        for entry in entries:
+            last = next_entry_id(last)
+            attrs = {**entry.attrs, "from": src_id.upper(), "orig": entry.entry_id}
+            blocks.append(ThreadEntry(last, attrs, entry.text).render())
+        os.write(fd, (prefix + "\n".join(blocks)).encode("utf-8"))
+        os.fsync(fd)
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+    return len(entries)
+
+
+def merge_cards(board: "Board", into: Card, sources: Sequence[Card], *, reason: str,
+                category_of: Callable[[Card], str] | None = None) -> dict:
+    """Fold `sources` into `into` without deleting anything.
+
+    The survivor keeps its own text and gains a `## Merged in` section holding each source's
+    body (headings demoted, capped at `MERGE_BODY_CAP`), the union of the labels and
+    `links.merged_from`.  Each source is rewritten with `links.merged_into`, a `## Resolution`
+    naming the survivor, status `dropped`, and its file moves into the category's `done/`
+    folder — so `#OLD` still resolves, to a card that says where the work went.  The source's
+    thread is copied into the survivor's and then closed with an event.
+
+    Returns `{into, into_path, into_hash, merged: [{id, title, path, was, entries}], others}`
+    where `others` is the (path, bytes-before, original-path) triples the undo needs.
+    """
+    if into.id is None or into.path is None:
+        raise BoardError("the surviving card needs an id and a path")
+    if merged_into(into):
+        raise BoardError(f"#{into.id} was itself merged into #{merged_into(into)}; merge into that one")
+    category_of = category_of or (lambda card: board.category_of(card.path))
+    others: list[tuple[Path, bytes | None, Path | None]] = []
+    merged: list[dict] = []
+    labels = [str(l) for l in (into.front.get("labels") or [])]
+    related = _link_list(into, "related")
+    from_ids = _link_list(into, "merged_from")
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    for src in sources:
+        if src.id is None or src.path is None:
+            raise BoardError("a merged card needs an id and a path")
+        if src.id == into.id:
+            raise BoardError(f"#{into.id} cannot be merged into itself")
+        if merged_into(src):
+            raise BoardError(f"#{src.id} was already merged into #{merged_into(src)}")
+        # The `# Title` heading is already the block's own header here, so it is dropped
+        # rather than demoted; every other byte of the body is kept.
+        body = _H1_RE.sub("", src.body, count=1).strip("\n")
+        quoted = demote_headings(body)
+        if len(quoted) > MERGE_BODY_CAP:
+            quoted = quoted[:MERGE_BODY_CAP].rstrip() + f"\n\n[…truncated; the whole card is kept at {src.path.name}]"
+        was = str(src.path.relative_to(board.repo))
+        into.body = append_body_section(
+            into.body, MERGED_HEADING,
+            f"### #{src.id} — {src.title} ({today})\n\n"
+            f"Merged from `{was}` ({src.status}): {reason}\n\n{quoted}")
+        into.dirty = True
+        for label in (src.front.get("labels") or []):
+            if str(label) not in labels:
+                labels.append(str(label))
+        for other in _link_list(src, "related"):
+            if other not in related and other != into.id:
+                related.append(other)
+        if src.id not in from_ids:
+            from_ids.append(src.id)
+        merged.append({"id": src.id, "title": src.title, "was": was, "src": src})
+
+    if labels:
+        into.set("labels", labels)
+    if related:
+        _set_link(into, "related", related)
+    _set_link(into, "merged_from", from_ids)
+    into_before = into.path.read_bytes()
+    _atomic_write(into.path, into.to_text())
+
+    for item in merged:
+        src: Card = item.pop("src")
+        before = src.path.read_bytes()
+        _set_link(src, "merged_into", into.id)
+        src.set("status", "dropped")
+        target_dir = board.base_for(src.private) / src.expected_folder(category_of(src))
+        target = target_dir / src.path.name
+        if target != src.path and target.exists():
+            raise BoardError(f"a different file already sits at {target.relative_to(board.repo)}")
+        # The link is written for where the file ends up, not where it is now.
+        src.body = append_body_section(
+            src.body, RESOLUTION_HEADING,
+            f"Merged into [#{into.id}]({_relative_link(target, into.path)}) on {today}: {reason}\n\n"
+            f"Nothing was thrown away: the text above is also kept on #{into.id} under "
+            f"`## {MERGED_HEADING}`, and this card stays here so `#{src.id}` keeps resolving.")
+        src.dirty = True
+        _atomic_write(src.path, src.to_text())
+        moved_from = None
+        if target != src.path:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            os.replace(src.path, target)
+            moved_from, src.path = src.path, target
+        item["path"] = str(src.path.relative_to(board.repo))
+        item["entries"] = carry_thread(board, src.id, into.id, src_private=src.private,
+                                       dst_private=into.private)
+        others.append((src.path, before, moved_from))
+
+    return {"into": into.id, "into_path": str(into.path.relative_to(board.repo)),
+            "into_before": into_before, "into_hash": file_hash(into.path),
+            "merged": merged, "others": others}
+
+
+def split_card(board: "Board", card: Card, parts: Sequence[dict], *, reason: str,
+               category: str, close: bool = False,
+               tab_category: Callable[[str], str] | None = None) -> dict:
+    """Split one card into several, leaving the original in place as the record.
+
+    Each part becomes a new card whose `## Issue` is the part's own verbatim excerpt of the
+    original request, with `parent` set to the original.  The original gains a `## Split`
+    section naming the children and `links.split_into`; with `close` it is additionally moved
+    to `dropped` with a resolution, for a card whose every piece moved out.
+
+    Returns `{id, path, hash, children: [{id, title, path}], others, closed}`.
+    """
+    if card.id is None or card.path is None:
+        raise BoardError("the card being split needs an id and a path")
+    if not 2 <= len(parts) <= 10:
+        raise BoardError("a split makes between 2 and 10 cards")
+    existing = board.cards()
+    taken = [c.id for c in existing if c.id]
+    today = datetime.now().strftime("%Y-%m-%d")
+    others: list[tuple[Path, bytes | None, Path | None]] = []
+    children: list[dict] = []
+    before = card.path.read_bytes()
+
+    for part in parts:
+        title = str(part.get("title") or "").strip()
+        request = str(part.get("request") or "").strip()
+        if not title or not request:
+            raise BoardError("every part of a split needs a title and a request")
+        status = str(part.get("status") or card.status)
+        if status not in STATUS_FOLDER[card.type]:
+            raise BoardError(f"unknown {card.type} status {status!r}")
+        part_category = category
+        if part.get("tab") and tab_category is not None:
+            part_category = tab_category(str(part["tab"]))
+        labels = [str(l) for l in (part.get("labels") or card.front.get("labels") or [])]
+        child_id = new_id(taken)
+        taken.append(child_id)
+        child = new_card(card.type, title, status, card_id=child_id, request=request,
+                         rank=board.next_rank([c for c in existing if c.status == status]),
+                         labels=labels or None, private=card.private,
+                         parent=card.id, source=card.front.get("source") or None)
+        links = dict(child.front.get("links") or {})
+        links["split_from"] = card.id
+        child.set("links", links)
+        folder = board.base_for(card.private) / child.expected_folder(part_category)
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / card_filename(title)
+        for n in range(2, 60):
+            if not path.exists():
+                break
+            path = folder / card_filename(f"{title}-{n}")
+        if path.exists():
+            raise BoardError("could not find a free file name for a split card")
+        child.path = path
+        _atomic_write(path, child.to_text())
+        existing.append(child)
+        others.append((path, None, None))
+        children.append({"id": child_id, "title": title, "status": status,
+                         "path": str(path.relative_to(board.repo))})
+
+    # Where the original ends up, so the links it writes point at the children from there.
+    target = card.path
+    if close:
+        card.set("status", "dropped")
+        target = board.base_for(card.private) / card.expected_folder(category) / card.path.name
+        if target != card.path and target.exists():
+            raise BoardError(f"a different file already sits at {target.relative_to(board.repo)}")
+    listing = "\n".join(f"- [#{c['id']}]({_relative_link(target, board.repo / c['path'])}) — "
+                        f"{c['title']} ({c['status']})" for c in children)
+    card.body = append_body_section(card.body, SPLIT_HEADING,
+                                    f"{today}: {reason}\n\n{listing}")
+    _set_link(card, "split_into", [c["id"] for c in children])
+    moved_from = None
+    if close:
+        card.body = append_body_section(
+            card.body, RESOLUTION_HEADING,
+            f"Split on {today} into {', '.join('#' + c['id'] for c in children)}: {reason}. "
+            "The text above is kept here, and each piece is now its own card.")
+    card.dirty = True
+    _atomic_write(card.path, card.to_text())
+    if target != card.path:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(card.path, target)
+        moved_from, card.path = card.path, target
+    return {"id": card.id, "path": str(card.path.relative_to(board.repo)),
+            "hash": file_hash(card.path), "before": before, "moved_from": moved_from,
+            "children": children, "others": others, "closed": bool(close)}
+
+
+def _relative_link(from_path: Path, to_path: Path) -> str:
+    """A Markdown link target from one card file to another, so the file reads on GitHub."""
+    return os.path.relpath(str(to_path), str(Path(from_path).parent))
+
+
+CONFIG_KEY_ORDER = ("version", "tabs", "columns", "column_statuses", "labels", "agent", "memory")
+CONFIG_HEADER = "# Switchboard configuration. Format: docs/SWITCHBOARD-FORMAT.md\n"
+
+_FLOW_UNSAFE_RE = re.compile(r"[,:\[\]{}]")
+
+
+def flow_value(value) -> str:
+    """A value inside a flow sequence or mapping.
+
+    `yaml_value` is written for front matter, where a comma or a colon inside a scalar is
+    usually already quoted for another reason.  `board.yaml` has `filter: status:done,dropped`,
+    which has to come back as one scalar, so anything with flow punctuation in it is quoted.
+    """
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(flow_value(v) for v in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{flow_value(k)}: {flow_value(v)}" for k, v in value.items()) + "}"
+    if isinstance(value, str) and _FLOW_UNSAFE_RE.search(value):
+        return _quote(value)
+    return yaml_scalar(value)
+
+
+def render_config(config: dict) -> str:
+    """`board.yaml` as text: the known keys in a stable order, then anything else, sorted."""
+    keys = [k for k in CONFIG_KEY_ORDER if k in config]
+    keys += sorted(str(k) for k in config if k not in CONFIG_KEY_ORDER)
+    return CONFIG_HEADER + "".join(f"{yaml_scalar(k)}: {flow_value(config[k])}\n" for k in keys)
+
+
+def write_config(board: "Board", config: dict) -> str:
+    """Replace `board.yaml` atomically.  Returns the new file hash."""
+    text = render_config(config)
+    parse_yaml(text)          # never leave a board.yaml the board cannot read back
+    return _atomic_write(board.config_path, text)

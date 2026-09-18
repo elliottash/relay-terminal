@@ -1,0 +1,3 @@
+error: changes/needs_qa_llm/2026-09-18-output-token-limit-defaults-to-32k.md: bad_id: id 'OT32' is not 4 Crockford-base32 characters with a letter
+error: changes/needs_qa_llm/2026-09-18-the-board-asks-on-the-panes-provider.md: bad_id: id 'Z3LP' is not 4 Crockford-base32 characters with a letter
+130 card(s) checked: 2 error(s), 0 warning(s)

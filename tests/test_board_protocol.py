@@ -189,7 +189,7 @@ class WriteTests(ProtocolTest):
         self.assertEqual(detail["event"], "board_card")
         self.assertEqual(detail["id"], "d1")
         self.assertEqual(detail["card_id"], card_id)
-        self.assertIn("## Request", detail["body"])
+        self.assertIn("## Issue", detail["body"])
         self.assertEqual([e["text"] for e in detail["thread"]][-1], "a reply")
         update = self.send(type="board_update", card=card_id, base_hash=detail["hash"],
                            patch={"fields": {"labels": ["voice"]}})
@@ -444,6 +444,156 @@ class KeylessWorkerTests(unittest.TestCase):
         opened = [e for e in events if e["event"] == "board" and e.get("id") == "o1"]
         self.assertEqual(len(opened), 1, names)
         self.assertEqual(opened[0]["cards"], [])
+
+
+# ------------------------------------------------ board_cleanup: the whole board at once
+
+class StubBoardAgent:
+    """Stands in for the Switchboard worker's Agent: it only has to carry the board tools."""
+
+    def __init__(self, tools):
+        self.board = tools
+        self.config = ProviderConfig(api_key="", base_url="https://example.invalid", model="stub/one")
+        self.session_id = "s-1"
+
+
+class CleanupTests(ProtocolTest):
+    """`board_cleanup` (protocol 19.9): one turn over the whole board, and its changelog."""
+
+    def setUp(self):
+        super().setUp()
+        self.agent_tools = self.commands.agent_tools(str(self.repo), {})
+        self.turns.agent = StubBoardAgent(self.agent_tools)
+
+    def start(self, **kw):
+        return self.send(type="board_cleanup", id="k1", **kw)
+
+    def finish(self, *, outcome="done", text="Merged nothing."):
+        self.events.clear()
+        if text:
+            self.commands.observe({"event": "delta", "text": text})
+        self.commands.observe({"event": outcome, "turn_id": "t-9"})
+        return self.events
+
+    def test_it_starts_one_turn_with_the_brief_and_the_roster(self):
+        card_id = self.make_card()
+        events = self.start(scope="the features tab")
+        started = [e for e in events if e["event"] == "board_cleanup_started"][0]
+        self.assertEqual(started["id"], "k1")
+        self.assertTrue(started["run_id"].startswith("c-"))
+        self.assertEqual(started["cards"], 1)
+        self.assertFalse(started["dry_run"])
+        self.assertEqual(started["scope"], "the features tab")
+        self.assertEqual(started["limits"]["max_writes_per_turn"],
+                         T.CLEANUP_LIMITS["max_writes_per_turn"])
+        prompt = self.turns.submitted[-1]["prompt"]
+        self.assertIn("[Switchboard cleanup]", prompt)
+        self.assertIn("board_merge_cards", prompt)              # the brief
+        self.assertIn(f"#{card_id}", prompt)                    # the roster
+        self.assertIn("the features tab", prompt)
+        self.assertEqual(self.turns.resets, 1)                  # its own conversation
+
+    def test_the_running_commentary_is_kept_apart_in_the_report(self):
+        self.make_card()
+        self.start()
+        self.commands.observe({"event": "delta", "text": "Reading the inbox."})
+        self.commands.observe({"event": "tool_started", "tool": "board_read"})
+        self.commands.observe({"event": "delta", "text": "Done."})
+        summary = [e for e in self.finish(text="") if e["event"] == "board_cleanup_summary"][0]
+        self.assertEqual(summary["report"], "Reading the inbox.\n\nDone.")
+
+    def test_the_turn_events_say_cleanup_and_never_a_card(self):
+        self.make_card()
+        run_id = [e for e in self.start() if e["event"] == "board_cleanup_started"][0]["run_id"]
+        tagged = self.commands.observe({"event": "tool_started", "name": "board_list"})
+        self.assertTrue(tagged["cleanup"])
+        self.assertEqual(tagged["run_id"], run_id)
+        self.assertNotIn("card_id", tagged)
+
+    def test_it_ends_with_a_summary_then_the_board_diff(self):
+        keep = self.make_card()
+        gone = self.make_card("Dictation", "let me dictate into the box")
+        self.start()
+        self.agent_tools.run("board_merge_cards",
+                             {"into": keep, "cards": [gone], "reason": "the same request"})
+        events = self.finish(text="Merged #%s into #%s." % (gone, keep))
+        names = [e["event"] for e in events]
+        self.assertEqual(names[-2:], ["board_cleanup_summary", "board_changed"])
+        summary = [e for e in events if e["event"] == "board_cleanup_summary"][0]
+        self.assertEqual(summary["id"], "k1")
+        self.assertEqual(summary["outcome"], "done")
+        self.assertEqual(summary["counts"]["merge"], 1)
+        self.assertEqual(summary["changes"][0]["action"], "merge")
+        self.assertEqual(summary["changes"][0]["cards"], [gone])
+        self.assertIn("Merged #", summary["report"])
+        self.assertTrue((self.repo / summary["changelog"]).is_file())
+        self.assertIn("| merge |", (self.repo / summary["changelog"]).read_text(encoding="utf-8"))
+
+    def test_a_run_that_changed_nothing_leaves_no_file_behind(self):
+        self.make_card()
+        self.start()
+        summary = [e for e in self.finish() if e["event"] == "board_cleanup_summary"][0]
+        self.assertEqual(summary["counts"]["writes"], 0)
+        self.assertEqual(summary["changelog"], "")
+
+    def test_a_cancelled_run_still_reports_what_it_did(self):
+        keep = self.make_card()
+        self.start()
+        self.agent_tools.run("board_move_card", {"id": keep, "status": "ready", "reason": "agreed"})
+        summary = [e for e in self.finish(outcome="cancelled", text="")
+                   if e["event"] == "board_cleanup_summary"][0]
+        self.assertEqual(summary["outcome"], "cancelled")
+        self.assertEqual(summary["counts"]["move"], 1)
+        self.assertTrue((self.repo / summary["changelog"]).is_file())
+
+    def test_a_dry_run_writes_no_card_and_reports_the_plan(self):
+        card_id = self.make_card()
+        before = self.board.card_by_id(card_id).path.read_bytes()
+        self.start(dry_run=True)
+        self.assertIn("THIS IS A DRY RUN", self.turns.submitted[-1]["prompt"])
+        result = self.agent_tools.run("board_move_card",
+                                      {"id": card_id, "status": "ready", "reason": "x"})
+        self.assertEqual(result["code"], "board_cleanup_dry_run")
+        summary = [e for e in self.finish(text="the plan") if e["event"] == "board_cleanup_summary"][0]
+        self.assertTrue(summary["dry_run"])
+        self.assertEqual(summary["counts"]["writes"], 0)
+        self.assertEqual(summary["counts"]["proposed"], 1)
+        self.assertTrue(summary["changes"][0]["proposed"])
+        self.assertEqual(self.board.card_by_id(card_id).path.read_bytes(), before)
+
+    def test_the_sections_delta_travels_with_the_summary(self):
+        self.start()
+        self.agent_tools.run("board_sections", {"columns": ["inbox", "ready", "done"],
+                                                "reason": "the middle lanes are empty"})
+        summary = [e for e in self.finish() if e["event"] == "board_cleanup_summary"][0]
+        self.assertEqual(summary["sections"]["columns_after"], ["inbox", "ready", "done"])
+        self.assertIn("discussing", summary["sections"]["columns_before"])
+
+    def test_a_second_cleanup_and_a_card_ask_are_refused_while_one_runs(self):
+        card_id = self.make_card()
+        self.start()
+        again = self.send(type="board_cleanup", id="k2")[0]
+        self.assertEqual(again["event"], "error")
+        self.assertEqual(again["code"], "board_busy")
+        self.assertTrue(again["cleanup_running"])
+        asked = self.send(type="board_ask", id="a2", card=card_id, text="hello?")[0]
+        self.assertEqual(asked["code"], "board_busy")
+        self.assertNotIn("hello?", [e.text for e in self.board.thread(card_id)])
+        self.assertEqual(len(self.turns.submitted), 1)
+
+    def test_a_cleanup_is_refused_while_a_card_question_runs(self):
+        card_id = self.make_card()
+        self.send(type="board_ask", card=card_id, text="where should this run?")
+        self.turns.busy = True
+        refused = self.start()[0]
+        self.assertEqual(refused["code"], "board_busy")
+        self.assertEqual(refused["card_id"], card_id)
+        self.assertTrue(refused["agent_busy"])
+
+    def test_a_cleanup_without_a_configured_agent_is_refused(self):
+        self.turns.agent = None
+        with self.assertRaises(ValueError):
+            self.commands.dispatch({"type": "board_cleanup", "id": "k1"})
 
 
 if __name__ == "__main__":       # pragma: no cover

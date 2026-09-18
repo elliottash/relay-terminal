@@ -105,6 +105,9 @@ FORWARDED_EVENTS = frozenset({
     # bodies are the user's own notes, already in git, not desktop-local configuration.
     "board", "board_activity", "board_card", "board_changed", "board_problems",
     "board_thread_appended", "board_undone", "board_written",
+    # A whole-board cleanup (protocol 19.9) is board activity too: the phone shows its progress
+    # and its changelog the same way the desktop does.
+    "board_cleanup_started", "board_cleanup_summary",
     # The agent typing into the visible program: a phone watching a pane must see every keystroke
     # the agent sends and every refusal, for the same reason the desktop prints them inline.
     "program_input", "program_input_refused",

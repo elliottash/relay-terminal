@@ -1128,7 +1128,7 @@ no key — that window used to show "Loading the Switchboard…" forever.
 |---|---|
 | `board_open {id?}` | `board {id, rev, root, workspace, config, cards: [row], problems}` |
 | `board_refresh {id?}` | `board_changed {id?, rev, upserts: [row], removed: [card_id], problems}` |
-| `board_card_get {id?, card, thread_entries?≤50}` | `board_card {id, card_id, hash, path, front, title, body, sections, tasks, thread, thread_total}` |
+| `board_card_get {id?, card, thread_entries?≤50}` | `board_card {id, card_id, hash, path, front, title, body, sections, issue, issue_heading, tasks, thread, thread_total}` |
 | `board_check {id?}` | `board_problems {id, items: [{code, path, message, severity}]}` |
 
 `config` is `{tabs, columns, autonomy, statuses, column_statuses, labels}`: `tabs` as `board.yaml`
@@ -1141,6 +1141,11 @@ thread_entries, tasks_done, tasks_total, created, milestone, topic, implemented_
 draw a card without reading the file. (Until 2026-09-18 `board_tools._row` sent only the first
 eleven, so the pane's age and `☑ done/total` badges had nothing to draw; it now sends them all.
 `component` is not in the row: the card detail reads it from `front`.)
+
+`issue` on `board_card` is the text of the card's own-words section and `issue_heading` the spelling
+that card uses for it — `Issue` since 2026-09-18, `Request` on a card filed before that (both are
+read as the same section, and a write settles the card on `Issue`; see `board.ISSUE_HEADINGS`).
+The pane offers `issue` for editing rather than parsing the body: the GUI never parses a card.
 
 `board_refresh` is what the GUI sends when its `QFileSystemWatcher` fires (and after a `git pull`).
 The worker diffs the tree against the rows it last sent, so a change to one card is one upsert, not
@@ -1159,11 +1164,21 @@ a reload. `rev` increases on every `board_changed`; a GUI that has missed revisi
 | `board_comment {id?, card, text, kind?, author?}` | `board_written` + `board_changed` |
 | `board_undo {id?, write_id}` | `board_undone` + `board_changed` |
 
-`board_create` is quick add: `text` is stored **verbatim** as the card's `## Request`, and the title
+`board_create` is quick add: `text` is stored **verbatim** as the card's `## Issue`, and the title
 is its first line (shortened) unless one is given. `patch` holds the `board_update_card` arguments
 (`fields`, `title`, `append_section`, `replace_section`, `tasks`). `before`/`after` are the card ids
 a drag dropped this card between; the worker computes the fractional rank. `author` names the
 person, and defaults to `owner`.
+
+**Editing a card from the pane** (2026-09-18; owner: "after adding a card, i couldn't edit the title
+or the task") is `board_update` and nothing new: the card detail's Edit (the `e` key, the Edit
+button, a click on the title, a double-click in the text) turns the title and the `## Issue` text
+into fields, and Save sends one patch — `{"title": …, "replace_section": {"heading": "Issue",
+"text": …}}` — with the `base_hash` the card was read at. The GUI never writes the file. A card
+edited elsewhere in the meantime answers `error {code: "board_conflict"}`, on which the pane
+re-reads the card (so it has the current hash and the version on disk), keeps what was typed and
+says that a second Save writes over it; the rewrite is logged in the thread either way, so nothing
+is lost.
 
 `board_written` carries `{id, kind, card_id, write_id, …}` plus whatever the tool returned (the new
 `hash`, `path`, `status`). A refusal is the ordinary `error` event with a `code` — notably
@@ -1241,7 +1256,7 @@ read tools and drops the four writes.
 - **Immutable through `board_update_card`:** `id`, `type`, `created`, `source`, `rank`, `status`,
   `private`. `status` and `rank` are `board_move_card`'s job; the rest are the record.
 - **Owner text may be rewritten** (decision 12.3, superseding the refusal in design 6.3): a replaced
-  `## Request`, or a new title, writes a `rewrite` thread entry holding the old *and* the new text,
+  `## Issue`, or a new title, writes a `rewrite` thread entry holding the old *and* the new text,
   so the discussion history shows the change and it can be put back. The card hash now detects an
   *unlogged* edit rather than preventing an edit.
 - **Every write appends a thread entry** with `author`, `model`, `pane` and `turn`.
@@ -1273,6 +1288,114 @@ read tools and drops the four writes.
 - Thread entry ids are second-resolution, so `board.append_thread` now picks the next free suffix
   after the last id **on disk, under the lock**. Two writes in the same second stay ordered and
   `relay-board.py check` stays clean.
+
+### 19.9 `board_cleanup`: the agent tidies the whole board (v2.2, 2026-09-18)
+
+Owner request: *"there should be a cleanup button, that would have the agent clean up the board,
+merge / split sections, merge redundant cards, split eclectic cards, review card status, etc."*
+One agent turn over the whole board, run by the same Switchboard worker as `board_ask` and with
+the same turn events, so the GUI reuses everything it already has for an ask. The brief is
+`backend/relay_core/board_cleanup_brief.md` — text beside `board_policy.md`, not code — and it is
+sent as the turn's *prompt*, so an ordinary card chat never carries it.
+
+| Message | Events |
+|---|---|
+| `board_cleanup {id?, scope?, note?, dry_run?, limits?}` | `board_cleanup_started`, then an ordinary turn tagged `cleanup: true`, `board_activity` per write, then `board_cleanup_summary` and `board_changed` |
+
+**The message.** `scope` (≤200 chars) narrows the run in words ("only the Needs QA lane") and is
+repeated to the agent. `note` (≤4000 chars) is the user's own extra instruction, passed verbatim.
+`dry_run: true` makes every write tool refuse with `{"code": "board_cleanup_dry_run"}` while
+recording what it was asked to do, so the run produces a plan and changes nothing — the safe thing
+for the button to offer first. `limits` may **lower** `max_creates_per_turn`,
+`max_writes_per_turn` or `max_creates_per_hour` for this run.
+
+**`board_cleanup_started`** — `{event, id, run_id, dry_run, scope, cards, limits, changelog}`.
+`run_id` is `c-<6 hex>` and identifies the run on every later event; `cards` is how many cards the
+board held when it started; `changelog` is where the run intends to write its changelog.
+
+**Turn events.** `delta`, `answer`, `thinking`, `thinking_done`, `tool_started`, `tool_result`,
+`turn_summary`, `status`, `turn_started`, `done`, `error` and `cancelled` carry **`cleanup: true`
+and `run_id`, and never `card_id`** — that is how the pane tells a cleanup from a card's ask and
+draws it in the board's notice/status area instead of a card thread. Nothing is appended to any
+card thread on behalf of the run itself (the per-card thread events of each write still happen).
+
+**`board_activity`** (19.5) gains `cleanup: true` and `run_id` for every write the run makes, so
+progress is live: one line per merged, split, moved or re-labelled card.
+
+**`board_cleanup_summary`** is the last word, before a final `board_changed`:
+
+```json
+{"event": "board_cleanup_summary", "id": "k1", "run_id": "c-1a2b3c", "outcome": "done",
+ "dry_run": false, "scope": null, "seconds": 412.7,
+ "counts": {"writes": 23, "proposed": 0, "cards_touched": 19, "merge": 3, "split": 1,
+            "move": 12, "update": 6, "sections": 1},
+ "changes": [{"action": "merge", "card_id": "K7Q2", "summary": "merged 2 card(s) in: …",
+              "path": "issues/features/2026-09-17-voice.md", "write_id": "w-…",
+              "cards": ["M3XJ", "R4TT"]}],
+ "truncated": false,
+ "refusals": [{"tool": "board_move_card", "error": "…", "code": "board_refused"}],
+ "cards_before": 96, "cards_after": 94,
+ "sections": {"columns_before": [...], "columns_after": [...],
+              "tabs_before": [...], "tabs_after": [...]},
+ "changelog": "docs/qa_evidence/2026-09-18-switchboard-cleanup/cleanup-20260918T1412Z.md",
+ "report": "the agent's closing message"}
+```
+
+`outcome` is `done`, `error` or `cancelled`. `counts` is keyed by action name plus `writes`,
+`proposed` and `cards_touched`. `changes` is capped at 200 entries with `truncated: true` beyond
+that; the changelog file always holds every one. `sections` is `null` when `board.yaml` was not
+touched. `changes[].cards` names the cards a merge folded in or a split created. `changelog` is
+`""` when the run changed nothing, and no file is written.
+
+**Busy rules.** The Switchboard worker runs **one turn at a time**, and a cleanup and a card's ask
+are not queued behind each other — a cleanup that ran while the user was talking to a card would
+rewrite the card under the conversation. The second of them is refused with
+`{"event": "error", "code": "board_busy", "agent_busy": true, "cleanup_running": <bool>,
+"card_id": <the card being asked about, or null>}` and a sentence naming what is running. The
+check happens **before** anything is written, so a refused `board_ask` does not leave its question
+on the card. **To stop a cleanup, send `cancel`** — the ordinary one, as for any turn; the run
+ends with `outcome: "cancelled"`, and the changelog and the summary still report everything it did
+before it stopped.
+
+**The conversation.** A cleanup calls `turns.reset()` first: it is its own conversation, not a
+card's, and the card seeded for `board_ask` is forgotten, so the next question about that card
+reseeds from the file.
+
+**Three more tools, only while it runs** (`relay_core.board_tools.CLEANUP_TOOL_SPECS`). Outside a
+cleanup they are neither advertised nor accepted (`{"code": "board_refused"}`), so a pane agent's
+every turn does not carry them and cannot merge the user's cards on a whim. Plan mode blocks them
+with the other writes.
+
+| Tool | Arguments | What it writes |
+|---|---|---|
+| `board_merge_cards` | `{into, cards: [id] ≤10, reason}` | The survivor gains `## Merged in` (each source's body, headings demoted, ≤8000 chars), the union of the labels, and `links.merged_from`. Each source keeps its file **and its id**, gains `links.merged_into` and a `## Resolution` linking the survivor, becomes `dropped`, and moves to its category's `done/`. Its thread is copied into the survivor's, each entry keeping its text and author and gaining `from=<source id>` and `orig=<its id there>`. |
+| `board_split_card` | `{id, parts: [{title, request, status?, tab?, labels?}] 2–10, reason, close?}` | One card per part, each with the part's verbatim `## Issue`, `parent` and `links.split_from` set to the original. The original gains `## Split` naming the children and `links.split_into`; with `close: true` it also gains a `## Resolution` and becomes `dropped`. |
+| `board_sections` | `{columns?, tabs?, reason}` | Rewrites `issues/board.yaml`. `columns` is the whole ordered list from `board.COLUMN_IDS`; `tabs` is the whole list of `{id, folder}`/`{id, filter}`. Refused when a folder that still holds cards is not named by any tab (`{"code": "board_refused", "requires": "empty_folder"}`), when a column id is unknown, or when nothing would change. |
+
+**Nothing is deleted, ever.** There is still no delete tool; a merged card is closed in place, so a
+`#ID` written in a commit message, a doc or another card keeps resolving — to a card that says
+where the work went. `board.merged_into(card)` reads the pointer.
+
+**Limits.** A cleanup runs on `board_tools.CLEANUP_LIMITS` (60 creates and 400 writes per turn,
+200 creates per hour) instead of a pane turn's 5/20/30; `limits` on the message may only lower
+them. Over the ceiling the tools answer `board_rate_limited` exactly as they do on a pane turn.
+
+**Undo.** Each merge and split is one `write_id` with the 30-second toast, and undoing it restores
+*every* file it touched — the survivor, the cards it folded in (moved back to their old folders)
+and the cards a split created (removed unless git already has them). `board_undone` gains
+`also_restored: <count>`.
+
+**The changelog.** A cleanup rewrites many of the user's files, so the run writes one Markdown file
+naming every change: the run id, the model, the outcome, the counts, a table of every write
+(action, card, summary, file), the refusals, and the agent's closing message. It goes to
+`docs/qa_evidence/<YYYY-MM-DD>-switchboard-cleanup/cleanup-<stamp>.md` (`-dry-run.md` on a dry
+run). That is the closest fit in `issues/README.md`'s conventions — a dated evidence folder, the
+same place an implementer's evidence for a change goes — because `issues/` itself holds cards and
+threads and anything else there would be parsed as a card. **The worker never runs git**: reviewing
+and committing a cleanup is the person's job, and `git diff` plus the changelog is how they do it.
+
+**The intake files are never touched.** `issues/bug_intake.txt` and `issues/feature_intake.txt` are
+the owner's inboxes; the brief says so and the cleanup has no tool that writes them.
 
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 

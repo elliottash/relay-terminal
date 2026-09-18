@@ -35,7 +35,8 @@ import re
 import secrets
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -193,8 +194,65 @@ TOOL_SPECS = [
          ["id", "kind", "text"]),
 ]
 
+#: The three tools a whole-board cleanup needs and an ordinary turn does not (protocol 19.9).
+#: They are offered only while `board_cleanup` is running, so a pane agent's every turn does
+#: not carry three more tool schemas — and cannot merge the user's cards on a whim.
+CLEANUP_TOOL_SPECS = [
+    spec("board_merge_cards",
+         "Fold one or more redundant cards into one surviving card. Nothing is deleted: each "
+         "merged card keeps its file and its id, gains a `## Resolution` naming the survivor and "
+         "is closed as `dropped`, its text is copied into the survivor under `## Merged in`, and "
+         "its thread is carried over. Read every card first; merge only cards that are genuinely "
+         "the same request.",
+         {"into": {**_ID_ARG, "description": "The card that survives and keeps the work."},
+          "cards": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 10,
+                    "description": "Ids of the cards folded into it."},
+          "reason": {"type": "string", "description": "Why they are the same request, in one line."}},
+         ["into", "cards", "reason"]),
+    spec("board_split_card",
+         "Split a card that mixes unrelated work into one card per piece. Each part's `request` is "
+         "the user's own words for that piece, quoted verbatim from the original; the title is "
+         "yours. The original stays as the record, gains a `## Split` section naming the new cards, "
+         "and is closed only when `close` is true, which is right when every piece moved out.",
+         {"id": _ID_ARG,
+          "parts": {"type": "array", "minItems": 2, "maxItems": 10,
+                    "description": "One entry per piece of work.",
+                    "items": {"type": "object", "properties": {
+                        "title": {"type": "string", "description": "One line, your words."},
+                        "request": {"type": "string",
+                                    "description": "The user's words for this piece, verbatim from the original card."},
+                        "status": {"type": "string", "description": "Defaults to the original's status."},
+                        "tab": {"type": "string", "description": "Defaults to the original's category folder."},
+                        "labels": {"type": "array", "items": {"type": "string"}}},
+                        "required": ["title", "request"], "additionalProperties": False}},
+          "reason": {"type": "string", "description": "Why the card mixes unrelated work, in one line."},
+          "close": {"type": "boolean",
+                    "description": "Close the original as `dropped` because every piece moved out."}},
+         ["id", "parts", "reason"]),
+    spec("board_sections",
+         "Change the board's own structure in issues/board.yaml: which sections (columns) the one "
+         "list is divided into and in what order, and which category folders (tabs) a card's file "
+         "can live in. Dropping a column does not hide its cards — a status no column collects gets "
+         "a section of its own — but a tab whose folder still holds cards cannot be dropped. Use "
+         "this sparingly: it changes the board for everyone.",
+         {"columns": {"type": "array", "items": {"type": "string"},
+                      "description": f"The whole ordered column list, from: {', '.join(B.COLUMN_IDS)}."},
+          "tabs": {"type": "array", "description": "The whole tab list, each {id, folder} or {id, filter}.",
+                   "items": {"type": "object", "properties": {
+                       "id": {"type": "string"}, "folder": {"type": "string"},
+                       "filter": {"type": "string"}},
+                       "required": ["id"], "additionalProperties": False}},
+          "reason": {"type": "string", "description": "Why the structure no longer fits, in one line."}},
+         ["reason"]),
+]
+
+#: The tools of every turn.  The cleanup-only three are in `CLEANUP_TOOL_NAMES`; `ALL_TOOL_NAMES`
+#: is what `handles` answers to, since a cleanup call still arrives through the same dispatch.
 TOOL_NAMES = tuple(s["function"]["name"] for s in TOOL_SPECS)
-WRITE_TOOLS = ("board_create_card", "board_update_card", "board_move_card", "board_comment")
+CLEANUP_TOOL_NAMES = tuple(s["function"]["name"] for s in CLEANUP_TOOL_SPECS)
+ALL_TOOL_NAMES = TOOL_NAMES + CLEANUP_TOOL_NAMES
+WRITE_TOOLS = ("board_create_card", "board_update_card", "board_move_card", "board_comment",
+               "board_merge_cards", "board_split_card", "board_sections")
 
 
 # ------------------------------------------------------------------ small helpers
@@ -249,11 +307,23 @@ def section_headings(body: str) -> list[str]:
     return [m.group("heading").strip() for m in _SECTION_RE.finditer(body or "")]
 
 
+def _heading_matches(found: str, wanted: str) -> bool:
+    """One `## ` heading names the same section as another.
+
+    `## Request` and `## Issue` are the same section under two names: cards written before
+    2026-09-18 say Request, new and edited ones say Issue (`board.ISSUE_HEADINGS`).
+    """
+    found, wanted = found.strip().lower(), wanted.strip().lower()
+    if found == wanted:
+        return True
+    return found in B.ISSUE_HEADINGS and wanted in B.ISSUE_HEADINGS
+
+
 def _section_span(body: str, heading: str) -> tuple[int, int, int] | None:
     """(start of the heading line, start of the section text, end of the section)."""
-    wanted = heading.strip().lower()
+    wanted = heading.strip()
     for match in _SECTION_RE.finditer(body):
-        if match.group("heading").strip().lower() != wanted:
+        if not _heading_matches(match.group("heading"), wanted):
             continue
         text_start = match.end()
         if body[text_start:text_start + 1] == "\n":
@@ -269,7 +339,7 @@ def _section_span(body: str, heading: str) -> tuple[int, int, int] | None:
 
 
 def is_owner_section(heading: str) -> bool:
-    """A section the user wrote (so a rewrite has to be logged).  `## Request` always is."""
+    """A section the user wrote (so a rewrite has to be logged).  `## Issue` always is."""
     return heading.strip().lower() not in AGENT_SECTIONS
 
 
@@ -331,6 +401,176 @@ class RateState:
                 os.close(lock)
 
 
+# --------------------------------------------------------------- whole-board cleanup
+
+#: A cleanup rewrites many cards in one turn, so it runs on its own ceilings rather than a
+#: pane turn's five creates and twenty writes.  They are still ceilings: a run that wants
+#: more than this has lost the plot and should stop and report.
+CLEANUP_LIMITS = {
+    "max_creates_per_turn": 60,
+    "max_writes_per_turn": 400,
+    "max_creates_per_hour": 200,
+}
+
+#: Where a run's changelog is written.  `issues/` holds cards and threads and nothing else,
+#: so the closest fit in `issues/README.md`'s conventions is a dated evidence folder — the
+#: same place an implementer's evidence for a change goes (`docs/qa_evidence/<date>-<slug>/`).
+CLEANUP_EVIDENCE_SLUG = "switchboard-cleanup"
+
+#: How many changes the summary event carries before it says "truncated"; the changelog file
+#: always holds every one of them.
+MAX_SUMMARY_CHANGES = 200
+
+
+@dataclass
+class CleanupChange:
+    """One write a cleanup made (or, on a dry run, one it wanted to make)."""
+    action: str
+    card_id: str
+    summary: str
+    path: str = ""
+    write_id: str = ""
+    cards: list[str] = field(default_factory=list)
+    proposed: bool = False
+
+    def to_dict(self) -> dict:
+        out = {"action": self.action, "card_id": self.card_id, "summary": self.summary,
+               "path": self.path, "write_id": self.write_id}
+        if self.cards:
+            out["cards"] = list(self.cards)
+        if self.proposed:
+            out["proposed"] = True
+        return out
+
+
+@dataclass
+class CleanupLog:
+    """The record of one `board_cleanup` run: what it changed, and the file that says so.
+
+    A cleanup rewrites the user's own files, so it is only as good as its changelog.  Every
+    write goes through `BoardTools._record_path`, which appends here; the run ends by writing
+    the whole thing to a dated file under `docs/qa_evidence/` and sending it as
+    `board_cleanup_summary`, so the change can be read, judged and reverted with git.
+    """
+    run_id: str
+    started: float = 0.0
+    dry_run: bool = False
+    scope: str | None = None
+    note: str | None = None
+    limits: dict = field(default_factory=lambda: dict(CLEANUP_LIMITS))
+    changes: list[CleanupChange] = field(default_factory=list)
+    refusals: list[dict] = field(default_factory=list)
+    outcome: str = "running"
+    report: str = ""
+    cards_before: int = 0
+    cards_after: int = 0
+    config_before: dict = field(default_factory=dict)
+    config_after: dict = field(default_factory=dict)
+    finished: float = 0.0
+    model: str | None = None
+    changelog: str = ""
+
+    def record(self, change: CleanupChange) -> None:
+        self.changes.append(change)
+
+    def counts(self) -> dict:
+        out = {"writes": sum(1 for c in self.changes if not c.proposed),
+               "proposed": sum(1 for c in self.changes if c.proposed),
+               "cards_touched": len({c.card_id for c in self.changes if c.card_id})}
+        for change in self.changes:
+            out[change.action] = out.get(change.action, 0) + 1
+        return out
+
+    def seconds(self) -> float:
+        return round(max(0.0, (self.finished or self.started) - self.started), 1)
+
+    def summary_event(self) -> dict:
+        shown = self.changes[:MAX_SUMMARY_CHANGES]
+        return {"run_id": self.run_id, "outcome": self.outcome, "dry_run": self.dry_run,
+                "scope": self.scope, "seconds": self.seconds(), "counts": self.counts(),
+                "changes": [c.to_dict() for c in shown],
+                "truncated": len(self.changes) > len(shown),
+                "refusals": self.refusals[:50],
+                "cards_before": self.cards_before, "cards_after": self.cards_after,
+                "sections": self.sections_delta(), "changelog": self.changelog,
+                "report": self.report[:4000]}
+
+    def sections_delta(self) -> dict | None:
+        if not self.config_after or self.config_before == self.config_after:
+            return None
+        return {"columns_before": list(self.config_before.get("columns") or []),
+                "columns_after": list(self.config_after.get("columns") or []),
+                "tabs_before": [str(t.get("id")) for t in (self.config_before.get("tabs") or [])],
+                "tabs_after": [str(t.get("id")) for t in (self.config_after.get("tabs") or [])]}
+
+    # ---- the changelog file ----------------------------------------------------
+    def stamp(self) -> str:
+        return datetime.fromtimestamp(self.started or time.time(), timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    def relative_path(self) -> str:
+        day = datetime.fromtimestamp(self.started or time.time(), timezone.utc).strftime("%Y-%m-%d")
+        name = f"cleanup-{self.stamp()}" + ("-dry-run" if self.dry_run else "") + ".md"
+        return f"docs/qa_evidence/{day}-{CLEANUP_EVIDENCE_SLUG}/{name}"
+
+    def markdown(self) -> str:
+        counts = self.counts()
+        head = [f"# Switchboard cleanup {self.run_id}",
+                "",
+                f"- **Run**: {self.run_id} ({'dry run, nothing written' if self.dry_run else 'applied'})",
+                f"- **Finished**: {datetime.fromtimestamp(self.finished or time.time(), timezone.utc).isoformat(timespec='seconds')}"
+                f" after {self.seconds()} s, outcome `{self.outcome}`",
+                f"- **Model**: {self.model or 'unknown'}",
+                f"- **Cards**: {self.cards_before} before, {self.cards_after} after",
+                f"- **Writes**: {counts.get('writes', 0)}"
+                + (f", proposed {counts['proposed']}" if counts.get("proposed") else ""),
+                f"- **Scope**: {self.scope or 'the whole board'}"]
+        if self.note:
+            head.append(f"- **Note from the user**: {self.note}")
+        sections = self.sections_delta()
+        if sections:
+            head += ["", "## Sections",
+                     f"- columns: `{', '.join(sections['columns_before'])}` → `{', '.join(sections['columns_after'])}`",
+                     f"- tabs: `{', '.join(sections['tabs_before'])}` → `{', '.join(sections['tabs_after'])}`"]
+        head += ["", "## Changes", ""]
+        if self.changes:
+            head += ["| # | Action | Card | Summary | File |", "|---|---|---|---|---|"]
+            for index, change in enumerate(self.changes, 1):
+                cards = (" ← " + " ".join("#" + c for c in change.cards)) if change.cards else ""
+                mark = "*(proposed)* " if change.proposed else ""
+                head.append(f"| {index} | {change.action} | #{change.card_id or '—'}{cards} | "
+                            f"{mark}{_cell(change.summary)} | `{change.path}` |")
+        else:
+            head.append("Nothing was changed.")
+        if self.refusals:
+            head += ["", "## Refused", ""]
+            head += [f"- `{r.get('tool')}`: {_cell(str(r.get('error', '')))}" for r in self.refusals[:50]]
+        head += ["", "## What the agent said", "", self.report.strip() or "(no closing message)", ""]
+        return "\n".join(head)
+
+    def write(self, repo: Path) -> str:
+        """Write the changelog under the repository and return its relative path."""
+        rel = self.relative_path()
+        path = Path(repo) / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        B.atomic_write(path, self.markdown())
+        self.changelog = rel
+        return rel
+
+
+def _cell(text: str) -> str:
+    return " ".join(str(text).split()).replace("|", "\\|")[:300]
+
+
+def cleanup_brief() -> str:
+    """The whole-board cleanup brief, versioned beside `board_policy.md` so evals can pin it."""
+    path = Path(__file__).resolve().parent / "board_cleanup_brief.md"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:                                        # pragma: no cover - packaging slip
+        return ""
+    return re.sub(r"<!--.*?-->", "", text, flags=re.S).strip()
+
+
 # ------------------------------------------------------------------------- writes
 
 @dataclass
@@ -347,6 +587,10 @@ class WriteRecord:
     thread_size: int = 0
     moved_from: Path | None = None
     undone: bool = False
+    #: Files beyond the primary card this one write also touched — a merge rewrites and
+    #: closes every card it folded in, a split creates one file per piece.  Each entry is
+    #: (path now, bytes before or None for a file this write created, path it was moved from).
+    others: list[tuple[Path, bytes | None, Path | None]] = field(default_factory=list)
 
 
 @dataclass
@@ -411,6 +655,9 @@ class BoardTools:
         self._order: list[str] = []
         self.creates_this_turn = 0
         self.writes_this_turn = 0
+        #: Set while a `board_cleanup` turn runs (protocol 19.9): it raises the per-turn
+        #: ceilings, offers the merge/split/sections tools, and records every write.
+        self.cleanup: CleanupLog | None = None
 
     # ---- lifecycle ------------------------------------------------------------
     @classmethod
@@ -427,11 +674,47 @@ class BoardTools:
         self.writes_this_turn = 0
         self.context.turn_id = turn_id
 
+    def begin_cleanup(self, run_id: str, *, dry_run: bool = False, scope: str | None = None,
+                      note: str | None = None, limits: dict | None = None) -> CleanupLog:
+        """Enter cleanup mode: raised ceilings, the merge/split/sections tools, a changelog."""
+        ceilings = dict(CLEANUP_LIMITS)
+        for key, value in (limits or {}).items():
+            if key in ceilings and isinstance(value, int):
+                ceilings[key] = max(0, int(value))
+        log = CleanupLog(run_id=run_id, started=self.clock(), dry_run=bool(dry_run),
+                         scope=scope, note=note, limits=ceilings,
+                         model=self.context.model,
+                         cards_before=len(self.board.card_paths()),
+                         config_before=self.board.config())
+        log.changelog = log.relative_path()
+        self.cleanup = log
+        return log
+
+    def end_cleanup(self, outcome: str, report: str = "") -> CleanupLog | None:
+        """Leave cleanup mode and finish the changelog.  Returns the log, or None."""
+        log, self.cleanup = self.cleanup, None
+        if log is None:
+            return None
+        log.outcome = outcome
+        log.report = report or ""
+        log.finished = self.clock()
+        log.cards_after = len(self.board.card_paths())
+        log.config_after = self.board.config()
+        log.model = log.model or self.context.model
+        return log
+
+    def limit(self, key: str) -> int:
+        """The ceiling in force: a cleanup's raised one, or the pane turn's."""
+        if self.cleanup is not None:
+            return int(self.cleanup.limits.get(key, self.limits[key]))
+        return int(self.limits[key])
+
     def tool_specs(self) -> list[dict]:
-        return [dict(s) for s in TOOL_SPECS]
+        specs = list(TOOL_SPECS) + (list(CLEANUP_TOOL_SPECS) if self.cleanup is not None else [])
+        return [dict(s) for s in specs]
 
     def handles(self, name: str) -> bool:
-        return name in TOOL_NAMES
+        return name in ALL_TOOL_NAMES
 
     # ---- dispatch -------------------------------------------------------------
     def preview(self, name: str, args: dict) -> str:
@@ -451,37 +734,59 @@ class BoardTools:
         if not isinstance(args, dict):
             raise BoardToolError("Tool arguments must be an object.")
         try:
+            if name in CLEANUP_TOOL_NAMES and self.cleanup is None:
+                raise BoardToolError(f"{name} is only available during a Switchboard cleanup.",
+                                     code="board_refused")
             if name in WRITE_TOOLS:
-                self._check_write_budget(name)
+                self._check_write_budget(name, args)
             handler = {"board_list": self._list, "board_read": self._read,
                        "board_create_card": self._create, "board_update_card": self._update,
-                       "board_move_card": self._move, "board_comment": self._comment}[name]
+                       "board_move_card": self._move, "board_comment": self._comment,
+                       "board_merge_cards": self._merge, "board_split_card": self._split,
+                       "board_sections": self._sections}[name]
             return handler(dict(args))
         except BoardToolError as exc:
+            # A dry run's refusals are the plan, not a problem: they are already recorded as
+            # proposed changes, so they do not also go into the refusal list.
+            if self.cleanup is not None and exc.code != "board_cleanup_dry_run":
+                self.cleanup.refusals.append({"tool": name, "error": str(exc), "code": exc.code})
             return exc.to_result()
         except B.BoardConflict as exc:
             return {"error": str(exc), "code": "board_conflict", "current_hash": exc.current_hash}
         except B.BoardError as exc:
+            if self.cleanup is not None:
+                self.cleanup.refusals.append({"tool": name, "error": str(exc), "code": "board_error"})
             return {"error": str(exc), "code": "board_error"}
 
     # ---- limits ---------------------------------------------------------------
-    def _check_write_budget(self, name: str) -> None:
+    def _check_write_budget(self, name: str, args: dict | None = None) -> None:
+        if self.cleanup is not None and self.cleanup.dry_run:
+            # A preview run: the plan is recorded, nothing is written.
+            self.cleanup.record(CleanupChange(
+                action=name.replace("board_", "").replace("_card", "").replace("_cards", ""),
+                card_id=str((args or {}).get("id") or (args or {}).get("into") or "").lstrip("#").upper(),
+                summary=preview_line(name, args or {}), proposed=True))
+            raise BoardToolError(
+                "This is a dry run of the Switchboard cleanup: nothing is written. Carry on "
+                "reading the board and call the write tools as you would — each call is recorded "
+                "as a proposal — then summarize the plan in your reply.",
+                code="board_cleanup_dry_run")
         if not self.enforce_limits:
             return
         if self.autonomy == "off":
             raise BoardToolError("Switchboard writes are turned off for this workspace (autonomy: off).",
                                  code="board_autonomy_off")
         if name == "board_create_card":
-            if self.creates_this_turn >= self.limits["max_creates_per_turn"]:
+            if self.creates_this_turn >= self.limit("max_creates_per_turn"):
                 raise BoardToolError(
-                    f"Switchboard limit: {self.limits['max_creates_per_turn']} new cards per turn. "
+                    f"Switchboard limit: {self.limit('max_creates_per_turn')} new cards per turn. "
                     "Summarize the remaining requests in your reply instead of creating more.",
-                    code="board_rate_limited", scope="turn", limit=self.limits["max_creates_per_turn"])
-        elif self.writes_this_turn >= self.limits["max_writes_per_turn"]:
+                    code="board_rate_limited", scope="turn", limit=self.limit("max_creates_per_turn"))
+        elif self.writes_this_turn >= self.limit("max_writes_per_turn"):
             raise BoardToolError(
-                f"Switchboard limit: {self.limits['max_writes_per_turn']} card writes per turn. "
+                f"Switchboard limit: {self.limit('max_writes_per_turn')} card writes per turn. "
                 "Summarize the rest in your reply.",
-                code="board_rate_limited", scope="turn", limit=self.limits["max_writes_per_turn"])
+                code="board_rate_limited", scope="turn", limit=self.limit("max_writes_per_turn"))
 
     # ---- reads ----------------------------------------------------------------
     def _tab_map(self) -> dict[str, dict]:
@@ -605,6 +910,12 @@ class BoardTools:
                 "front": dict(card.front), "title": card.title, "body": card.body[:MAX_TEXT],
                 "body_truncated": len(card.body) > MAX_TEXT,
                 "sections": section_headings(card.body),
+                # The user's own words, so the pane can offer them for editing without parsing
+                # Markdown itself.  `issue_heading` is the spelling this card uses today
+                # (`Request` on a card written before 2026-09-18); a write settles it on `Issue`.
+                "issue": _section_text(card.body, B.ISSUE_HEADING).strip("\n"),
+                "issue_heading": next((h for h in section_headings(card.body)
+                                       if _heading_matches(h, B.ISSUE_HEADING)), B.ISSUE_HEADING),
                 "tasks": [{"item_id": t.item_id, "text": t.text, "status": t.status,
                            "done": t.done, "depth": t.depth, "card": t.card}
                           for t in card.tasks()],
@@ -614,21 +925,41 @@ class BoardTools:
 
     # ---- writes ---------------------------------------------------------------
     def _record(self, action: str, card: B.Card, summary: str, before: bytes | None,
-                thread_size: int, moved_from: Path | None = None) -> str:
+                thread_size: int, moved_from: Path | None = None,
+                others: Sequence[tuple[Path, bytes | None, Path | None]] = (),
+                cards: Sequence[str] = ()) -> str:
+        return self._record_path(action, card.path, card.id or "", summary, before,
+                                 self.board.thread_path(card.id or "", card.private),
+                                 thread_size, moved_from, others, cards)
+
+    def _record_path(self, action: str, path: Path, card_id: str, summary: str,
+                     before: bytes | None, thread_path: Path | None, thread_size: int,
+                     moved_from: Path | None = None,
+                     others: Sequence[tuple[Path, bytes | None, Path | None]] = (),
+                     cards: Sequence[str] = ()) -> str:
+        """Record one undoable write, announce it, and (in a cleanup) log it for the changelog."""
         write_id = f"w-{int(self.clock() * 1000):x}-{secrets.token_hex(2)}"
-        record = WriteRecord(write_id=write_id, action=action, card_id=card.id or "",
-                             path=card.path, summary=summary, at=self.clock(), before=before,
-                             thread_path=self.board.thread_path(card.id or "", card.private),
-                             thread_size=thread_size, moved_from=moved_from)
+        record = WriteRecord(write_id=write_id, action=action, card_id=card_id,
+                             path=path, summary=summary, at=self.clock(), before=before,
+                             thread_path=thread_path, thread_size=thread_size,
+                             moved_from=moved_from, others=list(others))
         self.writes[write_id] = record
         self._order.append(write_id)
         while len(self._order) > 50:
             self.writes.pop(self._order.pop(0), None)
-        self.emit({"event": "board_activity", "write_id": write_id, "id": card.id, "action": action,
-                   "actor": self.context.actor, "model": self.context.model, "pane": self.context.pane,
-                   "turn_id": self.context.turn_id, "summary": summary,
-                   "path": str(card.path.relative_to(self.board.repo)), "undo_seconds": UNDO_SECONDS})
-        self.emit({"event": "board_changed", "upserts": [card.id], "removed": [], "write_id": write_id})
+        rel = str(path.relative_to(self.board.repo))
+        activity = {"event": "board_activity", "write_id": write_id, "id": card_id or None,
+                    "action": action, "actor": self.context.actor, "model": self.context.model,
+                    "pane": self.context.pane, "turn_id": self.context.turn_id,
+                    "summary": summary, "path": rel, "undo_seconds": UNDO_SECONDS}
+        if self.cleanup is not None:
+            activity["cleanup"] = True
+            activity["run_id"] = self.cleanup.run_id
+            self.cleanup.record(CleanupChange(action=action, card_id=card_id, summary=summary,
+                                              path=rel, write_id=write_id, cards=list(cards)))
+        self.emit(activity)
+        self.emit({"event": "board_changed", "upserts": [card_id] if card_id else [],
+                   "removed": [], "write_id": write_id})
         return write_id
 
     def _thread_size(self, card: B.Card) -> int:
@@ -670,11 +1001,11 @@ class BoardTools:
                 "the call with not_duplicate_of listing the ids you checked.",
                 code="board_possible_duplicate", possible_duplicates=duplicates)
 
-        if self.enforce_limits and not self.rate.claim(self.limits["max_creates_per_hour"]):
+        if self.enforce_limits and not self.rate.claim(self.limit("max_creates_per_hour")):
             raise BoardToolError(
-                f"Switchboard limit: {self.limits['max_creates_per_hour']} new cards per hour for this "
+                f"Switchboard limit: {self.limit('max_creates_per_hour')} new cards per hour for this "
                 "workspace. Summarize the remaining requests in your reply.",
-                code="board_rate_limited", scope="hour", limit=self.limits["max_creates_per_hour"])
+                code="board_rate_limited", scope="hour", limit=self.limit("max_creates_per_hour"))
 
         taken = [c.id for c in cards if c.id]
         card = B.new_card(card_type, title, status, card_id=B.new_id(taken), request=request,
@@ -715,7 +1046,7 @@ class BoardTools:
             if card.id is None or card.id in excused or card.status in ("done", "dropped"):
                 continue
             body_request = ""
-            span = _section_span(card.body, "Request")
+            span = _section_span(card.body, B.ISSUE_HEADING)
             if span:
                 body_request = card.body[span[1]:span[2]]
             score = max(similarity(title, card.title), similarity(request, body_request),
@@ -739,8 +1070,12 @@ class BoardTools:
         before = card.path.read_bytes()
         current = B.file_hash(card.path)
         if current != base_hash:
-            raise BoardToolError(f"#{card_id} changed since you read it; read it again and reapply "
-                                 "your change.", code="board_conflict", current_hash=current, id=card_id)
+            # The hash is named in the message as well as the fields: a model that mistyped or
+            # invented one repeated the same wrong hash four times in a live cleanup, because the
+            # sentence did not say what the right one was (2026-09-18).
+            raise BoardToolError(f"#{card_id} does not have the base_hash you sent; it is now "
+                                 f"{current}. Read it again and reapply your change to what you "
+                                 "read back.", code="board_conflict", current_hash=current, id=card_id)
 
         changes: list[str] = []
         rewrites: list[tuple[str, str, str]] = []   # (what, old, new)
@@ -785,6 +1120,10 @@ class BoardTools:
             if not isinstance(block, dict) or set(block) - {"heading", "text"}:
                 raise BoardToolError(f"{key} takes {{heading, text}}.")
             heading = _one_line(block.get("heading"), "heading", 120)
+            # One spelling for the section that holds the user's own words, whichever the caller
+            # used: a card written as `## Request` comes out saying `## Issue` once it is edited.
+            if heading.strip().lower() in B.ISSUE_HEADINGS:
+                heading = B.ISSUE_HEADING
             text = _text(block.get("text"), "text", MAX_SECTION)
             replace = key != "append_section"
             old_text = _section_text(card.body, heading)
@@ -960,6 +1299,183 @@ class BoardTools:
         write_id = self._record("comment", card, f"{kind}: {text.splitlines()[0][:120]}", before, size)
         return {"id": card.id, "entry_id": entry.entry_id, "kind": kind, "write_id": write_id}
 
+    # ---- cleanup-only writes ----------------------------------------------------
+    def _merge(self, args: dict) -> dict:
+        """`board_merge_cards`: fold redundant cards into one, losing nothing (protocol 19.9)."""
+        allowed = {"into", "cards", "reason"}
+        if set(args) - allowed:
+            raise BoardToolError(f"board_merge_cards takes {', '.join(sorted(allowed))}.")
+        into_id = normalize_id(args.get("into"), "into")
+        reason = _one_line(args.get("reason"), "reason", MAX_REASON)
+        source_ids = [normalize_id(c, "cards") for c in _string_list(args.get("cards"), "cards")]
+        if not source_ids:
+            raise BoardToolError("cards must name at least one card to merge in.")
+        if len(source_ids) > 10:
+            raise BoardToolError("merge at most 10 cards into one at a time.")
+        if into_id in source_ids:
+            raise BoardToolError(f"#{into_id} cannot be merged into itself.")
+        if len(set(source_ids)) != len(source_ids):
+            raise BoardToolError("cards lists the same card twice.")
+        into = self._card(into_id)
+        if into.status in ("done", "dropped"):
+            raise BoardToolError(f"#{into_id} is closed ({into.status}); merge into an open card.")
+        sources = [self._card(cid) for cid in source_ids]
+        for src in sources:
+            if src.type != into.type:
+                raise BoardToolError(f"#{src.id} is a {src.type} card and #{into_id} is a "
+                                     f"{into.type} card; merge like with like.")
+
+        size = self._thread_size(into)
+        result = B.merge_cards(self.board, into, sources, reason=reason,
+                               category_of=lambda card: self.board.category_of(card.path))
+        self.writes_this_turn += 1
+        titles = ", ".join(f"#{m['id']} {m['title']}" for m in result["merged"])[:300]
+        summary = f"merged {len(sources)} card(s) in: {titles}"
+        self._append(into, f"- ✦ {self.context.actor} merged "
+                           f"{', '.join('#' + m['id'] for m in result['merged'])} into this card · {reason}",
+                     kind="event")
+        for merged, src in zip(result["merged"], sources):
+            self._append(src, f"- ✦ {self.context.actor} merged this card into #{into_id} · {reason} · "
+                              "its text is kept here and copied there; this card stays as the record",
+                         kind="event")
+        write_id = self._record("merge", into, summary, result["into_before"], size,
+                                others=result["others"],
+                                cards=[m["id"] for m in result["merged"]])
+        return {"id": into.id, "path": result["into_path"], "hash": result["into_hash"],
+                "merged": [{k: v for k, v in m.items() if k != "src"} for m in result["merged"]],
+                "write_id": write_id, "summary": summary}
+
+    def _split(self, args: dict) -> dict:
+        """`board_split_card`: one card per piece of unrelated work (protocol 19.9)."""
+        allowed = {"id", "parts", "reason", "close"}
+        if set(args) - allowed:
+            raise BoardToolError(f"board_split_card takes {', '.join(sorted(allowed))}.")
+        card_id = normalize_id(args.get("id"))
+        reason = _one_line(args.get("reason"), "reason", MAX_REASON)
+        parts = args.get("parts")
+        if not isinstance(parts, list) or not 2 <= len(parts) <= 10:
+            raise BoardToolError("parts must be a list of 2 to 10 pieces.")
+        card = self._card(card_id)
+        if card.status in ("done", "dropped"):
+            raise BoardToolError(f"#{card_id} is closed ({card.status}); there is nothing to split.")
+        clean: list[dict] = []
+        for index, part in enumerate(parts, 1):
+            if not isinstance(part, dict) or set(part) - {"title", "request", "status", "tab", "labels"}:
+                raise BoardToolError(f"part {index} takes title, request, status, tab and labels.")
+            clean.append({"title": _one_line(part.get("title"), f"part {index} title", MAX_TITLE),
+                          "request": _text(part.get("request"), f"part {index} request", MAX_REQUEST),
+                          "status": str(part.get("status") or card.status).strip().lower(),
+                          "tab": part.get("tab"),
+                          "labels": _string_list(part.get("labels"), f"part {index} labels")})
+        if self.enforce_limits:
+            for _ in clean:
+                if not self.rate.claim(self.limit("max_creates_per_hour")):
+                    raise BoardToolError(
+                        f"Switchboard limit: {self.limit('max_creates_per_hour')} new cards per hour "
+                        "for this workspace. Summarize the rest of the split in your reply.",
+                        code="board_rate_limited", scope="hour")
+        category = (B.PLAN_FOLDER if card.type == "plan" else B.MEMORY_FOLDER if card.type == "memory"
+                    else self.board.category_of(card.path))
+        size = self._thread_size(card)
+        result = B.split_card(self.board, card, clean, reason=reason, category=category,
+                              close=bool(args.get("close")), tab_category=self._category_for_tab)
+        self.creates_this_turn += len(clean)
+        self.writes_this_turn += 1
+        summary = ("split into " + ", ".join(f"#{c['id']} {c['title']}" for c in result["children"]))[:400]
+        self._append(card, f"- ✦ {self.context.actor} {summary} · {reason}"
+                           + (" · this card is closed; every piece moved out" if result["closed"] else ""),
+                     kind="event")
+        for child in result["children"]:
+            self.board.append_thread(child["id"], f"- ✦ {self.context.actor} split this card out of "
+                                                  f"#{card_id} · {reason}",
+                                     author=self.context.actor, kind="event", private=card.private,
+                                     **self.context.attrs())
+        write_id = self._record("split", card, summary, result["before"], size,
+                                moved_from=result["moved_from"], others=result["others"],
+                                cards=[c["id"] for c in result["children"]])
+        return {"id": card.id, "path": result["path"], "hash": result["hash"],
+                "children": result["children"], "closed": result["closed"],
+                "write_id": write_id, "summary": summary}
+
+    def _sections(self, args: dict) -> dict:
+        """`board_sections`: the board's own columns and category folders (protocol 19.9)."""
+        allowed = {"columns", "tabs", "reason"}
+        if set(args) - allowed:
+            raise BoardToolError(f"board_sections takes {', '.join(sorted(allowed))}.")
+        reason = _one_line(args.get("reason"), "reason", MAX_REASON)
+        if args.get("columns") is None and args.get("tabs") is None:
+            raise BoardToolError("board_sections takes columns, tabs, or both.")
+        config = self.board.config()
+        before_bytes = (self.board.config_path.read_bytes()
+                        if self.board.config_path.exists() else b"")
+        changes: list[str] = []
+
+        if args.get("columns") is not None:
+            columns = _string_list(args.get("columns"), "columns")
+            if not columns:
+                raise BoardToolError("columns must name at least one section.")
+            unknown = [c for c in columns if c not in B.COLUMN_IDS]
+            if unknown:
+                raise BoardToolError(f"unknown column(s) {', '.join(unknown)}; the board's sections "
+                                     f"come from: {', '.join(B.COLUMN_IDS)}.")
+            if len(set(columns)) != len(columns):
+                raise BoardToolError("columns lists the same section twice.")
+            if list(config.get("columns") or []) != columns:
+                changes.append(f"columns: {', '.join(str(c) for c in config.get('columns') or [])} "
+                               f"→ {', '.join(columns)}")
+                config["columns"] = columns
+
+        if args.get("tabs") is not None:
+            tabs = args.get("tabs")
+            if not isinstance(tabs, list) or not 1 <= len(tabs) <= 20:
+                raise BoardToolError("tabs must be a list of 1 to 20 entries.")
+            clean: list[dict] = []
+            seen: set[str] = set()
+            for index, tab in enumerate(tabs, 1):
+                if not isinstance(tab, dict) or set(tab) - {"id", "folder", "filter"}:
+                    raise BoardToolError(f"tab {index} takes id and either folder or filter.")
+                tab_id = _one_line(tab.get("id"), f"tab {index} id", 40).lower()
+                if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", tab_id):
+                    raise BoardToolError(f"tab id {tab_id!r} must be lower-case letters, digits, - and _.")
+                if tab_id in seen:
+                    raise BoardToolError(f"tab {tab_id!r} is listed twice.")
+                seen.add(tab_id)
+                entry: dict = {"id": tab_id}
+                if tab.get("folder"):
+                    folder = _one_line(tab["folder"], f"tab {index} folder", 60)
+                    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", folder):
+                        raise BoardToolError(f"tab folder {folder!r} must be one plain directory name.")
+                    entry["folder"] = folder
+                elif tab.get("filter"):
+                    entry["filter"] = _one_line(tab["filter"], f"tab {index} filter", 120)
+                else:
+                    raise BoardToolError(f"tab {tab_id!r} needs a folder or a filter.")
+                clean.append(entry)
+            folders = {t["folder"] for t in clean if t.get("folder")}
+            orphaned = sorted({self.board.category_of(c.path) for c in self.board.cards()
+                               if c.type == "work" and c.path} - folders)
+            if orphaned:
+                raise BoardToolError(
+                    f"these folders still hold cards and no tab names them: {', '.join(orphaned)}. "
+                    "Move those cards with board_move_card first, then drop the tab.",
+                    code="board_refused", requires="empty_folder")
+            if config.get("tabs") != clean:
+                changes.append(f"tabs: {', '.join(str(t.get('id')) for t in config.get('tabs') or [])} "
+                               f"→ {', '.join(t['id'] for t in clean)}")
+                config["tabs"] = clean
+
+        if not changes:
+            raise BoardToolError("nothing to change: the board already has these sections.")
+        B.write_config(self.board, config)
+        self.writes_this_turn += 1
+        summary = "; ".join(changes)[:400] + f" · {reason}"
+        write_id = self._record_path("sections", self.board.config_path, "", summary,
+                                     before_bytes or None, None, 0)
+        return {"path": str(self.board.config_path.relative_to(self.board.repo)),
+                "columns": list(config.get("columns") or []),
+                "tabs": list(config.get("tabs") or []),
+                "changes": changes, "write_id": write_id, "summary": summary}
+
     # ---- undo ------------------------------------------------------------------
     def undo(self, write_id: str) -> dict:
         record = self.writes.get(write_id)
@@ -985,11 +1501,26 @@ class BoardTools:
         else:
             B._atomic_write(current, record.before.decode("utf-8"))
             self._truncate_thread(record)
+        # A merge or a split touched more than the card it was recorded against: put the
+        # cards it folded in back where they were, and remove the cards it created.
+        for path, before, moved_from in record.others:
+            here = path
+            if moved_from is not None and here.exists():
+                moved_from.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(here, moved_from)
+                here = moved_from
+            if before is None:
+                if _tracked_by_git(self.board.repo, here):
+                    continue
+                if here.exists():
+                    here.unlink()
+            else:
+                B._atomic_write(here, before.decode("utf-8"))
         record.undone = True
         self.emit({"event": "board_changed", "upserts": [] if removed else [record.card_id],
                    "removed": removed, "write_id": write_id, "undo_of": write_id})
         return {"undone": write_id, "id": record.card_id, "action": record.action,
-                "removed": bool(removed)}
+                "removed": bool(removed), "also_restored": len(record.others)}
 
     def _truncate_thread(self, record: WriteRecord) -> None:
         """Drop the entries this write appended, then record the undo itself."""
@@ -1009,6 +1540,20 @@ class BoardTools:
 
 
 # ------------------------------------------------------------------ text plumbing
+
+def preview_line(name: str, args: dict) -> str:
+    """One line describing a write a tool call would make (the dry-run changelog)."""
+    head = name.replace("board_", "").replace("_", " ")
+    bits = [f"{key}: {_short(args[key], 160)}" for key in
+            ("into", "cards", "title", "status", "tab", "kind", "columns", "tabs", "reason")
+            if args.get(key)]
+    if isinstance(args.get("parts"), list):
+        bits.append("parts: " + ", ".join(_short(p.get("title"), 60) for p in args["parts"]
+                                          if isinstance(p, dict)))
+    if isinstance(args.get("fields"), dict):
+        bits.append("fields: " + ", ".join(sorted(args["fields"])))
+    return f"{head} — " + ("; ".join(bits) or "(no arguments)")
+
 
 def _short(value, limit: int = 80) -> str:
     text = "(unset)" if value is None else (value if isinstance(value, str) else json.dumps(value, ensure_ascii=False))
@@ -1055,9 +1600,14 @@ def _write_section(body: str, heading: str, text: str, *, replace: bool) -> str:
     if span is None:
         prefix = body if body.endswith("\n") else body + "\n"
         return f"{prefix}\n## {heading}\n{block}"
-    _, start, end = span
+    head, start, end = span
     existing = body[start:end]
     if replace:
+        # A replace also settles the heading's spelling, which is how a card that still says
+        # `## Request` comes out saying `## Issue` once its text is edited.
+        line = f"## {heading}"
+        if body[head:start].strip() != line:
+            return body[:head] + line + "\n" + block + "\n" * _trailing_blanks(existing) + body[end:]
         return body[:start] + block + "\n" * _trailing_blanks(existing) + body[end:]
     kept = existing.rstrip("\n")
     joined = (kept + "\n" if kept else "") + block

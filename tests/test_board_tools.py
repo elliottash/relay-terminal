@@ -133,7 +133,7 @@ class ListAndReadTests(BoardToolsTest):
         card_id = self.create()
         result = self.tools.run("board_read", {"id": card_id})
         self.assertEqual(result["hash"], B.file_hash(self.board.card_by_id(card_id).path))
-        self.assertIn("## Request", result["body"])
+        self.assertIn("## Issue", result["body"])
         self.assertEqual(result["thread_total"], 1)
 
     def test_read_accepts_the_hash_prefixed_form_and_refuses_a_bad_id(self):
@@ -260,7 +260,7 @@ class UpdateTests(BoardToolsTest):
         body = self.board.card_by_id(self.card_id).body
         self.assertIn("- first", body)
         self.assertIn("- second", body)
-        self.assertIn("## Request", body)
+        self.assertIn("## Issue", body)
         self.assertEqual(body.count("## Findings"), 1)
 
     def test_a_stale_hash_is_a_conflict_and_nothing_is_overwritten(self):
@@ -314,16 +314,47 @@ class UpdateTests(BoardToolsTest):
 
     # ---- owner text (decision 12.3) -------------------------------------------
     def test_rewriting_the_users_own_request_is_allowed_and_logs_both_texts(self):
+        # "Request" is the old name of the section (owner, 2026-09-18: call it Issue); a caller
+        # that still uses it edits the same section, and the card comes out saying `## Issue`.
         result = self.tools.run("board_update_card", {
             "id": self.card_id, "base_hash": self.hash,
             "replace_section": {"heading": "Request", "text": "add a voice transcription mode"}})
-        self.assertEqual(result["logged_rewrites"], ["## Request"])
+        self.assertEqual(result["logged_rewrites"], ["## Issue"])
+        self.assertIn("## Issue", self.board.card_by_id(self.card_id).body)
+        self.assertNotIn("## Request", self.board.card_by_id(self.card_id).body)
         self.assertIn("add a voice transcription mode", self.board.card_by_id(self.card_id).body)
         text = self.thread_text(self.card_id)
         self.assertIn("kind=rewrite", text)
         self.assertIn("add voice transcribe mode", text)          # the text as it was
         self.assertIn("add a voice transcription mode", text)     # the text as it is now
         self.assertIn("rewrite", self.kinds(self.card_id))
+
+    def test_a_card_still_headed_request_is_read_and_edited_as_the_issue(self):
+        # Cards filed before 2026-09-18 say `## Request`. Nothing rewrites them in bulk: the
+        # reader takes either spelling, and the first edit settles that card on `## Issue`.
+        card = self.board.card_by_id(self.card_id)
+        card.body = card.body.replace("## Issue", "## Request")
+        card.dirty = True
+        self.board.save(card)
+        read = self.tools.run("board_read", {"id": self.card_id})
+        self.assertEqual(read["issue"], "add voice transcribe mode")
+        self.assertEqual(read["issue_heading"], "Request")
+        result = self.tools.run("board_update_card", {
+            "id": self.card_id, "base_hash": read["hash"],
+            "replace_section": {"heading": "Issue", "text": "add voice transcribe mode, like warp"}})
+        self.assertNotIn("error", result, result)
+        body = self.board.card_by_id(self.card_id).body
+        self.assertIn("## Issue\nadd voice transcribe mode, like warp", body)
+        self.assertNotIn("## Request", body)
+        # The heading changed name, not place: the title above it is still there.
+        self.assertTrue(body.startswith("# Voice transcription mode"))
+        self.assertEqual(self.tools.run("board_read", {"id": self.card_id})["issue_heading"], "Issue")
+
+    def test_read_offers_the_issue_text_so_the_pane_never_parses_markdown(self):
+        read = self.tools.run("board_read", {"id": self.card_id})
+        self.assertEqual(read["issue"], "add voice transcribe mode")
+        self.assertEqual(read["issue_heading"], "Issue")
+        self.assertIn("Issue", read["sections"])
 
     def test_rewriting_the_title_logs_both_titles(self):
         self.tools.run("board_update_card", {"id": self.card_id, "base_hash": self.hash,
@@ -757,6 +788,165 @@ class SectionWriterTests(unittest.TestCase):
 
     def test_headings_are_matched_without_case(self):
         self.assertEqual(T._section_text(self.BODY, "request").strip(), "the ask")
+
+
+# ------------------------------------------------------------- whole-board cleanup
+
+class CleanupToolTests(BoardToolsTest):
+    """The three tools only a `board_cleanup` turn gets (protocol 19.9)."""
+
+    def test_they_are_refused_and_unadvertised_outside_a_cleanup(self):
+        offered = {s["function"]["name"] for s in self.tools.tool_specs()}
+        self.assertEqual(offered, set(T.TOOL_NAMES))
+        for name in T.CLEANUP_TOOL_NAMES:
+            result = self.tools.run(name, {"reason": "x"})
+            self.assertEqual(result.get("code"), "board_refused", name)
+        self.tools.begin_cleanup("c-1")
+        offered = {s["function"]["name"] for s in self.tools.tool_specs()}
+        self.assertEqual(offered, set(T.TOOL_NAMES) | set(T.CLEANUP_TOOL_NAMES))
+
+    def test_a_cleanup_raises_the_per_turn_ceilings(self):
+        self.assertEqual(self.tools.limit("max_writes_per_turn"), 20)
+        self.tools.begin_cleanup("c-1")
+        self.assertEqual(self.tools.limit("max_writes_per_turn"),
+                         T.CLEANUP_LIMITS["max_writes_per_turn"])
+        self.tools.end_cleanup("done")
+        self.assertEqual(self.tools.limit("max_writes_per_turn"), 20)
+
+    def test_merging_keeps_both_cards_and_logs_the_change(self):
+        keep = self.create("Voice mode", "add voice transcribe mode")
+        gone = self.create("Dictation", "let me dictate into the box")
+        self.tools.run("board_comment", {"id": gone, "kind": "note", "text": "same thing"})
+        self.tools.begin_cleanup("c-1")
+        result = self.tools.run("board_merge_cards",
+                                {"into": keep, "cards": [gone], "reason": "the same request"})
+        self.assertNotIn("error", result, result)
+        self.assertEqual(result["merged"][0]["id"], gone)
+        self.assertIsNotNone(self.board.card_by_id(gone))          # nothing was deleted
+        self.assertEqual(self.board.card_by_id(gone).status, "dropped")
+        self.assertIn("let me dictate into the box", self.board.card_by_id(keep).body)
+        self.assertIn("merged", self.thread_text(keep))
+        self.assertIn("merged this card into", self.thread_text(gone))
+        log = self.tools.end_cleanup("done", "done.")
+        self.assertEqual(log.counts()["merge"], 1)
+        self.assertEqual(log.changes[-1].cards, [gone])
+
+    def test_a_merge_is_undone_in_full(self):
+        keep = self.create("Voice mode", "add voice transcribe mode")
+        gone = self.create("Dictation", "let me dictate into the box")
+        was = self.board.card_by_id(gone).path
+        self.tools.begin_cleanup("c-1")
+        result = self.tools.run("board_merge_cards",
+                                {"into": keep, "cards": [gone], "reason": "the same request"})
+        undone = self.tools.undo(result["write_id"])
+        self.assertEqual(undone["also_restored"], 1)
+        back = self.board.card_by_id(gone)
+        self.assertEqual(back.path, was)
+        self.assertEqual(back.status, "inbox")
+        self.assertNotIn("## Merged in", self.board.card_by_id(keep).body)
+
+    def test_a_split_makes_one_card_per_piece_with_the_users_own_words(self):
+        card = self.create("Two things", "the tabs flicker and also add a clock")
+        self.tools.begin_cleanup("c-1")
+        result = self.tools.run("board_split_card", {
+            "id": card, "reason": "two unrelated asks", "close": True,
+            "parts": [{"title": "Tabs flicker", "request": "the tabs flicker", "labels": ["bug"]},
+                      {"title": "A clock", "request": "also add a clock", "labels": ["feature"]}]})
+        self.assertNotIn("error", result, result)
+        ids = [c["id"] for c in result["children"]]
+        self.assertEqual(len(ids), 2)
+        self.assertEqual(self.board.card_by_id(card).status, "dropped")
+        clock = self.board.card_by_id(ids[1])
+        self.assertIn("also add a clock", clock.body)
+        self.assertEqual(clock.front["parent"], card)
+        self.assertEqual(clock.front["labels"], ["feature"])
+        self.assertIn("split this card out of", self.thread_text(ids[1]))
+        self.assertEqual(self.board.check(), [])
+
+    def test_a_split_needs_two_parts_and_an_open_card(self):
+        card = self.create()
+        self.tools.begin_cleanup("c-1")
+        one = self.tools.run("board_split_card", {"id": card, "reason": "x",
+                                                  "parts": [{"title": "a", "request": "b"}]})
+        self.assertIn("2 to 10", one["error"])
+        self.tools.run("board_move_card", {"id": card, "status": "dropped", "reason": "no"})
+        closed = self.tools.run("board_split_card", {"id": card, "reason": "x", "parts": [
+            {"title": "a", "request": "b"}, {"title": "c", "request": "d"}]})
+        self.assertIn("nothing to split", closed["error"])
+
+    def test_sections_rewrite_board_yaml_and_keep_it_readable(self):
+        self.tools.begin_cleanup("c-1")
+        result = self.tools.run("board_sections", {
+            "columns": ["inbox", "ready", "in-progress", "needs-qa", "done"],
+            "reason": "the waiting lane has been empty for weeks"})
+        self.assertNotIn("error", result, result)
+        self.assertEqual(self.board.config()["columns"],
+                         ["inbox", "ready", "in-progress", "needs-qa", "done"])
+        self.assertEqual(self.board.config()["tabs"], B.Board(self.root, self.repo).tabs())
+
+    def test_a_tab_whose_folder_still_holds_cards_cannot_be_dropped(self):
+        self.create()
+        self.tools.begin_cleanup("c-1")
+        result = self.tools.run("board_sections", {
+            "tabs": [{"id": "bugs", "folder": "changes"}], "reason": "fewer tabs"})
+        self.assertEqual(result["code"], "board_refused")
+        self.assertIn("features", result["error"])
+        self.assertEqual(len(self.board.tabs()), 4)               # board.yaml is untouched
+
+    def test_an_unknown_column_is_refused(self):
+        self.tools.begin_cleanup("c-1")
+        result = self.tools.run("board_sections", {"columns": ["inbox", "someday"], "reason": "x"})
+        self.assertEqual(result["code"], "board_refused")
+        self.assertIn("someday", result["error"])
+
+
+class CleanupLogTests(BoardToolsTest):
+    """A cleanup is only as reviewable as its changelog."""
+
+    def test_a_dry_run_writes_nothing_and_records_the_plan(self):
+        card = self.create()
+        before = (self.board.card_by_id(card).path).read_bytes()
+        self.tools.begin_cleanup("c-1", dry_run=True)
+        result = self.tools.run("board_move_card", {"id": card, "status": "ready", "reason": "x"})
+        self.assertEqual(result["code"], "board_cleanup_dry_run")
+        self.assertEqual((self.board.card_by_id(card).path).read_bytes(), before)
+        log = self.tools.end_cleanup("done", "here is the plan")
+        self.assertEqual(log.counts()["writes"], 0)
+        self.assertEqual(log.counts()["proposed"], 1)
+        self.assertEqual(log.refusals, [])            # the plan is not a list of problems
+        self.assertTrue(log.changes[0].proposed)
+        self.assertIn("status: ready", log.changes[0].summary)
+
+    def test_the_changelog_lands_in_a_dated_evidence_folder_and_lists_every_change(self):
+        keep = self.create("Voice mode", "add voice transcribe mode")
+        gone = self.create("Dictation", "let me dictate into the box")
+        self.tools.begin_cleanup("c-1")
+        self.tools.run("board_merge_cards", {"into": keep, "cards": [gone], "reason": "the same"})
+        self.tools.run("board_move_card", {"id": keep, "status": "ready", "reason": "agreed"})
+        log = self.tools.end_cleanup("done", "Merged #%s into #%s." % (gone, keep))
+        rel = log.write(self.repo)
+        self.assertTrue(rel.startswith("docs/qa_evidence/"))
+        self.assertIn("-switchboard-cleanup/cleanup-", rel)
+        text = (self.repo / rel).read_text(encoding="utf-8")
+        self.assertIn("| merge |", text)
+        self.assertIn("| move |", text)
+        self.assertIn(f"#{gone}", text)
+        self.assertIn("Merged #%s into #%s." % (gone, keep), text)
+        self.assertIn("anthropic/claude-opus-5", text)
+
+    def test_a_refusal_is_kept_so_the_changelog_says_what_was_attempted(self):
+        self.tools.begin_cleanup("c-1")
+        self.tools.run("board_merge_cards", {"into": "ZZZZ", "cards": ["YYYY"], "reason": "x"})
+        log = self.tools.end_cleanup("error")
+        self.assertEqual(log.refusals[0]["tool"], "board_merge_cards")
+        self.assertIn("Refused", log.markdown())
+
+    def test_the_brief_ships_beside_the_policy_and_names_the_rules(self):
+        text = T.cleanup_brief()
+        self.assertNotIn("<!--", text)
+        for phrase in ("board_merge_cards", "board_split_card", "board_sections",
+                       "bug_intake.txt", "verbatim", "Left alone"):
+            self.assertIn(phrase, text)
 
 
 if __name__ == "__main__":       # pragma: no cover

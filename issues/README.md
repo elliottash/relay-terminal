@@ -50,4 +50,14 @@ QA evidence lives under `docs/qa_evidence/YYYY-MM-DD-short-slug/`. Implementer s
 prefixed `implementer-`; they are not QA verdicts. Planned work across issues is summarized in
 [`docs/ROADMAP.md`](../docs/ROADMAP.md).
 
+## The body
+
+The first `# ` heading is the title, and **`## Issue`** holds what the card is about in the words
+of whoever asked for it — verbatim, never tidied. It was called `## Request` until 2026-09-18
+(owner: "i'm not sure about 'request' there, let's call it issue"); both spellings are read, cards
+already filed keep theirs, and anything that writes that section settles the card on `## Issue`.
+The other sections (`## Tasks`, `## Decisions`, findings, the QA checklist and the verdict) are
+described in [`docs/SWITCHBOARD-FORMAT.md`](../docs/SWITCHBOARD-FORMAT.md). In Relay, the title
+and the issue text are edited on the card itself (`e`, or the Edit button).
+
 Commits that only add or triage issues use `issue: <short title>`.

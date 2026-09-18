@@ -34,7 +34,8 @@ A card file keeps the name it was created with (`YYYY-MM-DD-slug.md` for work an
 ## 2. Card file
 
 YAML front matter between `---` fences, then the Markdown body. The body's first `# ` heading is
-the title (exactly one copy — it is not repeated in the front matter).
+the title (exactly one copy — it is not repeated in the front matter). `## Issue` holds what the
+card is about in the words of whoever asked for it.
 
 ```markdown
 ---
@@ -54,7 +55,7 @@ links: {plans: [], commits: [], evidence: [], related: [M3XJ], github: null}
 ---
 # Voice transcription mode (microphone button, hold Right Alt)
 
-## Request
+## Issue
 add voice transcribe mode (microphone icon). and hold right alt to transcribe. (like warp)
 
 ## Tasks
@@ -64,6 +65,12 @@ add voice transcribe mode (microphone icon). and hold right alt to transcribe. (
 ## Decisions
 - 2026-09-17, owner: "cloud-based, using the existing OpenRouter key."
 ```
+
+**`## Issue` was `## Request` until 2026-09-18** (owner: "i'm not sure about 'request' there, let's
+call it issue"). Both spellings name the same section: readers take either, and a card is settled
+on `Issue` the first time something writes that section (`relay_core.board.ISSUE_HEADINGS`). Cards
+already filed keep the heading they have — there was no rewriting commit — so a card on disk may
+say either, and nothing in `check` cares which.
 
 ### 2.1 YAML subset
 
