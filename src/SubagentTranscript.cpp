@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SubagentTranscript.h"
 #include "Theme.h"
+#include <QApplication>
 #include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -10,6 +11,8 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QScrollBar>
+#include <QStackedWidget>
+#include <QTabBar>
 #include <QTextCharFormat>
 #include <QTextCursor>
 #include <QToolButton>
@@ -65,7 +68,7 @@ SubagentTranscriptView::SubagentTranscriptView(const QString &id, QWidget *paren
     layout->addWidget(m_log, 1);
     m_input = new QLineEdit;
     m_input->setObjectName(QStringLiteral("subagentInput"));
-    m_input->setPlaceholderText(QStringLiteral("Message %1 · Enter sends (resumes it if finished) · Esc closes").arg(id));
+    m_input->setPlaceholderText(QStringLiteral("Message %1 · Enter sends (resumes it if finished) · Esc back to the main agent").arg(id));
     m_input->installEventFilter(this);
     layout->addWidget(m_input);
     m_title->setText(title());
@@ -85,8 +88,31 @@ QString SubagentTranscriptView::title() const {
     return m_description.isEmpty() ? QStringLiteral("✦ %1 %2").arg(type, m_id) : QStringLiteral("✦ %1 %2 · %3").arg(type, m_id, m_description);
 }
 
+void SubagentTranscriptView::restore(const QString &type, const QString &description, const QString &status, const QString &text) {
+    m_type = type; m_description = description;
+    // A live agent did not survive the quit: it reads as stopped, not as still running.
+    m_lastStatus = (status.isEmpty() || status == QStringLiteral("waiting") || status == QStringLiteral("running"))
+                       ? QStringLiteral("stopped") : status;
+    m_title->setText(title());
+    m_log->clear(); m_atLineStart = true;
+    m_calls.clear(); m_merge.clear(); m_mergeHead = -1;
+    if (!text.isEmpty()) append(text, Ink::Agent);
+    setEnded(true);
+}
+
+void SubagentTranscriptView::setEnded(bool ended) {
+    m_ended = ended;
+    m_input->setEnabled(!ended);
+    m_input->setPlaceholderText(ended ? QStringLiteral("%1 ended with the previous session · Esc back to the main agent").arg(m_id)
+                                      : QStringLiteral("Message %1 · Enter sends (resumes it if finished) · Esc back to the main agent").arg(m_id));
+    if (ended) {
+        appendNote(restoredMark());
+        m_status->setText(QStringLiteral("%1 %2 · ended with the previous session").arg(SubagentModel::statusIcon(m_lastStatus), m_lastStatus));
+    }
+}
+
 void SubagentTranscriptView::setRow(const SubagentRow &row, qint64 elapsedMs) {
-    m_type = row.type; m_description = row.description;
+    m_type = row.type; m_description = row.description; m_lastStatus = row.status;
     m_title->setText(title());
     m_title->setToolTip(QStringLiteral("%1 %2\nModel: %3%4").arg(row.type, row.id, row.model.isEmpty() ? QStringLiteral("inherit") : row.model,
                                                              row.effort.isEmpty() ? QString() : QStringLiteral(" · effort ") + row.effort));
@@ -415,6 +441,231 @@ void SubagentTranscriptView::handleEvent(const QJsonObject &event) {
     else if (kind == QStringLiteral("tool_output")) toolOutput(payload.value(QStringLiteral("text")).toString());
     else if (kind == QStringLiteral("tool_result")) toolResult(payload);
     // "status" payloads (step counters) update the row via subagent_progress; they are not logged.
+}
+
+// ----- tabbed subagent pane (card #WD83) ------------------------------------------------------
+
+SubagentTabsView::SubagentTabsView(QWidget *parent) : QWidget(parent) {
+    setObjectName(QStringLiteral("subagentTabs"));
+    setAttribute(Qt::WA_StyledBackground);
+    auto *layout = new QVBoxLayout(this); layout->setContentsMargins(0, 0, 0, 0); layout->setSpacing(0);
+    auto *head = new QWidget;
+    head->setObjectName(QStringLiteral("subagentTabsHeader"));
+    m_header = new QHBoxLayout(head); m_header->setContentsMargins(6, 4, 0, 0); m_header->setSpacing(6);
+    // Like the Switchboard's "← Back to board": always on screen, the way back to the main thread.
+    m_back = new QToolButton;
+    m_back->setObjectName(QStringLiteral("subagentBack"));
+    m_back->setText(QStringLiteral("←  main agent"));
+    m_back->setAutoRaise(true);
+    m_back->setCursor(Qt::PointingHandCursor);
+    m_back->setFocusPolicy(Qt::NoFocus);
+    setBackKeys(QString());
+    connect(m_back, &QToolButton::clicked, this, [this] {
+        if (onBackClicked) onBackClicked();
+        if (onBackToMain) onBackToMain();
+    });
+    m_header->addWidget(m_back);
+    m_bar = new QTabBar;
+    m_bar->setObjectName(QStringLiteral("subagentTabBar"));
+    m_bar->setDocumentMode(true);
+    m_bar->setTabsClosable(true);
+    m_bar->setMovable(true);
+    m_bar->setExpanding(false);
+    m_bar->setUsesScrollButtons(true);
+    m_bar->setElideMode(Qt::ElideRight);
+    m_bar->setDrawBase(false);
+    m_bar->setFocusPolicy(Qt::NoFocus);
+    m_header->addWidget(m_bar, 1);
+    layout->addWidget(head);
+    m_stack = new QStackedWidget;
+    layout->addWidget(m_stack, 1);
+    connect(m_bar, &QTabBar::currentChanged, this, [this](int index) {
+        const QString id = index >= 0 ? m_bar->tabData(index).toString() : QString();
+        auto *view = m_views.value(id).data();
+        if (!view) return;
+        const bool hadFocus = isAncestorOf(QApplication::focusWidget());
+        m_stack->setCurrentWidget(view);
+        if (hadFocus) view->focusInput();
+        if (onTitleChanged) onTitleChanged();
+    });
+    connect(m_bar, &QTabBar::tabCloseRequested, this, [this](int index) { closeTab(m_bar->tabData(index).toString()); });
+}
+
+void SubagentTabsView::setBackKeys(const QString &keys) {
+    m_back->setToolTip(keys.isEmpty() ? QStringLiteral("Back to the main agent's prompt box (Esc)")
+                                      : QStringLiteral("Back to the main agent's prompt box (%1, or Esc)").arg(keys));
+}
+
+int SubagentTabsView::indexOf(const QString &id) const {
+    for (int i = 0; i < m_bar->count(); ++i) if (m_bar->tabData(i).toString() == id) return i;
+    return -1;
+}
+
+int SubagentTabsView::count() const { return m_bar->count(); }
+
+// A plain × like the window's tabs, not the style's red close icon; it closes the tab, not the agent.
+int SubagentTabsView::addTabFor(const QString &id, int at) {
+    const int index = at >= 0 ? m_bar->insertTab(at, QString()) : m_bar->addTab(QString());
+    m_bar->setTabData(index, id);
+    auto *close = new QToolButton;
+    close->setObjectName(QStringLiteral("subagentTabClose"));
+    close->setText(QStringLiteral("×"));
+    close->setAutoRaise(true);
+    close->setFocusPolicy(Qt::NoFocus);
+    close->setCursor(Qt::PointingHandCursor);
+    close->setToolTip(QStringLiteral("Close this tab. The agent keeps running; its row in the list opens it again."));
+    connect(close, &QToolButton::clicked, this, [this, id] { closeTab(id); });
+    m_bar->setTabButton(index, QTabBar::RightSide, close);
+    return index;
+}
+
+QStringList SubagentTabsView::ids() const {
+    QStringList out;
+    for (int i = 0; i < m_bar->count(); ++i) out << m_bar->tabData(i).toString();
+    return out;
+}
+
+SubagentTranscriptView *SubagentTabsView::tab(const QString &id) const { return m_views.value(id).data(); }
+
+QString SubagentTabsView::currentId() const {
+    const int index = m_bar->currentIndex();
+    return index >= 0 ? m_bar->tabData(index).toString() : QString();
+}
+
+SubagentTranscriptView *SubagentTabsView::current() const { return tab(currentId()); }
+
+void SubagentTabsView::relabel(int index) {
+    const QString id = m_bar->tabData(index).toString();
+    const SubagentTranscriptView *view = tab(id);
+    if (!view) return;
+    const QString status = view->statusText();
+    const QString type = view->type().isEmpty() ? QStringLiteral("agent") : view->type();
+    m_bar->setTabText(index, QStringLiteral("%1 %2 %3").arg(SubagentModel::statusIcon(status), type, id));
+    m_bar->setTabToolTip(index, (view->description().isEmpty() ? QString() : view->description() + QLatin1Char('\n'))
+                                    + (view->ended() ? QStringLiteral("Ended with the previous session") : status));
+    QColor color = theme::TextMuted;
+    if (view->ended()) color = theme::TextMuted;
+    else if (status == QStringLiteral("running")) color = theme::Accent;
+    else if (status == QStringLiteral("done")) color = theme::Success;
+    else if (status == QStringLiteral("failed")) color = theme::SyntaxUnknown;
+    else if (status == QStringLiteral("waiting")) color = theme::Text;
+    m_bar->setTabTextColor(index, color);
+}
+
+SubagentTranscriptView *SubagentTabsView::showTab(const QString &id, bool live) {
+    if (id.isEmpty()) return nullptr;
+    // Subagent ids start again at a1 in a new worker: a restored tab with the same id is a
+    // different, finished agent, so the live one replaces it.
+    int at = -1;
+    if (auto *old = tab(id); old && old->ended() && live) {
+        at = indexOf(id);
+        m_bar->blockSignals(true); m_bar->removeTab(at); m_bar->blockSignals(false);
+        m_stack->removeWidget(old); m_views.remove(id); old->deleteLater();
+    }
+    if (auto *existing = tab(id)) {
+        m_bar->setCurrentIndex(indexOf(id));
+        m_stack->setCurrentWidget(existing);
+        return existing;
+    }
+    auto *view = new SubagentTranscriptView(id);
+    view->setHostedInPane(true);   // the tab's × and the pane's × close it
+    view->onClose = [this] { if (onBackToMain) onBackToMain(); };
+    m_views.insert(id, view);
+    m_stack->addWidget(view);
+    const int index = addTabFor(id, at);
+    if (onViewCreated) onViewCreated(view);
+    relabel(index);
+    m_bar->setCurrentIndex(index);
+    m_stack->setCurrentWidget(view);
+    if (onTitleChanged) onTitleChanged();
+    return view;
+}
+
+void SubagentTabsView::closeTab(const QString &id) {
+    const int index = indexOf(id);
+    if (index < 0) return;
+    const bool hadFocus = isAncestorOf(QApplication::focusWidget());
+    m_bar->removeTab(index);
+    if (auto *view = m_views.take(id).data()) { m_stack->removeWidget(view); view->deleteLater(); }
+    m_seen.remove(id);
+    if (m_bar->count() == 0) { if (onEmpty) onEmpty(); return; }
+    if (auto *view = current()) { m_stack->setCurrentWidget(view); if (hadFocus) view->focusInput(); }
+    if (onTitleChanged) onTitleChanged();
+}
+
+void SubagentTabsView::syncRows(const SubagentModel &model) {
+    QStringList gone;
+    for (const QString &id : ids()) {
+        SubagentTranscriptView *view = tab(id);
+        if (!view || view->ended()) continue;
+        if (const SubagentRow *row = model.row(id)) {
+            m_seen.insert(id, true);
+            view->setRow(*row, model.elapsedNow(*row));
+            relabel(indexOf(id));
+        } else if (m_seen.value(id)) {
+            gone << id;
+        }
+    }
+    for (const QString &id : std::as_const(gone)) closeTab(id);
+}
+
+void SubagentTabsView::dropEnded() {
+    QStringList ended;
+    for (const QString &id : ids()) if (auto *view = tab(id); view && view->ended()) ended << id;
+    for (const QString &id : std::as_const(ended)) closeTab(id);
+}
+
+QString SubagentTabsView::title() const {
+    const auto *view = current();
+    return view ? view->title() : QStringLiteral("✦ Subagents");
+}
+
+void SubagentTabsView::focusInput() { if (auto *view = current()) view->focusInput(); }
+
+void SubagentTabsView::setHeaderRightInset(int pixels) {
+    const QMargins m = m_header->contentsMargins();
+    if (m.right() != pixels) m_header->setContentsMargins(m.left(), m.top(), pixels, m.bottom());
+}
+
+void SubagentTabsView::keyPressEvent(QKeyEvent *event) {
+    if (event->key() == Qt::Key_Escape && event->modifiers() == Qt::NoModifier) { if (onBackToMain) onBackToMain(); return; }
+    QWidget::keyPressEvent(event);
+}
+
+QJsonObject SubagentTabsView::node() const {
+    QJsonArray tabs;
+    for (const QString &id : ids()) {
+        const auto *view = tab(id);
+        if (!view) continue;
+        tabs.append(QJsonObject{{"id", id}, {"type", view->type()}, {"description", view->description()},
+                                {"status", view->statusText()},
+                                // A tab restored twice does not stack the restart note.
+                                {"text", QString(view->plainText()).remove(SubagentTranscriptView::restoredMark() + QLatin1Char('\n'))
+                                             .right(kSavedChars)}});
+    }
+    if (tabs.isEmpty()) return {};
+    return {{"subagents", QJsonObject{{"owner", m_ownerKey}, {"cwd", m_cwd}, {"current", currentId()}, {"tabs", tabs}}}};
+}
+
+void SubagentTabsView::restore(const QJsonObject &subagents) {
+    m_ownerKey = subagents.value(QStringLiteral("owner")).toString();
+    m_cwd = subagents.value(QStringLiteral("cwd")).toString();
+    for (const auto &value : subagents.value(QStringLiteral("tabs")).toArray()) {
+        const QJsonObject saved = value.toObject();
+        const QString id = saved.value(QStringLiteral("id")).toString();
+        if (id.isEmpty() || tab(id)) continue;
+        auto *view = new SubagentTranscriptView(id);
+        view->setHostedInPane(true);
+        view->onClose = [this] { if (onBackToMain) onBackToMain(); };
+        view->restore(saved.value(QStringLiteral("type")).toString(), saved.value(QStringLiteral("description")).toString(),
+                      saved.value(QStringLiteral("status")).toString(), saved.value(QStringLiteral("text")).toString());
+        m_views.insert(id, view);
+        m_stack->addWidget(view);
+        relabel(addTabFor(id));
+    }
+    const int index = indexOf(subagents.value(QStringLiteral("current")).toString());
+    if (index >= 0) m_bar->setCurrentIndex(index);
+    if (auto *view = current()) m_stack->setCurrentWidget(view);
 }
 
 }  // namespace relay

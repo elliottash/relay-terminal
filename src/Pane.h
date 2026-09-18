@@ -229,7 +229,6 @@ public:
 
     ~Pane() override {
         m_closing = true;
-        delete m_subagentOverlay.data();   // subagents UI: its destroyed() handler uses members
         qApp->removeEventFilter(this);
         // Voice: a clip whose transcript never came back would otherwise outlive the pane.
         if (m_voiceCapture) m_voiceCapture->cancel();
@@ -962,6 +961,11 @@ public:
             const QUrl url(target);
             const QStringList parts = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
             if (url.host() == QStringLiteral("continue")) { continueTurn(true); return; }
+            // A ✦ subagent line: its tab in the subagent pane (card #WD83).
+            if (url.host() == QStringLiteral("subagent") && parts.size() == 2) {
+                openSubagent(QUrl::fromPercentEncoding(parts.at(1).toUtf8()));
+                return;
+            }
             if (url.host() == QStringLiteral("turn") && parts.size() == 2 && onOpenTurn) {
                 onOpenTurn(QUrl::fromPercentEncoding(parts.at(1).toUtf8()));
                 return;
@@ -1343,8 +1347,9 @@ public:
         if (onOpenPath) onOpenPath(path, 0);
     }
 
-    // ----- subagents UI (running-agents list, transcripts) ------------------------------------
-    // Opens a transcript pane split right; when unset or the window is narrow, an overlay is used.
+    // ----- subagents UI (running-agents list, the tabbed subagent pane) ------------------------
+    // Opens the subagent's tab in this pane's subagent pane (card #WD83): RelayWindow::openSubagentTab
+    // splits one beside this pane the first time, and after that brings it forward on that tab.
     std::function<void(const QString &id)> onOpenSubagent;
     const relay::SubagentModel &subagents() const { return m_subagents; }
     void stopSubagent(const QString &id) { send({{"type", "agent_stop"}, {"id", id}}); }
@@ -1359,9 +1364,59 @@ public:
         m_editor->setPlainText(text); m_editor->moveCursor(QTextCursor::End); focusInput();
     }
     void openSubagent(const QString &id) {
-        if (!m_subagents.row(id)) return;
-        if (onOpenSubagent && window() && window()->width() >= 1000) { onOpenSubagent(id); return; }
-        openSubagentOverlay(id);
+        if (id.isEmpty() || !onOpenSubagent) return;
+        onOpenSubagent(id);
+    }
+    // The subagent pane key (agent.subagentPane) from this pane: the open pane on its current tab,
+    // else the row selected in the list, else the first running subagent, else the first one.
+    void openSubagentPane() {
+        if (m_subagentTabs && m_subagentTabs->count() > 0) { openSubagent(m_subagentTabs->currentId()); return; }
+        QString id = m_agentsPanel ? m_agentsPanel->selectedId() : QString();
+        for (const auto &row : m_subagents.rows()) if (id.isEmpty() && row.live()) id = row.id;
+        if (id.isEmpty() && !m_subagents.isEmpty()) id = m_subagents.rows().first().id;
+        if (id.isEmpty()) { status(QStringLiteral("No subagents in this pane.")); return; }
+        openSubagent(id);
+    }
+    relay::SubagentTabsView *subagentTabs() const { return m_subagentTabs; }
+    // Whether showSubagentTab(id) has something to show: a row in the list or a tab already open.
+    bool canShowSubagent(const QString &id) const {
+        return m_subagents.row(id) || (m_subagentTabs && m_subagentTabs->tab(id));
+    }
+    // The window made (or restored) this pane's subagent pane: tabs subscribe through this pane,
+    // and the list folds to one line while it is open.
+    void adoptSubagentTabs(relay::SubagentTabsView *tabs) {
+        if (!tabs || m_subagentTabs == tabs) return;
+        m_subagentTabs = tabs;
+        tabs->setOwnerKey(m_scrollbackId);
+        tabs->setCwd(m_cwd);
+        tabs->setBackKeys(Keymap::instance().shortcutText(QStringLiteral("agent.subagentPane")));
+        QPointer<Pane> self(this);
+        tabs->onViewCreated = [self](relay::SubagentTranscriptView *view) { if (self) self->attachSubagentView(view); };
+        tabs->onBackClicked = [self] {
+            if (self) self->hint(QStringLiteral("subagents.back.mouse"),
+                                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("agent.subagentPane")),
+                                                                QStringLiteral("back to the main agent (Esc works too)")));
+        };
+        const QObject *gone = tabs;
+        connect(tabs, &QObject::destroyed, this, [this, gone] {
+            if (m_closing || (m_subagentTabs && m_subagentTabs.data() != gone)) return;
+            m_subagentTabs = nullptr;
+            foldAgentsStrip();
+        });
+        // Brought back with Ctrl+Shift+Z while its agents are still listed: those tabs go live again.
+        const QString current = tabs->currentId();
+        for (const QString &id : tabs->ids())
+            if (auto *view = tabs->tab(id); view && view->ended() && m_subagents.row(id)) tabs->showTab(id, true);
+        if (!current.isEmpty()) tabs->showTab(current, m_subagents.row(current) != nullptr);
+        tabs->syncRows(m_subagents);
+        foldAgentsStrip();
+    }
+    // Opens (or selects) the tab; a restored tab whose agent is gone is only selected.
+    relay::SubagentTranscriptView *showSubagentTab(const QString &id) {
+        if (!m_subagentTabs || !canShowSubagent(id)) return nullptr;
+        auto *view = m_subagentTabs->showTab(id, m_subagents.row(id) != nullptr);
+        m_subagentTabs->syncRows(m_subagents);
+        return view;
     }
     // Subscribes the view to the subagent's stream; unsubscribes when the last view for it closes.
     void attachSubagentView(relay::SubagentTranscriptView *view) {
@@ -1391,7 +1446,6 @@ protected:
         if (m_help) m_help->setVisible(width() >= 900);
         placeQueueStrip();
         placeTakeControl();
-        placeSubagentOverlay();   // subagents UI
         placeRequestsPanel();     // request ledger UI
         placeSubagentsPanel();
         QTimer::singleShot(0, this, [this] { placeSubagentsPanel(); });
@@ -4534,10 +4588,19 @@ private:
         m_agentsPanel = new relay::SubagentsPanel(&m_subagents, this);
         layout->addWidget(m_agentsPanel);
         m_agentsPanel->onOpen = [this](const QString &id) { openSubagent(id); };
+        m_agentsPanel->onOpenPane = [this] { openSubagentPane(); };
+        m_agentsPanel->onMouseOpen = [this] {
+            const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.subagentPane"));
+            hint(QStringLiteral("subagents.open.mouse"),
+                 relay::ShortcutHints::nextTime(keys.isEmpty() ? QStringLiteral("↓ from the prompt, then Enter")
+                                                               : keys + QStringLiteral(", or ↓ from the prompt then Enter"),
+                                                QStringLiteral("open a subagent's tab")));
+        };
         m_agentsPanel->onStop = [this](const QString &id) { stopSubagent(id); toast(QStringLiteral("Stopping ") + id); };
         m_agentsPanel->onExit = [this] { focusInput(); };
         m_agentsPanel->onPickModel = [this](const QString &id, const QPoint &at) { pickSubagentModel(id, at); };
         m_subagents.onChanged = [this] {
+            if (m_subagentTabs) m_subagentTabs->syncRows(m_subagents);   // tabs follow the list's rows
             m_agentsPanel->refresh();
             placeSubagentsPanel();
             for (const auto &view : std::as_const(m_subagentViews))
@@ -4545,9 +4608,10 @@ private:
             if (m_modelBox) m_modelBox->setToolTip(modelTooltip(QStringLiteral("Tokens: ") + m_subagents.tokenSplit()));
         };
         // Only one start and one finish line per subagent reach the terminal, never its tool activity.
-        m_subagents.onInline = [this](const QString &line) {
+        m_subagents.onFinishedCleared = [this] { if (m_subagentTabs) m_subagentTabs->dropEnded(); };
+        m_subagents.onInline = [this](const QString &line, const QString &id) {
             ensureLineStart();
-            printInline(line + '\n', Ink::Note);
+            printSubagentLine(line, id);
             // A wake-up turn often follows a finish line; let it start before redrawing the prompt.
             QTimer::singleShot(400, this, [this] { if (!m_agentBusy && !moreTurnsPending()) closeInline(); });
         };
@@ -4604,21 +4668,6 @@ private:
         if (m_agentsPanel && m_agentsPanel->isVisible()) m_agentsPanel->setFocus();
     }
 
-    void openSubagentOverlay(const QString &id) {
-        if (m_subagentOverlay) {
-            if (m_subagentOverlay->agentId() == id) { m_subagentOverlay->focusInput(); return; }
-            delete m_subagentOverlay.data();
-        }
-        auto *view = new relay::SubagentTranscriptView(id, this);
-        m_subagentOverlay = view;
-        QPointer<relay::SubagentTranscriptView> guard(view);
-        view->onClose = [this, guard] { if (guard) guard->deleteLater(); focusInput(); };
-        attachSubagentView(view);
-        placeSubagentOverlay();
-        view->show(); view->raise();
-        view->focusInput();
-    }
-
     void placeSubagentsPanel() {
         if (!m_agentsPanel) return;
         m_agentsPanel->setAllowed(!m_composer || m_composer->isVisible());
@@ -4626,13 +4675,24 @@ private:
         placeQueueStrip();
     }
 
-    void placeSubagentOverlay() {
-        if (!m_subagentOverlay) return;
-        const int w = std::min(width() - 16, std::max(340, width() * 3 / 5));
-        // Below the pane's header, like the requests panel: the header's top right is where the
-        // pane chrome's buttons sit, and the overlay's × would land on the pane's own × there.
-        const int top = m_terminalHost ? m_terminalHost->mapTo(this, QPoint(0, 0)).y() : 0;
-        m_subagentOverlay->setGeometry(width() - w - 8, top + 8, w, std::max(160, height() - top - 16));
+    // While the subagent pane is open the list is one line that names the key to reach it.
+    void foldAgentsStrip() {
+        if (!m_agentsPanel) return;
+        m_agentsPanel->setFolded(m_subagentTabs != nullptr, Keymap::instance().shortcutText(QStringLiteral("agent.subagentPane")));
+        placeQueueStrip();
+    }
+
+    // A ✦ start or finish line that is also a terminal hyperlink (OSC 8) to relay://subagent/<pane>/<id>:
+    // a click opens the subagent's tab, like the strip row. Printed plain while a program runs.
+    void printSubagentLine(const QString &line, const QString &id) {
+        if (id.isEmpty() || !shellIdleAtPrompt()) { printInline(line + '\n', Ink::Note); return; }
+        const QByteArray url = QStringLiteral("relay://subagent/%1/%2").arg(m_token, QString::fromUtf8(QUrl::toPercentEncoding(id))).toUtf8();
+        QByteArray out = takeWrapped();
+        if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
+        if (!m_atLineStart) out += "\r\n";
+        out += "\x1b]8;;" + url + "\x1b\\" + inkCode(Ink::Note) + sanitize(line).toUtf8() + "\x1b[0m" + "\x1b]8;;\x1b\\" + "\r\n";
+        m_atLineStart = true;
+        writeTerminal(out);
     }
     // ----- end subagents UI ---------------------------------------------------------------------
 
@@ -8801,7 +8861,7 @@ private:
     relay::JobsModel m_jobs;
     relay::JobsPanel *m_jobsPanel = nullptr;
     QList<QPointer<relay::SubagentTranscriptView>> m_subagentViews;
-    QPointer<relay::SubagentTranscriptView> m_subagentOverlay;
+    QPointer<relay::SubagentTabsView> m_subagentTabs;   // this pane's subagent pane, while open
 };
 
 

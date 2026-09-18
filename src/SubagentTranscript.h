@@ -11,7 +11,9 @@
 // listings collapses into "read 6 files · 4,100 lines".
 #include "SubagentsPanel.h"
 #include "ToolLabel.h"
+#include <QHash>
 #include <QJsonObject>
+#include <QPointer>
 #include <QTextCursor>
 #include <QVector>
 #include <QWidget>
@@ -21,6 +23,8 @@ class QHBoxLayout;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
+class QStackedWidget;
+class QTabBar;
 class QToolButton;
 
 namespace relay {
@@ -48,6 +52,16 @@ public:
     void setHostedInPane(bool hosted);
     // Room kept free at the right of the title row for the pane chrome's buttons (PaneChrome).
     void setHeaderRightInset(int pixels);
+    // A tab restored from the saved layout: the text it showed when Relay quit. The agent itself
+    // ended with the previous worker, so the message box is off.
+    void restore(const QString &type, const QString &description, const QString &status, const QString &text);
+    // A restored tab whose agent is gone: the message box is off and the status says so.
+    void setEnded(bool ended);
+    static QString restoredMark() { return QStringLiteral("── from before the restart; this agent ended with the previous session ──"); }
+    bool ended() const { return m_ended; }
+    QString type() const { return m_type; }
+    QString description() const { return m_description; }
+    QString statusText() const { return m_lastStatus; }
 
     // A tool line whose diff is too big to print inline (`open: {"type": "diff"}`, more than 12
     // changed lines) was clicked. The host opens it in a diff pane (src/DiffView.h); this view has
@@ -93,7 +107,7 @@ private:
     int callAt(int blockNumber) const;
     int indexOfCall(const QString &callId) const;
     void forgetCalls();
-    QString m_id, m_type, m_description;
+    QString m_id, m_type, m_description, m_lastStatus;
     QHBoxLayout *m_header = nullptr;
     QToolButton *m_close = nullptr;
     QLabel *m_title = nullptr, *m_status = nullptr;
@@ -102,7 +116,74 @@ private:
     QVector<ToolCall> m_calls;
     toollabel::MergeRun m_merge;
     int m_mergeHead = -1;        // the row showing the merged run, or -1 when none is open
-    bool m_atLineStart = true, m_snapshot = false;
+    bool m_atLineStart = true, m_snapshot = false, m_ended = false;
+};
+
+// One pane per main pane, one tab per subagent (owner, 2026-09-18, card #WD83). The tab shows the
+// status glyph and `type id`; the header's "← main agent" (and Esc in a message box) go back to
+// the owning pane's prompt box. Tabs follow the running-agents list: a tab whose row is dismissed
+// or cleared by the list's rules closes, and the pane closes with its last tab.
+class SubagentTabsView final : public QWidget {
+    Q_OBJECT
+public:
+    explicit SubagentTabsView(QWidget *parent = nullptr);
+
+    // A new tab's view, for the owner to subscribe (Pane::attachSubagentView).
+    std::function<void(SubagentTranscriptView *view)> onViewCreated;
+    // "← main agent", Esc in a message box.
+    std::function<void()> onBackToMain;
+    // The ← control was clicked (teach the key).
+    std::function<void()> onBackClicked;
+    // The last tab closed.
+    std::function<void()> onEmpty;
+    // The current tab changed (the pane's title follows it).
+    std::function<void()> onTitleChanged;
+
+    // Opens (or selects) the tab for `id`; returns its view. `live`: the owner's list has this row,
+    // so a restored tab with the same id (an earlier agent) is replaced by a live one.
+    SubagentTranscriptView *showTab(const QString &id, bool live = true);
+    SubagentTranscriptView *tab(const QString &id) const;
+    SubagentTranscriptView *current() const;
+    QString currentId() const;
+    QStringList ids() const;
+    int count() const;
+    void closeTab(const QString &id);
+    // Rows changed: relabel tabs and close the tabs of rows the list no longer has. A tab whose id
+    // the model has never had (restored from before a restart) is left alone.
+    void syncRows(const SubagentModel &model);
+    // The list's rules cleared finished rows (a new prompt, New chat): tabs restored from before a
+    // restart go with them.
+    void dropEnded();
+    // Tooltip text for the ← control, with the live key (set by the owner).
+    void setBackKeys(const QString &keys);
+
+    QString title() const;
+    QString agentId() const { return currentId(); }
+    void focusInput();
+    void setHeaderRightInset(int pixels);
+
+    // Saved layout: {"subagents": {"owner", "cwd", "current", "tabs": [{id, type, description, status, text}]}}.
+    void setOwnerKey(const QString &key) { m_ownerKey = key; }
+    QString ownerKey() const { return m_ownerKey; }
+    void setCwd(const QString &cwd) { m_cwd = cwd; }
+    QJsonObject node() const;
+    void restore(const QJsonObject &subagents);
+    static constexpr int kSavedChars = 16000;
+
+protected:
+    void keyPressEvent(QKeyEvent *event) override;
+
+private:
+    int indexOf(const QString &id) const;
+    int addTabFor(const QString &id, int at = -1);
+    void relabel(int index);
+    QHBoxLayout *m_header = nullptr;
+    QToolButton *m_back = nullptr;
+    QTabBar *m_bar = nullptr;
+    QStackedWidget *m_stack = nullptr;
+    QHash<QString, QPointer<SubagentTranscriptView>> m_views;
+    QHash<QString, bool> m_seen;   // the owner's model has had this row
+    QString m_ownerKey, m_cwd;
 };
 
 }  // namespace relay

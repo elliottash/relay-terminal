@@ -5,10 +5,13 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLineEdit>
+#include <QTabBar>
 #include <QTest>
+#include <QToolButton>
 
 using relay::SubagentModel;
 using relay::SubagentsPanel;
+using relay::SubagentTabsView;
 using relay::SubagentTranscriptView;
 
 namespace {
@@ -22,7 +25,7 @@ struct Harness {
     int changes = 0;
     Harness() {
         model.clock = [this] { return now; };
-        model.onInline = [this](const QString &line) { inlineLines << line; };
+        model.onInline = [this](const QString &line, const QString &) { inlineLines << line; };
         model.onFinished = [this](const relay::SubagentRow &row) { finished << row.id + QLatin1Char(':') + row.status; };
         model.onTranscript = [this](const QString &id, const QJsonObject &e) { transcript << id + QLatin1Char(':') + e.value(QStringLiteral("event")).toString(); };
         model.onStatus = [this](const QString &text) { statuses << text; };
@@ -341,6 +344,164 @@ private slots:
         QCOMPARE(title, QStringLiteral("src/Pane.h"));
         QVERIFY(diff.contains(QStringLiteral("+b")));
         QCOMPARE(view.toolLines(), QStringList{QStringLiteral("▸ edited Pane.h · +212 −87")});   // not folded
+    }
+
+    // Card #WD83: a click on a row opens its tab; with the subagent pane open the list is one line.
+    void clickOpensAndTheListFolds() {
+        Harness h;
+        SubagentsPanel panel(&h.model);
+        QStringList opened; int panes = 0, mouse = 0, below = 0, exits = 0;
+        panel.onOpen = [&](const QString &id) { opened << id; };
+        panel.onOpenPane = [&] { ++panes; };
+        panel.onMouseOpen = [&] { ++mouse; };
+        panel.onBelow = [&] { ++below; };
+        panel.onExit = [&] { ++exits; };
+        h.start("a1"); h.start("a2");
+        panel.refresh();
+        panel.resize(700, panel.sizeHint().height());
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        const int rowH = panel.fontMetrics().height() + 6;
+        QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier, QPoint(60, 2 + rowH * 2 + rowH / 2));   // a2's name
+        QCOMPARE(opened, QStringList{QStringLiteral("a2")});
+        QCOMPARE(mouse, 1);
+        QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier, QPoint(60, 2 + rowH / 2));             // main: no tab
+        QCOMPARE(opened.size(), 1);
+        const int full = panel.sizeHint().height();
+        panel.setFolded(true, QStringLiteral("Alt+A"));
+        QCOMPARE(panel.sizeHint().height(), rowH + 6);
+        QVERIFY(panel.sizeHint().height() < full);
+        QCOMPARE(panel.foldedText(), QStringLiteral("2 subagents running · Alt+A to open"));
+        h.model.handle(json("{'event':'subagent_finished','id':'a1','type':'explore','outcome':'done','tools':1,'tokens':10,'elapsed_ms':1000}"));
+        QCOMPARE(panel.foldedText(), QStringLiteral("1 subagent running · 1 finished · Alt+A to open"));
+        panel.enter();
+        QTest::keyClick(&panel, Qt::Key_Return);
+        QCOMPARE(panes, 1);
+        QTest::keyClick(&panel, Qt::Key_Down);
+        QCOMPARE(below, 1);
+        QTest::keyClick(&panel, Qt::Key_Escape);
+        QCOMPARE(exits, 1);
+        panel.resize(700, panel.sizeHint().height());
+        QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier, QPoint(80, 2 + rowH / 2));
+        QCOMPARE(panes, 2);
+        QCOMPARE(opened.size(), 1);   // folded: a click goes to the pane, not a row
+        if (!qEnvironmentVariableIsEmpty("RELAY_SUBAGENTS_FOLD_SHOT")) panel.grab().save(qEnvironmentVariable("RELAY_SUBAGENTS_FOLD_SHOT"));
+        panel.setFolded(false);
+        QCOMPARE(panel.sizeHint().height(), full);
+    }
+
+    void finishedClearedIsTheListsRuleNotAWorkerRestart() {
+        Harness h;
+        int cleared = 0;
+        h.model.onFinishedCleared = [&] { ++cleared; };
+        h.start("a1");
+        h.model.clearFinished();
+        QCOMPARE(cleared, 1);
+        h.model.handle(json("{'event':'ready'}"));
+        QCOMPARE(cleared, 1);
+        h.model.handle(json("{'event':'reset'}"));
+        QCOMPARE(cleared, 2);
+    }
+
+    void tabsOpenSwitchFollowTheListAndClose() {
+        Harness h;
+        SubagentTabsView tabs;
+        QStringList created; int empties = 0, backs = 0, clicks = 0;
+        tabs.onViewCreated = [&](SubagentTranscriptView *view) { created << view->agentId(); };
+        tabs.onEmpty = [&] { ++empties; };
+        tabs.onBackToMain = [&] { ++backs; };
+        tabs.onBackClicked = [&] { ++clicks; };
+        h.start("a1"); h.start("a2");
+        QVERIFY(tabs.showTab(QStringLiteral("a1")));
+        tabs.syncRows(h.model);
+        QVERIFY(tabs.showTab(QStringLiteral("a2")));
+        tabs.syncRows(h.model);
+        QCOMPARE(tabs.ids(), (QStringList{QStringLiteral("a1"), QStringLiteral("a2")}));
+        QCOMPARE(tabs.currentId(), QStringLiteral("a2"));
+        // Opening an open one switches to it; nothing is subscribed twice.
+        tabs.showTab(QStringLiteral("a1"));
+        QCOMPARE(tabs.currentId(), QStringLiteral("a1"));
+        QCOMPARE(created, (QStringList{QStringLiteral("a1"), QStringLiteral("a2")}));
+        auto *bar = tabs.findChild<QTabBar *>(QStringLiteral("subagentTabBar"));
+        QVERIFY(bar);
+        QCOMPARE(bar->tabText(0), QStringLiteral("○ explore a1"));
+        h.model.handle(json("{'event':'subagent_progress','id':'a1','status':'running','tools':1}"));
+        tabs.syncRows(h.model);
+        QCOMPARE(bar->tabText(0), QStringLiteral("● explore a1"));
+        QCOMPARE(tabs.title(), QStringLiteral("✦ explore a1 · Summarize fixture"));
+        // The ← control and Esc go back to the main agent; the pane stays.
+        auto *back = tabs.findChild<QToolButton *>(QStringLiteral("subagentBack"));
+        QVERIFY(back);
+        QVERIFY(back->text().contains(QStringLiteral("main agent")));
+        back->click();
+        QCOMPARE(backs, 1); QCOMPARE(clicks, 1);
+        tabs.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&tabs));
+        tabs.activateWindow();
+        tabs.focusInput();
+        auto *input = tabs.current()->findChild<QLineEdit *>(QStringLiteral("subagentInput"));
+        QTest::keyClick(input, Qt::Key_Escape);
+        QCOMPARE(backs, 2);
+        QCOMPARE(tabs.count(), 2);
+        if (!qEnvironmentVariableIsEmpty("RELAY_SUBAGENTS_TABS_SHOT")) tabs.grab().save(qEnvironmentVariable("RELAY_SUBAGENTS_TABS_SHOT"));
+        // A finished row stays a tab; dismissing it from the list closes the tab.
+        h.model.handle(json("{'event':'subagent_finished','id':'a2','type':'explore','outcome':'done','tools':1,'tokens':10,'elapsed_ms':1000}"));
+        tabs.syncRows(h.model);
+        QCOMPARE(bar->tabText(1), QStringLiteral("✓ explore a2"));
+        h.model.dismiss(QStringLiteral("a2"));
+        tabs.syncRows(h.model);
+        QCOMPARE(tabs.ids(), QStringList{QStringLiteral("a1")});
+        QCOMPARE(empties, 0);
+        // The tab's × closes it; the last one closes the pane.
+        emit bar->tabCloseRequested(0);
+        QCOMPARE(tabs.count(), 0);
+        QCOMPARE(empties, 1);
+    }
+
+    void tabsSurviveARestartAsText() {
+        Harness h;
+        QJsonObject saved;
+        {
+            SubagentTabsView tabs;
+            tabs.setOwnerKey(QStringLiteral("pane-7")); tabs.setCwd(QStringLiteral("/w"));
+            h.start("a1"); h.start("a2");
+            tabs.showTab(QStringLiteral("a1"))->handleEvent(json("{'event':'subagent_event','id':'a1','payload':{'event':'delta','text':'three files\\n'}}"));
+            tabs.showTab(QStringLiteral("a2"));
+            tabs.syncRows(h.model);
+            tabs.showTab(QStringLiteral("a1"));
+            saved = tabs.node().value(QStringLiteral("subagents")).toObject();
+        }
+        QCOMPARE(saved.value(QStringLiteral("owner")).toString(), QStringLiteral("pane-7"));
+        QCOMPARE(saved.value(QStringLiteral("current")).toString(), QStringLiteral("a1"));
+        QCOMPARE(saved.value(QStringLiteral("tabs")).toArray().size(), 2);
+        SubagentTabsView restored;
+        int empties = 0;
+        restored.onEmpty = [&] { ++empties; };
+        restored.restore(saved);
+        QCOMPARE(restored.ownerKey(), QStringLiteral("pane-7"));
+        QCOMPARE(restored.ids(), (QStringList{QStringLiteral("a1"), QStringLiteral("a2")}));
+        QCOMPARE(restored.currentId(), QStringLiteral("a1"));
+        QVERIFY(restored.current()->ended());
+        QCOMPARE(restored.current()->statusText(), QStringLiteral("stopped"));   // it was running when Relay quit
+        QCOMPARE(restored.findChild<QTabBar *>(QStringLiteral("subagentTabBar"))->tabText(0), QStringLiteral("■ explore a1"));
+        QVERIFY(restored.current()->plainText().contains(QStringLiteral("three files")));
+        // Saved again, the restart note is not stacked.
+        QVERIFY(!restored.node().value(QStringLiteral("subagents")).toObject().value(QStringLiteral("tabs")).toArray().first()
+                     .toObject().value(QStringLiteral("text")).toString().contains(SubagentTranscriptView::restoredMark()));
+        QVERIFY(!restored.current()->findChild<QLineEdit *>(QStringLiteral("subagentInput"))->isEnabled());
+        // A new worker's list does not close tabs it never had.
+        Harness fresh;
+        restored.syncRows(fresh.model);
+        QCOMPARE(restored.count(), 2);
+        // Selecting a gone agent keeps its text; a live agent with the same id replaces the tab.
+        QVERIFY(restored.showTab(QStringLiteral("a2"), false)->ended());
+        fresh.start("a2");
+        QVERIFY(!restored.showTab(QStringLiteral("a2"), true)->ended());
+        QCOMPARE(restored.ids(), (QStringList{QStringLiteral("a1"), QStringLiteral("a2")}));   // in place
+        // The list's rules (a new prompt) drop what is left from before the restart.
+        restored.dropEnded();
+        QCOMPARE(restored.ids(), QStringList{QStringLiteral("a2")});
+        QCOMPARE(empties, 0);
     }
 };
 

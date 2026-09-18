@@ -812,6 +812,7 @@ private:
             if (!pane || !pane->runCommand(editor + ' ' + quoted))
                 notice(QStringLiteral("Shortcuts file: ") + Keymap::instance().path());
         }
+        else if (id == QStringLiteral("agent.subagentPane")) toggleSubagentPane();   // card #WD83
         else if (!pane) return;
         else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
         else if (id == QStringLiteral("pane.restartShell")) pane->restartStopped();
@@ -2008,33 +2009,97 @@ private:
         if (ToolPane *tool = settingsPaneIn(m_tabs->currentWidget())) tool->settings()->scrollToGroup(QStringLiteral("menu:agents"));
     }
 
-    void openSubagentPane(Pane *owner, const QString &id) {
-        QWidget *page = pageOf(owner);
-        if (!page) return;
-        for (QWidget *leaf : leavesIn(page))
-            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->subagent() && tool->subagent()->agentId() == id) {
-                setActiveLeaf(tool); focusLeaf(tool); return;
-            }
-        auto *view = new relay::SubagentTranscriptView(id);
-        view->setHostedInPane(true);   // the pane chrome's × closes it
-        auto *tool = new ToolPane(view, owner->cwd());
+    // The subagent pane (card #WD83): one per main pane, a tab per subagent, split beside its
+    // owner the first time and brought forward (tab page, focus, the subagent's tab) after that.
+    ToolPane *subagentPaneOf(Pane *owner) const {
+        auto *tabs = owner ? owner->subagentTabs() : nullptr;
+        return tabs ? dynamic_cast<ToolPane *>(tabs->parentWidget()) : nullptr;
+    }
+
+    ToolPane *createSubagentPane(const QString &cwd, const QJsonObject &saved = {}) {
+        auto *tabs = new relay::SubagentTabsView;
+        if (!saved.isEmpty()) tabs->restore(saved);
+        auto *tool = new ToolPane(tabs, cwd);
+        tool->setProperty("paneType", QStringLiteral("subagent"));   // pane-type header colours
         relay::theme::polishWindow(tool);
         QPointer<ToolPane> guard(tool);
-        QPointer<Pane> ownerGuard(owner);
-        view->onClose = [guard, ownerGuard] {
-            auto *w = windowOf(guard);
-            if (!w) return;
-            w->closePane(guard, false);
-            if (ownerGuard && ownerGuard->window() == w) { w->setActiveLeaf(ownerGuard); ownerGuard->focusInput(); }
+        // The last tab closed (by its ×, or its row left the list): the pane goes with it.
+        tabs->onEmpty = [guard] {
+            if (guard) QTimer::singleShot(0, guard.data(), [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, false); });
         };
-        owner->attachSubagentView(view);
-        insertBeside(owner, tool, Qt::Horizontal, false);
-        setActiveLeaf(tool);
-        focusLeaf(tool);
+        tabs->onTitleChanged = [guard] { if (auto *w = windowOf(guard)) w->updateTitles(); };
+        // Until it has an owner (a restored pane whose pane did not come back): the tab's first pane.
+        tabs->onBackToMain = [guard] {
+            auto *w = windowOf(guard);
+            const auto panes = w ? panesIn(w->pageOf(guard)) : QList<Pane *>();
+            if (!panes.isEmpty()) w->backToMainAgent(panes.first());
+        };
+        return tool;
+    }
+
+    void linkSubagentPane(ToolPane *tool, Pane *owner) {
+        if (!tool || !tool->subagent() || !owner) return;
+        owner->adoptSubagentTabs(tool->subagent());
+        QPointer<Pane> ownerGuard(owner);
+        QPointer<ToolPane> guard(tool);
+        tool->subagent()->onBackToMain = [ownerGuard] { if (auto *w = windowOf(ownerGuard)) w->backToMainAgent(ownerGuard); };
+        // The subagents belong to the owner's worker: the pane closes with it.
+        connect(owner, &QObject::destroyed, tool, [guard] {
+            if (guard) QTimer::singleShot(0, guard.data(), [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, false); });
+        });
+    }
+
+    // "← main agent", Esc in the subagent pane, and the subagent pane key from inside it.
+    void backToMainAgent(Pane *owner) {
+        if (!owner) return;
+        if (QWidget *page = pageOf(owner)) m_tabs->setCurrentWidget(page);
+        setActiveLeaf(owner);
+        owner->focusInput();
+    }
+
+    // agent.subagentPane (Alt+A): in the subagent pane, back to its main agent; anywhere else, this
+    // pane's subagent pane.
+    void toggleSubagentPane() {
+        if (auto *tool = dynamic_cast<ToolPane *>(leafOf(QApplication::focusWidget())); tool && tool->subagent()) {
+            if (tool->subagent()->onBackToMain) tool->subagent()->onBackToMain();
+            return;
+        }
+        if (m_active) m_active->openSubagentPane();
+    }
+
+    // Links saved subagent panes to the panes they belonged to, once the layout is built.
+    void linkRestoredSubagentPane(ToolPane *tool, const QString &ownerKey) {
+        if (!tool || ownerKey.isEmpty()) return;
+        for (int i = 0; i < m_tabs->count(); ++i)
+            for (Pane *pane : panesIn(m_tabs->widget(i)))
+                if (pane->scrollbackId() == ownerKey && !pane->subagentTabs()) { linkSubagentPane(tool, pane); return; }
     }
     // ----- end subagents UI --------------------------------------------------------------------
 
 public:
+    // Opens `subagentId`'s tab in `ownerPane`'s subagent pane: splits the pane beside the owner if
+    // it is not open, else brings it forward (its tab page, focus) and switches to the tab. The
+    // strip, the palette's Agents list, /agents, ✦ links and Alt+A all come here (card #WD83).
+    void openSubagentTab(Pane *ownerPane, const QString &subagentId) {
+        if (!ownerPane || subagentId.isEmpty()) return;
+        if (!ownerPane->canShowSubagent(subagentId)) { ownerPane->toast(QStringLiteral("No subagent %1 in this pane.").arg(subagentId)); return; }
+        ToolPane *tool = subagentPaneOf(ownerPane);
+        if (!tool) {
+            tool = createSubagentPane(ownerPane->cwd());
+            linkSubagentPane(tool, ownerPane);
+            // Beside the owner; below it when the owner is too narrow to share its width.
+            insertBeside(ownerPane, tool, ownerPane->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        }
+        ownerPane->showSubagentTab(subagentId);
+        RelayWindow *w = windowOf(tool);
+        if (!w) return;
+        if (QWidget *page = w->pageOf(tool)) w->m_tabs->setCurrentWidget(page);
+        if (w != this) { w->raise(); w->activateWindow(); }
+        w->setActiveLeaf(tool);
+        focusLeaf(tool);
+        w->updateTitles();
+    }
+
     // Turn details: tool calls of one agent turn, opened from the inline link or the palette.
     void openTurnPane(Pane *owner, const QString &turnId) {
         QWidget *page = pageOf(owner);
@@ -2364,7 +2429,7 @@ private:
         pane->onOpenDocument = [guard](const QString &path) { if (auto *w = windowOf(guard)) w->openDocument(path, guard, false); };
         pane->onForkState = [guard](const QJsonObject &state, const QString &title) { if (auto *w = windowOf(guard)) w->openFork(guard, state, title); };
         pane->onOpenSessionInNewPane = [guard](const QJsonObject &state, const QString &title) { if (auto *w = windowOf(guard)) w->openFork(guard, state, title, false); };
-        pane->onOpenSubagent = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openSubagentPane(guard, id); };   // subagents UI
+        pane->onOpenSubagent = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openSubagentTab(guard, id); };   // subagents UI (#WD83)
         pane->onShowAgents = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openAgentsMenu(); } };   // /agents → subagents panel menu
         pane->onOpenTurn = [guard](const QString &turnId) { if (auto *w = windowOf(guard)) w->openTurnPane(guard, turnId); };
         // Pane titles (issue JRWQ): a fresh title relabels the tab; /rename-tab is the window's job.
@@ -2397,6 +2462,14 @@ private:
                 return createBoardPane(workspace, board.value(QStringLiteral("collapsed")).toArray(),
                                        board.value(QStringLiteral("hidden")).toArray());
             return createPane({{"cwd", m_manager->workspace()}, {"workspace", m_manager->workspace()}});
+        }
+        if (node.contains(QStringLiteral("subagents"))) {   // card #WD83: the tabs' text, then its owner
+            const QJsonObject saved = node.value(QStringLiteral("subagents")).toObject();
+            ToolPane *tool = createSubagentPane(saved.value(QStringLiteral("cwd")).toString(), saved);
+            QPointer<ToolPane> guard(tool);
+            const QString owner = saved.value(QStringLiteral("owner")).toString();
+            QTimer::singleShot(0, tool, [guard, owner] { if (auto *w = windowOf(guard)) w->linkRestoredSubagentPane(guard, owner); });
+            return tool;
         }
         if (node.contains(QStringLiteral("plan"))) {
             const QString path = node.value(QStringLiteral("plan")).toObject().value(QStringLiteral("path")).toString();

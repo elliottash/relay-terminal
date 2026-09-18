@@ -179,6 +179,9 @@ private slots:
         QVERIFY(isUsableNode(QJsonObject{{"board", QJsonObject{{"workspace", "/repo"}}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"board", QJsonObject{}}}));               // no workspace
         QVERIFY(!isUsableNode(QJsonObject{{"board", QJsonObject{{"tab", "bugs"}}}}));
+        // A subagent pane (#WD83) is its tabs' text; with no tabs there is nothing to bring back.
+        QVERIFY(isUsableNode(QJsonObject{{"subagents", QJsonObject{{"owner", "p1"}, {"tabs", QJsonArray{QJsonObject{{"id", "a1"}}}}}}}));
+        QVERIFY(!isUsableNode(QJsonObject{{"subagents", QJsonObject{{"owner", "p1"}, {"tabs", QJsonArray{}}}}}));
         QVERIFY(!isUsableNode(QJsonObject{}));
         QVERIFY(!isUsableNode(QJsonObject{{"subagent", QJsonObject{}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"explorer", QJsonObject{}}}));   // no path

@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonValue>
 #include <QSaveFile>
@@ -145,6 +146,11 @@ bool isUsableNode(const QJsonObject &node, int depth) {
         const QJsonObject board = node.value(QStringLiteral("board")).toObject();
         return node.value(QStringLiteral("board")).isObject()
                && !board.value(QStringLiteral("workspace")).toString().isEmpty();
+    }
+    // A subagent pane (card #WD83) comes back with its tabs' text; one with no tabs is not saved.
+    if (node.contains(QStringLiteral("subagents"))) {
+        const QJsonObject subagents = node.value(QStringLiteral("subagents")).toObject();
+        return node.value(QStringLiteral("subagents")).isObject() && !subagents.value(QStringLiteral("tabs")).toArray().isEmpty();
     }
     for (const char *kind : {"explorer", "preview", "plan"}) {
         const QString key = QString::fromLatin1(kind);

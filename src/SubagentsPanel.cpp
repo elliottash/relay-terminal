@@ -64,6 +64,7 @@ void SubagentModel::clearFinished() {
     const int before = m_rows.size();
     m_rows.erase(std::remove_if(m_rows.begin(), m_rows.end(), [](const SubagentRow &r) { return !r.live(); }), m_rows.end());
     if (m_rows.size() != before) changed();
+    if (onFinishedCleared) onFinishedCleared();
 }
 
 void SubagentModel::clear() {
@@ -143,7 +144,7 @@ bool SubagentModel::handle(const QJsonObject &event) {
                 row.resumed ? QStringLiteral("resumed") : row.background ? QStringLiteral("started in the background") : QStringLiteral("started"),
                 row.description);
             if (!row.warnings.isEmpty()) line += QStringLiteral(" (") + row.warnings.join(QStringLiteral("; ")) + QLatin1Char(')');
-            onInline(line);
+            onInline(line, row.id);
         }
         changed();
         return true;
@@ -174,7 +175,7 @@ bool SubagentModel::handle(const QJsonObject &event) {
                 .arg(formatTokens(copy.tokens, copy.tokensEstimated));
             const QString handoff = handoffText(copy.handoff, event.value(QStringLiteral("wakeups")).toInt(), event.value(QStringLiteral("max_auto_turns")).toInt());
             if (!handoff.isEmpty()) line += QStringLiteral(" · ") + handoff;
-            onInline(line);
+            onInline(line, copy.id);
         }
         changed();
         if (onTranscript) onTranscript(id, event);
@@ -187,7 +188,8 @@ bool SubagentModel::handle(const QJsonObject &event) {
         if (onInline && (handoff == QStringLiteral("wake") || handoff == QStringLiteral("pending"))) {
             onInline(handoff == QStringLiteral("wake")
                 ? QStringLiteral("✦ %1 result → main agent continues").arg(id)
-                : QStringLiteral("✦ %1 %2").arg(id, handoffText(handoff, event.value(QStringLiteral("wakeups")).toInt(), event.value(QStringLiteral("max_auto_turns")).toInt())));
+                : QStringLiteral("✦ %1 %2").arg(id, handoffText(handoff, event.value(QStringLiteral("wakeups")).toInt(), event.value(QStringLiteral("max_auto_turns")).toInt())),
+                id);
         }
         changed();
         return true;
@@ -288,6 +290,7 @@ int SubagentsPanel::firstVisible() const {
 }
 
 QSize SubagentsPanel::sizeHint() const {
+    if (m_folded) return {200, rowHeight() + 6};
     const int n = m_model->rows().size();
     const int lines = 1 + visibleCount() + (n > kMaxVisible ? 1 : 0);
     return {200, lines * rowHeight() + 6};
@@ -309,6 +312,21 @@ void SubagentsPanel::refresh() {
     else m_tick.stop();
     updateGeometry();
     update();
+}
+
+void SubagentsPanel::setFolded(bool folded, const QString &keys) {
+    if (m_folded == folded && m_foldKeys == keys) return;
+    m_folded = folded; m_foldKeys = keys;
+    refresh();
+}
+
+QString SubagentsPanel::foldedText() const {
+    const int n = int(m_model->rows().size());
+    const int live = m_model->liveCount();
+    QString text = live > 0 ? QStringLiteral("%1 subagent%2 running").arg(live).arg(live == 1 ? QString() : QStringLiteral("s"))
+                            : QStringLiteral("%1 subagent%2 finished").arg(n).arg(n == 1 ? QString() : QStringLiteral("s"));
+    if (live > 0 && n > live) text += QStringLiteral(" · %1 finished").arg(n - live);
+    return text + QStringLiteral(" · %1 to open").arg(m_foldKeys.isEmpty() ? QStringLiteral("Enter") : m_foldKeys);
 }
 
 void SubagentsPanel::enter() {
@@ -349,6 +367,15 @@ void SubagentsPanel::keyPressEvent(QKeyEvent *event) {
     const auto mods = event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
     const int n = m_model->rows().size();
     if (mods != Qt::NoModifier) { QWidget::keyPressEvent(event); return; }
+    if (m_folded) {
+        // One line: Enter goes to the open subagent pane, Down to the list beneath, Up/Esc back.
+        switch (event->key()) {
+        case Qt::Key_Return: case Qt::Key_Enter: if (onOpenPane) onOpenPane(); return;
+        case Qt::Key_Down: if (onBelow) onBelow(); return;
+        case Qt::Key_Up: case Qt::Key_Escape: if (onExit) onExit(); return;
+        default: QWidget::keyPressEvent(event); return;
+        }
+    }
     switch (event->key()) {
     case Qt::Key_Up:
         if (m_selected <= 0) { if (onExit) onExit(); }
@@ -379,22 +406,30 @@ void SubagentsPanel::keyPressEvent(QKeyEvent *event) {
 }
 
 void SubagentsPanel::mousePressEvent(QMouseEvent *event) {
+    if (m_folded) {
+        if (event->button() == Qt::LeftButton && onOpenPane) { onOpenPane(); if (onMouseOpen) onMouseOpen(); }
+        return;
+    }
     const int row = rowAt(event->pos());
     if (row < 0) return;
     m_selected = row;
     setFocus(Qt::MouseFocusReason);
-    // The × at the right edge stops or dismisses; the model chip opens the model picker.
+    // The × at the right edge stops or dismisses; the model chip opens the model picker; anywhere
+    // else on a subagent row opens its tab in the subagent pane (owner, 2026-09-18: a click).
     if (row > 0 && event->pos().x() >= width() - 24) act(true);
     else if (row > 0 && m_modelChips.value(row).contains(event->pos())) pickModel(row);
+    else if (row > 0 && event->button() == Qt::LeftButton && onOpen) {
+        const QString id = selectedId();
+        update();
+        onOpen(id);
+        if (onMouseOpen) onMouseOpen();
+        return;
+    }
     update();
 }
 
-void SubagentsPanel::mouseDoubleClickEvent(QMouseEvent *event) {
-    const int row = rowAt(event->pos());
-    if (row > 0 && event->pos().x() < width() - 24 && !m_modelChips.value(row).contains(event->pos()) && onOpen) {
-        m_selected = row; onOpen(selectedId());
-    }
-}
+// A second click of a double-click lands on a row the first click already opened.
+void SubagentsPanel::mouseDoubleClickEvent(QMouseEvent *) {}
 
 void SubagentsPanel::focusInEvent(QFocusEvent *event) { QWidget::focusInEvent(event); update(); }
 void SubagentsPanel::focusOutEvent(QFocusEvent *event) { QWidget::focusOutEvent(event); update(); }
@@ -411,6 +446,17 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
     p.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 8, 8);
     p.setBrush(Qt::NoBrush);
     p.setRenderHint(QPainter::Antialiasing, false);
+    if (m_folded) {
+        const QRect r(0, 2, width(), h);
+        if (focused) p.fillRect(r.adjusted(4, 0, -4, 0), theme::SurfaceRaised.lighter(135));
+        const bool live = m_model->liveCount() > 0;
+        p.setPen(live ? theme::Accent : theme::TextMuted);
+        p.drawText(QRect(10, r.top(), 16, h), Qt::AlignCenter, live ? QStringLiteral("●") : QStringLiteral("✓"));
+        p.setPen(theme::Text);
+        p.drawText(QRect(30, r.top(), width() - 40, h), Qt::AlignVCenter | Qt::AlignLeft,
+                   fm.elidedText(foldedText(), Qt::ElideRight, width() - 40));
+        return;
+    }
     const int nameWidth = std::max(fm.horizontalAdvance(QStringLiteral("general a00")) + 8, 96);
 
     m_modelChips.clear();
@@ -465,7 +511,7 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
         }
     };
 
-    const QString hint = focused ? QStringLiteral("↑↓ select · Enter open · m model · x stop/dismiss · Esc back")
+    const QString hint = focused ? QStringLiteral("↑↓ select · Enter open tab · m model · x stop/dismiss · Esc back")
                                  : QStringLiteral("↓ from the prompt to select");
     drawRow(0, focused && m_selected == 0, m_model->mainBusy() ? QStringLiteral("●") : QStringLiteral("○"),
             m_model->mainBusy() ? theme::Accent : theme::TextMuted, QStringLiteral("main"),

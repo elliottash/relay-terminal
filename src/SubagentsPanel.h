@@ -33,12 +33,16 @@ class SubagentModel {
 public:
     SubagentModel();
 
-    // A dim one-line notice for the terminal (start, finish, handoff). Never tool activity.
-    std::function<void(const QString &line)> onInline;
+    // A dim one-line notice for the terminal (start, finish, handoff) and the subagent it is
+    // about, so the line can link to its tab. Never tool activity.
+    std::function<void(const QString &line, const QString &id)> onInline;
     // A subagent reached done, failed or stopped.
     std::function<void(const SubagentRow &row)> onFinished;
     // Rows, counts or main-agent state changed.
     std::function<void()> onChanged;
+    // Finished rows were cleared by the strip's rules (a new user prompt, New chat). Not called by
+    // clear() (a worker restart), which also runs when a restored window's workers start.
+    std::function<void()> onFinishedCleared;
     // subagent_transcript and subagent_event (with its payload) for open transcript views.
     std::function<void(const QString &id, const QJsonObject &event)> onTranscript;
     // Short status-bar text (message delivered, options changed).
@@ -82,7 +86,7 @@ private:
 };
 
 // The running-agents list under the composer: a `main` row plus one row per subagent.
-// Hidden when there are no subagents. Up/Down move, Enter opens a transcript, x or Delete stops a
+// Hidden when there are no subagents. Up/Down move, Enter (or a click) opens the subagent's tab, x or Delete stops a
 // running agent or dismisses a finished row, m picks the row's model, Esc (or Up past the first row)
 // returns to the composer.
 class SubagentsPanel final : public QWidget {
@@ -96,11 +100,21 @@ public:
     std::function<void()> onBelow;   // Down past the last row: the list beneath (commands the agent left running)
     // The row's model chip was clicked (or m pressed): show a model picker at `at` (global).
     std::function<void(const QString &id, const QPoint &at)> onPickModel;
+    // A row was opened with the mouse (a click): teach the keyboard path.
+    std::function<void()> onMouseOpen;
+    // Folded: the subagent pane is open, so the list is one line ("2 subagents running · Alt+A to
+    // open"). Enter or a click on it calls onOpenPane.
+    std::function<void()> onOpenPane;
 
     // Called after the model changed. Visible when allowed and there are subagents.
     void refresh();
     // The owner hides the list while its composer is hidden (a full-screen program has the keys).
     void setAllowed(bool allowed) { m_allowed = allowed; refresh(); }
+    // While this pane's subagent pane is open the list folds to one line. `keys` is the live
+    // Keymap text of the key that opens the pane (empty when unbound).
+    void setFolded(bool folded, const QString &keys = QString());
+    bool folded() const { return m_folded; }
+    QString foldedText() const;
     // Focus the list with the first subagent row selected.
     void enter();
     int selectedRow() const { return m_selected; }   // 0 = main, 1.. = subagents
@@ -128,7 +142,8 @@ private:
     SubagentModel *m_model;
     QHash<int, QRect> m_modelChips;   // row index (1.. = subagents) -> model chip, from the last paint
     int m_selected = 1;
-    bool m_allowed = true;
+    bool m_allowed = true, m_folded = false;
+    QString m_foldKeys;
     QTimer m_tick;
 };
 

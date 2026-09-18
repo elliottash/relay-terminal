@@ -253,6 +253,11 @@ private:
         add("agent.stop", "agent", "Stop the agent turn", {});
         add("agent.stopAllSubagents", "agent", "Stop all running subagents", {QStringLiteral("Ctrl+Shift+X")});   // subagents UI
         add("agent.agentsMenu", "agent", "Agents: definitions and running subagents", {});
+        // The tabbed subagent pane (card #WD83): from the prompt box it opens (or brings forward)
+        // this pane's subagent pane; from the subagent pane it goes back to the main agent. A for
+        // agents; no preset binds Alt+A, and Readline leaves M-a unbound.
+        add("agent.subagentPane", "agent", "Subagents: open this pane's subagent tabs, or go back to the main agent from them",
+            {QStringLiteral("Alt+A")});
         // Voice transcription: the hold key is its own setting (Settings › Voice), because a
         // push-to-talk key is held rather than pressed and is not a shortcut the keymap can bind.
         add("voice.toggle", "agent", "Voice transcription: start or finish recording", {});

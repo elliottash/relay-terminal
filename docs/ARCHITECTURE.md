@@ -327,7 +327,7 @@ terminal mode), asking for a skill by name in a prompt that says "skill" (→ `/
 starting a card edit in the Switchboard with the Edit button, a click on the title or a
 double-click in the text (→ `e`),
 and rotating idle tips 4 s after a finished agent turn with an
-from the link or palette (→ `/continue` or `agent.continue`), the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), and rotating idle tips 4 s after a finished agent turn with an
+from the link or palette (→ `/continue` or `agent.continue`), the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter) and the subagent pane's "← main agent" (→ `agent.subagentPane`), and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
 in `WARP.md`); tests in `tests/hints_test.cpp`.
 

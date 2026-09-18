@@ -54,8 +54,9 @@ public:
         }
     }
 
-    // subagents UI: a live subagent transcript. Not saved or restored (node() is empty).
-    ToolPane(relay::SubagentTranscriptView *view, const QString &cwd) : m_kind(Kind::Subagent), m_subagent(view), m_subagentCwd(cwd) {
+    // subagents UI: one pane per main pane, a tab per subagent (card #WD83). Saved with its tabs'
+    // text; the agents themselves end with the worker.
+    ToolPane(relay::SubagentTabsView *view, const QString &cwd) : m_kind(Kind::Subagent), m_subagent(view), m_subagentCwd(cwd) {
         setObjectName(QStringLiteral("pane"));
         setAttribute(Qt::WA_StyledBackground);
         auto *layout = new QVBoxLayout(this); layout->setContentsMargins(1, 1, 1, 1);
@@ -94,7 +95,7 @@ public:
     relay::FileExplorer *explorer() const { return m_explorer; }
     relay::FilePreview *preview() const { return m_preview; }
     relay::PlanEditor *plan() const { return m_plan; }
-    relay::SubagentTranscriptView *subagent() const { return m_subagent; }
+    relay::SubagentTabsView *subagent() const { return m_subagent; }
     QString path() const { return (m_subagent || m_turn || m_board || m_settingsView) ? QString() : m_explorer ? m_explorer->root() : m_plan ? m_plan->path() : m_preview->path(); }
     QString cwd() const { return (m_subagent || m_turn || m_board || m_settingsView) ? m_subagentCwd : m_explorer ? m_explorer->root() : QFileInfo(path()).absolutePath(); }
     QString title() const {
@@ -112,7 +113,8 @@ public:
         if (m_board) return {{"board", QJsonObject{{"workspace", m_board->workspace()},
                                                    {"collapsed", m_board->collapsedSections()},
                                                    {"hidden", m_board->hiddenSections()}}}};
-        if (m_subagent || m_turn || m_settingsView) return {};
+        if (m_subagent) return m_subagent->node();
+        if (m_turn || m_settingsView) return {};
         if (m_plan) return {{"plan", QJsonObject{{"path", path()}}}};
         return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};
     }
@@ -131,7 +133,7 @@ private:
     relay::FileExplorer *m_explorer = nullptr;
     relay::FilePreview *m_preview = nullptr;
     relay::PlanEditor *m_plan = nullptr;
-    relay::SubagentTranscriptView *m_subagent = nullptr;
+    relay::SubagentTabsView *m_subagent = nullptr;
     relay::TurnTranscriptView *m_turn = nullptr;
     relay::BoardView *m_board = nullptr;
     relay::SettingsPane *m_settingsView = nullptr;
