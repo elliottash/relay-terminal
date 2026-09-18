@@ -1943,7 +1943,7 @@ public:
         m_skillsDialog->refresh();
     }
 
-    // ----- aliases: saved commands and prompts (issue G8DK, protocol 19) ----------------------
+    // ----- aliases: saved commands and prompts (issue G8DK, protocol 20) ----------------------
     // An alias runs three ways — the actions palette, `/name`, and the name typed in terminal mode.
     // All three end here: the template's `{{parameters}}` become fields in the prompt box, Tab moves
     // between them, and submitting sends the values to the worker, which does the substitution and

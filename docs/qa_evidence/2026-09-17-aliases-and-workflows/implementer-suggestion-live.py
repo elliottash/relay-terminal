@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""One live check of the agent's alias suggestion (issue G8DK, protocol 19.6).
+"""One live check of the agent's alias suggestion (issue G8DK, protocol 20.6).
 
 `./scripts/test.sh` stays offline, so this is the one place the suggestion meets a real model. It
 reads the stored `glm-coding` key through relay_core.keystore (RELAY_KEYRING left alone) and never

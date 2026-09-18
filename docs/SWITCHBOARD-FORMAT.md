@@ -97,7 +97,7 @@ Every type: `id`, `type`, `status`, `rank`, `created`, `labels`, `assignee`, `pr
   preference` (the memory design called this field `type`; it is `kind` here because `type` names
   the card type), `scope` is `project | team | user`, `paths` auto-attaches the body when a matching
   file is read, `pinned` always loads it.
-- An **alias** card (issue `#G8DK`, protocol section 19) is one saved command or prompt per file,
+- An **alias** card (issue `#G8DK`, protocol section 20) is one saved command or prompt per file,
   named `<name>.md`. `name` is what you type to run it (`/name`); `kind` is `command | prompt`.
   The runnable text is the first fenced block of a `## Run` section (or the section itself, for a
   prompt), and the parameters are a list in `## Parameters` (`` - `arg` = `default` — note ``).

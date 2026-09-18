@@ -948,7 +948,7 @@ cannot compact its own turn.
 
 ### Aliases: saved commands and prompts
 
-`src/Aliases.*` and `backend/relay_core/aliases.py` (issue `#G8DK`, protocol section 19). An alias
+`src/Aliases.*` and `backend/relay_core/aliases.py` (issue `#G8DK`, protocol section 20). An alias
 is a saved terminal command or agent prompt with `{{parameter}}` placeholders, stored as one
 Switchboard card per alias: **global** aliases in the global Switchboard
 (`$XDG_CONFIG_HOME/relay/switchboard/aliases/`), **local** ones in the repository Switchboard

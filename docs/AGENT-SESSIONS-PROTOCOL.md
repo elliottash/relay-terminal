@@ -1055,7 +1055,7 @@ call**. The only judgement is whether the panes are on the same work: one phrase
 with the first, and it is what the GUI uses until the worker answers and whenever no model is
 configured. A failed call is not an error: the offline answer is sent instead.
 
-## 19. Aliases: saved commands and prompts (v1.9, 2026-09-17)
+## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 
 Issue `#G8DK`. An alias is a saved terminal command or agent prompt with `{{parameter}}`
 placeholders, Warp-workflow style. Owner decisions: one Markdown file per alias with defaults;
@@ -1069,7 +1069,7 @@ Implementation: `backend/relay_core/aliases.py` (the store, the format, substitu
 `backend/relay_core/alias_import.py` (the importers), `backend/relay_core/session_protocol.py`
 (the handlers), `src/Aliases.*` (the composer's fields and the invocation rules, `relay-aliases`).
 
-### 19.1 Where an alias lives
+### 20.1 Where an alias lives
 
 | Scope | Root | Files |
 |---|---|---|
@@ -1118,7 +1118,7 @@ with no declared default is a required parameter.
 **Precedence.** A local alias hides a global one of the same name. The hidden one still appears in
 the list with `shadowed: true`, so the UI can say so instead of silently dropping it.
 
-### 19.2 `aliases`
+### 20.2 `aliases`
 
 `aliases {workspace?, id?}` → `aliases {workspace, items: [...], problems: [{path, message}], id?}`
 
@@ -1131,7 +1131,7 @@ one bad file does not cost the user the rest of the list.
 This needs **no configured provider**, because the palette and `/name` want the list before a key
 has been entered. The GUI asks for it on `ready` and after every write.
 
-### 19.3 `alias_run`
+### 20.3 `alias_run`
 
 `alias_run {name, values: {param: text}, scope?, workspace?, id?}`
 → `alias_expanded {name, kind, scope, title, path, text, id?}`
@@ -1151,7 +1151,7 @@ All three invocation paths send this same message:
 `matchTyped` fires only in terminal mode, only when the first word is exactly an alias name, and
 never for a line starting with `!`, `*`, `/`, `.`, `~` or `#`, or whose first word contains `=`.
 
-### 19.4 `alias_save`, `alias_delete`
+### 20.4 `alias_save`, `alias_delete`
 
 `alias_save {name, kind, text, title?, description?, params?, labels?, source?, status?, scope?,
 workspace?, id?}` → `alias_saved {name, kind, scope, path, alias_id, id?}`, then a fresh `aliases`.
@@ -1163,7 +1163,7 @@ A name is 1–32 characters of `a-z`, `0-9`, `-` or `_`, starting with a letter 
 enough to type, and with nothing in it that could read as a path. Saving over an existing alias
 keeps that card's id, rank and creation date, so its identity and its thread survive an edit.
 
-### 19.5 `alias_import_preview`, `alias_import_apply`
+### 20.5 `alias_import_preview`, `alias_import_apply`
 
 `alias_import_preview {sources?: ["warp", "shell"], workspace?, id?}`
 → `alias_import_preview {preview_id, sources, workspace, items: [...], skipped: [{origin, reason}],
@@ -1200,7 +1200,7 @@ The worker holds the preview and writes from **its own** copy of it: `names` sel
 only ever store bytes the worker read and showed. A `preview_id` it is not holding is an error
 ("that preview has expired"), and a name that was not in it is refused.
 
-### 19.6 `suggest {kind: "alias"}`
+### 20.6 `suggest {kind: "alias"}`
 
 `suggest {kind: "alias", commands: [string, …], id?}`
 → `suggestion {kind: "alias", text, reason, alias?: {…}, repeated?: [{command, count}], id?}`
@@ -1215,7 +1215,7 @@ the rules reject comes back empty (`reason: "rejected: …"`) rather than as a h
 suggested` to `worker.log`; nothing is stored until the user saves it, and a saved suggestion
 records `source: 'agent suggestion, <date>'` on its card.
 
-### 19.7 What an alias can and cannot do
+### 20.7 What an alias can and cannot do
 
 * An alias is **stored text**, not a program. Relay never executes an alias file, and neither the
   import nor the preview runs anything — they read.
@@ -1236,7 +1236,7 @@ records `source: 'agent suggestion, <date>'` on its card.
 * An alias **can** shadow a program on `PATH` when its name is typed in terminal mode. The import
   preview says so, and the staged line is visible on the prompt before Enter.
 
-### 19.8 Remote
+### 20.8 Remote
 
 All six events — `aliases`, `alias_expanded`, `alias_saved`, `alias_deleted`,
 `alias_import_preview`, `alias_imported` — are **withheld** from a phone in `remote/wire.py`. An

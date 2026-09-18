@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-// Aliases: saved commands and prompts (issue G8DK, docs/AGENT-SESSIONS-PROTOCOL.md section 19).
+// Aliases: saved commands and prompts (issue G8DK, docs/AGENT-SESSIONS-PROTOCOL.md section 20).
 //
 // An alias is run three ways — from the actions palette, by typing `/name` in the composer, and by
 // typing the name in terminal mode — and all three end at the same place: the composer holds the

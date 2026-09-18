@@ -32,7 +32,7 @@ the agent may suggest aliases for repeated commands (suggestion only, logged).
 
 ## Implemented (2026-09-17)
 
-Protocol: `docs/AGENT-SESSIONS-PROTOCOL.md` section 19. Architecture: `docs/ARCHITECTURE.md`,
+Protocol: `docs/AGENT-SESSIONS-PROTOCOL.md` section 20. Architecture: `docs/ARCHITECTURE.md`,
 section 11, "Aliases: saved commands and prompts".
 
 ### The file
@@ -115,7 +115,7 @@ command `, or just <name> in terminal mode`. Hint id `alias.run.<name>`, per-id 
 | `backend/relay_core/aliases.py` | new: the format, the store, global/local resolution, quote-aware substitution, repeated-command detection |
 | `backend/relay_core/alias_import.py` | new: the Warp (sqlite + YAML) and shell-alias importers, the preview and the apply |
 | `backend/relay_core/board.py` | the `alias` card type, its folder, fields and statuses; a public `atomic_write` |
-| `backend/relay_core/session_protocol.py` | the six section-19 handlers and `suggest kind: "alias"` |
+| `backend/relay_core/session_protocol.py` | the six section-20 handlers and `suggest kind: "alias"` |
 | `backend/relay_core/suggestions.py` | `propose_alias`: the side call and its validation |
 | `remote/wire.py` | classifies all six new events as withheld, with reasons |
 | `src/Aliases.h`, `src/Aliases.cpp` | new `relay-aliases`: composer fields, Tab, reparse, invocation matching, palette text, the hint |
@@ -125,7 +125,7 @@ command `, or just <name> in terminal mode`. Hint id `alias.run.<name>`, per-id 
 | `tests/test_alias_import.py` | new: both importers, malformed input, the preview and the apply |
 | `tests/test_alias_protocol.py` | new: the three invocation paths, save/delete, import, the suggestion |
 | `tests/aliases_test.cpp` | new: the GUI-side rules |
-| `docs/AGENT-SESSIONS-PROTOCOL.md` | section 19 (appended) |
+| `docs/AGENT-SESSIONS-PROTOCOL.md` | section 20 (appended; 19 went to the Switchboard branch) |
 | `docs/ARCHITECTURE.md` | the aliases subsection, the source map, the hint-trigger list |
 
 ## Acceptance evidence

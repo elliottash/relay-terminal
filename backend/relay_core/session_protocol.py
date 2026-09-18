@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Worker protocol handlers for sessions, model/effort, context, checkpoints, plan mode,
 instructions, recaps, suggestions, pane titles and aliases (docs/AGENT-SESSIONS-PROTOCOL.md
-sections 1-7, 9, 10, 17, 18, 19).
+sections 1-7, 9, 10, 17, 18, 20).
 
 Conversation rewrites (compact) run through TurnSupervisor.run_exclusive so they never overlap a
 turn. Calls that only read a copy of the conversation (recaps, suggestions, synthesis) run on
@@ -29,7 +29,7 @@ TYPES = {"set_model", "set_effort", "context", "compact", "checkpoints", "rewind
          "synthesize_instructions", "suggest",
          # pane title and tab label (protocol section 18)
          "set_session_title", "tab_label",
-         # aliases: saved commands and prompts (protocol section 19)
+         # aliases: saved commands and prompts (protocol section 20)
          "aliases", "alias_run", "alias_save", "alias_delete",
          "alias_import_preview", "alias_import_apply",
          # request ledger and todos (protocol section 12)
@@ -132,7 +132,7 @@ class SessionCommands:
         self.on_conversation_replaced = on_conversation_replaced or (lambda: None)
         # Conversation index (protocol 14), opened on the first conversation command.
         self._index = None
-        # Alias import previews (protocol 19), held until the matching apply names one.
+        # Alias import previews (protocol 20), held until the matching apply names one.
         self._alias_previews: dict[str, list] = {}
         self._alias_lock = threading.Lock()
 
@@ -537,7 +537,7 @@ class SessionCommands:
                     "bytes": len(text.encode("utf-8"))}
         self._background("synthesize_instructions", request.get("id"), work)
 
-    # ----- aliases: saved commands and prompts (protocol section 19) ------------------
+    # ----- aliases: saved commands and prompts (protocol section 20) ------------------
     # Reading and running an alias needs no provider and no configured agent: the palette wants
     # the list before a key is entered. Only the suggestion is a model call.
 
