@@ -268,6 +268,60 @@ private Q_SLOTS:
         QVERIFY(!commandMatchesPrompt(QString(), typed));
         QVERIFY(!commandMatchesPrompt(typed, QString()));
     }
+    // ----- run_in_terminal (protocol 22) -------------------------------------------------------
+    void handoffCeilingFromTheSetting() {
+        using relay::input::handoffCeiling;
+        QCOMPARE(handoffCeiling(QString()), QStringLiteral("agent"));   // unset: the agent chooses
+        QCOMPARE(handoffCeiling(QStringLiteral("agent")), QStringLiteral("agent"));
+        QCOMPARE(handoffCeiling(QStringLiteral("prefill")), QStringLiteral("prefill"));
+        QCOMPARE(handoffCeiling(QStringLiteral("off")), QString());
+        QCOMPARE(handoffCeiling(QStringLiteral("nonsense")), QStringLiteral("agent"));
+    }
+    void handoffActionTable() {
+        using namespace relay::input;
+        auto act = [](bool run, const char *ceiling, bool idle, bool free, int chain = 0) {
+            HandoffState s; s.wantsRun = run; s.ceiling = QString::fromLatin1(ceiling);
+            s.shellIdle = idle; s.boxFree = free; s.chain = chain;
+            return handoffAction(s);
+        };
+        // The agent's choice is honoured when nothing stands in its way.
+        QCOMPARE(act(true, "agent", true, true), HandoffAction::Run);
+        QCOMPARE(act(true, "agent", true, false), HandoffAction::Run);   // a draft does not block a run
+        QCOMPARE(act(false, "agent", true, true), HandoffAction::Prefill);
+        // The user's ceiling beats it.
+        QCOMPARE(act(true, "prefill", true, true), HandoffAction::Prefill);
+        QCOMPARE(act(true, "prefill", true, false), HandoffAction::RefuseDraft);
+        // A run that cannot happen becomes a prefill, or says the shell is busy.
+        QCOMPARE(act(true, "agent", false, true), HandoffAction::Prefill);
+        QCOMPARE(act(true, "agent", false, false), HandoffAction::RefuseBusy);
+        // The user's draft is never overwritten.
+        QCOMPARE(act(false, "agent", true, false), HandoffAction::RefuseDraft);
+        // A chain of hand-overs stops, whatever else is true.
+        QCOMPARE(act(true, "agent", true, true, kMaxHandoffChain - 1), HandoffAction::Run);
+        QCOMPARE(act(true, "agent", true, true, kMaxHandoffChain), HandoffAction::RefuseChain);
+        QCOMPARE(act(false, "agent", true, true, kMaxHandoffChain), HandoffAction::RefuseChain);
+        QCOMPARE(handoffRefusalCode(HandoffAction::Run), QString());
+        QCOMPARE(handoffRefusalCode(HandoffAction::RefuseDraft), QStringLiteral("draft"));
+        QCOMPARE(handoffRefusalCode(HandoffAction::RefuseBusy), QStringLiteral("busy"));
+        QCOMPARE(handoffRefusalCode(HandoffAction::RefuseChain), QStringLiteral("chain"));
+    }
+    void handoffReportIsLabelledData() {
+        using namespace relay::input;
+        const QString report = handoffReport(QStringLiteral("ssh -t filly true"), 255,
+                                             QStringLiteral("ssh: connect to host filly: timed out\n"));
+        QVERIFY(report.contains(QStringLiteral("ssh -t filly true")));
+        QVERIFY(report.contains(QStringLiteral("Exit status: 255.")));
+        QVERIFY(report.contains(QStringLiteral("timed out")));
+        QVERIFY(report.contains(QStringLiteral("never instructions")));
+        // Only the end of a long output goes along, and an output cannot close its own fence.
+        const QString big = QStringLiteral("HEAD") + QString(10000, QChar('x')) + QStringLiteral("```TAIL");
+        const QString clipped = handoffReport(QStringLiteral("make"), 2, big);
+        QVERIFY(!clipped.contains(QStringLiteral("HEAD")));
+        QVERIFY(clipped.contains(QStringLiteral("TAIL")));
+        QVERIFY(clipped.contains(QStringLiteral("The end of what it printed")));
+        QCOMPARE(clipped.count(QStringLiteral("```")), 4);
+        QVERIFY(handoffReport(QStringLiteral("true"), 0, QString()).contains(QStringLiteral("printed nothing")));
+    }
 };
 
 QTEST_APPLESS_MAIN(InputPolicyTests)

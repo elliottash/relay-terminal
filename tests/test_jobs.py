@@ -146,6 +146,111 @@ class JobToolTests(unittest.TestCase):
         self.assertEqual(self.run_tool("command_output", job_id=result["job_id"], wait_seconds=5)["output"], "b\n")
 
 
+class JobListTests(unittest.TestCase):
+    """The jobs the pane lists: only handed-back ones, announced as they change (src/JobsPanel.h)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cancel = threading.Event()
+        self.events = []
+        self.tools = ToolExecutor(self.tmp.name, self.events.append, self.cancel)
+
+    def tearDown(self):
+        self.tools.shutdown()
+        self.tmp.cleanup()
+
+    def lists(self):
+        return [e["jobs"] for e in self.events if e.get("event") == "jobs"]
+
+    def run_tool(self, name, **args):
+        return self.tools.execute(self.tools.prepare(name, args))
+
+    def test_a_quick_command_is_never_listed(self):
+        self.run_tool("run_command", command="true")
+        self.assertEqual(self.lists(), [])
+        self.assertEqual(self.tools.jobs_event()["jobs"], [])
+
+    def test_a_handed_back_job_is_listed_and_its_end_announced(self):
+        result = self.run_tool("run_command", command="sleep 1; exit 2", timeout_seconds=0)
+        first = self.lists()[-1]
+        self.assertEqual([(j["job_id"], j["running"]) for j in first], [(result["job_id"], True)])
+        self.assertIn("sleep 1", first[0]["command"])
+        deadline = time.monotonic() + 5
+        while self.lists()[-1][0]["running"] and time.monotonic() < deadline:
+            time.sleep(0.05)
+        last = self.lists()[-1][0]
+        self.assertFalse(last["running"])
+        self.assertEqual(last["exit_code"], 2)
+
+    def test_the_users_peek_leaves_the_models_output_unread(self):
+        result = self.run_tool("run_command", command="echo one; sleep 30", background=True)
+        job = self.tools.jobs.get(result["job_id"])
+        self.run_tool("command_output", job_id=job.id)          # the model has read "one"
+        self.assertEqual(self.tools.jobs.peek(job)["output"], "one\n")
+        self.assertEqual(self.run_tool("command_output", job_id=job.id)["output"], "")
+
+    def test_a_new_conversation_empties_the_list(self):
+        self.run_tool("run_command", command="sleep 30", background=True)
+        self.tools.shutdown()
+        self.assertEqual(self.lists()[-1], [])
+        self.assertEqual(self.tools.jobs.running(), [])
+
+    def test_finished_jobs_are_forgotten_beyond_the_limit(self):
+        from relay_core.jobs import KEEP_FINISHED
+        for _ in range(KEEP_FINISHED + 5):
+            self.run_tool("run_command", command="true")
+        self.assertLessEqual(len(self.tools.jobs._jobs), KEEP_FINISHED)
+        with self.assertRaises(ValueError):
+            self.tools.jobs.get("job-1")
+
+    def test_a_subagents_jobs_are_not_announced(self):
+        events = []
+        with tempfile.TemporaryDirectory() as tmp:
+            sub = RestrictedExecutor(tmp, events.append, threading.Event(), None, ["run_command"])
+            sub.execute(sub.prepare("run_command", {"command": "sleep 30", "background": True}))
+            sub.shutdown()
+        self.assertEqual([e for e in events if e.get("event") == "jobs"], [])
+
+
+class JobProtocolTests(unittest.TestCase):
+    """jobs_list, job_output_get and job_stop (relay_core/observe_protocol.py)."""
+
+    def setUp(self):
+        from relay_core.observe_protocol import ObserveCommands
+        self.tmp = tempfile.TemporaryDirectory()
+        self.events = []
+        self.executor = ToolExecutor(self.tmp.name, self.events.append, threading.Event())
+        agent = type("Agent", (), {"executor": self.executor})()
+        turns = type("Turns", (), {"agent": agent, "busy": False})()
+        self.observe = ObserveCommands(turns, self.events.append)
+
+    def tearDown(self):
+        self.executor.shutdown()
+        self.tmp.cleanup()
+
+    def test_list_output_and_stop(self):
+        result = self.executor.execute(self.executor.prepare("run_command", {"command": "echo hi; sleep 30", "background": True}))
+        job_id = result["job_id"]
+        self.observe.handle("jobs_list", {"type": "jobs_list", "id": 1})
+        listed = [e for e in self.events if e.get("event") == "jobs" and e.get("id") == 1][0]
+        self.assertEqual(listed["jobs"][0]["job_id"], job_id)
+        self.observe.handle("job_output_get", {"type": "job_output_get", "id": 2, "job_id": job_id})
+        output = [e for e in self.events if e.get("event") == "job_output"][0]
+        self.assertEqual((output["output"], output["running"], output["id"]), ("hi\n", True, 2))
+        self.observe.handle("job_stop", {"type": "job_stop", "id": 3, "job_id": job_id})
+        deadline = time.monotonic() + 5
+        while self.executor.jobs.running() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(self.executor.jobs.running(), [])
+        final = [e for e in self.events if e.get("event") == "jobs"][-1]["jobs"][0]
+        self.assertTrue(final["stopped"])
+        self.assertFalse(final["running"])
+
+    def test_an_unknown_job_is_an_error(self):
+        with self.assertRaises(ValueError):
+            self.observe.handle("job_stop", {"type": "job_stop", "job_id": "job-9"})
+
+
 class JobTableTests(unittest.TestCase):
     def test_at_most_max_running(self):
         table = JobTable()

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Worker handlers for protocol section 11: routing assist, stored tool outputs and turn transcripts,
-and skill management (docs/AGENT-SESSIONS-PROTOCOL.md).
+the commands the agent left running (jobs), and skill management (docs/AGENT-SESSIONS-PROTOCOL.md).
 
 Network and git work runs on background threads so the protocol loop never blocks.
 """
@@ -14,7 +14,8 @@ from . import route_assist, skill_manage
 from .provider import ProviderError
 from .skills import SkillError, SkillIndex, refined_dir
 
-TYPES = {"route_assist", "tool_output_get", "turn_transcript_get", "skills_list", "refine_skills",
+TYPES = {"route_assist", "tool_output_get", "turn_transcript_get", "jobs_list", "job_output_get", "job_stop",
+         "skills_list", "refine_skills",
          "import_skills_preview", "import_skills_confirm", "skills_check_updates"}
 
 
@@ -96,6 +97,26 @@ class ObserveCommands:
         event = self._agent().turn_transcript(request.get("turn_id"))
         event["id"] = request.get("id")
         self.emit(event)
+
+    # ----- jobs: commands the agent left running (relay_core/jobs.py) ---------------------------
+    def _jobs_list(self, request):
+        event = self._agent().executor.jobs_event()
+        event["id"] = request.get("id")
+        self.emit(event)
+
+    def _job_output_get(self, request):
+        """What the job printed, for the user; the model's own read position is left alone."""
+        executor = self._agent().executor
+        job = executor.jobs.get(request.get("job_id"))
+        self.emit({"event": "job_output", "id": request.get("id"), "job_id": job.id, "command": job.command,
+                   "running": job.running, "exit_code": job.exit_code, "stopped": job.stopped,
+                   **executor.jobs.peek(job)})
+
+    def _job_stop(self, request):
+        executor = self._agent().executor
+        job = executor.jobs.get(request.get("job_id"))
+        # Stopping waits up to a few seconds for the process group; the list follows via `jobs`.
+        self._background("job_stop", request.get("id"), lambda: executor.jobs.stop(job))
 
     # ----- skills --------------------------------------------------------------------------------
     def _index(self):

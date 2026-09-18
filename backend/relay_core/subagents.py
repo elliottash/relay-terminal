@@ -70,6 +70,8 @@ class RestrictedExecutor(ToolExecutor):
         # A command can outlive its call as a job; reading and stopping it come with run_command.
         extra = {"command_output", "stop_command"} if "run_command" in allowed else set()
         self.allowed = frozenset(allowed) | extra
+        # Its commands end with its run and are not the pane's list to show.
+        self.announce_jobs = False
 
     def tools(self) -> list[dict]:
         return [tool for tool in super().tools() if tool["function"]["name"] in self.allowed]
@@ -749,8 +751,11 @@ class SubagentManager:
             progress = False
             if kind == "tool_started":
                 sub.tools += 1
+                # The concise line when the event carries one (protocol 23), the preview otherwise.
+                label = event.get("label") if isinstance(event.get("label"), dict) else {}
+                running = label.get("running") if isinstance(label.get("running"), str) else ""
                 lines = [line for line in str(event.get("preview", "")).splitlines() if line.strip()]
-                sub.last_activity = f"{event.get('tool')}: {lines[-1][:120] if lines else ''}"
+                sub.last_activity = f"{event.get('tool')}: {running or (lines[-1] if lines else '')}"[:160]
                 progress = True
             elif kind == "usage":
                 usage = event.get("usage") or {}

@@ -828,57 +828,6 @@ QString GhosttyCore::hyperlinkAt(int row, int col) const
     return QString::fromStdString(uri);
 }
 
-// Every run of cells whose OSC 8 URI starts with `prefix`, in absolute
-// scrollback rows (GHOSTTY_POINT_TAG_SCREEN's coordinates, the ones
-// scrollToPrompt() and scrollViewportToRow() use).
-//
-// libghostty-vt answers a hyperlink per grid ref, so a scan of every cell of
-// the whole scrollback would be one FFI call per cell. This walks **column 0**
-// of each row instead and only then walks right to the end of the run, which is
-// two calls per row: Relay's own anchor lines carry their hyperlink from the
-// first column (the view overpaints the chevron there), so that is where they
-// are found. An anchor that starts further right is not seen on this core.
-std::vector<VtCore::HyperlinkRun> GhosttyCore::hyperlinkRuns(const QString &prefix) const
-{
-    std::vector<HyperlinkRun> out;
-    if (prefix.isEmpty())
-        return out;
-    const std::string pre = prefix.toStdString();
-    const int total = historyRows() + d->rowsN;
-    std::string uri, prev;
-    for (int y = 0; y < total; ++y) {
-        GhosttyGridRef ref;
-        if (!d->gridRef(GHOSTTY_POINT_TAG_SCREEN, 0, y, &ref) || !Impl::hyperlinkUri(ref, &uri)
-            || uri.size() < pre.size() || uri.compare(0, pre.size(), pre) != 0) {
-            prev.clear();
-            continue;
-        }
-        // The same URI on the row right above continues the run (a soft-wrapped
-        // anchor line); anything else starts a new one.
-        if (!out.empty() && uri == prev && out.back().endRow == y - 1) {
-            out.back().endRow = y;
-        } else {
-            HyperlinkRun r;
-            r.uri = QString::fromStdString(uri);
-            r.startRow = r.endRow = y;
-            r.startCol = 0;
-            out.push_back(r);
-        }
-        prev = uri;
-        // How far right the run reaches on this row (for the anchor's extent).
-        std::string cell;
-        int endCol = 0;
-        for (int x = 1; x < d->colsN; ++x) {
-            GhosttyGridRef cref;
-            if (!d->gridRef(GHOSTTY_POINT_TAG_SCREEN, x, y, &cref) || !Impl::hyperlinkUri(cref, &cell) || cell != uri)
-                break;
-            endCol = x;
-        }
-        out.back().endCol = endCol;
-    }
-    return out;
-}
-
 void GhosttyCore::selectionBegin(int row, int col, SelectionUnit unit, bool rectangle)
 {
     d->selUnit = unit;
@@ -1031,18 +980,6 @@ int GhosttyCore::searchStep(bool backwards)
 }
 
 int GhosttyCore::searchMatchCount() const { return d->searchTotal; }
-
-int GhosttyCore::searchCurrentRow() const
-{
-    if (!d->search || d->searchTotal == 0)
-        return -1;
-    GhosttySelection cur = GHOSTTY_INIT_SIZED(GhosttySelection);
-    GhosttyPointCoordinate start{0, 0};
-    if (ghostty_search_get(d->search, GHOSTTY_SEARCH_DATA_SELECTED_MATCH, &cur) != GHOSTTY_SUCCESS
-        || ghostty_terminal_point_from_grid_ref(d->t, &cur.start, GHOSTTY_POINT_TAG_SCREEN, &start) != GHOSTTY_SUCCESS)
-        return -1;
-    return int(start.y);
-}
 
 void GhosttyCore::sendKey(const KeyInput &key)
 {

@@ -18,6 +18,7 @@ from . import route_assist
 from . import titles as session_titles
 from . import board_tools
 from . import todos as todo_tool
+from . import tool_labels
 from .attachments import content_parts as image_content_parts
 from .attachments import format_block as format_attachments
 from .attachments import image_block, images as image_attachments, replace_images
@@ -44,7 +45,7 @@ TRANSCRIPT_CONTENT_CAP = 8000
 SUMMARY_PREVIEW_CAP = 160
 # Turn limits (owner decision 2026-09-17: 50 model steps, 150 tool calls, configurable). Hitting one ends the
 # turn with `done {stop_reason: "limit"}`, which does not pause the queue.
-DEFAULT_MAX_STEPS = 50
+DEFAULT_MAX_STEPS = 256
 DEFAULT_MAX_TOOL_CALLS = 150
 MAX_COMPLETION_REMINDERS = 2   # owner decision: automatic re-prompts per turn
 STALE_TODO_STEPS = 8
@@ -72,6 +73,19 @@ def _host(base_url: str) -> str:
         return urllib.parse.urlsplit(base_url).hostname or ""
     except ValueError:
         return ""
+
+
+def _switch_ceiling(window: int, max_tokens: int) -> int:
+    """The most a conversation may hold and still get an answer from a model with this window: the
+    window less room for a reply (the output budget, but at most a quarter of a small window).
+    Past it a switch is refused rather than sent to fail (issue 3ES1)."""
+    return window - min(max_tokens, window // 4)
+
+
+def _pending_window(pending: dict) -> int:
+    config = pending["config"]
+    return pending["window"] or context_window_for(resolve_preset(pending["preset_id"], config.base_url,
+                                                                  config.model))
 
 
 def validate_turn_options(request: dict) -> dict:
@@ -230,6 +244,9 @@ class Agent:
         # (subagent inheritance, role defaults) exactly as it follows an idle switch.
         self._model_lock = threading.RLock()
         self._pending_model: dict | None = None
+        # The switch being applied while its compaction runs (it has left _pending_model, so a newer
+        # switch can arrive meanwhile and overtake it).
+        self._switching: dict | None = None
         self.on_model_applied: Callable | None = None
         # --- subagents (relay_core.subagents) ---
         # subagents: SubagentManager giving this main agent the agent tools; None for subagents (no nesting).
@@ -402,19 +419,73 @@ class Agent:
         self.messages = adapt_history(self.messages, self._effort_style())
 
     # ----- a model switch while a turn runs (issue 3ES1) --------------------------------
+    def switch_fit(self, config: ProviderConfig, window: int) -> dict:
+        """How the conversation fits a model it may switch to: the numbers the context bar shows for
+        it, and a verdict. ``compacts``: over that model's auto-compaction limit, so the switch
+        compacts first (with the model in force summarising). ``refuse``: a reason, when even a
+        perfect compaction could not fit - the system prompt and tools alone leave no room for a
+        reply in that window."""
+        tools = self.tools()
+        used, _ = self.context.used(self.messages, tools)
+        ceiling = _switch_ceiling(window, config.max_tokens)
+        # A small window's auto-compaction limit (a fraction of it) can sit above the ceiling.
+        limit = min(compaction.limit_tokens(window, self.context.threshold, config.max_tokens), ceiling)
+        floor = int((compaction.estimate_tokens(self.messages[:1]) + compaction.estimate_tokens(tools))
+                    * self.context.ratio)
+        fit = {"used": used, "window": window, "limit": limit, "ceiling": ceiling, "compacts": used >= limit}
+        if floor >= fit["ceiling"]:
+            fit["refuse"] = (f"{config.model} cannot take over: its {window:,}-token window does not hold the "
+                             f"system prompt and tools (about {floor:,} tokens) with room for a reply. "
+                             f"Staying on {self.config.model}.")
+        return fit
+
+    def request_model(self, config: ProviderConfig, preset_id: str | None = None,
+                      context_window: int | None = None, *, idle: bool, apply_now: Callable,
+                      start_exclusive: Callable, on_applied: Callable | None = None,
+                      fields: dict | None = None, refused_fields: Callable | None = None) -> dict:
+        """One model switch, idle or mid-turn; returns what its `model_changed` says.
+
+        Idle and fitting: ``apply_now()`` switches at once (``applies: "now"``). Idle but over the
+        new window's limit: the switch waits for a compaction that ``start_exclusive(task)`` runs
+        off the protocol thread (``applies: "after_compaction"``). Mid-turn: `defer_model`. A switch
+        that cannot fit at all is refused before anything changes (``applies: "refused"``,
+        ``reason``); the caller then emits `model_switch_refused` instead of `model_changed`.
+        """
+        preset = resolve_preset(preset_id, config.base_url, config.model)
+        window = context_window or context_window_for(preset)
+        with self._model_lock:
+            fit = self.switch_fit(config, window)
+            same = (config.base_url, config.model) == (self.config.base_url, self.config.model) and not self._vision
+            if "refuse" in fit and not same:
+                return {"applies": "refused", "reason": fit["refuse"], "context_window": window}
+            if not idle:
+                return self.defer_model(config, preset_id, context_window, on_applied=on_applied,
+                                        fields=fields, refused_fields=refused_fields)
+            if not fit["compacts"] or same:
+                self._pending_model = None
+                apply_now()
+                return {"applies": "now", "context_window": self.context.window}
+            self._pending_model = {"config": config, "preset_id": preset_id, "window": context_window,
+                                   "on_applied": on_applied, "fields": dict(fields or {}),
+                                   "refused_fields": refused_fields}
+            start_exclusive(lambda agent: agent.apply_pending_model(at="now"))
+            return {"applies": "after_compaction", "in_flight_model": self.config.model,
+                    "context_window": window, "will_compact": True}
+
     def defer_model(self, config: ProviderConfig, preset_id: str | None = None,
                     context_window: int | None = None, *, on_applied: Callable | None = None,
-                    fields: dict | None = None) -> dict:
+                    fields: dict | None = None, refused_fields: Callable | None = None) -> dict:
         """Accept a set_model while a turn runs; it lands at the next step boundary.
 
         The request already in flight is never aborted: it finishes on the model it started on, and
         the one after it goes to the new model with the conversation so far (history converted by
-        `adapt_history`, the new window in force before auto-compaction checks it). Two switches
-        before that request: the last one wins. Switching back to the model in force just drops the
-        pending one. Returns what the `model_changed` event says about it.
+        `adapt_history`; compacted first, by the model in force, when it is over the new window's
+        limit). Two switches before that request: the last one wins. Switching back to the model in
+        force just drops the pending one. Returns what the `model_changed` event says about it.
 
         ``on_applied(agent)`` replaces `on_model_applied` for this switch (a role switch follows it
-        differently from a set_model), and ``fields`` are added to its `model_applied` event.
+        differently from a set_model), ``fields`` are added to its `model_applied` event, and
+        ``refused_fields()`` to its `model_switch_refused` event if it cannot land.
         """
         preset = resolve_preset(preset_id, config.base_url, config.model)
         window = context_window or context_window_for(preset)
@@ -422,30 +493,119 @@ class Agent:
             running = self._vision["model"] if self._vision else self.config.model
             if (config.base_url, config.model) == (self.config.base_url, self.config.model) and not self._vision:
                 self._pending_model = None
+                if self._switching is not None:
+                    self._switching["cancelled"] = True
                 return {"applies": "now", "context_window": self.context.window}
             self._pending_model = {"config": config, "preset_id": preset_id, "window": context_window,
-                                   "on_applied": on_applied, "fields": dict(fields or {})}
+                                   "on_applied": on_applied, "fields": dict(fields or {}),
+                                   "refused_fields": refused_fields}
             # An image turn stays on its vision model to the end: the new model applies after it.
             applies = "turn_end" if self._vision else "next_step"
-            return {"applies": applies, "in_flight_model": running, "context_window": window}
+            outcome = {"applies": applies, "in_flight_model": running, "context_window": window}
+            if self.switch_fit(config, window)["compacts"]:
+                outcome["will_compact"] = True
+            return outcome
+
+    def pending_model_compacts(self) -> bool:
+        """Whether the waiting switch needs a compaction first (a network call: the turn supervisor
+        then applies it on a thread of its own, not under its lock)."""
+        with self._model_lock:
+            pending = self._pending_model
+            if pending is None:
+                return False
+            fit = self.switch_fit(pending["config"], _pending_window(pending))
+            return fit["compacts"] and "refuse" not in fit
+
+    def _refuse_switch(self, pending: dict, reason: str, turn_id, at: str) -> dict:
+        config = pending["config"]
+        event = {"event": "model_switch_refused", "turn_id": turn_id, "at": at, "model": config.model,
+                 "current_model": self.config.model, "preset": self.preset.id if self.preset else None,
+                 "context_window": self.context.window, "effort": self.effort, "reason": reason}
+        if pending.get("refused_fields") is not None:
+            event.update(pending["refused_fields"]())
+        logs.event(_log, "model_switch_refused", session=self.session_id, turn=turn_id, at=at,
+                   model=config.model, current_model=self.config.model)
+        self.emit(event)
+        self.emit(self.context_event())
+        return event
 
     def apply_pending_model(self, turn_id: str | None = None, step: int | None = None,
                             at: str = "turn_end") -> dict | None:
         """Switch to the model a mid-turn set_model asked for, if one is waiting.
 
         Called by the turn loop at a step boundary (every tool call of the previous response has its
-        result, so nothing is in flight) and by the turn supervisor once a turn or an exclusive task
-        has ended, under its lock, so an idle switch cannot overtake it. Emits `model_applied` - the
-        moment the switch takes effect, which the pane marks in the transcript - then `context`.
+        result, so nothing is in flight), by the turn supervisor once a turn or an exclusive task
+        has ended, and by the exclusive task an idle switch that must compact first runs in
+        (``at="now"``). If the conversation is over the new window's limit it is compacted first,
+        by the model still in force (its window is the one the conversation fits in) with the new
+        window's limit as the target. If it still does not fit, the switch is refused and the pane
+        stays on the current model (`model_switch_refused`). Emits `model_applied` - the moment the
+        switch takes effect, which the pane marks in the transcript - then `context`.
         """
         with self._model_lock:
             pending = self._pending_model
             if pending is None or (at == "step" and self._vision):
                 return None
             self._pending_model = None
-            from_model = self.config.model
-            from_style = self._effort_style()
-            self.set_model(pending["config"], pending["preset_id"], pending["window"])
+            window = _pending_window(pending)
+            fit = self.switch_fit(pending["config"], window)
+            if "refuse" in fit:
+                refuse = fit["refuse"]
+            elif fit["compacts"]:
+                self._switching, refuse = pending, None
+            else:
+                return self._land_switch(pending, turn_id, step, at, compacted=False)
+        if refuse is not None:
+            self._refuse_switch(pending, refuse, turn_id, at)
+            return None
+        # Compact outside the model lock: a set_model arriving meanwhile must not wait for the
+        # summariser (it is queued behind this switch instead, and wins as usual).
+        config = pending["config"]
+        try:
+            self.compact("model_switch", target_window=window, target_max_tokens=config.max_tokens,
+                         target_model=config.model)
+            if self.context.used(self.messages, self.tools())[0] >= fit["limit"]:
+                # Auto-compaction keeps the last two turns whole; to fit this window, only the last.
+                self.compact("model_switch", target_window=window, target_max_tokens=config.max_tokens,
+                             target_model=config.model, keep_turns=1)
+        except Exception as exc:
+            with self._model_lock:
+                self._switching = None
+            stopped = isinstance(exc, Cancelled)
+            self._refuse_switch(pending, (f"{config.model} did not take over: the conversation had to be compacted "
+                                          f"to fit its window and the compaction "
+                                          + ("was stopped" if stopped else f"failed ({str(exc)[:300] or type(exc).__name__})")
+                                          + f". Staying on {self.config.model}."), turn_id, at)
+            if stopped and at == "step":
+                raise
+            return None
+        with self._model_lock:
+            cancelled = self._switching.get("cancelled")
+            self._switching = None
+            if self._pending_model is not None:
+                # A newer switch arrived while this one compacted: the last one wins.
+                newer = True
+            elif cancelled:
+                return None
+            else:
+                newer = False
+                used, _ = self.context.used(self.messages, self.tools())
+                if used >= fit["ceiling"]:
+                    refuse = (f"{config.model} cannot take over: even compacted, the conversation needs about "
+                              f"{used:,} tokens and its {window:,}-token window holds {fit['ceiling']:,} with room "
+                              f"for a reply. Staying on {self.config.model}.")
+                else:
+                    return self._land_switch(pending, turn_id, step, at, compacted=True)
+        if newer:
+            return self.apply_pending_model(turn_id, step, at)
+        self._refuse_switch(pending, refuse, turn_id, at)
+        return None
+
+    def _land_switch(self, pending: dict, turn_id, step, at: str, *, compacted: bool) -> dict:
+        """Under the model lock: make the switch and announce it."""
+        from_model = self.config.model
+        from_style = self._effort_style()
+        self.set_model(pending["config"], pending["preset_id"], pending["window"])
         event = {"event": "model_applied", "turn_id": turn_id, "at": at, "model": self.config.model,
                  "from_model": from_model, "preset": self.preset.id if self.preset else None,
                  "context_window": self.context.window, "effort": self.effort, **pending["fields"]}
@@ -453,11 +613,12 @@ class Agent:
             event["step"] = step
         if self._effort_style() != from_style:
             event["history_converted"] = True
-        if at == "step" and self.context.over(self.messages, self.tools()):
-            # The next line of the transcript is the compaction this causes; say why first.
-            event["compacts"] = True
+        if compacted:
+            # Compacted by the old model, to the new window's limit, just before this event.
+            event["compacted"] = True
         logs.event(_log, "model_applied", session=self.session_id, turn=turn_id, at=at, step=step,
-                   from_model=from_model, to_model=self.config.model, host=_host(self.config.base_url))
+                   from_model=from_model, to_model=self.config.model, host=_host(self.config.base_url),
+                   compacted=compacted)
         self.emit(event)
         follow = pending["on_applied"] or self.on_model_applied
         if follow is not None:
@@ -500,7 +661,19 @@ class Agent:
 
     # ----- context -------------------------------------------------------------
     def context_event(self) -> dict:
-        return self.context.event(self.messages, self.tools())
+        event = self.context.event(self.messages, self.tools())
+        # A switch waiting for the next step (or for its compaction): the model chip already names
+        # the new model, so the bar measures the conversation against the window that will serve
+        # the next request, and says which model the request in flight is still on (issue 3ES1).
+        with self._model_lock:
+            pending = self._pending_model or self._switching
+        if pending is not None:
+            fit = self.switch_fit(pending["config"], _pending_window(pending))
+            event["next"] = {"model": pending["config"].model, "window": fit["window"],
+                             "limit_tokens": fit["limit"], "used_tokens": fit["used"],
+                             "percent": round(100.0 * fit["used"] / fit["window"], 1) if fit["window"] else 0.0,
+                             "will_compact": fit["compacts"], "in_flight_model": self.config.model}
+        return event
 
     def _provider_emit(self, event: dict) -> None:
         kind = event.get("event")
@@ -531,12 +704,20 @@ class Agent:
         return record
 
     def _record_tool(self, record: dict, call_id: str, name: str, preview: str, result,
-                     ms: int | None = None) -> None:
+                     ms: int | None = None, label: dict | None = None, args=None,
+                     diff: str | None = None) -> None:
         ok = isinstance(result, dict) and "error" not in result and result.get("exit_code") in (None, 0) \
             and not result.get("timed_out")
         entry = {"call_id": call_id, "name": name, "preview": preview, "result": result, "ok": ok}
         if isinstance(result, dict) and isinstance(result.get("exit_code"), int):
             entry["exit_code"] = result["exit_code"]
+        # The concise line (protocol 23) and what the fold behind it needs. In memory only, like
+        # the rest of the record; nothing here reaches the session file or the log.
+        if label:
+            entry["label"] = label
+        entry["args"] = tool_labels.safe_args(name, args)
+        if diff:
+            entry["diff"] = diff
         record["tools"][call_id] = entry
         # The log gets the tool's name, outcome and duration. Never its arguments, preview or output.
         logs.event(_log, "tool", session=self.session_id, turn=record["turn_id"], call=call_id,
@@ -552,6 +733,8 @@ class Agent:
                     "ok": entry["ok"]}
             if "exit_code" in entry:
                 item["exit_code"] = entry["exit_code"]
+            if entry.get("label"):
+                item["label"] = entry["label"]
             tools.append(item)
         summary = {"event": "turn_summary", "turn_id": record["turn_id"], "elapsed_ms": record["elapsed_ms"],
                    "thinking_ms": record["thinking_ms"], "thinking_chars": record["thinking_chars"],
@@ -568,9 +751,18 @@ class Agent:
             entry = record["tools"].get(call_id) if isinstance(call_id, str) else None
             if entry is None:
                 raise ValueError("Unknown call_id for that turn.")
-            return {"event": "tool_output", "stored": True, "turn_id": turn_id, "call_id": call_id,
-                    "name": entry["name"], "preview": entry["preview"], "result": entry["result"],
-                    "ok": entry["ok"], **({"exit_code": entry["exit_code"]} if "exit_code" in entry else {})}
+            reply = {"event": "tool_output", "stored": True, "turn_id": turn_id, "call_id": call_id,
+                     "name": entry["name"], "preview": entry["preview"], "result": entry["result"],
+                     "ok": entry["ok"], **({"exit_code": entry["exit_code"]} if "exit_code" in entry else {})}
+            # The fold view: the label's line, the sections behind it, and the diff of a write, so
+            # no surface has to read `preview` to show what a call did (protocol 23).
+            if entry.get("label"):
+                reply["label"] = entry["label"]
+            if entry.get("diff"):
+                reply["diff"] = entry["diff"]
+            reply["detail"] = tool_labels.detail(entry["name"], entry.get("args"), entry["result"],
+                                                 preview=entry["preview"], diff=entry.get("diff"))
+            return reply
 
     def turn_transcript(self, turn_id) -> dict:
         with self._lock:
@@ -581,21 +773,38 @@ class Agent:
             return {"event": "turn_transcript", "turn_id": turn_id, "outcome": record["outcome"],
                     "running": record["elapsed_ms"] is None, "items": items}
 
-    def compact(self, reason: str = "manual", focus: str | None = None) -> dict:
-        """Compact the conversation. Only call between steps (never inside a tool-call group)."""
+    def compact(self, reason: str = "manual", focus: str | None = None, *, target_window: int | None = None,
+                target_max_tokens: int | None = None, target_model: str | None = None,
+                keep_turns: int = compaction.KEEP_TURNS) -> dict:
+        """Compact the conversation. Only call between steps (never inside a tool-call group).
+
+        ``target_window``: compact for a model about to take over (reason "model_switch", issue
+        3ES1): the model in force still summarises, but the limit to get under and the carried
+        block's budgets are the new window's."""
         if focus is not None and (not isinstance(focus, str) or len(focus) > 2000):
             raise ValueError("focus must be text of at most 2000 characters.")
         with self._lock:
             tools = self.tools()
             before, _ = self.context.used(self.messages, tools)
-            self.emit({"event": "compaction_started", "reason": reason})
+            started = {"event": "compaction_started", "reason": reason}
+            if target_model:
+                started["for_model"] = target_model
+            self.emit(started)
             limit, ratio = self.context.limit, self.context.ratio
+            carry = self._carry if self.track_requests else None
+            if target_window:
+                target_max = target_max_tokens or self.context.max_tokens
+                limit = min(compaction.limit_tokens(target_window, self.context.threshold, target_max),
+                            _switch_ceiling(target_window, target_max))
+                if carry is not None:
+                    carry = lambda region, tail_ids=frozenset(), lean=False: self._carry(  # noqa: E731
+                        region, tail_ids, lean, window=target_window)
             result = compaction.compact(
                 self.messages, self.side_provider(role="summaries"), manual=reason == "manual", focus=focus,
                 cancel=self.cancel_event,
                 over=lambda m: compaction.estimate_tokens(m) * ratio + compaction.estimate_tokens(tools) * ratio >= limit,
                 window_chars=max(20_000, min(400_000, self.context.window * compaction.CHARS_PER_TOKEN // 2)),
-                carry=self._carry if self.track_requests else None)
+                carry=carry, keep_turns=keep_turns)
             boundary = result["boundary"]
             if boundary is not None:
                 self._move_epoch(boundary, result["prefix"])
@@ -608,14 +817,18 @@ class Agent:
                      "summary_chars": result["summary_chars"], "trimmed_tool_outputs": result["trimmed"]}
             if result.get("carried") is not None:
                 event["carried"] = result["carried"]
+            if target_model:
+                event["for_model"] = target_model
             self.emit(event)
             self.emit(self.context_event())
             return event
 
-    def _carry(self, region: list[dict], tail_ids=frozenset(), lean: bool = False) -> tuple[str, dict]:
+    def _carry(self, region: list[dict], tail_ids=frozenset(), lean: bool = False,
+               window: int | None = None) -> tuple[str, dict]:
         """The deterministic post-compaction block: ledger requests, todos, plan, files, subagents and
-        recent user messages verbatim (research section 6 item 4)."""
-        window = self.context.window
+        recent user messages verbatim (research section 6 item 4). ``window``: the budgets' window,
+        when compacting for a model about to take over (issue 3ES1)."""
+        window = window or self.context.window
         user_budget = (min(compaction.CARRY_USER_TOKENS, window // compaction.CARRY_USER_WINDOW_DIVISOR)
                        * compaction.CHARS_PER_TOKEN)
         open_budget = (min(compaction.CARRY_OPEN_REQUEST_TOKENS, window // compaction.CARRY_OPEN_WINDOW_DIVISOR)
@@ -807,6 +1020,9 @@ class Agent:
                         raise Cancelled("Stopped.")
                     func = call["function"]
                     preview = ""
+                    # What the concise line (protocol 23) is built from, fresh for every call so a
+                    # call that fails before it is prepared never borrows the last one's.
+                    label_args, label_existed, label_diff = {}, None, ""
                     call_started = time.monotonic()
                     calls_used += 1
                     if calls_used > self.max_tool_calls:
@@ -814,30 +1030,45 @@ class Agent:
                     else:
                         try:
                             args = json.loads(func["arguments"])
+                            label_args = args if isinstance(args, dict) else {}
                             if batch is not None and self.subagents.handles(func["name"]):
                                 preview = self.subagents.preview(func["name"], args)
                                 self.emit({"event": "tool_started", "tool": func["name"], "preview": preview,
+                                           "label": tool_labels.started_label(func["name"], label_args),
                                            "turn_id": turn_id, "call_id": call["id"]})
                                 result = self.subagents.run_tool(func["name"], args, call["id"], batch, self.cancel_event)
                                 add({"role": "tool", "tool_call_id": call["id"],
                                      "content": json.dumps(result, ensure_ascii=False)})
-                                self._record_tool(record, call["id"], func["name"], preview, result,
-                                                  int((time.monotonic() - call_started) * 1000))
+                                ms = int((time.monotonic() - call_started) * 1000)
+                                label = tool_labels.result_label(func["name"], label_args, result, ms=ms)
+                                self._record_tool(record, call["id"], func["name"], preview, result, ms,
+                                                  label=label, args=label_args)
                                 self.emit({"event": "tool_result", "tool": func["name"], "result": result,
+                                           "label": label, "ms": ms,
                                            "turn_id": turn_id, "call_id": call["id"]})
                                 continue
                             prepared = self._prepare(func["name"], args)
                             preview = prepared.preview
+                            label_args = prepared.arguments if isinstance(prepared.arguments, dict) else label_args
+                            label_existed, label_diff = prepared.existed, getattr(prepared, "diff", "")
                             self.emit({"event": "tool_started", "tool": prepared.name, "preview": prepared.preview,
+                                       "label": tool_labels.started_label(prepared.name, label_args,
+                                                                          existed=label_existed),
                                        "turn_id": turn_id, "call_id": call["id"]})
                             result = self._execute(prepared, turn)
                         except (OSError, ValueError, UnicodeError) as exc:
                             result = {"error": str(exc)[:2000]}
                     add({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, ensure_ascii=False)})
-                    self._record_tool(record, call["id"], func["name"], preview, result,
-                                      int((time.monotonic() - call_started) * 1000))
-                    self.emit({"event": "tool_result", "tool": func["name"], "result": result,
-                               "turn_id": turn_id, "call_id": call["id"]})
+                    ms = int((time.monotonic() - call_started) * 1000)
+                    label = tool_labels.result_label(func["name"], label_args, result, ms=ms,
+                                                     existed=label_existed)
+                    self._record_tool(record, call["id"], func["name"], preview, result, ms,
+                                      label=label, args=label_args, diff=label_diff)
+                    event = {"event": "tool_result", "tool": func["name"], "result": result,
+                             "label": label, "ms": ms, "turn_id": turn_id, "call_id": call["id"]}
+                    if label_diff:
+                        event["diff"] = label_diff
+                    self.emit(event)
                 batch = None
         except Cancelled:
             # subagents: stop this turn's foreground subagents. Delivered notes stay in the conversation now.

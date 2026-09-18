@@ -25,7 +25,6 @@
 
 #include <functional>
 #include <memory>
-#include <vector>
 
 namespace relay {
 
@@ -96,25 +95,6 @@ public:
     // ---- hit testing (viewport coordinates)
     virtual QString hyperlinkAt(int row, int col) const = 0; // OSC 8 URI or empty
 
-    // One run of cells carrying the same OSC 8 hyperlink, in absolute
-    // scrollback rows (0 = the oldest line: the coordinates
-    // scrollViewportToRow() and historyRows() use). A run that soft-wrapped
-    // covers several rows, and `endRow` is the last of them.
-    struct HyperlinkRun {
-        QString uri;
-        int startRow = 0;
-        int startCol = 0;
-        int endRow = 0;
-        int endCol = 0;
-    };
-    // Every such run whose URI starts with `prefix`, oldest first. Empty
-    // prefix: nothing. This is how the view's fold layer finds the row a fold
-    // hangs under, including anchors far outside the viewport, and finds it
-    // again after a resize (both cores reflow) or after the scrollback was
-    // trimmed. It walks the scrollback, so callers use it on resize, trim and
-    // clear, never per frame.
-    virtual std::vector<HyperlinkRun> hyperlinkRuns(const QString &prefix) const = 0;
-
     // ---- selection (viewport coordinates; the core keeps it attached to content)
     virtual void selectionBegin(int row, int col, SelectionUnit unit, bool rectangle) = 0;
     virtual void selectionExtend(int row, int col) = 0;
@@ -132,10 +112,6 @@ public:
     // Matching is case-insensitive for ASCII letters.
     virtual int searchStep(bool backwards) = 0;
     virtual int searchMatchCount() const = 0;
-    // The absolute scrollback row the selected match starts on, or -1. The view
-    // needs it to interleave matches inside expanded folds with the core's own
-    // in visual order; a core that cannot say puts fold matches after its own.
-    virtual int searchCurrentRow() const { return -1; }
 
     // ---- input (results arrive through events.reply)
     virtual void sendKey(const KeyInput &key) = 0;

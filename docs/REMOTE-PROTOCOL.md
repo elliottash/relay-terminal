@@ -49,6 +49,13 @@ Switching is therefore explicit. The sender stops writing to the old path, sends
 **(security)** A receiver **must** reject any frame whose nonce is not exactly the next expected
 one, on any path, and **must not** implement a reorder or replay window.
 
+**The handshake is written (2026-09-18).** `next_seq` names the frame count the receiver must have
+applied when the switch completes — the offer itself included, so an ack pins the boundary exactly.
+The desktop answers `transport_switched {effective}` or refuses with `stale_seq`; a refused offer
+leaves the session where it was (`Host._on_transport_switch`, tested in `tests/test_remote_host.py`).
+No second transport exists yet, which is precisely why the nonce-exactness is worth having in place
+before one does.
+
 **(security)** The WebRTC DTLS fingerprint is never trusted on its own; authentication comes only
 from the inner Noise session.
 
@@ -382,9 +389,10 @@ A password from a client is deliberately **not** an ordinary input message, beca
 - **(security) carries no `seq`, is not written to the stream ring, and is never replayed** on
   resume;
 - **(security) the `nonce` is minted by the desktop**, not the client. It is created when the prompt
-  is detected, delivered with the `panes` status change, single use, bound to (pane, foreground pid,
-  prompt generation), and expires in seconds. The desktop discards any `secret_input` whose nonce is
-  unknown, spent or stale. A client-chosen nonce would bind nothing;
+  is detected, delivered with the `panes` status change (`secret_nonce` on the pane item, 45 s TTL),
+  single use, bound to (pane, foreground pid, prompt generation), and expires in seconds. The
+  desktop discards any `secret_input` whose nonce is unknown, spent or stale. A client-chosen nonce
+  would bind nothing; **this is implemented**: `Host._items` mints, `Host._on_secret_input` burns,
 - **(security) the prompt is re-checked from a fresh termios read immediately before the write**,
   with the foreground pid unchanged. `checkPasswordPrompt` polls at 1 s (250 ms while a command
   runs) and `submitSecret` trusts the cached flag, so remotely the window is that poll plus the
@@ -399,12 +407,13 @@ A password from a client is deliberately **not** an ordinary input message, beca
 - **(security)** it is rate-limited and locked out per device, so a `full` device cannot brute-force
   `sudo` remotely.
 
-**WebAuthn.** A user-verification check inside the web app enforces nothing — hostile JavaScript
-skips its own `if`, and the desktop, which is the party that cares, sees no proof. Either the client
-registers a WebAuthn credential id with the desktop at pairing and the desktop then issues a
-challenge and verifies the assertion before accepting `secret_input` or a take-over, or the claim is
-dropped and replaced by a desktop-side confirm. It **must not** be listed as a mitigation while it
-is only a client-side check.
+**WebAuthn — decided (2026-09-18): dropped from the threat table.** A user-verification check
+inside the web app enforces nothing — hostile JavaScript skips its own `if`, and the desktop, which
+is the party that cares, sees no proof — so it is not listed as a mitigation anywhere. What
+protects `secret_input` instead is all desktop-side: the per-device switch (off by default, owner
+toggled), the desktop-minted single-use nonce, the fresh termios re-check at the moment of the
+write, and the rate limit. Binding a WebAuthn credential to the desktop at pairing remains a
+possible future hardening for take-over; it is not a claim the protocol makes today.
 
 Tests mirror `tests/inputpolicy_test.cpp`, which already pins the desktop-side rules, and add the
 case it does not cover: the prompt ending between the message arriving and the write.
@@ -539,7 +548,9 @@ otherwise get permanent unreviewed access to an agent holding the owner's keys a
 **Audit log**, local only, `~/.local/share/relay/remote/audit-YYYY-MM.jsonl`: pairings, joins, role
 changes, control handoffs, prompts submitted (text), lines sent by others (text; raw keys as byte
 counts), password-field use (redacted, §6.7), revocations. **(security)** Never uploaded, written
-0600 inside a 0700 directory as `logs.py` requires of every Relay log, size-capped and rotated.
+0600 inside a 0700 directory as `logs.py` requires of every Relay log, and size-capped — but not
+rotated the way `logs.py` rotates, because nothing in it is ever deleted: a month past 5 MiB goes on
+in numbered parts (`audit-YYYY-MM.2.jsonl`, `.3`, …), each capped, so files grow with volume, not time.
 
 ## 11. Versioning
 

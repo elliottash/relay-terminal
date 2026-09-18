@@ -43,6 +43,7 @@ CLIENT_TYPES: dict[str, str | None] = {
     "pong": None,
     "bye": None,
     "resume": VIEW,
+    "transport_switch": None,      # session-level: re-binds the Noise stream to a new transport
     "client_state": VIEW,
     "pane_focus": VIEW,
     "pane_blur": VIEW,
@@ -78,7 +79,7 @@ NEVER_FROM_CLIENT = frozenset({
 
 SERVER_TYPES = frozenset({
     "welcome", "error", "ping", "pong", "bye", "paired", "revoked", "resumed",
-    "panes", "agent", "screen_snapshot", "screen_diff", "history",
+    "transport_switched", "panes", "agent", "screen_snapshot", "screen_diff", "history",
 })
 
 # ---- worker events --------------------------------------------------------------------------
@@ -88,7 +89,8 @@ FORWARDED_EVENTS = frozenset({
     "agent_finished", "agent_message_delivered", "agent_started", "agent_stopped", "cancelled",
     "checkpoints", "compacted", "compaction_started", "completion_check", "context",
     "conversation", "conversations", "delta", "done", "effort_changed", "error", "interrupting",
-    "mode_changed", "model_applied", "model_changed", "plan_written", "provider_retry", "queue_changed", "queued",
+    "mode_changed", "model_applied", "model_changed", "model_switch_refused", "plan_written", "provider_retry",
+    "queue_changed", "queued",
     "ready", "recap", "request", "request_audit", "requests", "sessions", "status",
     "steer_delivered", "steer_escalated", "steer_returned", "subagent_event", "subagent_finished",
     "subagent_handoff", "subagent_model", "subagent_progress", "subagent_started", "subagent_transcript",
@@ -114,6 +116,9 @@ FORWARDED_EVENTS = frozenset({
     # The agent handing a command to the user's real shell (protocol 22): same reason. The phone
     # only watches; the desktop pane is the one that answers it.
     "terminal_command",
+    # The commands the agent left running (backend/relay_core/jobs.py): a phone watching a pane
+    # should know a server is still up, for the same reason it sees tool_result.
+    "jobs",
 })
 
 # Never forwarded, with the reason. Key material, provider configuration, desktop-local
@@ -141,6 +146,7 @@ WITHHELD_EVENTS: dict[str, str] = {
     "index_rebuilt": "desktop-local administration",
     "terminal_history_indexed": "desktop-local administration",
     "conversation_deleted": "desktop-local administration",
+    "job_output": "reply to the desktop's own request (up to 256 KiB of command output)",
     "conversation_pinned": "desktop-local administration",
     "conversation_renamed": "desktop-local administration",
     "reset": "desktop-local administration",

@@ -1030,51 +1030,6 @@ QString LibVtermCore::hyperlinkAt(int row, int col) const
     return id < d->linkUris.size() ? d->linkUris[id] : QString();
 }
 
-// Every run of cells whose OSC 8 URI starts with `prefix`, in absolute
-// scrollback rows. The ring holds the link id per cell, so this is a walk over
-// the scrollback and the screen with no libvterm call per cell: about 20 ms for
-// a 100 000-line history here, which is why callers only run it on resize,
-// trimming and clearing.
-std::vector<VtCore::HyperlinkRun> LibVtermCore::hyperlinkRuns(const QString &prefix) const
-{
-    std::vector<HyperlinkRun> out;
-    if (prefix.isEmpty())
-        return out;
-    const int total = int(d->count) + d->rowsN;
-    Line tmp;
-    uint32_t openId = 0;
-    for (int row = 0; row < total; ++row) {
-        const Line *l = d->peekLine(d->firstId() + row, &tmp);
-        if (!l) {
-            openId = 0;
-            continue;
-        }
-        bool onThisRow = false;
-        for (int col = 0; col < int(l->cells.size()); ++col) {
-            const uint32_t id = l->cells[size_t(col)].link;
-            if (id == 0 || id >= d->linkUris.size() || !d->linkUris[id].startsWith(prefix))
-                continue;
-            // The same id on the same or the next row continues the run; the
-            // same URI printed again later starts a new one.
-            if (openId == id && !out.empty() && (out.back().endRow == row || out.back().endRow == row - 1)) {
-                out.back().endRow = row;
-                out.back().endCol = col;
-            } else {
-                HyperlinkRun r;
-                r.uri = d->linkUris[id];
-                r.startRow = r.endRow = row;
-                r.startCol = r.endCol = col;
-                out.push_back(r);
-                openId = id;
-            }
-            onThisRow = true;
-        }
-        if (!onThisRow)
-            openId = 0;
-    }
-    return out;
-}
-
 void LibVtermCore::selectionBegin(int row, int col, SelectionUnit unit, bool rectangle)
 {
     d->selUnit = unit;
@@ -1167,13 +1122,6 @@ int LibVtermCore::searchStep(bool backwards)
 }
 
 int LibVtermCore::searchMatchCount() const { return int(d->matches.size()); }
-
-int LibVtermCore::searchCurrentRow() const
-{
-    if (d->current < 0 || d->current >= int(d->matches.size()))
-        return -1;
-    return int(d->matches[size_t(d->current)].line - d->firstId());
-}
 
 void LibVtermCore::sendKey(const KeyInput &key)
 {

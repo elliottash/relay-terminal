@@ -12,6 +12,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTest>
+#include <QTreeWidget>
 
 using relay::RolesDialog;
 
@@ -43,6 +44,29 @@ QJsonArray presets(const QStringList &keyed) {
             preset(QStringLiteral("openai"), QStringLiteral("OpenAI · GPT-6 Astra"),
                    QStringLiteral("OpenAI (ChatGPT)"), QStringLiteral("Pay-as-you-go"),
                    has(QStringLiteral("openai")))};
+}
+
+// A model server on this machine, as backend/worker.py appends it to the `presets` event: no key is
+// stored and none is needed, `local` is what makes the row usable (card #24XJ).
+QJsonObject localPreset() {
+    return {{QStringLiteral("id"), QStringLiteral("local:bonsai")},
+            {QStringLiteral("label"), QStringLiteral("Bonsai 2 27B")},
+            {QStringLiteral("provider"), QStringLiteral("Bonsai 2 27B")},
+            {QStringLiteral("plan"), QStringLiteral("llama.cpp")},
+            {QStringLiteral("base_url"), QStringLiteral("http://127.0.0.1:8080/v1")},
+            {QStringLiteral("model"), QStringLiteral("bonsai-2-27b")},
+            {QStringLiteral("group"), QStringLiteral("local")},
+            {QStringLiteral("efforts"), QJsonArray{}},
+            {QStringLiteral("local"), true},
+            {QStringLiteral("server"), QStringLiteral("llamacpp")},
+            {QStringLiteral("key_source"), QStringLiteral("local")},
+            {QStringLiteral("has_stored_key"), false}};
+}
+
+QJsonArray presetsWithLocal(const QStringList &keyed) {
+    QJsonArray rows = presets(keyed);
+    rows.append(localPreset());   // the worker appends local rows after the built-in presets
+    return rows;
 }
 
 QJsonObject tierSpec(const QString &id, const QString &label) {
@@ -183,6 +207,45 @@ private Q_SLOTS:
         dialog.setProvider(QStringLiteral("kimi"));
         QComboBox *flash = tierProviderBoxes(dialog).first();
         QCOMPARE(flash->currentText(), QStringLiteral("Z.AI (GLM)  (no key)"));
+    }
+
+    // A model server on this machine has no key and needs none, so the roles modal offers it like
+    // any reachable provider — and never as "(no key)", which would read as something to fix.
+    void aLocalEndpointIsChoosableWithoutAStoredKey() {
+        RolesDialog dialog;
+        dialog.setPresets(presetsWithLocal({QStringLiteral("kimi")}), catalog(), {});
+        dialog.setProvider(QStringLiteral("kimi"));
+        auto *box = dialog.findChild<QComboBox *>();
+        QVERIFY(box->findData(QStringLiteral("local:bonsai")) >= 0);
+        QVERIFY(itemsOf(box).contains(QStringLiteral("Bonsai 2 27B")));
+        for (const QString &item : itemsOf(box)) QVERIFY(!item.contains(QStringLiteral("no key")));
+        // And a tier can be pinned to it too.
+        QComboBox *flash = tierProviderBoxes(dialog).first();
+        const int local = flash->findData(QStringLiteral("local:bonsai"));
+        QVERIFY(local > 0);
+        flash->setCurrentIndex(local);
+        Q_EMIT flash->activated(local);
+        QCOMPARE(QSettings().value(RolesDialog::tierSetting(QStringLiteral("flash"),
+                                                            QStringLiteral("preset"))).toString(),
+                 QStringLiteral("local:bonsai"));
+    }
+
+    // …but it is not an API key to hold, so it stays out of the keys modal entirely: that dialog
+    // lists the subscription/aggregator/payg groups and a local row's group is "local".
+    void aLocalEndpointIsAbsentFromTheKeysDialog() {
+        relay::KeysDialog dialog;
+        dialog.setPresets(presetsWithLocal({QStringLiteral("kimi")}));
+        auto *list = dialog.findChild<QTreeWidget *>();
+        QVERIFY(list);
+        QStringList ids;
+        for (int i = 0; i < list->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *group = list->topLevelItem(i);
+            QVERIFY(group->text(0) != QStringLiteral("On this machine"));
+            for (int j = 0; j < group->childCount(); ++j)
+                ids << group->child(j)->data(0, Qt::UserRole + 1).toString();
+        }
+        QVERIFY(!ids.contains(QStringLiteral("local:bonsai")));
+        QVERIFY(ids.contains(QStringLiteral("kimi")));   // the keyed presets are still listed
     }
 };
 

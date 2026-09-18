@@ -212,7 +212,9 @@ class SessionCommands:
     def _set_model(self, request):
         """Switch the pane's model, keeping the conversation. Accepted while a turn runs (issue 3ES1):
         the request in flight finishes on the old model and the switch lands before the next one,
-        which `model_applied` announces; idle, it applies at once as it always did."""
+        which `model_applied` announces; idle, it applies at once as it always did. A conversation
+        over the new window's limit is compacted first (by the model in force); one that cannot fit
+        the new window at all is refused with `model_switch_refused`, and the model stays."""
         agent = self._agent()
         # Resolved now, turn or no turn: a missing key is refused here, not at the next step.
         config = provider_config(request)
@@ -222,25 +224,30 @@ class SessionCommands:
         preset = resolve_preset(preset_id, config.base_url, config.model)
         agent.on_model_applied = self.on_model_changed
 
-        def announce(outcome: dict) -> dict:
+        def apply_now():
+            agent.set_model(config, preset_id, window)
+            self.on_model_changed(agent)
+
+        def decide(idle: bool) -> dict:
             # Under the agent's model lock, so `model_changed` always precedes the `model_applied`
-            # of the same switch.
-            self.emit({"event": "model_changed", "id": request.get("id"), "model": config.model,
-                       "preset": preset.id if preset else None, "effort": agent.effort, **outcome})
-            return outcome
-
-        def now():
+            # (or `model_switch_refused`) of the same switch.
             with agent._model_lock:
-                agent._pending_model = None
-                agent.set_model(config, preset_id, window)
-                self.on_model_changed(agent)
-                return announce({"applies": "now", "context_window": agent.context.window})
-
-        def later():
-            with agent._model_lock:
-                return announce(agent.defer_model(config, preset_id, window))
-        if self.turns.now_or_later(now, later)["applies"] == "now":
-            self.emit(agent.context_event())
+                outcome = agent.request_model(config, preset_id, window, idle=idle, apply_now=apply_now,
+                                              start_exclusive=lambda task: self.turns.start_exclusive_locked(
+                                                  "set_model", task))
+                if outcome["applies"] == "refused":
+                    self.emit({"event": "model_switch_refused", "id": request.get("id"), "at": "request",
+                               "model": config.model, "current_model": agent.config.model,
+                               "preset": agent.preset.id if agent.preset else None,
+                               "context_window": agent.context.window, "effort": agent.effort,
+                               "reason": outcome["reason"]})
+                else:
+                    self.emit({"event": "model_changed", "id": request.get("id"), "model": config.model,
+                               "preset": preset.id if preset else None, "effort": agent.effort, **outcome})
+                return outcome
+        self.turns.now_or_later(lambda: decide(True), lambda: decide(False))
+        # Every outcome moves the context bar: the window now in force, or the one about to be.
+        self.emit(agent.context_event())
 
     def _set_effort(self, request):
         agent = self._agent()

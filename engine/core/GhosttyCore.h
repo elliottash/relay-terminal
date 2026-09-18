@@ -42,7 +42,6 @@ public:
     bool scrollToPrompt(int direction) override;
 
     QString hyperlinkAt(int row, int col) const override;
-    std::vector<HyperlinkRun> hyperlinkRuns(const QString &prefix) const override;
 
     void selectionBegin(int row, int col, SelectionUnit unit, bool rectangle) override;
     void selectionExtend(int row, int col) override;
@@ -54,7 +53,6 @@ public:
     int searchSet(const QString &needle) override;
     int searchStep(bool backwards) override;
     int searchMatchCount() const override;
-    int searchCurrentRow() const override;
 
     void sendKey(const KeyInput &key) override;
     void sendText(const QString &text) override;

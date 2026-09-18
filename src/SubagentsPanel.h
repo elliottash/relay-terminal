@@ -93,6 +93,7 @@ public:
     std::function<void(const QString &id)> onOpen;
     std::function<void(const QString &id)> onStop;
     std::function<void()> onExit;    // give focus back to the composer
+    std::function<void()> onBelow;   // Down past the last row: the list beneath (commands the agent left running)
     // The row's model chip was clicked (or m pressed): show a model picker at `at` (global).
     std::function<void(const QString &id, const QPoint &at)> onPickModel;
 

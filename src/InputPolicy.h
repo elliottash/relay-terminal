@@ -116,4 +116,35 @@ private:
 // trailing `2>&1` — so those are stripped before comparing, with whitespace collapsed.
 bool commandMatchesPrompt(const QString &command, const QString &prompt);
 
+// ----- the agent hands a command to the terminal (protocol 22) ---------------------------------
+// `run_in_terminal`: the agent asks for a command to be run in the user's shell, or put in the
+// prompt box. What actually happens is decided here, from the state at that instant.
+enum class HandoffAction {
+    Run,          // stage it in the shell and press Enter
+    Prefill,      // put it in the prompt box, in terminal mode, for the user to submit
+    RefuseDraft,  // the prompt box holds the user's own text; it is never overwritten
+    RefuseBusy,   // a run was asked for, the shell is not free, and neither is the prompt box
+    RefuseChain,  // too many hand-overs in a row with nothing typed by the user in between
+};
+
+struct HandoffState {
+    bool wantsRun = false;   // the agent's mode: "run" rather than "prefill"
+    QString ceiling;         // handoffCeiling(): "agent" or "prefill"
+    bool shellIdle = false;  // at an integrated prompt, nothing loading, no foreground program
+    bool boxFree = false;    // the prompt box is empty
+    int chain = 0;           // hand-overs run back to back since the user last typed something
+};
+
+constexpr int kMaxHandoffChain = 3;
+constexpr int kHandoffOutputTail = 4000;
+
+// The `agent/terminal_handoff` setting as the worker hears it: "agent" (the agent chooses, the
+// default), "prefill" (never run, always hand it to the user), or empty for "off".
+QString handoffCeiling(const QString &setting);
+HandoffAction handoffAction(const HandoffState &state);
+// The protocol's refusal code for an action, or empty when it is not a refusal.
+QString handoffRefusalCode(HandoffAction action);
+// The follow-up prompt: what ran, how it ended, and the end of what it printed, labelled as data.
+QString handoffReport(const QString &command, int exitStatus, const QString &output);
+
 }  // namespace relay::input

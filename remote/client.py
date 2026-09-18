@@ -146,6 +146,15 @@ class Client:
             if message["t"] in ("bye", "revoked"):
                 raise wire.WireError("closed", message.get("reason", "the desktop closed the link."))
 
+    async def transport_switch(self) -> int:
+        """Offer to re-bind the session to a new transport; the desktop acks with the exact
+        frame count it expects next (docs/REMOTE-PROTOCOL.md section 2)."""
+        # The offer itself is a frame, so the count this names includes it: after the ack,
+        # exactly this many frames have been applied and the next one starts the new transport.
+        await self.send({"t": "transport_switch", "next_seq": self.session.sent + 1})
+        reply = await self.expect("transport_switched")
+        return int(reply.get("effective", -1))
+
     async def close(self) -> None:
         if self._reader:
             self._reader.cancel()

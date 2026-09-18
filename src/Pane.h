@@ -29,6 +29,7 @@
 #include "SkillsDialog.h"
 #include "SubagentTranscript.h"
 #include "SubagentsPanel.h"
+#include "JobsPanel.h"
 #include "RequestLedger.h"
 #include "RequestsPanel.h"
 #include "Conversations.h"
@@ -158,6 +159,14 @@ public:
         // Wrong-mode hints (2026-09-17): natural marks a terminal submission that reads like an
         // agent request; shellText carries an agent submission that is a runnable shell command.
         bool natural = false; QString shellText;
+        // run_in_terminal (protocol 22). On a terminal entry: report its exit to the agent. On an
+        // agent entry: it *is* that report, a prompt Relay wrote, shown and queued like a fix.
+        bool handoff = false;
+        bool noHandoff = false;   // a prompt from a paired device never gets the tool
+        bool written() const { return fix || (agent && handoff); }   // by Relay, not by the user
+        QString label() const {
+            return fix ? QStringLiteral("fix request") : written() ? QStringLiteral("terminal result") : text;
+        }
     };
     // Why the prompt box is hidden, so it can come back by itself when the reason ends.
     enum class HideReason { None, AltScreen, Remote, Manual };
@@ -1891,6 +1900,7 @@ private:
         m_programBar->hide();
         layout->addWidget(composer);
         setupSubagentsUi(layout);   // subagents UI: running-agents list beneath the composer
+        setupJobsUi(layout);        // commands the agent left running, beneath that
         updatePaths();
     }
 
@@ -1945,21 +1955,41 @@ private:
     }
 
 
+    void clearNextContext() {
+        m_ctxNextUsed = m_ctxNextWindow = m_ctxNextLimit = 0; m_ctxNextPercent = 0;
+        m_ctxNextModel.clear(); m_ctxInFlightModel.clear();
+    }
+
     void updateContextLabel() {
         if (!m_ctxLabel) return;
         if (m_ctxWindow <= 0) { m_ctxLabel->hide(); return; }
+        // While a switch waits (issue 3ES1) the chip already names the new model, so the bar agrees
+        // with it: the conversation against the window that serves the next request. The ↻ and the
+        // tooltip say the request in flight is still on the old model.
+        const bool next = m_ctxNextWindow > 0;
+        const qint64 used = next ? m_ctxNextUsed : m_ctxUsed, window = next ? m_ctxNextWindow : m_ctxWindow;
+        const qint64 limit = next ? m_ctxNextLimit : m_ctxLimit;
+        const double percent = next ? m_ctxNextPercent : m_ctxPercent;
         if (m_compacting) {
             m_ctxLabel->setText(QStringLiteral("compacting…"));
         } else {
-            const double left = std::max(0.0, 100.0 - m_ctxPercent);
-            m_ctxLabel->setText(QStringLiteral("%1% left").arg(QString::number(left, 'f', left < 10 ? 1 : 0)));
+            const double left = std::max(0.0, 100.0 - percent);
+            m_ctxLabel->setText(QStringLiteral("%1% left%2").arg(QString::number(left, 'f', left < 10 ? 1 : 0),
+                                                                 next ? QStringLiteral(" ↻") : QString()));
         }
-        const bool near = m_ctxLimit > 0 && m_ctxUsed >= m_ctxLimit * 9 / 10;
+        const bool near = limit > 0 && used >= limit * 9 / 10;
         m_ctxLabel->setProperty("warn", near);
         m_ctxLabel->style()->unpolish(m_ctxLabel); m_ctxLabel->style()->polish(m_ctxLabel);
-        m_ctxLabel->setToolTip(QStringLiteral("%1 of %2 tokens%3\nAuto-compacts at %4 tokens")
-            .arg(QLocale().toString(m_ctxUsed), QLocale().toString(m_ctxWindow), m_ctxEstimated ? QStringLiteral(" (estimated)") : QString(),
-                 QLocale().toString(m_ctxLimit)));
+        QString tip = QStringLiteral("%1 of %2 tokens%3\nAuto-compacts at %4 tokens")
+            .arg(QLocale().toString(used), QLocale().toString(window), m_ctxEstimated || next ? QStringLiteral(" (estimated)") : QString(),
+                 QLocale().toString(limit));
+        if (next)
+            tip = QStringLiteral("Measured against %1's window, which serves the next request.\n%2\n%3\n"
+                                 "The request in flight is still on %4 (%5-token window) until the switch lands.")
+                .arg(m_ctxNextModel, tip,
+                     used >= limit ? QStringLiteral("Over it: the switch compacts the conversation first.") : QString(),
+                     m_ctxInFlightModel, QLocale().toString(m_ctxWindow)).replace(QStringLiteral("\n\n"), QStringLiteral("\n"));
+        m_ctxLabel->setToolTip(tip);
         m_ctxLabel->show();
     }
 
@@ -1971,7 +2001,7 @@ private:
     // Turn limits and request audit from Agent options (protocol 12.1).
     static QJsonObject requestOptions() {
         QSettings settings;
-        return {{"max_steps", std::clamp(settings.value(QStringLiteral("agent/max_steps"), 50).toInt(), 1, 500)},
+        return {{"max_steps", std::clamp(settings.value(QStringLiteral("agent/max_steps"), 256).toInt(), 1, 500)},
                 {"max_tool_calls", std::clamp(settings.value(QStringLiteral("agent/max_tool_calls"), 150).toInt(), 1, 2000)},
                 // Idle deadline for a streamed model call (protocol 15).
                 {"stall_timeout_s", std::clamp(settings.value(QStringLiteral("agent/stall_timeout_s"), 60).toInt(), 1, 1800)},
@@ -2892,9 +2922,14 @@ public:
             };
             hooks.cwd = [this] { return m_cwd; };
             hooks.status = [this] { return shareStatus(); };
+            hooks.shellPid = [this] { return m_backend ? m_backend->shellPid() : 0; };
+            hooks.foregroundPid = [this] {
+                return m_backend ? m_backend->foregroundProcessId() : 0;
+            };
             hooks.input = [this](const QByteArray &bytes) {
                 if (m_backend) m_backend->sendText(QString::fromUtf8(bytes), false);
             };
+            hooks.secret = [this](const QByteArray &bytes) { return submitRemoteSecret(bytes); };
             hooks.compose = [this](const QString &text, bool route, const QString &origin) {
                 submitRemote(text, route, origin);
             };
@@ -2910,6 +2945,22 @@ public:
         dialog->setAttribute(Qt::WA_DeleteOnClose);
         connect(&share, &relay::RemoteShare::sharingChanged, dialog, [this] { updateShareChip(); });
         dialog->show();
+    }
+
+    // A password line from a phone (docs/REMOTE-PROTOCOL.md section 6.7). The sidecar has
+    // already checked the desktop-minted nonce and the prompt; this is the fresh termios read
+    // immediately before the write, which is what keeps a line typed at a prompt that ended in
+    // flight from landing at the shell — into history, onto the screen and out to every device.
+    bool submitRemoteSecret(const QByteArray &bytes) {
+        if (terminalMode() != TerminalMode::Secret || !m_backend) return false;
+        relay::input::Secret secret;
+        secret.set(QString::fromUtf8(bytes));
+        QString line = secret.take();        // the line plus the newline, stored copy wiped
+        m_backend->sendText(line, false);
+        relay::input::wipe(line);
+        m_echoTicks = 0;
+        status(QStringLiteral("Password sent from your phone."));
+        return true;
     }
 
     // The pane status a phone sees: the same vocabulary as the protocol's pane list.
@@ -3245,17 +3296,22 @@ private:
             if (!warning.isEmpty()) { ensureLineStart(); printInline(warning + '\n', Ink::Note); closeInline(); }
             // A role switch keeps the pane's main preset: only a set_model changes it.
             if (!preset.isEmpty() && role.isEmpty()) { m_currentPreset = preset; rememberPreset(preset); }
-            // Mid-turn (issue 3ES1) the chip moves now, but the context bar keeps the window of the
-            // model still answering until `model_applied`.
+            // Mid-turn (issue 3ES1) the chip moves now; the model still answering keeps its window as
+            // m_ctxWindow until `model_applied`, and the bar shows the new one from the `context`
+            // event's `next`, which follows this event.
             const QString applies = event.value(QStringLiteral("applies")).toString();
-            const bool later = applies == QStringLiteral("next_step") || applies == QStringLiteral("turn_end");
+            const bool afterCompaction = applies == QStringLiteral("after_compaction");
+            const bool later = applies == QStringLiteral("next_step") || applies == QStringLiteral("turn_end") || afterCompaction;
+            const bool willCompact = event.value(QStringLiteral("will_compact")).toBool();
             const qint64 window = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
             if (window > 0 && !later) m_ctxWindow = window;
             const QString effort = event.value(QStringLiteral("effort")).toString();
             if (efforts().contains(effort)) m_effort = effort;
             const QString inFlight = event.value(QStringLiteral("in_flight_model")).toString();
             const QString what = later
-                ? (applies == QStringLiteral("turn_end")
+                ? (afterCompaction
+                       ? QStringLiteral("Model: %1 once the conversation is compacted to fit its window").arg(m_model)
+                       : applies == QStringLiteral("turn_end")
                        ? QStringLiteral("Model: %1 from the next turn · this image turn finishes on %2").arg(m_model, inFlight)
                        : QStringLiteral("Model: %1 from the next step · %2 is not interrupted").arg(m_model, inFlight))
                 : role.isEmpty() || role == QStringLiteral("main")
@@ -3266,10 +3322,15 @@ private:
                 // The clock owns the status line while a turn runs, so the "not now, next step" part
                 // goes in the transcript too; `model_applied` marks where it landed.
                 ensureLineStart();
-                printInline(QStringLiteral("↻ %1 takes over %2 · %3 is not interrupted\n")
-                    .arg(m_model, applies == QStringLiteral("turn_end") ? QStringLiteral("after this turn")
-                                                                        : QStringLiteral("at the next step"),
-                         inFlight), Ink::Note);
+                if (afterCompaction)
+                    printInline(QStringLiteral("↻ %1 takes over once the conversation is compacted to fit its window · "
+                                               "%2 summarises it\n").arg(m_model, inFlight), Ink::Note);
+                else
+                    printInline(QStringLiteral("↻ %1 takes over %2 · %3 is not interrupted%4\n")
+                        .arg(m_model, applies == QStringLiteral("turn_end") ? QStringLiteral("after this turn")
+                                                                            : QStringLiteral("at the next step"),
+                             inFlight, willCompact ? QStringLiteral(" · will compact to fit") : QString()), Ink::Note);
+                if (!m_agentBusy && !moreTurnsPending()) closeInline();
             }
             changed();
             return true;
@@ -3285,11 +3346,35 @@ private:
                 line += QStringLiteral(" · from the next turn");
             if (event.value(QStringLiteral("history_converted")).toBool())
                 line += QStringLiteral(" · conversation converted from %1").arg(event.value(QStringLiteral("from_model")).toString());
-            if (event.value(QStringLiteral("compacts")).toBool())
-                line += QStringLiteral(" · its window is smaller, compacting first");
+            if (event.value(QStringLiteral("compacted")).toBool())
+                line += QStringLiteral(" · compacted to fit its window");
             ensureLineStart();
             printInline(line + '\n', Ink::Note);
             if (!m_agentBusy && !moreTurnsPending()) closeInline();
+            clearNextContext();
+            updateContextLabel();
+            changed();
+            return true;
+        }
+        if (type == QStringLiteral("model_switch_refused")) {
+            // A switch the new window cannot hold, even compacted (issue 3ES1): the pane stays on the
+            // model in force, so the chip, the role and the provider settings go back to it.
+            const QString refused = event.value(QStringLiteral("model")).toString();
+            const QString current = event.value(QStringLiteral("current_model")).toString();
+            if (!current.isEmpty()) m_model = current;
+            const QString role = event.value(QStringLiteral("agent_role")).toString();
+            const QString preset = event.value(QStringLiteral("preset")).toString();
+            if (!role.isEmpty()) m_agentRole = role;
+            else if (!preset.isEmpty()) { m_currentPreset = preset; rememberPreset(preset); }
+            const qint64 window = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
+            if (window > 0) m_ctxWindow = window;
+            clearNextContext();
+            const QString reason = event.value(QStringLiteral("reason")).toString();
+            ensureLineStart();
+            printInline(QStringLiteral("✗ %1 did not take over · %2\n").arg(refused, reason), Ink::Error);
+            if (!m_agentBusy && !moreTurnsPending()) closeInline();
+            const QString what = QStringLiteral("Still on %1 · %2's window is too small for this conversation").arg(m_model, refused);
+            status(what); toast(what);
             updateContextLabel();
             changed();
             return true;
@@ -3306,6 +3391,17 @@ private:
             m_ctxLimit = event.value(QStringLiteral("limit_tokens")).toVariant().toLongLong();
             m_ctxPercent = event.value(QStringLiteral("percent")).toDouble();
             m_ctxEstimated = event.value(QStringLiteral("estimated")).toBool();
+            // A switch waiting to land (issue 3ES1): the bar measures against its window instead.
+            const QJsonObject next = event.value(QStringLiteral("next")).toObject();
+            if (next.isEmpty()) clearNextContext();
+            else {
+                m_ctxNextUsed = next.value(QStringLiteral("used_tokens")).toVariant().toLongLong();
+                m_ctxNextWindow = next.value(QStringLiteral("window")).toVariant().toLongLong();
+                m_ctxNextLimit = next.value(QStringLiteral("limit_tokens")).toVariant().toLongLong();
+                m_ctxNextPercent = next.value(QStringLiteral("percent")).toDouble();
+                m_ctxNextModel = next.value(QStringLiteral("model")).toString();
+                m_ctxInFlightModel = next.value(QStringLiteral("in_flight_model")).toString();
+            }
             if (m_contextNotePending) {
                 m_contextNotePending = false;
                 ensureLineStart();
@@ -3326,8 +3422,10 @@ private:
             m_compacting = false;
             status(QStringLiteral("Conversation compacted"));
             ensureLineStart();
+            const QString forModel = event.value(QStringLiteral("for_model")).toString();   // issue 3ES1
             printInline(QStringLiteral("Conversation compacted (%1) · %2 → %3 tokens\n")
-                .arg(event.value(QStringLiteral("reason")).toString(QStringLiteral("manual")),
+                .arg(forModel.isEmpty() ? event.value(QStringLiteral("reason")).toString(QStringLiteral("manual"))
+                                        : QStringLiteral("to fit %1's window").arg(forModel),
                      compactTokens(event.value(QStringLiteral("before_tokens")).toVariant().toLongLong()),
                      compactTokens(event.value(QStringLiteral("after_tokens")).toVariant().toLongLong())), Ink::Note);
             if (!m_agentBusy && !moreTurnsPending()) closeInline();
@@ -3734,13 +3832,16 @@ private:
         return QSettings().value(QStringLiteral("index/terminal_output"), true).toBool();
     }
 
-    void beginCommandCapture(const QString &command) {
-        if (!indexTerminalHistory() || command.trimmed().isEmpty()) { m_captureCommand.clear(); return; }
+    // forAgent: a command the agent handed over is captured whatever the index settings say, because
+    // its output goes to the agent (protocol 22); the index still gets only what the settings allow.
+    void beginCommandCapture(const QString &command, bool forAgent = false) {
+        m_captureForAgent = forAgent; m_handoffOutput.clear();
+        if ((!indexTerminalHistory() && !forAgent) || command.trimmed().isEmpty()) { m_captureCommand.clear(); return; }
         m_captureCommand = command;
         m_captureCwd = m_cwd;
         m_captureAt = QDateTime::currentSecsSinceEpoch();
         m_capture.clear();
-        m_capturing = indexTerminalOutput() && m_backend;
+        m_capturing = (indexTerminalOutput() || forAgent) && m_backend;
         if (m_capturing) m_backend->setOutputCallbackEnabled(true);
     }
 
@@ -3759,10 +3860,12 @@ private:
         QString output = relay::conversations::stripAnsi(captured);
         // The shell echoes the command it is about to run; that line is already the command row.
         if (output.startsWith(m_captureCommand)) output = output.mid(m_captureCommand.size());
-        if (!output.trimmed().isEmpty()) item.insert(QStringLiteral("output"), output.trimmed());
+        if (m_captureForAgent) m_handoffOutput = output.trimmed();
+        if (!output.trimmed().isEmpty() && indexTerminalOutput()) item.insert(QStringLiteral("output"), output.trimmed());
         m_captureCommand.clear();
         m_capture.clear();
-        if (m_workerReady)
+        m_captureForAgent = false;
+        if (m_workerReady && indexTerminalHistory())
             send({{"type", "terminal_history"}, {"workspace", m_workspace}, {"items", QJsonArray{item}}});
     }
 
@@ -4129,7 +4232,7 @@ private:
     bool upgradeLastQueuedToSteer() {
         if (!m_agentBusy || m_entries.isEmpty() || !m_lastQueuedAt.isValid() || m_lastQueuedAt.elapsed() > 15000) return false;
         const QueueEntry &last = m_entries.last();
-        if (!last.agent || last.fix || last.id != m_lastQueuedEntryId) return false;
+        if (!last.agent || last.written() || last.id != m_lastQueuedEntryId) return false;
         QueueEntry entry = m_entries.takeLast();
         m_lastQueuedAt.invalidate();
         SteerEntry steer;
@@ -4293,6 +4396,7 @@ private:
     void placeSubagentsPanel() {
         if (!m_agentsPanel) return;
         m_agentsPanel->setAllowed(!m_composer || m_composer->isVisible());
+        if (m_jobsPanel) m_jobsPanel->setAllowed(!m_composer || m_composer->isVisible());
         placeQueueStrip();
     }
 
@@ -4305,6 +4409,41 @@ private:
         m_subagentOverlay->setGeometry(width() - w - 8, top + 8, w, std::max(160, height() - top - 16));
     }
     // ----- end subagents UI ---------------------------------------------------------------------
+
+    // ----- jobs: commands the agent left running (src/JobsPanel.h) ----------------------------
+    void setupJobsUi(QVBoxLayout *layout) {
+        m_jobsPanel = new relay::JobsPanel(&m_jobs, this);
+        layout->addWidget(m_jobsPanel);
+        m_jobsPanel->onOpen = [this](const QString &id) { send({{"type", "job_output_get"}, {"job_id", id}}); };
+        m_jobsPanel->onStop = [this](const QString &id, bool mouse) {
+            send({{"type", "job_stop"}, {"job_id", id}});
+            toast(QStringLiteral("Stopping ") + id);
+            if (mouse)
+                hint(QStringLiteral("jobs.stop.mouse"), relay::ShortcutHints::nextTime(QStringLiteral("↓ from the prompt, then x"), QStringLiteral("stop a command")));
+        };
+        m_jobsPanel->onExit = [this] { focusInput(); };
+        // Up past the first job goes back to the running-agents list when it is showing.
+        m_jobsPanel->onExitUp = [this] {
+            if (m_agentsPanel && m_agentsPanel->isVisible()) m_agentsPanel->setFocus(); else focusInput();
+        };
+        if (m_agentsPanel) m_agentsPanel->onBelow = [this] { if (m_jobsPanel && m_jobsPanel->isVisible()) m_jobsPanel->enter(); };
+        m_jobs.onChanged = [this] { m_jobsPanel->refresh(); placeQueueStrip(); };
+        m_jobs.onFinished = [this](const relay::JobRow &row) {
+            status(QStringLiteral("%1 finished (%2): %3").arg(row.id, row.state(row.elapsedMs), row.command.left(80)));
+        };
+    }
+
+    // The job's output as the worker kept it, in a file pane like a stored tool call's output.
+    void openJobOutput(const QJsonObject &event) {
+        QJsonObject result{{"output", event.value(QStringLiteral("output"))}};
+        if (!event.value(QStringLiteral("running")).toBool() && event.value(QStringLiteral("exit_code")).isDouble())
+            result.insert(QStringLiteral("exit_code"), event.value(QStringLiteral("exit_code")));
+        QString preview = QStringLiteral("$ ") + event.value(QStringLiteral("command")).toString();
+        if (event.value(QStringLiteral("running")).toBool()) preview += QStringLiteral("\n(still running: this is its output so far)");
+        if (event.value(QStringLiteral("truncated")).toBool())
+            preview += QStringLiteral("\n(%1 earlier bytes not shown)").arg(qint64(event.value(QStringLiteral("omitted_bytes")).toDouble()));
+        openToolOutput({{"name", "job"}, {"call_id", event.value(QStringLiteral("job_id"))}, {"preview", preview}, {"result", result}});
+    }
 
     // ----- request ledger UI (protocol section 12) ----------------------------------------------
     // One Switchboard chip for what this pane is working on (owner, 2026-09-17): the cards it
@@ -4815,6 +4954,7 @@ private:
                 hint(QStringLiteral("prefix.star"), QStringLiteral("Next time: type * at the start of the prompt for the agent"));
             if (!m_prefixMode.isEmpty()) clearPrefixMode(true);   // one submission only
             m_submitMode = mode;
+            m_handoffChain = 0;   // the user typed something: a chain of hand-overs starts over
             m_pendingSubmit = id; m_submittedDraft = typed;
         } else m_previewId = id;
         send({{"type", "route"}, {"id", id}, {"text", m_editor->toPlainText()}, {"mode", mode},
@@ -4858,7 +4998,10 @@ private:
         if (handleBoardEvent(type, event)) return;   // Switchboard (protocol 17)
         if (m_subagents.handle(event)) return;
         // --- end subagents UI ---
+        if (m_jobs.handle(event)) return;   // the jobs list; reset/ready are observed and passed on
+        if (type == QStringLiteral("job_output")) { openJobOutput(event); return; }
         if (handleProgramEvent(type, event)) return;    // the agent typing into this pane's program
+        if (type == QStringLiteral("terminal_command")) { handleTerminalCommand(event); return; }   // protocol 22
         if (handleRequestsEvent(type, event)) return;   // request ledger UI
         if (handleObservabilityEvent(type, event)) return;
         if (handleSessionEvent(type, event)) return;
@@ -4941,7 +5084,11 @@ private:
             m_stored.clear();
             for (const auto &item : m_presets) {
                 const auto preset = item.toObject();
-                if (preset.value(QStringLiteral("has_stored_key")).toBool())
+                // A model server on this machine (card #24XJ) needs no key, so `local` makes a row
+                // selectable just as a stored key does. The worker appends those rows after the
+                // keyed presets, so they stay last in this list.
+                if (preset.value(QStringLiteral("has_stored_key")).toBool()
+                    || preset.value(QStringLiteral("local")).toBool())
                     m_stored.append({preset.value(QStringLiteral("id")).toString(), preset.value(QStringLiteral("label")).toString()});
             }
             if (m_keysDialog) m_keysDialog->setPresets(m_presets);
@@ -4952,16 +5099,23 @@ private:
                 return;
             }
             if (!m_configured && !m_configuring) {
-                auto hasKey = [this](const QString &id) {
+                auto usable = [this](const QString &id) {
                     return std::any_of(m_stored.cbegin(), m_stored.cend(), [&](const auto &entry) { return entry.first == id; });
                 };
                 // A restored pane keeps the model it had; otherwise the saved choice, then Warp's
-                // default agent model, then the first stored key.
+                // default agent model, then the first stored key. A local endpoint is selectable
+                // but never wins that last step over a key (card #24XJ): it is picked on its own
+                // only when it is the restored/saved preset, or when nothing has a key at all.
                 QString choice = m_restorePreset;
                 m_restorePreset.clear();
-                if (!hasKey(choice)) choice = QSettings().value(QStringLiteral("provider/preset")).toString();
-                if (!hasKey(choice)) choice = event.value(QStringLiteral("warp_default")).toString();
-                if (!hasKey(choice)) choice = m_stored.first().first;
+                if (!usable(choice)) choice = QSettings().value(QStringLiteral("provider/preset")).toString();
+                if (!usable(choice)) choice = event.value(QStringLiteral("warp_default")).toString();
+                if (!usable(choice)) {
+                    const auto keyed = std::find_if(m_stored.cbegin(), m_stored.cend(), [this](const auto &entry) {
+                        return !presetById(entry.first).value(QStringLiteral("local")).toBool();
+                    });
+                    choice = (keyed == m_stored.cend() ? m_stored.first() : *keyed).first;
+                }
                 configurePreset(choice, false);
             }
         } else if (type == QStringLiteral("warp_imported")) {
@@ -5025,7 +5179,10 @@ private:
             m_modeHintShown = false;
             m_runCommands.clear();
             if (!prompt.program.isEmpty()) m_transcriptProgram = prompt.program;
-            if (!prompt.fix && !prompt.text.isEmpty()) {
+            if (prompt.handoff) {
+                ensureLineStart();
+                printInline(QStringLiteral("✦ the command finished · its result went to the agent\n"), Ink::Note);
+            } else if (!prompt.fix && !prompt.text.isEmpty()) {
                 ensureLineStart();
                 printInline(QStringLiteral("✦ ") + prompt.text + '\n', Ink::UserAgent);
                 if (!prompt.why.isEmpty()) printInline(prompt.why + '\n', Ink::Note);
@@ -5221,6 +5378,10 @@ private:
         const QString route = decision.value(QStringLiteral("route")).toString();
         const QString text = decision.value(QStringLiteral("text")).toString();
         if (route == QStringLiteral("empty")) return;
+        // A command the agent put in the prompt box (protocol 22): its exit goes back to the agent,
+        // which replaces the fix loop for this one submission.
+        const bool handoff = m_handoffPrefill;
+        m_handoffPrefill = false;
         if (route == QStringLiteral("shell")) {
             const bool valid = decision.value(QStringLiteral("valid")).toBool(decision.value(QStringLiteral("syntax_ok")).toBool(true));
             const QString problem = decision.value(QStringLiteral("invalid_reason")).toString(
@@ -5243,11 +5404,11 @@ private:
                 }
                 m_editor->remember(text); m_editor->clear();
                 if (!valid) { startFix(text, problem.isEmpty() ? QStringLiteral("not a valid command") : problem, 1); return; }
-                submitTerminal(text, true, readsLikeRequest);
+                submitTerminal(text, !handoff, readsLikeRequest, handoff);
                 return;
             }
             if (!valid) { submitAgent(text, true, problem); return; }
-            submitTerminal(text, false);
+            submitTerminal(text, false, false, handoff);
         } else {
             // "agent", or a legacy "ambiguous" decision: the agent is the default for invalid input.
             // Show why non-command input went to the agent, e.g. "command not found: foo" — but only
@@ -5296,6 +5457,8 @@ private:
         QTimer::singleShot(2500, this, [this, serial] {
             if (m_loading && m_loadSerial == serial) {
                 m_loading = false; clearFix(); setNative(true);
+                m_handoffNext = false;
+                answerTerminalCommand(false, QStringLiteral("failed"), QStringLiteral("The shell did not acknowledge the command, so Enter was not sent."));
                 if (m_activeValid && !m_active.agent) { m_activeValid = false; m_activeLoaded = false; m_entriesPaused = !m_entries.isEmpty(); rebuildQueueStrip(); }
                 status(QStringLiteral("Shell did not acknowledge the editor text. Enter was NOT sent. Inspect the native input line; try --clean-shell."));
             }
@@ -5829,8 +5992,12 @@ private:
         for (const auto &item : m_presets) {
             const QJsonObject preset = item.toObject();
             if (preset.value(QStringLiteral("id")).toString() != presetId) continue;
+            // A model server on this machine reads as local rather than as one more provider
+            // (card #24XJ): no key stands behind it and it answers from this machine.
+            const QString mark = preset.value(QStringLiteral("local")).toBool()
+                                     ? QStringLiteral(" · local") : QString();
             const QString model = preset.value(QStringLiteral("model")).toString();
-            if (!model.isEmpty()) return model.section('/', -1).toLower();
+            if (!model.isEmpty()) return model.section('/', -1).toLower() + mark;
         }
         return label;
     }
@@ -5886,6 +6053,73 @@ private:
         QueueEntry entry; entry.agent = true; entry.fix = true; entry.text = prompt;
         if (m_entries.isEmpty() && !m_activeValid && !m_agentBusy) startAgentEntry(entry, false);
         else { entry.id = ++m_entrySerial; m_entries.prepend(entry); rebuildQueueStrip(); pumpQueue(); }
+    }
+
+    // ----- run_in_terminal: the agent hands a command to this pane's shell (protocol 22) --------
+    // The agent chose "run" or "prefill"; relay::input::handoffAction decides what happens from the
+    // state right now. A run goes through runInTerminal like any other command, so Enter is only
+    // sent after the shell's hash acknowledgement, and the answer to the worker waits for it.
+    void handleTerminalCommand(const QJsonObject &event) {
+        const QString id = event.value(QStringLiteral("id")).toString();
+        const QString command = event.value(QStringLiteral("command")).toString();
+        const QString intent = event.value(QStringLiteral("intent")).toString();
+        const bool report = event.value(QStringLiteral("report_back")).toBool(true);
+        if (!m_handoffId.isEmpty()) answerTerminalCommand(false, QStringLiteral("failed"), QStringLiteral("Another command was handed over first."));
+        m_handoffId = id;
+        relay::input::HandoffState state;
+        state.wantsRun = event.value(QStringLiteral("mode")).toString() == QStringLiteral("run");
+        state.ceiling = relay::input::handoffCeiling(QSettings().value(QStringLiteral("agent/terminal_handoff")).toString());
+        state.shellIdle = shellIdleForQueue() && !(m_activeValid && !m_active.agent);
+        state.boxFree = !m_native && m_selected < 0 && m_editor->toPlainText().trimmed().isEmpty();
+        state.chain = m_handoffChain;
+        auto action = relay::input::handoffAction(state);
+        ensureLineStart();
+        if (action == relay::input::HandoffAction::Run) {
+            printInline(QStringLiteral("✦ running in your terminal · %1\n").arg(intent), Ink::Note);
+            m_handoffNext = report;
+            if (runInTerminal(command, false, 0)) { ++m_handoffChain; return; }   // answered from `loaded`
+            m_handoffNext = false;
+            state.shellIdle = false;
+            action = relay::input::handoffAction(state);
+        }
+        if (action == relay::input::HandoffAction::Prefill) {
+            printInline(QStringLiteral("✦ in your prompt box · %1 · Enter runs it\n").arg(intent), Ink::Note);
+            if (m_modeValue != QStringLiteral("shell")) setPrefixMode(QStringLiteral("shell"));   // this submission only
+            setComposerText(command);
+            m_handoffPrefill = report;
+            answerTerminalCommand(true, QStringLiteral("prefilled"));
+            return;
+        }
+        printInline(QStringLiteral("✦ not run · %1\n").arg(
+            action == relay::input::HandoffAction::RefuseDraft ? QStringLiteral("the prompt box has your text in it")
+            : action == relay::input::HandoffAction::RefuseChain ? QStringLiteral("too many commands in a row without you")
+                                                                 : QStringLiteral("the terminal is busy")), Ink::Note);
+        answerTerminalCommand(false, relay::input::handoffRefusalCode(action));
+    }
+
+    // Answers the `terminal_command` that is waiting, if one is. ok: `what` is the action; else the code.
+    void answerTerminalCommand(bool ok, const QString &what, const QString &error = QString()) {
+        if (m_handoffId.isEmpty()) return;
+        QJsonObject reply{{"type", "terminal_command_result"}, {"id", m_handoffId}, {"ok", ok},
+                          {ok ? "action" : "code", what}};
+        if (!error.isEmpty()) reply.insert(QStringLiteral("error"), error);
+        m_handoffId.clear();
+        send(reply);
+    }
+
+    // The handed-over command exited: the agent hears how, unless the user stopped it themselves.
+    void finishHandoff(int status) {
+        m_handoffArmed = false;
+        const QString command = m_handoffCommand, output = m_handoffOutput;
+        m_handoffCommand.clear(); m_handoffOutput.clear();
+        if (status == 130 || !m_configured) return;   // Ctrl+C: the user ended it on purpose
+        QueueEntry entry; entry.agent = true; entry.handoff = true;
+        entry.text = relay::input::handoffReport(command, status, output);
+        // Defer until Readline has drawn the prompt, as the fix loop does.
+        QTimer::singleShot(200, this, [this, entry]() mutable {
+            if (m_entries.isEmpty() && !m_activeValid && !m_agentBusy) startAgentEntry(entry, false);
+            else { entry.id = ++m_entrySerial; m_entries.prepend(entry); rebuildQueueStrip(); pumpQueue(); }
+        });
     }
 
     void finishFixTurn(bool completed) {
@@ -6215,6 +6449,7 @@ private:
         QueueEntry entry;
         entry.agent = true; entry.text = text; entry.why = why; entry.attachments = attachmentsFor(text);
         entry.shellText = shellText;
+        entry.noHandoff = m_remoteSubmit;
         entry.cards = cardsFor(text);   // Switchboard: `#K7Q2` in the prompt (protocol 17.6)
         for (const QJsonValue &card : entry.cards) noteWorkCard(card.toObject().value(QStringLiteral("id")).toString());
         if (when == QStringLiteral("interrupt") && m_agentBusy) {
@@ -6242,7 +6477,7 @@ private:
         status(QStringLiteral("Prompt from %1").arg(origin.isEmpty() ? QStringLiteral("a phone")
                                                                      : origin));
         if (!route || !m_workerReady) {
-            submitAgent(trimmed, false, origin);
+            m_remoteSubmit = true; submitAgent(trimmed, false, origin); m_remoteSubmit = false;
             return;
         }
         const QString id = QStringLiteral("remote-") + QString::number(++m_requestId);
@@ -6261,19 +6496,21 @@ private:
         if (event.value(QStringLiteral("route")).toString() == QStringLiteral("shell")) {
             submitTerminal(prompt.text, false);
         } else {
-            submitAgent(prompt.text, false, prompt.origin);
+            m_remoteSubmit = true; submitAgent(prompt.text, false, prompt.origin); m_remoteSubmit = false;
         }
         return true;
     }
 
-    void submitTerminal(const QString &text, bool watch, bool natural = false) {
+    void submitTerminal(const QString &text, bool watch, bool natural = false, bool handoff = false) {
         if (m_entries.isEmpty() && !m_activeValid && shellIdleForQueue()) {
-            runInTerminal(text, watch, 0, natural);
+            m_handoffNext = handoff;
+            if (!runInTerminal(text, watch, 0, natural)) m_handoffNext = false;
             return;
         }
         m_editor->remember(text);
         if (m_editor->toPlainText() == m_submittedDraft) m_editor->clear();
         QueueEntry entry; entry.agent = false; entry.text = text; entry.watch = watch; entry.natural = natural;
+        entry.handoff = handoff;
         enqueue(entry);
     }
 
@@ -6295,7 +6532,8 @@ private:
     void startAgentEntry(const QueueEntry &entry, bool fromQueue, const QString &when = QStringLiteral("now")) {
         PendingPrompt prompt;
         prompt.text = entry.text; prompt.why = entry.why; prompt.fix = entry.fix; prompt.shellText = entry.shellText;
-        if (!entry.fix) m_subagents.clearFinished();   // subagents UI: finished rows linger until a new user turn
+        prompt.handoff = entry.agent && entry.handoff;
+        if (!entry.fix) { m_subagents.clearFinished(); m_jobs.clearFinished(); }   // finished rows linger until a new user turn
         QJsonObject request{{"type", "ask"}, {"text", entry.text}, {"when", when}};
         if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
         if (!entry.cards.isEmpty()) request.insert(QStringLiteral("cards"), entry.cards);
@@ -6311,6 +6549,13 @@ private:
         // question and the screen (card C1HH). Without it none of that is sent.
         const QJsonObject grant = programGrant();
         if (!grant.isEmpty()) context.insert(QStringLiteral("program_control"), grant);
+        // run_in_terminal (protocol 22): offered unless the setting says off. Never to a fix turn,
+        // which has its own relay-run block, and never to a prompt from a paired device, which
+        // must not reach the shell through the agent either.
+        const QString ceiling = relay::input::handoffCeiling(
+            QSettings().value(QStringLiteral("agent/terminal_handoff")).toString());
+        if (!ceiling.isEmpty() && !entry.fix && !entry.noHandoff)
+            context.insert(QStringLiteral("terminal_handoff"), ceiling);
         request.insert(QStringLiteral("context"), context);
         const QString requestId = sendPrompt(request, prompt);
         if (fromQueue) { m_active = entry; m_activeValid = true; m_activeRequest = requestId; }
@@ -6329,7 +6574,8 @@ private:
             if (!shellIdleForQueue()) return;
             m_entries.removeFirst();
             m_active = head; m_activeValid = true; m_activeLoaded = false;
-            if (!runInTerminal(head.text, head.watch, 0, head.natural)) { m_entries.prepend(head); m_activeValid = false; return; }
+            m_handoffNext = head.handoff;
+            if (!runInTerminal(head.text, head.watch, 0, head.natural)) { m_handoffNext = false; m_entries.prepend(head); m_activeValid = false; return; }
         }
         keepSelectionOn(selected);   // every index below the head just moved up one
         rebuildQueueStrip(); changed();
@@ -6354,7 +6600,7 @@ private:
     void selectQueueEntry(int index) {
         if (index < 0 || index >= m_entries.size()) return;
         m_selected = index;
-        m_editor->setPlainText(m_entries[index].fix ? QString() : m_entries[index].text);
+        m_editor->setPlainText(m_entries[index].written() ? QString() : m_entries[index].text);
         m_editor->moveCursor(QTextCursor::End);
         rebuildQueueStrip(); changed();
         pumpQueue();   // the selection may have just left the head, which releases the queue
@@ -6365,7 +6611,7 @@ private:
     bool saveQueueEdit() {
         if (m_selected < 0 || m_selected >= m_entries.size()) return false;
         const QString text = m_editor->toPlainText();
-        if (text.trimmed().isEmpty() || m_entries[m_selected].fix || text == m_entries[m_selected].text) return false;
+        if (text.trimmed().isEmpty() || m_entries[m_selected].written() || text == m_entries[m_selected].text) return false;
         m_entries[m_selected].text = text;
         return true;
     }
@@ -6610,6 +6856,12 @@ private:
             m_agentsPanel->enter();
             return true;
         }
+        // The jobs list is next: entered straight from the prompt when no agents are listed above it.
+        if (mods == Qt::NoModifier && k == Qt::Key_Down && m_jobsPanel && m_jobsPanel->isVisible()
+            && m_editor->textCursor().blockNumber() == m_editor->document()->blockCount() - 1 && m_editor->atDraft()) {
+            m_jobsPanel->enter();
+            return true;
+        }
         // --- end subagents UI ---
         if (mods == Qt::NoModifier && k == Qt::Key_Escape && m_agentBusy) {
             stopAgent();
@@ -6626,6 +6878,9 @@ private:
     }
 
     void onComposerEdited() {
+        // A handed-over command the user wiped out is gone: what they type next is their own.
+        if (m_handoffPrefill && m_pendingSubmit.isEmpty() && m_editor->toPlainText().trimmed().isEmpty())
+            m_handoffPrefill = false;
         if (m_editor->toPlainText().trimmed().isEmpty()) refreshDestinationColor();
         if (!m_editor->toPlainText().isEmpty()) m_idleTip.stop();
         if (!m_editor->toPlainText().isEmpty()) clearAiGhost();
@@ -7375,7 +7630,7 @@ private:
         if (was) refreshProgramHint();
     }
 
-struct PendingPrompt { QString text, why, program; bool fix = false; QString shellText; };
+struct PendingPrompt { QString text, why, program; bool fix = false, handoff = false; QString shellText; };
 
     // Another turn will start without user action: something is queued and the queue is not paused.
     // Another turn will start without user action: queued items, or a turn that is interrupting this one.
@@ -7436,7 +7691,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
         }
         layout->addLayout(header);
         QString running;
-        if (m_activeValid) running = (m_active.agent ? QStringLiteral("✦ ") : QStringLiteral("$ ")) + (m_active.fix ? QStringLiteral("fix request") : m_active.text);
+        if (m_activeValid) running = (m_active.agent ? QStringLiteral("✦ ") : QStringLiteral("$ ")) + m_active.label();
         else if (m_agentBusy) running = QStringLiteral("✦ ") + m_itemPrompts.value(m_currentItem).text;
         else if (!m_promptReported && !m_pendingCommand.isEmpty()) running = QStringLiteral("$ ") + m_pendingCommand;
         if (!running.trimmed().isEmpty()) {
@@ -7467,7 +7722,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
         m_fillingQueueList = true;
         m_queueList->clear();
         for (const auto &entry : std::as_const(m_entries)) {
-            auto *item = new QListWidgetItem(entry.fix ? QStringLiteral("fix request") : entry.text, m_queueList);
+            auto *item = new QListWidgetItem(entry.label(), m_queueList);
             item->setData(Qt::UserRole, QVariant::fromValue<qulonglong>(entry.id));
             item->setData(Qt::UserRole + 1, entry.agent);
             item->setToolTip(entry.text);
@@ -7730,6 +7985,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
             m_commandNatural = false;   // consumed by this completion either way
             // The command Relay ran has finished: index its line, exit status and captured output.
             finishCommandCapture(status);
+            if (m_handoffArmed) finishHandoff(status);
             QTimer::singleShot(120, this, [this] { flushInline(); });
         } else if (stage == QStringLiteral("running")) {
             m_shellReady = false; m_promptReported = false;
@@ -7747,7 +8003,11 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
             m_commandLoaded = true;
             m_commandLog.append({m_pendingCommand, m_cwd});
             if (m_commandLog.size() > 500) m_commandLog.removeFirst();
-            beginCommandCapture(m_pendingCommand);   // conversation index (protocol 14)
+            // run_in_terminal (protocol 22): this is the command the agent handed over.
+            m_handoffArmed = m_handoffNext; m_handoffNext = false;
+            if (m_handoffArmed) m_handoffCommand = m_pendingCommand;
+            answerTerminalCommand(true, QStringLiteral("started"));
+            beginCommandCapture(m_pendingCommand, m_handoffArmed);   // conversation index (protocol 14)
             const bool fromQueue = m_activeValid && !m_active.agent;
             if (fromQueue) m_activeLoaded = true;
             // Do not discard edits typed while waiting for the shell acknowledgement.
@@ -8064,6 +8324,13 @@ private:
     QString m_submitMode, m_model, m_turnText, m_fixCommand;
     int m_fixAttempt = 0;
     bool m_fixWatch = false, m_fixArmed = false, m_fixAwaitingAgent = false, m_turnHeader = false;
+    // run_in_terminal (protocol 22). m_handoffId: the terminal_command still to be answered.
+    // Prefill: a reporting command sits in the prompt box. Next: the command being staged reports.
+    // Armed: the running command reports when it exits. Chain: runs since the user last typed.
+    QString m_handoffId, m_handoffCommand, m_handoffOutput;
+    bool m_handoffPrefill = false, m_handoffNext = false, m_handoffArmed = false;
+    bool m_captureForAgent = false, m_remoteSubmit = false;
+    int m_handoffChain = 0;
     // Wrong-mode hints (2026-09-17): a terminal submission that reads like a request
     // (m_commandNatural), the shell command an agent-mode turn started from
     // (m_turnShellPrompt), its run_command texts by call_id (m_runCommands), whether the
@@ -8215,6 +8482,11 @@ private:
     QString m_restorePreset, m_restoreSession, m_restoreRequest;
     qint64 m_ctxUsed = 0, m_ctxWindow = 0, m_ctxLimit = 0;
     double m_ctxPercent = 0;
+    // A model switch waiting to land (issue 3ES1): the bar measures against its window, not the one
+    // the request in flight runs on. Set from the `context` event's `next`; zero when none waits.
+    qint64 m_ctxNextUsed = 0, m_ctxNextWindow = 0, m_ctxNextLimit = 0;
+    double m_ctxNextPercent = 0;
+    QString m_ctxNextModel, m_ctxInFlightModel;
     bool m_ctxEstimated = false, m_compacting = false, m_contextNotePending = false;
     QString m_rewindKind = QStringLiteral("chat");
     bool m_rewindPending = false, m_forkPending = false, m_resumePending = false, m_recapManual = false;
@@ -8254,6 +8526,8 @@ private:
     QPointer<relay::RequestsPanel> m_requestsPanel;
     bool m_limitReached = false;   // the last turn stopped at the step or tool-call limit
     relay::SubagentsPanel *m_agentsPanel = nullptr;
+    relay::JobsModel m_jobs;
+    relay::JobsPanel *m_jobsPanel = nullptr;
     QList<QPointer<relay::SubagentTranscriptView>> m_subagentViews;
     QPointer<relay::SubagentTranscriptView> m_subagentOverlay;
 };

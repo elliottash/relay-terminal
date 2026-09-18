@@ -191,11 +191,19 @@ class TurnSupervisor:
             return now() if self._running is None else later()
 
     def _settle_model_locked(self, agent) -> None:
-        """A model switch that arrived after the turn's last request applies once the turn is over."""
+        """A model switch that arrived after the turn's last request applies once the turn is over.
+
+        One that must compact the conversation first (a smaller window) runs as an exclusive task
+        instead: the summary is a network call, which must not hold this lock, and queued prompts
+        wait for it so the next turn runs on the new model."""
         apply = getattr(agent, "apply_pending_model", None)
         if apply is None:
             return
         try:
+            compacts = getattr(agent, "pending_model_compacts", None)
+            if compacts is not None and compacts():
+                self.start_exclusive_locked("set_model", lambda a: a.apply_pending_model(at="turn_end"))
+                return
             apply(at="turn_end")
         except Exception as exc:  # never let it wedge the queue; the old model simply stays
             self._emit({"event": "error", "source": "set_model",
@@ -211,9 +219,14 @@ class TurnSupervisor:
                 raise ValueError("Worker is shutting down.")
             if self._running is not None or (self._queue and not self._paused):
                 raise ValueError("An agent turn is active; try again when it finishes.")
-            agent = self._agent
-            self._running = f"{name}-{uuid.uuid4().hex}"
-            agent.cancel_event.clear()
+            self.start_exclusive_locked(name, task)
+
+    def start_exclusive_locked(self, name: str, task: Callable) -> None:
+        """run_exclusive without its checks, for a caller already holding the lock with nothing
+        running (a model switch that compacts first, issue 3ES1). Queued prompts wait for it."""
+        agent = self._agent
+        self._running = f"{name}-{uuid.uuid4().hex}"
+        agent.cancel_event.clear()
 
         def runner():
             try:

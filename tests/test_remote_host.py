@@ -5,7 +5,10 @@ Everything runs in one process over real sockets — a real WebSocket, a real No
 real relay — so what is tested is the thing that ships, not a stub of it.
 """
 import asyncio
+import base64
+import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -393,3 +396,142 @@ class RendezvousTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SecretInputTests(unittest.TestCase):
+    """Password entry from a phone: nonce lifecycle, per-device switch, the audit line."""
+
+    @staticmethod
+    async def _paired(harness):
+        client, paired, _, _ = await harness.pair(name="Pixel 9", platform="Chrome")
+        return client, paired
+
+    def test_the_nonce_roundtrip(self):
+        async def main():
+            async with Harness(capability=wire.FULL) as harness:
+                client, paired = await self._paired(harness)
+                harness.devices.set_password_entry(paired.device_id, True)
+                harness.source.set_password_prompt("pane-1", True, shell_pid=11, foreground_pid=22)
+                panes = await client.expect("panes")
+                entry = next(item for item in panes["items"] if item["id"] == "pane-1")
+                self.assertEqual(entry["status"], "password")
+                nonce = entry["secret_nonce"]
+                self.assertTrue(nonce)
+
+                await client.send({"t": "secret_input", "pane": "pane-1", "nonce": "wrong",
+                                   "bytes": "cGFzcw=="})
+                with self.assertRaises(wire.WireError) as caught:
+                    await client.expect("agent")
+                self.assertEqual(caught.exception.code, "not_permitted")
+
+                await client.send({"t": "secret_input", "pane": "pane-1", "nonce": nonce,
+                                   "bytes": "cGFzcw=="})
+                reply = await client.expect("agent")
+                self.assertEqual(reply["event"]["text"], "Password sent.")
+                self.assertEqual(harness.source._secrets, [("pane-1", b"pass")])
+
+                # Single use: the same nonce cannot write a second line.
+                await client.send({"t": "secret_input", "pane": "pane-1", "nonce": nonce,
+                                   "bytes": "cGFzcw=="})
+                with self.assertRaises(wire.WireError):
+                    await client.expect("agent")
+                await client.close()
+        run(main())
+
+    def test_a_device_without_the_switch_is_refused(self):
+        async def main():
+            async with Harness(capability=wire.FULL) as harness:
+                client, paired = await self._paired(harness)
+                harness.source.set_password_prompt("pane-1", True, shell_pid=11, foreground_pid=22)
+                await client.expect("panes")
+                nonce = harness.host.secret_nonces["pane-1"].value
+                await client.send({"t": "secret_input", "pane": "pane-1", "nonce": nonce,
+                                   "bytes": "cGFzcw=="})
+                with self.assertRaises(wire.WireError) as caught:
+                    await client.expect("agent")
+                self.assertEqual(caught.exception.code, "not_permitted")
+                self.assertEqual(harness.source._secrets, [])
+                await client.close()
+        run(main())
+
+    def test_an_ended_prompt_refuses_even_a_live_nonce(self):
+        async def main():
+            async with Harness(capability=wire.FULL) as harness:
+                client, paired = await self._paired(harness)
+                harness.devices.set_password_entry(paired.device_id, True)
+                harness.source.set_password_prompt("pane-1", True, shell_pid=11, foreground_pid=22)
+                await client.expect("panes")
+                nonce = harness.host.secret_nonces["pane-1"].value
+                harness.source.set_password_prompt("pane-1", False)
+                await client.send({"t": "secret_input", "pane": "pane-1", "nonce": nonce,
+                                   "bytes": "cGFzcw=="})
+                with self.assertRaises(wire.WireError) as caught:
+                    await client.expect("agent")
+                self.assertEqual(caught.exception.code, "not_permitted")
+                self.assertEqual(harness.source._secrets, [])
+                await client.close()
+        run(main())
+
+    def test_a_new_prompt_mints_a_new_nonce(self):
+        async def main():
+            async with Harness(capability=wire.FULL) as harness:
+                client, paired = await self._paired(harness)
+                harness.devices.set_password_entry(paired.device_id, True)
+                harness.source.set_password_prompt("pane-1", True, shell_pid=11, foreground_pid=22)
+                await client.expect("panes")
+                first = harness.host.secret_nonces["pane-1"].value
+                harness.source.set_password_prompt("pane-1", False)
+                harness.source.set_password_prompt("pane-1", True, shell_pid=11, foreground_pid=33)
+                await client.expect("panes")
+                second = harness.host.secret_nonces["pane-1"].value
+                self.assertNotEqual(first, second)
+                self.assertEqual(harness.host.secret_nonces["pane-1"].foreground_pid, 33)
+                await client.close()
+        run(main())
+
+    def test_the_audit_log_records_the_shape_not_the_password(self):
+        async def main():
+            async with Harness(capability=wire.FULL) as harness:
+                client, paired = await self._paired(harness)
+                harness.devices.set_password_entry(paired.device_id, True)
+                harness.source.set_password_prompt("pane-1", True, shell_pid=11, foreground_pid=22)
+                await client.expect("panes")
+                nonce = harness.host.secret_nonces["pane-1"].value
+                await client.send({"t": "secret_input", "pane": "pane-1", "nonce": nonce,
+                                   "bytes": "c2VjcmV0LXBhc3N3b3Jk"})
+                await client.expect("agent")
+                path = next(harness.devices.directory.glob("audit-*.jsonl"))
+                text = path.read_text()
+                lines = [json.loads(line) for line in text.splitlines()]
+                kinds = [line["kind"] for line in lines]
+                self.assertIn("pair", kinds)
+                self.assertIn("prompt_detected", kinds)
+                self.assertIn("secret_input", kinds)
+                self.assertNotIn("secret-password", text)
+                await client.close()
+        run(main())
+
+
+class TransportSwitchTests(unittest.TestCase):
+    def test_the_handshake_acks_the_exact_next_frame(self):
+        async def main():
+            async with Harness() as harness:
+                client, _, _, _ = await harness.pair()
+                effective = await client.transport_switch()
+                self.assertGreaterEqual(effective, 1)
+                await client.close()
+        run(main())
+
+    def test_a_gap_is_refused(self):
+        async def main():
+            async with Harness() as harness:
+                client, _, _, _ = await harness.pair()
+                await client.send({"t": "transport_switch", "next_seq": 1})
+                with self.assertRaises(wire.WireError) as caught:
+                    await client.expect("transport_switched")
+                self.assertEqual(caught.exception.code, "stale_seq")
+                # The session survives: a correct offer after a refused one still acks.
+                effective = await client.transport_switch()
+                self.assertGreaterEqual(effective, 2)
+                await client.close()
+        run(main())

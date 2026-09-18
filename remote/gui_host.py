@@ -15,6 +15,7 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"answer","id":N,"allow":true,"capability":"full"}   the user answered the dialog
     {"t":"address","value":"192.168.1.9"}                    serve the QR on another address
     {"t":"revoke","device":"..."}   {"t":"devices"}   {"t":"stop"}
+    {"t":"password_entry","device":"...","allow":true}   per-device switch (section 6.7)
 
   here → GUI
     {"t":"started","base":"...","fingerprint":"...","note":"...",
@@ -24,6 +25,7 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"paired","device":"...","name":"...","capability":"..."}
     {"t":"devices","items":[...]}     {"t":"connected","count":N}
     {"t":"input","pane":"p1","bytes":"<base64>"}             keys from a phone
+    {"t":"secret_input","pane":"p1","bytes":"<base64>"}      a password line, nonce already checked
     {"t":"compose","pane":"p1","text":"...","route":bool,"origin":"remote:<id>"}   a prompt
     {"t":"error","message":"..."}
 
@@ -44,7 +46,8 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from remote import devtls, host as host_mod, identity as identity_mod, panes as panes_mod, wire
+from remote import devtls, host as host_mod, identity as identity_mod, panes as panes_mod, \
+    terminal as terminal_mod, wire
 from rendezvous.server import Store, build
 
 log = logging.getLogger("relay.gui_host")
@@ -103,6 +106,7 @@ class GuiPaneSource(panes_mod.PaneSource):
             "status": message.get("status", "idle"), "unread": 0, "queue": 0,
             "updated": message.get("updated", 0), "rows": message.get("rows", 24),
             "cols": message.get("cols", 80),
+            "shell_pid": message.get("pid", 0), "foreground_pid": message.get("foreground_pid", 0),
         }
         for callback in list(self._panes_callbacks):
             callback()
@@ -218,6 +222,31 @@ class GuiPaneSource(panes_mod.PaneSource):
     async def transcribe(self, pane: str, audio: bytes, audio_format: str) -> str:
         raise wire.WireError("not_permitted", "voice from a phone is not wired up yet.")
 
+    # ---- password prompts (section 6.7) ---------------------------------------------------------
+    # The GUI's pane message carries the shell's pid, so this sidecar can make the same fresh
+    # termios read the desktop makes; the write itself goes back to the GUI, which re-checks
+    # once more at the moment it writes — the check the spec insists on.
+
+    def _pids(self, pane_id: str) -> tuple[int, int]:
+        pane = self.panes.get(pane_id, {})
+        return int(pane.get("shell_pid", 0)), int(pane.get("foreground_pid", 0))
+
+    def secret_state(self, pane: str) -> dict | None:
+        shell_pid, foreground_pid = self._pids(pane)
+        if not shell_pid or not terminal_mod.secret_prompt(shell_pid):
+            return None
+        return {"shell_pid": shell_pid, "foreground_pid": foreground_pid}
+
+    def secret_prompt(self, pane: str) -> bool:
+        shell_pid, _ = self._pids(pane)
+        return bool(shell_pid) and terminal_mod.secret_prompt(shell_pid)
+
+    async def send_secret(self, pane: str, data: bytes, *, device: str) -> None:
+        if not self.secret_prompt(pane):
+            raise wire.WireError("not_permitted", "that pane is no longer at a password prompt.")
+        self.send({"t": "secret_input", "pane": pane,
+                   "bytes": base64.b64encode(data).decode(), "device": device})
+
 
 class Sidecar:
     def __init__(self):
@@ -288,6 +317,11 @@ class Sidecar:
             self.report_devices()
         elif kind == "revoke":
             if self.devices and self.devices.revoke(message.get("device", "")):
+                self.report_devices()
+        elif kind == "password_entry":
+            if self.devices:
+                self.devices.set_password_entry(message.get("device", ""),
+                                                bool(message.get("allow")))
                 self.report_devices()
         elif kind == "stop":
             await self.stop()
@@ -381,7 +415,8 @@ class Sidecar:
             return
         self.emit({"t": "devices", "items": [
             {"id": device.device_id, "name": device.name, "platform": device.platform,
-             "capability": device.capability, "fingerprint": device.fingerprint}
+             "capability": device.capability, "fingerprint": device.fingerprint,
+             "password_entry": device.password_entry}
             for device in self.devices.live()]})
 
     async def stop(self) -> None:

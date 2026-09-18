@@ -52,7 +52,14 @@ public:
         std::function<QString()> title;
         std::function<QString()> cwd;
         std::function<QString()> status;
+        // The pids behind a password prompt: the shell's for a fresh termios read, the
+        // foreground's to bind the desktop-minted nonce to the process that is asking.
+        std::function<qint64()> shellPid;
+        std::function<qint64()> foregroundPid;
         std::function<void(const QByteArray &)> input;
+        // A password line from a phone. Returns false when the fresh termios read at the moment
+        // of the write says the prompt has ended, in which case the bytes are dropped.
+        std::function<bool(const QByteArray &)> secret;
         // A prompt from a client. `route` means decide shell or agent the way the composer does;
         // without it the text may only reach the agent (the hub enforces which devices get it).
         std::function<void(const QString &text, bool route, const QString &origin)> compose;
@@ -73,6 +80,9 @@ public:
     void useAddress(const QString &address);
     void answer(int askId, bool allow, const QString &capability);
     void revoke(const QString &deviceId);
+    // Password entry is off for every device until the owner turns it on for that one
+    // (docs/REMOTE-PROTOCOL.md section 6.7); this is the switch the dialog drives.
+    void setPasswordEntry(const QString &deviceId, bool allow);
 
 signals:
     void startedChanged();
@@ -130,6 +140,7 @@ private:
     void showAsk(int id, const QString &name, const QString &platform, const QString &fingerprint,
                  const QString &code, const QString &peer);
     void showDevices(const QJsonArray &items);
+    void passwordLabel();
     void showAddresses(const QJsonArray &addresses);
     void answer(bool allow, const QString &capability = QString());
     void fit();
@@ -145,6 +156,7 @@ private:
     QLabel *m_askCode = nullptr;
     QPushButton *m_refuse = nullptr;
     QListWidget *m_devices = nullptr;
+    QPushButton *m_passwords = nullptr;
     QPushButton *m_stop = nullptr;
     int m_askId = -1;
 };

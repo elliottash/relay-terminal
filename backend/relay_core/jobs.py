@@ -8,7 +8,12 @@ then is handed back as a job id with its output so far. The model reads more wit
 (optionally waiting) and ends it with stop_command. A server or watcher starts with background: true.
 
 The limits that remain are about the machine, not the model's patience: at most MAX_RUNNING jobs at
-once, and each keeps the last KEEP_BYTES of its output. Jobs end with their conversation: a new
+once, each keeps the last KEEP_BYTES of its output, and only the KEEP_FINISHED most recent finished
+jobs are remembered (every command is a job, so a long conversation would otherwise keep them all).
+
+A job the model was handed back is also the user's business: it is listed under the pane's prompt
+(src/JobsPanel.h), which the table feeds through on_change and snapshot(), and the user can read or
+stop it there (protocol: jobs_list, job_output_get, job_stop). Jobs end with their conversation: a new
 conversation, the end of a subagent's run, or the worker exiting stops them (stop_all), because no
 later turn could name them. Each job is its own process group, so stopping one takes its children.
 """
@@ -26,6 +31,8 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 MAX_RUNNING = 8
+KEEP_FINISHED = 16            # finished jobs remembered for command_output; older ones are forgotten
+PEEK_BYTES = 256 * 1024       # what the user's "show output" gets: the newest part of the kept output
 KEEP_BYTES = 1 << 20          # output kept per job; older bytes are dropped (and counted)
 TERM_GRACE = 0.3              # seconds between SIGTERM and SIGKILL
 
@@ -42,6 +49,7 @@ class Job:
     exit_code: int | None = None
     finished: float | None = None
     stopped: bool = False
+    handed_back: bool = False  # outlived its call: listed for the user until the conversation ends
     done: threading.Event = field(default_factory=threading.Event)
     # Called with each chunk of text while a tool call is waiting on this job (the live stream
     # the pane shows under the call); None otherwise.
@@ -72,7 +80,10 @@ def _kill_group(process: subprocess.Popen) -> None:
 class JobTable:
     """The jobs of one agent (one conversation, or one subagent)."""
 
-    def __init__(self):
+    def __init__(self, on_change: Callable[[], None] | None = None):
+        # Called (from any thread) when the list the user sees changes: a job handed back, or a
+        # handed-back job ending.
+        self.on_change = on_change
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._next = 1
@@ -86,6 +97,9 @@ class JobTable:
                                  "(or wait for one with command_output) before starting another.")
             job_id = f"job-{self._next}"
             self._next += 1
+            finished = [job for job in self._jobs.values() if not job.running]
+            for old in finished[:max(0, len(finished) - KEEP_FINISHED + 1)]:
+                del self._jobs[old.id]
         process = subprocess.Popen(["/bin/bash", "--noprofile", "--norc", "-c", command],
                                    cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -141,6 +155,8 @@ class JobTable:
                 job.finished = time.monotonic()
                 job.live = None
             job.done.set()
+            if job.handed_back:
+                self._changed()
 
     def _append(self, job: Job, chunk: bytes) -> None:
         with self._lock:
@@ -182,17 +198,50 @@ class JobTable:
             data = data[-limit:]
         return {"output": data.decode("utf-8", "replace"), "truncated": omitted > 0, "omitted_bytes": omitted}
 
+    def hand_back(self, job: Job) -> None:
+        """The call returned while the job runs on: from now on the user sees it too."""
+        if not job.handed_back:
+            job.handed_back = True
+            self._changed()
+
+    def _changed(self) -> None:
+        if self.on_change is not None:
+            self.on_change()
+
+    def snapshot(self) -> list[dict]:
+        """The handed-back jobs, oldest first, as the protocol's `jobs` event lists them."""
+        now = time.monotonic()
+        with self._lock:
+            jobs = [job for job in self._jobs.values() if job.handed_back]
+        return [{"job_id": job.id, "command": job.command[:300], "running": job.running,
+                 "exit_code": job.exit_code, "stopped": job.stopped,
+                 "elapsed_ms": int(((job.finished or now) - job.started) * 1000)} for job in jobs]
+
+    def peek(self, job: Job, limit: int = PEEK_BYTES) -> dict:
+        """The newest `limit` bytes of kept output, for the user. The model's read position stays."""
+        with self._lock:
+            data = bytes(job.buffer[-limit:])
+            omitted = job.total - len(data)
+        return {"output": data.decode("utf-8", "replace"), "truncated": omitted > 0, "omitted_bytes": omitted}
+
     def stop(self, job: Job) -> None:
         if job.running:
             job.stopped = True
             _kill_group(job.process)
             job.done.wait(3)
 
-    def stop_all(self) -> None:
+    def stop_all(self, forget: bool = False) -> None:
+        """Stop every running job; `forget` also drops them all (a new conversation starts empty)."""
         with self._lock:
             jobs = [job for job in self._jobs.values() if job.running]
+            listed = any(job.handed_back for job in self._jobs.values())
         for job in jobs:
             self.stop(job)
+        if forget:
+            with self._lock:
+                self._jobs.clear()
+            if listed:
+                self._changed()
 
     def running(self) -> list[Job]:
         with self._lock:

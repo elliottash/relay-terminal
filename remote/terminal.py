@@ -376,3 +376,25 @@ class TerminalPaneSource(panes_mod.PaneSource):
 
     async def transcribe(self, pane: str, audio: bytes, audio_format: str) -> str:
         raise wire.WireError("not_permitted", "voice needs the agent worker.")
+
+    # ---- password prompts (section 6.7) ---------------------------------------------------------
+
+    def secret_state(self, pane: str) -> dict | None:
+        item = self.panes.get(pane)
+        if item is None or not secret_prompt(item.shell_pid):
+            return None
+        return {"shell_pid": item.shell_pid, "foreground_pid": item.foreground_pid}
+
+    def secret_prompt(self, pane: str) -> bool:
+        item = self.panes.get(pane)
+        return bool(item) and secret_prompt(item.shell_pid)
+
+    async def send_secret(self, pane: str, data: bytes, *, device: str) -> None:
+        """A password line, typed only after the fresh termios check that secret_prompt is."""
+        item = self.pane(pane)
+        if not secret_prompt(item.shell_pid):
+            raise wire.WireError("not_permitted",
+                                 "that pane is no longer at a password prompt.")
+        payload = data + b"\n"           # Secret::take() adds the newline on the GUI side; the
+        await self._write(item, {"t": "input",       # bridge takes raw bytes, so it is added here
+                                 "bytes": base64.b64encode(payload).decode()})

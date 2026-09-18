@@ -24,12 +24,14 @@ import contextlib
 import hmac
 import json
 import logging
+import secrets
 import time
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Awaitable, Callable
 
-from . import envelope, identity as identity_mod, noise, pairing, panes as panes_mod, wire, ws
+from . import audit as audit_mod, envelope, identity as identity_mod, noise, pairing, \
+    panes as panes_mod, wire, ws
 
 log = logging.getLogger("relay.host")
 
@@ -38,6 +40,8 @@ ENC_CBOR = 1
 HANDSHAKE_TIMEOUT = 20.0
 IDLE_TIMEOUT = 15 * 60
 MAX_VOICE_BYTES = 700_000          # what fits a 1 MiB frame once base64 has had its say
+SECRET_NONCE_TTL = 45.0            # a password nonce is minted to be used now, not remembered
+MAX_SECRET_BYTES = 1024
 
 # Per-device inbound budget: (messages, seconds). Everything not named gets DEFAULT_LIMIT.
 LIMITS = {
@@ -48,6 +52,7 @@ LIMITS = {
     "turn_transcript_get": (60, 60),
     "plan_execute": (10, 60),
     "pair_prove": (5, 60),
+    "secret_input": (10, 60),        # section 6.7: rate-limited so a full device cannot brute-force
 }
 DEFAULT_LIMIT = (240, 60)
 
@@ -76,6 +81,16 @@ Approver = Callable[[PairRequest], Awaitable[tuple[bool, str]]]
 
 async def approve_nothing(request: PairRequest) -> tuple[bool, str]:
     return False, wire.VIEW
+
+
+@dataclass
+class SecretNonce:
+    """One password prompt's permit: single use, seconds to live, bound to the asking process."""
+    value: str
+    pane: str
+    foreground_pid: int
+    generation: int
+    expires: float
 
 
 class Limiter:
@@ -114,6 +129,7 @@ class Channel:
         # concurrent senders can encrypt in one order and reach the socket in another, and the
         # peer then sees a nonce gap and drops the session. Fan-out makes that the common case.
         self.sending = asyncio.Lock()
+        self.recv_count = 0                 # frames decrypted: the transport_switch cursor
         self.opened = time.monotonic()
         self.last_seen = time.monotonic()
         self.closed = False
@@ -202,6 +218,7 @@ class Channel:
             if frame is None:
                 return
             plaintext = self.session.decrypt(frame)
+            self.recv_count += 1
             if not plaintext:
                 continue
             if plaintext[0] != ENC_JSON:
@@ -257,6 +274,9 @@ class Host:
         self.approver = approver
         self.name = name
         self.limiter = Limiter()
+        self.audit = audit_mod.AuditLog(devices.directory)   # beside devices.json, 0700/0600
+        self.secret_nonces: dict[str, SecretNonce] = {}
+        self._prompt_generation: dict[str, int] = {}
         self.rooms = pairing.RoomBook()
         self.channels: dict[bytes, Channel] = {}
         self.streams: dict[str, wire.Stream] = {}
@@ -409,8 +429,42 @@ class Host:
         return self.streams[name]
 
     def _panes_changed(self) -> None:
-        message = self.stream("panes", limit=64).add({"t": "panes", "items": self.source.snapshot()})
+        message = self.stream("panes", limit=64).add({"t": "panes", "items": self._items()})
         self._fan_out(message, needed=wire.VIEW)
+
+    def _items(self) -> list[dict]:
+        """The pane list, with a password nonce minted for any pane at a prompt (section 6.7).
+
+        The nonce is desktop-minted, single use and bound to (pane, foreground pid, prompt
+        generation); it expires in seconds and a spent or stale one is refused below. A replayed
+        `panes` message carrying an old nonce is harmless for the same reason.
+        """
+        items = [dict(item) for item in self.source.snapshot()]
+        now = time.monotonic()
+        self.secret_nonces = {pane: nonce for pane, nonce in self.secret_nonces.items()
+                              if nonce.expires > now}
+        for item in items:
+            pane = item.get("id", "")
+            if item.get("status") != "password":
+                continue
+            state = self.source.secret_state(pane)
+            generation = self._prompt_generation.get(pane, 0)
+            nonce = self.secret_nonces.get(pane)
+            if state is None:
+                continue                     # the source cannot vouch for the prompt: no nonce
+            if nonce and nonce.generation == generation and nonce.foreground_pid == \
+                    state.get("foreground_pid", 0) and nonce.expires > now:
+                item["secret_nonce"] = nonce.value
+                continue
+            self._prompt_generation[pane] = generation + 1
+            nonce = SecretNonce(value=secrets.token_urlsafe(16), pane=pane,
+                                foreground_pid=state.get("foreground_pid", 0),
+                                generation=generation + 1, expires=now + SECRET_NONCE_TTL)
+            self.secret_nonces[pane] = nonce
+            self.audit.record("prompt_detected", pane=pane,
+                              foreground_pid=nonce.foreground_pid or None)
+            item["secret_nonce"] = nonce.value
+        return items
 
     def _screen_event(self, pane: str, message: dict) -> None:
         # Screen frames are large and only interesting to whoever is looking at that pane, so they
@@ -457,6 +511,7 @@ class Host:
             if channel.device_id != device_id:
                 continue
             if device is None or device.revoked:
+                self.audit.record("revoke", device=device_id)
                 if self.screens:
                     self.source.release_device(device_id)
                 self._spawn(self._revoke_channel(channel))
@@ -496,7 +551,7 @@ class Host:
             "server_time": time.time(),
         })
         await channel.send(self.stream("panes", limit=64).add(
-            {"t": "panes", "items": self.source.snapshot()}))
+            {"t": "panes", "items": self._items()}))
 
     async def _on_ping(self, channel: Channel, message: dict) -> None:
         await channel.send({"t": "pong", "at": message.get("at"), "server_time": time.time()})
@@ -560,6 +615,8 @@ class Host:
             raise wire.WireError("not_permitted", "the desktop refused this device.")
         device = self.devices.pair(channel.client_static, request.name, request.platform, capability)
         channel.device_id = device.device_id
+        self.audit.record("pair", device=device.device_id, name=request.name,
+                          capability=capability, peer=request.peer)
         log.info("paired %s (%s) as %s", device.name, device.fingerprint, capability)
         await channel.send({"t": "paired", "device_id": device.device_id,
                             "capability": capability, "code": code,
@@ -569,7 +626,7 @@ class Host:
     # -- panes -----------------------------------------------------------------------------------
 
     async def _on_panes_get(self, channel: Channel, message: dict) -> None:
-        await channel.send({"t": "panes", "items": self.source.snapshot(),
+        await channel.send({"t": "panes", "items": self._items(),
                             "seq": self.stream("panes", limit=64).seq})
 
     def _pane_of(self, message: dict) -> str:
@@ -709,7 +766,57 @@ class Host:
         # Needs a const VtCore::historyLines in both cores; see the design doc section 12.1.
         raise wire.WireError("not_permitted", "scrollback paging is not implemented yet.")
 
+    async def _on_transport_switch(self, channel: Channel, message: dict) -> None:
+        """The explicit re-binding of the Noise stream to a new transport (section 2).
+
+        ``next_seq`` must name exactly the next frame the receiver expects: everything before it
+        was applied, everything after it arrives on the new path only. A gap or a replay is
+        refused with ``stale_seq`` and the session stays where it is, so a second writer cannot
+        split the nonce space — which is the whole point of writing the handshake down before
+        a WebRTC transport exists rather than after.
+        """
+        wanted = message.get("next_seq")
+        if not isinstance(wanted, int) or wanted < 0:
+            raise wire.WireError("unknown_type", "transport_switch needs next_seq.")
+        if wanted != channel.recv_count:
+            raise wire.WireError("stale_seq",
+                                 "next_seq must be exactly the next frame this side expects.")
+        await channel.send({"t": "transport_switched", "effective": wanted})
+
     async def _on_secret_input(self, channel: Channel, message: dict) -> None:
-        # Deliberately refused until the desktop can re-read termios at write time and mint a
-        # single-use nonce bound to the prompt (docs/REMOTE-PROTOCOL.md section 6.7).
-        raise wire.WireError("not_permitted", "password entry from a phone is not implemented.")
+        """A password line (section 6.7). Nothing here trusts the client's view of the pane.
+
+        Order: the per-device switch (off by default), then the nonce — known, unspent, unexpired,
+        bound to this pane, this asking process and this prompt generation — then a fresh prompt
+        check, and only then the write, which re-checks a final time at the moment it happens.
+        The bytes are wiped on the way out; the audit line records that this happened, not what.
+        """
+        device = channel.device
+        if device is None or not device.password_entry:
+            raise wire.WireError("not_permitted", "password entry is off for this device.")
+        pane = self._pane_of(message)
+        # A bytearray, not bytes: the copy this process holds is zeroed below. CPython still makes
+        # transient copies while decoding (the wire itself is inside Noise), so this is best
+        # effort here and a hard guarantee only on the C++ side, which wipes with
+        # relay::input::Secret; the spec says as much (section 6.7, "wiped in place").
+        raw = bytearray(wire.decode_bytes(message.get("bytes"), MAX_SECRET_BYTES, "the password"))
+        offered = message.get("nonce")
+        nonce = self.secret_nonces.get(pane)
+        state = self.source.secret_state(pane) if nonce else None
+        if (not isinstance(offered, str) or nonce is None or state is None
+                or nonce.value != offered or nonce.foreground_pid != state.get("foreground_pid", 0)
+                or nonce.expires <= time.monotonic()):
+            raise wire.WireError("not_permitted",
+                                 "that password prompt has ended; reopen it and try again.")
+        if not self.source.secret_prompt(pane):
+            raise wire.WireError("not_permitted",
+                                 "that pane is no longer at a password prompt.")
+        self.secret_nonces.pop(pane, None)          # single use, whatever happens next
+        self.audit.record("secret_input", pane=pane, device=channel.device_id)
+        try:
+            await self.source.send_secret(pane, bytes(raw), device=channel.device_id)
+        finally:
+            for index in range(len(raw)):
+                raw[index] = 0
+        await channel.send({"t": "agent", "pane": pane,
+                            "event": {"event": "status", "text": "Password sent."}})

@@ -226,6 +226,7 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-wrong-mode-hints.md`
 - `2026-09-18-edit-file-tool.md`
 - `2026-09-18-light-and-dark-commands.md`
+- `2026-09-18-local-models.md`
 - `2026-09-18-open-external-in-the-right-click-menu.md`
 - `2026-09-18-reasoning-panel-shortcut.md`
 
@@ -258,7 +259,6 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-voice-transcription.md`
 - `2026-09-17-windows-tabs-panes.md`
 - `2026-09-18-edit-file-tool.md`
-- `2026-09-18-local-models.md`
 
 Waiting for QA (`issues/changes/needs_qa_llm/`):
 

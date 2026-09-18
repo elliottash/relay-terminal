@@ -356,6 +356,7 @@ void SubagentsPanel::keyPressEvent(QKeyEvent *event) {
         return;
     case Qt::Key_Down:
         if (m_selected < n) { ++m_selected; update(); }
+        else if (onBelow) onBelow();
         return;
     case Qt::Key_Home: m_selected = 0; update(); return;
     case Qt::Key_End: m_selected = n; update(); return;

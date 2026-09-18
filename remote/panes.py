@@ -54,6 +54,24 @@ class PaneSource:
     async def transcribe(self, pane: str, audio: bytes, audio_format: str) -> str:
         raise NotImplementedError
 
+    # ---- password prompts (docs/REMOTE-PROTOCOL.md section 6.7) --------------------------------
+    # The hub mints the nonce; these three are what binds it and what eventually writes the line.
+
+    def secret_state(self, pane: str) -> dict | None:
+        """The pids behind a password prompt: ``shell_pid`` for a fresh termios read and
+        ``foreground_pid`` to bind the nonce to the process that is actually asking, or None
+        when the pane is not at a prompt the source can see."""
+        return None
+
+    def secret_prompt(self, pane: str) -> bool:
+        """A fresh password-prompt check. The write path re-checks at the moment of the write;
+        this is the earlier of the two gates."""
+        return False
+
+    async def send_secret(self, pane: str, data: bytes, *, device: str) -> None:
+        """Write a password line. Only ever reached after the nonce and both prompt checks."""
+        raise wire.WireError("not_permitted", "password entry is not available on this source.")
+
     def turn_transcript(self, pane: str, turn_id: str) -> dict | None:
         return None
 
@@ -96,6 +114,8 @@ class DemoPaneSource(PaneSource):
         self._panes_callbacks: list[Callable[[], None]] = []
         self._agent_callbacks: list[Callable[[str, dict], None]] = []
         self._running: dict[str, asyncio.Task] = {}
+        self._secret: tuple[str, bool, int, int] = (None, False, 0, 0)
+        self._secrets: list[tuple[str, bytes]] = []
 
     # ---- observation -------------------------------------------------------------------------
 
@@ -192,3 +212,25 @@ class DemoPaneSource(PaneSource):
     async def transcribe(self, pane: str, audio: bytes, audio_format: str) -> str:
         await asyncio.sleep(0.2)
         return f"[demo transcript of {len(audio)} bytes of {audio_format}]"
+
+    # ---- password prompts ----------------------------------------------------------------------
+
+    def set_password_prompt(self, pane: str, up: bool, shell_pid: int = 0,
+                            foreground_pid: int = 0) -> None:
+        self._secret = (pane, up, shell_pid, foreground_pid)
+        self.set_status(pane, "password" if up else "idle")
+
+    def secret_state(self, pane: str) -> dict | None:
+        which, up, shell_pid, foreground_pid = getattr(self, "_secret", (None, False, 0, 0))
+        if which != pane or not up:
+            return None
+        return {"shell_pid": shell_pid, "foreground_pid": foreground_pid}
+
+    def secret_prompt(self, pane: str) -> bool:
+        return self.secret_state(pane) is not None
+
+    async def send_secret(self, pane: str, data: bytes, *, device: str) -> None:
+        if not self.secret_prompt(pane):
+            raise wire.WireError("not_permitted", "that pane is not at a password prompt.")
+        self._emit(pane, {"event": "status", "text": "Password sent."})
+        self._secrets.append((pane, bytes(data)))

@@ -150,7 +150,17 @@ job to end; `stop_command {job_id}` stops the job's process group and returns `s
 `tool_output {text}` streams only while a call is waiting on the job. Stop ends the job being
 waited on; jobs handed back earlier keep running. At most 8 run at once. Every job of a
 conversation is stopped on a new conversation, when a subagent's run ends, and when the worker
-exits. The pane prints `▸ still running as job-N` / `■ stopped job-N` for these results.
+exits. The pane prints `▸ still running as job-N` / `■ stopped job-N` for these results. Only
+the 16 most recent finished jobs are remembered; `command_output` on an older one is an error.
+
+The pane lists the jobs the model was handed back (src/JobsPanel.h, under the prompt box and the
+running-agents list). The worker sends `jobs {jobs: [{job_id, command, running, exit_code, stopped,
+elapsed_ms}]}` whenever that list changes (a job handed back, one ending, a new conversation
+emptying it); a command that finished inside its own call is never listed, and a subagent's jobs
+are not announced. `jobs_list` → the same event with the request's `id`. `job_output_get {job_id}`
+→ `job_output {job_id, command, running, exit_code, stopped, output, truncated, omitted_bytes}`,
+the newest 256 KiB, without moving the model's read position. `job_stop {job_id}` stops it; the
+list follows with `jobs`, and the model sees `stopped: true` on its next `command_output`.
 
 **File writes and their previews (`edit_file`, v2.3, 2026-09-18).** Two tools change files.
 `write_file {path, content}` creates a file or replaces one in full; `edit_file {path, old_string,

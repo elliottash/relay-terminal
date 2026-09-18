@@ -19,6 +19,7 @@ let tab = 'agent';
 let driving = false;
 let sticky = { ctrl: false, alt: false };
 let directKeys = false;
+let passwordEntry = false;  // the owner's per-device switch (welcome.password_entry)
 let answerNode = null;      // the answer being streamed, without a terminal to print into
 
 const $ = (id) => document.getElementById(id);
@@ -200,6 +201,33 @@ function onScreen(message) {
   screenView.apply(message);
   const wrap = $('screen-wrap');
   wrap.scrollTop = wrap.scrollHeight;
+}
+
+// The masked field replaces the prompt box while the pane is at a password prompt and this
+// device is trusted to answer it. The nonce comes from the pane list itself, minted by the
+// desktop for exactly this prompt; sending clears the field whatever the desktop then says.
+function updateSecretRow() {
+  const pane = panes.find((item) => item.id === current);
+  const ask = pane?.status === 'password' && pane.secret_nonce
+    && capability === 'full' && passwordEntry;
+  $('secret-row').hidden = !ask;
+  if (ask) {
+    $('composer').hidden = true;
+    $('term-note').textContent = 'This pane is asking for a password.';
+  } else if (capability === 'agent' || capability === 'full') {
+    updateDriveUi();               // restore the composer's own visibility rules
+  }
+}
+
+function sendSecret() {
+  const box = $('secret-text');
+  const text = box.value;
+  const pane = panes.find((item) => item.id === current);
+  if (!text || !current || !pane?.secret_nonce) return;
+  rrp.send({ t: 'secret_input', pane: current, nonce: pane.secret_nonce,
+             bytes: b64(new TextEncoder().encode(text)) })
+    .then(() => { box.value = ''; })
+    .catch((error) => { $('term-note').textContent = error.message; });
 }
 
 function updateDriveUi() {
@@ -428,6 +456,7 @@ function sendPrompt() {
 rrp.addEventListener('welcome', (event) => {
   capability = event.detail.capability || capability;
   features = event.detail.features || [];
+  passwordEntry = !!event.detail.password_entry;
   $('capability').textContent = capability;
 });
 
@@ -448,6 +477,7 @@ rrp.addEventListener('panes', (event) => {
       $('thread-title').textContent = pane.title || pane.id;
       $('thread-cwd').textContent = pane.cwd || '';
     }
+    updateSecretRow();
   }
 });
 
@@ -496,6 +526,13 @@ window.addEventListener('DOMContentLoaded', () => {
   $('composer-text').addEventListener('input', (event) => {
     event.target.style.height = 'auto';
     event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`;
+  });
+  $('secret-send').addEventListener('click', sendSecret);
+  $('secret-text').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      sendSecret();
+    }
   });
   $('composer-stop').addEventListener('click', () => {
     rrp.send({ t: 'agent_stop', pane: current }).catch(() => {});

@@ -115,6 +115,18 @@ p { margin: 0 0 12px; }
 .note { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
 .note.error { color: var(--bad); }
 
+#secret-row {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+#secret-row input {
+  flex: 1;
+  min-width: 0;
+}
+
 #composer {
   display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px;
   border-top: 1px solid var(--line); background: var(--panel);

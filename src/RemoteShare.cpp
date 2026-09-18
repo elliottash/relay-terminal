@@ -192,6 +192,16 @@ void RemoteShare::handle(const QJsonObject &message)
                               message.value(QStringLiteral("route")).toBool(),
                               message.value(QStringLiteral("origin")).toString());
         }
+    } else if (kind == QLatin1String("secret_input")) {
+        const QString paneId = message.value(QStringLiteral("pane")).toString();
+        auto it = m_panes.find(paneId);
+        if (it != m_panes.end() && it->hooks.secret) {
+            // The sidecar checked the nonce and the prompt; this last check is the fresh termios
+            // read at the moment of the write (section 6.7), so the line can never land at the
+            // shell instead of the prompt that asked for it.
+            it->hooks.secret(QByteArray::fromBase64(
+                message.value(QStringLiteral("bytes")).toString().toLatin1()));
+        }
     } else if (kind == QLatin1String("agent_stop")) {
         const QString paneId = message.value(QStringLiteral("pane")).toString();
         auto it = m_panes.find(paneId);
@@ -258,8 +268,12 @@ void RemoteShare::sendPane(const QString &paneId)
     it->lastCwd = cwd;
     it->lastStatus = status;
     const ViewportFrame &frame = it->hooks.view->frame();
-    send({{"t", "pane"}, {"id", paneId}, {"title", title}, {"cwd", cwd}, {"status", status},
-          {"rows", frame.rows}, {"cols", frame.columns}});
+    QJsonObject message{{"t", "pane"}, {"id", paneId}, {"title", title}, {"cwd", cwd},
+                         {"status", status}, {"rows", frame.rows}, {"cols", frame.columns}};
+    if (it->hooks.shellPid) message["pid"] = static_cast<double>(it->hooks.shellPid());
+    if (it->hooks.foregroundPid)
+        message["foreground_pid"] = static_cast<double>(it->hooks.foregroundPid());
+    send(message);
 }
 
 void RemoteShare::sendFrame(const QString &paneId, bool full)
@@ -308,6 +322,11 @@ void RemoteShare::answer(int askId, bool allow, const QString &capability)
 void RemoteShare::revoke(const QString &deviceId)
 {
     send({{"t", "revoke"}, {"device", deviceId}});
+}
+
+void RemoteShare::setPasswordEntry(const QString &deviceId, bool allow)
+{
+    send({{"t", "password_entry"}, {"device", deviceId}, {"allow", allow}});
 }
 
 // ---- the dialog --------------------------------------------------------------------------------
@@ -409,6 +428,21 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
         if (item) RemoteShare::instance().revoke(item->data(Qt::UserRole).toString());
     });
     buttons->addWidget(revoke);
+    // Password entry is its own grant, off by default, because a password typed on a phone is
+    // the one input that can end up somewhere a keystroke must never go (section 6.7).
+    m_passwords = new QPushButton;
+    m_passwords->setToolTip(QStringLiteral(
+        "Whether this device may answer a password prompt. Off until you turn it on, and only "
+        "ever for a pane that is at a prompt right now."));
+    connect(m_passwords, &QPushButton::clicked, this, [this] {
+        const auto *item = m_devices->currentItem();
+        if (!item) return;
+        const QString device = item->data(Qt::UserRole).toString();
+        const bool now = item->data(Qt::UserRole + 1).toBool();
+        RemoteShare::instance().setPasswordEntry(device, !now);
+    });
+    connect(m_devices, &QListWidget::itemSelectionChanged, this, [this] { passwordLabel(); });
+    buttons->addWidget(m_passwords);
     buttons->addStretch(1);
     m_stop = new QPushButton(QStringLiteral("Stop sharing"));
     connect(m_stop, &QPushButton::clicked, this, [this] {
@@ -532,13 +566,31 @@ void RemoteShareDialog::showDevices(const QJsonArray &items)
     for (const QJsonValue &value : items) {
         const QJsonObject device = value.toObject();
         auto *item = new QListWidgetItem(
-            QStringLiteral("%1 (%2) · %3")
+            QStringLiteral("%1 (%2) · %3%4")
                 .arg(device.value(QStringLiteral("name")).toString(),
                      device.value(QStringLiteral("platform")).toString(),
-                     device.value(QStringLiteral("capability")).toString()));
+                     device.value(QStringLiteral("capability")).toString(),
+                     device.value(QStringLiteral("password_entry")).toBool()
+                         ? QStringLiteral(" · passwords") : QString()));
         item->setData(Qt::UserRole, device.value(QStringLiteral("id")).toString());
+        item->setData(Qt::UserRole + 1, device.value(QStringLiteral("password_entry")).toBool());
         m_devices->addItem(item);
     }
+    passwordLabel();
+}
+
+void RemoteShareDialog::passwordLabel()
+{
+    const auto *item = m_devices->currentItem();
+    if (!item) {
+        m_passwords->setEnabled(false);
+        m_passwords->setText(QStringLiteral("Passwords off"));
+        return;
+    }
+    m_passwords->setEnabled(true);
+    m_passwords->setText(item->data(Qt::UserRole + 1).toBool()
+                             ? QStringLiteral("Passwords: on")
+                             : QStringLiteral("Passwords: off"));
 }
 
 } // namespace relay

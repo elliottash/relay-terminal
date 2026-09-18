@@ -44,6 +44,14 @@ QString str(const QJsonObject &object, const char *key) {
     return object.value(QLatin1String(key)).toString();
 }
 
+// A model server on this machine (presets.py `local`, card #24XJ) serves without an API key, so it
+// counts as usable wherever a stored key does. It never reaches the keys modal: its group is
+// "local", which KeysDialog::rebuild() does not list.
+bool usable(const QJsonObject &preset) {
+    return preset.value(QStringLiteral("has_stored_key")).toBool()
+           || preset.value(QStringLiteral("local")).toBool();
+}
+
 }  // namespace
 
 // ===== KeysDialog ===============================================================================
@@ -417,11 +425,10 @@ QJsonArray RolesDialog::choosableProviders() const {
     for (const auto &value : std::as_const(m_presets)) {
         const QJsonObject preset = value.toObject();
         all.append(preset);
-        if (preset.value(QStringLiteral("has_stored_key")).toBool() || str(preset, "id") == m_provider)
-            keyed.append(preset);
+        if (usable(preset) || str(preset, "id") == m_provider) keyed.append(preset);
     }
     for (const auto &value : std::as_const(keyed))
-        if (value.toObject().value(QStringLiteral("has_stored_key")).toBool()) return keyed;
+        if (usable(value.toObject())) return keyed;
     return all;
 }
 
@@ -519,7 +526,7 @@ void RolesDialog::buildTierRow(QVBoxLayout *into, const QString &tier, const QJs
         for (const auto &value : std::as_const(m_presets)) {
             const QJsonObject item = value.toObject();
             const QString id = str(item, "id");
-            const bool stored = item.value(QStringLiteral("has_stored_key")).toBool();
+            const bool stored = usable(item);
             // A tier still shows the provider it is pinned to after that key goes away: the row would
             // otherwise read "Default provider" while the worker reports the fallback underneath it.
             if (!stored && id != override) continue;
@@ -718,13 +725,14 @@ void RolesDialog::buildVisionRow(QVBoxLayout *into) {
     into->addWidget(row);
 }
 
-// Pin one job to a provider and model of its own. Only providers with a stored key are offered,
-// because a role whose key is missing just falls back to the main agent.
+// Pin one job to a provider and model of its own. Only providers Relay can actually reach are
+// offered — a stored key, or a local endpoint that needs none — because a role whose key is missing
+// just falls back to the main agent.
 void RolesDialog::pinRole(const QString &role) {
     QStringList labels, ids;
     for (const auto &value : std::as_const(m_presets)) {
         const QJsonObject preset = value.toObject();
-        if (!preset.value(QStringLiteral("has_stored_key")).toBool()) continue;
+        if (!usable(preset)) continue;
         labels << providerChoice(str(preset, "id"));
         ids << str(preset, "id");
     }
@@ -762,7 +770,7 @@ void RolesDialog::rebuild() {
     m_providerBox->clear();
     for (const auto &value : choosableProviders()) {
         const QJsonObject preset = value.toObject();
-        const bool stored = preset.value(QStringLiteral("has_stored_key")).toBool();
+        const bool stored = usable(preset);
         const QString id = str(preset, "id");
         m_providerBox->addItem(stored ? providerChoice(id)
                                       : providerChoice(id) + QStringLiteral("  (no key)"), id);

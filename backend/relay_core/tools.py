@@ -82,6 +82,9 @@ class Prepared:
     replacements: int = 0
     added: int = 0
     removed: int = 0
+    # The unified diff on its own, so the tool events can carry it without anything parsing
+    # `preview` back apart (protocol 23, the concise tool-call line).
+    diff: str = ""
 
 
 class Workspace:
@@ -147,8 +150,10 @@ class ToolExecutor:
         self.terminal = TerminalHandoff(emit, cancel)
         # Where run_command runs when the model gives no cwd: the directory the user's terminal is in.
         self.default_cwd = "."
-        # Every command is a job; the one a tool call is waiting on is what Stop ends.
-        self.jobs = JobTable()
+        # Every command is a job; the one a tool call is waiting on is what Stop ends. The ones
+        # handed back are listed in the pane (`jobs` events); a subagent's executor turns that off.
+        self.announce_jobs = True
+        self.jobs = JobTable(on_change=self._announce_jobs)
         self._waiting = None
         self._lock = threading.Lock()
 
@@ -177,7 +182,14 @@ class ToolExecutor:
 
     def shutdown(self) -> None:
         """The conversation is over (new conversation, subagent done): no turn can name its jobs."""
-        self.jobs.stop_all()
+        self.jobs.stop_all(forget=True)
+
+    def jobs_event(self) -> dict:
+        return {"event": "jobs", "jobs": self.jobs.snapshot()}
+
+    def _announce_jobs(self) -> None:
+        if self.announce_jobs:
+            self.emit(self.jobs_event())
 
     @staticmethod
     def _text(args: dict, key: str, *, maximum: int = MAX_FILE) -> str:
@@ -280,7 +292,8 @@ class ToolExecutor:
         # Preserve reviewability for files whose only change is a trailing newline.
         title = "EDIT FILE" if name == "edit_file" else "WRITE FILE"
         preview = f"{title}\n\n{path}\n\n{diff or '(No text changes)'}\n\nOld bytes: {len(old)}; new bytes: {len(content.encode('utf-8'))}."
-        return Prepared(name, args, preview, path, old_sha, existed, content, replacements, added, removed)
+        return Prepared(name, args, preview, path, old_sha, existed, content, replacements, added, removed,
+                        diff=diff)
 
     def _edited(self, args: dict, old: bytes) -> tuple[str, int]:
         """The whole new text of an edit_file, and how many occurrences it replaces.
@@ -417,6 +430,7 @@ class ToolExecutor:
         result["job_id"] = job.id
         result["duration_seconds"] = round((job.finished or time.monotonic()) - job.started, 3)
         if job.running:
+            self.jobs.hand_back(job)
             result["still_running"] = True
             result["note"] = (f"Still running as {job.id}. Read more with command_output "
                               f"(wait_seconds up to {MAX_WAIT}), or end it with stop_command.")

@@ -307,27 +307,34 @@ def main():
                            "preset": resolved.preset_id, "effort": agent.effort, "agent_role": new_role,
                            **({"warning": resolved.warning} if resolved.warning else {})}
 
-                def role_now(agent=agent, resolved=resolved, new_role=new_role, changed=changed):
-                    with agent._model_lock:
-                        agent._pending_model = None
-                        state["agent_role"] = new_role
-                        agent.set_model(resolved.config, resolved.preset_id)
-                        emit({**changed, "applies": "now", "context_window": agent.context.window})
-                    return True
-
-                def role_later(agent=agent, resolved=resolved, new_role=new_role, changed=changed):
-                    # Mid-turn (issue 3ES1): like set_model, it lands before the turn's next request.
+                def role_decide(idle, agent=agent, resolved=resolved, new_role=new_role, changed=changed):
+                    # Idle: at once, or after the compaction a smaller window needs. Mid-turn (issue
+                    # 3ES1): like set_model, it lands before the turn's next request. Its own
+                    # follow-up: a role switch sets the pane's role, it does not rebase the roles.
                     def follow(_agent, new_role=new_role):
                         state["agent_role"] = new_role
+
+                    def apply_now():
+                        state["agent_role"] = new_role
+                        agent.set_model(resolved.config, resolved.preset_id)
                     with agent._model_lock:
-                        outcome = agent.defer_model(resolved.config, resolved.preset_id, on_applied=follow,
-                                                    fields={"agent_role": new_role})
+                        outcome = agent.request_model(
+                            resolved.config, resolved.preset_id, idle=idle, apply_now=apply_now,
+                            start_exclusive=lambda task: turns.start_exclusive_locked("set_agent_role", task),
+                            on_applied=follow, fields={"agent_role": new_role},
+                            refused_fields=lambda: {"agent_role": state["agent_role"]})
+                        if outcome["applies"] == "refused":
+                            emit({"event": "model_switch_refused", "id": request.get("id"), "at": "request",
+                                  "model": resolved.config.model, "current_model": agent.config.model,
+                                  "preset": agent.preset.id if agent.preset else None,
+                                  "context_window": agent.context.window, "effort": agent.effort,
+                                  "agent_role": state["agent_role"], "reason": outcome["reason"]})
+                            return
                         if outcome["applies"] == "now":
                             state["agent_role"] = new_role
                         emit({**changed, **outcome})
-                    return False
-                if turns.now_or_later(role_now, role_later):
-                    emit(agent.context_event())
+                turns.now_or_later(lambda: role_decide(True), lambda: role_decide(False))
+                emit(agent.context_event())
             # --- the agent typing into the program in the visible pane (protocol 17) ---
             elif kind == "program_state":
                 # The pane's live view: who owns the terminal, what it is asking, and whether the

@@ -82,6 +82,14 @@
     <!-- One box, like Relay's own: what you type is routed — a command runs, anything else goes
          to the agent, whose answer prints into the same terminal. After Take over it types
          straight into the running program instead. -->
+    <!-- A password prompt on the pane, for a device the owner has allowed to answer it. The
+         field is a password field and what it sends is a one-shot nonce the desktop minted, so
+         the line can only ever reach the prompt that asked for it, never the shell. -->
+    <div id="secret-row" hidden>
+      <input id="secret-text" type="password" autocomplete="off" autocapitalize="off"
+             spellcheck="false" placeholder="Password for this pane&hellip;" aria-label="Password">
+      <button type="button" id="secret-send">Send</button>
+    </div>
     <div id="composer">
       <textarea id="composer-text" rows="1" placeholder="Ask or run…"
                 autocapitalize="sentences" autocomplete="off"></textarea>
