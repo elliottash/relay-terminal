@@ -543,11 +543,13 @@ void SubagentTabsView::relabel(int index) {
     m_bar->setTabText(index, QStringLiteral("%1 %2 %3").arg(SubagentModel::statusIcon(status), type, id));
     m_bar->setTabToolTip(index, (view->description().isEmpty() ? QString() : view->description() + QLatin1Char('\n'))
                                     + (view->ended() ? QStringLiteral("Ended with the previous session") : status));
+    // The same ink the pane-status glyphs use (relay::panestatus::stateInk): a running agent is
+    // the agent colour, a failure the error colour, so a tab and a header never disagree.
     QColor color = theme::TextMuted;
     if (view->ended()) color = theme::TextMuted;
-    else if (status == QStringLiteral("running")) color = theme::Accent;
+    else if (status == QStringLiteral("running")) color = theme::Agent;
     else if (status == QStringLiteral("done")) color = theme::Success;
-    else if (status == QStringLiteral("failed")) color = theme::SyntaxUnknown;
+    else if (status == QStringLiteral("failed")) color = theme::Error;
     else if (status == QStringLiteral("waiting")) color = theme::Text;
     m_bar->setTabTextColor(index, color);
 }
