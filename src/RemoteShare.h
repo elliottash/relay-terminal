@@ -242,6 +242,7 @@ private:
     QLabel *m_qr = nullptr;
     QLabel *m_url = nullptr;
     QComboBox *m_address = nullptr;
+    QLabel *m_addressNote = nullptr;
     QLabel *m_note = nullptr;
     QWidget *m_askBox = nullptr;
     QLabel *m_askText = nullptr;

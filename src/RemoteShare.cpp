@@ -700,13 +700,22 @@ RemoteShareDialog::RemoteShareDialog(const QString &paneId, QWidget *parent)
     // reason a phone says it cannot reach the site, so the choice is in front of the QR code.
     m_address = new QComboBox;
     m_address->setToolTip(QStringLiteral(
-        "The address your phone will open. Use the network one when the phone is on the same "
-        "Wi-Fi, the tailnet one when it is signed in to your tailnet."));
+        "The address your phone will open. The tailnet name comes first when tailscale can serve "
+        "it: a real certificate, no warning to accept, and it works from anywhere the phone is "
+        "signed in to your tailnet. Use the network address when the phone is on the same Wi-Fi."));
     connect(m_address, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
         const QString address = m_address->itemData(index).toString();
         if (!address.isEmpty()) RemoteShare::instance().useAddress(address);
     });
     column->addWidget(m_address);
+
+    // Why the warning-free address is not on offer, when it is not. An absent entry and an entry
+    // that needs one command run once look identical in a list, so the sentence is shown.
+    m_addressNote = new QLabel;
+    m_addressNote->setWordWrap(true);
+    m_addressNote->setObjectName(QStringLiteral("shareNote"));
+    m_addressNote->setVisible(false);
+    column->addWidget(m_addressNote);
 
     m_qr = new QLabel;
     m_qr->setAlignment(Qt::AlignCenter);
@@ -1021,20 +1030,39 @@ void RemoteShareDialog::fit()
 
 void RemoteShareDialog::showAddresses(const QJsonArray &addresses)
 {
+    // The sidecar sends its best first: the tailnet name behind `tailscale serve`, which the phone
+    // opens with no certificate warning at all, then this machine's own addresses behind the
+    // self-signed certificate (the LAN one, then the tailnet IP). It also sends the tailnet entry
+    // when it cannot be used, carrying one sentence saying why — that is not something to choose,
+    // so it goes under the picker rather than into it.
     m_address->blockSignals(true);
     m_address->clear();
+    QString reason;
     for (const QJsonValue &value : addresses) {
         const QJsonObject entry = value.toObject();
+        if (entry.contains(QStringLiteral("available"))
+            && !entry.value(QStringLiteral("available")).toBool()) {
+            if (reason.isEmpty()) reason = entry.value(QStringLiteral("reason")).toString();
+            continue;
+        }
         const QString address = entry.value(QStringLiteral("value")).toString();
-        m_address->addItem(QStringLiteral("%1 — reachable from %2")
-                               .arg(address, entry.value(QStringLiteral("where")).toString()),
-                           address);
+        if (address.isEmpty()) continue;
+        QString label = entry.value(QStringLiteral("label")).toString();
+        if (label.isEmpty()) {
+            label = QStringLiteral("%1 — reachable from %2")
+                        .arg(address, entry.value(QStringLiteral("where")).toString());
+        }
+        m_address->addItem(label, address);
         if (entry.value(QStringLiteral("current")).toBool()) {
             m_address->setCurrentIndex(m_address->count() - 1);
         }
     }
     m_address->setVisible(m_address->count() > 1);
     m_address->blockSignals(false);
+    m_addressNote->setText(reason.isEmpty()
+                               ? QString()
+                               : QStringLiteral("No warning-free tailnet address: %1").arg(reason));
+    m_addressNote->setVisible(!reason.isEmpty());
     fit();
 }
 
