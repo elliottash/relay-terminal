@@ -174,6 +174,18 @@ private Q_SLOTS:
         QVERIFY(spec.terminalForeground.lightness() < spec.terminalBackground.lightness());
     }
 
+    // Issue 0EXJ: /light and /dark are the two themes the owner named, by id, so the two theme
+    // files those commands reach for have to be there and be the right way round. Renaming either
+    // file is what would break the commands, and this is what says so.
+    void theLightAndDarkCommandsHaveTheirThemes() {
+        const ThemeSpec beige = shipped(QStringLiteral("ibm-beige"));
+        QCOMPARE(beige.name, QStringLiteral("IBM Beige"));
+        QVERIFY(beige.isLight());
+        const ThemeSpec copper = shipped(QStringLiteral("dark-copper"));
+        QCOMPARE(copper.name, QStringLiteral("Dark Copper"));
+        QVERIFY(!copper.isLight());
+    }
+
     // --- filling gaps and keeping the unknown ------------------------------------------------
     void missingTokensComeFromTheFallback() {
         QString error;

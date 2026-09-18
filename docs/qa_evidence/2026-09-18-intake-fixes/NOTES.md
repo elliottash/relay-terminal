@@ -53,3 +53,14 @@ part is for human QA.
 | `v9v1-open-internal-opened-the-preview.png` | "Open internal" on that file: a rendered preview pane. |
 | `v9v1-preview-menu-on-a-markdown-file.png` | A preview pane had no menu of its own before; right-clicking gave the QTextEdit menu. Now: the three entries, Copy path, and the viewer's Copy / Copy Link Location / Select All under a separator. |
 | `v9v1-preview-menu-on-a-text-file.png` | The same in the text viewer (no Copy Link Location, because there is no link). |
+
+## #0EXJ — /light and /dark
+
+| Shot | What it shows |
+|---|---|
+| `0exj-slash-popup-names-the-theme.png` | `/light` in the prompt box: the popup reads "Light theme: IBM Beige", so the command says which theme it means. |
+| `0exj-light-switched-to-ibm-beige.png` | After Enter: chrome, explorer, preview and terminal all beige, status line "Theme: IBM Beige." |
+| `0exj-dark-switched-to-dark-copper.png` | `/dark`: Dark Copper, status line "Theme: Dark Copper." |
+
+Afterwards the isolated `relay.conf` held `[theme] name=dark-copper`, so the choice survives a
+restart.

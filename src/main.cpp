@@ -4024,6 +4024,8 @@ private:
             {QStringLiteral("conversations"), QStringLiteral("[words]"), QStringLiteral("List and search every conversation and Relay's terminal history")},
             {QStringLiteral("find"), QStringLiteral("[words]"), QStringLiteral("Find in this pane: conversation and terminal scrollback")},
             {QStringLiteral("plan"), QString(), QStringLiteral("Toggle plan mode")},
+            {QStringLiteral("light"), QString(), QStringLiteral("Light theme: IBM Beige")},
+            {QStringLiteral("dark"), QString(), QStringLiteral("Dark theme: Dark Copper")},
         {QStringLiteral("switchboard"), QString(), QStringLiteral("Open the Switchboard: cards, threads and plans")},
         {QStringLiteral("card"), QStringLiteral("<text>"), QStringLiteral("Add a card to the Switchboard inbox, verbatim")},
             {QStringLiteral("recap"), QString(), QStringLiteral("Summarize this session")},
@@ -4188,6 +4190,15 @@ private:
                 hint(QStringLiteral("find.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("find in this pane")));
         }
         else if (name == QStringLiteral("plan")) togglePlanMode();
+        else if (name == QStringLiteral("light") || name == QStringLiteral("dark")) {
+            // The owner named the two (0EXJ, 2026-09-18: "light activates beige; dark activates
+            // copper"), so these are not "any light theme" — they are those two theme files. The
+            // switch is the one the settings picker makes, which restyles the chrome, both
+            // terminal engines and the prompt box's colours and stores `theme/name`.
+            const QString id = name == QStringLiteral("light") ? QStringLiteral("ibm-beige") : QStringLiteral("dark-copper");
+            if (!relay::theme::setActiveTheme(id)) { status(QStringLiteral("The %1 theme could not be read.").arg(id)); return; }
+            status(QStringLiteral("Theme: %1.").arg(relay::theme::active().name));
+        }
         else if (name == QStringLiteral("rename")) {
             // With a name it renames straight away; without one it opens the same editor a double
             // click does, where clearing the field hands the pane back to the model.

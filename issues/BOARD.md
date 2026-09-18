@@ -18,7 +18,6 @@
 | `#P4GP` | [Website and beta release](features/2026-09-17-website-and-beta-release.md) | ready |  |  |  |
 | `#05J2` | [Export settings, and an optional sync across machines](features/2026-09-17-settings-export-and-sync.md) | ready |  |  |  |
 | `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | ready |  |  |  |
-| `#0EXJ` | [/light and /dark commands](features/2026-09-18-light-and-dark-commands.md) | ready | agent |  |  |
 | `#4TNY` | [Text editing for text files: word wrap, syntax highlighting, find](features/2026-09-18-text-editing-for-text-files.md) | ready | agent |  |  |
 | `#WQFS` | [In-app PDF rendering](features/2026-09-18-in-app-pdf-rendering.md) | ready | agent |  |  |
 | `#W5N2` | [Remote access from a phone and multiplayer shared terminals](features/2026-09-17-remote-phone-and-multiplayer.md) | in-progress |  |  |  |
@@ -84,6 +83,7 @@
 | `#X2F1` | [Bring the useful Konsole context-menu items to the engine panes](features/needs_qa_llm/2026-09-17-port-konsole-context-menus.md) | needs-qa-llm | agent |  |  |
 | `#5FY5` | [Ctrl+Shift alternates for the core shortcuts](features/needs_qa_llm/2026-09-17-in-app-shortcut-alternates.md) | needs-qa-llm |  |  |  |
 | `#1AXN` | [Switchboard phase 1: agent tools and policy, the protocol, the pane, `#` references](features/needs_qa_llm/2026-09-17-switchboard-phase1.md) | needs-qa-llm | agent |  |  |
+| `#0EXJ` | [/light and /dark commands](features/needs_qa_llm/2026-09-18-light-and-dark-commands.md) | needs-qa-llm | agent |  |  |
 | `#V9V1` | [An open-external button for every file, and a menu order to match](features/needs_qa_llm/2026-09-18-open-external-in-the-right-click-menu.md) | needs-qa-llm | agent |  |  |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | agent |  |  |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
