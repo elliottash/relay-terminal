@@ -266,6 +266,14 @@ target_include_directories(relay-diffview PUBLIC src)
 target_link_libraries(relay-diffview PUBLIC relay-highlight ${RELAY_QT}::Widgets)
 target_compile_options(relay-diffview PRIVATE -Wall -Wextra -Wpedantic)
 
+# The tool-call `label` (docs/AGENT-SESSIONS-PROTOCOL.md section 23) turned into the one concise
+# line every surface prints: the terminal pane, the subagent transcript and the turn pane share it.
+# QtCore only -- no widget, no theme -- so the rules are tested headless.
+add_library(relay-toollabel STATIC src/ToolLabel.cpp src/ToolLabel.h)
+target_include_directories(relay-toollabel PUBLIC src)
+target_link_libraries(relay-toollabel PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-toollabel PRIVATE -Wall -Wextra -Wpedantic)
+
 add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
 target_include_directories(relay-requests PUBLIC src)
 target_link_libraries(relay-requests PUBLIC ${RELAY_QT}::Widgets)
@@ -445,6 +453,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-diffview-tests PRIVATE relay-diffview ${RELAY_QT}::Test)
     add_test(NAME diffview COMMAND relay-diffview-tests)
     set_tests_properties(diffview PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-toollabel-tests tests/toollabel_test.cpp)
+    target_link_libraries(relay-toollabel-tests PRIVATE relay-toollabel ${RELAY_QT}::Test)
+    add_test(NAME toollabel COMMAND relay-toollabel-tests)
+    set_tests_properties(toollabel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME backend-and-bash COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -v)
     # XDG_DATA_HOME keeps session autosaves and the conversation index out of the real profile.
     set_tests_properties(backend-and-bash PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
