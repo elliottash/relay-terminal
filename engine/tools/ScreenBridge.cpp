@@ -161,7 +161,8 @@ private:
         m_session->withCore([&](VtCore &core) {
             total = core.historyRows();
             const int end = qMax(0, total - before); // one past the newest row of this page
-            from = core.historyLines(end - qMin(count, end), qMin(count, end), &lines);
+            const int want = qMin(count, end);
+            from = core.historyLines(end - want, want, &lines);
         });
         QJsonArray rows;
         for (int index = 0; index < int(lines.size()); ++index)
