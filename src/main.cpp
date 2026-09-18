@@ -1344,6 +1344,17 @@ public:
         QWidget *focus = QApplication::focusWidget();
         return focus && (focus == this || isAncestorOf(focus));
     }
+    // Whether the keyboard is in this pane, or will be once its window is active again. Timers
+    // change a pane behind the user's back — a command finishes, a program asks for a password —
+    // and a pane that is not being typed in must never take the keyboard for it: the rest of a
+    // sentence meant for another pane landed in this one's prompt box, or in its masked password
+    // field, one Enter from the program. focusInput() puts the keyboard in the right widget
+    // whenever the user does come here.
+    bool holdsFocus() const {
+        const QWidget *top = window();
+        const QWidget *focus = top ? top->focusWidget() : nullptr;
+        return focus && (focus == this || isAncestorOf(focus));
+    }
 
     // Human control (Ctrl+H, F12, the "Take control" button): the only way the terminal widget
     // ever gets the keyboard. Everything else keeps it in the prompt box.
@@ -5836,6 +5847,7 @@ private:
         if (m_secretMode || !m_secretEdit) return;
         // A password prompt ends any delegation: no model ever types into a masked prompt.
         endDelegation(QStringLiteral("password"));
+        const bool mine = holdsFocus();   // asked before the prompt box hides and Qt moves the focus on
         m_secretMode = true;
         m_secretProgram = program;
         hideAtPopup(); hideCardPopup(); hideSlashPopup(); hideTabPopup(); clearAiGhost();
@@ -5845,7 +5857,7 @@ private:
         scrubSecretEditor();
         m_editor->hide();
         m_secretEdit->show();
-        m_secretEdit->setFocus(Qt::OtherFocusReason);
+        if (mine) m_secretEdit->setFocus(Qt::OtherFocusReason);
         refreshProgramHint();
         changed();
         toast(QStringLiteral("Password prompt · type it here · %1 asks the agent instead")
@@ -5854,13 +5866,14 @@ private:
 
     void leaveSecretMode() {
         if (!m_secretMode) return;
+        const bool mine = holdsFocus();   // before the masked field hides
         m_secretMode = false;
         m_secretProgram.clear();
         scrubSecretEditor();
         m_secretEdit->hide();
         m_secretChip->hide();
         m_editor->show();
-        if (!m_native) m_editor->setFocus(Qt::OtherFocusReason);
+        if (mine && !m_native) m_editor->setFocus(Qt::OtherFocusReason);
         refreshProgramHint();
         requestRoute(false, QStringLiteral("auto"));
         changed();
@@ -7994,7 +8007,10 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
         refreshStatusStrip();
         m_shellReady = m_promptReported && !m_loading && readlineReady();
         if (m_refocus && m_shellReady && !m_native) {
-            m_editor->setFocus(); m_refocus = false;
+            // Only when the keyboard is already here: the command that just finished may belong
+            // to a pane the user left long ago.
+            if (holdsFocus()) m_editor->setFocus();
+            m_refocus = false;
         }
     }
 

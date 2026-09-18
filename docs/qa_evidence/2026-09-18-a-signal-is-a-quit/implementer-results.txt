@@ -1,0 +1,24 @@
+drive.sh <relay binary> <scratch dir>, isolated profile (XDG_* and TMPDIR), Xvfb :97, 2026-09-18.
+
+Before (05629ad):
+  before: tmp dirs=2  workers=1
+  relay exit status=143
+  after:  tmp dirs left=2 -> relay-WNgbTX relay-open-YrXlLN
+  layout saved: 0   scrollback files: 0
+  (layout 0 here is partly the harness: that run shared XDG_RUNTIME_DIR with a live Relay, which
+   owned the layout lock. The scrollback, which is only written on the way out, is the real loss.)
+
+After the signal handler alone:
+  relay exit status=0
+  after:  tmp dirs left=1 -> relay-VpfAdR        <- the pane's directory: ~Pane never ran
+  layout saved: 1   scrollback files: 1
+
+After ~WindowManager as well (0f49c89):
+  before: tmp dirs=2  workers=1
+  relay exit status=0
+  after:  tmp dirs left=0 ->
+  layout saved: 1   scrollback files: 1
+  stderr: (empty)
+
+On the owner's machine at the time: 876 /tmp/relay-XXXXXX and 386 /tmp/relay-open-XXXXXX
+directories, 44 MB, with one Relay running.
