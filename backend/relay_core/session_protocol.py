@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Worker protocol handlers for sessions, model/effort, context, checkpoints, plan mode,
-instructions, recaps, suggestions and pane titles (docs/AGENT-SESSIONS-PROTOCOL.md sections 1-7,
-9, 10, 17).
+instructions, recaps, suggestions, pane titles and aliases (docs/AGENT-SESSIONS-PROTOCOL.md
+sections 1-7, 9, 10, 17, 18, 19).
 
 Conversation rewrites (compact) run through TurnSupervisor.run_exclusive so they never overlap a
 turn. Calls that only read a copy of the conversation (recaps, suggestions, synthesis) run on
@@ -13,7 +13,8 @@ import os
 import threading
 import uuid
 
-from . import attachments, conv_index, instructions, keystore, planning, suggestions, titles
+from . import (alias_import, aliases, attachments, conv_index, instructions, keystore, logs,
+               planning, suggestions, titles)
 from .agent import validate_turn_options
 from .requests import check_ledger_id
 from .context import validate_threshold, validate_window
@@ -21,11 +22,16 @@ from .presets import PRESETS, match_preset, resolve_preset, validate_effort
 from .provider import ProviderConfig, ProviderError
 from .sessions import SessionStore, check_id, default_session_dir
 
+_log = logs.get("aliases")
+
 TYPES = {"set_model", "set_effort", "context", "compact", "checkpoints", "rewind", "fork", "load_state",
          "sessions", "resume", "recap_request", "set_mode", "plan_execute", "scan_instructions",
          "synthesize_instructions", "suggest",
          # pane title and tab label (protocol section 18)
          "set_session_title", "tab_label",
+         # aliases: saved commands and prompts (protocol section 19)
+         "aliases", "alias_run", "alias_save", "alias_delete",
+         "alias_import_preview", "alias_import_apply",
          # request ledger and todos (protocol section 12)
          "requests", "request_get", "request_set", "request_reask", "todos",
          # conversation list and full-text search (protocol section 14)
@@ -126,6 +132,9 @@ class SessionCommands:
         self.on_conversation_replaced = on_conversation_replaced or (lambda: None)
         # Conversation index (protocol 14), opened on the first conversation command.
         self._index = None
+        # Alias import previews (protocol 19), held until the matching apply names one.
+        self._alias_previews: dict[str, list] = {}
+        self._alias_lock = threading.Lock()
 
     @staticmethod
     def handles(kind) -> bool:
@@ -528,11 +537,159 @@ class SessionCommands:
                     "bytes": len(text.encode("utf-8"))}
         self._background("synthesize_instructions", request.get("id"), work)
 
+    # ----- aliases: saved commands and prompts (protocol section 19) ------------------
+    # Reading and running an alias needs no provider and no configured agent: the palette wants
+    # the list before a key is entered. Only the suggestion is a model call.
+
+    def _alias_scope(self, request, default=None):
+        scope = request.get("scope")
+        if scope is None:
+            return default
+        if scope not in aliases.SCOPES:
+            raise ValueError('scope must be "local" or "global".')
+        return scope
+
+    def _emit_aliases(self, request_id, workspace):
+        catalog, problems = aliases.catalog(workspace)
+        self.emit({"event": "aliases", "id": request_id, "workspace": workspace,
+                   "items": [a.to_dict() for a in catalog], "problems": problems})
+
+    def _aliases(self, request):
+        self._emit_aliases(request.get("id"), self._workspace(request))
+
+    def _alias_run(self, request):
+        """Expand one alias. The worker does the substitution, so the quoting rules that make a
+        parameter value data rather than syntax live in one place (relay_core/aliases.py)."""
+        name = request.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("alias_run needs the alias name.")
+        values = request.get("values") or {}
+        if not isinstance(values, dict):
+            raise ValueError("values must be an object of parameter names to text.")
+        workspace = self._workspace(request)
+        try:
+            alias = aliases.resolve(name, workspace, self._alias_scope(request))
+            text = aliases.fill(alias, values)
+        except aliases.AliasError as exc:
+            raise ValueError(str(exc)) from None
+        self.emit({"event": "alias_expanded", "id": request.get("id"), "name": alias.name,
+                   "kind": alias.kind, "scope": alias.scope, "text": text,
+                   "title": alias.title, "path": alias.path})
+
+    def _alias_save(self, request):
+        scope = self._alias_scope(request, "local")
+        params = request.get("params") or []
+        if not isinstance(params, list):
+            raise ValueError("params must be a list.")
+        alias = aliases.Alias(
+            name=str(request.get("name") or ""), kind=str(request.get("kind") or "command"),
+            title=str(request.get("title") or ""), description=str(request.get("description") or ""),
+            text=str(request.get("text") or ""),
+            params=[aliases.Param(str(p.get("name") or ""), p.get("default"),
+                                  str(p.get("description") or ""))
+                    for p in params if isinstance(p, dict)],
+            labels=[str(x) for x in (request.get("labels") or [])],
+            source=str(request["source"]) if request.get("source") else None,
+            status=str(request.get("status") or "active"))
+        workspace = self._workspace(request)
+        try:
+            saved = aliases.save(alias, workspace, scope)
+        except aliases.AliasError as exc:
+            raise ValueError(str(exc)) from None
+        logs.event(_log, "alias saved", name=saved.name, kind=saved.kind, scope=scope)
+        self.emit({"event": "alias_saved", "id": request.get("id"), "name": saved.name,
+                   "kind": saved.kind, "scope": scope, "path": saved.path, "alias_id": saved.card_id})
+        self._emit_aliases(None, workspace)
+
+    def _alias_delete(self, request):
+        name = request.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("alias_delete needs the alias name.")
+        scope = self._alias_scope(request, "local")
+        workspace = self._workspace(request)
+        try:
+            path = aliases.delete(name, workspace, scope)
+        except (aliases.AliasError, OSError) as exc:
+            raise ValueError(str(exc)) from None
+        self.emit({"event": "alias_deleted", "id": request.get("id"), "name": name,
+                   "scope": scope, "path": path})
+        self._emit_aliases(None, workspace)
+
+    def _alias_import_preview(self, request):
+        """Read Warp's workflows and the shell startup files and say what *would* be written.
+
+        Nothing is executed and nothing is written. The result is held here, so the matching
+        apply writes bytes this worker read itself rather than text handed back over the pipe.
+        """
+        sources = request.get("sources")
+        if sources is not None and not isinstance(sources, list):
+            raise ValueError("sources must be a list of \"warp\" and/or \"shell\".")
+        workspace = self._workspace(request)
+        request_id = request.get("id")
+
+        def work():
+            result = alias_import.preview(tuple(str(s) for s in sources) if sources else alias_import.SOURCES,
+                                          workspace=workspace)
+            token = uuid.uuid4().hex
+            with self._alias_lock:
+                self._alias_previews = {token: result["items"]}
+            logs.event(_log, "alias import previewed",
+                       items=len(result["items"]), skipped=len(result["skipped"]))
+            return {**result, "preview_id": token, "workspace": workspace}
+        self._background("alias_import_preview", request_id, work)
+
+    def _alias_import_apply(self, request):
+        token = request.get("preview_id")
+        names = request.get("names")
+        if not isinstance(token, str) or not token:
+            raise ValueError("alias_import_apply needs the preview_id from the preview.")
+        if not isinstance(names, list) or not names:
+            raise ValueError("Choose at least one alias to import.")
+        renames = request.get("renames") or {}
+        if not isinstance(renames, dict):
+            raise ValueError("renames must be an object of preview names to new names.")
+        scope = self._alias_scope(request, "global")
+        workspace = self._workspace(request)
+        with self._alias_lock:
+            items = self._alias_previews.get(token)
+        if items is None:
+            raise ValueError("That preview has expired. Preview the import again.")
+        try:
+            result = alias_import.apply(items, names, scope, workspace, renames)
+        except aliases.AliasError as exc:
+            raise ValueError(str(exc)) from None
+        logs.event(_log, "aliases imported", written=len(result["written"]),
+                   failed=len(result["failed"]), scope=scope)
+        self.emit({**result, "id": request.get("id")})
+        self._emit_aliases(None, workspace)
+
     def _suggest(self, request):
         agent = self._agent()
         kind = request.get("kind")
         suggestion_id = request.get("id") if isinstance(request.get("id"), str) else uuid.uuid4().hex
         provider = agent.side_provider(cheap=True, role="suggestions")
+        if kind == "alias":
+            # The agent may propose an alias for a command the user keeps re-typing. A suggestion
+            # only: it is logged here and shown, and nothing is written unless the user saves it.
+            history = request.get("commands")
+            if not isinstance(history, list):
+                raise ValueError("suggest kind alias needs the recent commands.")
+            repeated = aliases.repeats(history, suggestions.ALIAS_MIN_COUNT)
+            if not repeated:
+                self.emit({"event": "suggestion", "kind": kind, "id": suggestion_id,
+                           "text": "", "reason": "no_repeats"})
+                return
+            logs.event(_log, "alias suggestion requested",
+                       repeats=len(repeated), top=repeated[0]["count"])
+
+            def work():
+                event = suggestions.propose_alias(provider, repeated)
+                if event.get("alias"):
+                    logs.event(_log, "alias suggested",
+                               name=event["alias"]["name"], reason=event.get("reason"))
+                return {**event, "id": suggestion_id}
+            self._background("suggest", suggestion_id, work)
+            return
         if kind == "next_command":
             suggestions.validate_next_command(request)
             work = lambda: {**suggestions.next_command(provider, request), "id": suggestion_id}  # noqa: E731

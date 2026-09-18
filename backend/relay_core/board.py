@@ -161,7 +161,7 @@ def initial_ranks(count: int) -> list[str]:
 
 # ------------------------------------------------------------- statuses and paths
 
-CARD_TYPES = ("work", "plan", "memory")
+CARD_TYPES = ("work", "plan", "memory", "alias")
 
 #: status -> state subfolder inside the category folder ("" = the category itself)
 WORK_STATUS_FOLDER = {
@@ -174,9 +174,12 @@ PLAN_STATUS_FOLDER = {
     "draft": "", "approved": "", "executing": "", "done": "done", "dropped": "done",
 }
 MEMORY_STATUS_FOLDER = {"active": "", "retired": "archive"}
+#: Aliases (issue G8DK): saved commands and prompts, same two states as memory.
+ALIAS_STATUS_FOLDER = {"active": "", "retired": "archive"}
 
 STATUS_FOLDER: dict[str, dict[str, str]] = {
     "work": WORK_STATUS_FOLDER, "plan": PLAN_STATUS_FOLDER, "memory": MEMORY_STATUS_FOLDER,
+    "alias": ALIAS_STATUS_FOLDER,
 }
 
 #: Legacy header statuses from the pre-board tracker.
@@ -184,6 +187,7 @@ LEGACY_STATUS = {"open": "ready", "needs-qa": "needs-qa-llm"}
 
 PLAN_FOLDER = "planning"
 MEMORY_FOLDER = "memory"
+ALIAS_FOLDER = "aliases"
 THREADS_FOLDER = "threads"
 PRIVATE_FOLDER = ".private"
 BOARD_CONFIG = "board.yaml"
@@ -196,21 +200,27 @@ WORK_FIELDS = ("component", "milestone", "workstream", "acceptance", "implemente
 PLAN_FIELDS = ("approved_by", "goal")
 MEMORY_FIELDS = ("name", "description", "kind", "topic", "scope", "paths", "pinned",
                  "supersedes", "reviewed", "author")
+#: An alias card (issue G8DK): `name` is what you type, `kind` is command or prompt,
+#: `shell` records which shell an imported command came from. The runnable text and the
+#: parameter defaults live in the body, because front matter scalars are single-line and a
+#: default may hold any character (see relay_core/aliases.py).
+ALIAS_FIELDS = ("name", "kind", "shell")
 
 ALLOWED_FIELDS = {
     "work": set(COMMON_FIELDS) | set(WORK_FIELDS),
     "plan": set(COMMON_FIELDS) | set(PLAN_FIELDS),
     "memory": set(COMMON_FIELDS) | set(MEMORY_FIELDS),
+    "alias": set(COMMON_FIELDS) | set(ALIAS_FIELDS),
 }
 #: Emission order; anything else follows, sorted, so a new key is never dropped.
 FIELD_ORDER = ("id", "type", "status", "name", "description", "kind", "topic", "scope",
                "private", "labels", "component", "milestone", "workstream", "assignee",
                "implemented_by", "waiting_on", "parent", "blocked_by", "aliases", "paths",
                "pinned", "reviewed", "author", "supersedes", "approved_by", "goal",
-               "label_count", "label_output", "codebook", "rank", "created", "acceptance",
-               "source", "links")
+               "label_count", "label_output", "codebook", "shell", "rank", "created",
+               "acceptance", "source", "links")
 
-TASK_HEADING = {"work": "Tasks", "plan": "Steps", "memory": "Tasks"}
+TASK_HEADING = {"work": "Tasks", "plan": "Steps", "memory": "Tasks", "alias": "Tasks"}
 
 ITEM_STATUSES = ("open", "in-progress", "blocked", "deferred", "done", "dropped")
 CLOSED_ITEM_STATUSES = ("done", "dropped")
@@ -711,6 +721,8 @@ class Card:
             category = PLAN_FOLDER
         elif self.type == "memory":
             category = MEMORY_FOLDER
+        elif self.type == "alias":
+            category = ALIAS_FOLDER
         elif category is None:
             raise BoardError("a work card needs its category folder")
         sub = table[self.status]
@@ -797,6 +809,11 @@ def render_thread(entries: Sequence[ThreadEntry]) -> str:
 
 # -------------------------------------------------------------------- filesystem
 
+def atomic_write(path: Path, text: str, mode: int | None = None) -> str:
+    """Public name for the hash-returning atomic write (used by relay_core/aliases.py)."""
+    return _atomic_write(path, text, mode)
+
+
 def _atomic_write(path: Path, text: str, mode: int | None = None) -> str:
     data = text.encode("utf-8")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -882,7 +899,7 @@ class Board:
 
     def category_folders(self) -> list[str]:
         folders = [str(t["folder"]) for t in self.tabs() if t.get("folder")]
-        for extra in (PLAN_FOLDER, MEMORY_FOLDER):
+        for extra in (PLAN_FOLDER, MEMORY_FOLDER, ALIAS_FOLDER):
             if extra not in folders:
                 folders.append(extra)
         return folders
@@ -1503,6 +1520,8 @@ def _status_from_folder(board: Board, path: Path) -> str:
         table = PLAN_STATUS_FOLDER
     elif parts[0] == MEMORY_FOLDER:
         table = MEMORY_STATUS_FOLDER
+    elif parts[0] == ALIAS_FOLDER:
+        table = ALIAS_STATUS_FOLDER
     else:
         table = WORK_STATUS_FOLDER
     if not sub:

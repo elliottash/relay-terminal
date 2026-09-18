@@ -132,6 +132,17 @@ WITHHELD_EVENTS: dict[str, str] = {
     "state_loaded": "opaque conversation state",
     "route": "routing internals the phone does not render",
     "route_assisted": "routing internals the phone does not render",
+    # Aliases (issue G8DK). An alias card is a file on the desktop and its body is a command
+    # that would run there, so the list, an expansion and an import all carry local file paths
+    # and stored shell text. Same call as `skills` and `agents`: a phone may see the *result* of
+    # a turn, not the desktop's saved definitions. Running an alias remotely is a separate
+    # decision and a separate client message; none exists yet.
+    "aliases": "alias definitions and local file paths",
+    "alias_expanded": "a command line built for this desktop's shell",
+    "alias_saved": "local file paths",
+    "alias_deleted": "local file paths",
+    "alias_import_preview": "unreviewed text read from Warp's database and shell startup files",
+    "alias_imported": "local file paths",
 }
 
 # Every event name backend/relay_core and backend/worker.py emit today. The test that compares this
