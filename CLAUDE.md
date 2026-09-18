@@ -50,6 +50,18 @@ still had the new code, so nobody noticed until a clean export failed to build. 
 4. **Compare-and-swap onto `main`:** `NEW=$(git commit-tree $(git write-tree) -p $BASE -m ...)`, then
    `git update-ref refs/heads/main $NEW $BASE`. If `main` moved, this fails; rebuild on the new
    HEAD and retry. Never "just re-add" the files you built earlier on top of a newer base.
+   **Read the base once.** `$BASE` must be the same value in step 1, in `-p $BASE` and in
+   `update-ref`'s old-value argument. Each Bash call is a fresh shell, so the variable is gone by
+   the time step 4 runs and `BASE=$(git rev-parse HEAD)` looks like a harmless way to get it back —
+   it is not. The build in step 3 takes minutes, commits land here every few, and that second read
+   returns a newer head: the swap then guards the head it was given, succeeds, and writes your
+   older tree over everything that landed while you were testing. That is the one case the swap
+   exists to refuse, and it is what lost `backend/relay_core/tools.py` (#E99H, twice in one day)
+   and #W5N2's `docs/REMOTE-AND-MULTIPLAYER-DESIGN.md`, restored in `f38682f` and `26362e2`. Carry
+   the value across calls in a file instead (`echo $BASE > <scratch>/base`), re-`read-tree` from it
+   right before committing, and gate on `git diff --name-only $BASE $NEW`: it must list only your
+   own paths. Check that before `update-ref`, not after — a revert nobody notices stays on `main`
+   for hours, because every working tree still shows the file as it should be.
 5. **Reset the shared index for your paths** afterwards: `git reset -q HEAD -- <your paths>`. Skipping this leaves the shared index at your old blobs, and the next plain
    `git commit` by anyone reverts your commit.
 
