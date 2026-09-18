@@ -37,8 +37,8 @@ Owner, 2026-09-18, asked in the session:
 
 ## Tasks
 
-- [ ] Wrapper: `ssh()`/`mosh()` add connection sharing in Relay pane shells (`shell/integration.bash`)
-- [ ] Remote integration script, typed once per login (`shell/remote-integration.sh`)
+- [x] Wrapper: `ssh()`/`mosh()` add connection sharing in Relay pane shells (`shell/integration.bash`)
+- [x] Remote integration script, typed once per login (`shell/remote-integration.sh`)
 - [ ] Engine keeps OSC 7's host; a remote `cd` no longer moves the local cwd
 - [ ] Pane: remote session model from `ssh -G`, remote prompt detection
 - [ ] Prompt box types commands into the remote shell; router `remote` flag

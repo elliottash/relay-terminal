@@ -36,6 +36,115 @@ relay() {
     esac
 }
 
+# ssh and mosh share their connection so the pane's agent can reuse the login (docs/SSH-AND-MOSH.md,
+# section 1). The GUI sets RELAY_SSH_WRAP=1 and creates RELAY_SSH_DIR. `command ssh` bypasses this.
+if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
+    # A directory ssh can take in ControlPath (no %, spaces or quotes; room for %C and ssh's
+    # temporary suffix in a 108-byte socket path) and mosh can take in --ssh.
+    __relay_ssh_dir_ok() {
+        local re='^/[-A-Za-z0-9_.+@/]*$'
+        [[ -n ${RELAY_SSH_DIR:-} && $RELAY_SSH_DIR =~ $re && ${#RELAY_SSH_DIR} -le 48 && -d $RELAY_SSH_DIR ]]
+    }
+
+    # Succeeds when ssh "$@" can take Relay's ControlMaster/ControlPath/ControlPersist options:
+    # nothing in the arguments or in the user's ssh config for that host already decides them.
+    __relay_ssh_shareable() {
+        __relay_ssh_dir_ok || return 1
+        local -a args=("$@")
+        local arg rest opt value host= config
+        while (($#)); do
+            arg=$1
+            shift
+            case $arg in
+                --) break ;;
+                -?*) ;;
+                *)
+                    # ssh takes options after the destination too, up to the remote command.
+                    [[ -n $host ]] && break
+                    host=$arg
+                    continue
+                    ;;
+            esac
+            rest=${arg#-}
+            while [[ -n $rest ]]; do
+                opt=${rest:0:1}
+                rest=${rest:1}
+                case $opt in
+                    [MGV]) return 1 ;;
+                    [46AaCfgKkNnqsTtvXxYy]) ;;
+                    [BbcDEeFIiJLlmOoPpQRSWw])
+                        if [[ -n $rest ]]; then
+                            value=$rest
+                            rest=
+                        elif (($#)); then
+                            value=$1
+                            shift
+                        else
+                            return 1
+                        fi
+                        case $opt in
+                            [OSQW]) return 1 ;;
+                            o) case ${value,,} in control[mp]*) return 1 ;; esac ;;
+                        esac
+                        ;;
+                    *) return 1 ;;
+                esac
+            done
+        done
+        [[ -n $host ]] || return 1
+        # Local only: -G prints the configuration ssh would use, without connecting.
+        config=$(command ssh -G "${args[@]}" 2>/dev/null < /dev/null) || return 1
+        while read -r opt value; do
+            case $opt in
+                controlmaster) [[ $value == false || $value == no ]] || return 1 ;;
+                controlpath) [[ $value == none ]] || return 1 ;;
+            esac
+        done <<< "$config"
+        return 0
+    }
+
+    # `function name` rather than `name()`: an alias called ssh must not expand here.
+    function ssh {
+        if __relay_ssh_shareable "$@"; then
+            command ssh -o ControlMaster=auto -o "ControlPath=$RELAY_SSH_DIR/%C" -o ControlPersist=600 "$@"
+        else
+            command ssh "$@"
+        fi
+    }
+
+    # mosh's default way of finding the server's address (--experimental-remote-ip=proxy) passes
+    # `-S none` to ssh, which turns sharing off, and it cannot work over a shared connection anyway
+    # (the proxy that reports the address never runs). So an unspecified mode becomes `remote`,
+    # which reads the address from $SSH_CONNECTION on the server; an explicit `proxy` is left alone.
+    function mosh {
+        local -a extra=()
+        local arg next= mode=
+        if __relay_ssh_dir_ok; then
+            extra=("--ssh=ssh -o ControlMaster=auto -o ControlPath=$RELAY_SSH_DIR/%C -o ControlPersist=600")
+            for arg in "$@"; do
+                if [[ $next == mode ]]; then
+                    mode=$arg
+                    next=
+                    continue
+                fi
+                case $arg in
+                    --) break ;;
+                    --ssh | --ssh=*) extra=() && break ;;
+                    --experimental-remote-ip) next=mode ;;
+                    --experimental-remote-ip=*) mode=${arg#*=} ;;
+                esac
+            done
+            if [[ ${#extra[@]} -gt 0 ]]; then
+                case $mode in
+                    '') extra+=(--experimental-remote-ip=remote) ;;
+                    proxy) extra=() ;;
+                esac
+            fi
+        fi
+        command mosh ${extra[@]+"${extra[@]}"} "$@"
+    }
+fi
+
 __relay_event() {
     command "${RELAY_PYTHON:-python3}" -S "$RELAY_SHELL_EVENT" "$1" "${2:-0}" "$PWD" "$$"
 }

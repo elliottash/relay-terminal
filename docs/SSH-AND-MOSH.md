@@ -42,9 +42,15 @@ sharing so the agent can reuse the login:
   `-S`, `-M`, `-G`, `-V`, `-Q`, `-W`).
 - `mosh`: adds `--ssh="ssh -o ControlMaster=auto -o ControlPath=… -o ControlPersist=600"` unless
   `--ssh` is given. mosh's own ssh exits after starting mosh-server; `ControlPersist` keeps the
-  master alive so the agent can still reach the host.
+  master alive so the agent can still reach the host. mosh's default way of learning the server's
+  address, `--experimental-remote-ip=proxy`, passes `-S none` to ssh (sharing off) and cannot work
+  over an existing master anyway (its proxy never runs), so the wrapper also adds
+  `--experimental-remote-ip=remote` (the address from `$SSH_CONNECTION` on the server) when no mode
+  is given, and leaves mosh alone when the user asks for `proxy`.
 - `RELAY_SSH_DIR` is `$XDG_RUNTIME_DIR/relay-ssh` (mode 0700, created by the GUI). `%C` keeps the
-  socket path short.
+  socket path short. The wrappers only use it when it exists, is absolute, is at most 48 bytes (a
+  Unix socket path is 108, and ssh adds `/`, 40 for `%C` and a 17-byte temporary suffix) and has no
+  character ssh's `%` expansion or mosh's word splitting would read (`[-A-Za-z0-9_.+@/]` only).
 - `command ssh` / `\ssh` bypass it, as with any shell function.
 
 ### 2. The GUI's picture of a remote session (`src/Pane.h`)
@@ -69,7 +75,15 @@ no file. Relay types it into the remote shell once per login as one line with a 
     ␠RELAY_R=<rows> eval "$(printf %s '<base64 of gzip of the script>' | base64 -d | gzip -dc)"
 
 The script first erases the rows the typed line and the old prompt took, so the session looks as if
-the prompt had simply been redrawn. Nothing happens on shells other than bash and zsh.
+the prompt had simply been redrawn. Nothing happens on shells other than bash and zsh, or in a
+non-interactive one. A second eval in the same shell only erases its own line. In bash the typed
+line is also taken out of the history if it got in; zsh decides that when the line is read, so the
+line stays in a zsh history that did not already have `HIST_IGNORE_SPACE`.
+
+For the GUI: the payload must be gzip (RFC 1952, e.g. zlib with `windowBits` 31 — not `qCompress`,
+which is zlib with a length prefix), base64 on one line without wrapping; `base64 -d` needs macOS 13
+or later there (older macOS spells it `-D`). About 2.5 KB of script becomes about 1.5 KB typed.
+`tests/test_ssh_shell.py` types exactly this line into bash and zsh on a pty.
 
 When: `ssh/enhance` = `auto` → at the first remote prompt of each login, unless the host is in
 `ssh/hosts_never`. `ask` → the program bar offers "Enhance" / "Always on this host" / "Never on this

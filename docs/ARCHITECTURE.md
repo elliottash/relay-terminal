@@ -1585,6 +1585,16 @@ the palette (`terminal/shell_integration`), which sets `RELAY_SHELL_INTEGRATION=
 panes so `shell/integration.bash` sources it last. The engine turns those marks into cwd
 tracking and the palette's "Jump to previous/next prompt".
 
+Over ssh (card #S5SH, [SSH-AND-MOSH.md](SSH-AND-MOSH.md)) two more shell files take part. With
+`RELAY_SSH_WRAP=1` and `RELAY_SSH_DIR` set by the GUI, `shell/integration.bash` defines `ssh()` and
+`mosh()` wrappers that add OpenSSH connection sharing (`ControlMaster=auto`, a `%C` socket in
+`RELAY_SSH_DIR`, `ControlPersist=600`) unless the arguments or the user's own ssh config already
+decide it, so the pane's agent can run commands over the user's login. `shell/remote-integration.sh`
+is what the GUI types into the remote bash or zsh once per login, as one gzip+base64 line with a
+leading space: OSC 7 with the remote hostname, OSC 133 A/B/C/D, history-ignore-space and the
+`Ctrl+X Ctrl+P` redraw binding; on any other shell it does nothing. Both are tested in
+`tests/test_ssh_shell.py`.
+
 Status and the remaining parity gaps: [ENGINE.md](ENGINE.md) and
 `issues/features/needs_qa_llm/2026-09-17-engine-integration.md`.
 
@@ -1652,6 +1662,7 @@ of the platform and of the engine itself.
 | `src/EngineBackend.*` | the `TerminalBackend` implementation over `engine/` |
 | `src/TerminalBackends.*`, `src/BackendFactory.cpp` | per-pane engine selection and the factory |
 | `shell/relay-integration.bash`, `.zsh` | opt-in OSC 7 / OSC 133 marks |
+| `shell/remote-integration.sh` | OSC 7 / OSC 133 for a remote bash or zsh, typed in over ssh by the GUI |
 | `engine/` | Relay's terminal engine: cores, PTY, session, view, `TerminalBackend.h` |
 | `data/` | colour themes, `terminal.conf`, icons |
 | `packaging/`, `.github/workflows/`, `site/` | packages, CI, release, website |
