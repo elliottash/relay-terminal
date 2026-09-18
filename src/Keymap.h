@@ -220,7 +220,7 @@ private:
         add("pane.splitDown", "pane", "New pane below", {});
         add("pane.splitLeft", "pane", "New pane to the left", {});
         add("pane.splitUp", "pane", "New pane above", {});
-        add("ssh.split_same_host", "pane", "Split on the same host: a new pane running this pane's ssh or mosh command again", {});
+        add("ssh.splitSameHost", "pane", "Split on the same host: a new pane running this pane's ssh or mosh command again", {});
         add("pane.focusLeft", "pane", "Focus pane to the left", {QStringLiteral("Alt+Left")});
         add("pane.focusRight", "pane", "Focus pane to the right", {QStringLiteral("Alt+Right")});
         add("pane.focusUp", "pane", "Focus pane above", {QStringLiteral("Alt+Up")});

@@ -878,7 +878,7 @@ private:
             markForSshHint(m_active, QString());   // an ssh typed here soon teaches Connect to host
         }
         else if (id == QStringLiteral("ssh.connect")) openSshMenu();
-        else if (id == QStringLiteral("ssh.split_same_host")) splitSameHost();
+        else if (id == QStringLiteral("ssh.splitSameHost")) splitSameHost();
         else if (id == QStringLiteral("tab.next")) cycleTab(1);
         else if (id == QStringLiteral("tab.previous")) cycleTab(-1);
         // One key, one new pane on the right, then ← ↑ ↓ within two seconds to place it (#78BN).
@@ -1998,7 +1998,7 @@ private:
             if (!again.isEmpty())
                 items << actionItem(panes, QStringLiteral("Split on the same host"),
                                     QStringLiteral("A pane to the right running %1; a shared connection needs no second login").arg(again),
-                                    QStringLiteral("ssh.split_same_host"));
+                                    QStringLiteral("ssh.splitSameHost"));
         }
         {
             PaletteItem hosts = submenu(QStringLiteral("menu:ssh"), panes, QStringLiteral("Connect to host…"),
@@ -2268,7 +2268,7 @@ private:
             return;
         }
         if (age > kSshSplitHintMs || relay::panestatus::remoteHost(remoteLine) != host) return;
-        const QString keys = Keymap::instance().shortcutText(QStringLiteral("ssh.split_same_host"));
+        const QString keys = Keymap::instance().shortcutText(QStringLiteral("ssh.splitSameHost"));
         hint(QStringLiteral("ssh.split.typed"),
              keys.isEmpty() ? QStringLiteral("Next time: Split on the same host (Actions, or right-click › New pane on %1)").arg(host)
                             : relay::ShortcutHints::nextTime(keys, QStringLiteral("split on the same host")));
@@ -2944,7 +2944,7 @@ private:
             w->setActiveLeaf(guard);
             if (action == QStringLiteral("splitRight")) w->runAction(QStringLiteral("pane.splitRight"));
             else if (action == QStringLiteral("splitDown")) w->runAction(QStringLiteral("pane.splitDown"));
-            else if (action == QStringLiteral("splitSameHost")) w->runAction(QStringLiteral("ssh.split_same_host"));
+            else if (action == QStringLiteral("splitSameHost")) w->runAction(QStringLiteral("ssh.splitSameHost"));
             else if (action == QStringLiteral("close")) w->closePane(guard, true);
         };
         pane->onPlanWritten = [guard](const QString &path, Pane *) { if (auto *w = windowOf(guard)) w->openDocument(path, guard, true); };

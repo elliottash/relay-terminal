@@ -1175,7 +1175,7 @@ public:
             {QStringLiteral("find"), QStringLiteral("find.inView")},
             {QStringLiteral("splitRight"), QStringLiteral("pane.splitRight")},
             {QStringLiteral("splitDown"), QStringLiteral("pane.splitDown")},
-            {QStringLiteral("splitSameHost"), QStringLiteral("ssh.split_same_host")},
+            {QStringLiteral("splitSameHost"), QStringLiteral("ssh.splitSameHost")},
             {QStringLiteral("close"), QStringLiteral("pane.close")},
         };
         const QString action = actions.value(id);

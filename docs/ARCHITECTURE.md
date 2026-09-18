@@ -1527,7 +1527,7 @@ before every scored hit. **SSH** (card #S5SH, [SSH-AND-MOSH.md](SSH-AND-MOSH.md)
   (`src/SshConfig.*`, `relay-sshconfig`, `tests/sshconfig_test.cpp`). Typing `user@host` or
   `ssh <host>` offers exactly that host too. Choosing one opens a new tab whose pane runs
   `ssh <host>` once its shell is at the prompt (`Pane::queueCommand`, the pane's command queue).
-- **Split on the same host** (`ssh.split_same_host`, no default key; also "New pane on <host>" in the
+- **Split on the same host** (`ssh.splitSameHost`, no default key; also "New pane on <host>" in the
   terminal's right-click menu) is listed while the focused pane is in an ssh or mosh login. It reads
   the session's argv from `/proc/<pid>/cmdline`, so quoting survives, drops the connection-sharing
   options Relay's own wrapper added (the new pane's wrapper adds them back), refuses anything that is
