@@ -42,8 +42,10 @@ from remote import client as client_mod
 from remote import devtls, gui_host, host as host_mod, httpd, identity as identity_mod, noise, \
     notify, panes as panes_mod, push, wire
 from rendezvous.server import Store, build
+from tests.browser import Browser, find_chrome, shown
 
 HERE = Path(__file__).resolve().parent
+APP_DIR = HERE.parent / "app"
 
 
 def run(coroutine, timeout=40):
@@ -597,7 +599,7 @@ class Harness:
         self.temporary = tempfile.TemporaryDirectory()
         directory = Path(self.temporary.name)
         self.store = Store(":memory:")
-        self.server = build(self.store)
+        self.server = build(self.store, static_root=APP_DIR)
         await self.server.start("127.0.0.1", 0)
         self.base = f"http://127.0.0.1:{self.server.port}"
         self.identity = identity_mod.Identity.create(directory)
@@ -607,9 +609,9 @@ class Harness:
         async def approver(request):
             return True, self.capability
 
+        # app_base is where the pairing link points: this server, so a browser can follow it.
         self.host = host_mod.Host(self.identity, self.devices, self.source,
-                                  app_base="https://app.example", approver=approver,
-                                  name="test desktop")
+                                  app_base=self.base, approver=approver, name="test desktop")
         await self.host.register(self.base)
         self.serving = asyncio.create_task(self.host.serve())
         for _ in range(100):
@@ -822,6 +824,47 @@ class SidecarPresenceTests(unittest.TestCase):
             finally:
                 devices.close()
         run(main())
+
+
+@unittest.skipUnless(find_chrome(), "no Chrome or Chromium installed")
+class NotifyRowTests(unittest.TestCase):
+    """The row itself, in a real browser: it renders, and asking happens from a tap."""
+
+    def test_the_inbox_offers_to_notify_this_phone(self):
+        async def main():
+            async with Harness() as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    state = await browser.wait_for("""
+                        (() => {
+                          const button = document.getElementById('notify');
+                          if (!button) return null;
+                          return {
+                            text: button.textContent,
+                            hidden: button.hidden,
+                            note: document.getElementById('notify-note').textContent,
+                            usable: 'serviceWorker' in navigator && 'PushManager' in window
+                              && 'Notification' in window,
+                            permission: window.Notification ? Notification.permission : 'none',
+                          };
+                        })()
+                    """, timeout=20)
+                    self.assertIsNotNone(state, "the inbox has no Notify row")
+                    if state["usable"]:
+                        # Nothing was asked on load: permission is still the browser's default.
+                        self.assertEqual(state["permission"], "default")
+                        self.assertFalse(state["hidden"])
+                        self.assertEqual(state["text"], "Notify me on this phone")
+                    else:
+                        self.assertTrue(state["hidden"])
+                        self.assertIn("notification", state["note"].lower())
+                finally:
+                    await browser.stop()
+        run(main(), timeout=120)
 
 
 class VapidKeyRouteTests(unittest.TestCase):
