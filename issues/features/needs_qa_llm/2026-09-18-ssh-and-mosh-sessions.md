@@ -104,3 +104,22 @@ main, Options › Terminal › SSH sessions on "Enhance automatically" unless a 
     keeps the buffer and says the connection has ended. Click a *folder* the host printed: a toast
     says folders on the host are not opened. Evidence:
     `docs/qa_evidence/2026-09-18-ssh-and-mosh-sessions/implementer-remote-file-*`.
+13. A `tmux` on the host (`tmux new -s x`): the prompt box still types into the shell inside it, and
+    nothing typed there is ever queued for the local shell. Without `set -g allow-passthrough on`
+    in the host's tmux, one line says so at login; with it, prompt marks work inside tmux. Open a
+    full-screen program on the host instead (`vim`): a typed command is refused and kept in the box,
+    naming the program, and Ctrl+H gives it the keyboard.
+14. A host whose login shell is zsh: the integration loads and erases itself, and steps 2–3 hold. On
+    a host with no `~/.zshrc`, zsh shows its first-run menu instead of a prompt: Relay must wait
+    rather than type into it. Afterwards `fc -l` on the host must not show the line Relay typed.
+15. The host's Markdown, an image and a PDF: each opens the way a local file of that type does, and
+    a Markdown file still edits and saves back. A folder printed by the host opens the explorer pane
+    on the host's folder and walks into subfolders.
+16. Reading outside the home on the host (`/etc/hostname`) succeeds; writing there is refused with a
+    reason, and a symlink (`/etc/os-release`) is refused rather than followed.
+17. Break sharing on purpose (make `$XDG_RUNTIME_DIR/relay-ssh` unwritable, or set SSH sessions to
+    Off) and log in: typing still works, and the pane and the agent both say the connection cannot
+    be shared instead of failing silently.
+18. A host in `~/.ssh/config` with `Match exec "…"`: its hook runs no more often than plain ssh
+    does, and a hook that hangs does not hang the pane's shell (the wrapper caps it).
+
