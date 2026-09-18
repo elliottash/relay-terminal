@@ -21,6 +21,8 @@ the GUI never links a crypto library and this process never touches a widget.
                                           looking at the desktop (section 9)
     {"t":"transcribed","pane":"p1","id":"v1","ok":true,"text":"..."}   the answer to a `voice`
                                                             (`ok:false` carries `error` instead)
+    {"t":"history_page","pane":"p1","id":"h1","ok":true,"from_row":N,"total":N,"more":b,
+     "lines":[<row>]}                                       the answer to a `history`
 
   here → GUI
     {"t":"started","base":"...","fingerprint":"...","note":"...",
@@ -33,6 +35,9 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"secret_input","pane":"p1","bytes":"<base64>"}      a password line, nonce already checked
     {"t":"compose","pane":"p1","text":"...","route":bool,"origin":"remote:<id>"}   a prompt
     {"t":"voice","pane":"p1","id":"v1","format":"webm","data":"<base64>"}   a clip to transcribe
+    {"t":"history","pane":"p1","id":"h1","before_row":R,"count":N}   a page of the pane's
+                                              scrollback, ending just below absolute row R
+                                              (R < 0 asks for the newest page)
     {"t":"error","message":"..."}
 
 Input arrives here as RRP messages and leaves as `input`: the GUI writes the bytes into the pane's
@@ -64,9 +69,15 @@ APP_DIR = Path(__file__).resolve().parent.parent / "app"
 # a spinner open until it hears something.
 VOICE_TIMEOUT = 90.0
 
+# A scrollback page is a read of memory the GUI already holds, on its own thread, so this is a
+# wedged-GUI timeout and not a work budget. The phone is holding a scroll gesture open on it.
+HISTORY_TIMEOUT = 15.0
+
 
 class GuiPaneSource(panes_mod.PaneSource):
     """Panes owned by the GUI. Screen state comes in over stdio; input goes back the same way."""
+
+    scrollback = True
 
     def __init__(self, send):
         self.send = send
@@ -79,6 +90,10 @@ class GuiPaneSource(panes_mod.PaneSource):
         # so two clips in flight cannot be answered with each other's text.
         self._voice: dict[str, tuple[str, asyncio.Future]] = {}
         self._voice_seq = 0
+        # Scrollback pages waiting for the GUI: request id -> future. Same rule as a clip — the
+        # id is minted here, so two devices paging at once cannot be handed each other's page.
+        self._history: dict[str, asyncio.Future] = {}
+        self._history_seq = 0
 
     # ---- observation -------------------------------------------------------------------------
 
@@ -263,6 +278,46 @@ class GuiPaneSource(panes_mod.PaneSource):
             raise wire.WireError("unavailable", detail or "the clip could not be transcribed.")
         return str(reply.get("text") or "")
 
+    async def history(self, pane: str, before_row: int, count: int) -> dict:
+        """A page of the pane's scrollback, read from the core the GUI already owns.
+
+        The GUI answers from `VtCore::historyLines`, which is const and moves nothing: a phone
+        paging back must never scroll the desktop user's own screen. The page comes back through
+        the same serializer the live frames use, so history and the live screen cannot drift into
+        two shapes.
+        """
+        self._pane(pane)
+        self._history_seq += 1
+        request = f"h{self._history_seq}"
+        future = asyncio.get_event_loop().create_future()
+        self._history[request] = future
+        self.send({"t": "history", "pane": pane, "id": request,
+                   "before_row": int(before_row), "count": int(count)})
+        try:
+            reply = await asyncio.wait_for(future, HISTORY_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise wire.WireError("unavailable",
+                                 "the desktop did not answer that page in time.") from None
+        finally:
+            # Every path: a timeout, a cancelled client, or the answer itself.
+            self._history.pop(request, None)
+        if not reply.get("ok"):
+            raise wire.WireError("unavailable",
+                                 str(reply.get("error") or "") or "that pane is no longer shared.")
+        return {"from_row": int(reply.get("from_row", 0)), "total": int(reply.get("total", 0)),
+                "more": bool(reply.get("more")), "lines": reply.get("lines") or []}
+
+    def history_reply(self, message: dict) -> None:
+        """The GUI's answer to a `history` line, matched on the id this process minted.
+
+        Strictly by id: unlike a voice clip there is no sensible "the oldest one waiting on that
+        pane", because a phone and an iPad page the same pane at the same time. An id nobody is
+        waiting on is dropped.
+        """
+        future = self._history.get(message.get("id") or "")
+        if future is not None and not future.done():
+            future.set_result(message)
+
     def voice_reply(self, message: dict) -> None:
         """The GUI's answer to a `voice` line: `ok` with the text, or the worker's error.
 
@@ -369,6 +424,8 @@ class Sidecar:
             self.source.agent_event(message.get("pane", ""), message.get("event") or {})
         elif kind == "transcribed":
             self.source.voice_reply(message)
+        elif kind == "history_page":
+            self.source.history_reply(message)
         elif kind == "pair":
             await self.pair()
         elif kind == "address":

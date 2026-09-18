@@ -317,3 +317,143 @@ class VoiceTests(unittest.TestCase):
             self.assertIn("in time", caught.exception.message)
             self.assertEqual(source._voice, {}, "the pending clip must not be left behind")
         run(main())
+
+
+def page(from_row: int, count: int, total: int) -> dict:
+    """What the GUI would answer: `count` rows of scrollback starting at `from_row`."""
+    return {"ok": True, "from_row": from_row, "total": total, "more": from_row > 0,
+            "lines": [{"row": from_row + n, "segs": [[f"line-{from_row + n}", 0, 0, 0]]}
+                      for n in range(count)]}
+
+
+class HistoryTests(unittest.TestCase):
+    """Scrollback paging across the stdio line (docs/REMOTE-PROTOCOL.md section 6.5).
+
+    The GUI owns the emulator, so a page is a request to it and an answer back by id. What these
+    are about is that the answer reaches the device that asked, that a wedged GUI is an error
+    rather than a spinner, and that a pane nobody shared cannot be paged at all.
+    """
+
+    def test_a_desktop_with_panes_says_it_has_scrollback(self):
+        async def main():
+            async with Harness() as harness:
+                client, _ = await harness.paired_client()
+                await client.send({"t": "hello"})
+                welcome = await client.expect("welcome")
+                self.assertIn("history", welcome["features"])
+                await client.close()
+        run(main())
+
+    def test_a_page_round_trips_and_keeps_its_id(self):
+        async def main():
+            async with Harness() as harness:
+                client, _ = await harness.paired_client()
+                await client.send({"t": "history_get", "pane": "p1", "before_row": 40,
+                                   "count": 10, "id": "h7"})
+                ask = await harness.settle("history")
+                self.assertEqual(ask["pane"], "p1")
+                self.assertEqual(ask["before_row"], 40)
+                self.assertEqual(ask["count"], 10)
+                harness.source.history_reply({"t": "history_page", "pane": "p1",
+                                              "id": ask["id"], **page(30, 10, 500)})
+                reply = await client.expect("history")
+                self.assertEqual(reply["id"], "h7")
+                self.assertEqual(reply["pane"], "p1")
+                self.assertEqual(reply["from_row"], 30)
+                self.assertEqual(reply["total"], 500)
+                self.assertTrue(reply["more"])
+                self.assertEqual([row["row"] for row in reply["lines"]], list(range(30, 40)))
+                await client.close()
+        run(main())
+
+    def test_the_newest_page_is_asked_for_without_a_row(self):
+        """A phone that has scrolled back nowhere yet names no row; the desktop picks the end."""
+        async def main():
+            async with Harness() as harness:
+                client, _ = await harness.paired_client()
+                await client.send({"t": "history_get", "pane": "p1", "count": 300, "id": "h0"})
+                ask = await harness.settle("history")
+                self.assertLess(ask["before_row"], 0, "no row means the newest page")
+                self.assertEqual(ask["count"], 200, "the page size is capped at 200")
+                harness.source.history_reply({"t": "history_page", "pane": "p1",
+                                              "id": ask["id"], **page(0, 5, 5)})
+                reply = await client.expect("history")
+                self.assertFalse(reply["more"])
+                await client.close()
+        run(main())
+
+    def test_a_view_device_may_read_scrollback(self):
+        """Reading what already scrolled past is watching, not typing: `view` is enough."""
+        async def main():
+            async with Harness(capability=wire.VIEW) as harness:
+                client, _ = await harness.paired_client()
+                await client.send({"t": "history_get", "pane": "p1", "count": 5, "id": "hv"})
+                ask = await harness.settle("history")
+                harness.source.history_reply({"t": "history_page", "pane": "p1",
+                                              "id": ask["id"], **page(0, 5, 5)})
+                reply = await client.expect("history")
+                self.assertEqual(reply["id"], "hv")
+                self.assertEqual(len(reply["lines"]), 5)
+                await client.close()
+        run(main())
+
+    def test_a_pane_nobody_shared_cannot_be_paged(self):
+        async def main():
+            async with Harness() as harness:
+                client, _ = await harness.paired_client()
+                await client.send({"t": "history_get", "pane": "p9", "count": 5, "id": "hx"})
+                with self.assertRaises(wire.WireError) as caught:
+                    await client.expect("history")
+                self.assertEqual(caught.exception.code, "no_such_pane")
+                self.assertEqual(harness.sent("history"), [],
+                                 "an unpaired pane id must never reach the GUI")
+                await client.close()
+        run(main())
+
+    # The two below go straight at the source: one channel reads its own messages in order, so
+    # two pages only overlap when two devices are paging, and what they are about is the
+    # sidecar's own bookkeeping.
+
+    def source(self):
+        lines: list[dict] = []
+        source = gui_host.GuiPaneSource(lines.append)
+        source.set_pane({"id": "p1", "title": "relay-terminal", "cwd": "/home/elliott",
+                         "rows": 24, "cols": 80, "status": "idle"})
+        return source, lines
+
+    def test_two_devices_paging_at_once_get_their_own_pages(self):
+        async def main():
+            source, lines = self.source()
+            first = asyncio.ensure_future(source.history("p1", 100, 10))
+            second = asyncio.ensure_future(source.history("p1", 40, 10))
+            for _ in range(100):
+                await asyncio.sleep(0.01)
+                if len([line for line in lines if line["t"] == "history"]) == 2:
+                    break
+            asks = [line for line in lines if line["t"] == "history"]
+            self.assertEqual(len(asks), 2)
+            self.assertNotEqual(asks[0]["id"], asks[1]["id"])
+            # Answered out of order, as a GUI serving the nearer page first would.
+            source.history_reply({"t": "history_page", "id": asks[1]["id"], **page(30, 10, 500)})
+            source.history_reply({"t": "history_page", "id": asks[0]["id"], **page(90, 10, 500)})
+            self.assertEqual((await first)["from_row"], 90)
+            self.assertEqual((await second)["from_row"], 30)
+            # A page for an id nobody is waiting on is dropped, not given to the next request.
+            source.history_reply({"t": "history_page", "id": "h99", **page(0, 1, 500)})
+            self.assertEqual(source._history, {})
+        run(main())
+
+    def test_a_page_the_gui_never_answers_times_out(self):
+        """A wedged desktop is an error the phone can show, not a scroll that never lands."""
+        async def main():
+            source, _ = self.source()
+            original = gui_host.HISTORY_TIMEOUT
+            gui_host.HISTORY_TIMEOUT = 0.2
+            try:
+                with self.assertRaises(wire.WireError) as caught:
+                    await source.history("p1", -1, 40)
+            finally:
+                gui_host.HISTORY_TIMEOUT = original
+            self.assertIn("in time", caught.exception.message)
+            self.assertEqual(source._history, {}, "the pending page must not be left behind")
+        run(main())
