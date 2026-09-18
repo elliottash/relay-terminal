@@ -119,6 +119,8 @@ TerminalBackend::TermiosFlags VTermBackend::termiosFlags() const
 
 void VTermBackend::writeToDisplay(const QByteArray &bytes) { m_session->writeToDisplay(bytes); }
 
+void VTermBackend::holdProgramResize(bool hold) { m_session->holdPtyResize(hold); }
+
 void VTermBackend::redrawPrompt()
 {
     if (!m_redrawSequence.isEmpty())

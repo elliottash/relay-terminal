@@ -86,6 +86,11 @@ public:
     // Bash integration binds Ctrl+X Ctrl+P, the default).
     virtual void redrawPrompt() = 0;
     virtual void setRedrawPromptSequence(const QByteArray &bytes) = 0;
+    // While held, a resize changes the grid but not the program's window size: no SIGWINCH until
+    // the hold is released, which applies the latest size. Relay holds it while its own output
+    // owns the cursor line, because the shell's line editor answers SIGWINCH by clearing the
+    // cursor's row ("\r\x1b[K"), which is a row of that output.
+    virtual void holdProgramResize(bool hold) { (void)hold; }
 
     // ---- introspection
     virtual int capabilities() const = 0;

@@ -2884,7 +2884,7 @@ private:
         m_lastTurnId = turnId;
         const QByteArray url = QStringLiteral("relay://turn/%1/%2").arg(m_token, QString::fromUtf8(QUrl::toPercentEncoding(turnId))).toUtf8();
         QByteArray out = takeWrapped();
-        if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; }
+        if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
         if (!m_atLineStart) out += "\r\n";
         out += "\x1b]8;;" + url + "\x1b\\" + inkCode(Ink::Note) + sanitize(label).toUtf8() + "\x1b[0m" + "\x1b]8;;\x1b\\";
         out += inkCode(Ink::Note) + QByteArray("  (Ctrl+click)") + "\x1b[0m\r\n";
@@ -4968,7 +4968,7 @@ private:
         if (!shellIdleAtPrompt()) { printInline(QStringLiteral("▸ Continue: %1 (Actions › Continue agent turn)\n").arg(fast), Ink::Note); return; }
         const QByteArray url = QStringLiteral("relay://continue/%1").arg(m_token).toUtf8();
         QByteArray out = takeWrapped();
-        if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; }
+        if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
         if (!m_atLineStart) out += "\r\n";
         out += "\x1b]8;;" + url + "\x1b\\" + inkCode(Ink::Agent) + QByteArray("▸ Continue") + "\x1b[0m" + "\x1b]8;;\x1b\\";
         out += inkCode(Ink::Note) + QStringLiteral("  (Ctrl+click · %1)").arg(fast).toUtf8() + "\x1b[0m\r\n";
@@ -5809,6 +5809,7 @@ public:
         m_backend = nullptr; m_terminal = nullptr; m_shellStopped = false; m_shellPid = 0;
         m_shellReady = false; m_promptReported = false; m_loading = false; m_seenShell = false;
         m_shellSequence.clear(); m_stateSeen = false; m_inlineOpen = false; m_atLineStart = true; m_autoHuman = false;
+        m_shellResizeHeld = false;   // the new terminal starts unheld
         if (m_native) setNative(false, false);
         try {
             startTerminal(m_cleanShell);
@@ -6485,6 +6486,7 @@ private:
             out += "\r\x1b[2K";
             m_inlineOpen = true; m_atLineStart = true;
             m_wrap.reset();
+            holdShellResize(true);
         }
         // Agent prose is Markdown, rendered as it streams (MarkdownAnsi holds back only what it
         // cannot decide yet). Any other ink ends the Markdown run first, so held text lands before it.
@@ -6504,6 +6506,17 @@ private:
         out += wrapped(body) + terminalLines(m_wrap.flush());
         m_atLineStart = clean.endsWith('\n');
         writeTerminal(out);
+    }
+
+    // While Relay's own output owns the cursor row, a resize (the reasoning panel opening or
+    // closing, a split) must not reach the shell: Readline answers SIGWINCH with "\r\x1b[K",
+    // which blanked the row of the reply being written, a row at a time (TerminalBackend.h).
+    // The hold ends with the inline block, or as soon as a program other than the idle shell
+    // could be reading the size.
+    void holdShellResize(bool hold) {
+        if (hold == m_shellResizeHeld || !m_backend) return;
+        m_shellResizeHeld = hold;
+        m_backend->holdProgramResize(hold);
     }
 
     QByteArray wrapped(const QString &rendered) {
@@ -6533,6 +6546,7 @@ private:
         writeTerminal(takeWrapped());
         if (!m_atLineStart) writeTerminal("\r\n");
         m_inlineOpen = false; m_atLineStart = true;
+        holdShellResize(false);   // the cursor is on a fresh row: the shell may redraw there
         // Ctrl+X Ctrl+P is bound to a no-op shell function; Readline redraws the prompt after it.
         if (m_backend && shellIdleAtPrompt()) m_backend->redrawPrompt();
     }
@@ -8046,6 +8060,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
 
     void pollShell() {
         tunePoll();
+        if (m_shellResizeHeld && !shellIdleAtPrompt()) holdShellResize(false);
         // PROMPT_COMMAND runs before Readline puts the tty into noncanonical mode.
         // Recheck on every tick, even when the state file has not changed.
         refreshShellReady();
@@ -8490,6 +8505,7 @@ private:
     // the live tokens, as this did until 2026-09-18, burnt one theme's colours into the history.
     relay::MarkdownAnsi m_markdown;
     relay::WordWrap m_wrap;   // between m_markdown (and the other inks) and the terminal
+    bool m_shellResizeHeld = false;   // holdShellResize()
     QList<QPair<QString, QString>> m_stored;
     QComboBox *m_modelBox = nullptr;
     QToolButton *m_cwdChip = nullptr, *m_modeChip = nullptr;

@@ -45,8 +45,10 @@ public:
     Pty::TermiosFlags termiosFlags() const;
     void terminate();
 
-    // Geometry. Also resizes the PTY (SIGWINCH).
+    // Geometry. Also resizes the PTY (SIGWINCH), unless holdPtyResize(true): then only the
+    // grid follows, and releasing the hold gives the PTY the latest size.
     void resize(int rows, int cols, int cellWidthPx, int cellHeightPx);
+    void holdPtyResize(bool hold);
     int rows() const;
     int columns() const;
 
@@ -142,6 +144,9 @@ private:
     QString m_error;
     int m_rows = 24;
     int m_cols = 80;
+    bool m_holdPtyResize = false;
+    bool m_ptyResizePending = false;
+    int m_pendingPixelWidth = 0, m_pendingPixelHeight = 0;
 };
 
 } // namespace relay

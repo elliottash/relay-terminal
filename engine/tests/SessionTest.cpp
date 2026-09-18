@@ -72,6 +72,29 @@ private slots:
         s.terminate();
     }
 
+    // Relay's inline output holds the program's size: the grid follows a resize at once, the
+    // PTY (and so SIGWINCH) only when the hold is released.
+    void heldResizeReachesTheProgramOnRelease()
+    {
+        QFETCH_GLOBAL(QString, core);
+        TerminalSession s(core);
+        s.resize(8, 40, 8, 16);
+        TerminalSession::StartOptions o;
+        o.program = QStringLiteral("/bin/sh");
+        o.arguments = QStringList{QStringLiteral("-c"), QStringLiteral("while read l; do echo \"size=$(stty size)\"; done")};
+        QVERIFY(s.start(o));
+        s.holdPtyResize(true);
+        s.resize(12, 50, 8, 16);
+        QCOMPARE(s.rows(), 12);
+        QCOMPARE(s.columns(), 50);
+        s.sendInput("\n");
+        QTRY_VERIFY_WITH_TIMEOUT(s.screenText().contains(QStringLiteral("size=8 40")), 3000);
+        s.holdPtyResize(false);
+        s.sendInput("\n");
+        QTRY_VERIFY_WITH_TIMEOUT(s.screenText().contains(QStringLiteral("size=12 50")), 3000);
+        s.terminate();
+    }
+
     void bellFloodIsCoalesced()
     {
         QFETCH_GLOBAL(QString, core);

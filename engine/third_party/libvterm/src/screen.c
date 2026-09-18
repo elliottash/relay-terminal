@@ -747,7 +747,13 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
         count--;
       }
 
-      if(old_cursor.row == old_row && old_cursor.col >= old_col) {
+      /* RELAY PATCH: after a row that exactly fills the width, old_row has
+       * already stepped onto the *next* line; the cursor there belongs to that
+       * line, which was placed earlier (this loop runs bottom-up). Claiming it
+       * here moved the cursor to this row's last column, so the next character
+       * overwrote that column and wrapped onto the text below: a rows-only
+       * resize (a panel opening) garbled the line being written. */
+      if(old_row <= old_row_end && old_cursor.row == old_row && old_cursor.col >= old_col) {
         new_cursor.row = new_row, new_cursor.col = (old_cursor.col - old_col + new_col);
         if(new_cursor.col >= new_cols)
           new_cursor.col = new_cols-1;

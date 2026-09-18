@@ -36,6 +36,7 @@ public:
     void writeToDisplay(const QByteArray &bytes) override;
     void redrawPrompt() override;
     void setRedrawPromptSequence(const QByteArray &bytes) override { m_redrawSequence = bytes; }
+    void holdProgramResize(bool hold) override;
 
     int capabilities() const override;
     QString screenText() const override;

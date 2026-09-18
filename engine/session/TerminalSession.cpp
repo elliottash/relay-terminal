@@ -235,10 +235,33 @@ void TerminalSession::resize(int rows, int cols, int cellWidthPx, int cellHeight
         m_rows = rows;
         m_cols = cols;
     }
-    if (m_pty)
+    if (m_holdPtyResize) {
+        m_ptyResizePending = true;
+        m_pendingPixelWidth = cols * cellWidthPx;
+        m_pendingPixelHeight = rows * cellHeightPx;
+    } else if (m_pty) {
         m_pty->resize(rows, cols, cols * cellWidthPx, rows * cellHeightPx);
+    }
     m_contentDirty = true;
     scheduleDelivery();
+}
+
+void TerminalSession::holdPtyResize(bool hold)
+{
+    if (hold == m_holdPtyResize)
+        return;
+    m_holdPtyResize = hold;
+    if (hold || !m_ptyResizePending)
+        return;
+    m_ptyResizePending = false;
+    int rows, cols;
+    {
+        GuiLock lock(this);
+        rows = m_rows;
+        cols = m_cols;
+    }
+    if (m_pty)
+        m_pty->resize(rows, cols, m_pendingPixelWidth, m_pendingPixelHeight);
 }
 
 int TerminalSession::rows() const

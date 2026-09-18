@@ -262,6 +262,22 @@ private slots:
         QVERIFY2(all.contains(QStringLiteral("01234")) && all.contains(QStringLiteral("fghij")), qPrintable(all.join(QLatin1Char('|'))));
     }
 
+    // A rows-only resize (the reasoning panel opening under the terminal) must leave the cursor
+    // where it was when the row above it is exactly full. libvterm's reflow moved it to that
+    // row's last column, so the next text erased that column and overwrote the line below.
+    void rowsOnlyResizeKeepsCursorBelowAFullRow()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 8, 10);
+        h.feed("prompt\r\n0123456789\r\nabcd");
+        h.vt->resize(5, 10, 8, 16);
+        h.vt->resize(8, 10, 8, 16);
+        h.feed("ef\r\nnext");
+        QCOMPARE(h.row(1), QStringLiteral("0123456789"));
+        QCOMPARE(h.row(2), QStringLiteral("abcdef"));
+        QCOMPARE(h.row(3), QStringLiteral("next"));
+    }
+
     void selectionText()
     {
         QFETCH_GLOBAL(QString, core);
