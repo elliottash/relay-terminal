@@ -91,6 +91,43 @@ private slots:
         QCOMPARE(plain(md.feed(QStringLiteral("-"))), QString());
         QCOMPARE(plain(md.finish()), QStringLiteral("• "));
     }
+
+    // The app fills these from the live theme; the renderer must use every one of them, or a
+    // light theme gets the dark defaults and prose disappears into the paper (owner report,
+    // 2026-09-18: "some of the text in beige mode is too light and not readable").
+    void everyColourComesFromThePalette() {
+        MarkdownAnsi::Palette p;
+        p.base = QStringLiteral("38;2;1;1;1");
+        p.heading = QStringLiteral("1;38;2;22;22;22");
+        p.marker = QStringLiteral("38;2;3;3;3");
+        p.quote = QStringLiteral("3;38;2;4;4;4");
+        p.inlineCode = QStringLiteral("38;2;5;5;5");
+        p.codeBlock = QStringLiteral("38;2;6;6;6");
+        p.dim = QStringLiteral("38;2;7;7;7");
+        p.link = QStringLiteral("4;38;2;8;8;8");
+        MarkdownAnsi md(p);
+        // A level-1 heading underlines, so the bare heading colour is asserted from a level 2.
+        QString out = md.feed(QStringLiteral("## Title\n\nplain `code` and [label](https://x.invalid)\n"
+                                             "\n- bullet\n\n> quoted\n\n```\nblock\n```\n"));
+        out += md.finish();
+        for (const QString &sgr : {p.base, p.heading, p.marker, p.quote, p.inlineCode, p.codeBlock,
+                                   p.dim, p.link})
+            QVERIFY2(out.contains(sgr + QStringLiteral("m")), qPrintable(sgr));
+        // None of the shipped dark defaults survive a palette that replaced them.
+        for (const QString &dead : {QStringLiteral("180;142;247"), QStringLiteral("230;170;120"),
+                                    QStringLiteral("110;170;245"), QStringLiteral("160;166;180")})
+            QVERIFY2(!out.contains(dead), qPrintable(dead));
+    }
+
+    // A table cell is rendered by a second instance: it has to inherit the palette, not just the
+    // base colour.
+    void aTableCellKeepsThePalette() {
+        MarkdownAnsi::Palette p;
+        p.inlineCode = QStringLiteral("38;2;9;9;9");
+        MarkdownAnsi md(p);
+        const QString out = md.feed(QStringLiteral("| a | b |\n|---|---|\n| `x` | y |\n")) + md.finish();
+        QVERIFY(out.contains(QStringLiteral("38;2;9;9;9m")));
+    }
 };
 
 QTEST_GUILESS_MAIN(MarkdownAnsiTest)

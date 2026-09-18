@@ -13,13 +13,6 @@ namespace {
 const QString kEsc = QStringLiteral("\x1b[");
 const QString kReset = QStringLiteral("\x1b[0m");
 // Colours follow the inline inks in main.cpp: violet is the agent, amber is a tool.
-const QString kHeading = QStringLiteral("1;38;2;180;142;247");
-const QString kMarker = QStringLiteral("38;2;180;142;247");
-const QString kQuote = QStringLiteral("3;38;2;160;166;180");
-const QString kInlineCode = QStringLiteral("38;2;230;170;120");
-const QString kCodeBlock = QStringLiteral("38;2;170;200;230");
-const QString kDim = QStringLiteral("38;2;110;117;132");
-const QString kLink = QStringLiteral("4;38;2;110;170;245");
 
 QString sgr(const QString &params) { return kEsc + params + QLatin1Char('m'); }
 
@@ -67,7 +60,9 @@ QStringList tableCells(const QString &row) {
 
 }  // namespace
 
-MarkdownAnsi::MarkdownAnsi(const QString &baseSgr) : m_base(baseSgr) {}
+MarkdownAnsi::MarkdownAnsi(const QString &baseSgr) { m_palette.base = baseSgr; }
+MarkdownAnsi::MarkdownAnsi(const Palette &palette) : m_palette(palette) {}
+void MarkdownAnsi::setPalette(const Palette &palette) { m_palette = palette; }
 
 void MarkdownAnsi::reset() {
     m_pending.clear();
@@ -116,13 +111,13 @@ QString MarkdownAnsi::finish() {
 
 QString MarkdownAnsi::lineBase() const {
     switch (m_line) {
-    case Line::Heading1: return kHeading + QStringLiteral(";4");
-    case Line::Heading: return kHeading;
-    case Line::Quote: return kQuote;
-    case Line::Code: return kCodeBlock;
+    case Line::Heading1: return m_palette.heading + QStringLiteral(";4");
+    case Line::Heading: return m_palette.heading;
+    case Line::Quote: return m_palette.quote;
+    case Line::Code: return m_palette.codeBlock;
     case Line::Paragraph: break;
     }
-    return m_base;
+    return m_palette.base;
 }
 
 QString MarkdownAnsi::style() const {
@@ -130,7 +125,7 @@ QString MarkdownAnsi::style() const {
     if (m_bold) params += QStringLiteral(";1");
     if (m_italic) params += QStringLiteral(";3");
     if (m_strike) params += QStringLiteral(";9");
-    if (m_codeRun > 0) params += QLatin1Char(';') + kInlineCode;
+    if (m_codeRun > 0) params += QLatin1Char(';') + m_palette.inlineCode;
     return sgr(params);
 }
 
@@ -199,7 +194,7 @@ bool MarkdownAnsi::decideLine(QString &out) {
         if (!complete && couldClose) return false;
         if (complete && runLength(rest, 0, m_fenceChar) >= m_fenceLen && rest.trimmed().size() == runLength(rest, 0, m_fenceChar)) {
             m_inFence = false;
-            out += sgr(kDim) + line + kReset + newline;
+            out += sgr(m_palette.dim) + line + kReset + newline;
             m_pending.remove(0, consumed);
             return true;
         }
@@ -224,7 +219,7 @@ bool MarkdownAnsi::decideLine(QString &out) {
             m_inFence = true;
             m_fenceChar = first;
             m_fenceLen = run;
-            out += sgr(kDim) + line + kReset + newline;
+            out += sgr(m_palette.dim) + line + kReset + newline;
             m_pending.remove(0, consumed);
             return true;
         }
@@ -241,7 +236,7 @@ bool MarkdownAnsi::decideLine(QString &out) {
     if (ruleShape(rest, &ruleCount)) {
         if (!complete) return false;
         if (ruleCount >= 3) {
-            out += sgr(kDim) + QString(40, QChar(0x2500)) + kReset + newline;
+            out += sgr(m_palette.dim) + QString(40, QChar(0x2500)) + kReset + newline;
             m_pending.remove(0, consumed);
             return true;
         }
@@ -262,7 +257,7 @@ bool MarkdownAnsi::decideLine(QString &out) {
         if (!complete && rest.size() == 1) return false;
         int skip = indent + 1;
         if (skip < end && m_pending.at(skip) == QLatin1Char(' ')) ++skip;
-        startLine(Line::Quote, line.left(indent) + sgr(kMarker) + QStringLiteral("▎ "), skip);
+        startLine(Line::Quote, line.left(indent) + sgr(m_palette.marker) + QStringLiteral("▎ "), skip);
         return true;
     }
 
@@ -279,7 +274,7 @@ bool MarkdownAnsi::decideLine(QString &out) {
             int skip = indent + std::min<int>(2, rest.size());
             if (after.startsWith(boxes.at(0))) { glyph = QStringLiteral("☐"); skip += 4; }
             else if (after.startsWith(boxes.at(1)) || after.startsWith(boxes.at(2))) { glyph = QStringLiteral("☑"); skip += 4; }
-            startLine(Line::Paragraph, line.left(indent) + sgr(kMarker) + glyph + QLatin1Char(' '), skip);
+            startLine(Line::Paragraph, line.left(indent) + sgr(m_palette.marker) + glyph + QLatin1Char(' '), skip);
             return true;
         }
     }
@@ -292,7 +287,7 @@ bool MarkdownAnsi::decideLine(QString &out) {
             if (!complete && digits + 1 == rest.size()) return false;
             if (digits + 1 == rest.size() || rest.at(digits + 1) == QLatin1Char(' ')) {
                 const int skip = indent + std::min<int>(digits + 2, rest.size());
-                startLine(Line::Paragraph, line.left(indent) + sgr(kMarker) + rest.left(digits + 1) + QLatin1Char(' '), skip);
+                startLine(Line::Paragraph, line.left(indent) + sgr(m_palette.marker) + rest.left(digits + 1) + QLatin1Char(' '), skip);
                 return true;
             }
         }
@@ -387,8 +382,8 @@ bool MarkdownAnsi::inlineStep(QString &out, int &i) {
                 if (paren >= 0 && paren < limit) {
                     const QString label = text.mid(i + 1, close - i - 1);
                     const QString url = text.mid(close + 2, paren - close - 2).trimmed();
-                    out += sgr(QStringLiteral("0;") + kLink) + label + style();
-                    if (!url.isEmpty() && url != label) out += sgr(kDim) + QStringLiteral(" (") + url + QLatin1Char(')') + style();
+                    out += sgr(QStringLiteral("0;") + m_palette.link) + label + style();
+                    if (!url.isEmpty() && url != label) out += sgr(m_palette.dim) + QStringLiteral(" (") + url + QLatin1Char(')') + style();
                     m_prev = QLatin1Char(')');
                     i = paren + 1;
                     return true;
@@ -402,7 +397,11 @@ bool MarkdownAnsi::inlineStep(QString &out, int &i) {
 }
 
 QString MarkdownAnsi::renderInline(const QString &text, bool bold) const {
-    MarkdownAnsi inner(bold ? m_base + QStringLiteral(";1") : m_base);
+    // A table cell is rendered by a second instance, which needs the whole palette and not just
+    // the base: inline code and links inside a cell are the same colours as anywhere else.
+    Palette cell = m_palette;
+    if (bold) cell.base += QStringLiteral(";1");
+    MarkdownAnsi inner(cell);
     QString rendered = inner.feed(text) + inner.finish();
     return rendered;
 }
@@ -440,7 +439,7 @@ QString MarkdownAnsi::renderTable() {
     for (const QStringList &row : cells)
         for (int col = 0; col < row.size(); ++col) widths[col] = std::max(widths[col], visibleWidth(row.at(col)));
 
-    const QString bar = sgr(kDim) + QStringLiteral(" │ ");
+    const QString bar = sgr(m_palette.dim) + QStringLiteral(" │ ");
     for (int r = 0; r < cells.size(); ++r) {
         QString line;
         for (int col = 0; col < columns; ++col) {
@@ -448,15 +447,15 @@ QString MarkdownAnsi::renderTable() {
             const int pad = widths.at(col) - visibleWidth(cell);
             const int before = align.at(col) == QLatin1Char('r') ? pad : align.at(col) == QLatin1Char('c') ? pad / 2 : 0;
             if (col > 0) line += bar;
-            line += sgr(QStringLiteral("0;") + m_base) + QString(before, QLatin1Char(' '));
+            line += sgr(QStringLiteral("0;") + m_palette.base) + QString(before, QLatin1Char(' '));
             line += cell;
-            line += sgr(QStringLiteral("0;") + m_base) + QString(pad - before, QLatin1Char(' '));
+            line += sgr(QStringLiteral("0;") + m_palette.base) + QString(pad - before, QLatin1Char(' '));
         }
         out += line + kReset + QLatin1Char('\n');
         if (r == 0) {
             QStringList dashes;
             for (int col = 0; col < columns; ++col) dashes << QString(widths.at(col), QChar(0x2500));
-            out += sgr(kDim) + dashes.join(QStringLiteral("─┼─")) + kReset + QLatin1Char('\n');
+            out += sgr(m_palette.dim) + dashes.join(QStringLiteral("─┼─")) + kReset + QLatin1Char('\n');
         }
     }
     return out;

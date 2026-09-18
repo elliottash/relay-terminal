@@ -15,8 +15,27 @@ namespace relay {
 // renderer's own. Lines end in '\n'; the caller turns that into "\r\n" for the terminal.
 class MarkdownAnsi {
 public:
+    // Every colour the renderer can emit, as SGR parameter lists ("38;2;R;G;B", plus any
+    // attributes). The defaults are the dark-theme values this renderer shipped with; the app
+    // fills them from the live theme instead, because near-white prose on IBM Beige's warm paper
+    // is unreadable (owner report, 2026-09-18). Lines already printed keep the colours they were
+    // written in: a terminal cannot recolour its scrollback.
+    struct Palette {
+        QString base = QStringLiteral("39");
+        QString heading = QStringLiteral("1;38;2;180;142;247");
+        QString marker = QStringLiteral("38;2;180;142;247");
+        QString quote = QStringLiteral("3;38;2;160;166;180");
+        QString inlineCode = QStringLiteral("38;2;230;170;120");
+        QString codeBlock = QStringLiteral("38;2;170;200;230");
+        QString dim = QStringLiteral("38;2;110;117;132");
+        QString link = QStringLiteral("4;38;2;110;170;245");
+    };
+
     // `baseSgr` is the SGR parameter list of plain text, e.g. "38;2;226;229;235".
     explicit MarkdownAnsi(const QString &baseSgr = QStringLiteral("39"));
+    explicit MarkdownAnsi(const Palette &palette);
+    // Takes effect from the next line: anything held back keeps the colours it started in.
+    void setPalette(const Palette &palette);
 
     QString feed(const QString &text);
     // Emits whatever is held back, closes open styles and a pending table, and resets all state
@@ -41,7 +60,7 @@ private:
     QString renderInline(const QString &text, bool bold) const;
     void resetInline();
 
-    QString m_base;
+    Palette m_palette;
     QString m_pending;
     QStringList m_table;
     bool m_final = false;
