@@ -5,8 +5,8 @@ This is the harness the phone actually talks to today: it starts a rendezvous, s
 registers the desktop, opens a pairing room and prints the QR code. When the GUI grows Settings →
 Remote it will call the same ``remote.host.Host`` with a real pane source instead of the demo one.
 
-    python3 -m remote.cli dev --tailscale     # HTTPS on your tailnet, so a phone can open it
-    python3 -m remote.cli dev                 # http://127.0.0.1:8787, desktop browser only
+    python3 -m remote.cli share --tls         # share this terminal with your phone
+    python3 -m remote.cli dev --tls           # the same, with a demo agent instead of a shell
     python3 -m remote.cli devices             # list paired devices
     python3 -m remote.cli revoke <device-id>
 
@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -28,10 +29,12 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from remote import attach as attach_mod
 from remote import devtls
 from remote import host as host_mod
 from remote import identity as identity_mod
 from remote import panes as panes_mod
+from remote import terminal as terminal_mod
 from remote import wire
 from rendezvous.server import Store, build
 
@@ -99,8 +102,16 @@ def tailscale_reset() -> None:
 
 # ---- approving a device -----------------------------------------------------------------------
 
-def make_approver(mode: str, capability: str):
+def make_approver(mode: str, capability: str, attachment=None):
     async def approver(request: host_mod.PairRequest) -> tuple[bool, str]:
+        # If the local terminal is attached to the shared shell, hand it back for the question.
+        live = attachment[0] if attachment else None
+        if live is not None and not live.detached.is_set():
+            with live.suspend():
+                return await ask(request)
+        return await ask(request)
+
+    async def ask(request: host_mod.PairRequest) -> tuple[bool, str]:
         print("\n" + "─" * 60)
         print(f"  {request.name} ({request.platform}) from {request.peer} wants access")
         print(f"  Device key   {request.fingerprint}")
@@ -118,6 +129,129 @@ def make_approver(mode: str, capability: str):
     return approver
 
 
+async def publish(server, args, directory) -> tuple[str, str, bool]:
+    """Work out the base URL a phone can reach, starting the right listener. Returns
+    (base, note, tailscale_used)."""
+    local = f"http://127.0.0.1:{server.port}"
+    if args.public:
+        return args.public, "", False
+    if args.tailscale:
+        public, message = tailscale_serve(server.port)
+        print(message)
+        if public is None:
+            raise SystemExit(2)
+        return public, "", True
+    if args.tls:
+        where = identity_mod.state_dir() if directory is None else directory
+        address = args.address or devtls.preferred_address()
+        listener = await server.start("0.0.0.0", args.tls_port, ssl_context=devtls.context(where))
+        note = ("  The certificate is self-signed, so the phone warns once. Its SHA-256 begins "
+                f"{devtls.fingerprint(where)}.")
+        return f"https://{address}:{server.port_of(listener)}", note, False
+    return local, "", False
+
+
+def print_pairing(identity, base, local, devices, url, room, note, verbose=True):
+    print()
+    print(f"  Relay remote — {identity.fingerprint}   (desktop {identity.desktop_id[:8]})")
+    print(f"  App          {base}")
+    print(f"  Rendezvous   {local}   ·   paired devices: {len(devices.live())}")
+    print()
+    if not print_qr(url):
+        print("  (install the python 'qrcode' package to see a scannable code here)")
+    print()
+    print(f"  Scan with your phone's camera, or open:\n  {url}")
+    print(f"  The code expires in {room.seconds_left()}s.")
+    if note:
+        print(note)
+    elif base.startswith("http://"):
+        print("\n  Note: this is a plain http address, so only a browser on this machine can use\n"
+              "  it — WebCrypto needs a secure context. Use --tls (self-signed, one warning on\n"
+              "  the phone) or --tailscale (a real certificate; needs\n"
+              "  'sudo tailscale set --operator=$USER' once).")
+    print()
+
+
+async def share(args) -> int:
+    """Open a shell, share it with a phone, and attach this terminal to it."""
+    directory = Path(args.state).expanduser() if args.state else None
+    identity = identity_mod.Identity.load_or_create(directory)
+    devices = identity_mod.DeviceStore(directory)
+
+    bridge = terminal_mod.find_bridge()
+    if bridge is None:
+        print(terminal_mod.BUILD_HINT)
+        return 2
+
+    store = Store(":memory:")
+    server = build(store, static_root=APP_DIR)
+    await server.start("127.0.0.1", args.port)
+    local = f"http://127.0.0.1:{server.port}"
+    served_by_tailscale = False
+    try:
+        base, note, served_by_tailscale = await publish(server, args, directory)
+    except SystemExit:
+        await server.close()
+        return 2
+
+    rows, cols = attach_mod.terminal_size()
+    source = terminal_mod.TerminalPaneSource(bridge, rows=args.rows or rows,
+                                             cols=args.cols or cols, shell=args.shell,
+                                             raw_out=True)
+    holder: list = [None]
+    host = host_mod.Host(identity, devices, source, app_base=base,
+                         approver=make_approver(args.approve, args.capability, holder),
+                         name=args.name)
+    try:
+        await host.register(local)
+    except wire.WireError as error:
+        print(f"could not register with the rendezvous: {error}")
+        await server.close()
+        return 2
+
+    serving = asyncio.create_task(host.serve())
+    for _ in range(100):
+        await asyncio.sleep(0.02)
+        if host.socket is not None:
+            break
+
+    pane = await source.open(title=Path(os.getcwd()).name, cwd=os.getcwd())
+    url, room = await host.open_pairing()
+    print_pairing(identity, base, local, devices, url, room, note)
+    print(f"  Sharing {pane.id}: {args.shell or os.environ.get('SHELL', '/bin/bash')} "
+          f"in {pane.cwd}")
+    interactive = sys.stdin.isatty()
+    if interactive:
+        print("  Press Enter to attach this terminal to it. Detach with Ctrl-\\.\n")
+        await asyncio.to_thread(input)
+    else:
+        print("  stdin is not a terminal, so nothing is attached here; the shell is shared "
+              "and driveable from the phone. Ctrl-C to stop.\n")
+
+    attachment = attach_mod.Attachment(source, pane.id)
+    holder[0] = attachment
+    try:
+        if interactive:
+            await attachment.run()
+        else:
+            await asyncio.Event().wait()
+    finally:
+        holder[0] = None
+        print("Detached. The shell is still running and still shared.")
+        print(f"Re-attach or stop with Ctrl-C. App: {base}")
+        with contextlib.suppress(asyncio.CancelledError):
+            await source.close_all()
+        await host.stop()
+        serving.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await serving
+        await server.close()
+        store.close()
+        if served_by_tailscale:
+            tailscale_reset()
+    return 0
+
+
 # ---- commands ---------------------------------------------------------------------------------
 
 async def dev(args) -> int:
@@ -132,25 +266,11 @@ async def dev(args) -> int:
     port = server.port
     local = f"http://127.0.0.1:{port}"
 
-    public = args.public
-    served_by_tailscale = False
-    tls_note = ""
-    if args.tailscale and not public:
-        public, message = tailscale_serve(port)
-        print(message)
-        if public is None:
-            await server.close()
-            return 2
-        served_by_tailscale = True
-    elif args.tls and not public:
-        directory_for_cert = identity_mod.state_dir() if directory is None else directory
-        address = args.address or devtls.preferred_address()
-        listener = await server.start("0.0.0.0", args.tls_port,
-                                      ssl_context=devtls.context(directory_for_cert))
-        public = f"https://{address}:{server.port_of(listener)}"
-        tls_note = ("  The certificate is self-signed, so the phone will warn once. Its "
-                    f"SHA-256 begins {devtls.fingerprint(directory_for_cert)}.")
-    base = public or local
+    try:
+        base, tls_note, served_by_tailscale = await publish(server, args, directory)
+    except SystemExit:
+        await server.close()
+        return 2
 
     source = panes_mod.DemoPaneSource()
     host = host_mod.Host(identity, devices, source, app_base=base,
@@ -170,24 +290,8 @@ async def dev(args) -> int:
             break
 
     url, room = await host.open_pairing()
-    print()
-    print(f"  Relay remote — {identity.fingerprint}   (desktop {identity.desktop_id[:8]})")
-    print(f"  App          {base}")
-    print(f"  Rendezvous   {local}   ·   paired devices: {len(devices.live())}")
-    print()
-    if not print_qr(url):
-        print("  (install the python 'qrcode' package to see a scannable code here)")
-    print()
-    print(f"  Scan with your phone's camera, or open:\n  {url}")
-    print(f"  The code expires in {room.seconds_left()}s; press Ctrl+C to stop.")
-    if not public:
-        print("\n  Note: this is a plain http address, so only a browser on this machine can use\n"
-              "  it — WebCrypto needs a secure context. Use --tls (self-signed, one warning on\n"
-              "  the phone) or --tailscale (a real certificate; needs\n"
-              "  'sudo tailscale set --operator=$USER' once).")
-    elif tls_note:
-        print(tls_note)
-    print()
+    print_pairing(identity, base, local, devices, url, room, tls_note)
+    print("  Ctrl+C to stop.\n")
 
     try:
         await serving
@@ -245,6 +349,23 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--name", default="this desktop")
     run.add_argument("--verbose", action="store_true")
 
+    share_parser = sub.add_parser("share", help="share this terminal with a phone")
+    share_parser.add_argument("--port", type=int, default=8787)
+    share_parser.add_argument("--public", help="the https base a phone can reach")
+    share_parser.add_argument("--tailscale", action="store_true")
+    share_parser.add_argument("--tls", action="store_true",
+                              help="serve https with a self-signed certificate")
+    share_parser.add_argument("--tls-port", type=int, default=8443)
+    share_parser.add_argument("--address", help="the address to put in the pairing link")
+    share_parser.add_argument("--approve", choices=("ask", "auto"), default="ask")
+    share_parser.add_argument("--capability", choices=wire.CAPABILITIES, default=wire.FULL,
+                              help="what a paired phone may do; 'full' lets it type")
+    share_parser.add_argument("--shell", help="the shell to run (default: $SHELL)")
+    share_parser.add_argument("--rows", type=int, help="override the shared size")
+    share_parser.add_argument("--cols", type=int)
+    share_parser.add_argument("--name", default="this desktop")
+    share_parser.add_argument("--verbose", action="store_true")
+
     sub.add_parser("devices", help="list paired devices")
     revoke = sub.add_parser("revoke", help="revoke a device")
     revoke.add_argument("device_id")
@@ -257,6 +378,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "revoke":
         return revoke_command(args)
     try:
+        if args.command == "share":
+            # Logs would scribble over the shared screen once the terminal is attached.
+            logging.getLogger().setLevel(logging.WARNING if not args.verbose else logging.DEBUG)
+            return asyncio.run(share(args))
         return asyncio.run(dev(args))
     except KeyboardInterrupt:
         print("\nstopped.")

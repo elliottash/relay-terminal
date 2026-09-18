@@ -123,7 +123,7 @@ Sources:
   "warp": {
     "window.new": ["Ctrl+Shift+N"], "window.next": [], "window.previous": [],
     "tab.new": ["Ctrl+Shift+T"], "tab.next": ["Ctrl+PgDown", "Ctrl+Tab"], "tab.previous": ["Ctrl+PgUp", "Ctrl+Shift+Tab"],
-    "pane.splitRight": ["Ctrl+Shift+D"], "pane.splitDown": ["Ctrl+Shift+E"],
+    "pane.splitRight": ["Ctrl+Shift+D"], "pane.splitDown": [], "pane.splitLeft": [], "pane.splitUp": [],
     "pane.focusLeft": ["Ctrl+Alt+Left"], "pane.focusRight": ["Ctrl+Alt+Right"], "pane.focusUp": ["Ctrl+Alt+Up"], "pane.focusDown": ["Ctrl+Alt+Down"],
     "pane.close": ["Ctrl+Shift+W"], "closed.restore": ["Ctrl+Alt+T"], "palette.open": ["Ctrl+Shift+P"],
     "terminal.native": ["F12"], "terminal.interrupt": [],
@@ -134,7 +134,7 @@ Sources:
   "vscode": {
     "window.new": ["Ctrl+Shift+N"], "window.next": [], "window.previous": [],
     "tab.new": ["Ctrl+Shift+~"], "tab.next": ["Ctrl+PgDown", "Ctrl+Tab"], "tab.previous": ["Ctrl+PgUp", "Ctrl+Shift+Tab"],
-    "pane.splitRight": ["Ctrl+Shift+%", "Ctrl+\\"], "pane.splitDown": ["Ctrl+Shift+|"],
+    "pane.splitRight": ["Ctrl+Shift+%", "Ctrl+\\"], "pane.splitDown": [], "pane.splitLeft": [], "pane.splitUp": [],
     "pane.focusLeft": ["Alt+Left"], "pane.focusRight": ["Alt+Right"], "pane.focusUp": ["Alt+Up"], "pane.focusDown": ["Alt+Down"],
     "pane.close": ["Ctrl+W"], "closed.restore": ["Ctrl+Shift+T"], "palette.open": ["Ctrl+Shift+P"],
     "terminal.native": ["Ctrl+`", "F12"], "terminal.interrupt": [],
@@ -145,7 +145,7 @@ Sources:
   "konsole": {
     "window.new": ["Ctrl+Shift+N"], "window.next": [], "window.previous": [],
     "tab.new": ["Ctrl+Shift+T"], "tab.next": ["Ctrl+PgDown"], "tab.previous": ["Ctrl+PgUp"],
-    "pane.splitRight": ["Ctrl+Shift+(", "Ctrl+("], "pane.splitDown": ["Ctrl+Shift+)", "Ctrl+)"],
+    "pane.splitRight": ["Ctrl+Shift+(", "Ctrl+("], "pane.splitDown": [], "pane.splitLeft": [], "pane.splitUp": [],
     "pane.focusLeft": ["Ctrl+Shift+Left"], "pane.focusRight": ["Ctrl+Shift+Right"], "pane.focusUp": ["Ctrl+Shift+Up"], "pane.focusDown": ["Ctrl+Shift+Down"],
     "pane.close": ["Ctrl+Shift+W"], "closed.restore": [], "palette.open": ["Ctrl+Alt+I"],
     "terminal.native": ["F12"], "terminal.interrupt": [],
@@ -155,6 +155,12 @@ Sources:
   }
 }
 ```
+
+**Since issue #78BN:** one key is the whole of "new pane". `pane.splitRight` makes a pane on the
+right, and Left, Up or Down within two seconds re-docks it to that side, so **`pane.splitDown` has no
+default key in any preset** and `pane.splitLeft` / `pane.splitUp` have none either. All four keep an
+action, so they can still be bound here or run from the palette. The rows above record what each
+program binds; the JSON is what Relay ships.
 
 ## 5. Collisions, pass-through and desktop grabs
 

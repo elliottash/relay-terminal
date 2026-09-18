@@ -16,6 +16,7 @@
 #include <QTest>
 
 #include <memory>
+#include <utility>
 
 using namespace relay::panes;
 
@@ -226,6 +227,82 @@ private Q_SLOTS:
         // A splitter that has gone away is skipped rather than crashing.
         const QList<QPointer<QSplitter>> gone{QPointer<QSplitter>()};
         restoreSizes(gone, stale);
+    }
+
+    // ----- "new pane, then an arrow places it" (issue #78BN) ----------------------------------
+
+    void placementArrowsPlaceAndConsume() {
+        PlacementWindow window;
+        window.arm(0);
+        QVERIFY(window.armed(0));
+        const auto left = window.keyPress(Qt::Key_Left, Qt::NoModifier, 100);
+        QCOMPARE(int(left.action), int(PlacementWindow::Action::Place));
+        QCOMPARE(int(left.direction), int(Direction::Left));
+        // One arrow only: the window is closed afterwards.
+        QVERIFY(!window.armed(150));
+        QCOMPARE(int(window.keyPress(Qt::Key_Up, Qt::NoModifier, 150).action), int(PlacementWindow::Action::None));
+
+        for (const auto pair : {std::make_pair(int(Qt::Key_Up), Direction::Up),
+                                std::make_pair(int(Qt::Key_Down), Direction::Down),
+                                std::make_pair(int(Qt::Key_Right), Direction::Right)}) {
+            window.arm(0);
+            const auto response = window.keyPress(pair.first, Qt::NoModifier, 10);
+            QCOMPARE(int(response.action), int(PlacementWindow::Action::Place));
+            QCOMPARE(int(response.direction), int(pair.second));
+        }
+    }
+
+    void placementIgnoresModifiedArrowsAndOtherKeys() {
+        PlacementWindow window;
+        // Alt+Left still focuses the pane to the left.
+        window.arm(0);
+        const auto alt = window.keyPress(Qt::Key_Left, Qt::AltModifier, 10);
+        QCOMPARE(int(alt.action), int(PlacementWindow::Action::Dismiss));
+        QVERIFY(!window.armed(10));
+        // A letter closes the window and is passed on, so it still reaches the prompt box.
+        window.arm(0);
+        QCOMPARE(int(window.keyPress(Qt::Key_A, Qt::NoModifier, 10).action), int(PlacementWindow::Action::Dismiss));
+        QVERIFY(!window.armed(10));
+    }
+
+    void placementKeepsTheWindowOpenWhileAModifierIsHeld() {
+        PlacementWindow window;
+        window.arm(0);
+        for (int key : {int(Qt::Key_Control), int(Qt::Key_Shift), int(Qt::Key_Alt), int(Qt::Key_Meta), int(Qt::Key_AltGr)}) {
+            QCOMPARE(int(window.keyPress(key, Qt::NoModifier, 10).action), int(PlacementWindow::Action::None));
+            QVERIFY(window.armed(10));
+        }
+        // The arrow that follows still places the pane.
+        QCOMPARE(int(window.keyPress(Qt::Key_Down, Qt::NoModifier, 20).action), int(PlacementWindow::Action::Place));
+    }
+
+    void placementExpiresAfterTwoSeconds() {
+        PlacementWindow window;
+        window.arm(0);
+        QVERIFY(window.armed(PlacementWindow::kTimeoutMs - 1));
+        QVERIFY(!window.armed(PlacementWindow::kTimeoutMs));
+        // An arrow typed after the window closed is passed on, not swallowed.
+        const auto late = window.keyPress(Qt::Key_Left, Qt::NoModifier, PlacementWindow::kTimeoutMs + 500);
+        QCOMPARE(int(late.action), int(PlacementWindow::Action::Dismiss));
+        QVERIFY(!window.armed(PlacementWindow::kTimeoutMs + 500));
+    }
+
+    void placementClosesOnAClick() {
+        PlacementWindow window;
+        window.arm(0);
+        QCOMPARE(int(window.mousePress(10).action), int(PlacementWindow::Action::Dismiss));
+        QVERIFY(!window.armed(10));
+        QCOMPARE(int(window.keyPress(Qt::Key_Left, Qt::NoModifier, 20).action), int(PlacementWindow::Action::None));
+        // A click with no window open is nothing at all.
+        QCOMPARE(int(window.mousePress(30).action), int(PlacementWindow::Action::None));
+    }
+
+    void placementCancelClosesTheWindow() {
+        PlacementWindow window;
+        window.arm(0);
+        window.cancel();
+        QVERIFY(!window.armed(0));
+        QCOMPARE(int(window.keyPress(Qt::Key_Left, Qt::NoModifier, 10).action), int(PlacementWindow::Action::None));
     }
 };
 

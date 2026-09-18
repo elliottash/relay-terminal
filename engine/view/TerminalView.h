@@ -92,6 +92,11 @@ public:
     // current directory) if it exists. Exposed for tests.
     static bool splitPathToken(const QString &token, QString *path, int *line, int *column);
 
+    // The OSC 8 link, URL or existing path under a point in this view's coordinates, or an empty
+    // string when there is none. `line` and `column` are set to -1 when the token carries none.
+    // The host's right-click menu uses it for Open link / Copy link address / Open this file.
+    QString linkAtPoint(const QPoint &pos, int *line = nullptr, int *column = nullptr);
+
     QString debugDump();
     quint64 paintCount() const { return m_paints; }
     QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;

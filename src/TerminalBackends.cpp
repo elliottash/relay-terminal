@@ -76,4 +76,66 @@ bool engineAvailable()
 #endif
 }
 
+QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state)
+{
+    QList<TerminalMenuItem> items;
+    auto add = [&items](const char *id, const QString &label, bool enabled = true) {
+        items.append({QString::fromLatin1(id), label, enabled});
+    };
+    auto separate = [&items] {
+        if (!items.isEmpty() && !items.last().isSeparator())
+            items.append({QStringLiteral("-"), QString(), true});
+    };
+
+    // Relay's own entries come first: they are why this pane is not just a terminal.
+    if (state.hasTurn)
+        add("turn", QStringLiteral("Open last agent turn"));
+    if (state.canTakeControl)
+        add("takeControl", QStringLiteral("Take control"));
+    add("tasks", QStringLiteral("Tasks"));
+
+    separate();
+    // An engine that cannot report a selection leaves Copy enabled: Konsole's copy is a no-op
+    // without one, which is the same outcome as a greyed entry, and greying it wrongly would
+    // hide a working action.
+    add("copy", QStringLiteral("Copy"), state.selectionKnown ? state.hasSelection : true);
+    add("paste", QStringLiteral("Paste"));
+    add("selectAll", QStringLiteral("Select all"));
+
+    if (!state.link.isEmpty() || !state.filePath.isEmpty()) {
+        separate();
+        if (!state.link.isEmpty()) {
+            add("openLink", QStringLiteral("Open link"));
+            add("copyLink", QStringLiteral("Copy link address"));
+        }
+        if (!state.filePath.isEmpty())
+            add("openFile", QStringLiteral("Open “%1”").arg(state.filePath.section(QLatin1Char('/'), -1)));
+    }
+
+    separate();
+    if (state.canSearch)
+        add("find", QStringLiteral("Find…"));
+    add("clearScrollback", QStringLiteral("Clear scrollback"));
+    if (state.canInject)
+        add("reset", QStringLiteral("Clear scrollback and reset"));
+    if (state.canReadOutput)
+        add("saveOutput", QStringLiteral("Save output as…"));
+
+    if (state.canZoom) {
+        separate();
+        add("zoomIn", QStringLiteral("Zoom in"));
+        add("zoomOut", QStringLiteral("Zoom out"));
+        add("zoomReset", QStringLiteral("Reset zoom"));
+    }
+
+    separate();
+    add("splitRight", QStringLiteral("New pane to the right"));
+    add("splitDown", QStringLiteral("New pane below"));
+    add("close", QStringLiteral("Close pane"), state.canClosePane);
+
+    while (!items.isEmpty() && items.last().isSeparator())
+        items.removeLast();
+    return items;
+}
+
 } // namespace relay

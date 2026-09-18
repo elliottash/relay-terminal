@@ -6,12 +6,19 @@
 // textContent. There is no innerHTML in this file, and the CSP forbids inline script anyway.
 
 import { Rrp, loadDevice, forgetDevice, fingerprint, b64 } from './rrp.js';
+import { ScreenView, KEYS, controlByte } from './screen.js';
 
 const rrp = new Rrp();
 let panes = [];
 let current = null;
 let pending = null;          // the turn being rendered
 let reconnectTimer = null;
+let capability = 'view';
+let features = [];
+let screenView = null;
+let tab = 'agent';
+let driving = false;
+let sticky = { ctrl: false, alt: false };
 
 const $ = (id) => document.getElementById(id);
 const show = (name) => {
@@ -73,6 +80,7 @@ async function startPairing(link) {
 async function afterConnect(record) {
   $('desktop-name').textContent = record.desktopName || 'desktop';
   $('capability').textContent = record.capability;
+  capability = record.capability;
   if (!rrp.session) await rrp.connect(record);
   show('inbox');
 }
@@ -154,14 +162,130 @@ function openPane(paneId) {
   $('thread-cwd').textContent = pane?.cwd || '';
   $('thread-body').replaceChildren();
   pending = null;
+  driving = false;
+  const hasScreen = features.includes('screen');
+  $('thread-tabs').hidden = !hasScreen;
+  setTab(hasScreen ? 'terminal' : 'agent');
   show('thread');
   rrp.send({ t: 'pane_focus', pane: paneId }).catch(() => {});
 }
 
 function closePane() {
-  if (current) rrp.send({ t: 'pane_blur', pane: current }).catch(() => {});
+  if (current) {
+    if (driving) rrp.send({ t: 'control_release', pane: current }).catch(() => {});
+    rrp.send({ t: 'pane_blur', pane: current }).catch(() => {});
+  }
   current = null;
+  driving = false;
   show('inbox');
+}
+
+// ---- terminal -----------------------------------------------------------------------------
+
+function setTab(which) {
+  tab = which;
+  const terminal = which === 'terminal';
+  $('tab-agent').classList.toggle('is-on', !terminal);
+  $('tab-terminal').classList.toggle('is-on', terminal);
+  $('thread-body').hidden = terminal;
+  $('composer').hidden = terminal;
+  $('terminal-pane').hidden = !terminal;
+  if (terminal) {
+    if (!screenView) screenView = new ScreenView($('screen-wrap'));
+    screenView.fit();
+    updateDriveUi();
+    rrp.send({ t: 'screen_get', pane: current }).catch(() => {});
+  }
+}
+
+function onScreen(message) {
+  if (message.pane !== current) return;
+  if (!screenView) screenView = new ScreenView($('screen-wrap'));
+  screenView.apply(message);
+  const wrap = $('screen-wrap');
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function updateDriveUi() {
+  const allowed = capability === 'full';
+  $('term-take').hidden = driving || !allowed;
+  $('term-release').hidden = !driving;
+  $('term-keys').hidden = !driving;
+  $('term-composer').hidden = !driving;
+  $('term-mode').textContent = driving ? 'You have the keyboard' : 'Watching';
+  $('term-mode').className = `chip ${driving ? 'ok' : ''}`;
+  if (!allowed) {
+    $('term-note').textContent = 'This device is paired for viewing only.';
+  } else if (!driving) {
+    $('term-note').textContent = 'Read only until you take over.';
+  } else {
+    $('term-note').textContent = '';
+  }
+}
+
+function sendKeys(text) {
+  if (!driving || !current) return;
+  const bytes = new TextEncoder().encode(text);
+  rrp.send({ t: 'keys', pane: current, bytes: b64(bytes) })
+    .catch((error) => { $('term-note').textContent = error.message; });
+}
+
+function buildKeyRow() {
+  const row = $('term-keys');
+  row.replaceChildren();
+  const add = (label, action, name) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    if (name) button.dataset.sticky = name;
+    button.addEventListener('click', action);
+    row.append(button);
+    return button;
+  };
+  add('Esc', () => sendKeys(KEYS.Esc));
+  add('Tab', () => sendKeys(KEYS.Tab));
+  add('Ctrl', () => toggleSticky('ctrl'), 'ctrl');
+  add('Alt', () => toggleSticky('alt'), 'alt');
+  for (const [label, key] of [['←', 'Left'], ['↓', 'Down'], ['↑', 'Up'], ['→', 'Right']]) {
+    add(label, () => sendKeys(KEYS[key]));
+  }
+  for (const key of ['^C', '^D', '^Z', '^L', '^R', '^U', '^W']) {
+    add(key, () => sendKeys(KEYS[key]));
+  }
+  add('Home', () => sendKeys(KEYS.Home));
+  add('End', () => sendKeys(KEYS.End));
+  add('PgUp', () => sendKeys(KEYS.PgUp));
+  add('PgDn', () => sendKeys(KEYS.PgDn));
+  add('Enter', () => sendKeys(KEYS.Enter));
+}
+
+function toggleSticky(name) {
+  sticky[name] = !sticky[name];
+  for (const button of $('term-keys').querySelectorAll('[data-sticky]')) {
+    button.classList.toggle('sticky-on', !!sticky[button.dataset.sticky]);
+  }
+}
+
+// A whole line at a time is what avoids Android keyboards mangling per-key input; sticky Ctrl
+// turns the next line into a control byte instead.
+function sendLine() {
+  const box = $('term-line');
+  const text = box.value;
+  if (!current || !driving) return;
+  if (sticky.ctrl && text.length === 1) {
+    const byte = controlByte(text);
+    sticky.ctrl = false;
+    toggleSticky('ctrl');
+    toggleSticky('ctrl');
+    if (byte) sendKeys(byte);
+    box.value = '';
+    return;
+  }
+  let payload = text;
+  if (sticky.alt) { payload = `\x1b${payload}`; sticky.alt = false; }
+  rrp.send({ t: 'line', pane: current, text: payload })
+    .catch((error) => { $('term-note').textContent = error.message; });
+  box.value = '';
 }
 
 function threadBody() {
@@ -305,6 +429,15 @@ function sendPrompt() {
 
 // ---- wiring -----------------------------------------------------------------------------------
 
+rrp.addEventListener('welcome', (event) => {
+  capability = event.detail.capability || capability;
+  features = event.detail.features || [];
+  $('capability').textContent = capability;
+});
+
+rrp.addEventListener('screen_snapshot', (event) => onScreen(event.detail));
+rrp.addEventListener('screen_diff', (event) => onScreen(event.detail));
+
 rrp.addEventListener('authcode', (event) => {
   $('pair-code').textContent = event.detail.code;
   $('pair-state').textContent = 'Check this code on your desktop, then allow the device.';
@@ -372,6 +505,23 @@ window.addEventListener('DOMContentLoaded', () => {
     rrp.send({ t: 'agent_stop', pane: current }).catch(() => {});
   });
   $('thread-back').addEventListener('click', closePane);
+  $('tab-agent').addEventListener('click', () => setTab('agent'));
+  $('tab-terminal').addEventListener('click', () => setTab('terminal'));
+  buildKeyRow();
+  $('term-take').addEventListener('click', () => {
+    rrp.send({ t: 'control_request', pane: current })
+      .then(() => { driving = true; updateDriveUi(); $('term-line').focus(); })
+      .catch((error) => { $('term-note').textContent = error.message; });
+  });
+  $('term-release').addEventListener('click', () => {
+    rrp.send({ t: 'control_release', pane: current }).catch(() => {});
+    driving = false;
+    updateDriveUi();
+  });
+  $('term-send').addEventListener('click', sendLine);
+  $('term-line').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); sendLine(); }
+  });
   $('pair-retry').addEventListener('click', () => location.reload());
   $('forget').addEventListener('click', async () => {
     await forgetDevice();

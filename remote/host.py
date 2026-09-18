@@ -110,6 +110,10 @@ class Channel:
         self.subscribed: set[str] = set()
         self.visible = True
         self.dedupe = wire.Deduplicator()
+        # Encrypting and writing must happen as one step: a Noise cipherstate is a counter, so two
+        # concurrent senders can encrypt in one order and reach the socket in another, and the
+        # peer then sees a nonce gap and drops the session. Fan-out makes that the common case.
+        self.sending = asyncio.Lock()
         self.opened = time.monotonic()
         self.last_seen = time.monotonic()
         self.closed = False
@@ -133,7 +137,11 @@ class Channel:
         if self.session is None or self.closed:
             return
         payload = bytes([ENC_JSON]) + wire.encode(message)
-        await self.host._send_envelope(envelope.KIND_DATA, self.id, self.session.encrypt(payload))
+        async with self.sending:
+            if self.session is None or self.closed:
+                return
+            await self.host._send_envelope(envelope.KIND_DATA, self.id,
+                                           self.session.encrypt(payload))
 
     async def close(self, reason: str = "") -> None:
         if self.closed:

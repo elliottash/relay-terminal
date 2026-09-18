@@ -13,6 +13,7 @@
 
 #include <QByteArray>
 #include <QFont>
+#include <QPoint>
 #include <QString>
 #include <QStringList>
 #include <functional>
@@ -34,6 +35,7 @@ public:
         DisplayInjection = 1 << 7, // writeToDisplay()
         Search = 1 << 8,           // find()
         ScrollControl = 1 << 9,    // scrollLines/Pages/ToBottom
+        FontZoom = 1 << 10,        // zoom()
     };
 
     virtual ~TerminalBackend() = default;
@@ -90,6 +92,23 @@ public:
 
     // ---- search
     virtual int find(const QString &text, bool backwards) = 0; // returns match count, selects a match
+
+    // ---- right-click menu helpers (issue #X2F1)
+    // The OSC 8 link, URL or existing path under a point in widget()'s coordinates; empty when
+    // there is none, or when the engine cannot hit-test (KonsolePart). line/column are -1 when
+    // the token carries none.
+    virtual QString linkAt(const QPoint &pos, int *line = nullptr, int *column = nullptr) {
+        Q_UNUSED(pos);
+        if (line) *line = -1;
+        if (column) *column = -1;
+        return {};
+    }
+    // Font size: +1 larger, -1 smaller, 0 back to the profile's size. Returns false when the
+    // engine cannot do it (the FontZoom capability is then absent too).
+    virtual bool zoom(int step) {
+        Q_UNUSED(step);
+        return false;
+    }
 
     // ---- host callbacks (GUI thread)
     // OSC 8 URI, URL text or an existing absolute path; line/column are -1 when absent.

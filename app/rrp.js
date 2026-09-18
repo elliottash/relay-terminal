@@ -194,7 +194,14 @@ export class Rrp extends EventTarget {
     // Only at pairing: the code is what the person compares against the desktop's dialog, so it
     // must be on screen before the desktop is asked, and must not change afterwards.
     if (announce) this.emit('authcode', { code: this.authCode });
-    this.socket.onmessage = (event) => this.#frame(new Uint8Array(event.data));
+    // Frames are handled strictly in arrival order: decryption is async, and a screen stream
+    // delivers them faster than one can finish.
+    this.socket.onmessage = (event) => {
+      const bytes = new Uint8Array(event.data);
+      this.receiving = (this.receiving || Promise.resolve())
+        .then(() => this.#frame(bytes))
+        .catch(() => {});
+    };
   }
 
   async #authCode(handshakeHash) {
@@ -230,13 +237,23 @@ export class Rrp extends EventTarget {
 
   // -- sending ----------------------------------------------------------------------------------
 
-  async send(message) {
+  // Encrypt and write as one step. The Noise cipherstate is a counter, so two sends racing would
+  // arrive out of order and the desktop would reject the second one.
+  send(message) {
     if (!this.session || this.socket?.readyState !== WebSocket.OPEN) {
-      throw new Error('not connected.');
+      return Promise.reject(new Error('not connected.'));
     }
-    const body = new TextEncoder().encode(JSON.stringify(message));
-    const payload = concat(new Uint8Array([ENC_JSON]), body);
-    this.socket.send(await this.session.encrypt(payload));
+    this.sending = (this.sending || Promise.resolve()).then(async () => {
+      if (!this.session || this.socket?.readyState !== WebSocket.OPEN) {
+        throw new Error('not connected.');
+      }
+      const body = new TextEncoder().encode(JSON.stringify(message));
+      const payload = concat(new Uint8Array([ENC_JSON]), body);
+      this.socket.send(await this.session.encrypt(payload));
+    });
+    const result = this.sending;
+    this.sending = this.sending.catch(() => {});   // one failure must not poison the chain
+    return result;
   }
 
   once(kind, timeout = 20000) {

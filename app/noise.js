@@ -88,29 +88,29 @@ class CipherState {
     return this.imported;
   }
 
+  // The nonce is reserved synchronously, before the first await. WebCrypto is async, so two
+  // overlapping calls would otherwise both read the same counter and produce two frames with the
+  // same nonce — which is both a break of the cipher's contract and an instant session failure.
   async encrypt(ad, plaintext) {
     if (!this.key) return plaintext;
+    const nonce = this.nonce++;
     const key = await this.#aesKey();
-    const params = { name: 'AES-GCM', iv: nonceBytes(this.nonce), tagLength: 128 };
+    const params = { name: 'AES-GCM', iv: nonceBytes(nonce), tagLength: 128 };
     if (ad && ad.length) params.additionalData = ad;
-    const out = new Uint8Array(await subtle.encrypt(params, key, plaintext));
-    this.nonce += 1;
-    return out;
+    return new Uint8Array(await subtle.encrypt(params, key, plaintext));
   }
 
   async decrypt(ad, ciphertext) {
     if (!this.key) return ciphertext;
+    const nonce = this.nonce++;
     const key = await this.#aesKey();
-    const params = { name: 'AES-GCM', iv: nonceBytes(this.nonce), tagLength: 128 };
+    const params = { name: 'AES-GCM', iv: nonceBytes(nonce), tagLength: 128 };
     if (ad && ad.length) params.additionalData = ad;
-    let out;
     try {
-      out = new Uint8Array(await subtle.decrypt(params, key, ciphertext));
+      return new Uint8Array(await subtle.decrypt(params, key, ciphertext));
     } catch {
       throw new Error('authentication failed.');
     }
-    this.nonce += 1;
-    return out;
   }
 
   async rekey() {

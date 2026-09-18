@@ -12,6 +12,8 @@
 #include <QDateTime>
 #include <QResizeEvent>
 #include <algorithm>
+#include <QApplication>
+#include <QClipboard>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
@@ -21,11 +23,17 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QImageReader>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
+#include <QMenu>
+#include <QMessageBox>
 #include <QMimeDatabase>
+#include <QMouseEvent>
+#include <QProcess>
+#include <QSettings>
 #include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -73,6 +81,54 @@ QString tildePath(const QString &path) {
 }
 }  // namespace
 
+// ----- explorer right-click menu ------------------------------------------------------------------
+
+QList<FileMenuItem> explorerMenu(FileMenuTarget target, const FileMenuHost &host) {
+    QList<FileMenuItem> items;
+    auto add = [&items](const char *id, const QString &label, bool enabled = true) {
+        items.append({QString::fromLatin1(id), label, enabled});
+    };
+    auto separate = [&items] {
+        if (!items.isEmpty() && !items.last().isSeparator()) items.append({QStringLiteral("-"), QString(), true});
+    };
+
+    if (target == FileMenuTarget::Folder) {
+        add("open", QStringLiteral("Open"));
+        if (host.canNavigateTerminal) add("navigate", QStringLiteral("Navigate here"));
+    } else if (target == FileMenuTarget::File) {
+        add("open", QStringLiteral("Open"));
+        if (host.canPreview) add("preview", QStringLiteral("Open in a preview pane"));
+        if (host.canNavigateTerminal) add("navigate", QStringLiteral("Navigate here"));
+    } else if (host.canNavigateTerminal) {
+        // The empty space below the rows acts on the folder the explorer is showing.
+        add("navigate", QStringLiteral("Navigate here"));
+    }
+
+    if (target != FileMenuTarget::None) {
+        separate();
+        add("copyPath", QStringLiteral("Copy path"));
+        add("copyRelativePath", QStringLiteral("Copy relative path"));
+    }
+    separate();
+    add("reveal", QStringLiteral("Reveal in file manager"));
+
+    separate();
+    add("newFile", QStringLiteral("New file…"), host.writable);
+    add("newFolder", QStringLiteral("New folder…"), host.writable);
+    if (target != FileMenuTarget::None) {
+        add("rename", QStringLiteral("Rename…"), host.writable);
+        add("delete", QStringLiteral("Delete…"), host.writable);
+    }
+
+    if (host.canSetWorkspace && target != FileMenuTarget::File) {
+        separate();
+        add("workspace", QStringLiteral("Set as agent workspace"));
+    }
+
+    while (!items.isEmpty() && items.last().isSeparator()) items.removeLast();
+    return items;
+}
+
 // ----- FileExplorer ------------------------------------------------------------------------------
 
 FileExplorer::FileExplorer(const QString &root, QWidget *parent) : QWidget(parent) {
@@ -93,6 +149,10 @@ FileExplorer::FileExplorer(const QString &root, QWidget *parent) : QWidget(paren
     // Long paths elide instead of forcing the pane wide.
     m_path->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_path->setMinimumWidth(40);
+    // Clicking the folder in the header closes the explorer again (issue #D60R): the same header
+    // line that opened it from the terminal pane puts it away.
+    m_path->setCursor(Qt::PointingHandCursor);
+    m_path->installEventFilter(this);
     m_hidden = headerButton(QStringLiteral(".*"), QStringLiteral("Show hidden files"));
     m_hidden->setObjectName(QStringLiteral("fileExplorerHidden"));
     m_hidden->setCheckable(true);
@@ -120,8 +180,11 @@ FileExplorer::FileExplorer(const QString &root, QWidget *parent) : QWidget(paren
     m_view->setUniformRowHeights(true);
     m_view->setSortingEnabled(true);
     m_view->sortByColumn(0, Qt::AscendingOrder);
-    m_view->setSelectionMode(QAbstractItemView::SingleSelection);
+    // Ctrl+click and Shift+click extend the selection; they never open (issue #D60R).
+    m_view->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_view->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_singleClick = singleClickDefault();
     m_view->setColumnHidden(2, true);  // type
     m_view->header()->setStretchLastSection(false);
     m_view->header()->setSectionResizeMode(0, QHeaderView::Stretch);
@@ -133,8 +196,18 @@ FileExplorer::FileExplorer(const QString &root, QWidget *parent) : QWidget(paren
     connect(m_hidden, &QToolButton::toggled, this, [this](bool on) { setShowHidden(on); });
     connect(m_filter, &QLineEdit::textChanged, this, [this](const QString &text) { setFilter(text); });
     connect(m_view, &QTreeView::doubleClicked, this, [this](const QModelIndex &index) {
+        if (m_singleClick) return;   // the single click already opened it
         if (index.isValid()) activate(m_model->filePath(index));
     });
+    // Dolphin-style single click (issue #0C7V). clicked() only fires when press and release land
+    // on the same row without a drag, so dragging still selects; the modifiers are the ones from
+    // the press, so Ctrl+click and Shift+click only extend the selection.
+    connect(m_view, &QTreeView::clicked, this, [this](const QModelIndex &index) {
+        if (!m_singleClick || !index.isValid()) return;
+        if (m_clickModifiers & (Qt::ControlModifier | Qt::ShiftModifier)) return;
+        activate(m_model->filePath(index));
+    });
+    connect(m_view, &QTreeView::customContextMenuRequested, this, [this](const QPoint &at) { showMenu(at); });
     // Keep a selection once the folder finishes loading, so arrows and Enter work at once.
     connect(m_model, &QFileSystemModel::rowsInserted, this, [this] { hideUnmatchedFolders(); });
     connect(m_model, &QFileSystemModel::layoutChanged, this, [this] { hideUnmatchedFolders(); });
@@ -146,8 +219,13 @@ FileExplorer::FileExplorer(const QString &root, QWidget *parent) : QWidget(paren
             m_view->setCurrentIndex(m_model->index(0, 0, rootIndex));
     });
     m_view->installEventFilter(this);
+    m_view->viewport()->installEventFilter(this);
     m_filter->installEventFilter(this);
     setRoot(root.isEmpty() ? QDir::homePath() : root);
+}
+
+bool FileExplorer::singleClickDefault() {
+    return QSettings().value(QStringLiteral("files/single_click"), true).toBool();
 }
 
 void FileExplorer::setRoot(const QString &path) {
@@ -245,7 +323,162 @@ void FileExplorer::updateHeader() {
     m_up->setEnabled(!QDir(m_root).isRoot());
 }
 
+QList<FileMenuItem> FileExplorer::menuFor(const QString &path) const {
+    FileMenuHost host;
+    host.canNavigateTerminal = bool(onNavigateHere);
+    host.canPreview = bool(onOpenInPreview);
+    host.canSetWorkspace = bool(onSetWorkspace);
+    const QFileInfo info(path.isEmpty() ? m_root : path);
+    FileMenuTarget target = FileMenuTarget::None;
+    if (!path.isEmpty()) target = info.isDir() ? FileMenuTarget::Folder : FileMenuTarget::File;
+    // Creating, renaming and deleting all need the containing folder to be writable.
+    const QString parent = target == FileMenuTarget::None ? m_root : info.absolutePath();
+    host.writable = QFileInfo(parent).isWritable();
+    return explorerMenu(target, host);
+}
+
+void FileExplorer::showMenu(const QPoint &viewportPos) {
+    const QModelIndex index = m_view->indexAt(viewportPos);
+    const QString path = index.isValid() ? m_model->filePath(index) : QString();
+    if (index.isValid() && !m_view->selectionModel()->isSelected(index))
+        m_view->setCurrentIndex(index);
+    auto *menu = new QMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    for (const FileMenuItem &item : menuFor(path)) {
+        if (item.isSeparator()) { menu->addSeparator(); continue; }
+        QAction *action = menu->addAction(item.label);
+        action->setEnabled(item.enabled);
+        const QString id = item.id;
+        connect(action, &QAction::triggered, this, [this, id, path] { runMenuAction(id, path); });
+    }
+    menu->popup(m_view->viewport()->mapToGlobal(viewportPos));
+}
+
+void FileExplorer::runMenuAction(const QString &id, const QString &path) {
+    const QString target = path.isEmpty() ? m_root : path;
+    if (id == QLatin1String("open")) {
+        if (QFileInfo(target).isDir()) setRoot(target);
+        // A file "opens" the way the desktop would open it; the preview pane is its own entry.
+        else QDesktopServices::openUrl(QUrl::fromLocalFile(target));
+    } else if (id == QLatin1String("preview")) {
+        if (onOpenInPreview) onOpenInPreview(target);
+    } else if (id == QLatin1String("navigate")) {
+        const QString directory = QFileInfo(target).isDir() ? target : QFileInfo(target).absolutePath();
+        if (onNavigateHere) onNavigateHere(directory);
+    } else if (id == QLatin1String("copyPath")) {
+        QApplication::clipboard()->setText(target);
+    } else if (id == QLatin1String("copyRelativePath")) {
+        QApplication::clipboard()->setText(QDir(m_root).relativeFilePath(target));
+    } else if (id == QLatin1String("reveal")) {
+        // Ask the desktop's file manager to select the entry; fall back to opening the folder.
+        const QString folder = QFileInfo(target).isDir() ? target : QFileInfo(target).absolutePath();
+        if (!QProcess::startDetached(QStringLiteral("dbus-send"),
+                                     {QStringLiteral("--session"), QStringLiteral("--print-reply"),
+                                      QStringLiteral("--dest=org.freedesktop.FileManager1"),
+                                      QStringLiteral("--type=method_call"), QStringLiteral("/org/freedesktop/FileManager1"),
+                                      QStringLiteral("org.freedesktop.FileManager1.ShowItems"),
+                                      QStringLiteral("array:string:") + QUrl::fromLocalFile(target).toString(),
+                                      QStringLiteral("string:")}))
+            QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+    } else if (id == QLatin1String("newFile")) {
+        createEntry(false);
+    } else if (id == QLatin1String("newFolder")) {
+        createEntry(true);
+    } else if (id == QLatin1String("rename")) {
+        renameEntry(target);
+    } else if (id == QLatin1String("delete")) {
+        deleteEntry(target);
+    } else if (id == QLatin1String("workspace")) {
+        const QString directory = QFileInfo(target).isDir() ? target : QFileInfo(target).absolutePath();
+        if (onSetWorkspace) onSetWorkspace(directory);
+    }
+}
+
+void FileExplorer::createEntry(bool folder) {
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, folder ? QStringLiteral("New folder") : QStringLiteral("New file"),
+                                               QStringLiteral("Name:"), QLineEdit::Normal, QString(), &ok).trimmed();
+    if (!ok || name.isEmpty()) return;
+    if (name.contains(QLatin1Char('/'))) {
+        QMessageBox::warning(this, QStringLiteral("Relay"), QStringLiteral("A name cannot contain “/”."));
+        return;
+    }
+    const QString path = QDir(m_root).filePath(name);
+    if (QFileInfo::exists(path)) {
+        QMessageBox::warning(this, QStringLiteral("Relay"), QStringLiteral("“%1” already exists.").arg(name));
+        return;
+    }
+    bool made = false;
+    if (folder) {
+        made = QDir(m_root).mkdir(name);
+    } else {
+        QFile file(path);
+        made = file.open(QIODevice::WriteOnly);
+        if (made) file.close();
+    }
+    if (!made) {
+        QMessageBox::warning(this, QStringLiteral("Relay"), QStringLiteral("Could not create “%1”.").arg(name));
+        return;
+    }
+    select(path);
+}
+
+void FileExplorer::renameEntry(const QString &path) {
+    const QFileInfo info(path);
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, QStringLiteral("Rename"), QStringLiteral("New name:"),
+                                               QLineEdit::Normal, info.fileName(), &ok).trimmed();
+    if (!ok || name.isEmpty() || name == info.fileName()) return;
+    if (name.contains(QLatin1Char('/'))) {
+        QMessageBox::warning(this, QStringLiteral("Relay"), QStringLiteral("A name cannot contain “/”."));
+        return;
+    }
+    const QString destination = QDir(info.absolutePath()).filePath(name);
+    if (QFileInfo::exists(destination)) {
+        QMessageBox::warning(this, QStringLiteral("Relay"), QStringLiteral("“%1” already exists.").arg(name));
+        return;
+    }
+    if (!QFile::rename(path, destination)) {
+        QMessageBox::warning(this, QStringLiteral("Relay"), QStringLiteral("Could not rename “%1”.").arg(info.fileName()));
+        return;
+    }
+    select(destination);
+}
+
+void FileExplorer::deleteEntry(const QString &path) {
+    const QFileInfo info(path);
+    const bool directory = info.isDir();
+    const QString question = directory
+        ? QStringLiteral("Delete the folder “%1” and everything in it?\n\nThis cannot be undone.").arg(info.fileName())
+        : QStringLiteral("Delete “%1”?\n\nThis cannot be undone.").arg(info.fileName());
+    if (QMessageBox::warning(this, QStringLiteral("Delete"), question, QMessageBox::Cancel | QMessageBox::Yes,
+                             QMessageBox::Cancel) != QMessageBox::Yes)
+        return;
+    const bool removed = directory ? QDir(path).removeRecursively() : QFile::remove(path);
+    if (!removed)
+        QMessageBox::warning(this, QStringLiteral("Relay"), QStringLiteral("Could not delete “%1”.").arg(info.fileName()));
+}
+
+void FileExplorer::select(const QString &path) {
+    const QModelIndex index = m_model->index(path);
+    if (index.isValid()) m_view->setCurrentIndex(index);
+}
+
 bool FileExplorer::eventFilter(QObject *object, QEvent *event) {
+    if (object == m_path) {
+        // A click on the folder line asks the host to close this pane again (issue #D60R).
+        if (event->type() == QEvent::MouseButtonRelease
+            && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton
+            && !m_path->hasSelectedText() && onCloseRequested) {
+            onCloseRequested();
+            return true;
+        }
+        return QWidget::eventFilter(object, event);
+    }
+    // Remember the modifiers of the press, so the single-click opener can tell a plain click
+    // from Ctrl+click or Shift+click (which extend the selection instead).
+    if (object == m_view->viewport() && (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonDblClick))
+        m_clickModifiers = static_cast<QMouseEvent *>(event)->modifiers();
     if (event->type() != QEvent::KeyPress) return QWidget::eventFilter(object, event);
     auto *key = static_cast<QKeyEvent *>(event);
     const auto mods = key->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier | Qt::MetaModifier);
@@ -257,6 +490,13 @@ bool FileExplorer::eventFilter(QObject *object, QEvent *event) {
         }
         if ((key->key() == Qt::Key_Backspace && mods == Qt::NoModifier) || (key->key() == Qt::Key_Up && mods == Qt::AltModifier)) {
             goUp();
+            return true;
+        }
+        // The keyboard route to the right-click menu.
+        if ((key->key() == Qt::Key_Menu && mods == Qt::NoModifier) || (key->key() == Qt::Key_F10 && mods == Qt::ShiftModifier)) {
+            const QModelIndex index = m_view->currentIndex();
+            const QRect row = index.isValid() ? m_view->visualRect(index) : QRect();
+            showMenu(row.isValid() ? row.center() : QPoint(8, 8));
             return true;
         }
         // Printable keys start filtering, like a file manager's type-ahead.

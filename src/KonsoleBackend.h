@@ -70,6 +70,10 @@ public:
 
     int find(const QString &, bool) override { return 0; }
 
+    // Konsole's TerminalDisplay carries increase/decrease/reset font-size slots in recent
+    // versions; they are probed by name, and zoom() is a no-op (and FontZoom absent) without them.
+    bool zoom(int step) override;
+
     void setOutputCallbackEnabled(bool) override {}
 
 public Q_SLOTS:
@@ -84,6 +88,7 @@ private:
     QObject *display() const; // the TerminalDisplay child with copyToClipboard()
     QScrollBar *scrollBar() const;
     void invokeOnDisplay(const char *slot);
+    bool displayHasSlot(const char *signature) const;
 
     QPointer<KParts::ReadOnlyPart> m_part;
     TerminalInterface *m_iface = nullptr;

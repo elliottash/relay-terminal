@@ -29,6 +29,12 @@ def body(request: dict) -> dict:
                 text = " ".join(p.get("text", "") for p in text if isinstance(p, dict))
             prompt = text.strip()
             break
+    # Relay prepends a labelled context note to the user's turn (relay_core.agent.format_context).
+    # A real model reads the note and runs the user's command, so the stub must likewise skip
+    # past [End of Relay context] before taking the first line as the command to reproduce.
+    END = "[End of Relay context]"
+    if END in prompt:
+        prompt = prompt.split(END, 1)[1].lstrip("\n")
     command = "cd {0} && {1}".format(SANDBOX, prompt.splitlines()[0] if prompt else "true")
     return {"role": "assistant", "content": None,
             "tool_calls": [{"id": "call_1", "type": "function",

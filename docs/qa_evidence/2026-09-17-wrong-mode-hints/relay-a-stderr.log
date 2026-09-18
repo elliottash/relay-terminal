@@ -1,5 +1,3 @@
 [wmh] dispatch route=shell mode=shell valid=0 signal=1 text='how do I list files by size'
 [wmh] wrongModeHint towardAgent=1 key='Ctrl+I'
 [wmh] hint id=mode.requestInTerminal: showing
-[wmh] tool_result run='cd /tmp/relay-qa-wrong-mode && [Relay context: added by Relay, not typed by the ' prompt='git stauts' exit=127 mode=agent shown=0
-[wmh] hint id=turn.link: showing
