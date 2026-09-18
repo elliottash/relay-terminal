@@ -57,13 +57,22 @@ sharing so the agent can reuse the login:
 
 When the foreground program is `ssh`/`mosh`/`mosh-client` (after 300 ms, as before), the pane runs
 `ssh -G <the program's own arguments>` once, locally and without network, and keeps a
-`RemoteSession`: alias, resolved hostname, user, port, control path, whether the master answers
-`ssh -O check`, the remote cwd (from OSC 7 with a non-local host), whether the remote shell
-integration is live (OSC 133 marks seen), and whether the remote shell is at its prompt.
+`RemoteLogin` (`Pane::beginLogin`, rules in `src/RemoteSession.h`): the destination as typed,
+resolved hostname, user, port, control path, whether that socket exists (`reachable`), the remote
+cwd (any OSC 7 while the login runs), whether the remote shell integration is live (OSC 133 marks
+seen while the login runs), and whether the remote shell is at its prompt. mosh and mosh-client
+are reduced to the ssh arguments mosh gave its own ssh, with Relay's socket directory added when
+they name none (the wrapper's).
 
 "At its prompt" is decided by OSC 133 marks when the integration is live (last mark `A`/`B`), and
-otherwise by the screen classifier (`ScreenPrompt::ShellPrompt`, cursor on that row, no alternate
-screen, output quiet).
+otherwise by the screen classifier: `ScreenPrompt::ShellPrompt` on the cursor row, the cursor at the
+end of it, no alternate screen, twice in a row (about half a second). While Relay's own inline
+output is on the cursor row the prompt is taken to still be there, and the screen classifier is not
+consulted, so an agent line ending in "password:" can never mask the prompt box.
+
+The engine gained two things for this: `TerminalBackend::onCwdHostChanged(path, host)` (OSC 7's host
+was parsed and then dropped) and `TerminalBackend::cursorPosition()`. Outside a login, an OSC 7 whose
+host is not this machine no longer moves the pane's directory either (ssh inside a local tmux).
 
 ### 3. The remote integration (`shell/remote-integration.sh`)
 
@@ -80,15 +89,18 @@ non-interactive one. A second eval in the same shell only erases its own line. I
 line is also taken out of the history if it got in; zsh decides that when the line is read, so the
 line stays in a zsh history that did not already have `HIST_IGNORE_SPACE`.
 
-For the GUI: the payload must be gzip (RFC 1952, e.g. zlib with `windowBits` 31 — not `qCompress`,
-which is zlib with a length prefix), base64 on one line without wrapping; `base64 -d` needs macOS 13
+For the GUI: the payload must be gzip (RFC 1952), not `qCompress`'s zlib with a length prefix —
+`relay::remote::gzip` takes the raw deflate out of `qCompress` and puts gzip's header and CRC-32
+around it (`tests/remotesession_test.cpp` decodes it with the real `gzip`) — and base64 on one line
+without wrapping; `base64 -d` needs macOS 13
 or later there (older macOS spells it `-D`). About 2.5 KB of script becomes about 1.5 KB typed.
 `tests/test_ssh_shell.py` types exactly this line into bash and zsh on a pty.
 
 When: `ssh/enhance` = `auto` → at the first remote prompt of each login, unless the host is in
-`ssh/hosts_never`. `ask` → the program bar offers "Enhance" / "Always on this host" / "Never on this
-host". `off` → never, and no wrapper. mosh drops unknown OSC sequences, so a mosh session is never
-enhanced; it still gets everything the screen classifier can give (items 4–6).
+`ssh/hosts_never`. `ask` → a banner offers "Enhance" for this login (hosts in `ssh/hosts_always` are
+enhanced without asking; both lists are edited in Options). `off` → never, and no wrapper. mosh
+drops unknown OSC sequences, so a mosh session is never enhanced; it still gets everything the
+screen classifier can give (items 4–6).
 
 ### 4. The prompt box types into the remote shell
 
@@ -96,6 +108,12 @@ At a remote prompt, Enter sends the route request with `remote: {"host": …}`. 
 the local PATH/alias checks (they describe the wrong machine) and decides only between "a shell
 command" and "a request for the agent". A shell command is typed into ssh followed by Enter, and the
 prompt box keeps it in history as usual. `/agent` and `/shell` prefixes still force the destination.
+
+The same holds while the remote side is busy (no prompt, no full-screen program): the line is typed
+ahead into ssh, as it would be at a real keyboard, and a toast says the host was busy. It is never
+queued for the local shell. A question read off the remote screen ("Do you want to continue?
+[Y/n]") takes the line directly, without the router. A full-screen remote program (vim, htop) keeps
+the Take control banner.
 
 ### 5. Remote passwords
 
@@ -108,7 +126,13 @@ password prompt: what is typed goes to ssh, never to the router or the model, an
 `printInline` treats "remote shell at its prompt" like "local shell idle at its prompt": it erases
 the prompt row, prints, and on close asks the remote shell to redraw (`Ctrl+X Ctrl+P` when the
 integration is live), or re-prints the prompt row's text it saved before erasing. Resize is held for
-the program while the block is open, as for the local shell.
+the program while the block is open, as for the local shell. The saved row is padded to the cursor
+column (the screen's text drops the blank after `$`) and printed plain, so a coloured prompt comes
+back uncoloured until the next command redraws it; with the integration the remote shell redraws its
+own prompt and nothing is lost.
+
+Anything printed while the remote side is busy (a command running on the host) still goes to the
+side panel and into the terminal at the next remote prompt, not only when ssh exits.
 
 ### 7. The agent works on the host
 

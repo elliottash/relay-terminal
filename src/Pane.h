@@ -43,6 +43,7 @@
 #include "RuntimeDirs.h"
 #include "RemoteShare.h"
 #include "PaneStatus.h"
+#include "RemoteSession.h"
 #include "backend/VTermBackend.h"
 #include "Voice.h"
 #include "Images.h"
@@ -84,6 +85,7 @@
 #include <QMessageBox>
 #include <QPointer>
 #include <QProcess>
+#include <QSysInfo>
 #include <QProcessEnvironment>
 #include <QPushButton>
 #include <QSaveFile>
@@ -733,7 +735,9 @@ private:
     // Re-read the last rows and tell the rest of the pane (and the worker) what they say.
     void updateScreenPrompt() {
         relay::screen::Detection next;
-        if (m_backend && !m_promptReported && !m_native)
+        // Relay's own inline output over a remote prompt is not the program asking anything: an
+        // agent line ending in "password:" must not mask the prompt box (card #S5SH).
+        if (m_backend && !m_promptReported && !m_native && !(m_inlineOpen && m_login.active))
             next = relay::screen::detect(canShowAgentTheScreen()
                                              ? relay::screen::lastRows(m_backend->screenText())
                                              : QStringList(),
@@ -5460,6 +5464,13 @@ private:
         // tracks the working directory and command boundaries from them.
         qputenv("RELAY_SHELL_INTEGRATION",
                 QSettings().value(QStringLiteral("terminal/shell_integration"), false).toBool() ? "1" : "0");
+        // The ssh and mosh wrappers (shell/integration.bash, card #S5SH) share the login's
+        // connection through a socket here, so the agent can reuse it. Off in Options › Terminal.
+        const bool wrapSsh = QSettings().value(QStringLiteral("ssh/enhance"), QStringLiteral("auto")).toString() != QStringLiteral("off")
+                             && QDir().mkpath(sshSocketDir())
+                             && QFile::setPermissions(sshSocketDir(), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        qputenv("RELAY_SSH_WRAP", wrapSsh ? "1" : "0");
+        qputenv("RELAY_SSH_DIR", sshSocketDir().toUtf8());
         m_backendOwned.reset(relay::createTerminalBackend(m_engineCore, m_terminalHost));
         m_backend = m_backendOwned.get();
         m_terminal = m_backend->widget();
@@ -5486,7 +5497,11 @@ private:
         // Alternate screen (vim, less, htop, tmux), reported by the emulator itself.
         m_backend->onAltScreenChanged = [this](bool active) { onPrimaryScreen(!active); };
         // OSC 7 from the shell integration (engine panes; see shell/relay-integration.bash).
-        m_backend->onCwdChanged = [this](const QString &path) {
+        // A folder on another machine (OSC 7 from a shell behind ssh names its host) is the
+        // login's, never this pane's local directory, even when the same path exists here.
+        m_backend->onCwdHostChanged = [this](const QString &path, const QString &host) {
+            if (m_login.active) { if (m_login.cwd != path) { m_login.cwd = path; changed(); } return; }
+            if (!relay::remote::isLocalHost(host, QSysInfo::machineHostName())) return;
             if (path.isEmpty() || path == m_cwd || !QFileInfo(path).isDir()) return;
             m_cwd = path; updatePaths(); changed();
         };
@@ -5495,6 +5510,9 @@ private:
         m_backend->onPromptMark = [this](char kind, int exitCode) {
             m_lastPromptMark = kind;
             if (kind == 'D') m_lastMarkExitCode = exitCode;
+            // Marks while a login owns the terminal come from the remote shell: they say exactly
+            // when it is at its prompt, without waiting for the screen poll.
+            if (m_login.active) { m_login.integration = true; updateLoginPrompt(); }
         };
         // Output of the commands Relay itself ran, for the conversation index (protocol 14).
         // Only enabled between "command loaded" and "shell ready", so it costs nothing otherwise.
@@ -5507,6 +5525,13 @@ private:
         // an explorer pane, a URL in the browser. The engine only reports paths that exist.
         m_backend->onLinkActivated = [this](const QString &target, int line, int column) {
             Q_UNUSED(column);
+            // The engine links paths that exist here; inside a login the output is the remote
+            // machine's, and the same path here is a different file (card #S5SH). URLs still open.
+            const QUrl url(target);
+            if (m_login.active && (url.scheme().isEmpty() || url.isLocalFile())) {
+                toast(QStringLiteral("That path is on %1, not this machine · ask the agent to open it there").arg(loginHost()));
+                return;
+            }
             openOutputTarget(target, line, true);
         };
         // `#K7Q2` in the output is a card link when this pane's Switchboard index knows the id
@@ -5641,8 +5666,12 @@ private:
             m_handoffChain = 0;   // the user typed something: a chain of hand-overs starts over
             m_pendingSubmit = id; m_submittedDraft = typed;
         } else m_previewId = id;
-        send({{"type", "route"}, {"id", id}, {"text", m_editor->toPlainText()}, {"mode", mode},
-              {"known_commands", m_knownCommands}, {"path", m_shellPath}, {"cwd", m_cwd}});
+        QJsonObject route{{"type", "route"}, {"id", id}, {"text", m_editor->toPlainText()}, {"mode", mode},
+                          {"known_commands", m_knownCommands}, {"path", m_shellPath}, {"cwd", m_cwd}};
+        // At a login the local PATH and aliases describe the wrong machine: the router only
+        // decides between a line for the remote shell and a request for the agent (#S5SH).
+        if (loginTakesLines()) route.insert(QStringLiteral("remote"), QJsonObject{{"host", loginHost()}});
+        send(route);
     }
 
     // The rule for a submitted line while a foreground program is running: it is written to
@@ -5651,6 +5680,12 @@ private:
     // or queue it until the terminal is free. Never remembered (relay::input::retainable).
     bool sendLineToProgram(const QString &mode) {
         if (m_native || !m_backend || m_secretMode) return false;
+        // A question on the screen of a login ("Do you want to continue? [Y/n]" from a remote
+        // apt): the local terminal is raw, so only the screen says a line is wanted (#S5SH).
+        if (loginTakesLines() && mode != QStringLiteral("agent") && m_screenPrompt.actionable() && !m_screenPrompt.masked) {
+            typeIntoLogin(m_editor->toPlainText());
+            return true;
+        }
         if (relay::input::targetFor(inputState(), mode) != relay::input::LineTarget::Program) return false;
         const QString text = m_editor->toPlainText();
         if (text.contains('\n')) return false;   // a multi-line draft is not an answer to a prompt
@@ -6089,6 +6124,11 @@ private:
         // which replaces the fix loop for this one submission.
         const bool handoff = m_handoffPrefill;
         m_handoffPrefill = false; m_handoffPrefix = false; m_handoffOffered = false;
+        if (route == QStringLiteral("shell") && loginTakesLines()) {
+            // A command for the remote shell: typed into the login, never queued for the local one.
+            typeIntoLogin(text);
+            return;
+        }
         if (route == QStringLiteral("shell")) {
             const bool valid = decision.value(QStringLiteral("valid")).toBool(decision.value(QStringLiteral("syntax_ok")).toBool(true));
             const QString problem = decision.value(QStringLiteral("invalid_reason")).toString(
@@ -6277,7 +6317,10 @@ private:
     // command runs.
     void checkPasswordPrompt() {
         if (!m_backend) { leaveSecretMode(); return; }
-        if (relay::input::secretPrompt(inputState(false)) && !m_promptReported) {
+        // Inside ssh the local terminal is raw whatever the remote asks, so a remote password
+        // prompt (`sudo`, a key's passphrase) is only visible on the screen (card #S5SH).
+        const bool loginMasked = m_login.active && !m_altScreen && m_screenPrompt.masked && m_screenPrompt.actionable();
+        if ((relay::input::secretPrompt(inputState(false)) || loginMasked) && !m_promptReported) {
             m_echoTicks = 0;
             if (m_secretMode || m_native || m_secretDeclined) return;
             endWaiting(false);
@@ -7018,12 +7061,21 @@ private:
 
     void printInline(const QString &text, Ink ink) {
         if (text.isEmpty()) return;
-        if (!shellIdleAtPrompt()) { m_inlinePending.append({text, ink}); appendTranscript(text, ink); return; }
+        if (!inlineReady()) { m_inlinePending.append({text, ink}); appendTranscript(text, ink); return; }
         endCallRun();   // a held tool-call row ends before anything else prints (#TK9C)
         const QString clean = sanitize(text);
         if (clean.isEmpty()) return;
         QByteArray out;
         if (!m_inlineOpen) {
+            // A remote prompt without Relay's integration cannot be asked to redraw itself: keep
+            // its text, and print it back when the block closes (card #S5SH).
+            m_login.promptRow.clear();
+            if (loginAtPrompt() && !m_login.integration) {
+                const QPoint cursor = m_backend->cursorPosition();
+                // The screen's text drops trailing blanks; the cursor column puts back the one after "$".
+                if (cursor.y() >= 0)
+                    m_login.promptRow = m_backend->screenText().split('\n').value(cursor.y()).left(cursor.x()).leftJustified(cursor.x(), ' ');
+            }
             // Erase the idle prompt line; closeInline() asks Readline to redraw it afterwards.
             out += "\r\x1b[2K";
             m_inlineOpen = true; m_atLineStart = true;
@@ -7094,6 +7146,13 @@ private:
         holdShellResize(false);   // the cursor is on a fresh row: the shell may redraw there
         // Ctrl+X Ctrl+P is bound to a no-op shell function; Readline redraws the prompt after it.
         if (m_backend && shellIdleAtPrompt()) m_backend->redrawPrompt();
+        else if (m_backend && loginAtPrompt()) {
+            // The remote shell: the integration binds the same keys there; without it the prompt
+            // is printed back as it was, and the remote line editor never knew it was gone.
+            if (m_login.integration) sendShellInput(QStringLiteral("\x18\x10"));
+            else if (!m_login.promptRow.isEmpty()) writeTerminal(sanitize(m_login.promptRow).toUtf8());
+            m_login.promptRow.clear();
+        }
     }
 
     // The pane's text from before the last quit (src/WindowState.h), printed once, at the
@@ -7122,8 +7181,11 @@ private:
         status(QStringLiteral("Restored %1 line(s) of scrollback from before the restart.").arg(lines.size()));
     }
 
+    // Where inline output may go now: a local shell idle at its prompt, or a remote one (#S5SH).
+    bool inlineReady() const { return shellIdleAtPrompt() || loginAtPrompt(); }
+
     void flushInline() {
-        if (m_inlinePending.isEmpty() || !shellIdleAtPrompt()) return;
+        if (m_inlinePending.isEmpty() || !inlineReady()) return;
         const auto pending = m_inlinePending;
         m_inlinePending.clear();
         for (const auto &item : pending) printInline(item.first, item.second);
@@ -7274,6 +7336,9 @@ private:
         const QString program = processBusy() ? foregroundCommandLine() : QString();
         // The terminal's directory always goes along: `cd` in the terminal must move the agent too.
         QJsonObject context{{"terminal_cwd", m_cwd}};
+        // An ssh or mosh login: which host, and whether the agent can run commands there over the
+        // user's own connection (docs/SSH-AND-MOSH.md, section 7).
+        if (const QJsonObject login = loginContext(); !login.isEmpty()) context.insert(QStringLiteral("remote_session"), login);
         if (!program.isEmpty()) {
             // Tell the agent what owns the terminal and that it cannot see or type into it yet.
             context.insert(QStringLiteral("foreground_program"), program);
@@ -8159,6 +8224,189 @@ private:
         }
     }
 
+    // ----- ssh and mosh logins (card #S5SH, docs/SSH-AND-MOSH.md) -------------------------------
+    // While ssh or mosh owns the terminal the pane keeps a picture of the other end: which host
+    // (`ssh -G` over the program's own arguments), the user's control socket for it, the remote
+    // folder (OSC 7) and whether the remote shell is sitting at its prompt. At that prompt the
+    // prompt box types into the login, the agent's reply prints into the terminal, and the agent
+    // may run commands on the host over the socket.
+
+    // Where Relay's `ssh` and `mosh` wrappers keep their control sockets (shell/integration.bash).
+    // Short on purpose: a socket path is limited to 107 bytes and %C adds 40.
+    static QString sshSocketDir() {
+        const QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
+        return (runtime.isEmpty() ? QDir::tempPath() : runtime) + QStringLiteral("/relay-ssh");
+    }
+
+    // The foreground program's arguments, unjoined (foregroundCommandLine() joins them with spaces).
+    QStringList foregroundArgv() const {
+        const int shell = shellPid();
+        long group = shell > 0 ? foregroundGroup(shell) : -1;
+        if (group <= 0 || group == shell) group = foregroundPid();
+        if (group <= 0 || group == shell) return {};
+        QFile file(QStringLiteral("/proc/%1/cmdline").arg(group));
+        if (!file.open(QIODevice::ReadOnly)) return {};
+        QByteArray raw = file.read(16384);
+        if (raw.endsWith('\0')) raw.chop(1);
+        QStringList argv;
+        for (const QByteArray &part : raw.split('\0')) argv << QString::fromLocal8Bit(part);
+        return argv;
+    }
+
+    // The prompt box types into the login instead of routing to the local shell.
+    bool loginTakesLines() const { return m_login.active && !m_altScreen && !m_native && !m_secretMode; }
+    // The remote shell is idle at its prompt: agent output may be printed there.
+    bool loginAtPrompt() const { return loginTakesLines() && m_login.atPrompt; }
+    QString loginHost() const {
+        if (!m_login.where.host.isEmpty()) return m_login.where.host;
+        return relay::panestatus::remoteHost(foregroundCommandLine());
+    }
+
+    void beginLogin(const QString &program) {
+        m_login = RemoteLogin();
+        m_login.active = true;
+        m_login.program = program;
+        m_login.group = foregroundPid();
+        const QStringList argv = foregroundArgv();
+        const QStringList args = relay::remote::dumpArguments(argv, sshSocketDir());
+        const QString destination = relay::remote::destination(argv);
+        relay::log::info(QStringLiteral("login_begin pane=%1 program=%2 resolvable=%3")
+                             .arg(paneLogId(), program).arg(args.isEmpty() ? 0 : 1));
+        if (args.isEmpty()) return;
+        // `ssh -G` reads the configuration and prints the result; it never touches the network.
+        auto *dump = new QProcess(this);
+        const qint64 group = m_login.group;
+        connect(dump, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this, dump, group, destination](int code, QProcess::ExitStatus) {
+            dump->deleteLater();
+            if (!m_login.active || m_login.group != group || code != 0) return;
+            m_login.where = relay::remote::parseDump(dump->readAllStandardOutput(), destination);
+            m_login.resolved = m_login.where.ok;
+            relay::log::info(QStringLiteral("login_resolved pane=%1 shared=%2")
+                                 .arg(paneLogId()).arg(loginReachable() ? 1 : 0));
+            changed();
+        });
+        connect(dump, &QProcess::errorOccurred, dump, &QObject::deleteLater);
+        dump->start(QStringLiteral("ssh"), args);
+        QTimer::singleShot(3000, dump, [dump] { if (dump->state() != QProcess::NotRunning) dump->kill(); });
+    }
+
+    void endLogin() {
+        if (!m_login.active) return;
+        relay::log::info(QStringLiteral("login_end pane=%1").arg(paneLogId()));
+        if (m_login.offered) hideBanner();
+        m_login = RemoteLogin();
+        changed();
+    }
+
+    // The user's own authenticated connection to the host answers at its control socket.
+    bool loginReachable() const {
+        if (!m_login.resolved || m_login.where.controlPath.isEmpty()) return false;
+        return QFileInfo(m_login.where.controlPath).exists();
+    }
+
+    // What the agent is told about the login (ask context `remote_session`, protocol section 9).
+    QJsonObject loginContext() const {
+        if (!m_login.active) return {};
+        const bool reachable = loginReachable();
+        QJsonObject out{{"program", m_login.program}, {"host", loginHost()},
+                        {"reachable", reachable}, {"shell_integration", m_login.integration},
+                        {"at_prompt", m_login.atPrompt}};
+        if (m_login.resolved) {
+            out.insert(QStringLiteral("hostname"), m_login.where.hostname);
+            out.insert(QStringLiteral("user"), m_login.where.user);
+            out.insert(QStringLiteral("port"), m_login.where.port);
+        }
+        if (reachable) out.insert(QStringLiteral("control_path"), m_login.where.controlPath);
+        if (!m_login.cwd.isEmpty()) out.insert(QStringLiteral("cwd"), m_login.cwd);
+        return out;
+    }
+
+    // Is the remote shell at its prompt? With the remote integration the OSC 133 marks say so;
+    // without it (mosh, a declined host, a shell other than bash or zsh) the screen does: a
+    // shell prompt on the cursor row, the cursor at its end, twice in a row (~0.5 s).
+    void updateLoginPrompt() {
+        if (!m_login.active) return;
+        const bool before = m_login.atPrompt;
+        if (m_altScreen || m_native || !m_backend) {
+            m_login.atPrompt = false; m_login.promptTicks = 0;
+        } else if (m_login.integration) {
+            m_login.atPrompt = m_lastPromptMark == 'B' || m_lastPromptMark == 'A';
+        } else if (m_inlineOpen && m_login.atPrompt) {
+            // Relay's own output is on the cursor row now, not the prompt: it stays a prompt until
+            // the block closes or the user sends the login a line (typeIntoLogin).
+        } else {
+            bool prompt = m_screenPrompt.kind == relay::screen::Kind::ShellPrompt;
+            if (prompt) {
+                const QPoint cursor = m_backend->cursorPosition();
+                const QString row = m_backend->screenText().split('\n').value(cursor.y());
+                prompt = cursor.y() >= 0 && !row.trimmed().isEmpty() && cursor.x() >= row.trimmed().size();
+            }
+            m_login.promptTicks = prompt ? m_login.promptTicks + 1 : 0;
+            m_login.atPrompt = m_login.promptTicks >= 2;
+        }
+        if (m_login.atPrompt && !before) {
+            if (!m_login.greeted) {
+                m_login.greeted = true;
+                toast(QStringLiteral("Logged in to %1 · the prompt box types there · %2 for keys")
+                          .arg(loginHost(), Keymap::instance().shortcutText(QStringLiteral("control.human"))));
+            }
+            maybeEnhanceLogin();
+            flushInline();
+            refreshProgramHint();
+        }
+        if (before != m_login.atPrompt) updateTakeControl();
+    }
+
+    // Load shell/remote-integration.sh into the remote shell once per login, per Options ›
+    // Terminal › SSH sessions: automatically, after asking, or never. mosh drops the escape
+    // sequences the script sends, so only ssh is enhanced.
+    void maybeEnhanceLogin() {
+        if (m_login.program != QStringLiteral("ssh") || m_login.bootstrapped || m_login.integration) return;
+        QSettings settings;
+        const QString mode = settings.value(QStringLiteral("ssh/enhance"), QStringLiteral("auto")).toString();
+        const QString host = loginHost();
+        const auto listed = [&](const char *key) {
+            return settings.value(QString::fromLatin1(key)).toStringList().contains(host, Qt::CaseInsensitive);
+        };
+        if (mode == QStringLiteral("off") || host.isEmpty() || listed("ssh/hosts_never")) return;
+        if (mode == QStringLiteral("ask") && !listed("ssh/hosts_always")) {
+            if (m_login.offered) return;
+            m_login.offered = true;
+            showBanner(QStringLiteral("Enhance this ssh session on %1? Prompt marks, the remote folder, the agent's replies "
+                                      "at the prompt · nothing is installed on the host").arg(host),
+                       QStringLiteral("Enhance"), [this] { hideBanner(); typeLoginBootstrap(); });
+            return;
+        }
+        typeLoginBootstrap();
+    }
+
+    void typeLoginBootstrap() {
+        if (!loginAtPrompt() || m_login.bootstrapped) return;
+        QFile file(m_data + QStringLiteral("/shell/remote-integration.sh"));
+        if (!file.open(QIODevice::ReadOnly)) return;
+        const QPoint cursor = m_backend->cursorPosition();
+        const QString line = relay::remote::bootstrapLine(file.readAll(), std::max(0, cursor.x()), m_backend->columns());
+        m_login.bootstrapped = true;
+        m_login.atPrompt = false; m_login.promptTicks = 0;   // the line runs; the next prompt is the enhanced one
+        sendShellInput(line + '\r');
+        relay::log::info(QStringLiteral("login_enhance pane=%1 bytes=%2").arg(paneLogId()).arg(line.size()));
+    }
+
+    // A line from the prompt box, typed into the login. Several lines go as one bracketed paste.
+    void typeIntoLogin(const QString &text) {
+        m_editor->remember(text);
+        m_editor->clear();
+        hideAtPopup(); clearAiGhost();
+        if (m_inlineOpen) { ensureLineStart(); closeInline(); }
+        const bool idle = m_login.atPrompt;
+        if (text.contains('\n')) m_backend->sendText(text, true);
+        else sendShellInput(text);
+        sendShellInput(QStringLiteral("\r"));
+        m_login.atPrompt = false; m_login.promptTicks = 0;
+        if (!idle) toast(QStringLiteral("Typed into %1 · it was busy, so the line waits for it").arg(loginHost()));
+        QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
+    }
+
     // Remote sessions never switch screens, so a short list stands in for detection.
     static bool remoteSessionProgram(const QString &name) {
         static const QSet<QString> names{QStringLiteral("ssh"), QStringLiteral("mosh"), QStringLiteral("mosh-client"), QStringLiteral("telnet")};
@@ -8177,6 +8425,7 @@ private:
         updateOpaqueProgram();
         checkPasswordPrompt();
         updateScreenPrompt();
+        updateLoginPrompt();
         if (!m_native && !m_altScreen && !m_secretMode && m_runningSince.isValid() && m_runningSince.elapsed() > 300) {
             const QString program = foregroundProgramName();
             if (remoteSessionProgram(program) && !m_remoteHandled) {
@@ -8184,13 +8433,16 @@ private:
                 m_remoteHandled = true;
                 m_remoteProgram = true;
                 endWaiting(false);
+                if (relay::remote::isLoginProgram(program)) beginLogin(program);
                 if (controlFor(program) == QStringLiteral("human")) {
                     m_autoHuman = true; setNative(true); m_hideReason = HideReason::Remote;
                     return;
                 }
                 updateTakeControl();
-                toast(QStringLiteral("%1 is running · %2 to type into it")
-                          .arg(program, Keymap::instance().shortcutText(QStringLiteral("control.human"))));
+                // A login says hello once its remote prompt shows (updateLoginPrompt).
+                if (!m_login.active)
+                    toast(QStringLiteral("%1 is running · %2 to type into it")
+                              .arg(program, Keymap::instance().shortcutText(QStringLiteral("control.human"))));
                 return;
             }
             if (m_screenPrompt.actionable() && !m_screenPrompt.masked) {
@@ -8527,7 +8779,8 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         const QString program = foregroundProgramName();
         const QString who = program.isEmpty() ? QStringLiteral("the program") : program;
         const QString question = relay::screen::bannerText(program, m_screenPrompt);
-        const bool offerControl = relay::input::offerTakeControl(state, m_remoteProgram);
+        // A login types from the prompt box; Take control stays for full-screen remote programs.
+        const bool offerControl = relay::input::offerTakeControl(state, m_remoteProgram && !m_login.active);
         // The banner appears whenever Relay has something to say about the program in this pane:
         // a question it read off the screen, a full-screen or remote program the prompt box is
         // holding the keyboard for, or the agent driving it.
@@ -8704,7 +8957,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             // type into it ends with it (cards YR21, C1HH).
             endDelegation(QStringLiteral("program_exited"));
             updateScreenPrompt();
-            m_remoteHandled = false; m_remoteProgram = false;
+            m_remoteHandled = false; m_remoteProgram = false; endLogin();
             m_secretDeclined = false; m_secretNotified = false;
             leaveSecretMode();
             if (m_native && m_autoHuman) { m_autoHuman = false; setNative(false, false); }
@@ -8745,7 +8998,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             // The prompt box stays visible while ordinary programs run so more commands and prompts
             // can be queued. It hides for the alternate screen (Session signal), password prompts,
             // and remote sessions; a program blocked reading the terminal gets the focus instead.
-            m_waitTicks = 0; m_echoTicks = 0; m_remoteHandled = false; m_remoteProgram = false; m_secretDeclined = false;
+            m_waitTicks = 0; m_echoTicks = 0; m_remoteHandled = false; m_remoteProgram = false; endLogin(); m_secretDeclined = false;
             m_programPoll.start();
             QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
         } else if (stage == QStringLiteral("loaded") && m_loading && m_backend &&
@@ -9200,6 +9453,22 @@ private:
     QTimer m_programPoll;
     HideReason m_hideReason = HideReason::None;
     bool m_altScreen = false, m_waiting = false, m_remoteHandled = false, m_remoteProgram = false;
+    // An ssh or mosh login in the foreground (card #S5SH): see beginLogin().
+    struct RemoteLogin {
+        bool active = false;         // ssh/mosh owns the terminal and has for 300 ms
+        qint64 group = 0;            // its foreground process group
+        QString program;             // ssh, mosh, mosh-client
+        relay::remote::Resolved where;
+        bool resolved = false;       // `ssh -G` answered
+        QString cwd;                 // OSC 7 from the remote shell
+        bool integration = false;    // the remote shell sends OSC 133 marks
+        bool bootstrapped = false;   // Relay typed shell/remote-integration.sh for this login
+        bool offered = false;        // the "Enhance this ssh session" banner is up
+        bool greeted = false;        // the "Logged in to …" toast was shown
+        int promptTicks = 0;         // polls in a row the screen showed a shell prompt
+        bool atPrompt = false;
+        QString promptRow;           // the prompt, as inline output found it; printed back after
+    } m_login;
     // prompt-box-only input: masked prompt box at a password prompt, and the take-control button
     QLineEdit *m_secretEdit = nullptr;
     QLabel *m_secretChip = nullptr;

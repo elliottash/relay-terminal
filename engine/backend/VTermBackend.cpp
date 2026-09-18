@@ -63,9 +63,11 @@ VTermBackend::VTermBackend(const QString &coreName, QWidget *parent)
         if (onTitleChanged)
             onTitleChanged(t);
     });
-    connect(m_session, &TerminalSession::cwdChanged, this, [this](const QString &path, const QString &) {
+    connect(m_session, &TerminalSession::cwdChanged, this, [this](const QString &path, const QString &host) {
         if (onCwdChanged)
             onCwdChanged(path);
+        if (onCwdHostChanged)
+            onCwdHostChanged(path, host);
     });
     connect(m_session, &TerminalSession::altScreenChanged, this, [this](bool a) {
         if (onAltScreenChanged)
@@ -222,6 +224,7 @@ void VTermBackend::setCardLookup(std::function<bool(const QString &id, QString *
 }
 
 QString VTermBackend::screenText() const { return m_session->screenText(); }
+QPoint VTermBackend::cursorPosition() const { return m_session->cursorPosition(); }
 QStringList VTermBackend::scrollbackText(int maxLines) const { return m_session->scrollbackText(maxLines); }
 bool VTermBackend::altScreen() const { return m_session->altScreen(); }
 int VTermBackend::rows() const { return m_session->rows(); }

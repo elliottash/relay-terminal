@@ -212,6 +212,13 @@ add_library(relay-panestatus STATIC src/PaneStatus.cpp src/PaneStatus.h)
 target_include_directories(relay-panestatus PUBLIC src)
 target_link_libraries(relay-panestatus PUBLIC ${RELAY_QT}::Gui)
 target_compile_options(relay-panestatus PRIVATE -Wall -Wextra -Wpedantic)
+
+# SSH and mosh sessions (card #S5SH, docs/SSH-AND-MOSH.md): which host a login reached, per
+# `ssh -G`, and the line that loads shell/remote-integration.sh into the remote shell.
+add_library(relay-remotesession STATIC src/RemoteSession.cpp src/RemoteSession.h)
+target_include_directories(relay-remotesession PUBLIC src)
+target_link_libraries(relay-remotesession PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-remotesession PRIVATE -Wall -Wextra -Wpedantic)
 # SSH (#S5SH, docs/SSH-AND-MOSH.md section 8): the concrete hosts of ~/.ssh/config and its
 # Includes for "Connect to host…", the recently used hosts, and the ssh/mosh command line that
 # "Split on the same host" runs again. Plain QtCore, tested against a temporary ~/.ssh.
@@ -320,7 +327,7 @@ if(RELAY_BUILD_APP)
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
-    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-remotesession relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -449,6 +456,9 @@ if(BUILD_TESTING)
     add_test(NAME panestatus COMMAND relay-panestatus-tests)
     # Reads the shipped theme files from the source tree.
     set_tests_properties(panestatus PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_executable(relay-remotesession-tests tests/remotesession_test.cpp)
+    target_link_libraries(relay-remotesession-tests PRIVATE relay-remotesession ${RELAY_QT}::Test)
+    add_test(NAME remotesession COMMAND relay-remotesession-tests)
     add_executable(relay-sshconfig-tests tests/sshconfig_test.cpp)
     target_link_libraries(relay-sshconfig-tests PRIVATE relay-sshconfig ${RELAY_QT}::Test)
     add_test(NAME sshconfig COMMAND relay-sshconfig-tests)

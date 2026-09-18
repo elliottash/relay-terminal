@@ -305,6 +305,13 @@ QString TerminalSession::screenText()
     return m_core->screenText();
 }
 
+QPoint TerminalSession::cursorPosition()
+{
+    GuiLock lock(this);
+    const CursorState cursor = m_core->activeCursor();
+    return QPoint(cursor.col, cursor.row);
+}
+
 QStringList TerminalSession::scrollbackText(int maxLines)
 {
     GuiLock lock(this);

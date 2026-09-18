@@ -13,6 +13,7 @@
 
 #include <QElapsedTimer>
 #include <QObject>
+#include <QPoint>
 #include <QTimer>
 
 #include <atomic>
@@ -75,6 +76,7 @@ public:
 
     // Convenience (each takes the lock once).
     QString screenText();
+    QPoint cursorPosition(); // active screen: x column, y row
     QStringList scrollbackText(int maxLines);
     bool altScreen() const { return m_alt.load(); }
     QString title() const;

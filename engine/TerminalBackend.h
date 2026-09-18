@@ -129,6 +129,9 @@ public:
     virtual int columns() const = 0;
     virtual QString title() const = 0;
     virtual QString currentDirectory() const = 0; // OSC 7, else best effort
+    // The cursor on the active screen: x is the column, y the row, both from 0; (-1, -1) when the
+    // engine cannot say.
+    virtual QPoint cursorPosition() const { return {-1, -1}; }
 
     // ---- geometry, focus, appearance
     virtual void resizeTerminal(int rows, int columns) = 0; // resizes the widget to fit the grid
@@ -240,6 +243,9 @@ public:
     std::function<void(const QString &target, int line, int column)> onLinkActivated;
     std::function<void(const QString &title)> onTitleChanged;
     std::function<void(const QString &path)> onCwdChanged;
+    // The same OSC 7 with its host part ("" for file:///path). A shell on another machine (ssh)
+    // names that machine here; its path means nothing on this one (card #S5SH).
+    std::function<void(const QString &path, const QString &host)> onCwdHostChanged;
     std::function<void(bool active)> onAltScreenChanged;
     std::function<void()> onBell;
     // kind: 'A' prompt start, 'B' command start, 'C' output start, 'D' finished (exitCode, -1 if unknown)
