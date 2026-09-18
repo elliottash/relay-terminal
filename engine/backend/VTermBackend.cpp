@@ -278,6 +278,10 @@ void VTermBackend::paste()
 
 QString VTermBackend::selectedText() const
 {
+    // Through the view: a selection that touches an open fold is the view's,
+    // and comes back in the order the rows are displayed.
+    if (m_view)
+        return m_view->selectedText();
     return m_session->withCore([](VtCore &c) { return c.selectedText(); });
 }
 

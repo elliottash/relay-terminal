@@ -557,6 +557,58 @@ private slots:
         QVERIFY(t.view->visibleRowsText().contains(QStringLiteral("   one")));
     }
 
+    void selectionCrossesTheFoldBoundaryInVisualOrder()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        t.view->setFoldContent(QStringLiteral("relay://call/p/1/a"),
+                               foldBody({QStringLiteral("one"), QStringLiteral("two")}));
+        QTest::qWait(100);
+        const int anchor = t.rowOf(QStringLiteral("* ran python"));
+        QVERIFY(anchor >= 0);
+        QCOMPARE(t.view->visibleRowsText().value(anchor + 3), QStringLiteral("after"));
+
+        const QPoint a = t.cellPoint(anchor, 0);
+        const QPoint b = t.cellPoint(anchor + 3, 20);
+        QTest::mousePress(t.view, Qt::LeftButton, Qt::NoModifier, a);
+        QMouseEvent move(QEvent::MouseMove, b, Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(t.view, &move);
+        QTest::mouseRelease(t.view, Qt::LeftButton, Qt::NoModifier, b);
+        // Real rows and fold rows interleaved exactly as displayed; the fold
+        // lines come back without their indent.
+        QCOMPARE(t.backend->selectedText(),
+                 QStringLiteral("* ran python\none\ntwo\nafter"));
+
+        // A double click inside the fold picks a word out of it.
+        QTest::mouseDClick(t.view, Qt::LeftButton, Qt::NoModifier, t.cellPoint(anchor + 2, 4));
+        QCOMPARE(t.backend->selectedText(), QStringLiteral("two"));
+    }
+
+    void aLinkInsideAFoldOpens()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.anchoredLines();
+        FoldSpan plain;
+        plain.text = QStringLiteral("see ");
+        FoldSpan linked;
+        linked.text = QStringLiteral("the report");
+        linked.link = QStringLiteral("https://relay.test/report");
+        FoldLine line;
+        line.spans << plain << linked;
+        t.view->setFoldContent(QStringLiteral("relay://call/p/1/a"), QVector<FoldLine>{line});
+        QTest::qWait(100);
+        const int anchor = t.rowOf(QStringLiteral("* ran python"));
+        QVERIFY(anchor >= 0);
+        // The link sits at the block's indent + "see " (4 cells).
+        const QPoint p = t.cellPoint(anchor + 1, 3 + 6);
+        QCOMPARE(t.view->linkAtPoint(p).target, QStringLiteral("https://relay.test/report"));
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::ControlModifier, p);
+        QTest::qWait(40);
+        QCOMPARE(t.links, QStringList{QStringLiteral("https://relay.test/report")});
+    }
+
     void hostShortcutFilter()
     {
         QFETCH_GLOBAL(QString, core);

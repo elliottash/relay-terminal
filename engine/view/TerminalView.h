@@ -268,6 +268,37 @@ private:
     void setVisualTop(int top);
     // The fold anchor under a screen cell (its URI), or empty.
     QString foldAnchorAt(const CellPos &c) const;
+
+    // ---- selection across the boundary between real rows and fold rows
+    //
+    // The cores own the selection over real rows ("the core keeps it attached
+    // to content") and they know nothing about fold rows, so when a fold is on
+    // screen the view owns a selection in visual coordinates and delegates its
+    // real-row part to the core: the core paints and yields the real text, the
+    // view paints and yields the fold text, and copySelection() puts them
+    // together in the order they are displayed. With no fold on screen none of
+    // this runs and the core owns the selection outright, as before.
+    struct FoldSelPos {
+        bool fold = false;
+        int realRow = 0;      // absolute scrollback row (fold == false)
+        QString foldUri;      // fold == true
+        int foldRow = 0;      // wrapped row inside the fold
+        int col = 0;          // grid column
+    };
+    bool foldSelectionActive() const { return m_visualSelection; }
+    FoldSelPos selPosAt(const CellPos &c) const;
+    int visualRowOf(const FoldSelPos &p) const;
+    bool selPosLess(const FoldSelPos &a, const FoldSelPos &b) const;
+    void beginVisualSelection(const CellPos &c, SelectionUnit unit);
+    void extendVisualSelection(const CellPos &c);
+    void applyVisualSelection();   // mirror the real-row part onto the core
+    void clearVisualSelection();
+    // The selected grid columns of one fold row, or false when it has none.
+    bool foldSelectionRange(int foldIndex, int foldRow, int *from, int *to) const;
+    QString visualSelectedText() const;
+    bool foldWordRange(const FoldSelPos &p, int *from, int *to) const;
+    // A FoldSpan link under a screen cell, or an empty string.
+    QString foldLinkAt(const CellPos &c, int *startCol, int *endCol) const;
     quint32 glyphFor(int variant, char32_t cp);
     bool handleBuiltinShortcut(QKeyEvent *e);
     void sendKey(const KeyInput &k);
@@ -328,6 +359,13 @@ private:
     bool m_followBottom = true;  // the view sits at the newest output
     bool m_foldAnchorsDirty = false;
     QElapsedTimer m_foldResolveAt;
+    bool m_visualSelection = false;
+    bool m_visualGesture = false;
+    SelectionUnit m_visualSelUnit = SelectionUnit::Cell;
+    FoldSelPos m_selAnchor;
+    FoldSelPos m_selExtent;
+    FoldSelPos m_selStart;
+    FoldSelPos m_selEnd;
 
     bool m_focused = false;
     bool m_unfocusedCursor = true;

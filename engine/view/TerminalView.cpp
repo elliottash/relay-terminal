@@ -837,6 +837,9 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
         return batches.back();
     };
 
+    int selFrom = 0, selTo = -1;
+    const bool selected = foldSelectionRange(foldIndex, foldRow, &selFrom, &selTo);
+
     int col = indent;
     for (int i = row.first; i < row.first + row.count && i < int(cells.size()); ++i) {
         const FoldLayer::Cell &c = cells[size_t(i)];
@@ -846,6 +849,8 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
         QColor fg = c.fg.isValid() ? c.fg : m_scheme.foreground;
         if (c.bg.isValid())
             p.fillRect(QRect(x, y, c.width * m_cw, m_ch), c.bg);
+        if (selected && col >= selFrom && col <= selTo)
+            p.fillRect(QRect(x, y, c.width * m_cw, m_ch), m_scheme.selection);
         if (c.dim)
             fg.setAlphaF(0.6);
         const bool hovered = screenRow == m_hoverRow && col >= m_hoverStart && col <= m_hoverEnd;
@@ -1207,8 +1212,14 @@ void TerminalView::mousePressEvent(QMouseEvent *e)
             : m_clickCount == 2                      ? SelectionUnit::Word
                                                      : SelectionUnit::Cell;
         const bool rect = e->modifiers() & Qt::AltModifier;
-        const int frameRow = frameRowClamped(pos.row);
-        m_session->withCore([&](VtCore &c) { c.selectionBegin(frameRow, pos.col, unit, rect); });
+        m_visualGesture = foldsVisible() && !rect;
+        if (m_visualGesture) {
+            beginVisualSelection(pos, unit);
+        } else {
+            clearVisualSelection();
+            const int frameRow = frameRowClamped(pos.row);
+            m_session->withCore([&](VtCore &c) { c.selectionBegin(frameRow, pos.col, unit, rect); });
+        }
         m_selecting = true;
         m_selectionMoved = unit != SelectionUnit::Cell;
         scheduleFrame();
@@ -1240,8 +1251,12 @@ void TerminalView::mouseMoveEvent(QMouseEvent *e)
     }
     if (m_selecting && (e->buttons() & Qt::LeftButton)) {
         const CellPos pos = cellAt(e->pos());
-        const int frameRow = frameRowClamped(pos.row);
-        m_session->withCore([&](VtCore &c) { c.selectionExtend(frameRow, pos.col); });
+        if (m_visualGesture && foldsVisible()) {
+            extendVisualSelection(pos);
+        } else {
+            const int frameRow = frameRowClamped(pos.row);
+            m_session->withCore([&](VtCore &c) { c.selectionExtend(frameRow, pos.col); });
+        }
         m_selectionMoved = true;
         if (e->pos().y() < m_padding || e->pos().y() >= height() - m_padding)
             m_autoScroll.start();
@@ -1278,6 +1293,7 @@ void TerminalView::mouseReleaseEvent(QMouseEvent *e)
     m_selecting = false;
     m_autoScroll.stop();
     if (!m_selectionMoved) {
+        clearVisualSelection();
         m_session->withCore([](VtCore &c) { c.selectionClear(); });
         scheduleFrame();
         // A plain click on an anchor that neither dragged nor left it toggles
@@ -1433,8 +1449,26 @@ struct LogicalRow {
 bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endCol)
 {
     *link = Link();
-    // A screen row may be one of a fold's own rows; those carry FoldSpan links,
-    // which foldLinkAt() answers, not the emulator's cells.
+    // A screen row may be one of a fold's own rows; those carry the FoldSpan
+    // links the host put there, not the emulator's cells.
+    {
+        int foldStart = 0, foldEnd = 0;
+        const QString target = foldLinkAt(c, &foldStart, &foldEnd);
+        if (!target.isEmpty()) {
+            link->text = target;
+            const QString local = target.startsWith(QLatin1String("file://")) ? QUrl(target).toLocalFile() : target;
+            if (!local.isEmpty() && QFileInfo::exists(local)) {
+                link->target = local;
+                link->directory = QFileInfo(local).isDir();
+            } else {
+                link->target = target;
+                link->url = true;
+            }
+            *startCol = foldStart;
+            *endCol = foldEnd;
+            return true;
+        }
+    }
     const int row = frameRowOf(c.row);
     if (row < 0 || row >= int(m_frame.lines.size()))
         return false;
@@ -1898,6 +1932,274 @@ bool TerminalView::toggleFoldAt(const QPoint &pos)
     return !uri.isEmpty() && toggleFold(uri);
 }
 
+// ---------------------------------------------------------------- fold selection
+
+TerminalView::FoldSelPos TerminalView::selPosAt(const CellPos &c) const
+{
+    FoldSelPos p;
+    const FoldLayer::VisualRow v = visualAt(c.row);
+    p.col = c.col;
+    if (v.fold) {
+        p.fold = true;
+        p.foldUri = m_folds.folds()[size_t(v.foldIndex)].uri;
+        p.foldRow = v.foldRow;
+    } else {
+        p.realRow = v.realRow;
+    }
+    return p;
+}
+
+int TerminalView::visualRowOf(const FoldSelPos &p) const
+{
+    if (!p.fold)
+        return m_folds.visualOfReal(p.realRow);
+    const int index = m_folds.indexOf(p.foldUri);
+    const int start = index < 0 ? -1 : m_folds.foldVisualStart(index);
+    return start < 0 ? -1 : start + p.foldRow;
+}
+
+bool TerminalView::selPosLess(const FoldSelPos &a, const FoldSelPos &b) const
+{
+    const int ra = visualRowOf(a), rb = visualRowOf(b);
+    return ra != rb ? ra < rb : a.col < b.col;
+}
+
+void TerminalView::beginVisualSelection(const CellPos &c, SelectionUnit unit)
+{
+    m_visualSelUnit = unit;
+    m_selAnchor = m_selExtent = selPosAt(c);
+    m_visualSelection = unit != SelectionUnit::Cell;
+    applyVisualSelection();
+}
+
+void TerminalView::extendVisualSelection(const CellPos &c)
+{
+    m_selExtent = selPosAt(c);
+    m_visualSelection = true;
+    applyVisualSelection();
+}
+
+void TerminalView::clearVisualSelection()
+{
+    m_visualSelection = false;
+    m_selStart = m_selEnd = FoldSelPos();
+}
+
+// Order the two ends, widen them for a double or triple click, and hand the
+// real-row part to the core so it paints and owns exactly what it did before.
+void TerminalView::applyVisualSelection()
+{
+    m_selStart = m_selAnchor;
+    m_selEnd = m_selExtent;
+    if (selPosLess(m_selEnd, m_selStart))
+        std::swap(m_selStart, m_selEnd);
+    if (m_visualSelUnit == SelectionUnit::Line) {
+        m_selStart.col = 0;
+        m_selEnd.col = m_cols - 1;
+    } else if (m_visualSelUnit == SelectionUnit::Word && m_selStart.fold && m_selEnd.fold
+               && m_selStart.foldUri == m_selEnd.foldUri && m_selStart.foldRow == m_selEnd.foldRow) {
+        int from = 0, to = 0;
+        if (foldWordRange(m_selStart, &from, &to)) {
+            m_selStart.col = from;
+            m_selEnd.col = to;
+        }
+    }
+
+    // The real rows the selection covers: from its first real position to its
+    // last. A fold's rows sit under its anchor, so a selection that starts
+    // inside a fold starts, in real terms, on the row after that anchor.
+    bool haveReal = false;
+    int startRow = 0, startCol = 0, endRow = 0, endCol = 0;
+    const FoldLayer::Fold *startFold = m_selStart.fold ? m_folds.fold(m_selStart.foldUri) : nullptr;
+    const FoldLayer::Fold *endFold = m_selEnd.fold ? m_folds.fold(m_selEnd.foldUri) : nullptr;
+    startRow = startFold ? startFold->anchorRow + 1 : m_selStart.realRow;
+    startCol = startFold ? 0 : m_selStart.col;
+    endRow = endFold ? endFold->anchorRow : m_selEnd.realRow;
+    endCol = endFold ? m_cols - 1 : m_selEnd.col;
+    haveReal = endRow >= startRow;
+
+    m_session->withCore([&](VtCore &c) {
+        if (!haveReal) {
+            c.selectionClear();
+            return;
+        }
+        const int top = m_frame.viewportTop;
+        const int rows = std::max(1, m_frame.rows);
+        c.selectionBegin(std::max(0, std::min(startRow - top, rows - 1)), startCol,
+                         m_visualSelUnit == SelectionUnit::Word && !m_selStart.fold ? SelectionUnit::Word : SelectionUnit::Cell,
+                         false);
+        c.selectionExtend(std::max(0, std::min(endRow - top, rows - 1)), endCol);
+    });
+    scheduleFrame();
+}
+
+bool TerminalView::foldSelectionRange(int foldIndex, int foldRow, int *from, int *to) const
+{
+    if (!m_visualSelection)
+        return false;
+    const int start = m_folds.foldVisualStart(foldIndex);
+    if (start < 0)
+        return false;
+    const int v = start + foldRow;
+    const int sv = visualRowOf(m_selStart), ev = visualRowOf(m_selEnd);
+    if (sv < 0 || ev < 0 || v < sv || v > ev)
+        return false;
+    *from = v == sv ? m_selStart.col : 0;
+    *to = v == ev ? m_selEnd.col : m_cols - 1;
+    return *to >= *from;
+}
+
+// The selection as text, in the order it is displayed: the real rows the core
+// owns and the rows of every fold in between, spliced at the boundaries. A
+// wrapped fold line copies as its one logical line, without the indent.
+//
+// Limitation: a real segment that reaches above the visible window is read back
+// through the core's own selection, so its soft-wrapped rows join as they
+// always did; the segments between two folds are on screen by construction.
+QString TerminalView::visualSelectedText() const
+{
+    const int sv = visualRowOf(m_selStart), ev = visualRowOf(m_selEnd);
+    if (sv < 0 || ev < 0)
+        return QString();
+    QStringList parts;
+    int v = sv;
+    while (v <= ev) {
+        const FoldLayer::VisualRow r = m_folds.at(v);
+        if (r.fold) {
+            const FoldLayer::Fold &f = m_folds.folds()[size_t(r.foldIndex)];
+            const FoldLayer::Row &fr = f.rows[size_t(r.foldRow)];
+            // Collect every wrapped row of this logical line that the
+            // selection covers, so the line comes back whole.
+            QString line;
+            const int lineIndex = fr.line;
+            while (v <= ev) {
+                const FoldLayer::VisualRow rr = m_folds.at(v);
+                if (!rr.fold || rr.foldIndex != r.foldIndex)
+                    break;
+                const FoldLayer::Row &row = f.rows[size_t(rr.foldRow)];
+                if (row.line != lineIndex)
+                    break;
+                int from = 0, to = m_cols - 1;
+                foldSelectionRange(r.foldIndex, rr.foldRow, &from, &to);
+                // Grid columns back to cell indices: the block starts at the indent.
+                const int firstCell = row.first + std::max(0, from - m_folds.indent());
+                const int lastCell = row.first + std::min(row.count, std::max(0, to - m_folds.indent() + 1));
+                line += m_folds.cellsText(r.foldIndex, lineIndex, firstCell, lastCell);
+                ++v;
+            }
+            parts << line;
+            continue;
+        }
+        // A run of real rows: hand it to the core in one go.
+        const int firstReal = r.realRow;
+        int lastReal = r.realRow;
+        int firstCol = v == sv ? m_selStart.col : 0;
+        int lastCol = m_cols - 1;
+        while (v + 1 <= ev) {
+            const FoldLayer::VisualRow next = m_folds.at(v + 1);
+            if (next.fold)
+                break;
+            ++v;
+            lastReal = next.realRow;
+        }
+        if (v == ev)
+            lastCol = m_selEnd.col;
+        ++v;
+        const int top = m_frame.viewportTop;
+        const int rows = std::max(1, m_frame.rows);
+        parts << m_session->withCore([&](VtCore &c) {
+            c.selectionBegin(std::max(0, std::min(firstReal - top, rows - 1)), firstCol, SelectionUnit::Cell, false);
+            c.selectionExtend(std::max(0, std::min(lastReal - top, rows - 1)), lastCol);
+            return c.selectedText();
+        });
+    }
+    // Put the core's selection back the way the painting needs it.
+    const_cast<TerminalView *>(this)->applyVisualSelection();
+    return parts.join(QLatin1Char('\n'));
+}
+
+// The grid columns of the word under a position inside a fold, the same way a
+// double click picks a word out of a real row.
+bool TerminalView::foldWordRange(const FoldSelPos &p, int *from, int *to) const
+{
+    const int index = m_folds.indexOf(p.foldUri);
+    if (index < 0)
+        return false;
+    const FoldLayer::Fold &f = m_folds.folds()[size_t(index)];
+    if (p.foldRow < 0 || p.foldRow >= int(f.rows.size()))
+        return false;
+    const FoldLayer::Row &row = f.rows[size_t(p.foldRow)];
+    const std::vector<FoldLayer::Cell> &cells = f.cells[size_t(row.line)];
+    auto wordy = [](const QString &s) {
+        if (s.isEmpty())
+            return false;
+        const QChar ch = s.at(0);
+        return ch.isLetterOrNumber() || ch == QLatin1Char('_') || ch == QLatin1Char('-') || ch == QLatin1Char('.')
+            || ch == QLatin1Char('/');
+    };
+    int col = m_folds.indent(), hit = -1;
+    for (int i = row.first; i < row.first + row.count && i < int(cells.size()); ++i) {
+        if (p.col >= col && p.col < col + cells[size_t(i)].width) {
+            hit = i;
+            break;
+        }
+        col += cells[size_t(i)].width;
+    }
+    if (hit < 0 || !wordy(cells[size_t(hit)].text))
+        return false;
+    int start = hit, end = hit;
+    while (start > row.first && wordy(cells[size_t(start - 1)].text))
+        --start;
+    while (end + 1 < row.first + row.count && end + 1 < int(cells.size()) && wordy(cells[size_t(end + 1)].text))
+        ++end;
+    int x = m_folds.indent();
+    for (int k = row.first; k < start; ++k)
+        x += cells[size_t(k)].width;
+    *from = x;
+    for (int k = start; k <= end; ++k)
+        x += cells[size_t(k)].width;
+    *to = x - 1;
+    return true;
+}
+
+// A FoldSpan link under a screen cell: the host said this run of the detail
+// points somewhere, and it opens through the normal link path.
+QString TerminalView::foldLinkAt(const CellPos &c, int *startCol, int *endCol) const
+{
+    if (!foldsVisible())
+        return QString();
+    const FoldLayer::VisualRow v = m_folds.at(m_visualTop + c.row);
+    if (!v.fold)
+        return QString();
+    const FoldLayer::Fold &f = m_folds.folds()[size_t(v.foldIndex)];
+    if (v.foldRow < 0 || v.foldRow >= int(f.rows.size()))
+        return QString();
+    const FoldLayer::Row &row = f.rows[size_t(v.foldRow)];
+    const std::vector<FoldLayer::Cell> &cells = f.cells[size_t(row.line)];
+    int col = m_folds.indent();
+    for (int i = row.first; i < row.first + row.count && i < int(cells.size()); ++i) {
+        const FoldLayer::Cell &cell = cells[size_t(i)];
+        if (c.col >= col && c.col < col + cell.width && !cell.link.isEmpty()) {
+            int from = i, to = i;
+            while (from > row.first && cells[size_t(from - 1)].link == cell.link)
+                --from;
+            while (to + 1 < row.first + row.count && to + 1 < int(cells.size())
+                   && cells[size_t(to + 1)].link == cell.link)
+                ++to;
+            int x = m_folds.indent();
+            for (int k = row.first; k < from; ++k)
+                x += cells[size_t(k)].width;
+            *startCol = x;
+            for (int k = from; k <= to; ++k)
+                x += cells[size_t(k)].width;
+            *endCol = x - 1;
+            return cell.link;
+        }
+        col += cell.width;
+    }
+    return QString();
+}
+
 QStringList TerminalView::visibleRowsText() const
 {
     QStringList out;
@@ -1959,7 +2261,7 @@ void TerminalView::contextMenuEvent(QContextMenuEvent *e)
         menu->addSeparator();
     }
     QAction *copy = menu->addAction(tr("Copy"), this, &TerminalView::copySelection);
-    copy->setEnabled(m_session->withCore([](VtCore &c) { return c.hasSelection(); }));
+    copy->setEnabled(m_visualSelection || m_session->withCore([](VtCore &c) { return c.hasSelection(); }));
     menu->addAction(tr("Paste"), this, &TerminalView::pasteClipboard);
     menu->addAction(tr("Select All"), this, &TerminalView::selectAll);
     menu->addSeparator();
@@ -2074,6 +2376,9 @@ bool TerminalView::scrollToPrompt(int direction)
 
 QString TerminalView::selectedText() const
 {
+    // A selection that touches an open fold is the view's, in visual order.
+    if (m_visualSelection && foldsVisible())
+        return visualSelectedText();
     return m_session->withCore([](VtCore &c) { return c.selectedText(); });
 }
 
@@ -2105,12 +2410,26 @@ void TerminalView::pasteSelection()
 
 void TerminalView::selectAll()
 {
+    if (foldsVisible()) {
+        // Everything, in visual order: the whole scrollback and every open
+        // fold's rows with it.
+        m_visualSelUnit = SelectionUnit::Cell;
+        m_selAnchor = FoldSelPos();
+        m_selAnchor.realRow = 0;
+        m_selExtent = FoldSelPos();
+        m_selExtent.realRow = std::max(0, realRows() - 1);
+        m_selExtent.col = m_cols - 1;
+        m_visualSelection = true;
+        applyVisualSelection();
+        return;
+    }
     m_session->withCore([](VtCore &c) { c.selectAll(); });
     scheduleFrame();
 }
 
 void TerminalView::clearSelection()
 {
+    clearVisualSelection();
     m_session->withCore([](VtCore &c) { c.selectionClear(); });
     scheduleFrame();
 }
