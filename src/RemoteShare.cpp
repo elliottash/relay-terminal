@@ -299,6 +299,14 @@ void RemoteShare::handle(const QJsonObject &message)
                              message.value(QStringLiteral("holder")).toString(),
                              message.value(QStringLiteral("name")).toString());
         emit sharingModelChanged();
+    } else if (kind == QLatin1String("share_state")) {
+        // Why guests cannot act: "owner" (you paused it) or "away" (present-only, and this is not
+        // the window you are looking at). The second one the GUI never asked for, so it has to be
+        // told rather than assumed.
+        m_sharing.setShareState(message.value(QStringLiteral("pane")).toString(),
+                                message.value(QStringLiteral("paused")).toBool(),
+                                message.value(QStringLiteral("reason")).toString());
+        emit sharingModelChanged();
     } else if (kind == QLatin1String("agent_stop")) {
         const QString paneId = message.value(QStringLiteral("pane")).toString();
         auto it = m_panes.find(paneId);

@@ -55,8 +55,10 @@ inline constexpr int kPromptSeconds = 600;
 struct Participant {
     QString id, name, platform, role, fingerprint, invite;
     QStringList panes;
-    qint64 expires = 0;      // seconds this participant record has left
-    bool driving = false;    // holds this pane's control token right now
+    QStringList drivingPanes;   // the panes whose control token they hold, as the hub reports it
+    qint64 expires = 0;         // seconds this participant record has left
+    bool online = true;         // a record outlives the connection: they may be away, not gone
+    bool driving = false;       // filled in by participantsOn(), for the pane being asked about
 };
 
 struct Invite {
@@ -73,6 +75,7 @@ struct Request {
     Kind kind = Kind::Knock;
     QString id;              // knock/control: the participant id. prompt: the prompt id
     QString participant, name, platform, fingerprint, peer, pane, code, role, text;
+    QString plan;            // a guest's plan_execute arrives as a prompt (section 10.4)
     qint64 askedAtMs = 0;
     int seconds = kKnockSeconds;
 
@@ -116,6 +119,10 @@ public:
     void addPromptAsk(const QJsonObject &line, qint64 nowMs);
     // `control {pane, holder, name}`: "owner", "agent" or "participant:<id>".
     void setControl(const QString &pane, const QString &holder, const QString &name);
+    // `share_state {pane, paused, reason}`: why guests cannot act — "owner" (you paused it) or
+    // "away" (present-only, and Relay's window is not the one you are looking at).
+    void setShareState(const QString &pane, bool paused, const QString &reason);
+    QString pauseReason(const QString &pane) const { return m_pauseReason.value(pane); }
     // The owner answered, or the hub says it is gone.
     void dropRequest(Request::Kind kind, const QString &id);
     void dropParticipant(const QString &id);
@@ -157,6 +164,7 @@ private:
     QHash<QString, QString> m_holder;     // pane -> holder string from `control`
     QHash<QString, QString> m_holderName; // pane -> the name the hub gave
     QHash<QString, ShareOptions> m_options;
+    QHash<QString, QString> m_pauseReason;
     QList<SharedPane> m_shared;
 };
 

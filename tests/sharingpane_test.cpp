@@ -41,6 +41,9 @@ private slots:
     void removingSomeoneTakesTheirQuestions();
     void endingAShareForgetsIt();
     void theChipSaysWhatIsGoingOn();
+    void theParticipantsLineCarriesPresenceAndControl();
+    void pausedSaysWhy();
+    void aPlanArrivesAsAPrompt();
     void sentences();
 };
 
@@ -262,6 +265,57 @@ void SharingTest::theChipSaysWhatIsGoingOn()
     QCOMPARE(driving.text, QStringLiteral("alice is typing"));
     QVERIFY(driving.guestDriving);
     QVERIFY(driving.tooltip.contains(QStringLiteral("take it straight back")));
+}
+
+// The hub says who is connected and who holds each pane's control token on the `participants`
+// line itself, so a Sharing pane opened after a handoff reads the same state as one that watched
+// it happen (remote/gui_host.py, report_participants).
+void SharingTest::theParticipantsLineCarriesPresenceAndControl()
+{
+    Model model;
+    model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")}});
+    model.setParticipants(items(R"([
+        {"id":"a1","name":"alice","role":"editor","panes":["p1"],"online":true,"driving":["p1"]},
+        {"id":"b2","name":"bob","role":"viewer","panes":["p1"],"online":false,"driving":[]}
+    ])"), {});
+    QCOMPARE(model.driverOn(QStringLiteral("p1")), QStringLiteral("alice"));
+    const QList<Participant> here = model.participantsOn(QStringLiteral("p1"));
+    QVERIFY(here.at(0).driving);
+    QVERIFY(here.at(0).online);
+    QVERIFY(!here.at(1).driving);
+    QVERIFY(!here.at(1).online);
+    QCOMPARE(model.chip(QStringLiteral("p1"), true).text, QStringLiteral("alice is typing"));
+    // A line without the two fields (an older hub) is read as "connected, not driving" rather
+    // than as "gone".
+    model.setParticipants(items(R"([{"id":"a1","name":"alice","role":"editor","panes":["p1"]}])"), {});
+    QVERIFY(model.participantsOn(QStringLiteral("p1")).first().online);
+    QVERIFY(model.driverOn(QStringLiteral("p1")).isEmpty());
+}
+
+void SharingTest::pausedSaysWhy()
+{
+    Model model;
+    model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")}});
+    QVERIFY(!model.options(QStringLiteral("p1")).paused);
+    model.setShareState(QStringLiteral("p1"), true, QStringLiteral("away"));
+    QVERIFY(model.options(QStringLiteral("p1")).paused);
+    QCOMPARE(model.pauseReason(QStringLiteral("p1")), QStringLiteral("away"));
+    model.setShareState(QStringLiteral("p1"), false, QString());
+    QVERIFY(!model.options(QStringLiteral("p1")).paused);
+    QVERIFY(model.pauseReason(QStringLiteral("p1")).isEmpty());
+}
+
+// A guest's plan_execute arrives as an ordinary prompt carrying the plan's id (section 10.4), and
+// the row has to say so: approving it runs a plan, not a sentence.
+void SharingTest::aPlanArrivesAsAPrompt()
+{
+    Model model;
+    model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")}});
+    model.addPromptAsk(json(R"({"id":"q9","participant":"a1","pane":"p1","text":"run step 2",
+        "when":"now","plan":"plan-7"})"), kNow);
+    const Request prompt = model.requests().first();
+    QCOMPARE(prompt.plan, QStringLiteral("plan-7"));
+    QCOMPARE(prompt.seconds, kPromptSeconds);
 }
 
 void SharingTest::sentences()

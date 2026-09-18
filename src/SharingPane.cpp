@@ -141,8 +141,14 @@ void Model::setParticipants(const QJsonArray &items, const QJsonArray &invites)
         person.fingerprint = item.value(QStringLiteral("fingerprint")).toString();
         person.invite = item.value(QStringLiteral("invite")).toString();
         person.expires = qint64(item.value(QStringLiteral("expires")).toDouble());
+        // `online` is false for a record whose channel is not up: a guest whose phone went to
+        // sleep is still admitted, and saying "gone" would be wrong.
+        person.online = !item.contains(QStringLiteral("online"))
+                        || item.value(QStringLiteral("online")).toBool();
         for (const QJsonValue &pane : item.value(QStringLiteral("panes")).toArray())
             person.panes << pane.toString();
+        for (const QJsonValue &pane : item.value(QStringLiteral("driving")).toArray())
+            person.drivingPanes << pane.toString();
         m_participants.append(person);
     }
     m_invites.clear();
@@ -217,6 +223,7 @@ void Model::addPromptAsk(const QJsonObject &line, qint64 nowMs)
     request.name = line.value(QStringLiteral("name")).toString();
     request.pane = line.value(QStringLiteral("pane")).toString();
     request.text = line.value(QStringLiteral("text")).toString();
+    request.plan = line.value(QStringLiteral("plan")).toString();
     request.askedAtMs = nowMs;
     request.seconds = kPromptSeconds;
     if (request.name.isEmpty()) {
@@ -232,10 +239,21 @@ void Model::setControl(const QString &pane, const QString &holder, const QString
     m_holderName.insert(pane, name);
     const QString driver = holder.startsWith(QStringLiteral("participant:"))
                                ? holder.mid(QStringLiteral("participant:").size()) : QString();
-    for (Participant &person : m_participants)
-        if (person.panes.contains(pane)) person.driving = !driver.isEmpty() && person.id == driver;
+    for (Participant &person : m_participants) {
+        if (!person.panes.contains(pane)) continue;
+        person.drivingPanes.removeAll(pane);
+        if (!driver.isEmpty() && person.id == driver) person.drivingPanes << pane;
+    }
     // Whoever now holds the pane is no longer asking for it.
     if (!driver.isEmpty()) dropRequest(Request::Kind::Control, driver);
+}
+
+void Model::setShareState(const QString &pane, bool paused, const QString &reason)
+{
+    ShareOptions options = m_options.value(pane);
+    options.paused = paused;
+    m_options.insert(pane, options);
+    if (paused) m_pauseReason.insert(pane, reason); else m_pauseReason.remove(pane);
 }
 
 void Model::dropRequest(Request::Kind kind, const QString &id)
@@ -314,8 +332,13 @@ QList<Request> Model::requests(const QString &pane) const
 QList<Participant> Model::participantsOn(const QString &pane) const
 {
     QList<Participant> here;
-    for (const Participant &person : m_participants)
-        if (person.panes.contains(pane)) here.append(person);
+    for (const Participant &person : m_participants) {
+        if (!person.panes.contains(pane)) continue;
+        Participant copy = person;
+        copy.driving = person.drivingPanes.contains(pane) || m_holder.value(pane)
+                           == QStringLiteral("participant:") + person.id;
+        here.append(copy);
+    }
     return here;
 }
 
@@ -329,7 +352,14 @@ QList<Invite> Model::invitesOn(const QString &pane) const
 
 QString Model::driverOn(const QString &pane) const
 {
-    const QString holder = m_holder.value(pane);
+    QString holder = m_holder.value(pane);
+    if (holder.isEmpty()) {
+        // No `control` line yet in this session: the participants list says it too, which is what
+        // a Sharing pane opened after the handoff has to read.
+        for (const Participant &person : m_participants)
+            if (person.drivingPanes.contains(pane))
+                holder = QStringLiteral("participant:") + person.id;
+    }
     if (!holder.startsWith(QStringLiteral("participant:"))) return QString();
     const QString id = holder.mid(QStringLiteral("participant:").size());
     for (const Participant &person : m_participants)
@@ -540,9 +570,14 @@ QWidget *SharingView::requestRow(const Request &request, bool editorAllowed)
         text->setTextInteractionFlags(Qt::TextSelectableByMouse);
         text->setStyleSheet(QStringLiteral("padding: 4px 0;"));
         column->addWidget(text);
-        column->addWidget(note(QStringLiteral(
-            "Approving runs it on your API key, in this pane's folder, with this pane's tools. "
-            "It is approved once: there is no \"approve always\" while an invite is a bare link.")));
+        column->addWidget(note(
+            request.plan.isEmpty()
+                ? QStringLiteral("Approving runs it on your API key, in this pane's folder, with "
+                                 "this pane's tools. It is approved once: there is no \"approve "
+                                 "always\" while an invite is a bare link.")
+                : QStringLiteral("This asks to run a plan, which is why it is a prompt and not a "
+                                 "button. Approving runs it on your API key, in this pane's "
+                                 "folder, with this pane's tools, once.")));
     }
 
     auto *buttons = new FlowRow;
@@ -626,6 +661,7 @@ QWidget *SharingView::participantRow(const Participant &person, const QString &p
                             "settingsRowLabel"));
     QStringList facts;
     if (!person.platform.isEmpty()) facts << person.platform;
+    if (!person.online) facts << QStringLiteral("not connected right now");
     if (!person.fingerprint.isEmpty()) facts << QStringLiteral("key %1").arg(person.fingerprint);
     facts << QStringLiteral("access ends in %1").arg(expiryText(person.expires));
     column->addWidget(note(facts.join(QStringLiteral(" · "))));
@@ -710,6 +746,14 @@ QWidget *SharingView::shareControls(const QString &pane)
     QObject::connect(end, &QPushButton::clicked, this, [this, pane] { if (onEndShare) onEndShare(pane); });
     buttons->add(end);
     column->addWidget(buttons);
+    if (options.paused) {
+        const QString why = m_model ? m_model->pauseReason(pane) : QString();
+        column->addWidget(note(why == QLatin1String("away")
+            ? QStringLiteral("Guests are paused because you are not here: “guests can act only "
+                             "while I'm here” is on and Relay is not the window you are looking at.")
+            : QStringLiteral("Guests are paused. They still see this pane's screen; nothing they "
+                             "type or send is accepted.")));
+    }
 
     auto addOption = [&](const QString &label, const QString &detail, bool on,
                          std::function<void(bool)> set) {
