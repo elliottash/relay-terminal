@@ -74,6 +74,15 @@ The 59 graded pairs per theme:
   to 4.5:1 would make it indistinguishable from ANSI 7.
 - `border_strong` on `background` — **UI**
 
+A theme may shade the grid instead of painting it flat: `[terminal] background_end` is the colour
+the ground fades to at the bottom of the pane, `background` stays the colour at the top, and the
+fade is a plain vertical gradient across the whole view. It is opt-in — no key, no gradient, and
+no inheriting one from the fallback theme. Every rule above is then measured **at both ends**, not
+just at the top (`theAuditionedThemesMeetTheirContrastContract` walks both), because text lands on
+the bottom edge as often as the top. Only the default ground is shaded: a cell carrying its own
+background colour still paints solid, so `\e[41m` is the same red everywhere on the page. The
+Konsole engine has no gradient and takes `background` flat.
+
 **Distinctness** (the rule WCAG does not have): `accent` and `border_strong` against `warning` and
 `error`; `surface_raised` against `warning`; `border` against `error`; and `shell` against
 `agent`. The first four are the copper trap (§4); the last keeps the destination pair two colours

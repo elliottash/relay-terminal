@@ -64,10 +64,13 @@ agent = "#4f4163"
 token = "#324d5c"
 
 [terminal]
-# The grid is warm paper, not a white block (owner, 2026-09-18): a faint cream that belongs to the
-# beige case around it, still the lightest thing in the theme and still neutral enough that every
-# ANSI colour keeps AA contrast (worst entry 4.84:1).
-background = "#f4efe4"
+# The grid is warm paper, not a white block (owner, 2026-09-18), and the paper is lit rather than
+# printed flat: it fades from a lit top edge to a shaded bottom one, the way a page on a desk does.
+# The colour the owner approved, #f4efe4, is now the middle of that fade. Both ends carry the
+# theme's contrast promise on their own — worst ANSI entry 5.06:1 at the top, 4.55:1 at the bottom,
+# which is the floor: one step further (#ece4d4) lands at 4.39:1 and fails AA.
+background = "#f8f4ec"
+background_end = "#efe8da"
 foreground = "#1f1c16"
 cursor = "#23211a"
 background_intense = "#ffffff"

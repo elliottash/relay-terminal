@@ -63,6 +63,7 @@ void EngineBackend::applyThemeColors()
     ColorScheme colors = v->colorScheme();
     if (spec.terminalBackground.isValid())
         colors.background = spec.terminalBackground;
+    colors.backgroundEnd = spec.terminalBackgroundEnd;
     if (spec.terminalForeground.isValid())
         colors.foreground = spec.terminalForeground;
     colors.cursor = spec.terminalCursor.isValid() ? spec.terminalCursor : colors.foreground;

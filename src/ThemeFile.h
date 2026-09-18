@@ -60,6 +60,8 @@ struct ThemeSpec {
     QMap<QString, QColor> syntax;  // syntaxTokenNames()
 
     QColor terminalBackground, terminalForeground, terminalCursor;
+    // Optional: the colour the terminal ground fades to at the bottom. Invalid = flat.
+    QColor terminalBackgroundEnd;
     QColor terminalBackgroundIntense, terminalForegroundIntense;
     QVector<QColor> ansi;          // exactly 16 entries once complete
 

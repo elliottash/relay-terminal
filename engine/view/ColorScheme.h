@@ -10,6 +10,9 @@ namespace relay {
 struct ColorScheme {
     QColor foreground{0xd8, 0xd8, 0xd8};
     QColor background{0x1c, 0x1e, 0x24};
+    // When valid, the ground fades from background (top) to this colour (bottom). Cells with
+    // their own background still paint solid; only the default ground is shaded.
+    QColor backgroundEnd;
     QColor cursor{0xe0, 0xe0, 0xe0};
     QColor cursorText{0x1c, 0x1e, 0x24};
     QColor selection{0x3a, 0x5a, 0x8c};

@@ -271,6 +271,8 @@ ThemeSpec parseTheme(const QString &text, const QString &id, const ThemeSpec &fa
         return fallbackColor;
     };
     spec.terminalBackground = readOne(QStringLiteral("terminal.background"), fallback.terminalBackground);
+    // A gradient is opt-in: no key, no gradient (and no fallback from another theme).
+    spec.terminalBackgroundEnd = readOne(QStringLiteral("terminal.background_end"), QColor());
     spec.terminalForeground = readOne(QStringLiteral("terminal.foreground"), fallback.terminalForeground);
     spec.terminalCursor = readOne(QStringLiteral("terminal.cursor"), fallback.terminalCursor);
 

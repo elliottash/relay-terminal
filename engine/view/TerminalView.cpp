@@ -22,6 +22,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
 #include <QRegularExpression>
@@ -528,7 +529,16 @@ void TerminalView::paintEvent(QPaintEvent *e)
     ++m_paints;
     QPainter p(this);
     const QRect dirty = e->rect();
-    p.fillRect(dirty, m_flash ? m_scheme.foreground : m_scheme.background);
+    if (!m_flash && m_scheme.backgroundEnd.isValid()) {
+        // The gradient spans the whole view, not the dirty rect, so a partial repaint lands on
+        // exactly the colour the full paint put there.
+        QLinearGradient ground(0, 0, 0, height());
+        ground.setColorAt(0, m_scheme.background);
+        ground.setColorAt(1, m_scheme.backgroundEnd);
+        p.fillRect(dirty, ground);
+    } else {
+        p.fillRect(dirty, m_flash ? m_scheme.foreground : m_scheme.background);
+    }
     if (m_frame.lines.empty())
         return;
     const int firstRow = std::max(0, (dirty.top() - m_padding) / m_ch);

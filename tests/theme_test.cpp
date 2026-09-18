@@ -337,11 +337,18 @@ private Q_SLOTS:
         for (const QString &token : syntaxTokenNames())
             for (const char *ground : {"surface", "surface_raised"})
                 pairs << Pair{spec.syntaxColor(token), ui(ground), 4.5, "syntax"};
-        pairs << Pair{spec.terminalForeground, spec.terminalBackground, 4.5, "terminal text"}
-              << Pair{spec.terminalCursor, spec.terminalBackground, 3.0, "cursor (UI)"};
-        // ANSI 0 is a background in practice; ANSI 8 is the deliberately dim one (UI 3:1).
-        for (int i = 1; i < 16; ++i)
-            pairs << Pair{spec.ansi.value(i), spec.terminalBackground, i == 8 ? 3.0 : 4.5, "ANSI"};
+        // A shaded grid is measured at both ends of the fade: text sitting on the bottom edge is
+        // read exactly as often as text on the top one.
+        QList<QColor> grounds{spec.terminalBackground};
+        if (spec.terminalBackgroundEnd.isValid())
+            grounds << spec.terminalBackgroundEnd;
+        for (const QColor &ground : grounds) {
+            pairs << Pair{spec.terminalForeground, ground, 4.5, "terminal text"}
+                  << Pair{spec.terminalCursor, ground, 3.0, "cursor (UI)"};
+            // ANSI 0 is a background in practice; ANSI 8 is the deliberately dim one (UI 3:1).
+            for (int i = 1; i < 16; ++i)
+                pairs << Pair{spec.ansi.value(i), ground, i == 8 ? 3.0 : 4.5, "ANSI"};
+        }
 
         for (const Pair &p : pairs) {
             const double r = contrast(p.fg, p.bg);

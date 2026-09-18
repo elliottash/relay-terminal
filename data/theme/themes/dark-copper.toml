@@ -60,8 +60,11 @@ agent = "#ab97f7"
 token = "#45c8ee"
 
 [terminal]
-# The grid stays plain: no copper reaches it (docs/SWITCHBOARD-AESTHETIC.md 2.2).
-background = "#0e0f12"
+# The grid stays plain: no copper reaches it (docs/SWITCHBOARD-AESTHETIC.md 2.2). It is shaded,
+# not tinted — a neutral fade from a lit top edge down into the dark, centred on the #0e0f12 the
+# flat version used. Contrast holds at both ends (worst readable entry 6.7:1 at the top).
+background = "#12131a"
+background_end = "#0a0b0e"
 foreground = "#dad4ce"
 cursor = "#f4efe9"
 background_intense = "#15161a"
