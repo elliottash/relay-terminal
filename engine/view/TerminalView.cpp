@@ -1017,6 +1017,12 @@ bool TerminalView::handleBuiltinShortcut(QKeyEvent *e)
         case Qt::Key_Home: scrollToTop(); return true;
         case Qt::Key_End: scrollToBottom(); return true;
         case Qt::Key_D: emit dumpRequested(); return true;
+        // Open or shut the nearest tool-call line at or above the cursor (#TK9C).
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            if (toggleNearestFold())
+                return true;
+            break;
         default: break;
         }
     }
@@ -1816,6 +1822,24 @@ void TerminalView::syncFoldViewport(VtCore &core, bool *changed)
     m_paintedVisualTop = m_visualTop;
 }
 
+// Toggling a fold leaves the line that was clicked where it was on screen --
+// the block grows downwards under it -- unless that would push the cursor row
+// off the bottom, in which case the older rows go up instead and the prompt
+// stays in sight, which is what a terminal sitting at the bottom does.
+void TerminalView::keepFoldAnchorInPlace(int anchorRow, int screenRow)
+{
+    if (anchorRow < 0 || screenRow < 0 || screenRow >= m_rows)
+        return;
+    int top = m_folds.visualOfReal(anchorRow) - screenRow;
+    if (m_frame.cursorInViewport) {
+        const int cursorVisual = m_folds.visualOfReal(m_frame.viewportTop + m_frame.cursor.row);
+        top = std::max(top, cursorVisual - m_rows + 1);
+    }
+    const int maxTop = maxVisualTop();
+    m_visualTop = std::max(0, std::min(top, maxTop));
+    m_followBottom = m_visualTop >= maxTop;
+}
+
 void TerminalView::setVisualTop(int top)
 {
     const int maxTop = maxVisualTop();
@@ -1868,8 +1892,7 @@ void TerminalView::setFoldContent(const QString &uri, const QVector<FoldLine> &l
     if (!m_foldResolveAt.isValid())
         m_foldResolveAt.start();
     // A fold whose anchor is already known opens without waiting for the walk.
-    if (anchor >= 0 && keep >= 0 && keep < m_rows && !m_followBottom)
-        m_visualTop = std::max(0, m_folds.visualOfReal(anchor) - keep);
+    keepFoldAnchorInPlace(anchor, keep);
     invalidateFoldAnchors();
 }
 
@@ -1880,9 +1903,7 @@ void TerminalView::setFoldExpanded(const QString &uri, bool expanded)
     const int anchor = m_folds.known(uri) ? m_folds.fold(uri)->anchorRow : -1;
     const int keep = anchor >= 0 ? screenRowOfReal(anchor) : -1;
     m_folds.setExpanded(uri, expanded);
-    // The row that was clicked stays where it was on screen.
-    if (anchor >= 0 && keep >= 0 && keep < m_rows && !m_followBottom)
-        m_visualTop = std::max(0, std::min(m_folds.visualOfReal(anchor) - keep, maxVisualTop()));
+    keepFoldAnchorInPlace(anchor, keep);
     m_forceFull = true;
     scheduleFrame();
 }
