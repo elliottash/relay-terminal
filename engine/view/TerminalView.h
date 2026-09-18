@@ -266,6 +266,7 @@ private:
     // m_visualTop. Called with the session lock held, right after updateFrame.
     void syncFoldViewport(VtCore &core, bool *frameChanged);
     void setVisualTop(int top);
+    void keepFoldAnchorInPlace(int anchorRow, int screenRow);
     // The fold anchor under a screen cell (its URI), or empty.
     QString foldAnchorAt(const CellPos &c) const;
 
