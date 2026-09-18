@@ -774,6 +774,10 @@ public:
     // first prompt. Plain text: see the note in src/WindowState.h on why the colours do not come
     // back with it.
     QString scrollbackId() const { return m_scrollbackId; }
+    // The two rules the replay prints around the restored block. They are also what the save
+    // filters out, so a pane that has been restored twice does not stack them.
+    static QString scrollbackOpenMark() { return QStringLiteral("— scrollback from before the restart —"); }
+    static QString scrollbackCloseMark() { return QStringLiteral("— end of restored scrollback; this shell is new —"); }
     void saveScrollback() const {
         if (!terminalCan(relay::TerminalBackend::Scrollback)) return;
         QStringList lines = m_backend->scrollbackText(relay::windowstate::kScrollbackMaxLines);
@@ -781,6 +785,12 @@ public:
         // program (vim, less) owns it instead, and its frame is not output worth keeping.
         if (terminalCan(relay::TerminalBackend::ScreenText) && !m_backend->altScreen())
             lines += m_backend->screenText().split(QLatin1Char('\n'));
+        // The rules a previous restore printed are Relay's own chrome, not output: saving them
+        // would stack one pair per restart inside the history. Each run prints its own.
+        lines.erase(std::remove_if(lines.begin(), lines.end(), [](const QString &line) {
+                        return line == scrollbackOpenMark() || line == scrollbackCloseMark();
+                    }),
+                    lines.end());
         QString error;
         if (!relay::windowstate::writeScrollback(m_scrollbackId, lines, &error) && !error.isEmpty())
             fprintf(stderr, "relay: could not save this pane's scrollback: %s\n", qPrintable(error));
@@ -6486,10 +6496,10 @@ private:
     }
 
     // The pane's text from before the last quit (src/WindowState.h), printed once, at the
-    // restarted shell's first prompt. The prompt line is erased and redrawn the way inline agent
-    // output does it, so the restored lines land above the new prompt in the order they were
-    // written. They print plain — no saved colours, so they take the live theme — between two
-    // muted rules, because the shell underneath them is a new one and nothing on them was re-run.
+    // restarted shell's first prompt. The idle prompt line is erased the way inline agent output
+    // erases it and a fresh one is asked for below, so the restored lines land above the prompt in
+    // the order they were written. They print plain — no saved colours, so they take the live
+    // theme — between two muted rules, because the shell under them is new and nothing was re-run.
     void replayRestoredScrollback() {
         if (m_restoredScrollback.isEmpty() || m_scrollbackReplayed || !m_backend) return;
         if (m_inlineOpen || !shellIdleAtPrompt()) return;   // busy: the next prompt tries again
@@ -6497,13 +6507,17 @@ private:
         const QStringList lines = m_restoredScrollback;
         m_restoredScrollback.clear();
         QByteArray out = "\r\x1b[2K";
-        out += inkCode(Ink::Note) + QByteArray("— scrollback from before the restart —") + "\x1b[0m\r\n";
+        out += inkCode(Ink::Note) + scrollbackOpenMark().toUtf8() + "\x1b[0m\r\n";
         // Saved output is replayed as text: any escape sequence left in the file is stripped, so
         // a hand-edited (or truncated) file cannot drive the terminal.
         for (const QString &line : lines) out += sanitize(line).toUtf8() + "\r\n";
-        out += inkCode(Ink::Note) + QByteArray("— end of restored scrollback; this shell is new —") + "\x1b[0m\r\n";
+        out += inkCode(Ink::Note) + scrollbackCloseMark().toUtf8() + "\x1b[0m\r\n";
         writeTerminal(out);
-        m_backend->redrawPrompt();
+        // Not redrawPrompt(): Readline still believes its prompt is where it drew it, and the
+        // restored block has just scrolled the screen out from under it, so the repaint is a no-op
+        // and the pane is left with no prompt at all (the same trap clearTerminal() documents).
+        // An empty line is the shell's own way of printing a fresh prompt where the cursor now is.
+        sendShellInput(QStringLiteral("\n"));
         status(QStringLiteral("Restored %1 line(s) of scrollback from before the restart.").arg(lines.size()));
     }
 

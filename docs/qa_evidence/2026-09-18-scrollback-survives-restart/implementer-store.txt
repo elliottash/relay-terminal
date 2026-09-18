@@ -1,0 +1,27 @@
+== state directory after the quit ==
+595	/tmp/relay-scrollback-shots/.local/share/relay/state/scrollback/a4f5570b-a47d-4b67-8e62-754f45270787.txt
+862	/tmp/relay-scrollback-shots/.local/share/relay/state/windows.json
+
+== the pane node in windows.json ==
+{
+  "cwd": "/tmp/relay-scrollback-shots/project",
+  "scrollback": "a4f5570b-a47d-4b67-8e62-754f45270787"
+}
+
+== saved scrollback: line count, then the first and last lines ==
+128 /tmp/relay-scrollback-shots/.local/share/relay/state/scrollback/a4f5570b-a47d-4b67-8e62-754f45270787.txt
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo_root" for details.
+
+...
+120
+TAIL-BEFORE-QUIT
+~/project $
+
+== after the second restart: the store still holds one file per pane ==
+783	/tmp/relay-scrollback-shots/.local/share/relay/state/scrollback/a4f5570b-a47d-4b67-8e62-754f45270787.txt
+862	/tmp/relay-scrollback-shots/.local/share/relay/state/windows.json
+
+== does the saved text carry both runs? ==
+2
+2

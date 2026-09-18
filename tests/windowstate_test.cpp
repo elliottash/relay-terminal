@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Saved window layout ("reopen where I left off"): the parts that do not need a window —
 // reading and writing state/windows.json, validating pane trees, clamping geometry onto a
-// screen that still exists, and the cwd/workspace/$HOME fallback.
+// screen that still exists, the cwd/workspace/$HOME fallback, and the per-pane scrollback store
+// a restored pane refills itself from.
 #include "WindowState.h"
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -23,6 +25,29 @@ QJsonObject pane(const QString &cwd, const QString &engine = QStringLiteral("rel
 QJsonObject split(const QString &direction, const QJsonArray &children) {
     return {{"split", direction}, {"children", children}, {"sizes", QJsonArray{1000, 1000}}};
 }
+
+// The scrollback store names its own path under $XDG_DATA_HOME, so a test that touches it points
+// that at a temporary directory and puts the old value back afterwards.
+class DataHome {
+public:
+    DataHome() {
+        m_previous = qgetenv("XDG_DATA_HOME");
+        m_had = qEnvironmentVariableIsSet("XDG_DATA_HOME");
+        if (m_dir.isValid()) qputenv("XDG_DATA_HOME", m_dir.path().toLocal8Bit());
+    }
+    ~DataHome() {
+        if (m_had) qputenv("XDG_DATA_HOME", m_previous);
+        else qunsetenv("XDG_DATA_HOME");
+    }
+    DataHome(const DataHome &) = delete;
+    DataHome &operator=(const DataHome &) = delete;
+    bool valid() const { return m_dir.isValid(); }
+
+private:
+    QTemporaryDir m_dir;
+    QByteArray m_previous;
+    bool m_had = false;
+};
 
 }  // namespace
 
@@ -255,6 +280,127 @@ private slots:
         QVERIFY(defaultPath().endsWith(QStringLiteral("/relay/state/windows.json")));
         QVERIFY(defaultDirectory().endsWith(QStringLiteral("/relay/state")));
         QVERIFY(defaultLockPath().endsWith(QStringLiteral("windows.lock")));
+        QVERIFY(scrollbackDirectory().endsWith(QStringLiteral("/relay/state/scrollback")));
+    }
+
+    // ----- terminal scrollback across a restart (owner report, 2026-09-18) --------------------
+
+    // The whole point: what a pane had on screen before the quit is what the restored pane reads
+    // back, in the same order, without a byte of it changing on the way.
+    void scrollbackSurvivesSaveAndRestore() {
+        DataHome data;
+        QVERIFY(data.valid());
+        const QString id = QStringLiteral("2f9a7d41-0000-4000-8000-abcdefabcdef");
+        const QStringList lines{QStringLiteral("$ ls"), QStringLiteral("README.md  src"),
+                                QStringLiteral("$ echo é中"), QStringLiteral("é中")};
+        QVERIFY(writeScrollback(id, lines));
+        QCOMPARE(readScrollback(id), lines);
+        // Next to the layout, not beside it in some new place, and readable by nobody else.
+        const QString path = scrollbackPath(id);
+        QVERIFY(path.startsWith(defaultDirectory()));
+        QCOMPARE(QFileInfo(path).permissions() & (QFile::ReadGroup | QFile::ReadOther), QFileDevice::Permissions());
+        // A restart rewrites the same file rather than leaving one behind per run.
+        QVERIFY(writeScrollback(id, QStringList{QStringLiteral("after the restart")}));
+        QCOMPARE(readScrollback(id), QStringList{QStringLiteral("after the restart")});
+        QCOMPARE(QDir(scrollbackDirectory()).entryList({QStringLiteral("*.txt")}, QDir::Files).size(), 1);
+    }
+
+    // The file cannot grow without limit: the newest lines win, on both caps.
+    void scrollbackIsBoundedByLinesAndBytes() {
+        QStringList many;
+        for (int i = 0; i < kScrollbackMaxLines + 500; ++i) many << QStringLiteral("line %1").arg(i);
+        const QStringList clamped = clampScrollback(many);
+        QCOMPARE(clamped.size(), kScrollbackMaxLines);
+        QCOMPARE(clamped.constLast(), many.constLast());
+        QCOMPARE(clamped.constFirst(), many.at(many.size() - kScrollbackMaxLines));
+
+        QStringList wide;
+        for (int i = 0; i < 200; ++i) wide << QString(4096, QLatin1Char('x'));
+        const QStringList byBytes = clampScrollback(wide);
+        QVERIFY(byBytes.size() < wide.size());
+        qint64 bytes = 0;
+        for (const QString &line : byBytes) bytes += line.toUtf8().size() + 1;
+        QVERIFY(bytes <= kScrollbackMaxBytes);
+
+        // Trailing blank rows of the screen are not worth a restart; blanks inside the text are.
+        QCOMPARE(clampScrollback(QStringList{QStringLiteral("a"), QString(), QStringLiteral("b"), QString(), QStringLiteral("   ")}),
+                 (QStringList{QStringLiteral("a"), QString(), QStringLiteral("b")}));
+        QVERIFY(clampScrollback(QStringList{QString(), QStringLiteral("  ")}).isEmpty());
+    }
+
+    void scrollbackFileIsCappedOnDiskToo() {
+        DataHome data;
+        QVERIFY(data.valid());
+        const QString id = QStringLiteral("11111111-2222-3333-4444-555555555555");
+        QStringList many;
+        for (int i = 0; i < kScrollbackMaxLines + 2000; ++i) many << QStringLiteral("line %1").arg(i);
+        QVERIFY(writeScrollback(id, many));
+        QVERIFY(QFileInfo(scrollbackPath(id)).size() <= kScrollbackMaxBytes + 1);
+        const QStringList back = readScrollback(id);
+        QVERIFY(!back.isEmpty());
+        QCOMPARE(back.constLast(), many.constLast());
+        QVERIFY(back.size() <= kScrollbackMaxLines);
+        // A caller may ask for less than the cap and gets the newest lines.
+        QCOMPARE(readScrollback(id, 3).size(), 3);
+        QCOMPARE(readScrollback(id, 3).constLast(), many.constLast());
+    }
+
+    // An empty pane leaves no file, so a fresh shell never inherits yesterday's output.
+    void emptyScrollbackRemovesTheFile() {
+        DataHome data;
+        QVERIFY(data.valid());
+        const QString id = QStringLiteral("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        QVERIFY(writeScrollback(id, QStringList{QStringLiteral("something")}));
+        QVERIFY(QFile::exists(scrollbackPath(id)));
+        QVERIFY(writeScrollback(id, QStringList{QString(), QStringLiteral("   ")}));
+        QVERIFY(!QFile::exists(scrollbackPath(id)));
+        QVERIFY(readScrollback(id).isEmpty());
+    }
+
+    // A hand-edited layout cannot make the store write or read outside itself.
+    void scrollbackIdsAreValidated() {
+        DataHome data;
+        QVERIFY(data.valid());
+        for (const QString &bad : {QStringLiteral("../../windows.json"), QStringLiteral("a/b"), QStringLiteral("short"),
+                                   QStringLiteral(""), QStringLiteral("has space"), QString(80, QLatin1Char('x'))}) {
+            QVERIFY2(!isScrollbackId(bad), qPrintable(bad));
+            QVERIFY(scrollbackPath(bad).isEmpty());
+            QVERIFY(!writeScrollback(bad, QStringList{QStringLiteral("x")}));
+            QVERIFY(readScrollback(bad).isEmpty());
+        }
+        QVERIFY(isScrollbackId(QStringLiteral("2f9a7d41-0000-4000-8000-abcdefabcdef")));
+    }
+
+    // The saved layout is the list of panes that can come back; every other file is dead weight.
+    void prunedToThePanesTheLayoutKeeps() {
+        DataHome data;
+        QVERIFY(data.valid());
+        const QString kept = QStringLiteral("11111111-1111-4111-8111-111111111111");
+        const QString nested = QStringLiteral("22222222-2222-4222-8222-222222222222");
+        const QString gone = QStringLiteral("33333333-3333-4333-8333-333333333333");
+        for (const QString &id : {kept, nested, gone}) QVERIFY(writeScrollback(id, QStringList{id}));
+
+        QJsonObject keptPane = pane(QStringLiteral("/tmp"));
+        QJsonObject leaf = keptPane.value(QStringLiteral("pane")).toObject();
+        leaf.insert(QStringLiteral("scrollback"), kept);
+        keptPane.insert(QStringLiteral("pane"), leaf);
+        QJsonObject nestedPane = pane(QStringLiteral("/usr"));
+        leaf = nestedPane.value(QStringLiteral("pane")).toObject();
+        leaf.insert(QStringLiteral("scrollback"), nested);
+        nestedPane.insert(QStringLiteral("pane"), leaf);
+        const QJsonArray windows{windowRecord(QRect(0, 0, 800, 600), QStringLiteral("DP-1"),
+                                              QJsonArray{keptPane, split(QStringLiteral("h"), QJsonArray{nestedPane, pane(QStringLiteral("/"))})},
+                                              0)};
+        QCOMPARE(scrollbackIds(windows), (QStringList{kept, nested}));
+        QCOMPARE(pruneScrollback(scrollbackIds(windows)), 1);
+        QCOMPARE(readScrollback(kept), QStringList{kept});
+        QCOMPARE(readScrollback(nested), QStringList{nested});
+        QVERIFY(readScrollback(gone).isEmpty());
+
+        // "Start a fresh window set" forgets the text with the layout.
+        removeAllScrollback();
+        QVERIFY(readScrollback(kept).isEmpty());
+        QVERIFY(!QDir(scrollbackDirectory()).exists());
     }
 };
 

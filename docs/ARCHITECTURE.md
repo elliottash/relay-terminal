@@ -107,7 +107,11 @@ Layout rules:
   "effort","preset","model","session_id"}}`, `{"explorer":{"path"}}`, `{"preview":{"path"}}`,
   `{"plan":{"path"}}`, `{"split":"h"|"v","sizes":[…],"children":[…]}`. Restoring starts **new
   shells** in the saved directories (`RELAY_START_DIR`, applied by `shell/integration.bash` after
-  `.bashrc`). Scrollback and running programs are not restored. `serializeNode()` writes these
+  `.bashrc`). Running programs are not restored. The node carries a `scrollback` id, but the text
+  behind it is only ever written when Relay quits (the saved window layout below), so a pane
+  reopened with Ctrl+Shift+W comes back empty unless a quit had saved that pane's text — in which
+  case it replays what was saved then, not what was on screen when it was closed.
+  `serializeNode()` writes these
   nodes and `buildNode()` / `createPane()` rebuild them; the saved window layout below uses the
   same shapes, so there is only one layout format in the app.
 - Closing a window asks for confirmation when it has more than one pane or anything is busy.
@@ -249,11 +253,39 @@ nothing is re-run.
   directory falls back to its workspace, then `$HOME` (`resolveDirectory()`). Each pane asks the
   worker to `resume` its session id once the agent is configured and prints the usual
   `Session loaded: "…" · N turn(s)` line plus the open-task count; a session whose file is gone
-  prints one note and starts fresh. Terminal scrollback is never restored — the shell is new.
+  prints one note and starts fresh. The shell is new, but the pane's **terminal text comes back**
+  with it (below).
+- **Scrollback across a restart** (owner report, 2026-09-18; before this a restored pane came back
+  empty). Each pane node carries a `scrollback` id and its text lives beside the layout, one file
+  per pane: `$XDG_DATA_HOME/relay/state/scrollback/<id>.txt` (0600), written with the same
+  temp-file-and-rename as `windows.json`. The pure part is `relay::windowstate`
+  (`scrollbackPath`, `clampScrollback`, `writeScrollback`, `readScrollback`, `scrollbackIds`,
+  `pruneScrollback`); the pane side is `Pane::saveScrollback()` / `replayRestoredScrollback()`.
+  - **Text, not cells.** What is saved is `scrollbackText()` plus the visible screen (skipped while
+    a full-screen program owns it), without colour. The engine hands the host text, and an
+    absolute colour replayed into a new pane is burnt into its history — a terminal cannot
+    recolour its scrollback (`src/MarkdownAnsi.h`), so text saved under one theme would come back
+    in that theme's colours for good. Anything worth keeping later must be *indexed* SGR, which
+    the engine resolves at paint time from the live theme.
+  - **Bounded.** At most 5,000 lines and 512 KiB per pane, newest kept, trailing blank rows
+    dropped (`kScrollbackMaxLines` / `kScrollbackMaxBytes`, both well inside the engine's 20,000
+    line scrollback). A pane whose text is empty leaves no file, every layout write prunes the
+    files of panes that are gone, and forgetting the layout deletes the whole store.
+  - **When it writes.** Only on the way out — `noteWindowClosing()` (a quit catches every window
+    while its panes are still alive) and `aboutToQuit` — never on the 1 s debounce, which must not
+    read thousands of lines per pane. A crash therefore loses the scrollback, not just the
+    debounce window.
+  - **What it looks like.** At the restarted shell's first prompt the pane erases the prompt line,
+    prints the saved lines plain between two muted rules (“— scrollback from before the restart
+    —” / “— end of restored scrollback; this shell is new —”) and sends an empty line so the
+    shell prints a fresh prompt underneath — `redrawPrompt()` is a no-op here, because Readline's
+    idea of where its prompt sits has just scrolled away. The rules are Relay's own chrome and are
+    filtered out of the next save, so they do not stack up over restarts, and restored lines go
+    through `sanitize()`, so a hand-edited file cannot drive the terminal.
 - **Controls.** The setting `windows/restore` ("Reopen windows on start" in the palette, default
-  on; turning it off deletes the file), `relay --fresh` (ignores the file once, keeps it), and the
-  palette action `windows.fresh` ("Start a fresh window set": deletes the file and stops saving for
-  the rest of the session, with a shortcut hint pointing at `--fresh`). Ctrl+Shift+W
+  on; turning it off deletes the file and the saved scrollback), `relay --fresh` (ignores the file
+  once, keeps it), and the palette action `windows.fresh` ("Start a fresh window set": deletes the
+  file and stops saving for the rest of the session, with a shortcut hint pointing at `--fresh`). Ctrl+Shift+W
   (`closed.restore`) is a separate, in-session stack and is unaffected by any of them.
 
 ## 4. Keyboard: Keymap, presets, palette
