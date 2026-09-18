@@ -842,14 +842,14 @@ through the same path as a fork.
 ### Model roles and the Main / Flash / Lite tiers
 
 `backend/relay_core/roles.py` and the tier table in `presets.py`, protocol sections 13 and 13.7.
-Eleven roles — `main`, `terminal_use`, `subagent`, `switchboard`, `fast`, `summaries`, `suggestions`,
+Eleven roles — `main`, `terminal_use`, `subagent`, `switchboard`, `flash`, `summaries`, `suggestions`,
 `chores`, `audit`, `vision`, `route_assist` — but only **three** knobs, because every role follows a
 tier:
 
 | Tier | Roles | Default |
 |---|---|---|
 | Main | `main`, `subagent`, `switchboard` | the pane's own model |
-| Flash | `terminal_use`, `fast`, `summaries`, `suggestions` | `TIER_DEFAULTS[<main preset>]["flash"]` |
+| Flash | `terminal_use`, `flash`, `summaries`, `suggestions` | `TIER_DEFAULTS[<main preset>]["flash"]` |
 | Lite | `chores`, `audit` | `TIER_DEFAULTS[<main preset>]["lite"]` |
 
 `vision` and `route_assist` are outside the tiers: vision uses the provider's image model, and route
@@ -868,15 +868,15 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   protocol objects; both go out together in `configure` and `set_agent_options`.
 - Used by: subagents that inherit (`SubagentFactory.base()`), compaction and recaps (`summaries`),
   next-command/next-prompt suggestions (`suggestions`), the request audit (`audit`), routing assist
-  (`route_assist`), and panes that run the fast agent themselves (`configure {agent_role}` /
+  (`route_assist`), and panes that run the Flash agent themselves (`configure {agent_role}` /
   `set_agent_role`).
 - GUI: `src/ModelSettings.*` — `RolesDialog` (default provider, the three tier rows, an Advanced
   disclosure with one row per job showing the model it resolves to). Reached from Settings › Models,
   the palette (`agent.modelRoles`) and the ⚙ entry at the bottom of the pane's model box. Plus
-  "New panes use the fast agent" (on by default; the first pane keeps the main agent), the pane's model
-  chip (role and effective model, all roles in its tooltip) and "Fast agent for this pane"
-  (`agent.fastAgent`, Alt+F).
-- Difficulty-based routing between the main and fast agent is deliberately not implemented yet.
+  "New panes use the Flash agent" (off by default; the first pane keeps the Main agent), the pane's model
+  chip (role and effective model, all roles in its tooltip), "Flash agent for this pane"
+  (`agent.flashAgent`, Alt+F) and the `/main` and `/flash` slash commands.
+- Difficulty-based routing between the Main and Flash agent is deliberately not implemented yet.
 
 ### Provider transport
 

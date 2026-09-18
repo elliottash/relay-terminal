@@ -34,7 +34,7 @@ from .agent import CONTEXT_CLOSE, CONTEXT_OPEN, Agent
 from .agents_defs import EFFORTS, MAX_STEPS, AgentCatalog, AgentDefinition
 from .presets import PRESETS, apply_effort, match_preset
 from .provider import Cancelled, ProviderConfig
-from .roles import ROLES
+from .roles import ROLES, canonical_role
 from .tools import ToolExecutor, spec
 
 MAX_CONCURRENT = 4
@@ -109,7 +109,7 @@ class SubagentFactory:
         self.roles = roles
         self.key_lookup = key_lookup
         self.user_aliases = {str(k).lower(): str(v) for k, v in (aliases or {}).items()}
-        self.aliases = {"haiku": "inherit", "sonnet": "inherit", "opus": "inherit", "fast": "inherit",
+        self.aliases = {"haiku": "inherit", "sonnet": "inherit", "opus": "inherit", "flash": "inherit",
                         **self.user_aliases}
         self.provider_factory = provider_factory
 
@@ -124,10 +124,12 @@ class SubagentFactory:
     def resolve(self, model: str | None, warnings: list[str]) -> tuple[ProviderConfig, str | None]:
         base_config, base_preset = self.base()
         spec_ = (model or "inherit").strip() or "inherit"
-        # With roles configured, a role name ("fast", "chores", ...) picks that role's model unless
-        # the user aliased the name to something else.
-        if self.roles is not None and spec_.lower() in ROLES and spec_.lower() not in self.user_aliases:
-            resolved = self.roles.resolve(spec_.lower())
+        # With roles configured, a role name ("flash", "chores", ...) picks that role's model unless
+        # the user aliased the name to something else. Definitions written before 2026-09-18 say
+        # "fast"; canonical_role keeps those working (roles.DEPRECATED_ROLES).
+        role_spec = canonical_role(spec_.lower())
+        if self.roles is not None and role_spec in ROLES and spec_.lower() not in self.user_aliases:
+            resolved = self.roles.resolve(role_spec)
             return resolved.config, resolved.preset_id
         spec_ = self.aliases.get(spec_.lower(), spec_)
         if spec_ == "inherit" or spec_ == base_config.model:

@@ -125,7 +125,7 @@ class TierTableTests(unittest.TestCase):
         self.assertEqual([role for role, tier in model_roles.ROLE_TIERS.items() if tier == "main"],
                          ["main", "subagent", "switchboard"])
         self.assertEqual(sorted(r for r, t in model_roles.ROLE_TIERS.items() if t == "flash"),
-                         ["fast", "suggestions", "summaries", "terminal_use"])
+                         ["flash", "suggestions", "summaries", "terminal_use"])
         self.assertEqual(sorted(r for r, t in model_roles.ROLE_TIERS.items() if t == "lite"),
                          ["audit", "chores"])
         # Command routing is its own override, never moved by the Lite row.

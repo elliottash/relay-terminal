@@ -61,7 +61,7 @@ TOOL_MAP: dict[str, tuple[str, ...]] = {
 SHELL_WIDENING = {"grep", "grep_search", "search_file_content"}
 
 # Model aliases from other tools. Values are Relay preset ids or "inherit"; configure may override.
-DEFAULT_ALIASES = {"haiku": "inherit", "sonnet": "inherit", "opus": "inherit", "fast": "inherit"}
+DEFAULT_ALIASES = {"haiku": "inherit", "sonnet": "inherit", "opus": "inherit", "flash": "inherit"}
 
 
 @dataclass

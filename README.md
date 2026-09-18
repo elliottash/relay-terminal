@@ -155,8 +155,9 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   an empty prompt), `/rewind-code` (restores the files the agent changed, after showing them and
   asking; "Code and chat" does both), `/fork` (continues in a new pane),
   `/resume` (with a recap), `/conversations`, `/find`, `/plan`, `/recap`, `/tasks`, `/continue`, `/agents`, `/skills`, `/instructions`, `/export`
-  (Markdown under `.relay/exports`). Coming back to the window after 3 minutes, with a finished
-  turn and an empty prompt, prints a short recap (Actions › Agent options turns it off).
+  (Markdown under `.relay/exports`), `/main` and `/flash` (this pane's model tier), `/glm` and `/kimi`
+  (switch provider). Coming back to the window after 3 minutes, with a finished
+  turn and an empty prompt, prints a short recap (Settings › General turns it off).
 - **Conversations: list and full-text search.** Ctrl+Shift+O (also `/conversations` and Actions ›
   Conversations…) opens every saved conversation, grouped by project and newest first, with a
   search field that filters as you type. The search covers **both** agent threads (your prompts,
@@ -173,13 +174,6 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   updated on every autosave and rebuildable from the session files at any time (Actions › Rebuild
   the conversation index). It holds message text, so it stays on this machine and is deleted with
   the conversation; `RELAY_INDEX=off` turns indexing off entirely.
-- **Model roles.** Actions › Agent options › Model roles picks a model per job: terminal use,
-  subagents, the Switchboard agent, the fast agent, chores, vision and route assist. Each role is
-  "same as the main agent" until you pick one, and a role whose key is missing quietly falls back to
-  the main agent. The fast agent has a default per provider (GLM-5.3 Flash, DeepSeek V4.1 Flash,
-  Kimi K2.7 Code HighSpeed). Every pane starts on the main agent; Settings › Agent › "New panes use
-  the fast agent" makes every pane after a window's first one start on the fast agent instead;
-  turn and an empty prompt, prints a short recap (Settings › General turns it off).
 - **Model roles: Main, Flash, Lite.** Settings › Models › **Model roles…** (also the ⚙ at the bottom
   of the model box, or Actions › Model roles…) asks for one thing: your default provider. Everything
   else follows from it as three models — **Main** for agent turns and subagents, **Flash** for driving
@@ -192,10 +186,11 @@ runs the action; Esc closes and puts focus back where it was, so nothing there n
   Command routing is pinned to `google/gemini-3.5-flash-lite` on purpose: routing has a sub-second
   budget and that model measures 0.5–0.6 s against 2.3–4.9 s for Gemini 3.8 Flash.
   A tier whose provider has no key steps down to the next one and says so inline; nothing ever fails
-  because a key is missing. Every pane starts on the main agent unless Settings › Agent › "New panes
-  use the fast agent" is on, and then every pane after a window's first one starts on the fast agent.
-  Alt+F, or Actions › Fast agent for this pane, switches a pane either way without losing the
-  conversation.
+  because a key is missing. Every pane starts on the Main agent unless Settings › Agent › "New panes
+  use the Flash agent" is on, and then every pane after a window's first one starts on the Flash agent.
+  **`/flash`**, Alt+F, or Actions › Flash agent for this pane moves a pane to the Flash model and
+  **`/main`** moves it back, both without losing the conversation. **`/glm`** and **`/kimi`** switch
+  the pane to that provider's Coding Plan (its pay-as-you-go preset when no Coding Plan key is stored).
 - **Plan mode.** Shift+Tab in the prompt box (or `/plan`) shows a PLAN chip: the agent
   investigates read-only and writes a plan, which opens in an editable pane (Ctrl+S saves) with
   **Execute**, **Execute in fresh context** and **Keep planning**.

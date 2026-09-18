@@ -476,5 +476,5 @@ Board UI), so autonomy is QA'd before the drag-and-drop pane lands.
   machine after the local state is lost, reconstructs the thread from the file, and an edit to the card invalidates the
   saved conversation (it is reseeded from the file).
 - **Chores (option E):** duplicate checks, label and title suggestions and non-compliant-note scans run on the chores
-  role, default `google/gemini-3.8-flash` via OpenRouter (fast agent if no OpenRouter key). They never post thread
+  role, default `google/gemini-3.8-flash` via OpenRouter (Flash agent if no OpenRouter key). They never post thread
   replies and every write is logged.

@@ -388,7 +388,7 @@ private:
         add("agent.modelKeys", "agent", "API keys for model providers", {});
         add("agent.modelRoles", "agent", "Model roles: default provider and the Main / Flash / Lite models", {});
         add("app.settings", "window", "Settings pane, General tab", {QStringLiteral("Ctrl+,")});
-        add("agent.fastAgent", "agent", "Switch this pane between the main agent and the fast agent", {QStringLiteral("Alt+F")});   // model roles
+        add("agent.flashAgent", "agent", "Switch this pane between the Main agent and the Flash agent", {QStringLiteral("Alt+F")});   // model roles
         add("input.modeAuto", "agent", "Input mode: auto detect", {});
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
         add("input.modeAgent", "agent", "Input mode: agent", {});
@@ -836,9 +836,15 @@ public:
     // Mirrors relay_core.roles.ROLES minus "main" (the pane's own model).
     static QStringList roleIds() {
         return {QStringLiteral("terminal_use"), QStringLiteral("subagent"), QStringLiteral("switchboard"),
-                QStringLiteral("fast"), QStringLiteral("summaries"), QStringLiteral("suggestions"),
+                QStringLiteral("flash"), QStringLiteral("summaries"), QStringLiteral("suggestions"),
                 QStringLiteral("chores"), QStringLiteral("audit"), QStringLiteral("vision"),
                 QStringLiteral("route_assist")};
+    }
+    // The pane-agent role was called "fast" until 2026-09-18 (see backend/relay_core/roles.py:
+    // DEPRECATED_ROLES). Saved layouts and settings written before then still say "fast"; every
+    // read goes through this, and nothing writes the old name any more.
+    static QString canonicalRole(const QString &role) {
+        return role == QStringLiteral("fast") ? QStringLiteral("flash") : role;
     }
     static QString roleLabel(const QString &role) {
         static const QHash<QString, QString> labels{
@@ -846,7 +852,7 @@ public:
             {QStringLiteral("terminal_use"), QStringLiteral("Terminal-use agent")},
             {QStringLiteral("subagent"), QStringLiteral("Subagent")},
             {QStringLiteral("switchboard"), QStringLiteral("Switchboard agent")},
-            {QStringLiteral("fast"), QStringLiteral("Fast agent")},
+            {QStringLiteral("flash"), QStringLiteral("Flash agent")},
             {QStringLiteral("summaries"), QStringLiteral("Summaries")},
             {QStringLiteral("suggestions"), QStringLiteral("Suggestions")},
             {QStringLiteral("chores"), QStringLiteral("Chores")},
@@ -903,10 +909,10 @@ public:
     }
     // Off by default (owner report, 2026-09-18: "it keeps changing from glm 5.3 to glm 5.3 flash").
     // A pane that quietly answers on a smaller model than the one the window says it is using is a
-    // surprise, not a saving; the fast agent is a choice per pane (the model chip, or the toggle in
-    // Settings › Agent) rather than what every pane after the first does by itself.
-    static bool newPanesUseFastAgent() {
-        return QSettings().value(QStringLiteral("agent/panes_fast"), false).toBool();
+    // surprise, not a saving; the Flash agent is a choice per pane (the model chip, /flash, Alt+F, or
+    // the toggle in Settings › Agent) rather than what every pane after the first does by itself.
+    static bool newPanesUseFlashAgent() {
+        return QSettings().value(QStringLiteral("agent/panes_flash"), false).toBool();
     }
     QString agentRole() const { return m_agentRole; }
     // The model a role resolves to, as last reported by the worker.
@@ -921,14 +927,14 @@ public:
         if (announce) {
             const QString model = roleModel(role);
             toast(role == QStringLiteral("main") ? QStringLiteral("Main agent for this pane")
-                                                 : QStringLiteral("Fast agent for this pane%1").arg(model.isEmpty() ? QString() : QStringLiteral(" · ") + model));
+                                                 : QStringLiteral("%1 for this pane%2").arg(roleLabel(role), model.isEmpty() ? QString() : QStringLiteral(" · ") + model));
         }
         changed();
     }
     // Before the first configure: the role a new or restored pane starts with.
     void initAgentRole(const QString &role) { if (!m_configured) m_agentRole = role; }
-    void toggleFastAgent() {
-        setAgentRole(m_agentRole == QStringLiteral("fast") ? QStringLiteral("main") : QStringLiteral("fast"));
+    void toggleFlashAgent() {
+        setAgentRole(m_agentRole == QStringLiteral("flash") ? QStringLiteral("main") : QStringLiteral("flash"));
     }
     // Live update after the roles modal changed something (applies to side calls and new subagents
     // at once). Both tables go together so the worker never resolves half a change.
@@ -1641,7 +1647,7 @@ public:
             rolesChanged();
             return;
         }
-        if (key == QStringLiteral("agent/panes_fast")) return;   // only affects panes opened later
+        if (key == QStringLiteral("agent/panes_flash")) return;   // only affects panes opened later
         // Turn limits and the request audit apply to the running agent at once (protocol 12.1).
         if (key == QStringLiteral("agent/max_steps") || key == QStringLiteral("agent/max_tool_calls")
             || key == QStringLiteral("agent/stall_timeout_s") || key == QStringLiteral("agent/audit_requests")) {
@@ -4045,6 +4051,10 @@ private:
             {QStringLiteral("new"), QString(), QStringLiteral("Start a new conversation and clear the terminal")},
             {QStringLiteral("clear"), QString(), QStringLiteral("Start a new conversation and clear the terminal (same as /new)")},
             {QStringLiteral("model"), QStringLiteral("[name]"), QStringLiteral("Switch model, keeping the conversation")},
+            {QStringLiteral("main"), QString(), QStringLiteral("Run this pane on the Main model")},
+            {QStringLiteral("flash"), QString(), QStringLiteral("Run this pane on the Flash model (same as Alt+F)")},
+            {QStringLiteral("glm"), QString(), QStringLiteral("Switch to the GLM Coding Plan")},
+            {QStringLiteral("kimi"), QString(), QStringLiteral("Switch to the Kimi Coding Plan")},
             {QStringLiteral("effort"), QStringLiteral("[low|medium|high|max]"), QStringLiteral("Set reasoning effort")},
             {QStringLiteral("compact"), QStringLiteral("[focus]"), QStringLiteral("Summarize older turns to free context")},
             {QStringLiteral("context"), QString(), QStringLiteral("Show context usage")},
@@ -4197,6 +4207,42 @@ private:
             const auto result = relay::agentui::pick(this, QStringLiteral("Model"), QStringLiteral("Switch this pane's model. The conversation is kept."),
                                                      {QStringLiteral("Model"), QString()}, rows, {{QStringLiteral("use"), QStringLiteral("Use"), true}});
             if (result.row >= 0) selectModel(m_stored.at(result.row).first);
+        } else if (name == QStringLiteral("main") || name == QStringLiteral("flash")) {
+            // The pane's own agent, not the tier table: /flash runs this conversation on the Flash
+            // model and /main puts it back, both keeping the conversation (the same switch as Alt+F).
+            // Saying so even when the pane is already there means the command always reports where
+            // it ended up, rather than looking like it did nothing.
+            if (m_agentRole == name) {
+                const QString model = name == QStringLiteral("main") ? m_model : roleModel(name);
+                status(QStringLiteral("Already on the %1%2.").arg(roleLabel(name), model.isEmpty() ? QString() : QStringLiteral(" · ") + model));
+                return;
+            }
+            setAgentRole(name);
+        } else if (name == QStringLiteral("glm") || name == QStringLiteral("kimi")) {
+            // One word for the two providers the owner actually pays for. The Coding Plan preset is
+            // tried first so the subscription is spent before pay-as-you-go credit, and the other
+            // preset in the family is the fallback; with neither key stored the command says which
+            // provider is missing instead of opening a picker.
+            const bool glm = name == QStringLiteral("glm");
+            const QStringList order = glm ? QStringList{QStringLiteral("glm-coding"), QStringLiteral("glm")}
+                                          : QStringList{QStringLiteral("kimi-code"), QStringLiteral("kimi")};
+            // Checked here rather than left to selectModel, which refuses silently as far as this
+            // command is concerned: it would still fall through to the "Model: …" line below.
+            if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn before switching models.")); return; }
+            for (const QString &id : order) {
+                const auto stored = std::find_if(m_stored.cbegin(), m_stored.cend(),
+                                                 [&](const auto &entry) { return entry.first == id; });
+                if (stored == m_stored.cend()) continue;
+                if (id == m_currentPreset && m_agentRole == QStringLiteral("main")) {
+                    status(QStringLiteral("Already on %1.").arg(stored->second));
+                    return;
+                }
+                selectModel(id);   // also puts the pane back on the Main agent
+                status(QStringLiteral("Model: %1.").arg(stored->second));
+                return;
+            }
+            status(QStringLiteral("No stored %1 key. Add one in Settings › Models › API keys….")
+                       .arg(glm ? QStringLiteral("GLM") : QStringLiteral("Kimi")));
         } else if (name == QStringLiteral("effort")) {
             if (efforts().contains(args.toLower())) setEffort(args.toLower());
             else if (args.isEmpty()) effortStep(1 - (efforts().indexOf(m_effort) == efforts().size() - 1 ? 4 : 0));
@@ -9389,7 +9435,7 @@ private:
         else if (id == QStringLiteral("control.prompt")) pane->showPrompt();
         else if (id == QStringLiteral("program.delegate")) pane->delegateProgram();
         else if (id == QStringLiteral("input.toggle")) pane->toggleInputMode();
-        else if (id == QStringLiteral("agent.fastAgent")) pane->toggleFastAgent();   // model roles
+        else if (id == QStringLiteral("agent.flashAgent")) pane->toggleFlashAgent();   // model roles
         else if (id == QStringLiteral("agent.planToggle")) pane->togglePlanMode();
         else if (id == QStringLiteral("agent.effortUp")) pane->effortStep(1);
         else if (id == QStringLiteral("agent.effortDown")) pane->effortStep(-1);
@@ -9844,7 +9890,7 @@ private:
                 if (m_active) m_active->agentOptionsChanged(QStringLiteral("agent/effort"));
             });
         }
-        models.rows << toggleRow(QStringLiteral("agent/panes_fast"), QStringLiteral("New panes use the fast agent"),
+        models.rows << toggleRow(QStringLiteral("agent/panes_flash"), QStringLiteral("New panes use the Flash agent"),
                                  QStringLiteral("Off: every pane starts on the main agent. On: the first pane of a window keeps it"), false);
         models.rows << numberRow(QStringLiteral("provider/max_tokens"), QStringLiteral("Output token limit"),
                                  QStringLiteral("Per model call; applies to the next conversation"), 8192, 256, 32768);
@@ -10110,13 +10156,13 @@ private:
             return children;
         });
         if (pane) {
-            // Model roles (protocol 13): flip this pane between the main agent and the fast agent.
-            const bool fast = pane->agentRole() == QStringLiteral("fast");
-            const QString fastModel = pane->roleModel(QStringLiteral("fast"));
-            items << actionItem(agent, QStringLiteral("Fast agent for this pane"),
-                                (fast ? QStringLiteral("On · ") : QStringLiteral("Off · "))
-                                    + (fastModel.isEmpty() ? QStringLiteral("a quick model for this pane; the conversation is kept") : fastModel),
-                                QStringLiteral("agent.fastAgent"), fast);
+            // Model roles (protocol 13): flip this pane between the Main agent and the Flash agent.
+            const bool flash = pane->agentRole() == QStringLiteral("flash");
+            const QString flashModel = pane->roleModel(QStringLiteral("flash"));
+            items << actionItem(agent, QStringLiteral("Flash agent for this pane"),
+                                (flash ? QStringLiteral("On · ") : QStringLiteral("Off · "))
+                                    + (flashModel.isEmpty() ? QStringLiteral("the Flash model for this pane; the conversation is kept") : flashModel),
+                                QStringLiteral("agent.flashAgent"), flash);
         }
         const QString mode = pane ? pane->mode() : QStringLiteral("auto");
         const QString modeName = mode == QStringLiteral("shell") ? QStringLiteral("Terminal") : mode == QStringLiteral("agent") ? QStringLiteral("Agent") : QStringLiteral("Auto detect");
@@ -10814,10 +10860,12 @@ private:
         // still carry an "engine" key; it is ignored, and every pane gets Relay's engine.
         const QString core = spec.value(QStringLiteral("engine_core")).toString(relay::defaultEngineCore());
         auto *pane = new Pane(workspace, cwd, m_manager->cleanShell(), core);
-        // Model roles (protocol 13): panes opened after the first one default to the fast agent.
-        const QString savedRole = spec.value(QStringLiteral("agent_role")).toString();
+        // Model roles (protocol 13): panes opened after the first one default to the Flash agent.
+        // A layout saved before 2026-09-18 calls that role "fast"; it is read as "flash" and saved
+        // back under the new name (Pane::canonicalRole).
+        const QString savedRole = Pane::canonicalRole(spec.value(QStringLiteral("agent_role")).toString());
         if (!savedRole.isEmpty()) pane->initAgentRole(savedRole);
-        else if (Pane::newPanesUseFastAgent() && !allPanes().isEmpty()) pane->initAgentRole(QStringLiteral("fast"));
+        else if (Pane::newPanesUseFlashAgent() && !allPanes().isEmpty()) pane->initAgentRole(QStringLiteral("flash"));
         // Saved window layout: model/effort/mode and the conversation to reattach.
         pane->initRestore(spec);
         QPointer<Pane> guard(pane);
@@ -12306,12 +12354,35 @@ static void registerUrlHandler() {
     }
 }
 
+// The pane-agent role and its "new panes" toggle were renamed from "fast" to "flash" on 2026-09-18.
+// Settings are the one place the old spelling would otherwise survive a restart, so they are moved
+// once, in place: `roles/fast/*` becomes `roles/flash/*` and `agent/panes_fast` becomes
+// `agent/panes_flash`. A value already stored under the new name wins, because it was written by
+// this version; the old key is removed either way, so this is a no-op on every later start.
+static void migrateFastRoleSettings() {
+    QSettings settings;
+    for (const QString &field : {QStringLiteral("tier"), QStringLiteral("preset"),
+                                 QStringLiteral("model"), QStringLiteral("effort")}) {
+        const QString from = QStringLiteral("roles/fast/") + field;
+        if (!settings.contains(from)) continue;
+        const QString to = QStringLiteral("roles/flash/") + field;
+        if (!settings.contains(to)) settings.setValue(to, settings.value(from));
+        settings.remove(from);
+    }
+    if (settings.contains(QStringLiteral("agent/panes_fast"))) {
+        if (!settings.contains(QStringLiteral("agent/panes_flash")))
+            settings.setValue(QStringLiteral("agent/panes_flash"), settings.value(QStringLiteral("agent/panes_fast")));
+        settings.remove(QStringLiteral("agent/panes_fast"));
+    }
+}
+
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
     relay::theme::applyDarkTheme(app);
     QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminal"));
     QCoreApplication::setApplicationName(QStringLiteral("relay"));
     QCoreApplication::setApplicationVersion(QStringLiteral(RELAY_VERSION));
+    migrateFastRoleSettings();   // "fast" -> "flash", once, before anything reads these keys
     // From here on, stderr is no longer the only record: a launcher-started Relay keeps one too.
     relay::log::installMessageHandler();
     relay::log::info(QStringLiteral("gui_start version=%1 pid=%2 level=%3")

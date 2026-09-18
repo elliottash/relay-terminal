@@ -125,11 +125,11 @@ QList<ActionItem> actions(State *state) {
     split.label = QStringLiteral("New pane to the right"); split.shortcut = QStringLiteral("Ctrl+E");
     split.run = [state] { state->ran << QStringLiteral("pane.splitRight"); };
     items << split;
-    ActionItem fast;
-    fast.key = QStringLiteral("agent.fastAgent"); fast.section = QStringLiteral("Agent");
-    fast.label = QStringLiteral("Fast agent for this pane"); fast.stayOpen = true;
-    fast.run = [state] { state->ran << QStringLiteral("agent.fastAgent"); };
-    items << fast;
+    ActionItem flash;
+    flash.key = QStringLiteral("agent.flashAgent"); flash.section = QStringLiteral("Agent");
+    flash.label = QStringLiteral("Flash agent for this pane"); flash.stayOpen = true;
+    flash.run = [state] { state->ran << QStringLiteral("agent.flashAgent"); };
+    items << flash;
     return items;
 }
 
@@ -227,7 +227,7 @@ private slots:
         pane.setSearch(QStringLiteral("pane"));
         ids = pane.visibleRowIds();
         QVERIFY(ids.contains(QStringLiteral("pane.splitRight")));
-        QVERIFY(ids.contains(QStringLiteral("agent.fastAgent")));
+        QVERIFY(ids.contains(QStringLiteral("agent.flashAgent")));
         pane.setSearch(QStringLiteral("zzzz"));
         QVERIFY(pane.visibleRowIds().isEmpty());
         // Clearing the search returns to the tab that was selected.
@@ -263,7 +263,7 @@ private slots:
         // Recent first, then Agent (the Model submenu opened inline, then the fast-agent toggle),
         // then Panes and tabs.
         QCOMPARE(ids, (QStringList{QStringLiteral("pane.splitRight"), QStringLiteral("model:Kimi K3"),
-                                   QStringLiteral("model:DeepSeek V4"), QStringLiteral("agent.fastAgent"),
+                                   QStringLiteral("model:DeepSeek V4"), QStringLiteral("agent.flashAgent"),
                                    QStringLiteral("pane.splitRight")}));
         QSettings().remove(QStringLiteral("palette/recent"));
     }

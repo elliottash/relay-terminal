@@ -462,7 +462,7 @@ exactly as before.
 | `terminal_use` | driving programs, fixing commands | Flash tier |
 | `subagent` | subagents that do not name a model | Main tier (the pane's own model) |
 | `switchboard` | Switchboard card threads (stored now, used when the Switchboard lands) | Main tier |
-| `fast` | panes that default to the fast agent | Flash tier |
+| `flash` | panes that default to the Flash agent | Flash tier |
 | `summaries` | compaction summaries and recaps | Flash tier |
 | `suggestions` | next-command and next-prompt suggestions | Flash tier |
 | `chores` | duplicate checks, labels, titles, note scans | Lite tier |
@@ -474,7 +474,7 @@ Side calls by role: compaction summaries and recaps use `summaries`; next-comman
 use `suggestions`; the request audit uses `audit`; routing assist uses `route_assist`; instruction
 synthesis stays on `main`.
 
-`summaries`, `suggestions` and `audit` were split out of `fast` and `chores` on 2026-09-17 so the roles
+`summaries`, `suggestions` and `audit` were split out of `flash` and `chores` on 2026-09-17 so the roles
 modal's Advanced list can name one job per row (owner). Their defaults resolve to the same models as
 before, so a worker that gets no `roles` still behaves exactly as it did.
 
@@ -497,11 +497,15 @@ desktop keyring) for the preset matching its endpoint, and reuses the main agent
 lands on the main preset. Invalid values → `error`, nothing changed.
 
 `configure` also accepts `agent_role` (default `"main"`): the role this pane's **own** agent runs, used by
-panes that default to the fast agent.
+panes that default to the Flash agent.
 
-### 13.3 Fast-agent defaults by main provider
+The `flash` role was called `fast` until 2026-09-18. Every place a role is read still accepts the old
+name and normalizes it (`roles.DEPRECATED_ROLES`), so settings, saved layouts and subagent definitions
+written before then keep working; nothing writes it any more.
 
-Superseded by the Flash tier (13.7). `fast` resolves to `TIER_DEFAULTS[<main preset>]["flash"]`, which is
+### 13.3 Flash-agent defaults by main provider
+
+Superseded by the Flash tier (13.7). `flash` resolves to `TIER_DEFAULTS[<main preset>]["flash"]`, which is
 the same model it used to be for every provider that existed before, except GLM: Z.AI now rejects
 `thinking.type: "disabled"` on GLM-5.3 and GLM-5.3-Flash
 (<https://docs.z.ai/guides/capabilities/thinking>), so the Flash tier sends
@@ -525,7 +529,7 @@ after a `set_model` (per-provider defaults are recomputed for the new main model
 
 ### 13.5 `set_agent_role`
 
-`set_agent_role {role, id?}` switches this pane between the main agent and another role (the fast agent in
+`set_agent_role {role, id?}` switches this pane between the main agent and another role (the Flash agent in
 the GUI) **keeping the conversation**, like `set_model`. Refused while a turn is running. Replies with
 `model_changed {model, preset, context_window, effort, agent_role, warning?}` and `context`. A role that
 falls back reports `agent_role: "main"`. `configure` with an unusable `agent_role` reports
@@ -533,14 +537,14 @@ falls back reports `agent_role: "main"`. `configure` with an unusable `agent_rol
 
 ### 13.6 Notes and deviations
 
-- Subagent model specs accept role names (`fast`, `chores`, …) in addition to preset ids; a user alias of the
+- Subagent model specs accept role names (`flash`, `chores`, …) in addition to preset ids; a user alias of the
   same name still wins. A definition's own `model` still overrides the `subagent` role.
 - A pane running a non-main role resolves roles that "follow main" against that pane's model, not the
   configured main preset; the `subagent` role and subagent inheritance keep using the configured main model.
 - `set_model` rebases the role defaults on the new model and puts the pane back on `agent_role: "main"`.
 - `RELAY_KEYRING=off` (environment) skips the desktop keyring entirely; environment keys still work. Tests
   set it so no test run can reach a real keyring.
-- Not implemented on purpose (owner: "later"): routing between the main and fast agent by estimated task
+- Not implemented on purpose (owner: "later"): routing between the Main and Flash agent by estimated task
   difficulty.
 
 ## 14. Conversation list and full-text search (v1.4, 2026-09-17)

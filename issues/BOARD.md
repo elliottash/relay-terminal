@@ -2,7 +2,7 @@
      edit the card files and regenerate. -->
 # Board
 
-108 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
+109 cards. Format: [docs/SWITCHBOARD-FORMAT.md](../docs/SWITCHBOARD-FORMAT.md).
 
 ## Features (80)
 
@@ -89,7 +89,7 @@
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 
-## Bugs (26)
+## Bugs (27)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -100,6 +100,7 @@
 | `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | ready |  |  | [2](threads/72NR.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | ready |  |  | [2](threads/9MYY.md) |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | agent |  |  |
+| `#C6YX` | [Four model commands in the composer, and the Flash role stops calling itself "fast"](changes/needs_qa_llm/2026-09-18-model-tier-commands-and-flash-naming.md) | needs-qa-llm | agent |  |  |
 | `#XXP5` | [Retire KonsolePart: Relay's own engine is the only terminal](changes/needs_qa_llm/2026-09-18-retire-konsolepart.md) | needs-qa-llm | agent |  |  |
 | `#SP4N` | [Settings as a full pane, with sub-tabs and one search over settings and actions](changes/needs_qa_llm/2026-09-18-settings-as-a-full-pane.md) | needs-qa-llm | agent |  |  |
 | `#90JF` | [Check that a terminal command will run before it is sent](changes/needs_qa_llm/2026-09-17-pre-submit-run-check.md) | needs-qa-llm |  |  |  |

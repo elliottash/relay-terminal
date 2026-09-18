@@ -21,15 +21,27 @@ from .provider import ProviderConfig
 
 # Protocol names. "switchboard" is stored and resolved even though the Switchboard itself is not
 # built yet (owner decision 2026-09-17); "route_assist" keeps its own fast default.
-# "summaries", "suggestions" and "audit" were split out of "fast"/"chores" on 2026-09-17 so the roles
+# "summaries", "suggestions" and "audit" were split out of "flash"/"chores" on 2026-09-17 so the roles
 # modal's Advanced list can name one action per row; their defaults resolve exactly as before.
-ROLES = ("main", "terminal_use", "subagent", "switchboard", "fast", "summaries", "suggestions",
+ROLES = ("main", "terminal_use", "subagent", "switchboard", "flash", "summaries", "suggestions",
          "chores", "audit", "vision", "route_assist")
 SETTABLE = tuple(r for r in ROLES if r != "main")
 LABELS = {"main": "Main agent", "terminal_use": "Terminal-use agent", "subagent": "Subagent",
-          "switchboard": "Switchboard agent", "fast": "Fast agent", "summaries": "Summaries",
+          "switchboard": "Switchboard agent", "flash": "Flash agent", "summaries": "Summaries",
           "suggestions": "Suggestions", "chores": "Chores", "audit": "Request audit",
           "vision": "Vision", "route_assist": "Route assist"}
+
+# The pane-agent role was called "fast" until 2026-09-18. It is renamed to "flash" so the one word
+# names the tier, the role and the /flash command, and so nothing in Relay says "fast" — in Codex and
+# Claude Code /fast means the same model served faster, which is close to the opposite trade.
+# Settings, saved layouts and user subagent definitions on disk still carry the old name, so it is
+# accepted wherever a role is read and normalized on the way in. Nothing writes it.
+DEPRECATED_ROLES = {"fast": "flash"}
+
+
+def canonical_role(role):
+    """The current name for a role, translating names Relay used to write."""
+    return DEPRECATED_ROLES.get(role, role) if isinstance(role, str) else role
 
 # The roles modal's Advanced list: one row per thing a model actually does, in display order, named
 # after the job rather than the protocol id (owner, 2026-09-17). The GUI mirrors this table.
@@ -37,7 +49,7 @@ ACTIONS: tuple[tuple[str, str, str], ...] = (
     ("main", "Agent turns", "the main conversation in this pane"),
     ("subagent", "Subagents", "agents the main agent starts"),
     ("terminal_use", "Driving programs in the terminal", "answering prompts, fixing failed commands"),
-    ("fast", "New panes (fast agent)", "panes that open on the fast agent"),
+    ("flash", "New panes (Flash agent)", "panes that open on the Flash agent"),
     ("suggestions", "Next-command and next-prompt suggestions",
      "sends recent command output, so it stays on your own provider"),
     ("summaries", "Summaries, compaction and recaps", "condensing the conversation"),
@@ -56,7 +68,7 @@ MAX_URL = 400
 # pane's own model ("main") or takes the provider's Flash or Lite model.
 ROLE_TIERS: dict[str, str | None] = {
     "main": "main", "subagent": "main", "switchboard": "main",
-    "terminal_use": "flash", "fast": "flash", "summaries": "flash", "suggestions": "flash",
+    "terminal_use": "flash", "flash": "flash", "summaries": "flash", "suggestions": "flash",
     "chores": "lite", "audit": "lite",
     # Vision and route assist are not tiered: they have their own fixed defaults below.
     "vision": None, "route_assist": None,
@@ -103,6 +115,7 @@ def _text(value, name: str, limit: int) -> str:
 
 
 def validate_role(role) -> str:
+    role = canonical_role(role)
     if role not in ROLES:
         raise ValueError("Unknown model role: " + repr(role)[:60] + ".")
     return role
@@ -120,7 +133,7 @@ def validate_roles(raw) -> dict[str, dict]:
         raise ValueError("roles must be an object.")
     out: dict[str, dict] = {}
     for name, value in raw.items():
-        validate_role(name)
+        name = validate_role(name)
         if name == "main":
             raise ValueError('The "main" role is the pane\'s own model; set it with configure or set_model.')
         if value is None:
@@ -364,7 +377,7 @@ class RoleResolver:
 
     # ----- api --------------------------------------------------------------------------
     def resolve(self, role: str) -> Resolved:
-        validate_role(role)
+        role = validate_role(role)   # also translates the pre-2026-09-18 name "fast"
         if role in self._cache:
             return self._cache[role]
         if role == "main":

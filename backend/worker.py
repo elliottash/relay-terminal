@@ -59,8 +59,8 @@ def main():
 
     # Subagents observe main-turn endings to wake the main agent for background results.
     subagents = SubagentManager(emit)
-    # Which model role this pane's own agent runs (protocol 13): "main", or "fast" for panes that
-    # default to the fast agent.
+    # Which model role this pane's own agent runs (protocol 13): "main", or "flash" for panes that
+    # default to the Flash agent.
     state = {"agent_role": "main"}
 
     # Switchboard (protocol 17). `board` also tags board_ask turn events with their card_id and
@@ -290,7 +290,7 @@ def main():
                 if changed_models:
                     emit(agent.roles.event(state["agent_role"], request.get("id")))
             elif kind == "set_agent_role":
-                # Protocol 13: switch this pane between the main agent and another role (the fast agent).
+                # Protocol 13: switch this pane between the Main agent and another role (the Flash agent).
                 role = model_roles.validate_role(request.get("role"))
                 agent = turns.agent
                 if agent is None or agent.roles is None:
