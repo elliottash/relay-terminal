@@ -45,6 +45,9 @@ public:
     std::function<void(const QJsonObject &)> onSend;         // a board_* protocol message
     std::function<void(const QString &reference)> onSendToTerminal;  // `t`: insert #ID in the composer
     std::function<void(const QString &path)> onOpenFile;     // `o`: open the card file in a pane
+    // Execute (`x`, #XS6Q): open a terminal pane beside the board whose agent is handed `task`
+    // with card `id` attached. The board has already moved the card to In progress.
+    std::function<void(const QString &id, const QString &task)> onExecuteCard;
     std::function<void(const QString &)> onTitleChanged;
     std::function<void(const QString &)> onStatus;           // one line for the pane's status area
     std::function<void(const QString &id, const QString &text)> onHint;  // shortcut hints
@@ -81,6 +84,9 @@ public:
     void quickAddIn(const QString &columnId);
     void openSelected();
     void editSelected();             // `e`: edit the open card's title and issue text
+    // `p` / `x` on the open or the selected card: Plan it, or Execute it (#XS6Q). "plan" or
+    // "execute"; Discuss is the reply box's Enter.
+    void cardAction(const QString &action);
     void closeDetail();
     bool detailOpen() const;
     void focusFilter();
@@ -148,6 +154,7 @@ private:
     // One `board_update` for what the card detail's editor changed, against the hash the card
     // was read at. The worker writes the file; a stale hash comes back as `board_conflict`.
     void saveCardEdit(const QJsonObject &patch, const QString &baseHash);
+    void executeCard(const QString &note);
     void send(QJsonObject message);
     QString nextRequestId();
     void showNotice(const QString &text, bool error, const QString &undoWriteId = QString());
@@ -248,6 +255,7 @@ private:
     bool m_detailSized = false;     // the split was sized for the open card already
     bool m_replyOnOpen = false;     // `c` before the card arrived: focus its reply box then
     bool m_editOnOpen = false;      // `e` before the card arrived: start editing it then
+    QString m_actionOnOpen;         // `p` / `x` before the card arrived: "plan" or "execute"
     QTimer *m_follow = nullptr;     // the open card follows the selection, debounced
     QTimer *m_dragScroll = nullptr; // scrolls the list while a card is dragged near an edge
     // The cards are files: a write from a pane agent, a collaborator's `git pull` or an editor

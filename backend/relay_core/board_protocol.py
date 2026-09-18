@@ -19,7 +19,8 @@ import secrets
 from pathlib import Path
 
 from . import board as B
-from .board_tools import BoardTools, BoardToolError, ToolContext, cleanup_brief, normalize_id
+from .board_tools import (CARD_MODES, PLAN_HEADING, BoardTools, BoardToolError, ToolContext,
+                          card_brief, cleanup_brief, normalize_id)
 
 TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
          "board_move", "board_comment", "board_undo", "board_ask", "board_check",
@@ -53,6 +54,10 @@ class BoardCommands:
         self._ask_hash: str | None = None
         self._ask_turn: str | None = None
         self._ask_text: list[str] = []
+        self._ask_mode: str = "discuss"      # protocol 19.10: discuss | plan
+        # The mode whose brief this card's conversation last carried. A Discuss straight after a
+        # Discuss sends the owner's words alone; a change of mode, or a Plan, sends the brief.
+        self._brief_mode: str | None = None
         # board_cleanup state (protocol 19.9): the agent's tools while the run owns them, and
         # the log they write into.  Not None means a cleanup turn is in flight.
         self._cleanup_tools = None
@@ -255,29 +260,59 @@ class BoardCommands:
     def _ask(self, request: dict, rid) -> None:
         tools = self._need()
         card_id = normalize_id(request.get("card"))
+        mode = request.get("mode") or "discuss"
+        if mode not in CARD_MODES:
+            raise ValueError(f"board_ask mode must be one of {', '.join(CARD_MODES)}.")
         text = request.get("text")
-        if not isinstance(text, str) or not text.strip() or len(text) > MAX_ASK_TEXT:
-            raise ValueError(f"board_ask text must be 1-{MAX_ASK_TEXT} characters.")
+        if text is None and mode == "plan":
+            text = ""                       # Plan needs no words: the card is the brief
+        if not isinstance(text, str) or len(text) > MAX_ASK_TEXT or (mode == "discuss" and not text.strip()):
+            raise ValueError(f"board_ask text must be 1-{MAX_ASK_TEXT} characters"
+                             + (" (it may be empty for a plan)." if mode == "discuss" else "."))
+        text = text.strip()
         # Checked before the question is appended, so a refused ask leaves no trace on the card.
-        if self._busy_error(rid, "the question"):
+        if self._busy_error(rid, "the plan" if mode == "plan" else "the question"):
             return
         card = tools.board.card_by_id(card_id)
         if card is None:
             raise ValueError(f"no card #{card_id} on this board.")
+        agent_tools = getattr(getattr(self.turns, "agent", None), "board", None)
         card_hash = B.file_hash(card.path)
-        # The owner's message is part of the record before the agent ever sees it.
-        entry = tools.board.append_thread(card_id, text, author=str(request.get("author") or "owner"),
-                                          kind="comment", private=card.private)
+        # The owner's message is part of the record before the agent ever sees it. The mode goes
+        # with it, so the thread reads "Plan ·" / "Discuss ·" in Relay and `mode=plan` in the file.
+        said = text or "Plan this card."
+        entry = tools.board.append_thread(card_id, said, author=str(request.get("author") or "owner"),
+                                          kind="comment", private=card.private, mode=mode)
         seeded = self._ask_card == card_id and self._ask_hash == card_hash
         if not seeded:
             self.turns.reset()
             self._ask_card, self._ask_hash = card_id, card_hash
-        prompt = text if seeded else seed_block(tools.board, card) + "\n\n" + text
+            self._brief_mode = None
+        prompt = (text if mode == "discuss" and self._brief_mode == "discuss"
+                  else mode_prompt(mode, card_id, text))
+        self._brief_mode = mode
+        if not seeded:
+            prompt = seed_block(tools.board, card) + "\n\n" + prompt
         self._ask_text = []
         self._ask_turn = None
+        self._ask_mode = mode
         self.emit({"event": "board_thread_appended", "id": rid, "card_id": card_id,
-                   "entry_id": entry.entry_id, "author": "owner", "kind": "comment", "text": text})
-        self.turns.submit(prompt, "now", rid, None, None)
+                   "entry_id": entry.entry_id, "author": "owner", "kind": "comment", "text": said,
+                   "mode": mode})
+        # What the mode may touch is enforced by the agent's tools for the length of the turn,
+        # not only asked for in the brief (protocol 19.10).
+        if agent_tools is not None:
+            agent_tools.begin_card_turn(mode, card_id)
+        try:
+            self.turns.submit(prompt, "now", rid, None, None)
+        except Exception:
+            self._end_card_turn()
+            raise
+
+    def _end_card_turn(self) -> None:
+        agent_tools = getattr(getattr(self.turns, "agent", None), "board", None)
+        if agent_tools is not None:
+            agent_tools.end_card_turn()
 
     # ---- board_cleanup: one agent turn over the whole board ----------------------
     def _cleanup(self, request: dict, rid) -> None:
@@ -360,12 +395,20 @@ class BoardCommands:
             self._ask_turn = event.get("turn_id") or self._ask_turn
         if name in ("delta", "answer") and isinstance(event.get("text"), str):
             self._ask_text.append(event["text"])
+        # What the model says before a tool call and after it are two paragraphs, not one run-on
+        # line ("…Writing the plan.The plan is on #ZW95", live Plan turn, 2026-09-18).
+        if name == "tool_started" and self._ask_text and not self._ask_text[-1].endswith("\n\n"):
+            self._ask_text.append("\n\n")
         if name in ("delta", "done", "error", "cancelled", "turn_summary", "thinking",
                     "thinking_done", "tool_started", "tool_result", "status"):
             event = {**event, "card_id": self._ask_card}
+        if name in ("delta", "done", "error", "cancelled", "turn_summary", "turn_started"):
+            event = {**event, "mode": self._ask_mode}
         if name == "done":
+            self._end_card_turn()
             self._finish_ask(event.get("turn_id"))
         elif name in ("error", "cancelled"):
+            self._end_card_turn()
             self._ask_text = []
         return event
 
@@ -380,12 +423,14 @@ class BoardCommands:
             return
         agent = getattr(self.turns, "agent", None)
         tools.board.append_thread(card_id, answer, author="agent", kind="comment",
-                                  private=card.private,
+                                  private=card.private, mode=self._ask_mode,
                                   model=getattr(getattr(agent, "config", None), "model", None),
                                   turn=f"{getattr(agent, 'session_id', '')}/{turn_id}" if turn_id else None)
-        # The card is unchanged, so the seeded conversation stays valid for the next question.
+        # A Discuss that edited the card, or a Plan that wrote its `## Plan`, changed the file:
+        # the next question reseeds from it, so the conversation never argues with a stale copy.
+        # An answer that changed nothing keeps the seeded conversation.
         self.emit({"event": "board_thread_appended", "card_id": card_id, "author": "agent",
-                   "kind": "comment", "text": answer, "turn_id": turn_id})
+                   "kind": "comment", "text": answer, "turn_id": turn_id, "mode": self._ask_mode})
 
     def _observe_cleanup(self, event: dict) -> dict:
         """Tag a cleanup turn's events so the pane shows them on the board, not on a card."""
@@ -468,6 +513,21 @@ def _title_from(text) -> str:
         raise ValueError("board_create needs text.")
     first = next((line.strip() for line in text.splitlines() if line.strip()), "")
     return (first[:80].rstrip() + "…") if len(first) > 80 else first
+
+
+def mode_prompt(mode: str, card_id: str, text: str) -> str:
+    """One card turn's prompt: the mode's brief, then what the owner typed (protocol 19.10).
+
+    The brief belongs to the turn rather than the seed, because one card's conversation may go
+    Discuss, Plan, Discuss: the mode is the turn's, not the conversation's. It is sent when the
+    mode changes and on every Plan; a Discuss after a Discuss is the owner's words alone.
+    """
+    brief = card_brief(mode).replace("{card}", card_id).replace("{plan_heading}", PLAN_HEADING)
+    label = "Plan" if mode == "plan" else "Discuss"
+    head = f"[{label} · #{card_id}]\n{brief}"
+    if mode == "plan":
+        return head + ("\n\nThe owner adds, verbatim:\n" + text if text else "")
+    return head + "\n\nThe owner says:\n" + text
 
 
 def seed_block(board: B.Board, card: B.Card) -> str:

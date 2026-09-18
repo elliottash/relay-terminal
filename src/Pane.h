@@ -5363,6 +5363,7 @@ private:
             if (m_rolesDialog) m_rolesDialog->setResolved(m_tierSummary, m_roleSummary);
             m_agentRole = event.value(QStringLiteral("agent_role")).toString(QStringLiteral("main"));
             onSessionConfigured(event);
+            runBoardTask();   // a card handed over by the Switchboard's Execute, if any (#XS6Q)
             // No "Agent ready · <model>" here: the composer's own chips carry the model and the
             // agent role, so announcing it again only filled the window with a permanent line.
             changed();
@@ -6090,6 +6091,15 @@ private:
     }
 
 public:
+    // The Switchboard's Execute (#XS6Q): this pane's agent is handed a card as its task. The card
+    // travels as `ask {cards: [id]}` whether or not this pane has its board rows yet, and a pane
+    // that was only just created runs it once its agent is configured.
+    void startBoardTask(const QString &text, const QString &cardId) {
+        m_boardTask = text; m_boardTaskCard = cardId;
+        if (m_configured) runBoardTask();
+        else status(QStringLiteral("#%1 is handed to this pane; the agent starts on it when it is ready.").arg(cardId));
+    }
+
     void toast(const QString &text, int milliseconds = 1600) {
         if (!m_toast) {
             m_toast = new QLabel(this);
@@ -8854,6 +8864,18 @@ private:
     relay::RequestLedgerModel m_ledger;
     QToolButton *m_workChip = nullptr;
     QStringList m_workCards;     // cards this pane referenced or the agent changed, newest first
+    QString m_boardTask, m_boardTaskCard;   // Execute's task, until the agent is configured (#XS6Q)
+    void runBoardTask() {
+        if (m_boardTask.isEmpty()) return;
+        QueueEntry entry;
+        entry.agent = true; entry.text = m_boardTask;
+        entry.why = QStringLiteral("Switchboard · Execute #%1").arg(m_boardTaskCard);
+        entry.cards = QJsonArray{QJsonObject{{QStringLiteral("id"), m_boardTaskCard}}};
+        noteWorkCard(m_boardTaskCard);
+        m_boardTask.clear(); m_boardTaskCard.clear();
+        if (m_entries.isEmpty() && !m_activeValid && !m_agentBusy) startAgentEntry(entry, false);
+        else enqueue(entry);
+    }
     QString m_lastPlanPath;      // the plan this pane's agent wrote last
     QPointer<relay::RequestsPanel> m_requestsPanel;
     bool m_limitReached = false;   // the last turn stopped at the step or tool-call limit

@@ -13,6 +13,7 @@
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPointer>
+#include <QPushButton>
 #include <QTextBrowser>
 #include <QToolButton>
 #include <QTimeZone>
@@ -153,6 +154,10 @@ private slots:
     void theProgressLineKeepsOffAnOpenCardsControls();
     void theTitleAndTheIssueAreEditedOnTheCardAndSavedThroughTheWorker();
     void anEditIsKeptWhenTheCardChangedUnderIt();
+    void aCardOffersDiscussPlanAndExecuteAndTheThreadNamesTheMode();
+    void executeHandsTheCardToAPaneAndMovesItToInProgress();
+    void theExecuteTaskCarriesTheBoardsConventions();
+    void aRewriteShowsBeforeAboveTheOldTextAndAfterAboveTheNew();
 };
 
 void BoardModelTests::categoryFoldersComeFromTheConfig()
@@ -1296,6 +1301,168 @@ void BoardModelTests::anEditIsKeptWhenTheCardChangedUnderIt()
     sent.clear();
     QTest::keyClick(issue, Qt::Key_Return, Qt::ControlModifier);
     QCOMPARE(sent.last().value("base_hash").toString(), QString(64, QLatin1Char('b')));
+}
+
+// ---- Discuss / Plan / Execute (#XS6Q, protocol 19.10) --------------------------------------
+
+namespace {
+QPushButton *button(relay::BoardView &view, const QString &text)
+{
+    const auto buttons = view.findChildren<QPushButton *>();
+    for (QPushButton *candidate : buttons)
+        if (candidate->text() == text)
+            return candidate;
+    return nullptr;
+}
+}  // namespace
+
+void BoardModelTests::aCardOffersDiscussPlanAndExecuteAndTheThreadNamesTheMode()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    QVERIFY(button(view, QStringLiteral("Discuss")));
+    QVERIFY(button(view, QStringLiteral("Plan")));
+    QVERIFY(button(view, QStringLiteral("Execute")));
+    QVERIFY(!button(view, QStringLiteral("Ask the agent")));
+
+    // Enter in the reply box discusses.
+    auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    reply->setPlainText(QStringLiteral("Is this still wanted?"));
+    QTest::keyClick(reply, Qt::Key_Return);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_ask"));
+    QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("discuss"));
+    QCOMPARE(sent.last().value("text").toString(), QStringLiteral("Is this still wanted?"));
+    // While it runs, Discuss is Stop and the other two wait.
+    QVERIFY(button(view, QStringLiteral("Stop")));
+    QVERIFY(!button(view, QStringLiteral("Plan"))->isEnabled());
+    QVERIFY(!button(view, QStringLiteral("Execute"))->isEnabled());
+    view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}, {"mode", "discuss"}});
+    QVERIFY(button(view, QStringLiteral("Discuss")));
+    QVERIFY(button(view, QStringLiteral("Plan"))->isEnabled());
+
+    // `p` plans with an empty box: no text travels, and the Plan button becomes Stop.
+    sent.clear();
+    view.cardAction(QStringLiteral("plan"));
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("plan"));
+    QVERIFY(!sent.last().contains("text"));
+    QVERIFY(!button(view, QStringLiteral("Plan")));
+    QVERIFY(!button(view, QStringLiteral("Discuss"))->isEnabled());
+    button(view, QStringLiteral("Stop"))->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("cancel"));
+    view.handleEvent(QJsonObject{{"event", "cancelled"}, {"card_id", "K7Q2"}});
+
+    // Ctrl+Enter plans with what was typed as the note.
+    sent.clear();
+    reply->setPlainText(QStringLiteral("keep it to the backend"));
+    QTest::keyClick(reply, Qt::Key_Return, Qt::ControlModifier);
+    QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("plan"));
+    QCOMPARE(sent.last().value("text").toString(), QStringLiteral("keep it to the backend"));
+    view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}});
+
+    // The thread says which mode each entry was.
+    QJsonObject withThread = card("K7Q2", "K7Q2 card", "the issue", "h2");
+    withThread.insert("thread", QJsonArray{
+        QJsonObject{{"entry_id", "20260918T100000Z-a1"}, {"author", "owner"}, {"kind", "comment"},
+                    {"attrs", QJsonObject{{"mode", "plan"}}}, {"text", "Plan this card."}},
+        QJsonObject{{"entry_id", "20260918T100100Z-a2"}, {"author", "agent"}, {"kind", "comment"},
+                    {"attrs", QJsonObject{{"mode", "discuss"}, {"model", "glm-5"}}}, {"text", "Retitled it."}}});
+    withThread.insert("thread_total", 2);
+    view.handleEvent(withThread);
+    const QString doc = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"))->toPlainText();
+    QVERIFY2(doc.contains(QStringLiteral("owner  Plan")), qPrintable(doc));
+    QVERIFY2(doc.contains(QStringLiteral("✦ agent  Discuss · glm-5")), qPrintable(doc));
+    QCOMPARE(relay::board::modeTitle(QStringLiteral("plan")), QStringLiteral("Plan"));
+    QVERIFY(relay::board::modeTitle(QStringLiteral("comment")).isEmpty());
+}
+
+void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToInProgress()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QString handedCard, handedTask;
+    int opened = 0;
+    view.onExecuteCard = [&](const QString &id, const QString &task) {
+        ++opened;
+        handedCard = id;
+        handedTask = task;
+    };
+    view.handleEvent(::opened({row("K7Q2", "ready", "features")}));
+    view.handleEvent(card("K7Q2", "Voice mode", "the issue", QString(64, QLatin1Char('a'))));
+    auto *error = view.findChild<QLabel *>(QStringLiteral("boardCardError"));
+
+    // No plan and no acceptance: the first press asks, here on the card, and does nothing else.
+    sent.clear();
+    view.cardAction(QStringLiteral("execute"));
+    QCOMPARE(opened, 0);
+    QVERIFY(sent.isEmpty());
+    QVERIFY(!error->isHidden());
+    QVERIFY(error->text().contains(QStringLiteral("no plan and no acceptance")));
+
+    // The second goes ahead: assignee (hash-checked), In progress, a note, then the pane.
+    button(view, QStringLiteral("Execute"))->click();
+    QCOMPARE(opened, 1);
+    QCOMPARE(handedCard, QStringLiteral("K7Q2"));
+    QVERIFY(handedTask.startsWith(QStringLiteral("Execute #K7Q2: Voice mode")));
+    QStringList types;
+    for (const QJsonObject &message : std::as_const(sent))
+        types << message.value("type").toString();
+    QCOMPARE(types, (QStringList{"board_update", "board_move", "board_comment"}));
+    QCOMPARE(sent.at(0).value("base_hash").toString(), QString(64, QLatin1Char('a')));
+    QCOMPARE(sent.at(0).value("patch").toObject().value("fields").toObject().value("assignee").toString(),
+             QStringLiteral("agent"));
+    QCOMPARE(sent.at(1).value("status").toString(), QStringLiteral("in-progress"));
+    QVERIFY(sent.at(2).value("text").toString().startsWith(QStringLiteral("Execute ·")));
+    QVERIFY(error->isHidden());
+
+    // A card with a plan goes at once, and one already in progress and assigned is not rewritten.
+    QJsonObject planned = card("K7Q2", "Voice mode", "the issue", QString(64, QLatin1Char('b')));
+    planned.insert("status", "in-progress");
+    planned.insert("sections", QJsonArray{"Issue", "Plan"});
+    planned.insert("front", QJsonObject{{"assignee", "agent"}});
+    view.handleEvent(planned);
+    sent.clear();
+    view.cardAction(QStringLiteral("execute"));
+    QCOMPARE(opened, 2);
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_comment"));
+    QVERIFY(handedTask.contains(QStringLiteral("`## Plan`")));
+}
+
+void BoardModelTests::theExecuteTaskCarriesTheBoardsConventions()
+{
+    const QString task = relay::board::executeTask(QStringLiteral("XS6Q"), QStringLiteral("Modes"),
+                                                   true, true, QStringLiteral("backend first"));
+    QVERIFY(task.startsWith(QStringLiteral("Execute #XS6Q: Modes\n")));
+    QVERIFY(task.contains(QStringLiteral("until the acceptance holds")));
+    QVERIFY(task.contains(QStringLiteral("implemented_by")));
+    QVERIFY(task.contains(QStringLiteral("links.commits")));
+    QVERIFY(task.contains(QStringLiteral("Put #XS6Q in the message of every commit")));
+    QVERIFY(task.contains(QStringLiteral("needs-qa-llm")));
+    QVERIFY(task.endsWith(QStringLiteral("The owner adds, verbatim:\nbackend first")));
+    QVERIFY(relay::board::executeTask(QStringLiteral("XS6Q"), QStringLiteral("Modes"), false, false)
+                .contains(QStringLiteral("no plan and no acceptance")));
+}
+
+// A rewrite entry's before/after, as the thread file writes them for GitHub, reads in order in
+// the card detail: the label above its text (QTextDocument drops the <details> tags).
+void BoardModelTests::aRewriteShowsBeforeAboveTheOldTextAndAfterAboveTheNew()
+{
+    const QString entry = QStringLiteral(
+        "- ✦ rewrote title\n\n<details><summary>before</summary>\n\n```\nOld\n```\n\n</details>\n\n"
+        "<details><summary>after</summary>\n\n```\nNew\n```\n\n</details>");
+    const QString md = relay::board::threadMarkdown(entry, QStringLiteral("rewrite"));
+    QVERIFY(!md.contains(QStringLiteral("<")));
+    QVERIFY(md.startsWith(QStringLiteral("✦ rewrote title")));
+    QVERIFY(md.indexOf(QStringLiteral("**before**")) < md.indexOf(QStringLiteral("Old")));
+    QVERIFY(md.indexOf(QStringLiteral("Old")) < md.indexOf(QStringLiteral("**after**")));
+    QVERIFY(md.indexOf(QStringLiteral("**after**")) < md.indexOf(QStringLiteral("New")));
+    QCOMPARE(relay::board::threadMarkdown(QStringLiteral("- a list"), QStringLiteral("comment")),
+             QStringLiteral("- a list"));
 }
 
 QTEST_MAIN(BoardModelTests)

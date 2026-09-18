@@ -1279,7 +1279,9 @@ closed with `done`/`dropped` instead, and the undo is refused.
 
 | Message | Events |
 |---|---|
-| `board_ask {id?, card, text, author?}` | `board_thread_appended` (the question), then an ordinary turn tagged with `card_id`, then `board_thread_appended` (the answer) |
+| `board_ask {id?, card, text, mode?, author?}` | `board_thread_appended` (the question), then an ordinary turn tagged with `card_id`, then `board_thread_appended` (the answer) |
+
+`mode` is `discuss` (the default) or `plan` since 2026-09-18 (#XS6Q); what each may do is 19.10.
 
 The Switchboard agent is **a worker per window**, started by the GUI exactly like a pane's worker
 but configured with `agent_role: "switchboard"`, so its model is the `switchboard` role of section
@@ -1470,6 +1472,66 @@ and committing a cleanup is the person's job, and `git diff` plus the changelog 
 
 **The intake files are never touched.** `issues/bug_intake.txt` and `issues/feature_intake.txt` are
 the owner's inboxes; the brief says so and the cleanup has no tool that writes them.
+
+### 19.10 A card's Discuss, Plan and Execute (v2.5, 2026-09-18)
+
+Owner (#XS6Q): *"rather than "ask the agent", lets have: plan / edit / discuss"*, decided as three
+buttons on a card — **Discuss**, **Plan**, **Execute**. Discuss and Plan are `board_ask` with a
+`mode`; Execute is GUI-side and adds no message.
+
+**`board_ask {mode}`.** `"discuss"` (the default, and what a `board_ask` without `mode` is) or
+`"plan"`; anything else is refused before anything is written. A Discuss needs `text`; a Plan may
+omit it (the thread then records "Plan this card.") and, when given, the text is the owner's note
+to the planner, passed verbatim. The question entry and the answer entry both carry the attribute
+`mode=discuss|plan` in the thread file, and `board_thread_appended` carries `mode`; so do the turn's
+`delta`, `done`, `error`, `cancelled`, `turn_started` and `turn_summary`. The pane shows it on the
+entry's author line ("owner  Plan · 2 min ago", "✦ agent  Discuss · glm-5"), so the history
+reads right after the fact.
+
+**The brief.** Each mode has a short brief beside the policy, `backend/relay_core/board_discuss_brief.md`
+and `board_plan_brief.md`, sent at the head of the turn's prompt (after the seed block on a
+card's first question). It is sent on every Plan and whenever the mode changes; a Discuss straight
+after a Discuss on the same card sends the owner's words alone, as before.
+
+**What each mode may touch — enforced by the tools, not only asked for.** The Switchboard worker is
+an ordinary worker, whose executor would otherwise offer the pane's whole tool set. For the length
+of a card turn, `BoardTools.card_scope` is set and `Agent.tools()` / `Agent._prepare` go through it:
+
+| | Discuss | Plan |
+|---|---|---|
+| repository | `read_file`, `list_directory`, `search_files`, skills (read) | the same |
+| board | `board_list`, `board_read`, `board_create_card`, `board_update_card`, `board_move_card`, `board_comment` | `board_list`, `board_read`; `board_update_card` **only this card's `## Plan`** (`replace_section`/`append_section` with heading `Plan`, nothing else in the patch); `board_comment` **only on this card** |
+| never | `run_command` and the job tools, `write_file`, `edit_file`, `run_in_terminal`, `type_into_program`, `set_keybinding`, subagents, `update_todos`, the cleanup-only tools | the same |
+
+A call outside the mode is refused with `code: "board_mode_refused"` (board tools) or an ordinary
+tool error naming Execute (the rest). `search_files {pattern, path?, glob?}` is new and exists only
+in a card turn: a case-insensitive (unless the pattern has a capital) regular-expression search of
+the workspace's text files, ≤80 matching lines as `path:line: text`, skipping `.git`, build and
+cache folders, binaries, files over 1 MiB, symlinks and the file tools' secret names. Before
+2026-09-18 a card's "Ask the agent" ran with every pane tool, commands and file writes included.
+
+A Discuss edit is `board_update_card` / `board_move_card` as before: hash-checked, a `rewrite`
+entry holding the old and the new title or `## Issue`, an event line per write, and the brief asks
+the agent to say in its reply what it changed. The plan is the card's own `## Plan` section —
+design 12.4, "plan mode writes the plan onto a card", rather than a separate `type: plan` card; a
+card whose `links.plans` names plan cards has them read as context. The scope ends on the turn's
+`done`, `error` or `cancelled`. **Busy** is 19.9's rule unchanged: one turn at a time, a Plan
+refused while a cleanup runs (`board_busy`, text "… then start the plan."), nothing written.
+
+**Execute** (no message). The pane (a) sends `board_update {patch: {fields: {assignee: "agent"}}}`
+against the hash the card was read at, unless it is already the agent's; (b) `board_move {status:
+"in-progress", reason: "Execute: handed to a terminal pane"}` unless it is there; (c)
+`board_comment {kind: "progress", text: "Execute · handed to a new terminal pane …"}`, with the
+reply box's text appended as the owner's note; then (d) the window opens a terminal pane beside
+the board, in the board's workspace, on the main agent, and submits the task as that pane's first
+`ask` with `cards: [{id}]` — so the pane agent has the card's front matter (acceptance), body (issue,
+plan) and thread tail as the 19.6 block even before the pane has its own board rows. The task text
+(`relay::board::executeTask`) names the card, says to set `implemented_by`, to put `#ID` in every
+commit message and add each commit's hash to `links.commits` with `board_update_card`, to post
+progress with `board_comment`, and to land in `needs-qa-llm` per the policy. Pane agents have the
+board tools whenever the workspace has a board (19.7), so this is the whole link-back mechanism:
+the commit message carries the id for `git log --grep '#ID'`, and the card carries the hashes.
+A card with neither a `## Plan` nor an `acceptance` asks once, on the card, before it goes.
 
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 

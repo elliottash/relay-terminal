@@ -92,6 +92,26 @@ int badgeDropOrder(Badge::Kind kind);
 // before it loses meaning. Returns what is kept, still in reading order.
 QList<Badge> fitBadges(const QList<QPair<Badge, int>> &measured, int available, int gap);
 
+// A card turn's mode as the thread shows it (protocol 19.10, #XS6Q): "discuss" -> "Discuss",
+// "plan" -> "Plan", "execute" -> "Execute"; empty for anything else, so an entry written before
+// the modes existed reads as it always did.
+QString modeTitle(const QString &mode);
+
+// A thread entry's Markdown as the card detail shows it. The file keeps GitHub's
+// `<details><summary>before</summary> … </details>` around a rewrite's old and new text, which
+// QTextDocument's Markdown reader drops the tags of — the labels then came out *under* the text
+// they name ("before" beneath the old title). Here each summary becomes a bold label above its
+// block and the tags go; a rewrite's leading "- " bullet goes too, as an event's does.
+QString threadMarkdown(const QString &text, const QString &kind);
+
+// What a terminal pane's agent is handed when the owner presses Execute on a card (#XS6Q). The
+// card itself (issue, plan, acceptance, thread tail) travels as `ask {cards: [id]}`, so this is
+// the instruction around it: the card id, what to do, and the board's conventions for the work —
+// `implemented_by`, `#ID` in each commit message and `links.commits`, and the QA lane at the end.
+// `note` is whatever the owner had typed in the card's reply box, passed on verbatim.
+QString executeTask(const QString &id, const QString &title, bool hasPlan, bool hasAcceptance,
+                    const QString &note = QString());
+
 // The body without its leading `# Title` line when that only repeats the title: the card
 // detail already shows the title in its header, so the heading would be said twice.
 QString bodyWithoutTitle(const QString &body, const QString &title);

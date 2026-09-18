@@ -1,0 +1,22 @@
+# git log of the throwaway workspace after the Execute pane's turn
+4cf6614 switchboard: #ZW95 to needs-qa-llm with QA checklist and evidence
+
+ .../2026-09-18-tab-completion-adds-a-stray-dash.md | 16 --------
+ .../2026-09-18-tab-completion-adds-a-stray-dash.md | 48 ++++++++++++++++++++++
+ 2 files changed, 48 insertions(+), 16 deletions(-)
+4b2063a fix(completion): folder candidates end in "/" not "/-" (#ZW95)
+
+ .../verify.txt                                     | 20 +++++++++++++
+ src/complete.py                                    |  2 +-
+ tests/test_complete.py                             | 34 ++++++++++++++++++++++
+ 3 files changed, 55 insertions(+), 1 deletion(-)
+1e001a4 fixture
+
+ README.md                                              |  1 +
+ issues/.gitignore                                      |  2 ++
+ issues/board.yaml                                      |  9 +++++++++
+ .../2026-09-18-tab-completion-adds-a-stray-dash.md     | 16 ++++++++++++++++
+ ...18-distinct-headers-or-colors-for-each-pane-type.md | 14 ++++++++++++++
+ issues/features/2026-09-18-in-app-pdf-rendering.md     | 16 ++++++++++++++++
+ src/complete.py                                        | 18 ++++++++++++++++++
+ 7 files changed, 76 insertions(+)

@@ -561,6 +561,19 @@ def _cell(text: str) -> str:
     return " ".join(str(text).split()).replace("|", "\\|")[:300]
 
 
+def _without_own_heading(text: str, heading: str) -> str:
+    """A section's text with a leading copy of its own heading dropped.
+
+    Models writing `replace_section {heading: "Plan", text: "## Plan\\n…"}` repeat the heading
+    they were given, and the card then said `## Plan` twice (live Plan turn, 2026-09-18).
+    """
+    lines = text.lstrip("\n").split("\n")
+    first = lines[0].strip() if lines else ""
+    if first.startswith("#") and first.lstrip("#").strip().lower() == heading.strip().lower():
+        return "\n".join(lines[1:]).lstrip("\n")
+    return text
+
+
 def cleanup_brief() -> str:
     """The whole-board cleanup brief, versioned beside `board_policy.md` so evals can pin it."""
     path = Path(__file__).resolve().parent / "board_cleanup_brief.md"
@@ -569,6 +582,150 @@ def cleanup_brief() -> str:
     except OSError:                                        # pragma: no cover - packaging slip
         return ""
     return re.sub(r"<!--.*?-->", "", text, flags=re.S).strip()
+
+
+# ------------------------------------------------------------ card turns (protocol 19.10)
+#
+# A card's "Ask the agent" became Discuss / Plan / Execute (#XS6Q, owner 2026-09-18). Discuss
+# and Plan are one `board_ask` turn each, told apart by `mode`; Execute hands the card to a
+# terminal pane and is not a turn here at all. What a mode may touch is enforced below, not
+# left to the brief: a card turn runs on the Switchboard worker, whose executor would otherwise
+# offer the whole pane tool set (commands, file writes, subagents).
+
+CARD_MODES = ("discuss", "plan")
+
+#: The worker's own tools a card turn keeps: reading, never writing or running anything.
+CARD_READ_TOOLS = ("read_file", "list_directory", "load_skill", "read_skill_file")
+
+#: The board tools each mode offers. Plan writes only its own card's `## Plan` (and may
+#: comment on that card); Discuss keeps the whole ordinary set, cleanup-only tools aside.
+CARD_MODE_BOARD_TOOLS = {
+    "discuss": ("board_list", "board_read", "board_create_card", "board_update_card",
+                "board_move_card", "board_comment"),
+    "plan": ("board_list", "board_read", "board_update_card", "board_comment"),
+}
+
+#: Where a Plan turn writes. SWITCHBOARD-DESIGN 12.4: plan mode writes the plan onto the card.
+PLAN_HEADING = "Plan"
+
+MAX_SEARCH_MATCHES = 80
+MAX_SEARCH_FILES = 20000
+MAX_SEARCH_FILE_BYTES = 1 << 20
+_SEARCH_SKIP_DIRS = frozenset({".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv",
+                               "venv", ".mypy_cache", ".pytest_cache", ".relay", ".ssh", ".gnupg",
+                               "dist", ".cache"})
+
+SEARCH_SPEC = spec(
+    "search_files",
+    "Search the workspace's text files for a regular expression (Python syntax, case-insensitive "
+    "unless it has an uppercase letter). Returns up to 80 matching lines as path:line: text. "
+    "Read-only. Use it to find where something is defined before reading the file.",
+    {"pattern": {"type": "string", "description": "Regular expression, e.g. 'def board_ask|board_ask\\('."},
+     "path": {"type": "string", "description": "Workspace-relative directory or file to search; default '.'."},
+     "glob": {"type": "string", "description": "Only files whose name matches, e.g. '*.py' or '*.cpp'."}},
+    ["pattern"])
+
+
+def card_brief(mode: str) -> str:
+    """The Discuss or Plan brief (`board_discuss_brief.md`, `board_plan_brief.md`), beside the policy."""
+    path = Path(__file__).resolve().parent / f"board_{mode}_brief.md"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:                                        # pragma: no cover - packaging slip
+        return ""
+    return re.sub(r"<!--.*?-->", "", text, flags=re.S).strip()
+
+
+@dataclass
+class CardScope:
+    """One Discuss or Plan turn on one card: the tools it may call and the card it is about."""
+    mode: str
+    card_id: str
+
+    def allows(self, name: str) -> bool:
+        return (name in CARD_READ_TOOLS or name == "search_files"
+                or name in CARD_MODE_BOARD_TOOLS.get(self.mode, ()))
+
+    def tool_specs(self, executor_specs: list[dict]) -> list[dict]:
+        """The turn's tool list: the executor's read-only tools, search_files, the mode's board tools."""
+        keep = [t for t in executor_specs if t["function"]["name"] in CARD_READ_TOOLS]
+        board = [dict(s) for s in TOOL_SPECS if s["function"]["name"] in CARD_MODE_BOARD_TOOLS[self.mode]]
+        return keep + [dict(SEARCH_SPEC)] + board
+
+    def refusal(self, name: str) -> str:
+        what = "Plan" if self.mode == "plan" else "Discuss"
+        return (f"{name} is not available in a {what} turn on #{self.card_id}: it reads the "
+                "repository (read_file, list_directory, search_files) and writes only through the "
+                "board tools. Writing code is Execute's job — the owner hands the card to a "
+                "terminal pane for that.")
+
+
+def search_workspace(root: Path, args: dict) -> dict:
+    """`search_files`: a read-only grep over the workspace, with the file tools' secret guard."""
+    from .tools import Workspace                       # late: tools imports nothing of ours
+    if set(args) - {"pattern", "path", "glob"}:
+        raise BoardToolError("search_files takes pattern, path and glob.")
+    pattern = args.get("pattern")
+    if not isinstance(pattern, str) or not pattern or len(pattern) > 500:
+        raise BoardToolError("pattern must be a regular expression of 1-500 characters.")
+    try:
+        regex = re.compile(pattern, 0 if any(c.isupper() for c in pattern) else re.I)
+    except re.error as exc:
+        raise BoardToolError(f"pattern is not a valid regular expression: {exc}") from exc
+    glob = args.get("glob")
+    if glob is not None and (not isinstance(glob, str) or len(glob) > 100):
+        raise BoardToolError("glob must be a short file-name pattern such as '*.py'.")
+    workspace = Workspace(root)
+    rel = args.get("path") or "."
+    try:
+        start = workspace.root if rel in (".", "./") else workspace.resolve(str(rel))
+    except (ValueError, OSError) as exc:
+        raise BoardToolError(str(exc)) from exc
+    import fnmatch
+
+    def secret(parts) -> bool:
+        return any(p == ".env" or p.startswith(".env.") or p in {"id_rsa", "id_ed25519"}
+                   or p.endswith((".pem", ".key")) for p in parts)
+
+    matches: list[str] = []
+    scanned = 0
+    truncated = False
+    walker = [(start.parent, [], [start.name])] if start.is_file() else os.walk(start)
+    for folder, dirs, names in walker:
+        folder = Path(folder)
+        dirs[:] = sorted(d for d in dirs if d not in _SEARCH_SKIP_DIRS
+                         and not (folder / d).is_symlink())
+        for name in sorted(names):
+            if glob and not fnmatch.fnmatch(name, glob):
+                continue
+            path = folder / name
+            relative = path.relative_to(workspace.root)
+            if path.is_symlink() or secret(relative.parts):
+                continue
+            scanned += 1
+            if scanned > MAX_SEARCH_FILES:
+                truncated = True
+                break
+            try:
+                if path.stat().st_size > MAX_SEARCH_FILE_BYTES:
+                    continue
+                data = path.read_bytes()
+            except OSError:
+                continue
+            if b"\0" in data[:4096]:
+                continue                                   # binary
+            for number, line in enumerate(data.decode("utf-8", "replace").splitlines(), 1):
+                if regex.search(line):
+                    matches.append(f"{relative}:{number}: {line.strip()[:200]}")
+                    if len(matches) >= MAX_SEARCH_MATCHES:
+                        truncated = True
+                        break
+            if truncated:
+                break
+        if truncated:
+            break
+    return {"matches": matches, "count": len(matches), "truncated": truncated,
+            "files_scanned": min(scanned, MAX_SEARCH_FILES)}
 
 
 # ------------------------------------------------------------------------- writes
@@ -658,6 +815,9 @@ class BoardTools:
         #: Set while a `board_cleanup` turn runs (protocol 19.9): it raises the per-turn
         #: ceilings, offers the merge/split/sections tools, and records every write.
         self.cleanup: CleanupLog | None = None
+        #: Set while a card's Discuss or Plan turn runs (protocol 19.10, #XS6Q): the tools that
+        #: mode offers, and the card a Plan turn may write to. None for a pane's own turns.
+        self.card_scope: CardScope | None = None
 
     # ---- lifecycle ------------------------------------------------------------
     @classmethod
@@ -714,7 +874,44 @@ class BoardTools:
         return [dict(s) for s in specs]
 
     def handles(self, name: str) -> bool:
-        return name in ALL_TOOL_NAMES
+        return name in ALL_TOOL_NAMES or (name == "search_files" and self.card_scope is not None)
+
+    def begin_card_turn(self, mode: str, card_id: str) -> CardScope:
+        """A Discuss or Plan turn on one card starts: narrow the tools to what the mode offers."""
+        if mode not in CARD_MODES:
+            raise BoardToolError(f"mode must be one of {', '.join(CARD_MODES)}.")
+        self.card_scope = CardScope(mode, normalize_id(card_id))
+        return self.card_scope
+
+    def end_card_turn(self) -> None:
+        self.card_scope = None
+
+    def _check_card_scope(self, name: str, args: dict) -> None:
+        """A Plan turn writes its own card's `## Plan` and nothing else; Discuss has no extra rule."""
+        scope = self.card_scope
+        if scope is None:
+            return
+        if not scope.allows(name):
+            raise BoardToolError(scope.refusal(name), code="board_mode_refused", mode=scope.mode)
+        if scope.mode != "plan" or name not in WRITE_TOOLS:
+            return
+        target = normalize_id(args.get("id")) if args.get("id") else ""
+        if target != scope.card_id:
+            raise BoardToolError(
+                f"A Plan turn writes only to #{scope.card_id}, the card being planned. Mention "
+                f"#{target or '?'} in the plan instead of changing it.",
+                code="board_mode_refused", mode="plan")
+        if name == "board_update_card":
+            extra = set(args) - {"id", "base_hash", "replace_section", "append_section"}
+            blocks = [args.get(k) for k in ("replace_section", "append_section") if args.get(k) is not None]
+            headings = {str(b.get("heading") or "").strip().lstrip("#").strip().lower()
+                        for b in blocks if isinstance(b, dict)}
+            if extra or not blocks or headings != {PLAN_HEADING.lower()}:
+                raise BoardToolError(
+                    f"A Plan turn writes the card's `## {PLAN_HEADING}` section and nothing else: "
+                    f"call board_update_card with replace_section {{heading: \"{PLAN_HEADING}\", "
+                    "text}. The title, the issue, labels and status are Discuss's to change.",
+                    code="board_mode_refused", mode="plan")
 
     # ---- dispatch -------------------------------------------------------------
     def preview(self, name: str, args: dict) -> str:
@@ -723,7 +920,7 @@ class BoardTools:
             return name.upper().replace("_", " ")
         head = name.replace("board_", "").replace("_", " ").upper()
         bits = []
-        for key in ("id", "tab", "status", "title", "kind", "query", "reason"):
+        for key in ("id", "tab", "status", "title", "kind", "query", "reason", "pattern", "glob"):
             if args.get(key):
                 bits.append(f"{key}: {str(args[key])[:120]}")
         return f"SWITCHBOARD {head}\n\n" + ("\n".join(bits) or "(no arguments)")
@@ -737,6 +934,9 @@ class BoardTools:
             if name in CLEANUP_TOOL_NAMES and self.cleanup is None:
                 raise BoardToolError(f"{name} is only available during a Switchboard cleanup.",
                                      code="board_refused")
+            self._check_card_scope(name, args)
+            if name == "search_files":
+                return search_workspace(Path(self.board.repo), dict(args))
             if name in WRITE_TOOLS:
                 self._check_write_budget(name, args)
             handler = {"board_list": self._list, "board_read": self._read,
@@ -1124,7 +1324,7 @@ class BoardTools:
             # used: a card written as `## Request` comes out saying `## Issue` once it is edited.
             if heading.strip().lower() in B.ISSUE_HEADINGS:
                 heading = B.ISSUE_HEADING
-            text = _text(block.get("text"), "text", MAX_SECTION)
+            text = _without_own_heading(_text(block.get("text"), "text", MAX_SECTION), heading)
             replace = key != "append_section"
             old_text = _section_text(card.body, heading)
             card.body = _write_section(card.body, heading, text, replace=replace)

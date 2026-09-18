@@ -284,7 +284,7 @@ owner's files. The pane never starts one of those from a click.
   after a preview that found something, and **Dismiss**. Every control in it is `NoFocus`, so the
   arrows still walk the list.
 - **Busy** (19.9: the worker runs one turn at a time and the two refuse each other). A card's
-  "Ask the agent" pressed while a cleanup runs is stopped in the pane and explained on the card,
+  Discuss or Plan (until 4.9, "Ask the agent") pressed while a cleanup runs is stopped in the pane and explained on the card,
   with the typed message put back in the reply box rather than sent away to bounce; a
   `board_busy` from the worker says which is running — "A cleanup is running on this board." or
   "The agent is answering on #K7Q2." — in the notice, or on the card when it was that card's ask.
@@ -347,6 +347,40 @@ old text kept in the thread (decision 12.3) — so this is a pane that never ask
 add, `board_create_card`, and any `replace_section` naming either spelling. Readers accept both
 (`relay_core.board.ISSUE_HEADINGS`), so the ~96 cards already filed keep saying `## Request` until
 something edits them — there is no rewriting commit, and `check` does not care which a card says.
+
+### 4.9 Discuss, Plan, Execute instead of "Ask the agent" (owner, 2026-09-18)
+
+Owner (#XS6Q): *"rather than "ask the agent", lets have: plan / edit / discuss"*. Decided as three
+buttons under a card's reply box, after **Comment**: **Discuss** (the accent button), **Plan**,
+**Execute** (outlined in the agent colour: it leaves the board). Protocol: 19.10. Evidence:
+`docs/qa_evidence/2026-09-18-card-discuss-plan-execute/`.
+
+- **Discuss** is the old ask, and it edits: the agent may retitle the card, rewrite its `## Issue`,
+  relabel it or move it when the conversation calls for it, through the same hash-checked
+  `board_update_card` / `board_move_card` as always, so the thread keeps the old text (`rewrite`
+  entries) and an event line per change, and the answer says what it changed. The owner's own
+  editing is `e` (4.8), unchanged. **Enter** in the reply box discusses.
+- **Plan** has the agent read the code (read-only: `read_file`, `list_directory`, and
+  `search_files`, which exists for this) and write or revise the card's `## Plan`. It touches no
+  code and no other card, and the tools refuse if it tries. Words in the reply box go with it as the
+  owner's note; an empty box is fine. **`p`** on the card or the list, or **Ctrl+Enter** in the reply box.
+- **Execute** hands the card to a new terminal pane split beside the board, in the board's
+  workspace, on the main agent: the card goes to In progress and to the agent, a progress note goes
+  in the thread, and the pane's agent gets the card attached with a task that tells it the board's
+  conventions (`implemented_by`, `#ID` in every commit message, the hashes in `links.commits`, the
+  QA lane when it lands). A card with neither a plan nor an `acceptance` line asks once, on the
+  card, in the error line under it ("Execute again (x) … or Plan (p) first") — no dialog. **`x`**.
+- **One turn at a time, per card as before.** While a Discuss or a Plan runs, *its* button is Stop
+  (`cancel`) and the other two are disabled; the agent's streaming reply is headed with the mode.
+  The cleanup/busy interplay of 4.8 applies to both modes.
+- **The thread names the mode** on every entry that has one: "owner  Plan · 2 min ago",
+  "✦ agent  Discuss · glm-5". Entries from before carry no mode and read as they did.
+- **Keys** (card view): `e` edit, `d` or Tab to the reply box, Enter discuss, `p` / Ctrl+Enter plan,
+  `x` execute, Ctrl+Shift+Enter comment only. On the list, `p` and `x` open the selected card and
+  do the same. A click on any of the three buttons shows its key once (WARP.md hint rule;
+  hint ids `board.plan`, `board.execute`, `board.discuss`).
+- **Before this**, the card's ask ran on a worker with every pane tool, so "ask the agent" could run
+  commands and write files from a card thread. Discuss and Plan now cannot; that is Execute's job.
 
 ## 5. Referencing cards from the terminal
 

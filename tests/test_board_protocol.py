@@ -596,5 +596,130 @@ class CleanupTests(ProtocolTest):
             self.commands.dispatch({"type": "board_cleanup", "id": "k1"})
 
 
+# ------------------------------------------ board_ask {mode}: Discuss and Plan (#XS6Q)
+
+class ModeTests(ProtocolTest):
+    """Protocol 19.10: a card's Discuss and Plan are `board_ask` turns told apart by `mode`."""
+
+    def setUp(self):
+        super().setUp()
+        self.agent_tools = self.commands.agent_tools(str(self.repo), {})
+        self.turns.agent = StubBoardAgent(self.agent_tools)
+
+    def test_no_mode_is_a_discuss_and_the_thread_says_so(self):
+        card_id = self.make_card()
+        events = self.send(type="board_ask", id="a1", card=card_id, text="is this still wanted?")
+        appended = self.of("board_thread_appended")[0]
+        self.assertEqual(appended["mode"], "discuss")
+        self.assertEqual(self.board.thread(card_id)[-1].attrs.get("mode"), "discuss")
+        prompt = self.turns.submitted[-1]["prompt"]
+        self.assertIn(f"[Discuss · #{card_id}]", prompt)
+        self.assertTrue(prompt.endswith("is this still wanted?"))
+        self.assertEqual(self.agent_tools.card_scope.mode, "discuss")
+        self.assertTrue(events)
+
+    def test_a_plan_needs_no_words_and_carries_the_plan_brief(self):
+        card_id = self.make_card()
+        self.send(type="board_ask", id="p1", card=card_id, mode="plan")
+        entry = self.board.thread(card_id)[-1]
+        self.assertEqual((entry.author, entry.attrs.get("mode"), entry.text),
+                         ("owner", "plan", "Plan this card."))
+        prompt = self.turns.submitted[-1]["prompt"]
+        self.assertIn(f"[Plan · #{card_id}]", prompt)
+        self.assertIn("## Plan", prompt)
+        self.assertIn(f"[Switchboard card #{card_id}", prompt)      # seeded first
+        self.assertEqual(self.agent_tools.card_scope.mode, "plan")
+        self.assertEqual(self.agent_tools.card_scope.card_id, card_id)
+
+    def test_a_plan_with_a_note_passes_it_verbatim(self):
+        card_id = self.make_card()
+        self.send(type="board_ask", card=card_id, mode="plan", text="keep it to the backend")
+        self.assertEqual(self.board.thread(card_id)[-1].text, "keep it to the backend")
+        self.assertTrue(self.turns.submitted[-1]["prompt"].endswith("keep it to the backend"))
+
+    def test_the_brief_is_sent_when_the_mode_changes_and_not_twice_for_discuss(self):
+        card_id = self.make_card()
+        self.send(type="board_ask", card=card_id, text="one")
+        self.commands.observe({"event": "done", "turn_id": "t-1"})
+        self.send(type="board_ask", card=card_id, text="two")
+        self.assertEqual(self.turns.submitted[-1]["prompt"], "two")
+        self.commands.observe({"event": "done", "turn_id": "t-2"})
+        self.send(type="board_ask", card=card_id, mode="plan")
+        self.assertIn("[Plan ·", self.turns.submitted[-1]["prompt"])
+        self.commands.observe({"event": "done", "turn_id": "t-3"})
+        self.send(type="board_ask", card=card_id, text="three")
+        self.assertIn("[Discuss ·", self.turns.submitted[-1]["prompt"])
+
+    def test_the_answer_and_the_turn_events_carry_the_mode_and_the_scope_ends(self):
+        card_id = self.make_card()
+        self.send(type="board_ask", card=card_id, mode="plan")
+        self.assertEqual(self.commands.observe({"event": "delta", "text": "Planned."})["mode"], "plan")
+        self.events.clear()
+        done = self.commands.observe({"event": "done", "turn_id": "t-4"})
+        self.assertEqual(done["mode"], "plan")
+        self.assertIsNone(self.agent_tools.card_scope)
+        entry = self.board.thread(card_id)[-1]
+        self.assertEqual((entry.author, entry.attrs.get("mode"), entry.text), ("agent", "plan", "Planned."))
+        self.assertEqual(self.of("board_thread_appended")[0]["mode"], "plan")
+
+    def test_what_is_said_before_and_after_a_tool_call_stays_two_paragraphs(self):
+        card_id = self.make_card()
+        self.send(type="board_ask", card=card_id, mode="plan")
+        self.commands.observe({"event": "delta", "text": "Writing the plan."})
+        self.commands.observe({"event": "tool_started", "name": "board_update_card"})
+        self.commands.observe({"event": "delta", "text": "The plan is on the card."})
+        self.commands.observe({"event": "done", "turn_id": "t-5"})
+        self.assertEqual(self.board.thread(card_id)[-1].text,
+                         "Writing the plan.\n\nThe plan is on the card.")
+
+    def test_a_failed_or_stopped_turn_ends_the_scope_too(self):
+        card_id = self.make_card()
+        for outcome in ("error", "cancelled"):
+            self.send(type="board_ask", card=card_id, mode="plan")
+            self.commands.observe({"event": outcome})
+            self.assertIsNone(self.agent_tools.card_scope, outcome)
+
+    def test_an_unknown_mode_and_an_empty_discuss_are_refused_before_anything_is_written(self):
+        card_id = self.make_card()
+        before = len(self.board.thread(card_id))
+        for request in ({"mode": "execute", "text": "go"}, {"mode": "discuss", "text": " "},
+                        {"text": None}):
+            with self.assertRaises(ValueError):
+                self.commands.dispatch({"type": "board_ask", "card": card_id, **request})
+        self.assertEqual(len(self.board.thread(card_id)), before)
+        self.assertIsNone(self.agent_tools.card_scope)
+
+    def test_a_plan_is_refused_while_a_cleanup_runs(self):
+        card_id = self.make_card()
+        self.send(type="board_cleanup", id="k1", dry_run=True)
+        before = len(self.board.thread(card_id))
+        refused = self.send(type="board_ask", id="p2", card=card_id, mode="plan")[0]
+        self.assertEqual(refused["code"], "board_busy")
+        self.assertIn("the plan", refused["text"])
+        self.assertEqual(len(self.board.thread(card_id)), before)
+
+
+class CardScopeAgentTests(unittest.TestCase):
+    """The worker's Agent offers only what the card turn's mode allows (protocol 19.10)."""
+
+    setUp, tearDown, agent = AgentWiringTests.setUp, AgentWiringTests.tearDown, AgentWiringTests.agent
+
+    def test_a_card_turn_offers_no_commands_no_writes_and_no_subagents(self):
+        tools = T.BoardTools.for_workspace(self.repo, state_path=self.repo / ".relay" / "r.json")
+        agent = self.agent(tools)
+        tools.begin_card_turn("plan", "ABCD")
+        names = {t["function"]["name"] for t in agent.tools()}
+        self.assertIn("read_file", names)
+        self.assertIn("search_files", names)
+        self.assertFalse({"run_command", "write_file", "edit_file", "board_move_card"} & names)
+        with self.assertRaises(ValueError) as refused:
+            agent._prepare("run_command", {"command": "ls"})
+        self.assertIn("Execute", str(refused.exception))
+        prepared = agent._prepare("search_files", {"pattern": "x"})
+        self.assertIn("matches", agent._execute(prepared, {}))
+        tools.end_card_turn()
+        self.assertIn("run_command", {t["function"]["name"] for t in agent.tools()})
+
+
 if __name__ == "__main__":       # pragma: no cover
     unittest.main()

@@ -375,6 +375,10 @@ class Agent:
         self.refresh_system_prompt()
 
     def tools(self) -> list[dict]:
+        scope = getattr(self.board, "card_scope", None)
+        if scope is not None:
+            # A Switchboard card's Discuss or Plan turn (protocol 19.10): read-only files + the board.
+            return scope.tool_specs(self.executor.tools())
         tools = self.executor.tools()
         extra = [todo_tool.SPEC] if self._todos_enabled() else []
         if self.board is not None:
@@ -1407,6 +1411,9 @@ class Agent:
             self.inbox.restore(delivered)
 
     def _prepare(self, name: str, args) -> Prepared:
+        scope = getattr(self.board, "card_scope", None)
+        if scope is not None and not scope.allows(name):
+            raise ValueError(scope.refusal(name))
         if self.board is not None and self.board.handles(name):
             if not isinstance(args, dict):
                 raise ValueError("Tool arguments must be an object.")

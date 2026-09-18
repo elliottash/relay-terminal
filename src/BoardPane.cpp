@@ -841,8 +841,8 @@ public:
         replyLayout->setSpacing(4);
         m_reply = new RichEditor(reply);
         m_reply->setObjectName(QStringLiteral("boardReplyEditor"));
-        m_reply->setPlaceholders({QStringLiteral("Reply — Enter asks the agent, Ctrl+Shift+Enter only comments"),
-                                  QStringLiteral("Reply — Enter asks the agent"),
+        m_reply->setPlaceholders({QStringLiteral("Reply — Enter discusses, Ctrl+Enter plans, Ctrl+Shift+Enter only comments"),
+                                  QStringLiteral("Reply — Enter discusses, Ctrl+Enter plans"),
                                   QStringLiteral("Reply to this card…"), QStringLiteral("Reply…")});
         m_reply->setAutoHeight(2, 8);
         replyLayout->addWidget(m_reply);
@@ -852,11 +852,21 @@ public:
         m_comment = new QPushButton(QStringLiteral("Comment"), reply);
         m_comment->setObjectName(QStringLiteral("boardReplyButton"));
         m_comment->setToolTip(QStringLiteral("Append to the thread without calling a model (Ctrl+Shift+Enter)"));
-        m_ask = new QPushButton(QStringLiteral("Ask the agent"), reply);
-        m_ask->setObjectName(QStringLiteral("primary"));
-        m_ask->setToolTip(QStringLiteral("The Switchboard agent answers in this thread (Enter)"));
+        // The three things the agent can do with a card (#XS6Q, owner 2026-09-18): talk it
+        // through and change it, write its plan, or take it to a terminal pane and build it.
+        m_discuss = new QPushButton(QStringLiteral("Discuss"), reply);
+        m_discuss->setObjectName(QStringLiteral("primary"));
+        m_plan = new QPushButton(QStringLiteral("Plan"), reply);
+        m_plan->setObjectName(QStringLiteral("boardReplyButton"));
+        m_execute = new QPushButton(QStringLiteral("Execute"), reply);
+        m_execute->setObjectName(QStringLiteral("boardExecute"));
+        for (QPushButton *button : {m_comment, m_discuss, m_plan, m_execute})
+            button->setFocusPolicy(Qt::NoFocus);   // Tab stays between the reply box and the card
         buttons->addWidget(m_comment);
-        buttons->addWidget(m_ask);
+        buttons->addWidget(m_discuss);
+        buttons->addWidget(m_plan);
+        buttons->addWidget(m_execute);
+        setModeTips();
         replyLayout->addLayout(buttons);
         layout->addWidget(reply);
 
@@ -865,15 +875,27 @@ public:
         m_render->setInterval(40);   // a streamed answer re-renders at most 25 times a second
         connect(m_render, &QTimer::timeout, this, [this] { render(Scroll::Follow); });
 
-        connect(m_ask, &QPushButton::clicked, this, [this] {
-            if (m_busy) {
-                if (onCancel)
-                    onCancel();
+        // A click is the slow path: each says its key once (WARP.md hint rule).
+        connect(m_discuss, &QPushButton::clicked, this, [this] {
+            if (stopIfBusy(QStringLiteral("discuss")))
                 return;
-            }
-            submit(true);
+            if (onModeHint)
+                onModeHint(QStringLiteral("discuss"));
+            submit(QStringLiteral("discuss"));
         });
-        connect(m_comment, &QPushButton::clicked, this, [this] { submit(false); });
+        connect(m_plan, &QPushButton::clicked, this, [this] {
+            if (stopIfBusy(QStringLiteral("plan")))
+                return;
+            if (onModeHint)
+                onModeHint(QStringLiteral("plan"));
+            plan();
+        });
+        connect(m_execute, &QPushButton::clicked, this, [this] {
+            if (onModeHint)
+                onModeHint(QStringLiteral("execute"));
+            execute();
+        });
+        connect(m_comment, &QPushButton::clicked, this, [this] { submit(QString()); });
         connect(m_edit, &QToolButton::clicked, this, [this] {
             if (onEditHint)
                 onEditHint();
@@ -886,7 +908,15 @@ public:
         connect(m_openFile, &QToolButton::clicked, this, [this] { if (onOpenPath) onOpenPath(m_path); });
         // Ctrl+Shift+Enter is the composer's "terminal, never the model" chord; here it means
         // the same thing: a note on the thread with no model call.
-        m_reply->onSubmit = [this](const QString &route) { submit(route != QStringLiteral("shell")); };
+        // Enter discusses, Ctrl+Enter plans (with what was typed as the owner's note).
+        m_reply->onSubmit = [this](const QString &route) {
+            if (route == QStringLiteral("shell"))
+                submit(QString());
+            else if (route == QStringLiteral("agent"))
+                plan();
+            else
+                submit(QStringLiteral("discuss"));
+        };
         m_reply->installEventFilter(this);
         connect(m_meta, &QLabel::linkActivated, this, [this](const QString &link) {
             if (onOpenPath)
@@ -910,7 +940,11 @@ public:
         });
     }
 
-    std::function<void(const QString &text, bool ask)> onReply;
+    // `mode` is "discuss" or "plan" for an agent turn (protocol 19.10), empty for a plain comment.
+    std::function<void(const QString &text, const QString &mode)> onReply;
+    // Execute: hand the card to a terminal pane. `note` is what was in the reply box.
+    std::function<void(const QString &note)> onExecute;
+    std::function<void(const QString &mode)> onModeHint;   // a mode button was clicked, not keyed
     std::function<void()> onClose, onCancel, onToPrompt, onEscape;
     std::function<void(const QString &what, const QString &value)> onMove;
     // A path relative to the workspace (the card file) or to the card (a link in its body).
@@ -923,6 +957,55 @@ public:
     QString cardId() const { return m_id; }
     QString path() const { return m_path; }
     bool editing() const { return m_editing; }
+    QString hash() const { return m_hash; }
+    QString title() const { return m_title->text(); }
+    QJsonObject front() const { return m_front; }
+    QString status() const { return m_statusValue; }
+    bool hasPlan() const { return m_sections.contains(QStringLiteral("Plan"), Qt::CaseInsensitive); }
+    bool hasAcceptance() const { return !m_front.value(QStringLiteral("acceptance")).toString().trimmed().isEmpty(); }
+    bool busy() const { return m_busy; }
+
+    // Plan: a turn that writes the card's `## Plan` (protocol 19.10). Words in the reply box go
+    // with it as the owner's note; an empty box is fine — the card is the brief.
+    void plan()
+    {
+        if (m_id.isEmpty() || m_editing || m_busy || !onReply)
+            return;
+        const QString text = m_reply->toPlainText().trimmed();
+        if (!text.isEmpty())
+            m_reply->remember(text);
+        m_reply->clear();
+        m_error->hide();
+        onReply(text, QStringLiteral("plan"));
+    }
+
+    // Execute: hand the card to a terminal pane's agent. A card with neither a plan nor an
+    // acceptance line asks once, here on the card rather than in a dialog: the pane's agent would
+    // be working from the issue text alone. The second press (or `x`) goes ahead.
+    void execute()
+    {
+        if (m_id.isEmpty() || m_editing || !onExecute)
+            return;
+        if (m_busy) {
+            showError(QStringLiteral("The agent is still answering on #%1. Stop it, or wait for it, "
+                                     "before handing the card to a pane.").arg(m_id));
+            return;
+        }
+        if (!hasPlan() && !hasAcceptance() && m_executeArmed != m_id) {
+            m_executeArmed = m_id;
+            showError(QStringLiteral("#%1 has no plan and no acceptance yet, so the pane's agent "
+                                     "would work from the issue alone. Execute again (x) to hand "
+                                     "it over as it is, or Plan (p) first.").arg(m_id));
+            return;
+        }
+        m_executeArmed.clear();
+        const QString note = m_reply->toPlainText().trimmed();
+        if (!note.isEmpty())
+            m_reply->remember(note);
+        m_reply->clear();
+        m_error->hide();
+        onExecute(note);
+    }
 
     void setChoices(const QStringList &statuses, const QList<QPair<QString, QString>> &tabs)
     {
@@ -949,10 +1032,16 @@ public:
             m_reply->setPlainText(m_drafts.take(id));
             m_error->hide();
             m_streaming.clear();
+            m_executeArmed.clear();
         }
         m_id = id;
         m_path = card.value(QStringLiteral("path")).toString();
         const QJsonObject front = card.value(QStringLiteral("front")).toObject();
+        m_front = front;
+        m_statusValue = card.value(QStringLiteral("status")).toString();
+        m_sections.clear();
+        for (const QJsonValue &heading : card.value(QStringLiteral("sections")).toArray())
+            m_sections << heading.toString();
         const QString title = card.value(QStringLiteral("title")).toString();
         // What an edit writes over, and what it would have to be saved against. A card read
         // again while it is being edited (the file changed under us, or our own write was
@@ -1008,12 +1097,12 @@ public:
             m_render->start();
     }
 
-    void setBusy(bool busy)
+    // While a Discuss or a Plan runs, its own button is Stop and the other two wait.
+    void setBusy(bool busy, const QString &mode = QString())
     {
         m_busy = busy;
-        m_ask->setText(busy ? QStringLiteral("Stop") : QStringLiteral("Ask the agent"));
-        m_ask->setToolTip(busy ? QStringLiteral("Stop the Switchboard agent's answer")
-                               : QStringLiteral("The Switchboard agent answers in this thread (Enter)"));
+        m_busyMode = busy ? (mode.isEmpty() ? QStringLiteral("discuss") : mode) : QString();
+        setModeTips();
         if (!busy)
             m_streaming.clear();
         render(busy ? Scroll::Bottom : Scroll::Keep);
@@ -1167,6 +1256,21 @@ protected:
                 beginEdit(false);
                 return true;
             }
+            // `p` plans, `x` executes, `d` goes to the reply box to discuss (#XS6Q).
+            if (object == m_doc && !m_editing && mods == Qt::NoModifier) {
+                if (key->text() == QStringLiteral("p")) {
+                    plan();
+                    return true;
+                }
+                if (key->text() == QStringLiteral("x")) {
+                    execute();
+                    return true;
+                }
+                if (key->text() == QStringLiteral("d")) {
+                    m_reply->setFocus();
+                    return true;
+                }
+            }
             if (m_editing && (object == m_titleEdit || object == m_issueEdit)) {
                 if (key->key() == Qt::Key_Escape) {
                     cancelEdit();
@@ -1202,15 +1306,45 @@ private:
         return button;
     }
 
-    void submit(bool ask)
+    void submit(const QString &mode)
     {
         const QString text = m_reply->toPlainText().trimmed();
-        if (text.isEmpty() || !onReply || (ask && m_busy))
+        if (text.isEmpty() || !onReply || (!mode.isEmpty() && m_busy))
             return;
         m_reply->remember(text);
         m_reply->clear();
         m_error->hide();
-        onReply(text, ask);
+        onReply(text, mode);
+    }
+
+    // The running mode's button stops it; the others are off until it is done.
+    bool stopIfBusy(const QString &mode)
+    {
+        if (!m_busy)
+            return false;
+        if (mode == m_busyMode && onCancel)
+            onCancel();
+        return true;
+    }
+
+    void setModeTips()
+    {
+        const auto set = [this](QPushButton *button, const QString &mode, const QString &label,
+                                const QString &tip) {
+            const bool running = m_busy && m_busyMode == mode;
+            button->setText(running ? QStringLiteral("Stop") : label);
+            button->setToolTip(running ? QStringLiteral("Stop the Switchboard agent") : tip);
+            button->setEnabled(!m_busy || running);
+        };
+        set(m_discuss, QStringLiteral("discuss"), QStringLiteral("Discuss"),
+            QStringLiteral("Talk the card through with the agent; it may edit the title, the issue, "
+                           "the labels or the status as you go (Enter)"));
+        set(m_plan, QStringLiteral("plan"), QStringLiteral("Plan"),
+            QStringLiteral("The agent reads the code and writes the card's plan; it changes no code "
+                           "and no other card. Anything typed goes with it (p, or Ctrl+Enter)"));
+        m_execute->setEnabled(!m_busy);
+        m_execute->setToolTip(QStringLiteral("Hand the card to a new terminal pane beside the board: "
+                                             "its agent builds it, and the card moves to In progress (x)"));
     }
 
     // Two short lines of facts under the pickers, keys muted, the file a link that opens it.
@@ -1334,7 +1468,8 @@ private:
             threadTitle += QStringLiteral("  (last %1)").arg(shown);
         insertLine(cursor, threadTitle, heading, 22);
         if (m_entries.isEmpty() && !m_busy)
-            insertLine(cursor, QStringLiteral("No replies yet. Ask the agent about this card, or "
+            insertLine(cursor, QStringLiteral("No replies yet. Discuss the card with the agent, have "
+                                              "it Plan the work, Execute it in a terminal pane, or "
                                               "leave a comment for whoever picks it up."), muted, 4);
 
         const QDateTime now = QDateTime::currentDateTimeUtc();
@@ -1361,6 +1496,11 @@ private:
                        who, 14);
             QStringList extra;
             const QString model = attrs.value(QStringLiteral("model")).toString();
+            // The mode first, so the history reads "Plan · …", "Discuss · …" (#XS6Q).
+            const QString mode = board::modeTitle(attrs.value(QStringLiteral("mode")).toString(
+                entry.value(QStringLiteral("mode")).toString()));
+            if (!mode.isEmpty())
+                extra << mode;
             if (!model.isEmpty())
                 extra << model;
             if (!kind.isEmpty() && kind != QStringLiteral("comment"))
@@ -1370,13 +1510,15 @@ private:
             if (!extra.isEmpty())
                 cursor.insertText(QStringLiteral("  ") + extra.join(QStringLiteral(" · ")), muted);
             cursor.insertBlock(QTextBlockFormat(), QTextCharFormat());
-            insertMarkdown(cursor, text, base);
+            insertMarkdown(cursor, board::threadMarkdown(text, kind), base);
         }
         if (m_busy || !m_streaming.isEmpty()) {
             QTextCharFormat who;
             who.setFontWeight(QFont::DemiBold);
             who.setForeground(theme::Agent);
             insertLine(cursor, QStringLiteral("✦ agent"), who, 14);
+            if (const QString mode = board::modeTitle(m_busyMode); m_busy && !mode.isEmpty())
+                cursor.insertText(QStringLiteral("  ") + mode, muted);
             cursor.insertBlock(QTextBlockFormat(), QTextCharFormat());
             if (m_streaming.isEmpty()) {
                 QTextCharFormat thinking = muted;
@@ -1412,7 +1554,7 @@ private:
     QToolButton *m_close = nullptr, *m_toPrompt = nullptr, *m_openFile = nullptr, *m_edit = nullptr;
     QTextBrowser *m_doc = nullptr;
     RichEditor *m_reply = nullptr;
-    QPushButton *m_ask = nullptr, *m_comment = nullptr;
+    QPushButton *m_discuss = nullptr, *m_plan = nullptr, *m_execute = nullptr, *m_comment = nullptr;
     QFrame *m_replyFrame = nullptr, *m_editFrame = nullptr;
     QLineEdit *m_titleEdit = nullptr;
     QPlainTextEdit *m_issueEdit = nullptr;
@@ -1424,6 +1566,11 @@ private:
     // The card as the worker last handed it over: the hash an edit is written against, and the
     // `## Issue` text an edit starts from and is compared with.
     QString m_hash, m_issue;
+    QJsonObject m_front;
+    QString m_statusValue;
+    QStringList m_sections;           // the body's `## ` headings, for "has it a plan?"
+    QString m_busyMode;               // "discuss" or "plan" while a turn runs
+    QString m_executeArmed;           // the card that was warned it has no plan or acceptance
     int m_threadTotal = 0;
     bool m_loading = false, m_busy = false, m_editing = false;
 };
@@ -1657,11 +1804,11 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         }
         showNotice(QStringLiteral("No file at %1").arg(path), true);
     };
-    m_detail->onReply = [this](const QString &text, bool ask) {
+    m_detail->onReply = [this](const QString &text, const QString &mode) {
         const QString card = m_detail->cardId();
         if (card.isEmpty())
             return;
-        if (ask) {
+        if (!mode.isEmpty()) {
             // The worker would refuse it anyway (19.9's busy rule), but saying so here keeps the
             // question in the box instead of sending it away to bounce.
             if (cleanupRunning()) {
@@ -1678,9 +1825,13 @@ void BoardView::buildChrome(QVBoxLayout *layout)
             }
             m_askCard = card;
             m_askText = text;
-            m_detail->setBusy(true);
-            send({{QStringLiteral("type"), QStringLiteral("board_ask")},
-                  {QStringLiteral("card"), card}, {QStringLiteral("text"), text}});
+            m_detail->setBusy(true, mode);
+            // protocol 19.10: one `board_ask`, its mode "discuss" or "plan"; a plan may be wordless.
+            QJsonObject ask{{QStringLiteral("type"), QStringLiteral("board_ask")},
+                            {QStringLiteral("card"), card}, {QStringLiteral("mode"), mode}};
+            if (!text.isEmpty())
+                ask.insert(QStringLiteral("text"), text);
+            send(ask);
         } else {
             send({{QStringLiteral("type"), QStringLiteral("board_comment")},
                   {QStringLiteral("card"), card}, {QStringLiteral("text"), text},
@@ -1688,6 +1839,17 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         }
     };
     m_detail->onCancel = [this] { send({{QStringLiteral("type"), QStringLiteral("cancel")}}); };
+    m_detail->onExecute = [this](const QString &note) { executeCard(note); };
+    m_detail->onModeHint = [this](const QString &mode) {
+        if (!onHint)
+            return;
+        if (mode == QStringLiteral("plan"))
+            onHint(QStringLiteral("board.plan"), QStringLiteral("p"));
+        else if (mode == QStringLiteral("execute"))
+            onHint(QStringLiteral("board.execute"), QStringLiteral("x"));
+        else
+            onHint(QStringLiteral("board.discuss"), QStringLiteral("Enter"));
+    };
     m_detail->onMove = [this](const QString &what, const QString &value) {
         const QString card = m_detail->cardId();
         if (card.isEmpty() || value.isEmpty())
@@ -2170,6 +2332,11 @@ void BoardView::handleEvent(const QJsonObject &event)
         if (m_editOnOpen) {
             m_editOnOpen = false;
             m_detail->beginEdit(false);
+        } else if (!m_actionOnOpen.isEmpty()) {
+            const QString action = m_actionOnOpen;
+            m_actionOnOpen.clear();
+            m_detail->focusDocument();
+            cardAction(action);
         } else if (m_replyOnOpen) {
             m_replyOnOpen = false;
             m_detail->focusReply();
@@ -2621,14 +2788,15 @@ void BoardView::updateDetailLayout()
     // The key line says what the keys do in what is on screen: the list, or a card that has the
     // pane to itself.
     static const QString boardKeys = QStringLiteral(
-        "<b>Enter</b> open &nbsp; <b>e</b> edit &nbsp; <b>n</b> new &nbsp; <b>←/→</b> fold section &nbsp; "
+        "<b>Enter</b> open &nbsp; <b>e</b> edit &nbsp; <b>p</b> plan &nbsp; <b>x</b> execute &nbsp; "
+        "<b>n</b> new &nbsp; <b>←/→</b> fold section &nbsp; "
         "<b>Alt+Shift+↑↓</b> reorder &nbsp; <b>Alt+Shift+←→</b> status &nbsp; <b>m</b> move "
         "&nbsp; <b>/</b> filter &nbsp; <b>t</b> #ID to prompt &nbsp; <b>y</b> copy &nbsp; "
         "<b>o</b> file &nbsp; <b>Ctrl+Z</b> undo");
     static const QString cardKeys = QStringLiteral(
-        "<b>Esc</b> back to the board &nbsp; <b>e</b> edit the title and issue &nbsp; <b>Tab</b> reply "
-        "&nbsp; <b>Enter</b> asks the agent &nbsp; <b>Ctrl+Shift+Enter</b> comments only &nbsp; "
-        "<b>Shift+Enter</b> new line");
+        "<b>Esc</b> back to the board &nbsp; <b>e</b> edit &nbsp; <b>d</b>/<b>Tab</b> reply &nbsp; "
+        "<b>Enter</b> discuss &nbsp; <b>p</b> or <b>Ctrl+Enter</b> plan &nbsp; <b>x</b> execute "
+        "&nbsp; <b>Ctrl+Shift+Enter</b> comment only");
     const bool stacked = width() < kStackedWidth;
     const QString keys = detailOpen() && stacked ? cardKeys : boardKeys;
     if (m_keys->text() != keys)
@@ -2780,6 +2948,63 @@ void BoardView::editSelected()
         return;
     m_editOnOpen = true;
     openSelected();
+}
+
+// `p` / `x`: Plan or Execute the open card, or the selected one once it has been read (the
+// buttons need its sections and front matter to know whether it has a plan).
+void BoardView::cardAction(const QString &action)
+{
+    if (!(detailOpen() && (m_selected.isEmpty() || m_detail->cardId() == m_selected))) {
+        if (m_selected.isEmpty())
+            return;
+        m_actionOnOpen = action;
+        openSelected();
+        return;
+    }
+    if (action == QStringLiteral("plan"))
+        m_detail->plan();
+    else
+        m_detail->execute();
+}
+
+// Execute (#XS6Q): the card goes to a terminal pane's agent. The board records the hand-off with
+// the writes it already has — assignee, In progress, a progress note in the thread — and the
+// window opens the pane (`onExecuteCard`), whose agent gets the card attached and the task text
+// that tells it the board's conventions (board::executeTask). Nothing here is a model turn, so
+// the Switchboard worker stays free for the next Discuss or Plan.
+void BoardView::executeCard(const QString &note)
+{
+    const QString card = m_detail->cardId();
+    if (card.isEmpty())
+        return;
+    if (!onExecuteCard) {
+        m_detail->showError(QStringLiteral("This window cannot open a terminal pane for the card."));
+        return;
+    }
+    const QJsonObject front = m_detail->front();
+    // In this order on the worker's stdin: the hash-checked update first, while the hash is the
+    // one the card was read at, then the move (which re-reads the file), then the note.
+    if (front.value(QStringLiteral("assignee")).toString() != QStringLiteral("agent"))
+        send({{QStringLiteral("type"), QStringLiteral("board_update")}, {QStringLiteral("id"), nextRequestId()},
+              {QStringLiteral("card"), card}, {QStringLiteral("base_hash"), m_detail->hash()},
+              {QStringLiteral("patch"), QJsonObject{{QStringLiteral("fields"),
+                                                     QJsonObject{{QStringLiteral("assignee"), QStringLiteral("agent")}}}}}});
+    if (m_detail->status() != QStringLiteral("in-progress")) {
+        const QString id = nextRequestId();
+        m_pendingNotes.insert(id, QStringLiteral("Moved #%1 to In progress · Execute").arg(card));
+        send({{QStringLiteral("type"), QStringLiteral("board_move")}, {QStringLiteral("id"), id},
+              {QStringLiteral("card"), card}, {QStringLiteral("status"), QStringLiteral("in-progress")},
+              {QStringLiteral("reason"), QStringLiteral("Execute: handed to a terminal pane")}});
+    }
+    send({{QStringLiteral("type"), QStringLiteral("board_comment")}, {QStringLiteral("card"), card},
+          {QStringLiteral("kind"), QStringLiteral("progress")},
+          {QStringLiteral("text"), QStringLiteral("Execute · handed to a new terminal pane beside the "
+                                                  "Switchboard, whose agent works on it and records "
+                                                  "its commits in `links.commits`.")
+                                       + (note.isEmpty() ? QString()
+                                                         : QStringLiteral("\n\n") + note)}});
+    onExecuteCard(card, board::executeTask(card, m_detail->title(), m_detail->hasPlan(),
+                                           m_detail->hasAcceptance(), note));
 }
 
 void BoardView::saveCardEdit(const QJsonObject &patch, const QString &baseHash)
@@ -2994,6 +3219,12 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
     // document, or the pane itself when an open card left the focus nowhere in particular.
     if (text == QStringLiteral("e") && (detailOpen() || !m_selected.isEmpty())) {
         editSelected();
+        return true;
+    }
+    // `p` plans and `x` executes the open card, or the selected one (opening it first) (#XS6Q).
+    if ((text == QStringLiteral("p") || text == QStringLiteral("x"))
+        && (detailOpen() || !m_selected.isEmpty())) {
+        cardAction(text == QStringLiteral("p") ? QStringLiteral("plan") : QStringLiteral("execute"));
         return true;
     }
     if (key->key() == Qt::Key_Escape && detailOpen()) {

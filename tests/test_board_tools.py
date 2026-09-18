@@ -949,5 +949,143 @@ class CleanupLogTests(BoardToolsTest):
             self.assertIn(phrase, text)
 
 
+
+# ------------------------------------------------- card turns: Discuss and Plan (#XS6Q)
+
+class CardTurnScopeTests(BoardToolsTest):
+    """Protocol 19.10: what a Discuss or a Plan turn on a card may touch, enforced by the tools."""
+
+    def read_hash(self, card_id):
+        return self.tools.run("board_read", {"id": card_id})["hash"]
+
+    def test_a_plan_turn_writes_its_own_cards_plan_section(self):
+        card_id = self.create()
+        self.tools.begin_card_turn("plan", card_id)
+        result = self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": self.read_hash(card_id),
+            "replace_section": {"heading": "Plan", "text": "1. Record audio.\n2. Transcribe it."}})
+        self.assertNotIn("error", result, result)
+        self.assertIn("## Plan\n1. Record audio.", self.board.card_by_id(card_id).body)
+
+    def test_a_plan_that_repeats_its_heading_is_written_once(self):
+        card_id = self.create()
+        self.tools.begin_card_turn("plan", card_id)
+        self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": self.read_hash(card_id),
+            "replace_section": {"heading": "Plan", "text": "## Plan\n\n### Goal\nFix it."}})
+        body = self.board.card_by_id(card_id).body
+        self.assertEqual(body.count("## Plan"), 1, body)
+        self.assertIn("### Goal\nFix it.", body)
+
+    def test_a_plan_turn_cannot_retitle_relabel_or_touch_the_issue(self):
+        card_id = self.create()
+        self.tools.begin_card_turn("plan", card_id)
+        for patch in ({"title": "Something else"}, {"fields": {"labels": ["bug"]}},
+                      {"replace_section": {"heading": "Issue", "text": "new words"}},
+                      {"replace_section": {"heading": "Plan", "text": "x"}, "title": "Also this"}):
+            result = self.tools.run("board_update_card",
+                                    {"id": card_id, "base_hash": self.read_hash(card_id), **patch})
+            self.assertEqual(result.get("code"), "board_mode_refused", patch)
+        self.assertEqual(self.board.card_by_id(card_id).title, "Voice transcription mode")
+
+    def test_a_plan_turn_touches_no_other_card_and_moves_nothing(self):
+        mine = self.create()
+        other = self.create(title="Clickable paths", request="clicking a path opens a pane",
+                            not_duplicate_of=[mine])
+        self.tools.begin_card_turn("plan", mine)
+        refused = self.tools.run("board_update_card", {
+            "id": other, "base_hash": self.read_hash(other),
+            "replace_section": {"heading": "Plan", "text": "x"}})
+        self.assertEqual(refused["code"], "board_mode_refused")
+        self.assertEqual(self.tools.run("board_comment", {"id": other, "kind": "note", "text": "hi"})["code"],
+                         "board_mode_refused")
+        self.assertEqual(self.tools.run("board_move_card", {"id": mine, "status": "ready", "reason": "r"})["code"],
+                         "board_mode_refused")
+        self.assertEqual(self.tools.run("board_create_card", {
+            "tab": "features", "status": "inbox", "title": "T", "request": "r"})["code"], "board_mode_refused")
+        # A question for the owner on the card being planned is allowed.
+        asked = self.tools.run("board_comment", {"id": mine, "kind": "question", "text": "1. which?"})
+        self.assertNotIn("error", asked, asked)
+
+    def test_a_discuss_turn_may_rewrite_the_card_and_the_thread_keeps_the_old_text(self):
+        card_id = self.create()
+        self.tools.begin_card_turn("discuss", card_id)
+        result = self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": self.read_hash(card_id), "title": "Voice input (hold Right Alt)",
+            "fields": {"labels": ["feature", "voice"]},
+            "replace_section": {"heading": "Issue", "text": "hold right alt to talk"}})
+        self.assertNotIn("error", result, result)
+        self.assertIn("rewrite", self.kinds(card_id))
+        self.assertIn("add voice transcribe mode", self.thread_text(card_id))
+        moved = self.tools.run("board_move_card", {"id": card_id, "status": "discussing", "reason": "talked"})
+        self.assertNotIn("error", moved, moved)
+
+    def test_the_turn_ends_and_the_tools_are_whole_again(self):
+        card_id = self.create()
+        self.tools.begin_card_turn("plan", card_id)
+        self.assertTrue(self.tools.handles("search_files"))
+        self.tools.end_card_turn()
+        self.assertFalse(self.tools.handles("search_files"))
+        moved = self.tools.run("board_move_card", {"id": card_id, "status": "ready", "reason": "r"})
+        self.assertNotIn("error", moved, moved)
+
+    def test_an_unknown_mode_is_refused(self):
+        with self.assertRaises(T.BoardToolError):
+            self.tools.begin_card_turn("execute", "ABCD")
+
+    def test_the_offered_tools_are_read_only_files_search_and_the_modes_board_tools(self):
+        executor = [T.spec(n, "d", {}, []) for n in
+                    ("run_command", "read_file", "list_directory", "write_file", "edit_file",
+                     "command_output", "stop_command", "load_skill", "run_in_terminal")]
+        plan = {t["function"]["name"] for t in T.CardScope("plan", "ABCD").tool_specs(executor)}
+        self.assertEqual(plan, {"read_file", "list_directory", "load_skill", "search_files",
+                                "board_list", "board_read", "board_update_card", "board_comment"})
+        discuss = {t["function"]["name"] for t in T.CardScope("discuss", "ABCD").tool_specs(executor)}
+        self.assertEqual(discuss - plan, {"board_create_card", "board_move_card"})
+        self.assertFalse({"run_command", "write_file", "edit_file", "run_in_terminal"} & discuss)
+
+
+class SearchFilesTests(BoardToolsTest):
+    def setUp(self):
+        super().setUp()
+        (self.repo / "src").mkdir()
+        (self.repo / "src" / "a.py").write_text("def board_ask():\n    return 1\n", encoding="utf-8")
+        (self.repo / "src" / "b.cpp").write_text("void boardAsk() {}\n", encoding="utf-8")
+        (self.repo / ".env").write_text("board_ask=secret\n", encoding="utf-8")
+        (self.repo / ".git").mkdir()
+        (self.repo / ".git" / "x").write_text("board_ask\n", encoding="utf-8")
+        (self.repo / "bin.dat").write_bytes(b"\0board_ask")
+        card_id = self.create()
+        self.tools.begin_card_turn("plan", card_id)
+
+    def search(self, **args):
+        return self.tools.run("search_files", args)
+
+    def test_it_finds_lines_with_their_path_and_number(self):
+        result = self.search(pattern="board_?ask")
+        self.assertIn("src/a.py:1: def board_ask():", result["matches"])
+        self.assertIn("src/b.cpp:1: void boardAsk() {}", result["matches"])
+
+    def test_it_skips_secrets_git_and_binaries(self):
+        joined = "\n".join(self.search(pattern="board_ask")["matches"])
+        self.assertNotIn(".env", joined)
+        self.assertNotIn(".git", joined)
+        self.assertNotIn("bin.dat", joined)
+
+    def test_a_glob_and_a_path_narrow_it(self):
+        self.assertEqual([m.split(":")[0] for m in self.search(pattern="board", glob="*.cpp")["matches"]],
+                         ["src/b.cpp"])
+        self.assertEqual(self.search(pattern="board", path="src/a.py")["count"], 1)
+
+    def test_it_stays_inside_the_workspace(self):
+        self.assertIn("error", self.search(pattern="x", path="../"))
+        self.assertIn("error", self.search(pattern="("))
+
+    def test_it_is_not_a_tool_outside_a_card_turn(self):
+        self.tools.end_card_turn()
+        with self.assertRaises(T.BoardToolError):
+            self.search(pattern="x")
+
+
 if __name__ == "__main__":       # pragma: no cover
     unittest.main()

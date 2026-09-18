@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "BoardModel.h"
 
+#include <QRegularExpression>
+
 #include <QJsonValue>
 #include <QLocale>
 #include <QTimeZone>
@@ -123,6 +125,66 @@ QString tabTitle(const QString &id)
 QString issueHeading()
 {
     return QStringLiteral("Issue");
+}
+
+QString modeTitle(const QString &mode)
+{
+    if (mode == QStringLiteral("discuss"))
+        return QStringLiteral("Discuss");
+    if (mode == QStringLiteral("plan"))
+        return QStringLiteral("Plan");
+    if (mode == QStringLiteral("execute"))
+        return QStringLiteral("Execute");
+    return {};
+}
+
+QString threadMarkdown(const QString &text, const QString &kind)
+{
+    static const QRegularExpression summary(QStringLiteral("<details>\\s*<summary>(.*?)</summary>"),
+                                            QRegularExpression::DotMatchesEverythingOption);
+    static const QRegularExpression close(QStringLiteral("\\s*</details>"));
+    QString out = text;
+    out.replace(summary, QStringLiteral("**\\1**"));
+    out.replace(close, QString());
+    if (kind == QStringLiteral("rewrite") && out.startsWith(QStringLiteral("- ")))
+        out = out.mid(2);
+    return out;
+}
+
+QString executeTask(const QString &id, const QString &title, bool hasPlan, bool hasAcceptance,
+                    const QString &note)
+{
+    const QString ref = QStringLiteral("#") + id;
+    QStringList lines;
+    lines << QStringLiteral("Execute %1: %2").arg(ref, title) << QString();
+    QString what = QStringLiteral("The Switchboard card %1 is attached");
+    if (hasPlan && hasAcceptance)
+        what += QStringLiteral(" with its issue, its `## Plan` and its acceptance. Carry out the plan "
+                               "until the acceptance holds.");
+    else if (hasPlan)
+        what += QStringLiteral(" with its issue and its `## Plan`. Carry out the plan.");
+    else if (hasAcceptance)
+        what += QStringLiteral(" with its issue and its acceptance. It has no plan: read the code "
+                               "first, then implement it until the acceptance holds.");
+    else
+        what += QStringLiteral(" with its issue. It has no plan and no acceptance: read the code "
+                               "first, and say what you took \"done\" to mean when you finish.");
+    lines << what.arg(ref) << QString();
+    lines << QStringLiteral("The owner handed it to you from the Switchboard; it is already in "
+                            "progress and assigned to the agent.")
+          << QStringLiteral("- When you start, set `implemented_by` on %1 to your model "
+                            "(board_update_card).").arg(ref)
+          << QStringLiteral("- Put %1 in the message of every commit you make for it, and after "
+                            "each commit add its short hash to the card's `links.commits` "
+                            "(board_update_card `fields.links`: the card's whole `links` object "
+                            "from board_read, with the hash appended).").arg(ref)
+          << QStringLiteral("- Post progress, questions and decisions on %1 with board_comment, "
+                            "not only here.").arg(ref)
+          << QStringLiteral("- When it lands, move %1 to needs-qa-llm with the evidence path and a "
+                            "`## QA checklist`, as the Switchboard rules say.").arg(ref);
+    if (!note.trimmed().isEmpty())
+        lines << QString() << QStringLiteral("The owner adds, verbatim:") << note.trimmed();
+    return lines.join(QLatin1Char('\n'));
 }
 
 QString statusGlyph(const QString &status)

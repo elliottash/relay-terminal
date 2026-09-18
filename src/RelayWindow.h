@@ -2280,6 +2280,20 @@ public:
             w->setActiveLeaf(w->m_active);
             w->m_active->focusInput();
         };
+        // Execute (#XS6Q): a new terminal pane beside the board, in the board's workspace, on
+        // the main agent (it builds the card), handed the card as its first task.
+        view->onExecuteCard = [guard, workspace](const QString &card, const QString &task) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            Pane *pane = nullptr;
+            try { pane = w->createPane({{"cwd", workspace}, {"workspace", workspace}, {"agent_role", "main"}}); }
+            catch (const std::exception &error) { w->statusBar()->showMessage(QString::fromUtf8(error.what()), 9000); return; }
+            w->insertBeside(guard, pane, Qt::Horizontal, false);
+            w->setActive(pane);
+            focusLeaf(pane);
+            pane->startBoardTask(task, card);
+            w->updateTitles();
+        };
         view->onHint = [guard](const QString &id, const QString &keys) {
             auto *w = windowOf(guard);
             if (!w || keys.isEmpty()) return;
