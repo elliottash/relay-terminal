@@ -6,7 +6,10 @@ The first test is the one that matters: it reads the event names the worker actu
 what makes "denied by default" a property of the codebase rather than a sentence in a document —
 adding an event to the worker breaks this test until somebody decides whether a phone may see it.
 """
+import json
 import re
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -208,6 +211,42 @@ class PairingTests(unittest.TestCase):
         room = pairing.Room(room="r1", ttl=-1)
         self.assertTrue(room.expired)
         self.assertFalse(room.check(room.secret))
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class BrowserPairLinkTests(unittest.TestCase):
+    """app/rrp.js parsing the links a phone actually receives."""
+
+    def parse(self, fragments: list[str]) -> list[dict]:
+        done = subprocess.run(
+            [shutil.which("node"), str(Path(__file__).resolve().parent / "pair_link_peer.mjs"),
+             json.dumps(fragments)], capture_output=True, text=True,
+            cwd=str(Path(__file__).resolve().parent.parent))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def test_a_plain_link_parses(self):
+        url = pairing.pair_url("https://host", b"\x11" * 32, b"\x22" * 16, "room-1")
+        result = self.parse(["#" + url.split("#", 1)[1]])[0]
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["room"], "room-1")
+        self.assertEqual(result["desktop"], pairing.b64(b"\x11" * 32))
+        self.assertEqual(result["secret"], pairing.b64(b"\x22" * 16))
+
+    def test_percent_encoded_separators_still_parse(self):
+        """Some QR readers escape the fragment, which used to read as "missing 'd'"."""
+        url = pairing.pair_url("https://host", b"\x11" * 32, b"\x22" * 16, "room-1")
+        fragment = url.split("#", 1)[1].replace("&", "%26")
+        result = self.parse(["#" + fragment])[0]
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["room"], "room-1")
+        self.assertEqual(result["desktop"], pairing.b64(b"\x11" * 32))
+
+    def test_a_truncated_link_says_what_to_do(self):
+        for fragment in ("#v=1", "#v=1&d=" + pairing.b64(b"\x11" * 32), "#", "#v=1&d=short&s=a&r=b"):
+            result = self.parse([fragment])[0]
+            self.assertFalse(result["ok"], fragment)
+            self.assertIn("again", result["error"].lower(), fragment)
 
 
 class LabelTests(unittest.TestCase):

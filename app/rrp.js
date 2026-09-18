@@ -106,14 +106,37 @@ export class Rrp extends EventTarget {
   // -- pairing ----------------------------------------------------------------------------------
 
   static parsePairFragment(fragment) {
-    const fields = new URLSearchParams(fragment.replace(/^#/, ''));
-    for (const required of ['v', 'd', 's', 'r']) {
-      if (!fields.get(required)) throw new Error(`the pairing link is missing '${required}'.`);
+    let raw = fragment.replace(/^#/, '');
+    // Some QR readers and link handlers percent-encode the fragment, which turns the separators
+    // into %26 and leaves one field called `v` holding the whole rest of the link. Undo that
+    // before parsing rather than reporting a missing field the user cannot do anything about.
+    if (!raw.includes('&') && /%26/i.test(raw)) {
+      try {
+        raw = decodeURIComponent(raw);
+      } catch {
+        /* keep the original and let the checks below report it */
+      }
     }
-    if (fields.get('v') !== '1') throw new Error('this link needs a newer version of the app.');
-    const desktopPublic = un64(fields.get('d'));
-    if (desktopPublic.length !== 32) throw new Error('the desktop key in the link is malformed.');
-    return { desktopPublic, secret: un64(fields.get('s')), room: fields.get('r') };
+    const fields = new URLSearchParams(raw);
+    for (const required of ['v', 'd', 's', 'r']) {
+      if (!fields.get(required)) {
+        throw new Error('That pairing link is incomplete — part of it was lost on the way here. '
+          + 'Scan the QR code on your desktop again.');
+      }
+    }
+    if (fields.get('v') !== '1') throw new Error('This link needs a newer version of the app.');
+    const damaged = new Error('That pairing link is damaged — scan the QR code on your desktop '
+      + 'again.');
+    let desktopPublic;
+    let secret;
+    try {
+      desktopPublic = un64(fields.get('d'));
+      secret = un64(fields.get('s'));
+    } catch {
+      throw damaged;            // not base64: the link was mangled, not merely truncated
+    }
+    if (desktopPublic.length !== 32 || secret.length < 16) throw damaged;
+    return { desktopPublic, secret, room: fields.get('r') };
   }
 
   async pair(link, { name, platform }) {

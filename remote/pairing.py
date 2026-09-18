@@ -16,7 +16,7 @@ import hmac
 import secrets
 import time
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import parse_qs, unquote, urlsplit
 
 SECRET_BYTES = 16          # 128 bits
 ROOM_TTL = 300             # five minutes
@@ -48,7 +48,12 @@ def parse_pair_url(url: str) -> dict:
     parts = urlsplit(url)
     if not parts.fragment:
         raise ValueError("that link carries no pairing fragment.")
-    fields = {name: values[0] for name, values in parse_qs(parts.fragment).items()}
+    fragment = parts.fragment
+    # Some QR readers and link handlers percent-encode the fragment, which turns the separators
+    # into %26 and leaves one field holding the rest of the link.
+    if "&" not in fragment and "%26" in fragment.lower():
+        fragment = unquote(fragment)
+    fields = {name: values[0] for name, values in parse_qs(fragment).items()}
     for required in ("v", "d", "s", "r"):
         if required not in fields:
             raise ValueError(f"the pairing link is missing '{required}'.")
