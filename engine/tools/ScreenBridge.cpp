@@ -14,7 +14,10 @@
 //   in   {"t":"input","bytes":"<base64>"}      keys or text for the program
 //        {"t":"resize","rows":R,"cols":C}      the *desktop* resizing its own pane
 //        {"t":"snapshot"}                      ask for a full frame (a phone reconnected)
-//        {"t":"history","before":K,"count":N}   scrollback: the N lines before the newest K
+//        {"t":"history","before_row":R,"count":N}  scrollback: the N lines ending just below the
+//                                                  absolute row R (omit R for the newest page)
+//        {"t":"history","before":K,"count":N}   the same page named from the end: the N lines
+//                                                  before the newest K
 //        {"t":"signal","name":"int"}           ^C without guessing an encoding
 //        {"t":"quit"}
 //
@@ -145,14 +148,23 @@ private:
     // Scrollback for a phone (protocol section 6.5), styled: the page goes out in exactly the
     // `segs` shape the live screen uses, through the same screenjson::rowOf().
     //
-    // `before` counts from the end — the page is the N lines above the newest K — because an
-    // absolute row number would drift the moment the shell prints anything. The reply carries the
-    // absolute rows anyway (`from`, and `row` per line), so a client that wants to anchor a
-    // scrollbar can, and `total` says how far back the page came from.
+    // A page can be named two ways and both end up at the same absolute range.
+    //
+    // `endRow` is an absolute row: the page is the N lines ending just below it, which is the
+    // cursor RRP/1 carries (section 6.5). An absolute row does not move when the shell prints —
+    // only an eviction from a full scrollback ring shifts it — so a phone that paged back and
+    // then asks for the lines above what it holds gets exactly those, with no overlap and no
+    // hole, however much output arrived meanwhile.
+    //
+    // `before` counts back from the newest row instead, for a caller that only wants "the last
+    // N and then the N above those" and is not racing live output. `endRow < 0` selects it.
+    //
+    // The reply carries the absolute rows either way (`from`, and `row` per line), and `total`
+    // says how far back the page came from.
     //
     // historyLines() is const and never moves the viewport, which is the other hard rule of
     // section 6.5: the desktop user's screen is shared state.
-    void sendHistory(int before, int count)
+    void sendHistory(int before, int endRow, int count)
     {
         before = qBound(0, before, 10'000'000);
         count = qBound(1, count, 200);
@@ -160,7 +172,8 @@ private:
         std::vector<Line> lines;
         m_session->withCore([&](VtCore &core) {
             total = core.historyRows();
-            const int end = qMax(0, total - before); // one past the newest row of this page
+            // One past the newest row of this page, clamped into the scrollback either way.
+            const int end = qBound(0, endRow >= 0 ? endRow : total - before, total);
             const int want = qMin(count, end);
             from = core.historyLines(end - want, want, &lines);
         });
@@ -216,7 +229,9 @@ private:
             m_forceSnapshot = true;
             sendFrame();
         } else if (kind == QLatin1String("history")) {
-            sendHistory(message.value("before").toInt(0), message.value("count").toInt(50));
+            sendHistory(message.value("before").toInt(0),
+                        message.value("before_row").toInt(-1),
+                        message.value("count").toInt(50));
         } else if (kind == QLatin1String("signal")) {
             const qint64 pid = m_session->foregroundPid();
             if (pid > 0) ::kill(pid_t(pid), SIGINT);

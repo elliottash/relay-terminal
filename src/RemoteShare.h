@@ -64,11 +64,6 @@ public:
         // without it the text may only reach the agent (the hub enforces which devices get it).
         std::function<void(const QString &text, bool route, const QString &origin)> compose;
         std::function<void()> stopAgent;
-        // A voice clip from a phone (docs/REMOTE-PROTOCOL.md section 6.4). The pane hands it to
-        // the same worker request its own microphone uses and answers with `voiceResult`; the
-        // text belongs to the device that spoke, never to the desktop's prompt box.
-        std::function<void(const QString &requestId, const QByteArray &audio,
-                           const QString &format)> transcribe;
     };
 
     // Start the sidecar if needed and share this pane. Returns false with `error` set when the
@@ -88,12 +83,6 @@ public:
     // Password entry is off for every device until the owner turns it on for that one
     // (docs/REMOTE-PROTOCOL.md section 6.7); this is the switch the dialog drives.
     void setPasswordEntry(const QString &deviceId, bool allow);
-
-    // The answer to one `voice` line, carrying back the id it arrived with so that two clips in
-    // flight cannot be given each other's words. `error` is what the phone shows when `ok` is
-    // false; no audio and no key ever leaves this machine.
-    void voiceResult(const QString &paneId, const QString &requestId, bool ok,
-                     const QString &text, const QString &error);
 
 signals:
     void startedChanged();

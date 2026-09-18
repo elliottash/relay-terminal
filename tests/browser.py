@@ -48,16 +48,11 @@ def find_chrome() -> str | None:
 class Browser:
     """One headless Chrome with one page."""
 
-    def __init__(self, binary: str | None = None, *, insecure: bool = False,
-                 microphone: bool = False):
+    def __init__(self, binary: str | None = None, *, insecure: bool = False):
         self.binary = binary or find_chrome()
         # `insecure` is for the development certificate only: the GUI shares over https with a
         # self-signed certificate, and a phone gets a warning it can accept. Chrome cannot.
         self.insecure = insecure
-        # `microphone` gives the page Chrome's own fake capture device and answers the permission
-        # prompt for it, so a voice test records a real clip through a real MediaRecorder without
-        # any hardware. Off by default: a page that asks for the microphone should have to.
-        self.microphone = microphone
         self.process: subprocess.Popen | None = None
         self.socket: ws.WebSocket | None = None
         self.profile: tempfile.TemporaryDirectory | None = None
@@ -78,9 +73,6 @@ class Browser:
                      f"--user-data-dir={self.profile.name}"]
         if self.insecure:
             arguments.append("--ignore-certificate-errors")
-        if self.microphone:
-            arguments += ["--use-fake-device-for-media-stream",
-                          "--use-fake-ui-for-media-stream"]
         arguments.append("about:blank")
         self.process = subprocess.Popen(arguments, stdout=subprocess.DEVNULL,
                                         stderr=subprocess.DEVNULL)

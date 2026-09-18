@@ -12,7 +12,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFontDatabase>
-#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QLabel>
@@ -76,12 +75,6 @@ RemoteShare::RemoteShare()
     m_poll = new QTimer(this);
     m_poll->setInterval(700);
     connect(m_poll, &QTimer::timeout, this, &RemoteShare::poll);
-    // The presence rule for notifications (docs/REMOTE-PROTOCOL.md section 9): the hub must not
-    // push to a phone while this window is the active, focused one, because the person is already
-    // looking at it. Only the GUI knows that, so it says so.
-    connect(qApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState s) {
-        send({{"t", "window_active"}, {"active", s == Qt::ApplicationActive}});
-    });
 }
 
 RemoteShare::~RemoteShare() = default;
@@ -123,8 +116,6 @@ bool RemoteShare::ensureSidecar(QString *error)
     }
     QJsonObject start{{"t", "start"}, {"tls", true}, {"name", QStringLiteral("this desktop")}};
     send(start);
-    send({{"t", "window_active"},
-          {"active", QGuiApplication::applicationState() == Qt::ApplicationActive}});
     return true;
 }
 
@@ -211,21 +202,6 @@ void RemoteShare::handle(const QJsonObject &message)
             it->hooks.secret(QByteArray::fromBase64(
                 message.value(QStringLiteral("bytes")).toString().toLatin1()));
         }
-    } else if (kind == QLatin1String("voice")) {
-        // A clip recorded on a phone. It is handed to the pane's own worker, which holds the
-        // key; this process decodes the base64 and nothing more.
-        const QString paneId = message.value(QStringLiteral("pane")).toString();
-        const QString requestId = message.value(QStringLiteral("id")).toString();
-        auto it = m_panes.find(paneId);
-        if (it == m_panes.end() || !it->hooks.transcribe) {
-            voiceResult(paneId, requestId, false, QString(),
-                        QStringLiteral("That pane is no longer shared."));
-        } else {
-            it->hooks.transcribe(requestId,
-                                 QByteArray::fromBase64(
-                                     message.value(QStringLiteral("data")).toString().toLatin1()),
-                                 message.value(QStringLiteral("format")).toString());
-        }
     } else if (kind == QLatin1String("agent_stop")) {
         const QString paneId = message.value(QStringLiteral("pane")).toString();
         auto it = m_panes.find(paneId);
@@ -240,16 +216,6 @@ void RemoteShare::handle(const QJsonObject &message)
         m_running = false;
         emit startedChanged();
     }
-}
-
-void RemoteShare::voiceResult(const QString &paneId, const QString &requestId, bool ok,
-                              const QString &text, const QString &error)
-{
-    QJsonObject reply{{"t", QStringLiteral("transcribed")}, {"pane", paneId},
-                      {"id", requestId}, {"ok", ok}};
-    if (ok) reply.insert(QStringLiteral("text"), text);
-    else reply.insert(QStringLiteral("error"), error);
-    send(reply);
 }
 
 bool RemoteShare::sharePane(const QString &paneId, const PaneHooks &hooks, QString *error)

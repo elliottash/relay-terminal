@@ -508,6 +508,31 @@ class BridgeHistoryTests(unittest.TestCase):
                 empty = await self._expect(process, "history")
                 self.assertEqual(empty["lines"], [])
                 self.assertFalse(empty["more"])
+
+                # The absolute cursor names the same page: `before_row` is the row the page ends
+                # just below, which is what RRP/1 carries because it does not move when the shell
+                # prints. Paging with it joins exactly, even across new output.
+                await self._send(process, {"t": "history", "before_row": newest["from"] + 10,
+                                           "count": 10})
+                same = await self._expect(process, "history")
+                self._check_rows(same)
+                self.assertEqual(same["from"], newest["from"])
+                self.assertEqual([self._text(row) for row in same["lines"]],
+                                 [self._text(row) for row in newest["lines"]])
+
+                # Thirty more lines scroll by; the page above `same` is still the page above it.
+                await self._send(process, {"t": "input", "bytes": base64.b64encode(
+                    b"for i in $(seq 1 30); do echo later-$i; done\n").decode()})
+                await self._expect(process, ("snapshot", "diff"), seconds=30,
+                                   wanted=lambda message: any("later-30" in self._text(row)
+                                                              for row in message.get("lines", [])))
+                await self._send(process, {"t": "history", "before_row": same["from"],
+                                           "count": 10})
+                above = await self._expect(process, "history")
+                self._check_rows(above)
+                self.assertEqual(above["from"] + len(above["lines"]), same["from"])
+                self.assertGreater(above["total"], same["total"],
+                                   "the shell should have printed into scrollback")
             finally:
                 with contextlib.suppress(Exception):
                     await self._send(process, {"t": "quit"})
@@ -516,9 +541,6 @@ class BridgeHistoryTests(unittest.TestCase):
                     process.kill()
         asyncio.run(asyncio.wait_for(main(), 120))
 
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 @unittest.skipUnless(BRIDGE, "relay-screen-bridge is not built")
@@ -566,3 +588,7 @@ class HistoryTests(unittest.TestCase):
                 self.assertEqual(len(hist), len(set(hist)), "a page repeated itself")
                 await client.close()
         asyncio.run(asyncio.wait_for(main(), 120))
+
+
+if __name__ == "__main__":
+    unittest.main()
