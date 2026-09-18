@@ -1464,12 +1464,25 @@ of the platform and of the engine itself.
 - Rich integration is Bash only. Zsh, Fish, SSH and tmux sessions work through native input.
 - The GUI process holds every pane's screen and scrollback, so a crash in the engine takes
   down every pane. Per-pane process isolation is tracked separately.
+- The window layer is one translation unit. `src/main.cpp` includes `src/Pane.h`, `src/RelayWindow.h`
+  and the rest, and nothing else does; every class there defines its members in the class body. That
+  is deliberate — splitting the file (2026-09-18) was about reading it, not about build times — but
+  it means a one-line change to `Pane` still recompiles all ~13,000 lines. De-inlining `Pane` into a
+  `Pane.cpp` is the separate, riskier job that would fix that.
 
 ## 18. Source map
 
 | Path | Content |
 |---|---|
-| `src/main.cpp` | `Keymap`, `isolation`, `Pane`, `ToolPane`, `WindowManager`, `RelayWindow`, palette, `main()` |
+| `src/main.cpp` | the app's includes, the `relay://` handler registration, the quit signal, `main()`. The window layer below is `#include`d from here and nowhere else, so it is still one translation unit — the headers hold classes whose members are all defined in the class body, and de-inlining them is a separate job |
+| `src/AppPaths.h` | `dataRoot()` (where the backend, shell and scripts are) and `relayFuzzyScore()` (how the palette and the `@` picker rank rows), plus the `RELAY_VERSION` / `RELAY_DATA_DIR` / `RELAY_SOURCE_DIR` fallbacks |
+| `src/Keymap.h` | every window-level shortcut as a named action: defaults, `keybindings.json` overrides, the presets, and the reload (section 12) |
+| `src/Isolation.h` | per-pane systemd scopes: whether they are available, the memory limits, and what systemd says killed one (section 2) |
+| `src/Pane.h` | `Pane` — the terminal pane: its backend, Bash bridge, composer, queue, agent worker and conversation — and `QueueRowDelegate`, which draws the queue rows. `Pane` never names a window; it calls up through `std::function` callbacks |
+| `src/PaneChrome.h` | `ToolPane` (explorer, preview, plan, transcript, Switchboard, settings) and `PaneChrome`, the button row and drag grip in a pane's corner |
+| `src/WindowChrome.h` | `ChromeButton`, the painted header glyphs Relay draws instead of taking the desktop's title bar, and `NotificationsPopup`, the list behind the bell |
+| `src/RelayWindow.h` | `ClosedItem` and `WindowManager` (the windows, what was closed, `relay open PATH`, the saved layout), then `RelayWindow` — the tab row that is the title bar, the splitter tree, the palette, and shortcut routing. The two share a header because they name each other inline |
+| `src/WindowManagerImpl.h` | the `WindowManager` members that need the complete `RelayWindow`: opening and restoring windows, and reading and writing the saved layout. Included after `RelayWindow.h` |
 | `src/RichEditor.*` | composer editor |
 | `src/FilePanes.*` | explorer and preview widgets |
 | `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Switchboard: card rows, tabs, columns, filters; the pane and card detail; the per-window Switchboard worker |

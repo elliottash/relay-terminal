@@ -274,7 +274,13 @@ if(RELAY_BUILD_APP)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
         message(FATAL_ERROR "Relay v0.1 targets Linux (/proc and the Bash integration).")
     endif()
-    add_executable(relay src/main.cpp src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/Hints.cpp src/Hints.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
+    # main.cpp was split into one header per unit on 2026-09-18 (scripts/split-main.py); it is
+    # still one translation unit -- main.cpp includes them -- and they are listed so AUTOMOC and
+    # IDEs see them.
+    add_executable(relay src/main.cpp
+        src/AppPaths.h src/Keymap.h src/Isolation.h src/Pane.h src/PaneChrome.h
+        src/WindowChrome.h src/RelayWindow.h src/WindowManagerImpl.h
+        src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/Hints.cpp src/Hints.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
