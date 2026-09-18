@@ -773,6 +773,61 @@ void RolesDialog::buildActionRow(QVBoxLayout *into, const QJsonObject &action) {
     into->addWidget(row);
 }
 
+// Image context (issue EM1E): the vision model, chosen separately from the pane's own model.
+//
+// It sits with the three tiers rather than in Advanced, because it is a model the user picks, not a
+// tier a job follows: a turn carrying an image goes here whenever the pane's model cannot read one.
+// Left at "Automatic" it is the provider's own image model (GLM-5.3 → GLM-5.3-Flash); with nothing
+// to fall back to, an image turn is refused with a message instead of failing at the provider.
+void RolesDialog::buildVisionRow(QVBoxLayout *into) {
+    const QString role = QStringLiteral("vision");
+    const QJsonObject resolved = m_resolvedRoles.value(role).toObject();
+    const QString model = str(resolved, "model");
+    const QString source = str(resolved, "source");
+    const bool haveOne = !model.isEmpty() && source != QStringLiteral("main") && source != QStringLiteral("fallback");
+
+    auto *row = new QWidget;
+    row->setObjectName(QStringLiteral("visionRow"));
+    auto *box = new QHBoxLayout(row);
+    box->setContentsMargins(0, 2, 0, 2);
+    auto *text = new QVBoxLayout;
+    text->setSpacing(1);
+    auto *title = new QLabel(QStringLiteral("Vision model · %1").arg(haveOne ? model : QStringLiteral("none")));
+    QFont bold = title->font();
+    bold.setBold(true);
+    title->setFont(bold);
+    text->addWidget(title);
+    text->addWidget(hint(haveOne
+        ? QStringLiteral("a prompt with an image runs here for that turn, then goes back to your model")
+        : QStringLiteral("your model cannot read images and none is set, so a prompt with an image is refused")));
+    box->addLayout(text, 1);
+
+    QSettings settings;
+    const QString pinnedPreset = settings.value(roleSetting(role, QStringLiteral("preset"))).toString();
+    auto *choice = new QComboBox;
+    choice->setAccessibleName(QStringLiteral("Vision model"));
+    choice->setToolTip(QStringLiteral("Which model reads images. Automatic uses your provider's own image "
+                                      "model where it has one."));
+    choice->addItem(QStringLiteral("Automatic"), QString());
+    if (!pinnedPreset.isEmpty())
+        choice->addItem(QStringLiteral("Pinned · ") + shortProviderLabel(pinnedPreset), QStringLiteral("pinned"));
+    choice->addItem(QStringLiteral("Pin to a model…"), QStringLiteral("pin"));
+    choice->setCurrentIndex(pinnedPreset.isEmpty() ? 0 : 1);
+    connect(choice, QOverload<int>::of(&QComboBox::activated), this, [this, choice, role](int i) {
+        const QString chosen = choice->itemData(i).toString();
+        if (chosen == QStringLiteral("pinned")) return;
+        if (chosen == QStringLiteral("pin")) { pinRole(role); return; }
+        QSettings settings;
+        settings.remove(roleSetting(role, QStringLiteral("preset")));
+        settings.remove(roleSetting(role, QStringLiteral("model")));
+        settings.remove(roleSetting(role, QStringLiteral("tier")));
+        if (onRolesChanged) onRolesChanged();
+        rebuild();
+    });
+    box->addWidget(choice);
+    into->addWidget(row);
+}
+
 // Pin one job to a provider and model of its own. Only providers with a stored key are offered,
 // because a role whose key is missing just falls back to the main agent.
 void RolesDialog::pinRole(const QString &role) {
@@ -849,6 +904,7 @@ void RolesDialog::rebuild() {
     QVBoxLayout *tiers = clear(m_tiers);
     for (const auto &value : m_catalog.value(QStringLiteral("tiers")).toArray())
         buildTierRow(tiers, str(value.toObject(), "id"), value.toObject());
+    buildVisionRow(tiers);   // image context (issue EM1E): a model for pictures, beside the tiers
 
     m_disclosure->setText(m_showAdvanced ? QStringLiteral("▾ Advanced options")
                                          : QStringLiteral("▸ Advanced options"));
@@ -858,7 +914,12 @@ void RolesDialog::rebuild() {
         advanced->addWidget(hint(QStringLiteral(
             "Each job follows one of the three tiers above unless you pin it. Changing a tier moves every "
             "job that follows it.")));
-        for (const auto &value : std::as_const(m_actions)) buildActionRow(advanced, value.toObject());
+        // "vision" has its own row beside the tiers (image context), so it is not repeated here.
+        for (const auto &value : std::as_const(m_actions)) {
+            const QJsonObject action = value.toObject();
+            if (str(action, "role") == QStringLiteral("vision")) continue;
+            buildActionRow(advanced, action);
+        }
         advanced->addStretch(1);
     }
     m_filling = false;
