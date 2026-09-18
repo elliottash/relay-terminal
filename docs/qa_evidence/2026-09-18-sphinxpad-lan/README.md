@@ -24,6 +24,25 @@ g++ 13 (aarch64) runs `feed` first, g++ 15 (x86_64) runs `finish` first, which f
 before the text is fed. Fixed by sequencing both calls; the laptop now passes the same suites spark
 does. A second toolchain earning its keep on the first run.
 
+### The suites on the laptop, and two things the second machine exposed
+
+`ctest` there: 44 of 45, with `backend-and-bash` the only failure, and nothing in it is a code bug:
+
+- **`cryptography` is missing from the interpreter `ctest` picks up.** A non-interactive shell there
+  finds the owner's uv-managed CPython 3.12 (`~/.local/share/uv/python/…`) before
+  `/usr/bin/python3` 3.14, which does have it. Every `test_remote_*` module fails to import for that
+  reason alone. Run with the system interpreter and they pass:
+  `cd tests && PYTHONPATH=../backend:.. /usr/bin/python3 -m unittest test_remote_pane_state
+  test_remote_wire test_remote_host test_queue` → 123 tests, OK. Nothing was installed into the
+  owner's uv environment to make `ctest` happy; that is his to decide.
+- **Four `test_router` cases depend on what is installed on the machine.** `test_table_routes_correctly`,
+  the two `a_semicolon_in_a_sentence_is_not_a_command` cases and `sentence_punctuation_is_not_a_mistyped_command`
+  use "Docker ps" and "ok; Docker ps", and pass on spark only because `docker` is on its PATH.
+  sphinxpad has no `docker`, so the router reads the same sentence differently and they fail. The
+  router's own resolution is injectable elsewhere (the unknown-`/command` work does this), so these
+  cases should pass a command table in rather than read the machine's PATH — for the router's owner,
+  not changed here. `test_ssh_shell.test_bash` is the same kind of thing: it needs a reachable sshd.
+
 ## What the phones and tablets need
 
 The owner has an iPad, an iPhone, a Lenovo Android tablet, a Pixel and the laptop browser.
