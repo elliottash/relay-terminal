@@ -2,33 +2,21 @@
 #include "EngineBackend.h"
 
 #include "Theme.h"
+#include "ThemeFile.h"
 #include "view/TerminalView.h"
 
-#include <QFile>
 #include <QFont>
 #include <QSettings>
 
 namespace relay {
-
-namespace {
-
-QColor colorAt(const QSettings &scheme, const QString &group, const QColor &fallback)
-{
-    const QStringList parts = scheme.value(group + QStringLiteral("/Color")).toString().split(QLatin1Char(','));
-    if (parts.size() != 3)
-        return fallback;
-    bool r = false, g = false, b = false;
-    const QColor color(parts[0].trimmed().toInt(&r), parts[1].trimmed().toInt(&g), parts[2].trimmed().toInt(&b));
-    return r && g && b && color.isValid() ? color : fallback;
-}
-
-} // namespace
 
 EngineBackend::EngineBackend(const QString &coreName, QWidget *parent)
     : VTermBackend(coreName, parent)
 {
     applyRelayProfile();
     applySettings();
+    // A theme switch repaints running engine panes; no new pane is needed for this engine.
+    connect(theme::notifier(), &theme::Notifier::themeChanged, this, [this] { applyThemeColors(); });
     if (TerminalView *v = view())
         v->setScrollToBottomOnKeystroke(true);
 }
@@ -39,8 +27,8 @@ void EngineBackend::applySettings()
         v->setCopyOnSelect(QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool());
 }
 
-// Relay ships one Konsole profile and colour scheme in data/theme/konsole; engine
-// panes read the same files so both engines look the same side by side.
+// Relay ships one Konsole profile in data/theme/konsole; engine panes read its font and
+// spacing so both engines look the same side by side. Colour comes from the theme below.
 void EngineBackend::applyRelayProfile()
 {
     TerminalView *v = view();
@@ -60,24 +48,31 @@ void EngineBackend::applyRelayProfile()
     v->setPadding(profile.value(QStringLiteral("Appearance/TerminalMargin"), 2).toInt());
     v->setUnfocusedCursorVisible(profile.value(QStringLiteral("Cursor Options/ShowUnfocusedCursor"), true).toBool());
 
-    const QString schemeName = profile.value(QStringLiteral("Appearance/ColorScheme"), QStringLiteral("RelayDark")).toString();
-    const QString schemePath = dir + QStringLiteral("/konsole/") + schemeName + QStringLiteral(".colorscheme");
-    if (!QFile::exists(schemePath))
+    applyThemeColors();
+}
+
+// Colour comes from the selected theme (issue 0JA7) rather than from a checked-in .colorscheme:
+// data/theme/themes/<id>.toml is the single source of truth, and the Konsole scheme KonsolePart
+// panes read is generated from the same file.
+void EngineBackend::applyThemeColors()
+{
+    TerminalView *v = view();
+    if (!v)
         return;
-    const QSettings scheme(schemePath, QSettings::IniFormat);
+    const theme::ThemeSpec &spec = theme::active();
     ColorScheme colors = v->colorScheme();
-    colors.background = colorAt(scheme, QStringLiteral("Background"), colors.background);
-    colors.foreground = colorAt(scheme, QStringLiteral("Foreground"), colors.foreground);
-    colors.cursor = colorAt(scheme, QStringLiteral("Color7Intense"), colors.foreground);
+    if (spec.terminalBackground.isValid())
+        colors.background = spec.terminalBackground;
+    if (spec.terminalForeground.isValid())
+        colors.foreground = spec.terminalForeground;
+    colors.cursor = spec.terminalCursor.isValid() ? spec.terminalCursor : colors.foreground;
     colors.cursorText = colors.background;
-    // Konsole numbers the 16 ANSI colours Color0..Color7 plus their Intense variants.
-    for (int i = 0; i < 8; ++i) {
-        const QString base = QStringLiteral("Color%1").arg(i);
-        colors.palette[size_t(i)] = colorAt(scheme, base, QColor::fromRgb(colors.palette[size_t(i)])).rgb();
-        colors.palette[size_t(i + 8)] =
-            colorAt(scheme, base + QStringLiteral("Intense"), QColor::fromRgb(colors.palette[size_t(i + 8)])).rgb();
-    }
+    // The engine numbers the 16 ANSI colours 0-7 then the bright eight, as the theme file does.
+    if (spec.ansi.size() == 16)
+        for (int i = 0; i < 16; ++i)
+            colors.palette[size_t(i)] = spec.ansi.at(i).rgb();
     v->setColorScheme(colors);
+    v->update();
 }
 
 } // namespace relay

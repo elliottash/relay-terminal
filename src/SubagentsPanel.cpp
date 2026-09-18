@@ -13,8 +13,9 @@ namespace relay {
 namespace {
 QString str(const QJsonObject &o, const char *key) { return o.value(QLatin1String(key)).toString(); }
 
-const QColor kDone{126, 200, 140};
-const QColor kFailed{240, 113, 120};
+// Read at paint time so a theme switch recolours the list (issue 0JA7).
+inline const QColor &kDone() { return theme::Success; }
+inline const QColor &kFailed() { return theme::SyntaxUnknown; }
 }  // namespace
 
 SubagentModel::SubagentModel() {
@@ -430,8 +431,8 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
         const SubagentRow &row = rows.at(first + i);
         QColor color = theme::TextMuted;
         if (row.status == QStringLiteral("running")) color = theme::Accent;
-        else if (row.status == QStringLiteral("done")) color = kDone;
-        else if (row.status == QStringLiteral("failed")) color = kFailed;
+        else if (row.status == QStringLiteral("done")) color = kDone();
+        else if (row.status == QStringLiteral("failed")) color = kFailed();
         QStringList parts;
         if (!row.live()) parts << row.status;
         else if (row.status == QStringLiteral("waiting")) parts << QStringLiteral("waiting");

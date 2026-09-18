@@ -16,10 +16,11 @@ namespace relay {
 namespace {
 constexpr int kIdRole = Qt::UserRole;          // todo id on task rows
 constexpr int kGroupRole = Qt::UserRole + 1;   // "#earlier" on the group row
-const QColor kDone{126, 200, 140};
-const QColor kWarn{229, 192, 123};
-const QColor kFailed{224, 108, 117};
-const QColor kCancelled{150, 150, 160};
+// Status colours follow the selected theme (issue 0JA7), so they are read at paint time.
+inline const QColor &kDone() { return theme::Success; }
+inline const QColor &kWarn() { return theme::Warning; }
+inline const QColor &kFailed() { return theme::Error; }
+inline const QColor &kCancelled() { return theme::TextMuted; }
 
 // Model text is untrusted; drop control characters except newline and tab.
 QString clean(const QString &text) {
@@ -33,11 +34,11 @@ QString clean(const QString &text) {
 }
 
 QColor statusColor(const QString &status) {
-    if (status == QStringLiteral("done") || status == QStringLiteral("completed")) return kDone;
+    if (status == QStringLiteral("done") || status == QStringLiteral("completed")) return kDone();
     if (status == QStringLiteral("in_progress")) return theme::Accent;
-    if (status == QStringLiteral("blocked")) return kFailed;
-    if (status == QStringLiteral("deferred")) return kWarn;
-    if (status.startsWith(QStringLiteral("cancelled"))) return kCancelled;
+    if (status == QStringLiteral("blocked")) return kFailed();
+    if (status == QStringLiteral("deferred")) return kWarn();
+    if (status.startsWith(QStringLiteral("cancelled"))) return kCancelled();
     return theme::Text;
 }
 
@@ -51,8 +52,8 @@ QString rowText(const LedgerTodo &todo) {
 RequestsPanel::RequestsPanel(RequestLedgerModel *model, QWidget *parent) : QWidget(parent), m_model(model) {
     setObjectName(QStringLiteral("requestsPanel"));
     setAttribute(Qt::WA_StyledBackground);
-    setStyleSheet(QStringLiteral("QWidget#requestsPanel { background: %1; border: 1px solid %2; border-radius: 8px; }")
-                      .arg(theme::Background.name(), theme::Border.name()));
+    // The frame comes from the application stylesheet (QWidget#requestsPanel), so a theme
+    // switch restyles this panel without rebuilding it.
     auto *layout = new QVBoxLayout(this); layout->setContentsMargins(10, 8, 8, 8); layout->setSpacing(6);
     auto *header = new QHBoxLayout;
     m_title = new QLabel; m_title->setTextFormat(Qt::PlainText);
@@ -65,7 +66,7 @@ RequestsPanel::RequestsPanel(RequestLedgerModel *model, QWidget *parent) : QWidg
     header->addWidget(close);
     layout->addLayout(header);
     m_keys = new QLabel(QStringLiteral("↑↓ select · Enter fold Earlier · Esc close"));
-    QPalette muted = m_keys->palette(); muted.setColor(QPalette::WindowText, theme::TextMuted); m_keys->setPalette(muted);
+    m_keys->setObjectName(QStringLiteral("panelKeys"));
     m_keys->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     layout->addWidget(m_keys);
     m_tree = new QTreeWidget;

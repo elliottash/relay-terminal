@@ -30,6 +30,12 @@ public:
     explicit KonsoleBackend(QObject *parent = nullptr);
     ~KonsoleBackend() override;
 
+    // Colour themes (issue 0JA7): hand this session the Konsole profile generated for the
+    // selected theme. Connected to the theme notifier. KonsolePart offers no API for this, so it
+    // goes through the Session object's scriptable setProfile(); where that is missing the new
+    // colours only reach new panes.
+    void applyTheme();
+
     bool startProgram(const QString &program, const QStringList &args, const QString &workingDirectory,
                       const QStringList &extraEnvironment = {}) override;
     void sendInput(const QByteArray &bytes) override;
