@@ -272,6 +272,13 @@ indicator from them (issue 3ES1).
 
 Forwarded as `{t: "agent", pane, seq, event: {...the worker event verbatim...}}`.
 
+**A few events have a capability floor** (`EVENT_FLOOR` / `floor_for` in `remote/wire.py`, read by
+the fan-out per device, as the allow-list is). `sessions`, `conversations` and `conversation` name
+**other conversations**, so they are `full` — the owner's level in the three of section 16, where a
+viewer observes this conversation and a partner types in it. Everything else is `view`. The rule has
+to hold in both streams: `pane_state` drops its `sessions` block below `full`, and without a floor
+here the same titles would arrive as worker events a moment later.
+
 **(security)** The hub forwards an allow-list, never everything. `key_stored`, `key_removed`,
 `key_tested`, `warp_imported`, `presets`, `model_roles`, `configured`, `agent_options`, the
 `skills_*` family, `fork_state` and `state_loaded` **must not** be forwarded in any phase — key
