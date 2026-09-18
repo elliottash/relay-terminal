@@ -595,6 +595,36 @@ Applies only to terminal mode (Ctrl+Shift+Enter, `/shell `, or the Terminal pick
   through section 6, 150 ms later. At most 3 attempts (`kMaxFixAttempts`).
 - Auto-mode commands are never auto-fixed.
 
+### 7.1 The agent hands a command to the terminal (`run_in_terminal`)
+
+The fix loop is Relay asking the agent for a command. This is the other direction: the agent, in
+an ordinary turn, needs a command run that its own `run_command` cannot run, because that is a
+separate Bash with no terminal, no stdin and no ssh agent (`ssh -t`, `sudo`, logins). Protocol
+section 22; worker side `backend/relay_core/terminal_handoff.py`; card #D8J3.
+
+- The tool exists only when the pane offers it: `startAgentEntry` sends
+  `context.terminal_handoff` from the `agent/terminal_handoff` setting (`agent`, `prefill`, or
+  `off`, which sends nothing). Never on a fix turn, and never on a prompt from a paired device.
+- The agent picks `run` or `prefill` per call. What happens is `relay::input::handoffAction`
+  (`src/InputPolicy`), from the state at that instant: the setting caps it, a run that cannot
+  happen (a program owns the terminal, native input, a queued command) becomes a prefill, a prompt
+  box with the user's text in it is never overwritten, and three runs in a row with nothing typed
+  by the user stop the chain.
+- `run` goes through `runInTerminal` (section 6) like any command; the pane answers
+  `terminal_command_result {action: "started"}` from the `loaded` branch, once the hash matched
+  and Enter was sent. `prefill` puts the command in the prompt box under the one-shot `! terminal`
+  chip; wiping the box drops the chip and the hand-over with it.
+- A handed-over command is not watched by the fix loop. Its output is captured even when the
+  conversation index is off (`beginCommandCapture(..., forAgent)`; the index still gets only what
+  its settings allow). At the next `ready` event `finishHandoff` puts a Relay-written prompt at
+  the front of the agent queue: the command, its exit status and the last 4000 characters of
+  output, fenced and labelled as data (`relay::input::handoffReport`). Exit 130 sends nothing.
+  This is the one place the agent is shown terminal output it did not produce itself.
+- When a run leaves a program in the foreground (ssh, a REPL), section 9.2 applies unchanged: the
+  banner offers "Let the agent drive", and consent stays the user's gesture.
+- The capture keeps the first 64 KiB a command prints (`kCommandCaptureCap`), so the "last 4000
+  characters" of a very long output are the end of that, not of everything.
+
 ## 8. Inline agent output
 
 There is no agent pane. Output goes through the pane's backend

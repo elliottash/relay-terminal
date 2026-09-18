@@ -1335,6 +1335,22 @@ private:
                 QSettings().setValue(QStringLiteral("input/default"), value);
             });
         }
+        {
+            // run_in_terminal (protocol 22): how far a command the agent hands over may go. The
+            // value is read when a turn starts, so it applies to the next prompt.
+            const QString current = QSettings().value(QStringLiteral("agent/terminal_handoff"),
+                                                      QStringLiteral("agent")).toString();
+            agent.rows << choiceRow(QStringLiteral("option:terminal_handoff"),
+                                    QStringLiteral("Commands the agent hands to your terminal"),
+                                    QStringLiteral("For ssh, sudo and logins, which the agent's own shell cannot run"),
+                                    {QStringLiteral("agent"), QStringLiteral("prefill"), QStringLiteral("off")},
+                                    {QStringLiteral("The agent runs it or puts it in the prompt box"),
+                                     QStringLiteral("Always in the prompt box, for you to run"),
+                                     QStringLiteral("Off")},
+                                    current, [](const QString &value) {
+                QSettings().setValue(QStringLiteral("agent/terminal_handoff"), value);
+            });
+        }
         agent.rows << buttonRow(QStringLiteral("agent.instructions"), QStringLiteral("Instructions"),
                                 QStringLiteral("CLAUDE.md, AGENTS.md, WARP.md and other instruction files"),
                                 QStringLiteral("Choose…"), [this] { runAction(QStringLiteral("agent.instructions")); });

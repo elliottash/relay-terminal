@@ -101,6 +101,7 @@ Claude session. They show the feature worked once; they are not independent QA.
 | Terminal scrollback surviving a quit and restart: 120 lines printed, Relay quit, reopened with the text back, scrollable, and a second quit saving the restored text with the new output | [`qa_evidence/2026-09-18-scrollback-survives-restart/`](qa_evidence/2026-09-18-scrollback-survives-restart/) |
 | Model roles: provider names, only providers with a key offered, the two Kimi plans told apart, Flash put on Z.AI with `glm-5.3-flash`, and "Auto" replacing "Auto detect" | [`qa_evidence/2026-09-18-provider-names-and-tier-providers/`](qa_evidence/2026-09-18-provider-names-and-tier-providers/) |
 | A Switchboard card's title and its `## Issue` text edited on the card (`e`, the Edit button, a click on the title), written by the worker, surviving a restart, a save refused when the file changed underneath, and a card still headed `## Request` settling on `## Issue` | [`qa_evidence/2026-09-18-edit-card-title-and-issue/`](qa_evidence/2026-09-18-edit-card-title-and-issue/) |
+| The agent handing a command to the terminal (`run_in_terminal`): run in the pane with a real tty and the follow-up turn carrying exit status and output, a prefill submitted by the user, Ctrl+C sending nothing, the `prefill` setting downgrading a run, and a draft in the prompt box never overwritten | [`qa_evidence/2026-09-18-agent-terminal-handoff/`](qa_evidence/2026-09-18-agent-terminal-handoff/) |
 
 Live provider smoke test, 2026-09-16, through the real `Agent` loop with keys imported from
 Warp: Kimi K3 (`kimi`), GLM-5.3 Coding Plan (`glm-coding`) and DeepSeek V4.1 Flash via
@@ -224,6 +225,7 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-window-header-and-notifications.md`
 - `2026-09-17-windows-tabs-panes.md`
 - `2026-09-17-wrong-mode-hints.md`
+- `2026-09-18-agent-hands-commands-to-the-terminal.md`
 - `2026-09-18-edit-file-tool.md`
 - `2026-09-18-light-and-dark-commands.md`
 - `2026-09-18-local-models.md`

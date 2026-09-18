@@ -5381,7 +5381,7 @@ private:
         // A command the agent put in the prompt box (protocol 22): its exit goes back to the agent,
         // which replaces the fix loop for this one submission.
         const bool handoff = m_handoffPrefill;
-        m_handoffPrefill = false;
+        m_handoffPrefill = false; m_handoffPrefix = false;
         if (route == QStringLiteral("shell")) {
             const bool valid = decision.value(QStringLiteral("valid")).toBool(decision.value(QStringLiteral("syntax_ok")).toBool(true));
             const QString problem = decision.value(QStringLiteral("invalid_reason")).toString(
@@ -6084,9 +6084,10 @@ private:
         }
         if (action == relay::input::HandoffAction::Prefill) {
             printInline(QStringLiteral("✦ in your prompt box · %1 · Enter runs it\n").arg(intent), Ink::Note);
-            if (m_modeValue != QStringLiteral("shell")) setPrefixMode(QStringLiteral("shell"));   // this submission only
+            const bool prefix = m_modeValue != QStringLiteral("shell");
+            if (prefix) setPrefixMode(QStringLiteral("shell"));   // this submission only
             setComposerText(command);
-            m_handoffPrefill = report;
+            m_handoffPrefill = report; m_handoffPrefix = prefix;
             answerTerminalCommand(true, QStringLiteral("prefilled"));
             return;
         }
@@ -6878,9 +6879,12 @@ private:
     }
 
     void onComposerEdited() {
-        // A handed-over command the user wiped out is gone: what they type next is their own.
-        if (m_handoffPrefill && m_pendingSubmit.isEmpty() && m_editor->toPlainText().trimmed().isEmpty())
+        // A handed-over command the user wiped out is gone: what they type next is their own, and
+        // so is the mode. The one-shot terminal mode came with the command and leaves with it.
+        if ((m_handoffPrefill || m_handoffPrefix) && m_pendingSubmit.isEmpty() && m_editor->toPlainText().trimmed().isEmpty()) {
             m_handoffPrefill = false;
+            if (m_handoffPrefix) { m_handoffPrefix = false; clearPrefixMode(true); }
+        }
         if (m_editor->toPlainText().trimmed().isEmpty()) refreshDestinationColor();
         if (!m_editor->toPlainText().isEmpty()) m_idleTip.stop();
         if (!m_editor->toPlainText().isEmpty()) clearAiGhost();
@@ -8328,7 +8332,7 @@ private:
     // Prefill: a reporting command sits in the prompt box. Next: the command being staged reports.
     // Armed: the running command reports when it exits. Chain: runs since the user last typed.
     QString m_handoffId, m_handoffCommand, m_handoffOutput;
-    bool m_handoffPrefill = false, m_handoffNext = false, m_handoffArmed = false;
+    bool m_handoffPrefill = false, m_handoffPrefix = false, m_handoffNext = false, m_handoffArmed = false;
     bool m_captureForAgent = false, m_remoteSubmit = false;
     int m_handoffChain = 0;
     // Wrong-mode hints (2026-09-17): a terminal submission that reads like a request

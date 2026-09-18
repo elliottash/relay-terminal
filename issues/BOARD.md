@@ -86,6 +86,7 @@
 | `#1AXN` | [Switchboard phase 1: agent tools and policy, the protocol, the pane, `#` references](features/needs_qa_llm/2026-09-17-switchboard-phase1.md) | needs-qa-llm | agent |  |  |
 | `#0EXJ` | [/light and /dark commands](features/needs_qa_llm/2026-09-18-light-and-dark-commands.md) | needs-qa-llm | agent |  |  |
 | `#V9V1` | [An open-external button for every file, and a menu order to match](features/needs_qa_llm/2026-09-18-open-external-in-the-right-click-menu.md) | needs-qa-llm | agent |  |  |
+| `#D8J3` | [The agent hands a command to the user's terminal: run it, or put it in the prompt box](features/needs_qa_llm/2026-09-18-agent-hands-commands-to-the-terminal.md) | needs-qa-llm | agent | 7/9 |  |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | agent |  |  |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
