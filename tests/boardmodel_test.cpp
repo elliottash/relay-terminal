@@ -6,12 +6,14 @@
 #include "BoardPane.h"
 
 #include <QCheckBox>
+#include <QFrame>
 #include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPointer>
+#include <QTextBrowser>
 #include <QToolButton>
 #include <QTimeZone>
 #include <QJsonDocument>
@@ -144,6 +146,11 @@ private slots:
     void theOpenCardRefetchesOnlyForItsOwnChanges();
     void aQuestionTheAgentCannotTakeIsReportedOnTheCard();
     void quickAddNamesTheSectionItAddsTo();
+    void aCleanupPreviewsFirstAndItsEventsNeverReachACardThread();
+    void applyingAPreviewRunsTheCleanupForReal();
+    void aCleanupAndACardsAskRefuseEachOther();
+    void stoppingACleanupSendsCancelAndTheSummarySaysSo();
+    void theProgressLineKeepsOffAnOpenCardsControls();
     void theTitleAndTheIssueAreEditedOnTheCardAndSavedThroughTheWorker();
     void anEditIsKeptWhenTheCardChangedUnderIt();
 };
@@ -746,11 +753,13 @@ void BoardModelTests::theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack()
     QVERIFY(!listPane->isHidden());
     QCOMPARE(hinted, QStringLiteral("Esc"));
 
-    // "Clean up" has its room and says what it will do; the backend is not there yet.
-    QString status;
-    view.onStatus = [&status](const QString &text) { status = text; };
+    // "Clean up" has its room in that row and starts a preview run (19.9); the run itself is
+    // walked in aCleanupPreviewsFirstAndItsEventsNeverReachACardThread below.
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.findChild<QToolButton *>(QStringLiteral("boardCleanup"))->click();
-    QCOMPARE(status, QStringLiteral("Board cleanup is not wired yet."));
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_cleanup"));
+    QCOMPARE(sent.last().value("dry_run").toBool(), true);
 }
 
 // ---- the view's answers to the worker ------------------------------------------------------
@@ -865,6 +874,296 @@ void BoardModelTests::aQuestionTheAgentCannotTakeIsReportedOnTheCard()
     QVERIFY(!error->isHidden());
     QVERIFY(error->text().contains(QStringLiteral("Configure a provider first.")));
     QVERIFY(view.notice().isEmpty());   // on the card, not over the board
+}
+
+// ---- the whole-board cleanup (protocol 19.9) -----------------------------------------------
+
+namespace {
+
+// `board_cleanup_started`, as the worker sends it.
+QJsonObject cleanupStarted(const QString &id, bool dryRun)
+{
+    return QJsonObject{{"event", "board_cleanup_started"}, {"id", id}, {"run_id", "c-1a2b3c"},
+                       {"dry_run", dryRun}, {"scope", QJsonValue()}, {"cards", 96},
+                       {"limits", QJsonObject{{"max_writes_per_turn", 400}}},
+                       {"changelog", "docs/qa_evidence/2026-09-18-switchboard-cleanup/run.md"}};
+}
+
+// One turn event of the run: `cleanup: true` and a `run_id`, and never a `card_id` (19.9).
+QJsonObject cleanupEvent(const QString &type, const QJsonObject &extra = {})
+{
+    QJsonObject out{{"event", type}, {"cleanup", true}, {"run_id", "c-1a2b3c"}};
+    for (auto it = extra.begin(); it != extra.end(); ++it)
+        out.insert(it.key(), it.value());
+    return out;
+}
+
+QJsonObject cleanupSummary(const QString &id, bool dryRun, const QString &outcome,
+                           const QJsonArray &changes)
+{
+    int writes = 0, proposed = 0;
+    for (const QJsonValue &value : changes)
+        (value.toObject().value("proposed").toBool() ? proposed : writes) += 1;
+    return QJsonObject{
+        {"event", "board_cleanup_summary"}, {"id", id}, {"run_id", "c-1a2b3c"},
+        {"outcome", outcome}, {"dry_run", dryRun}, {"seconds", 412.7},
+        {"counts", QJsonObject{{"writes", writes}, {"proposed", proposed},
+                               {"cards_touched", changes.size()}, {"merge", 1}, {"move", 1}}},
+        {"changes", changes}, {"truncated", false}, {"refusals", QJsonArray{}},
+        {"cards_before", 96}, {"cards_after", 95},
+        {"changelog", "docs/qa_evidence/2026-09-18-switchboard-cleanup/run.md"},
+        {"report", "I merged one pair and moved one card.\n\nI left the QA lane alone."}};
+}
+
+QJsonArray twoChanges(bool proposed)
+{
+    return QJsonArray{
+        QJsonObject{{"action", "merge"}, {"card_id", "K7Q2"}, {"summary", "merged 1 card in"},
+                    {"path", "issues/features/k7q2.md"}, {"proposed", proposed}},
+        QJsonObject{{"action", "move"}, {"card_id", "M3XJ"}, {"summary", "Inbox to Ready"},
+                    {"path", "issues/features/m3xj.md"}, {"proposed", proposed}}};
+}
+
+QToolButton *cleanupButton(relay::BoardView &view)
+{
+    return view.findChild<QToolButton *>(QStringLiteral("boardCleanup"));
+}
+
+}  // namespace
+
+// The first click is a preview, and every event the run sends is drawn over the board — never in
+// the thread of a card that happens to be open (19.9: `cleanup: true`, a run id, no card id).
+void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "inbox", "features")}));
+    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    QVERIFY(view.detailOpen());
+    auto *document = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
+    QVERIFY(document);
+    const QString threadBefore = document->toPlainText();
+
+    QToolButton *button = cleanupButton(view);
+    QVERIFY(button);
+    QCOMPARE(button->text(), QStringLiteral("Clean up"));
+    sent.clear();
+    button->click();
+
+    // A preview, not the real thing: a cleanup rewrites the owner's files, so the button never
+    // starts one that writes.
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_cleanup"));
+    QCOMPARE(sent.last().value("dry_run").toBool(), true);
+    const QString runId = sent.last().value("id").toString();
+    QVERIFY(!runId.isEmpty());
+    QVERIFY(view.cleanupRunning());
+    QCOMPARE(button->text(), QStringLiteral("Stop"));
+
+    view.handleEvent(cleanupStarted(runId, true));
+    QVERIFY(view.cleanupRunning());
+    QVERIFY(view.notice().contains(QStringLiteral("Cleanup preview")));
+
+    // The run's chatter and its writes: progress over the board, nothing on the card.
+    view.handleEvent(cleanupEvent(QStringLiteral("delta"), {{"text", "thinking about the board"}}));
+    view.handleEvent(cleanupEvent(QStringLiteral("tool_started"), {{"tool", "board_read"}}));
+    QVERIFY(view.notice().contains(QStringLiteral("board_read")));
+    view.handleEvent(cleanupEvent(QStringLiteral("board_activity"),
+                                  {{"id", "M3XJ"}, {"action", "move"},
+                                   {"summary", "Inbox to Ready"}, {"write_id", "w-1"}}));
+    QVERIFY(view.notice().contains(QStringLiteral("#M3XJ")));
+    QVERIFY(view.notice().contains(QStringLiteral("1 proposed")));
+    QCOMPARE(document->toPlainText(), threadBefore);
+    QVERIFY(!document->toPlainText().contains(QStringLiteral("thinking about the board")));
+
+    // The summary ends the run and puts the result in the list page, with Apply offered because
+    // this was only a preview.
+    view.handleEvent(cleanupEvent(QStringLiteral("done")));
+    view.handleEvent(cleanupSummary(runId, true, QStringLiteral("done"), twoChanges(true)));
+    QVERIFY(!view.cleanupRunning());
+    QCOMPARE(button->text(), QStringLiteral("Clean up"));
+    auto *panel = view.findChild<QWidget *>(QStringLiteral("boardCleanupPanel"));
+    auto *head = view.findChild<QLabel *>(QStringLiteral("boardCleanupHead"));
+    auto *body = view.findChild<QTextBrowser *>(QStringLiteral("boardCleanupBody"));
+    QVERIFY(panel && head && body);
+    QVERIFY(!panel->isHidden());
+    QVERIFY(head->text().contains(QStringLiteral("nothing was written")));
+    QVERIFY(head->text().contains(QStringLiteral("2 proposed")));
+    QVERIFY(body->toPlainText().contains(QStringLiteral("#K7Q2")));
+    QVERIFY(body->toPlainText().contains(QStringLiteral("I left the QA lane alone.")));
+    QVERIFY(!view.findChild<QToolButton *>(QStringLiteral("boardAddButton"))->isHidden());
+    // It is dismissible, and it never took the keyboard off the list.
+    QCOMPARE(body->focusPolicy(), Qt::NoFocus);
+    view.findChild<QToolButton *>(QStringLiteral("boardCleanupPanel"));
+    for (QToolButton *tool : panel->findChildren<QToolButton *>())
+        if (tool->text() == QStringLiteral("Dismiss"))
+            tool->click();
+    QVERIFY(panel->isHidden());
+}
+
+// Apply is the only way to a run that writes, and it says so afterwards.
+void BoardModelTests::applyingAPreviewRunsTheCleanupForReal()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    cleanupButton(view)->click();
+    const QString previewId = sent.last().value("id").toString();
+    view.handleEvent(cleanupStarted(previewId, true));
+    view.handleEvent(cleanupSummary(previewId, true, QStringLiteral("done"), twoChanges(true)));
+
+    auto *panel = view.findChild<QWidget *>(QStringLiteral("boardCleanupPanel"));
+    QToolButton *apply = nullptr;
+    for (QToolButton *tool : panel->findChildren<QToolButton *>())
+        if (tool->text() == QStringLiteral("Apply"))
+            apply = tool;
+    QVERIFY(apply);
+    QVERIFY(!apply->isHidden());
+    sent.clear();
+    apply->click();
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_cleanup"));
+    QCOMPARE(sent.last().value("dry_run").toBool(), false);
+    const QString runId = sent.last().value("id").toString();
+    QVERIFY(panel->isHidden());          // the plan goes when the run it planned starts
+
+    view.handleEvent(cleanupStarted(runId, false));
+    QVERIFY(view.notice().startsWith(QStringLiteral("Cleanup ·")));
+    view.handleEvent(cleanupSummary(runId, false, QStringLiteral("done"), twoChanges(false)));
+    auto *head = view.findChild<QLabel *>(QStringLiteral("boardCleanupHead"));
+    QVERIFY(head->text().contains(QStringLiteral("the board was rewritten")));
+    QVERIFY(head->text().contains(QStringLiteral("2 written")));
+    // Nothing to apply twice: the run already wrote.
+    for (QToolButton *tool : panel->findChildren<QToolButton *>())
+        if (tool->text() == QStringLiteral("Apply"))
+            QVERIFY(tool->isHidden());
+}
+
+// One turn at a time (19.9): the second of a cleanup and a card's ask is refused, and the pane
+// says which is running rather than showing a bare error.
+void BoardModelTests::aCleanupAndACardsAskRefuseEachOther()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    auto *error = view.findChild<QLabel *>(QStringLiteral("boardCardError"));
+    QVERIFY(reply && error);
+
+    // A cleanup is running, so the ask is not even sent, and the words stay in the box.
+    cleanupButton(view)->click();
+    view.handleEvent(cleanupStarted(sent.last().value("id").toString(), true));
+    sent.clear();
+    reply->setPlainText(QStringLiteral("Which layout?"));
+    QTest::keyClick(reply, Qt::Key_Return);
+    QVERIFY(sent.isEmpty());
+    QVERIFY(!error->isHidden());
+    QVERIFY(error->text().contains(QStringLiteral("A cleanup is running")));
+    QCOMPARE(reply->toPlainText(), QStringLiteral("Which layout?"));
+    // …and it stops saying so when it stops being true.
+    view.handleEvent(cleanupSummary(QStringLiteral("x"), true, QStringLiteral("done"), QJsonArray{}));
+    QVERIFY(error->isHidden());
+    QCOMPARE(reply->toPlainText(), QStringLiteral("Which layout?"));
+
+    // The other way round: an ask is running and the worker refuses the cleanup.
+    relay::BoardView second(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> theirs;
+    second.onSend = [&theirs](const QJsonObject &message) { theirs << message; };
+    second.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    cleanupButton(second)->click();
+    const QString refusedId = theirs.last().value("id").toString();
+    second.handleEvent(QJsonObject{{"event", "error"}, {"id", refusedId}, {"code", "board_busy"},
+                                   {"agent_busy", true}, {"cleanup_running", false},
+                                   {"card_id", "K7Q2"},
+                                   {"text", "the agent is answering about #K7Q2"}});
+    QVERIFY(!second.cleanupRunning());
+    QCOMPARE(cleanupButton(second)->text(), QStringLiteral("Clean up"));
+    QVERIFY(second.notice().contains(QStringLiteral("answering on #K7Q2")));
+    QVERIFY(second.notice().contains(QStringLiteral("did not start")));
+
+    // And an ask refused by a cleanup someone else started: off the card, and back in the box.
+    relay::BoardView third(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> mine;
+    third.onSend = [&mine](const QJsonObject &message) { mine << message; };
+    third.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    third.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    auto *box = third.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
+    box->setPlainText(QStringLiteral("Still relevant?"));
+    QTest::keyClick(box, Qt::Key_Return);
+    QCOMPARE(mine.last().value("type").toString(), QStringLiteral("board_ask"));
+    third.handleEvent(QJsonObject{{"event", "error"}, {"id", mine.last().value("id").toString()},
+                                  {"code", "board_busy"}, {"agent_busy", true},
+                                  {"cleanup_running", true}, {"card_id", QJsonValue()},
+                                  {"text", "a cleanup is running"}});
+    auto *theirError = third.findChild<QLabel *>(QStringLiteral("boardCardError"));
+    QVERIFY(theirError->text().contains(QStringLiteral("A cleanup is running")));
+    QVERIFY(theirError->text().contains(QStringLiteral("not in the thread")));
+    QCOMPARE(box->toPlainText(), QStringLiteral("Still relevant?"));
+}
+
+void BoardModelTests::stoppingACleanupSendsCancelAndTheSummarySaysSo()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    QToolButton *button = cleanupButton(view);
+    button->click();
+    const QString runId = sent.last().value("id").toString();
+    view.handleEvent(cleanupStarted(runId, false));
+    QCOMPARE(button->text(), QStringLiteral("Stop"));
+
+    sent.clear();
+    button->click();
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("cancel"));
+    QVERIFY(view.cleanupRunning());      // still running until the summary says otherwise
+
+    view.handleEvent(cleanupEvent(QStringLiteral("cancelled")));
+    view.handleEvent(cleanupSummary(runId, false, QStringLiteral("cancelled"), twoChanges(false)));
+    QVERIFY(!view.cleanupRunning());
+    QCOMPARE(button->text(), QStringLiteral("Clean up"));
+    auto *head = view.findChild<QLabel *>(QStringLiteral("boardCleanupHead"));
+    QVERIFY(head->text().contains(QStringLiteral("stopped part way")));
+    QVERIFY(view.notice().isEmpty());    // the progress line goes with the run
+}
+
+// A move's notice is gone in ten seconds; a cleanup's progress line stays up for minutes, so it
+// must not be parked on the reply box and the Ask button of a card that has the pane to itself.
+void BoardModelTests::theProgressLineKeepsOffAnOpenCardsControls()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.resize(500, 700);          // narrow: an open card takes the whole pane
+    view.show();                    // the placement is geometry, so the layout has to have run
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    cleanupButton(view)->click();
+    auto *notice = view.findChild<QFrame *>(QStringLiteral("boardNotice"));
+    QVERIFY(notice);
+    QVERIFY(!notice->isHidden());
+    // Over the list it sits at the bottom, where every other notice has always been.
+    QVERIFY2(notice->y() > view.height() / 2, qPrintable(QString::number(notice->y())));
+
+    // With the card on top of it, the line sits clear of the reply box and the Ask button.
+    view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
+    QVERIFY(view.detailOpen());
+    QCoreApplication::processEvents();
+    view.rebuild();                 // any pending layout, then the notice is placed again
+    QCoreApplication::sendPostedEvents(&view, QEvent::LayoutRequest);
+    auto *reply = view.findChild<QFrame *>(QStringLiteral("boardReply"));
+    QVERIFY(reply);
+    const int replyTop = reply->mapTo(&view, QPoint(0, 0)).y();
+    QVERIFY2(notice->y() + notice->height() <= replyTop,
+             qPrintable(QStringLiteral("notice %1..%2, reply starts at %3")
+                            .arg(notice->y()).arg(notice->y() + notice->height()).arg(replyTop)));
+
+    // …and back to the bottom of the pane once the card is closed.
+    view.closeDetail();
+    QVERIFY2(notice->y() > view.height() / 2, qPrintable(QString::number(notice->y())));
 }
 
 void BoardModelTests::quickAddNamesTheSectionItAddsTo()

@@ -9,6 +9,7 @@
 //
 // The view holds no process: it hands JSON commands to `onSend` and is fed events through
 // `handleEvent`, so it can be driven by a per-window Switchboard worker or, in tests, by hand.
+#include <QElapsedTimer>
 #include <QHash>
 #include <QJsonObject>
 #include <QPointer>
@@ -83,9 +84,12 @@ public:
     void closeDetail();
     bool detailOpen() const;
     void focusFilter();
-    // "Clean up": hands the board to the agent to tidy — merge or split sections and cards,
-    // review statuses. The backend message does not exist yet, so for now it only says so.
+    // "Clean up" (protocol 19.9): hands the whole board to the agent to tidy — merge or split
+    // sections and cards, review statuses. The first click is always a **preview** (`dry_run`),
+    // because a cleanup rewrites many of the owner's files; the result panel then offers Apply.
+    // While a run is going the same button is Stop and sends `cancel`.
     void requestCleanup();
+    bool cleanupRunning() const { return !m_cleanupRun.isEmpty(); }
     void moveSelected();            // the `m` popup
     void undoLast();                // Ctrl+Z: board_undo of this pane's last write
     void copyReference();
@@ -113,6 +117,21 @@ private:
     // one checkbox per section. They belong to the list, not to the pane's header, so an open
     // card is not looking at the list's tools (owner, 2026-09-18).
     void buildListTools(QVBoxLayout *layout);
+    // The cleanup's result, in the list page itself rather than over it: outcome, counts, every
+    // change with its card as a link, the refusals, the agent's report and the changelog.
+    void buildCleanupPanel(QVBoxLayout *layout);
+    void startCleanup(bool dryRun);
+    void endCleanup();                        // the run is over, whatever ended it
+    void updateCleanupButton();
+    void showCleanupSummary(const QJsonObject &summary);
+    void hideCleanupPanel();
+    // One line about the run in the notice area: the step it is on and what it has written or
+    // proposed so far. It stays up until the run ends — a cleanup takes minutes.
+    void showCleanupProgress(const QString &step);
+    // A turn event, a board_activity or a summary belonging to a cleanup (19.9: `cleanup: true`,
+    // a `run_id` and never a `card_id`). Returns true when it was one, so an open card's thread
+    // never sees it.
+    bool handleCleanupEvent(const QString &type, const QJsonObject &event);
     void buildQuickAdd(QVBoxLayout *layout);
     void closeQuickAdd();
     // One checkbox per section the model has right now, rebuilt only when that set changes.
@@ -156,6 +175,8 @@ private:
     QString m_workspace;
     board::Model m_model;
     QString m_selected, m_askCard;
+    QString m_askText;                  // the question in flight, to put back if it is refused
+    QString m_busyCard;                 // the card told "a cleanup is running", to un-tell it
     bool m_open = false;
 
     // The pane's header row. It holds nothing at all while the list is on screen — the list's
@@ -189,6 +210,24 @@ private:
     QWidget *m_quickAddRow = nullptr;
     QPointer<QLineEdit> m_quickAdd;
     QString m_quickAddColumn;
+
+    // ---- the cleanup run (protocol 19.9). One at a time, on the whole board.
+    QWidget *m_cleanupPanel = nullptr;      // the result, in the list page
+    QLabel *m_cleanupHead = nullptr;
+    QTextBrowser *m_cleanupBody = nullptr;
+    QToolButton *m_cleanupApply = nullptr, *m_cleanupLog = nullptr, *m_cleanupDismiss = nullptr;
+    // Empty when nothing is running. It is set to a placeholder on the click, before
+    // `board_cleanup_started` names the real run, so the button says Stop from the click and a
+    // card's ask is refused in this pane rather than by the worker.
+    QString m_cleanupRun;
+    QString m_cleanupRequest;               // the id this pane sent the message under
+    QString m_cleanupChangelog;             // where the run says it will write its changelog
+    bool m_cleanupDry = false;
+    int m_cleanupWrites = 0, m_cleanupCards = 0;
+    QElapsedTimer m_cleanupClock;
+    // A worker that dies mid-run would otherwise leave the button on Stop for good: the last turn
+    // event starts this, and it ends the run if no summary follows.
+    QTimer *m_cleanupGuard = nullptr;
     // What the list shows: one entry per visible row, in order, so the widget's row i is this
     // list's entry i. The delegate and the drop logic read it; nothing else holds card data.
     QList<board::Row> m_rows;

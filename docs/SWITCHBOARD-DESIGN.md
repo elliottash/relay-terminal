@@ -255,8 +255,42 @@ its own matches would be a search that does nothing. The tokens are `label:`, `s
   `{"board": {"workspace", "collapsed", "hidden"}}` (`BoardView::collapsedSections()` and
   `hiddenSections()`).
 - **Clean up** (`#boardCleanup`) hands the board to the agent to tidy: merge or split sections and
-  cards, review statuses. The button and its room are built; the backend message is not, and
-  `BoardView::requestCleanup()` says so until it is.
+  cards, review statuses. Protocol 19.9; see 4.8.
+
+### 4.8 The cleanup button: preview, then apply (2026-09-18)
+
+`board_cleanup` (protocol 19.9) is one agent turn over the whole board that rewrites many of the
+owner's files. The pane never starts one of those from a click.
+
+- **The first click is a preview.** `BoardView::requestCleanup()` sends
+  `board_cleanup {dry_run: true}`: the agent makes the same plan and every write tool refuses, so
+  the run produces proposals and changes nothing. The result panel's **Apply** is the only path to
+  a run that writes. No dialog asks "are you sure" — a plan the person can read is a better
+  question than a modal, and the owner's rule is that a surface is a pane or in-pane, never a
+  floating strip.
+- **While it runs the same button is Stop**, in the warning colour, and sends the ordinary
+  `cancel` — mirroring the card detail's Ask/Stop. A run takes minutes, so progress is a line in
+  the board's notice area that stays up instead of timing out: elapsed, the tool or step it is on
+  or the last `board_activity`, a running count of what it has written or proposed, and "nothing is
+  written" while it is a preview. With a card open in a stacked pane the notice moves to the *top*
+  of the pane, because the bottom is where that card's reply box and Ask button are.
+- **A cleanup's events never reach a card thread.** They carry `cleanup: true` and a `run_id` and
+  no `card_id`, and `BoardView::handleCleanupEvent()` takes every one of them before the card
+  routing runs.
+- **The result is a panel in the list page** (`#boardCleanupPanel`), under the tools and over the
+  rows: the outcome, whether anything was written, the counts, every change with its `#ID` as a
+  link that opens the card and its file as a link that opens the file, the refusals, the agent's
+  report, a **Changelog** button that opens the run's Markdown through `onOpenFile`, **Apply**
+  after a preview that found something, and **Dismiss**. Every control in it is `NoFocus`, so the
+  arrows still walk the list.
+- **Busy** (19.9: the worker runs one turn at a time and the two refuse each other). A card's
+  "Ask the agent" pressed while a cleanup runs is stopped in the pane and explained on the card,
+  with the typed message put back in the reply box rather than sent away to bounce; a
+  `board_busy` from the worker says which is running — "A cleanup is running on this board." or
+  "The agent is answering on #K7Q2." — in the notice, or on the card when it was that card's ask.
+- **No key and no palette entry**, so the WARP.md hint rule has nothing to register: a cleanup is a
+  rare, minutes-long, board-wide write, and a shortcut for it would be a way to start one by
+  accident. If one is ever added, the hint goes with it.
 
 **Quick add** is a field over the list rather than inside a section: with one long list, a field
 at a section's head would be scrolled out of sight as often as not. It names the section it adds

@@ -68,10 +68,11 @@ section, ticked by default.
    not disturb each other.
 8. **Restart.** Untick a box, quit, start again: the unticked set comes back with the window's
    layout, the way the folded set does. *(Not yet seen live — see Known gaps.)*
-9. **"Clean up"** shows its tooltip and, for now, says "Board cleanup is not wired yet." on the
-   board and in the status bar. Its label is not clipped at any pane width. (It is a QToolButton,
-   which `tests/buttonfit_test.cpp` does not walk — that test is about QPushButton's `:default`
-   font trap — so this one is checked by eye, in shots 01 and 06.)
+9. **"Clean up"** shows its tooltip and has its room in the row. It is wired: clicking it starts a
+   preview run of `board_cleanup` (`#KDK9`, design 4.8), and while one runs the same button reads
+   **Stop**. Its label is not clipped at either width. (It is a QToolButton, which
+   `tests/buttonfit_test.cpp` does not walk — that test is about QPushButton's `:default` font
+   trap — so this one is checked by eye, in shots 01 and 06 here and in `#KDK9`'s GUI shots.)
 
 ## Known gaps
 

@@ -1033,6 +1033,25 @@ public:
 
     void focusReply() { m_reply->setFocus(); }
     void focusDocument() { m_doc->setFocus(); }
+    // How much of the card's bottom is controls (the reply box, or the editor's Save row). The
+    // board's notice floats over this widget when a card has the pane to itself, and a cleanup's
+    // progress line stays up for minutes, so it has to be placed clear of them.
+    int controlsHeight() const
+    {
+        const QFrame *bottom = m_editFrame->isHidden() ? m_replyFrame : m_editFrame;
+        int height = bottom->isHidden() ? 0 : bottom->height();
+        if (!m_error->isHidden())
+            height += m_error->height() + 6;   // the refusal line belongs to them
+        return height;
+    }
+    // An ask that was refused before it reached the model (19.9's busy rule): submit() has already
+    // emptied the box, so the words go back into it rather than being lost with the refusal.
+    void restoreReply(const QString &text)
+    {
+        if (m_reply->toPlainText().trimmed().isEmpty())
+            m_reply->setPlainText(text);
+        m_reply->setFocus();
+    }
 
     // ---- editing the card's own words (the title and `## Issue`)
     //
@@ -1511,6 +1530,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     listLayout->setContentsMargins(0, 0, 0, 0);
     listLayout->setSpacing(0);
     buildListTools(listLayout);
+    buildCleanupPanel(listLayout);
     buildQuickAdd(listLayout);
     m_list = new RowList(&m_rows, m_listPane);
     auto *delegate = new RowDelegate(&m_model, &m_rows, m_list);
@@ -1642,7 +1662,22 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         if (card.isEmpty())
             return;
         if (ask) {
+            // The worker would refuse it anyway (19.9's busy rule), but saying so here keeps the
+            // question in the box instead of sending it away to bounce.
+            if (cleanupRunning()) {
+                m_busyCard = card;
+                m_detail->restoreReply(text);
+                m_detail->showError(QStringLiteral("A cleanup is running — it is rewriting cards, "
+                                                   "so the agent cannot answer on one until it is "
+                                                   "done. Your message is still here, unsent. Stop "
+                                                   "the run with the button at the top of the "
+                                                   "board, or wait for it."));
+                // The line takes height at the bottom of the card, where the progress notice is.
+                QTimer::singleShot(0, this, [this] { placeNotice(); });
+                return;
+            }
             m_askCard = card;
+            m_askText = text;
             m_detail->setBusy(true);
             send({{QStringLiteral("type"), QStringLiteral("board_ask")},
                   {QStringLiteral("card"), card}, {QStringLiteral("text"), text}});
@@ -1766,6 +1801,80 @@ void BoardView::buildListTools(QVBoxLayout *layout)
     });
     connect(m_cleanup, &QToolButton::clicked, this, [this] { requestCleanup(); });
     m_filter->installEventFilter(this);
+}
+
+// What a cleanup leaves behind, in the list page rather than over it: a panel between the tools
+// and the rows, dismissible, that never takes the keyboard off the list (owner rule: a new
+// surface is a pane or in-pane, never a floating strip).
+void BoardView::buildCleanupPanel(QVBoxLayout *layout)
+{
+    m_cleanupPanel = new QWidget(m_listPane);
+    m_cleanupPanel->setObjectName(QStringLiteral("boardCleanupPanel"));
+    m_cleanupPanel->setAttribute(Qt::WA_StyledBackground);
+    auto *panel = new QVBoxLayout(m_cleanupPanel);
+    panel->setContentsMargins(10, 8, 10, 8);
+    panel->setSpacing(6);
+
+    auto *top = new QHBoxLayout;
+    top->setSpacing(6);
+    m_cleanupHead = new QLabel(m_cleanupPanel);
+    m_cleanupHead->setObjectName(QStringLiteral("boardCleanupHead"));
+    m_cleanupHead->setWordWrap(true);
+    top->addWidget(m_cleanupHead, 1);
+    m_cleanupApply = new QToolButton(m_cleanupPanel);
+    m_cleanupApply->setObjectName(QStringLiteral("boardAddButton"));
+    m_cleanupApply->setText(QStringLiteral("Apply"));
+    m_cleanupApply->setToolTip(QStringLiteral("Run the cleanup for real and write these changes. "
+                                              "Every write goes in the changelog, and nothing is "
+                                              "committed for you."));
+    m_cleanupApply->setCursor(Qt::PointingHandCursor);
+    m_cleanupApply->setFocusPolicy(Qt::NoFocus);
+    m_cleanupApply->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    top->addWidget(m_cleanupApply);
+    m_cleanupLog = new QToolButton(m_cleanupPanel);
+    m_cleanupLog->setObjectName(QStringLiteral("boardTextButton"));
+    m_cleanupLog->setText(QStringLiteral("Changelog"));
+    m_cleanupLog->setToolTip(QStringLiteral("Open the run's changelog in a pane"));
+    m_cleanupLog->setCursor(Qt::PointingHandCursor);
+    m_cleanupLog->setFocusPolicy(Qt::NoFocus);
+    top->addWidget(m_cleanupLog);
+    m_cleanupDismiss = new QToolButton(m_cleanupPanel);
+    m_cleanupDismiss->setObjectName(QStringLiteral("boardTextButton"));
+    m_cleanupDismiss->setText(QStringLiteral("Dismiss"));
+    m_cleanupDismiss->setToolTip(QStringLiteral("Put this away. The changelog keeps the record."));
+    m_cleanupDismiss->setCursor(Qt::PointingHandCursor);
+    m_cleanupDismiss->setFocusPolicy(Qt::NoFocus);
+    top->addWidget(m_cleanupDismiss);
+    panel->addLayout(top);
+
+    m_cleanupBody = new QTextBrowser(m_cleanupPanel);
+    m_cleanupBody->setObjectName(QStringLiteral("boardCleanupBody"));
+    m_cleanupBody->setOpenLinks(false);          // a card id opens the card, not a web browser
+    m_cleanupBody->setFocusPolicy(Qt::NoFocus);  // the arrows stay with the list
+    m_cleanupBody->setMaximumHeight(260);
+    panel->addWidget(m_cleanupBody);
+
+    m_cleanupPanel->hide();
+    layout->addWidget(m_cleanupPanel);
+
+    connect(m_cleanupDismiss, &QToolButton::clicked, this, [this] { hideCleanupPanel(); });
+    connect(m_cleanupApply, &QToolButton::clicked, this, [this] { startCleanup(false); });
+    connect(m_cleanupLog, &QToolButton::clicked, this, [this] {
+        if (onOpenFile && !m_cleanupChangelog.isEmpty())
+            onOpenFile(QDir(m_workspace).absoluteFilePath(m_cleanupChangelog));
+    });
+    connect(m_cleanupBody, &QTextBrowser::anchorClicked, this, [this](const QUrl &url) {
+        // `card:K7Q2` goes through the same path a row click does; anything else is a file.
+        if (url.scheme() == QStringLiteral("card")) {
+            const QString id = (url.path().isEmpty() ? url.host() : url.path()).toUpper();
+            selectCard(id);
+            m_selected = id;
+            openSelected();
+            return;
+        }
+        if (onOpenFile && !url.path().isEmpty())
+            onOpenFile(QDir(m_workspace).absoluteFilePath(url.path()));
+    });
 }
 
 // The pane's hover buttons take their room out of whichever row is on top for good, and in a
@@ -1974,9 +2083,14 @@ void BoardView::placeNotice()
     QLayout *layout = m_notice->layout();
     m_notice->setFixedHeight(layout->hasHeightForWidth() ? layout->totalHeightForWidth(m_notice->width())
                                                          : layout->totalSizeHint().height());
+    const int x = (this->width() - m_notice->width()) / 2;
     // From the size hint, not the geometry: on a resize the layout has not placed m_keys yet.
-    const int bottom = height() - (m_keys->isVisible() ? m_keys->sizeHint().height() : 0) - 10;
-    m_notice->move((this->width() - m_notice->width()) / 2, bottom - m_notice->height());
+    int bottom = height() - (m_keys->isVisible() ? m_keys->sizeHint().height() : 0) - 10;
+    // A card with the pane to itself has its reply box and its Ask button along that bottom, and a
+    // cleanup's progress line stays up for minutes rather than ten seconds: it goes above them.
+    if (detailOpen() && m_listPane->isHidden())
+        bottom -= m_detail->controlsHeight();
+    m_notice->move(x, bottom - m_notice->height());
     m_notice->raise();
 }
 
@@ -2102,6 +2216,50 @@ void BoardView::handleEvent(const QJsonObject &event)
                        .arg(event.value(QStringLiteral("card_id")).toString()), false);
         return;
     }
+    // A cleanup's events first, and whole: they are tagged `cleanup: true` with a run id and no
+    // card id (19.9), and an open card's thread must never see one of them.
+    if (handleCleanupEvent(type, event))
+        return;
+    // The worker runs one turn at a time, and a cleanup and a card's ask refuse each other rather
+    // than queue (19.9): say which it is, and put back whatever this pane had started.
+    if (type == QStringLiteral("error")
+        && event.value(QStringLiteral("code")).toString() == QStringLiteral("board_busy")) {
+        const bool cleanupRuns = event.value(QStringLiteral("cleanup_running")).toBool();
+        const QString busyCard = event.value(QStringLiteral("card_id")).toString();
+        const QString what = cleanupRuns
+            ? QStringLiteral("A cleanup is running on this board.")
+            : (busyCard.isEmpty()
+                   ? QStringLiteral("The Switchboard agent is busy.")
+                   : QStringLiteral("The agent is answering on #%1.").arg(busyCard));
+        if (!m_cleanupRequest.isEmpty() && requestId == m_cleanupRequest) {
+            endCleanup();
+            m_notice->hide();
+            showNotice(what + QStringLiteral(" The cleanup did not start — nothing was written. "
+                                             "Try again when it has finished."), true);
+            return;
+        }
+        if (!m_askCard.isEmpty()) {
+            const bool here = m_askCard == m_detail->cardId();
+            const QString unsent = m_askText;
+            m_detail->setBusy(false);
+            m_askCard.clear();
+            m_askText.clear();
+            if (here) {
+                // The worker checks before it writes, so the question never reached the thread.
+                if (cleanupRuns)
+                    m_busyCard = m_detail->cardId();
+                m_detail->restoreReply(unsent);
+                m_detail->showError(what + QStringLiteral(" The agent answers one thing at a time, "
+                                                          "so your message was not sent and is not "
+                                                          "in the thread — it is back in the reply "
+                                                          "box. Try again when it has finished."));
+                QTimer::singleShot(0, this, [this] { placeNotice(); });
+                return;
+            }
+        }
+        showNotice(what, true);
+        return;
+    }
     // A board_ask turn: the answer streams into the open card.
     const QString card = event.value(QStringLiteral("card_id")).toString();
     if (!card.isEmpty() && card == m_detail->cardId()) {
@@ -2113,6 +2271,7 @@ void BoardView::handleEvent(const QJsonObject &event)
             || type == QStringLiteral("cancelled")) {
             m_detail->setBusy(false);
             m_askCard.clear();
+            m_askText.clear();
             if (type == QStringLiteral("error"))
                 m_detail->showError(event.value(QStringLiteral("text")).toString());
             return;
@@ -2142,6 +2301,7 @@ void BoardView::handleEvent(const QJsonObject &event)
             const bool here = m_askCard == m_detail->cardId();
             m_detail->setBusy(false);
             m_askCard.clear();
+            m_askText.clear();
             if (here) {
                 m_detail->showError(QStringLiteral("The Switchboard agent could not answer: %1 "
                                                    "Your message is kept in the thread.").arg(text));
@@ -2480,10 +2640,12 @@ void BoardView::updateDetailLayout()
     }
     if (!detailOpen()) {
         m_listPane->setVisible(true);
+        placeNotice();      // back to the bottom of the list
         return;
     }
     const bool wasStacked = m_listPane->isHidden();
     m_listPane->setVisible(!stacked);
+    placeNotice();          // the top of the pane while the card has it, the bottom otherwise
     if (stacked)
         return;
     if (!m_detailSized || wasStacked) {
@@ -3010,18 +3172,286 @@ int BoardView::rowHeight() const
     return qMax(16, QFontMetrics(m_list->font()).height() + 10);
 }
 
-// "Clean up": hand the board to the agent to tidy — merge or split sections and cards, review
-// statuses. The button and its room at the top of the list page are here now; the backend message
-// that would carry the request does not exist yet, so this says so rather than sending nothing.
-// Kept last in the file, and small, so wiring it is one isolated edit.
+// ------------------------------------------------------------------- the cleanup run (19.9)
+
+// The one button, in its three states. Clicking it while a run is going stops that run; clicking
+// it otherwise starts a **preview**, never the real thing: a cleanup rewrites many of the owner's
+// files, and `dry_run` produces the same plan while every write tool refuses. The Apply button in
+// the result panel is the only way to a run that writes.
 void BoardView::requestCleanup()
 {
-    static const QString notYet = QStringLiteral("Board cleanup is not wired yet.");
-    if (onStatus)
-        onStatus(notYet);
-    // …and on the board itself: this window's status bar is not shown, so onStatus alone would
-    // make the button look broken rather than unfinished.
-    showNotice(notYet, false);
+    if (cleanupRunning()) {
+        send({{QStringLiteral("type"), QStringLiteral("cancel")}});
+        showCleanupProgress(QStringLiteral("stopping"));
+        return;
+    }
+    startCleanup(true);
+}
+
+void BoardView::startCleanup(bool dryRun)
+{
+    if (cleanupRunning())
+        return;
+    hideCleanupPanel();
+    m_cleanupDry = dryRun;
+    m_cleanupWrites = 0;
+    m_cleanupCards = m_model.total();
+    m_cleanupChangelog.clear();
+    m_cleanupRequest = nextRequestId();
+    // Held from the click, not from the worker's answer: the button has to say Stop at once, and
+    // a card's ask has to be refused here rather than be sent and bounced.
+    m_cleanupRun = QStringLiteral("starting");
+    m_cleanupClock.start();
+    updateCleanupButton();
+    showCleanupProgress(QStringLiteral("starting"));
+    send({{QStringLiteral("type"), QStringLiteral("board_cleanup")},
+          {QStringLiteral("id"), m_cleanupRequest},
+          {QStringLiteral("dry_run"), dryRun}});
+}
+
+void BoardView::endCleanup()
+{
+    m_cleanupRun.clear();
+    m_cleanupRequest.clear();
+    if (m_cleanupGuard)
+        m_cleanupGuard->stop();
+    // "A cleanup is running" stops being true here, so the line that said it on a card goes with
+    // the run — but only on the card it was said about, and only if that card is still open.
+    if (!m_busyCard.isEmpty()) {
+        if (m_busyCard == m_detail->cardId())
+            m_detail->showError(QString());
+        m_busyCard.clear();
+    }
+    updateCleanupButton();
+}
+
+void BoardView::updateCleanupButton()
+{
+    if (!m_cleanup)
+        return;
+    const bool running = cleanupRunning();
+    m_cleanup->setText(running ? QStringLiteral("Stop") : QStringLiteral("Clean up"));
+    m_cleanup->setToolTip(running
+        ? (m_cleanupDry
+               ? QStringLiteral("Stop the preview. Nothing has been written either way.")
+               : QStringLiteral("Stop the cleanup. What it has already written stays, and the "
+                                "changelog says what that was."))
+        : QStringLiteral("Have the agent tidy the board: merge or split sections and cards, "
+                         "review statuses. The first run is a preview that writes nothing."));
+    // A property, not a font: a stylesheet rule with a pseudo-state that changed the font would
+    // paint one width and measure another (tests/buttonfit_test.cpp).
+    m_cleanup->setProperty("running", running);
+    m_cleanup->style()->unpolish(m_cleanup);
+    m_cleanup->style()->polish(m_cleanup);
+    layoutListTools();
+}
+
+// A cleanup takes minutes, so its progress line stays up instead of timing out like a move's
+// notice. `step` is the tool it is on, the last write it made, or a word for a state.
+void BoardView::showCleanupProgress(const QString &step)
+{
+    const qint64 seconds = m_cleanupClock.isValid() ? m_cleanupClock.elapsed() / 1000 : 0;
+    QString text = m_cleanupDry ? QStringLiteral("Cleanup preview") : QStringLiteral("Cleanup");
+    text += QStringLiteral(" · %1:%2").arg(seconds / 60).arg(seconds % 60, 2, 10, QLatin1Char('0'));
+    if (!step.isEmpty())
+        text += QStringLiteral(" · ") + step;
+    if (m_cleanupWrites > 0)
+        text += QStringLiteral(" · %1 %2").arg(m_cleanupWrites)
+                    .arg(m_cleanupDry ? QStringLiteral("proposed") : QStringLiteral("written"));
+    if (m_cleanupDry)
+        text += QStringLiteral(" · nothing is written");
+    m_noticeText->setText(text);
+    m_notice->setProperty("error", false);
+    m_notice->style()->unpolish(m_notice);
+    m_notice->style()->polish(m_notice);
+    m_noticeUndo->setVisible(false);
+    m_notice->show();
+    placeNotice();
+    m_noticeTimer->stop();      // it goes when the run does, not on a timer
+}
+
+void BoardView::hideCleanupPanel()
+{
+    if (m_cleanupPanel)
+        m_cleanupPanel->hide();
+}
+
+// 19.9's events, kept away from any card thread. They carry `cleanup: true` and a `run_id` and
+// never a `card_id`, so this runs before the card routing and swallows every one of them.
+bool BoardView::handleCleanupEvent(const QString &type, const QJsonObject &event)
+{
+    if (type == QStringLiteral("board_cleanup_started")) {
+        m_cleanupRun = event.value(QStringLiteral("run_id")).toString();
+        if (m_cleanupRun.isEmpty())
+            m_cleanupRun = QStringLiteral("running");
+        m_cleanupDry = event.value(QStringLiteral("dry_run")).toBool();
+        m_cleanupChangelog = event.value(QStringLiteral("changelog")).toString();
+        m_cleanupCards = event.value(QStringLiteral("cards")).toInt(m_model.total());
+        m_cleanupWrites = 0;
+        if (!m_cleanupClock.isValid())
+            m_cleanupClock.start();
+        updateCleanupButton();
+        showCleanupProgress(QStringLiteral("reading %1 cards").arg(m_cleanupCards));
+        return true;
+    }
+    if (type == QStringLiteral("board_cleanup_summary")) {
+        endCleanup();
+        m_noticeTimer->stop();
+        m_notice->hide();
+        showCleanupSummary(event);
+        return true;
+    }
+    if (!event.value(QStringLiteral("cleanup")).toBool())
+        return false;
+    // Everything below belongs to the run, and to nothing else.
+    if (type == QStringLiteral("board_activity")) {
+        ++m_cleanupWrites;
+        const QString card = event.value(QStringLiteral("id")).toString();
+        QString line = event.value(QStringLiteral("summary")).toString();
+        if (!card.isEmpty())
+            line = QStringLiteral("#%1 %2").arg(card, line);
+        showCleanupProgress(line);
+        return true;
+    }
+    if (type == QStringLiteral("tool_started")) {
+        showCleanupProgress(event.value(QStringLiteral("tool")).toString());
+        return true;
+    }
+    if (type == QStringLiteral("status")) {
+        showCleanupProgress(event.value(QStringLiteral("text")).toString());
+        return true;
+    }
+    if (type == QStringLiteral("error")) {
+        showCleanupProgress(QStringLiteral("failed: %1")
+                                .arg(event.value(QStringLiteral("text")).toString()));
+    }
+    if (type == QStringLiteral("done") || type == QStringLiteral("error")
+        || type == QStringLiteral("cancelled")) {
+        // The summary is the last word (19.9) and ends the run. This only catches a worker that
+        // died before sending one, which would otherwise leave the button on Stop for good.
+        if (!m_cleanupGuard) {
+            m_cleanupGuard = new QTimer(this);
+            m_cleanupGuard->setSingleShot(true);
+            m_cleanupGuard->setInterval(20000);
+            connect(m_cleanupGuard, &QTimer::timeout, this, [this] {
+                if (!cleanupRunning())
+                    return;
+                endCleanup();
+                showNotice(QStringLiteral("The cleanup ended without a summary. Its changelog, if "
+                                          "it wrote one, has what it did."), true);
+            });
+        }
+        m_cleanupGuard->start();
+    }
+    // delta, answer, thinking, turn_summary and the rest of a turn's chatter: the run's prose is
+    // in its report and its changelog, not streamed over the board.
+    return true;
+}
+
+void BoardView::showCleanupSummary(const QJsonObject &summary)
+{
+    const QString outcome = summary.value(QStringLiteral("outcome")).toString();
+    const bool dry = summary.value(QStringLiteral("dry_run")).toBool();
+    const QJsonObject counts = summary.value(QStringLiteral("counts")).toObject();
+    const QJsonArray changes = summary.value(QStringLiteral("changes")).toArray();
+    const QJsonArray refusals = summary.value(QStringLiteral("refusals")).toArray();
+    const int writes = counts.value(QStringLiteral("writes")).toInt();
+    const int proposed = counts.value(QStringLiteral("proposed")).toInt();
+    const double seconds = summary.value(QStringLiteral("seconds")).toDouble();
+    m_cleanupChangelog = summary.value(QStringLiteral("changelog")).toString();
+
+    // The heading says which of the two ran, and how it ended, in that order: whether anything
+    // was written to the owner's files is the first thing to know.
+    QString head = dry ? QStringLiteral("Cleanup preview — nothing was written")
+                       : QStringLiteral("Cleanup — the board was rewritten");
+    if (outcome == QStringLiteral("cancelled"))
+        head += dry ? QStringLiteral(" · stopped") : QStringLiteral(" · stopped part way");
+    else if (outcome == QStringLiteral("error"))
+        head += QStringLiteral(" · it failed");
+    QStringList facts;
+    facts << QStringLiteral("%1 card%2 before, %3 after")
+                 .arg(summary.value(QStringLiteral("cards_before")).toInt(m_cleanupCards))
+                 .arg(summary.value(QStringLiteral("cards_before")).toInt(m_cleanupCards) == 1
+                          ? QString() : QStringLiteral("s"))
+                 .arg(summary.value(QStringLiteral("cards_after")).toInt(m_cleanupCards));
+    facts << (dry ? QStringLiteral("%1 proposed").arg(proposed)
+                  : QStringLiteral("%1 written").arg(writes));
+    for (const QString &action : {QStringLiteral("merge"), QStringLiteral("split"),
+                                  QStringLiteral("move"), QStringLiteral("update"),
+                                  QStringLiteral("create"), QStringLiteral("comment"),
+                                  QStringLiteral("sections")}) {
+        const int n = counts.value(action).toInt();
+        if (n > 0)
+            facts << QStringLiteral("%1 %2").arg(n).arg(action);
+    }
+    if (seconds > 0)
+        facts << QStringLiteral("%1:%2").arg(int(seconds) / 60)
+                     .arg(int(seconds) % 60, 2, 10, QLatin1Char('0'));
+    m_cleanupHead->setText(QStringLiteral("<b>%1</b><br>%2")
+                               .arg(head.toHtmlEscaped(), facts.join(QStringLiteral(" · ")).toHtmlEscaped()));
+
+    QString html;
+    if (changes.isEmpty()) {
+        html += QStringLiteral("<p>%1</p>")
+                    .arg(dry ? QStringLiteral("It proposed no change.")
+                             : QStringLiteral("It changed nothing. Doing less and saying why is a "
+                                              "good outcome for this run."));
+    } else {
+        html += QStringLiteral("<p><b>%1</b></p><ul>")
+                    .arg(dry ? QStringLiteral("What it would do") : QStringLiteral("What it did"));
+        for (const QJsonValue &value : changes) {
+            const QJsonObject change = value.toObject();
+            const QString id = change.value(QStringLiteral("card_id")).toString();
+            const QString action = change.value(QStringLiteral("action")).toString();
+            const QString text = change.value(QStringLiteral("summary")).toString();
+            const QString path = change.value(QStringLiteral("path")).toString();
+            QString line = QStringLiteral("<b>%1</b>").arg(action.toHtmlEscaped());
+            if (!id.isEmpty())
+                line += QStringLiteral(" <a href=\"card:%1\">#%1</a>").arg(id.toHtmlEscaped());
+            if (!text.isEmpty())
+                line += QStringLiteral(" — %1").arg(text.toHtmlEscaped());
+            if (!path.isEmpty())
+                line += QStringLiteral(" · <a href=\"%1\">%2</a>")
+                            .arg(path.toHtmlEscaped(), QFileInfo(path).fileName().toHtmlEscaped());
+            html += QStringLiteral("<li>%1</li>").arg(line);
+        }
+        html += QStringLiteral("</ul>");
+        if (summary.value(QStringLiteral("truncated")).toBool())
+            html += QStringLiteral("<p>Only the first %1 are listed here; the changelog has every "
+                                   "one.</p>").arg(changes.size());
+    }
+    if (!refusals.isEmpty()) {
+        html += QStringLiteral("<p><b>Refused (%1)</b></p><ul>").arg(refusals.size());
+        for (const QJsonValue &value : refusals) {
+            const QJsonObject refusal = value.toObject();
+            html += QStringLiteral("<li>%1 — %2</li>")
+                        .arg(refusal.value(QStringLiteral("tool")).toString().toHtmlEscaped(),
+                             refusal.value(QStringLiteral("error")).toString().toHtmlEscaped());
+        }
+        html += QStringLiteral("</ul>");
+    }
+    const QString report = summary.value(QStringLiteral("report")).toString();
+    if (!report.isEmpty()) {
+        html += QStringLiteral("<p><b>The agent's report</b></p>");
+        const QStringList paragraphs = report.split(QStringLiteral("\n\n"), Qt::SkipEmptyParts);
+        for (const QString &paragraph : paragraphs)
+            html += QStringLiteral("<p>%1</p>").arg(paragraph.trimmed().toHtmlEscaped());
+    }
+    m_cleanupBody->setHtml(html);
+    m_cleanupBody->verticalScrollBar()->setValue(0);
+
+    // Apply only follows a preview that found something, and only when it ran to the end: half a
+    // plan is not a plan.
+    m_cleanupApply->setVisible(dry && outcome == QStringLiteral("done") && !changes.isEmpty());
+    m_cleanupLog->setVisible(!m_cleanupChangelog.isEmpty());
+    m_cleanupLog->setToolTip(m_cleanupChangelog.isEmpty()
+                                 ? QString()
+                                 : QStringLiteral("Open %1 in a pane").arg(m_cleanupChangelog));
+    m_cleanupPanel->setProperty("failed", outcome == QStringLiteral("error"));
+    m_cleanupPanel->style()->unpolish(m_cleanupPanel);
+    m_cleanupPanel->style()->polish(m_cleanupPanel);
+    m_cleanupPanel->show();
+    // The list keeps the keyboard: every control in the panel is NoFocus, so nothing moved.
 }
 
 }  // namespace relay

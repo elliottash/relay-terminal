@@ -572,6 +572,16 @@ QLineEdit#boardFilter { padding: 4px 8px; }
 QToolButton#boardAddButton, QToolButton#boardCleanup { background: @raised; color: @text; border: 1px solid @border; border-radius: 6px; padding: 4px 10px; }
 QToolButton#boardAddButton:hover, QToolButton#boardCleanup:hover { border-color: @accent; }
 QToolButton#boardCleanup { color: @muted; }
+/* While a cleanup runs the same button is Stop. Colour and border only: a rule that changed the
+   font here would paint one width and measure another (tests/buttonfit_test.cpp). */
+QToolButton#boardCleanup[running="true"] { color: @warning; border-color: @warningBorder; }
+QToolButton#boardCleanup[running="true"]:hover { border-color: @warning; }
+/* The cleanup's result, in the list page under its tools — not a floating strip. */
+QWidget#boardCleanupPanel { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
+QWidget#boardCleanupPanel[failed="true"] { border-color: @error; }
+QLabel#boardCleanupHead { color: @text; }
+QTextBrowser#boardCleanupBody { background: transparent; color: @text; border: none; }
+QTextBrowser#boardCleanupBody QScrollBar:vertical { width: 8px; margin: 0; }
 /* The list page's own tools (the count, the filter, the buttons, the section checkboxes) sit on
    a hairline over the rows; the pane's header carries nothing but the way back from a card. */
 QWidget#boardListTools { background: @bg; border-bottom: 1px solid @border; }
