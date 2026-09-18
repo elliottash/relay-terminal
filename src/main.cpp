@@ -1296,6 +1296,16 @@ public:
     // Where a clicked or keyboard-selected link goes. `fromMouse` teaches the keyboard path.
     void openOutputTarget(const QString &target, int line, bool fromMouse) {
         if (target.isEmpty()) return;
+        if (target.startsWith(QStringLiteral("relay://"))) {
+            const QUrl url(target);
+            const QStringList parts = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+            if (url.host() == QStringLiteral("continue")) { continueTurn(true); return; }
+            if (url.host() == QStringLiteral("turn") && parts.size() == 2 && onOpenTurn) {
+                onOpenTurn(QUrl::fromPercentEncoding(parts.at(1).toUtf8()));
+                return;
+            }
+            return;
+        }
         if (target.contains(QStringLiteral("://")) || target.startsWith(QStringLiteral("mailto:"))) {
             QDesktopServices::openUrl(QUrl(target));
             return;
@@ -2071,7 +2081,7 @@ private:
         bannerRow->addWidget(m_takeControl);
         m_programBar->hide();
         layout->addWidget(composer);
-        setupSubagentsUi(layout);   // subagents UI: running-agents list under the composer
+        setupSubagentsUi(layout);   // subagents UI: running-agents list beneath the composer
         updatePaths();
     }
 
@@ -2345,7 +2355,10 @@ private:
             // A stream that stopped mid-reasoning reports {elapsed_ms: 0, chars: 0}: nothing to summarize.
             if (event.value(QStringLiteral("chars")).toInt() <= 0 && ms <= 0) return true;
             ensureLineStart();
-            printInline(QStringLiteral("✦ thought for %1 s\n").arg(std::max<qint64>(1, (ms + 500) / 1000)), Ink::Note);
+            const QString turn = event.value(QStringLiteral("turn_id")).toString();
+            const QString label = QStringLiteral("✦ thought for %1 s").arg(std::max<qint64>(1, (ms + 500) / 1000));
+            if (turn.isEmpty()) printInline(label + '\n', Ink::Note);
+            else printTurnLink(label, turn);   // the turn pane shows the reasoning in full
             return true;
         }
         if (type == QStringLiteral("turn_summary")) {
@@ -3176,7 +3189,7 @@ private:
                 for (int i = 0; i < m_steering.size(); ++i) {
                     if (m_steering[i].requestId != value.toString()) continue;
                     ensureLineStart();
-                    printInline(QStringLiteral("› ") + m_steering[i].text + QStringLiteral("  ↪ at the next tool call\n"), Ink::User);
+                    printInline(QStringLiteral("✦ ") + m_steering[i].text + QStringLiteral("  ↪ at the next tool call\n"), Ink::UserAgent);
                     m_steering.removeAt(i);
                     break;
                 }
@@ -4048,10 +4061,11 @@ private:
     }
     // ----- subagents UI -------------------------------------------------------------------------
     void setupSubagentsUi(QVBoxLayout *layout) {
-        // Floats over the bottom of the terminal like the queue strip: taking layout space would
-        // resize the terminal, and Readline then redraws its prompt in the middle of agent output.
-        Q_UNUSED(layout);
+        // Beneath the prompt box, as in Claude Code: Down from the prompt moves into it. It takes
+        // layout space like the growing editor does, so the terminal gives up a few rows while
+        // subagents are listed.
         m_agentsPanel = new relay::SubagentsPanel(&m_subagents, this);
+        layout->addWidget(m_agentsPanel);
         m_agentsPanel->onOpen = [this](const QString &id) { openSubagent(id); };
         m_agentsPanel->onStop = [this](const QString &id) { stopSubagent(id); toast(QStringLiteral("Stopping ") + id); };
         m_agentsPanel->onExit = [this] { focusInput(); };
@@ -4096,13 +4110,8 @@ private:
     }
 
     void placeSubagentsPanel() {
-        if (!m_agentsPanel || !m_terminalHost) return;
+        if (!m_agentsPanel) return;
         m_agentsPanel->setAllowed(!m_composer || m_composer->isVisible());
-        if (!m_agentsPanel->isVisible()) { placeQueueStrip(); return; }
-        const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
-        const int height = std::min(m_agentsPanel->sizeHint().height(), host.height() / 2);
-        m_agentsPanel->setGeometry(host.left() + 8, host.bottom() - height - 6, host.width() - 16, height);
-        m_agentsPanel->raise();
         placeQueueStrip();
     }
 
@@ -4759,7 +4768,7 @@ private:
             if (!prompt.program.isEmpty()) m_transcriptProgram = prompt.program;
             if (!prompt.fix && !prompt.text.isEmpty()) {
                 ensureLineStart();
-                printInline(QStringLiteral("› ") + prompt.text + '\n', Ink::User);
+                printInline(QStringLiteral("✦ ") + prompt.text + '\n', Ink::UserAgent);
                 if (!prompt.why.isEmpty()) printInline(prompt.why + '\n', Ink::Note);
             }
         } else if (type == QStringLiteral("agent_finished")) {
@@ -5634,12 +5643,15 @@ private:
     }
 
     // ----- inline output in the terminal -------------------------------------------------
-    enum class Ink { Agent, User, Tool, ToolOutput, DiffAdd, DiffRemove, Error, Note, Recap };
+    enum class Ink { Agent, User, UserAgent, Tool, ToolOutput, DiffAdd, DiffRemove, Error, Note, Recap };
 
     static QByteArray inkCode(Ink ink) {
         switch (ink) {
         case Ink::Agent: return "\x1b[38;2;226;229;235m";
         case Ink::User: return "\x1b[1;38;2;62;197;240m";
+        // A line that went to the agent is echoed in the agent's violet, the same colour the caret
+        // and the mode chip use for that destination.
+        case Ink::UserAgent: return "\x1b[1;38;2;180;142;247m";
         case Ink::Tool: return "\x1b[38;2;229;192;123m";
         case Ink::ToolOutput: return "\x1b[38;2;128;135;150m";
         case Ink::DiffAdd: return "\x1b[38;2;126;200;140m";
@@ -5682,6 +5694,7 @@ private:
         switch (ink) {
         case Ink::Agent: return QColor(226, 229, 235);
         case Ink::User: return QColor(62, 197, 240);
+        case Ink::UserAgent: return QColor(180, 142, 247);
         case Ink::Tool: return QColor(229, 192, 123);
         case Ink::ToolOutput: case Ink::Note: return QColor(128, 135, 150);
         case Ink::DiffAdd: return QColor(126, 200, 140);
@@ -6980,8 +6993,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
         if (!m_queueStrip || !m_queueStrip->isVisible() || !m_terminalHost) return;
         const QRect host(m_terminalHost->mapTo(this, QPoint(0, 0)), m_terminalHost->size());
         const int height = std::min(m_queueStrip->sizeHint().height(), host.height() / 2);
-        const int below = m_agentsPanel && m_agentsPanel->isVisible() ? m_agentsPanel->height() + 4 : 0;   // subagents UI
-        m_queueStrip->setGeometry(host.left() + 8, host.bottom() - height - 6 - below, host.width() - 16, height);
+        m_queueStrip->setGeometry(host.left() + 8, host.bottom() - height - 6, host.width() - 16, height);
         m_queueStrip->raise();
     }
 
