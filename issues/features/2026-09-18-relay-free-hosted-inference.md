@@ -9,7 +9,7 @@ workstream: providers
 rank: zzzzzn
 created: '2026-09-18'
 source: owner, in a Claude Code session, 2026-09-18, with a written spec ("Relay Free Hosted Inference")
-links: {plans: ['docs/RELAY-FREE.md'], commits: [], evidence: [], related: ['24XJ', 'W5N2'], github: null}
+links: {plans: ['docs/RELAY-FREE.md'], commits: ['6e83ee9'], evidence: ['docs/qa_evidence/2026-09-18-relay-free/'], related: ['24XJ', 'W5N2'], github: null}
 ---
 # Relay Free: the agent works on a fresh install, with no API key
 
@@ -231,12 +231,12 @@ are kept; the decisions in it are unchanged):
 
 ## Tasks
 
-- [ ] `gateway/`: config, store, validation, streaming proxy, routes, systemd unit, README, tests (Phase 1) <!-- t:g1 -->
-- [ ] `relay-free` preset, `hosted.py`, `HostedChatProvider`, roles, `provider_config`, keytest, `presets` row, `hosted_quota`, protocol 13.9, tests (Phase 2) <!-- t:b2 -->
-- [ ] Desktop: usable gate, first-run default, disclosure line, mirror row, keys-modal group and row, quota chip, exhausted message, privacy copy (Phase 3) <!-- t:d3 -->
-- [ ] Docs and site: `docs/RELAY-FREE.md`, ROADMAP and WARP decision rows, README privacy, `site/index.html`, `site/free.html` (Phase 4) <!-- t:s4 -->
+- [x] `gateway/`: config, store, validation, streaming proxy, routes, systemd unit, README, tests (Phase 1) <!-- t:g1 -->
+- [x] `relay-free` preset, `hosted.py`, `HostedChatProvider`, roles, `provider_config`, keytest, `presets` row, `hosted_quota`, protocol 13.9, tests (Phase 2) <!-- t:b2 -->
+- [x] Desktop: usable gate, first-run default, disclosure line, mirror row, keys-modal group and row, quota chip, exhausted message, privacy copy (Phase 3) <!-- t:d3 -->
+- [x] Docs and site: `docs/RELAY-FREE.md`, ROADMAP and WARP decision rows, README privacy, `site/index.html`, `site/free.html` (Phase 4) <!-- t:s4 -->
 - [ ] Deploy: `python3-cryptography`, unit, env file, cloudflared ingress, DNS (owner), live health check <!-- t:p5 -->
-- [ ] QA evidence under `docs/qa_evidence/2026-09-18-relay-free/` <!-- t:q6 -->
+- [x] QA evidence under `docs/qa_evidence/2026-09-18-relay-free/` <!-- t:q6 -->
 
 ## What is left
 
@@ -248,3 +248,7 @@ are kept; the decisions in it are unchanged):
 - Tuning the `relay-lite` cap toward the spec's 32 after measuring live replies.
 - Gemini direct for Lite: confirm the data-use terms on a billed project first.
 - Phase 4–5: cost-aware routing, provider health, a metrics dashboard, stronger identity.
+
+## Thread
+
+- 2026-09-18, implementer (Claude): landed as `6e83ee9`: gateway, backend, desktop, docs and site in one commit, built and tested on the exact tree (the tmux test in `test_ssh_shell` is flaky under load and passed on rerun). Left open: deploying the gateway (DNS, cloudflared ingress, env file with the OpenRouter key, real prices), the phone view's copy of the quota chip, and the Lite cap tuning.
