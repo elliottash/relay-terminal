@@ -22,7 +22,7 @@ links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-17-remote-p1
 panes, from the share button in the app. Confirmed on a real iPhone and iPad (2026-09-18).**
 
 Against the acceptance line: a phone drives a pane's terminal **and** its agent, over an
-end-to-end encrypted session. **Notifications and multiplayer are not built**, so the card stays
+end-to-end encrypted session. **Notifications are half-wired and multiplayer is not started**, so the card stays
 open — see "What is left".
 
 - Design and owner decisions: `docs/REMOTE-AND-MULTIPLAYER-DESIGN.md` (section 12 records the review
@@ -74,30 +74,115 @@ python3 -m remote.cli share --tls    # prints a QR; scan it, confirm the five-di
 | The share button, dialog and GUI sidecar | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` |
 | Dev harness with the QR and self-signed TLS | `remote/cli.py`, `remote/devtls.py` |
 
-## What is left
+## What is left (refreshed 2026-09-18, 15:00, against `dd35ead`)
 
-1. **Notifications.** Nothing is delivered. `/v1/push/send` accepts a payload and drops it;
-   VAPID signing is not written. "Agent finished", "waiting for input" and "password prompt" are
-   the point of a companion app and none of them reach a phone yet. This is the largest gap
-   against the acceptance line.
-2. **Multiplayer (P4).** Not started: no invites, roles, knock-to-admit, presence, guest prompt
-   approval or audit log. The second half of the acceptance line.
-3. **Web Push delivery.** `/v1/push/send` accepts and does not deliver; VAPID signing is not written.
-   The subscription keys deliberately never reach the rendezvous.
-4. **Hosting actions (owner).** `app.relay-terminal.ai` and the `rv.` cloudflared ingress rule.
-   Until then Relay serves the app itself, over the LAN or the tailnet, with a self-signed
-   certificate the phone warns about once.
-5. **Security findings not yet fixed**, all in parts that are refused rather than half-built:
-   `secret_input` needs a desktop-minted prompt nonce, so answering a password prompt from the
-   phone returns `not_permitted`; WebAuthn user verification must be bound to the desktop or
-   dropped from the threat table; transport switching needs the explicit `transport_switch`
-   handshake before WebRTC arrives. Ordinary input *is* refused while a pane is at a password
-   prompt, checked from a fresh termios read at write time.
-6. **Scrollback paging** (`history_get`) needs the const `VtCore::historyLines` in both cores. A
-   phone sees the live screen only.
-7. **Voice from a phone** is refused: `remote/gui_host.py` has no route to the pane's worker for it,
-   though the desktop's own transcription path would take the clip as it stands.
-8. **Native apps (P5)** — Android then iOS, per the owner's decision.
+Since the last refresh, `cc79c01` and `dd35ead` landed a second batch of remote work: password
+entry, the push crypto, the rendezvous's push delivery, an audit log and the `transport_switch`
+handshake. Some of it is complete and some is half-wired; this list is what reading the code and
+running the suites shows, not what the commit messages say. The remote suites run 95 tests with
+4 failing; three of the four are tests written ahead of code that does not exist yet.
+
+**Done since the last refresh**
+
+- **Password entry from the phone.** `secret_input` is no longer refused: a desktop-minted,
+  single-use, 45-second nonce bound to (pane, foreground pid, prompt generation), a per-device
+  switch that is off by default, a fresh termios check in the hub and again in
+  `Pane::submitRemoteSecret` at the write, an audit line that records the fact and not the bytes,
+  and a password field in the web client. Tested in `SecretInputTests`. **Not yet tried on a real
+  phone.**
+- **Audit log** (`remote/audit.py`): local, 0600, split by month and size. Records pairing,
+  revoke, prompt detection and password use. It does not yet record prompts, lines or control
+  handoffs, which section 10 asks for.
+- **`transport_switch`**: the handshake exists and is tested. No second transport exists to switch
+  to, which is correct for now.
+
+**Half-built: finish these first**
+
+1. **Notifications.** The two ends exist and nothing connects them. Built: RFC 8291 encryption,
+   the inner seal and VAPID signing (`remote/push.py`); `/v1/push/key` and a `/v1/push/send` that
+   really delivers (`rendezvous/server.py`); a service worker that opens the seal and discards
+   what it cannot open (`app/sw.js`); `DeviceStore.set_push`. Missing: the web client never calls
+   `pushManager.subscribe` and never sends the subscription; there is no `push_subscribe` message
+   in `remote/wire.py`; the hub never decides to send a push (no triggers, no presence rule, no
+   per-pane cooldown, no constructed bodies, section 9); the GUI does not tell the sidecar whether
+   its window is active. `remote/push.py` has **no tests**.
+2. **Scrollback paging.** `ScreenBridge` answers a `history` request, but from
+   `VtCore::historyText`, which is plain text, and the owner's decision was styled history. The hub
+   refuses `history_get`; `HistoryTests` fails against that refusal. Needs a const, styled
+   `historyLines(from, count)` in both cores, then the bridge, `TerminalView`, the sidecar, the
+   hub and a scroll-up gesture in `app/screen.js`.
+3. **Voice from a phone.** The hub handler and two `VoiceTests` exist; `GuiPaneSource.transcribe`
+   still raises. Needs a `voice` message to the GUI, a hook into the pane's existing transcription
+   path, the reply, and a microphone button in the web client.
+4. **Docs are behind the code.** `REMOTE-PROTOCOL.md` section 14 still says password entry is
+   refused and push is not delivered, and is dated 2026-09-17.
+
+**Not started**
+
+5. **Multiplayer (P4)**: the second half of the acceptance line. No guest identity, invite links,
+   roles, knock-to-admit, presence, control handoff between people, guest-prompt approval, or
+   desktop surface for any of it. Today a device pairs to the owner's desktop *as the owner*.
+6. **WebAuthn binding**: bind user verification to the desktop, or drop it from the threat table.
+   Recommendation: drop it for v1; the per-device password switch already covers the case it was
+   there for. Owner's call.
+
+**Needs the owner**
+
+7. **Hosting**: `app.relay-terminal.ai` and the `rv.` cloudflared ingress rule. Until then it is
+   LAN or tailnet with a certificate warning. It also gates the real two-person test, because a
+   guest is not on the owner's network; the code can be tested on the LAN without it.
+8. **Native apps (P5)**: Android then iOS. Not in the acceptance line. Recommendation: move it to a
+   card of its own so this one can close on what it promises.
+
+**Other sessions' loose ends that touch this**
+
+- `#XEMH` (remote browser-peer tests fail, `Rrp` not a named export) no longer reproduces:
+  `test_remote_wire` and `test_remote_noise` pass, 42 of 42. It can be closed.
+- `test_a_model_switch_mid_turn_shows_where_it_lands` fails in `test_remote_browser`. That test and
+  the `app/app.js` model indicator it covers are `#3ES1`'s uncommitted work, not this card's.
+- `engine/core/VtCore.h`, both cores and `CoreTest.cpp` carry `#TK9C`'s uncommitted edits. The
+  scrollback work needs the same files, so it waits for that commit.
+
+## Delivery plan (Opus subagents, this checkout, `main`)
+
+Every agent gets: a named set of files it owns, the rule that it commits only its own hunks
+(`git apply --cached`, never `git add -A`), the "fix clear gaps" rule, and the remote suites as its
+gate. `remote/host.py`, `app/app.js`, `src/RemoteShare.cpp` and `src/Pane.h` are touched by almost
+everything, so the waves are cut so that no two agents running at once share a function in them.
+
+**Wave 0: lead session, no subagent.** Refresh `REMOTE-PROTOCOL.md` section 14. Write the
+multiplayer wire contract into section 10 as messages (`invite_create`, `knock`, `admit`,
+`presence`, `control_offer`, `prompt_pending`, `prompt_decide`), so wave 3's agents build against one
+text. Close `#XEMH`.
+
+**Wave 1: three agents in parallel**
+
+| Agent | Delivers | Owns | Also touches |
+|---|---|---|---|
+| A · push | `push_subscribe`; the hub's triggers (agent finished, waiting for input, password prompt) with constructed bodies, the presence rule and the cooldown; subscribe in the client with a permission prompt that is asked for, not sprung; `tests/test_remote_push.py` including a fake push service and RFC 8291 vectors | `remote/push.py`, `rendezvous/server.py`, `app/sw.js`, the new test | a `# ---- push` section in `host.py`; one settings row in `app.js`; a `window_active` line from `RemoteShare.cpp` |
+| B1 · styled history, engine half | `VtCore::historyLines`, const, in both cores, with `CoreTest` cases; `ScreenBridge` answers in `segs` | `engine/core/*`, `engine/tools/ScreenBridge.cpp` | none. **Starts when `#TK9C` commits.** |
+| C · voice | `voice` to the GUI and back, the pane hook, the microphone button | `GuiPaneSource.transcribe`, the `voice` branch in `RemoteShare.cpp`, one hook in `Pane.h` | the composer row in `app.js`/`index.html` |
+
+**Wave 2: one agent.** B2 · history, the rest: `TerminalView` accessor, sidecar and hub
+(`_on_history_get`), `remote/terminal.py`, scroll-up paging in `app/screen.js`. Makes `HistoryTests`
+pass rather than rewriting it.
+
+**Wave 3: multiplayer, four agents, two at a time**
+
+| Agent | Delivers | Owns |
+|---|---|---|
+| M1 · guests and invites | guest identity (a guest is never the owner), invite links with role and expiry built on `pairing.Room`, roles mapped onto the existing capabilities, knock-to-admit, audit lines for all of it | new `remote/guests.py`, `identity.py`, `pairing.py`, a section of `host.py` |
+| M2 · presence and control (after M1) | who is here, who holds control, offer/request/take back, the guest-prompt approval queue, audit of prompts, lines and handoffs | new `remote/control.py`, a section of `host.py` |
+| M3 · desktop surface (with M2) | participants, knocks and pending guest prompts as a **pane**, not a dialog; invite creation from the share button | `src/RemoteShare.{h,cpp}`, one hook block in `Pane.h` |
+| M4 · web client (with M2) | guest join flow, presence chips, ask-for-control, "waiting for the owner" on a prompt | `app/*` |
+
+**Wave 4: two agents.** An independent security review of push, password entry and multiplayer,
+as was done for P0, with findings fixed rather than listed. Then a live drive: `drive.sh` grown to
+two browsers (owner's phone and a guest), screenshots and logs into `docs/qa_evidence/`, and the
+card moved to `needs_qa_llm`.
+
+Ten agents, of which at most three run at once. The order is what the acceptance line needs first:
+notifications close the phone half, multiplayer closes the other.
 
 Related work: take-over shares the control token with `#C1HH`; `#YR21` improves remote
 "waiting for input" notifications; `#05J2` reuses this feature's pairing machinery.
