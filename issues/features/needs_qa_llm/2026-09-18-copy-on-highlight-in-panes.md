@@ -12,7 +12,7 @@ implemented_by: Claude Opus 5 (1M context) (Claude Code session relay-terminal, 
 created: '2026-09-18'
 acceptance: with `terminal/copy_on_select` on, a mouse drag over text in the conversation info pane, the file preview and the Switchboard card detail puts that text on the clipboard and on PRIMARY; with it off, nothing Relay owns is copied; an editable field is never copied from
 source: owner, in a Claude Code session, 2026-09-18
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-copy-on-highlight-in-panes'], related: [], github: null}
+links: {plans: [], commits: ['d5db918'], evidence: ['docs/qa_evidence/2026-09-18-copy-on-highlight-in-panes'], related: [], github: null}
 ---
 # Copy on highlight works in the info pane and every other read-only pane, not only the terminal
 
