@@ -44,8 +44,9 @@ Backend tests by module:
 | `tests/test_alias_import.py` | 22 | Importing: Warp workflows out of a copied read-only database (with their parameters and an `agent_mode` workflow importing as a prompt), workflow YAML, shell aliases with bash's own quote escape, malformed rows / YAML / alias lines each skipped with a reason, a database that is not one, a symlinked startup file, nothing executed and nothing written by a preview, an apply writing only what was chosen, a name that was not previewed refused, renaming on import, the conflict and warning fields, and this machine's real Warp workflows when Warp is installed |
 | `tests/test_alias_protocol.py` | 18 | The section-20 messages: defining an alias and the list that follows, a bad definition refused with a sentence, delete, the list readable with no provider configured, the palette / `/name` / typed-name paths all expanding the same way, defaults, a metacharacter value quoted before it reaches the GUI, a missing required value, a prompt alias, local beating global, the preview writing nothing and the apply writing what was chosen, an apply without a preview, and the agent's alias suggestion (proposed, rejected, and no repeats meaning no model call) |
 | `tests/test_images.py` | 27 | Image context: attachments loaded as bytes with the type sniffed from them, text attachments unchanged, the per-image cap, multimodal content parts and their base64 data URLs, `relay_*` keys never reaching the wire, an image estimated as a constant, which models read images, the GLM-5.3 → GLM-5.3-Flash swap and the swap back (including after a failed turn), the refusal when nothing can read images, a configured vision model, and the replacement of each image by its description and path once the turn is over |
+| `tests/test_tool_labels.py` | 57 | Tool-call labels (#TK9C, protocol § 23): the verb and title of every tool, a short command shown whole and a long one shrunk to its program (keeping the subcommand for a multi-command CLI), a pipeline or `&&` chain named by its first real command with the rest counted, the stats (lines, entries, exit code, duration, `+n −m`), `kind`, the `open` target, which calls merge and which never do (a failure, a command, an edit), and the `detail` sections `tool_output_get` replies with |
 | `tests/test_version.py` | 1 | `relay_core.__version__` matches `project(Relay VERSION …)` in `CMakeLists.txt` |
-| **Total** | **201** | |
+| **Total** | **300** | the rows above, added up; `./scripts/test.sh` is the live count |
 
 Qt tests:
 
@@ -56,6 +57,24 @@ Qt tests:
 | `tests/filepanes_test.cpp` | explorer navigates in and up, filter, hidden files, Enter opens a file, typing starts the filter, filter then Down+Enter opens the match, preview picks a viewer by type, large text truncated with a notice, missing path returns false |
 | `tests/aliases_test.cpp` | aliases: name and slug rules matching the worker's, a template rendered into composer fields with its defaults, Tab and Shift+Tab walking and wrapping, typing into a field moving the later ones, the values sent to the worker, a field still showing its own name counting as unfilled, reading the values back out of an edited line and refusing a line that was rewritten, a trailing field running to the end, `/name` never shadowing a built-in, a typed name matching only when it is exactly an alias (not a path, a prefix, an assignment or a longer word), a shadowed global alias not being a name, the palette row text, and the fast-path hint |
 | `tests/images_test.cpp` | image context: type sniffed from the bytes (including a mislabelled file), `@` tokens quoted for paths with spaces, capture names stamped and never colliding, PNG writing and the empty-image refusal, what a paste or a drop carries (file URLs used in place, inline data written to the cache), plain text is not an image, the cache sweep takes only old `relay-*` captures, and the 3 MiB cap matches the worker's |
+| `tests/toollabel_test.cpp` (20) | the shared label parser (#TK9C): one line per call for every tool and every `kind`, the command classifier, the stats in the order § 23.4 fixes, a failure's `✗` and exit code, what a click opens, and which consecutive calls merge |
+| `tests/calllines_test.cpp` (32) | the terminal pane's rows, headless (#TK9C): the `relay://call/` and `relay://open-call/` URIs and reading them back, a row cut to the pane's columns so it never wraps, the rewrite-or-new-row state machine, a run of reads merging and being broken by anything else, and the `FoldLine` spans a fold is filled with (detail sections, a merged run's members, the inline diff, the `… N more lines · open in pane` cap) |
+| `tests/turntranscript_test.cpp` (9) | the turn pane (#TK9C): every row is the label's line, a merged run is one parent row with its members, each call's duration, and `detail` rendered section by section |
+
+Engine suites (`relay-engine-tests`, one binary, `RELAY_ENGINE_TEST=<name>` runs one):
+
+| Test object | Tests | What it checks |
+|---|---:|---|
+| `engine/tests/FoldLayerTest.cpp` | 15 | The fold layer's maths on its own (#TK9C): real rows and fold rows in one visual sequence, anchoring a fold to a hyperlink run, wrapping a block to the pane's width at its indent, the line cap, scroll ranges, and what a resize, a trim and a clear do to a fold |
+| `engine/tests/FoldSearchTest.cpp` | 12 | Find across the open folds (#TK9C): matches inside a block in screen order, a match straddling the block's wrap counted once, the merge with the core's own matches, and the count following a fold being opened or shut |
+| `engine/tests/FaintInkTest.cpp` | 15 | Faint ink (#LG7T, `engine/view/FaintInk.h`): WCAG luminance and contrast, the flat 40% fade being under the floor on both shipped themes' muted grey, and the helper fading as far as it can while staying at 4.5:1 — unchanged where there is no room, and never fainter than the old alpha |
+| `engine/tests/ViewTest.cpp` | 15 fold cases of 31 | The fold in the view (#TK9C): a click opens the detail under its line and shuts it again, an unknown fold asks the host, the fold stays under its line across a resize and goes when the scrollback is cleared, its rows count in the scroll range and step one by one, a full-screen program hides it, selection and copy cross it in visual order, a link inside it opens, find steps both sides of it in screen order, and a real row painted under a fold's last row is pixel-identical to the same row with the fold shut |
+
+Counts exclude Qt Test's `initTestCase`/`cleanupTestCase` entries and were taken from a
+`ctest --test-dir build` run on 2026-09-18: **42 of 43** suites pass. The one that does not is
+`backend-and-bash`, and not on a test: the suite takes longer than the `TIMEOUT 120` it is declared
+with (`CMakeLists.txt`) — about 130 s on an idle machine, more when several sessions are building
+at once — so ctest kills it. Run on its own (`./scripts/test.sh`) it is clean.
 
 Provider tests use a local mock server and synthetic responses. They do not validate real
 accounts, quotas, billing or model behavior.
@@ -226,6 +245,7 @@ Waiting for QA (`issues/features/needs_qa_llm/`):
 - `2026-09-17-windows-tabs-panes.md`
 - `2026-09-17-wrong-mode-hints.md`
 - `2026-09-18-agent-hands-commands-to-the-terminal.md`
+- `2026-09-18-concise-tool-call-lines.md`
 - `2026-09-18-distinct-headers-or-colors-for-each-pane-type.md`
 - `2026-09-18-edit-file-tool.md`
 - `2026-09-18-light-and-dark-commands.md`

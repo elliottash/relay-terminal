@@ -118,9 +118,9 @@ sleep 40
 shot 02-lines-folded
 
 # ---- what a click does ----------------------------------------------------------------------
-# One click per run (PHASE=command|reads|diff, all three by default): a fold that opens scrolls the
-# view to keep the newest output on screen, so after the first click the rows are no longer where
-# this script counted them. The rows are 19 pixels apart from the turn's first row, and Ctrl+click
+# One click per run (PHASE=command|reads|diff; without PHASE the run stops at the folded shot, so
+# all four shots take four runs): a fold that opens scrolls the view to keep the newest output on
+# screen, so after the first click the rows are no longer where this script counted them. The rows are 19 pixels apart from the turn's first row, and Ctrl+click
 # always opens a link, whether or not the pane is the active one.
 row() { echo $((169 + 19 * $1)); }
 click() { xdotool mousemove --sync 120 "$(row "$1")"; sleep 0.4; xdotool keydown ctrl; xdotool click 1; xdotool keyup ctrl; sleep "${2:-3}"; }

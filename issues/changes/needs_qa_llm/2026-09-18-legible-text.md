@@ -12,7 +12,7 @@ rank: b
 created: '2026-09-18'
 acceptance: 'No UI text under 9pt (stylesheet in pt only, QPainter labels through theme::legible); the application font at least 10pt; every text token 4.5:1 on background, surface and surface_raised in every shipped theme; no italic + muted + monospace in the terminal notes, the subagent transcript, the thinking panel or the turn log; the Options "Log detail" row reads as a line, not a column; theme and buttonfit tests pass'
 source: 'owner, 2026-09-18: "some of the fonts seem hard to read, eg in subagent panes"'
-links: {plans: [], commits: [fac5dac], evidence: ['docs/qa_evidence/2026-09-18-legible-text/'], related: [SPBN, WD83, TK9C], github: null}
+links: {plans: [], commits: [fac5dac, 6eb00d0], evidence: ['docs/qa_evidence/2026-09-18-legible-text/'], related: [SPBN, WD83, TK9C], github: null}
 ---
 # Text is legible everywhere: a size floor, 4.5:1 on every surface, no italic muted mono
 
@@ -72,6 +72,14 @@ the thinking format — style constants only),
 `src/BoardPane.cpp` (font helpers), `src/SettingsPane.cpp` (row layout), `src/WindowChrome.h`
 (bell badge), `src/RemoteShare.cpp`, `src/FilePanes.cpp`, `tests/theme_test.cpp`,
 `tests/buttonfit_test.cpp`, `tests/panestatus_test.cpp`, `docs/ARCHITECTURE.md`.
+
+## The engine's part
+
+The terminal engine drew faint text (SGR 2) and a fold's dim rows at 60% alpha, a flat 40% fade
+that put the shipped themes' muted grey at about 2.9:1 (Relay Dark) and 2.5:1 (Relay Light). Landed
+with #TK9C as 6eb00d0: `engine/view/FaintInk.h` fades the ink toward the ground the cell is drawn
+on only as far as 4.5:1 allows and never worsens ink that was already under the floor;
+`engine/tests/FaintInkTest.cpp` pins it on both themes' greys.
 
 ## Evidence
 

@@ -1,6 +1,6 @@
 # Package E — the terminal pane's tool-call lines, live
 
-Card: `issues/features/2026-09-18-concise-tool-call-lines.md` (#TK9C), task g1.
+Card: `issues/features/needs_qa_llm/2026-09-18-concise-tool-call-lines.md` (#TK9C), task g1.
 Implementer evidence, 2026-09-18. Everything below is a real Relay under Xvfb, driving a real
 worker against `pane-stub-provider.py` on 127.0.0.1 — no network, no keys. `HOME`,
 `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR` and `TMPDIR` are all
