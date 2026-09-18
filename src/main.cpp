@@ -79,6 +79,8 @@
 #include <QSet>
 #include <QDesktopServices>
 #include <QMetaObject>
+#include <QShowEvent>
+#include <QShowEvent>
 #include <QSignalBlocker>
 #include <QSocketNotifier>
 #include <QSpinBox>
@@ -119,6 +121,7 @@
 #include <QDirIterator>
 #include <QMimeDatabase>
 #include <QTextBlock>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <algorithm>
 #include <functional>
@@ -649,7 +652,7 @@ public:
         connect(&m_poll, &QTimer::timeout, this, [this] { pollShell(); });
         connect(&m_secretPoll, &QTimer::timeout, this, [this] { checkPasswordPrompt(); checkOomKills(); });
         m_secretPoll.start(1000);
-        m_poll.start(80);
+        m_poll.start(kPollFastMs);
         m_debounce.setSingleShot(true);
         m_debounce.setInterval(150);
         m_idleTip.setSingleShot(true);
@@ -736,7 +739,9 @@ public:
     void toggleNative() { setNative(!m_native); }
     bool agentBusy() const { return m_agentBusy; }
     bool processBusy() const {
-        return m_backend && foregroundPid() > 0 && foregroundPid() != shellPid();
+        if (!m_backend) return false;
+        const int foreground = foregroundPid();   // an ioctl: asked once, this runs on every poll
+        return foreground > 0 && foreground != shellPid();
     }
     // The pane's shell and the process group in the terminal's foreground, through whichever
     // engine this pane uses. 0 when there is no terminal.
@@ -1834,6 +1839,12 @@ protected:
         QTimer::singleShot(0, this, [this] { placeSubagentsPanel(); });
         updateTranscriptHeight();
         updatePaths();
+    }
+
+    // Coming back on screen: catch up at once instead of on the next quiet tick (tunePoll).
+    void showEvent(QShowEvent *event) override {
+        QWidget::showEvent(event);
+        if (m_poll.isActive()) pollShell();
     }
 
     bool eventFilter(QObject *object, QEvent *event) override {
@@ -5702,6 +5713,7 @@ private:
         closeInline();
         m_pendingHash = QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
         m_pendingCommand = text; m_loading = true; m_shellReady = false; m_promptReported = false;
+        tunePoll();   // a background pane waits for the acknowledgement at the fast rate
         m_fixCommand = watch ? text : QString(); m_fixAttempt = attempt; m_fixWatch = watch; m_fixArmed = false;
         m_commandNatural = natural;   // wrong-mode hints: reads like a request (agent_signal)
         // Stage text via a bound Readline function. Enter is sent only after its hash acknowledgement.
@@ -5800,7 +5812,7 @@ public:
         }
         m_backend = nullptr; m_terminal = nullptr; m_shellStopped = false; m_shellPid = 0;
         m_shellReady = false; m_promptReported = false; m_loading = false; m_seenShell = false;
-        m_shellSequence.clear(); m_inlineOpen = false; m_atLineStart = true; m_autoHuman = false;
+        m_shellSequence.clear(); m_stateSeen = false; m_inlineOpen = false; m_atLineStart = true; m_autoHuman = false;
         if (m_native) setNative(false, false);
         try {
             startTerminal(m_cleanShell);
@@ -8014,13 +8026,34 @@ struct PendingPrompt { QString text, why, program; bool fix = false; QString she
         }
     }
 
+    // The shell poll costs about a dozen system calls, and every pane runs one. A pane nobody can
+    // see (a background tab) with nothing in flight has no one waiting on its answer, so it asks
+    // five times less often; it is back to the fast rate the moment it is shown or given work.
+    static constexpr int kPollFastMs = 80, kPollQuietMs = 400;
+    void tunePoll() {
+        const bool quiet = !isVisible() && !m_loading && !m_activeValid && m_entries.isEmpty();
+        const int wanted = quiet ? kPollQuietMs : kPollFastMs;
+        if (m_poll.interval() != wanted) m_poll.setInterval(wanted);
+    }
+
     void pollShell() {
+        tunePoll();
         // PROMPT_COMMAND runs before Readline puts the tty into noncanonical mode.
         // Recheck on every tick, even when the state file has not changed.
         refreshShellReady();
         if (!m_entries.isEmpty() && !m_activeValid) pumpQueue();
-        QFile file(m_runtime.filePath(QStringLiteral("state.json")));
+        // This runs 12 times a second in every pane, and the file changes a few times per
+        // command. shell/event.py replaces it atomically, so a new event is a new inode: one
+        // stat() says whether there is anything to read, in place of an open, a read and a JSON
+        // parse. A small saving; tunePoll() above is the larger one.
+        const QString statePath = m_runtime.filePath(QStringLiteral("state.json"));
+        struct stat info;
+        if (::stat(QFile::encodeName(statePath).constData(), &info) != 0) return;
+        if (m_stateSeen && info.st_ino == m_stateInode && info.st_size == m_stateSize
+            && info.st_mtim.tv_sec == m_stateMtime.tv_sec && info.st_mtim.tv_nsec == m_stateMtime.tv_nsec) return;
+        QFile file(statePath);
         if (!file.open(QIODevice::ReadOnly) || file.size() > 1024 * 1024) return;
+        m_stateSeen = true; m_stateInode = info.st_ino; m_stateSize = info.st_size; m_stateMtime = info.st_mtim;
         const auto event = QJsonDocument::fromJson(file.readAll()).object();
         if (event.value(QStringLiteral("token")).toString() != m_token) return;
         const auto sequence = event.value(QStringLiteral("sequence")).toString();
@@ -8396,6 +8429,8 @@ private:
     QString m_scrollbackId;
     QStringList m_restoredScrollback;
     bool m_scrollbackReplayed = false;
+    // state.json as pollShell() last read it, so an unchanged file is not read again.
+    bool m_stateSeen = false; ino_t m_stateInode = 0; off_t m_stateSize = 0; timespec m_stateMtime{};
     QString m_shellSequence, m_shellPath, m_pendingHash, m_pendingCommand, m_pendingSubmit, m_previewId, m_submittedDraft;
     QJsonArray m_knownCommands;
     QTemporaryDir m_runtime{QDir::tempPath() + QStringLiteral("/relay-XXXXXX")};

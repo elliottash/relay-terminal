@@ -503,7 +503,11 @@ Routing is a convenience, not a security classifier. Natural language can be val
   Ctrl+X Ctrl+P runs the no-op `__relay_redraw`.
 
 The GUI polls `state.json` every 80 ms and accepts only events with its session token and a
-new sequence value. If no event arrives within 5 s, the pane switches to native input.
+new sequence value. If no event arrives within 5 s, the pane switches to native input. The poll
+is a `stat()` unless the file has changed (`shell/event.py` replaces it, so a new event is a new
+inode), and a pane that is off screen with nothing in flight — a background tab — polls every
+400 ms instead (`Pane::tunePoll`); it returns to 80 ms when shown, when it is given a command and
+while its queue has items. Measured idle, eight tabs: 1.80 % of a core before, 0.55 % after.
 
 Sending a command (`Pane::runInTerminal`):
 
