@@ -6,7 +6,8 @@ labels: [feature]
 component: [worker]
 milestone: desktop-alpha
 workstream: switchboard
-assignee: Claude Opus 5 (1M context), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (1M context), 2026-09-17
 rank: y9
 created: '2026-09-17'
 acceptance: '`docs/qa_evidence/2026-09-17-switchboard-phase0/` (migration dry run and apply over a copy of the 57 real issue files, `check` output, body-fidelity and determinism verification, full test run); 76 new tests in `tests/test_board.py`, suite at 349 tests'

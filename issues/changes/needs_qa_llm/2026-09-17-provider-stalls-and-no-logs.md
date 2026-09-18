@@ -5,7 +5,8 @@ status: needs-qa-llm
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: agent
-assignee: implemented by Claude Opus 5 (1M context), Claude Code session, 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (1M context), Claude Code session, 2026-09-17
 rank: zzz
 created: '2026-09-17'
 labels: [bug]

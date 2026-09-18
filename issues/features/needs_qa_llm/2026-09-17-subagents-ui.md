@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: agent (E2, subagents UI)
-assignee: implemented by Claude Opus 5 (Claude Code, GUI E2 worktree), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code, GUI E2 worktree), 2026-09-17
 rank: xo
 created: '2026-09-17'
 acceptance: '`tests/subagents_test.cpp` (ctest `subagents`), live run in `docs/qa_evidence/2026-09-17-subagents-ui/`'

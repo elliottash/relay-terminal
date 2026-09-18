@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui, worker, shell-integration]
 milestone: desktop-alpha
 workstream: terminal
-assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code session), 2026-09-17
 rank: nt
 created: '2026-09-17'
 acceptance: in one pane, a command that allocates memory past the pane limit (for example `python3 -c "b=bytearray(1<<40)"` or `stress-ng --vm 1 --vm-bytes 90%`) is killed; other panes, their shells and agents, and the Relay window keep running; `systemd-cgls --user` shows one scope per pane

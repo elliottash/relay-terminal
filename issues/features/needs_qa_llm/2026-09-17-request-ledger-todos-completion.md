@@ -6,7 +6,8 @@ labels: [feature]
 component: [agent, worker]
 milestone: desktop-alpha
 workstream: agent
-assignee: implemented by Claude Opus 5 (Claude Code, backend), 2026-09-17. Not committed.
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code, backend), 2026-09-17. Not committed.
 rank: sg
 created: '2026-09-17'
 acceptance: '`tests/test_requests.py` (39 tests; full suite 272 tests OK), updated `tests/test_agent.py` and `tests/test_queue.py`; live scenarios in `docs/qa_evidence/2026-09-17-request-ledger/` (see `NOTES.md`)'

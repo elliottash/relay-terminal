@@ -6,7 +6,8 @@ labels: [feature]
 component: [agent]
 milestone: 0.1-preview
 workstream: agent
-assignee: Claude Opus 5 research subagent, 2026-09-16
+assignee: agent
+implemented_by: Claude Opus 5 research subagent, 2026-09-16
 rank: 9v
 created: '2026-09-17'
 acceptance: '`docs/OPENCODE-NOTES.md`'

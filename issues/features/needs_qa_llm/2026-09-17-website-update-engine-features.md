@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal
-assignee: Claude Opus 5 (1M context), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (1M context), 2026-09-17
 rank: zzk1
 created: '2026-09-17'
 acceptance: the live site describes the current build with fresh screenshots that show no personal paths

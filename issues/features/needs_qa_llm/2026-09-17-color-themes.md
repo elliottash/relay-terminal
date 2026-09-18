@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui, theme]
 milestone: desktop-alpha
 workstream: terminal
-assignee: implemented by Claude Opus 5 (Claude Code, color-themes worktree), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code, color-themes worktree), 2026-09-17
 rank: zz0j
 created: '2026-09-17'
 acceptance: switching theme in Settings restyles the app, the terminal and the composer colours without a restart

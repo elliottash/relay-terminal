@@ -6,7 +6,8 @@ labels: [feature]
 component: [agent, worker]
 milestone: desktop-alpha
 workstream: agent (B, backend subagents)
-assignee: implemented by Claude Opus 5 (Claude Code, backend B worktree), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code, backend B worktree), 2026-09-17
 rank: fo
 created: '2026-09-17'
 acceptance: '`tests/test_agents_defs.py`, `tests/test_subagents.py`, live run in `docs/qa_evidence/2026-09-17-backend-subagents/`'

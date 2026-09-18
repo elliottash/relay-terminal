@@ -6,7 +6,8 @@ labels: [feature]
 component: [worker, gui]
 milestone: desktop-alpha
 workstream: agent
-assignee: implemented by Claude Opus 5 (Claude Code, model-roles worktree), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code, model-roles worktree), 2026-09-17
 rank: mn
 created: '2026-09-17'
 acceptance: '`tests/test_roles.py` (25 tests, `./scripts/test.sh` 298 total), live worker and GUI runs in `docs/qa_evidence/2026-09-17-model-roles/`'

@@ -6,7 +6,8 @@ labels: [feature]
 component: [worker, gui]
 milestone: desktop-alpha
 workstream: agent
-assignee: implemented by Claude Opus 5 (Claude Code, model-roles worktree), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code, model-roles worktree), 2026-09-17
 rank: m2
 created: '2026-09-17'
 acceptance: each role's model is pickable in Agent options; unset roles follow the main agent; the fast agent's per-provider default is applied; side calls and subagents visibly use their role's model

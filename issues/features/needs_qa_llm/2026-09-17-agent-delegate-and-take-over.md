@@ -7,7 +7,8 @@ component: [agent, gui, shell-integration]
 milestone: desktop-alpha
 workstream: agent
 rank: 0k
-assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code session), 2026-09-17
 created: '2026-09-17'
 acceptance: a recorded run where the agent edits a file in vim in the visible pane, the user takes over mid-session with a keystroke, and hands control back
 source: '`issues/feature_intake.txt`, "check that i can run programs, eg nano / vim. i need the delegate / take over functionality like warp."'

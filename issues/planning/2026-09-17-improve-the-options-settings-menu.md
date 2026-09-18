@@ -62,3 +62,17 @@ Ordered by value/effort; each names the findings it fixes.
 **Today's shape, for context:** Ctrl+, (Relay preset) or palette → Settings opens a modeless dialog — section list left (General, Appearance, Models, Terminal, Agent, Voice, Privacy, Shortcuts), rows right; the same row catalog renders as palette submenus, so every setting keeps a keyboard path. All proposals above stay inside that catalog design.
 
 **Implementation/QA notes:** everything proposed is GUI/QSettings-only — no protocol changes (`docs/AGENT-SESSIONS-PROTOCOL.md` untouched). Verify under Xvfb with an isolated `XDG_CONFIG_HOME` per the project routine; any new fast path needs a shortcut-hint entry (WARP.md standing rule).
+
+## Update (2026-09-18): the Settings pane
+
+The owner asked for settings as a full pane rather than a strip (card SP4N,
+`issues/changes/needs_qa_llm/2026-09-18-settings-as-a-full-pane.md`). `src/SettingsPane.{h,cpp}`
+replaces both the palette overlay and the compact dialog. Of the findings above it settles:
+1 (search in the pane, over settings rows and actions, aliases live), 2 (Show tool output, Desktop
+notifications, Log detail, Log folder and the stall timeout are rows now), 4 (a rebuild keeps the tab,
+scroll offset, highlight and focused control), 5 (no nested palette any more), 6 (spin boxes write once
+per finished edit), 7 (the whole toggle row is clickable), 9 (headings inside Agent, Voice and General),
+10 (the gear and Ctrl+Shift+A open it; Ctrl+, still does). Still open: 3 (a pane open in another tab
+is redrawn on keymap reload and theme reload, not on every external write), 8 (per-row reset and a
+changed indicator), 11 (confirm before "Start a fresh window set"), the Browse… button for path rows,
+and export/import (#05J2).

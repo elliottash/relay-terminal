@@ -6,7 +6,8 @@ labels: [feature]
 component: [agent]
 milestone: desktop-alpha
 workstream: agent
-assignee: implemented by Claude Opus 5 (Claude Code session, skills subagent), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code session, skills subagent), 2026-09-17
 rank: lh
 created: '2026-09-17'
 acceptance: backend tests with a fixture skills directory, plus a live run where the agent loads `issue-tracking` for a triage request and follows it

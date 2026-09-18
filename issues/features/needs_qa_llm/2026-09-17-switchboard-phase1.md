@@ -6,8 +6,8 @@ labels: [feature, switchboard]
 component: [worker, gui]
 milestone: desktop-alpha
 workstream: switchboard
-assignee: Claude Opus 5 (1M context), 2026-09-17
-implemented_by: Claude Opus 5 (1M context)
+assignee: agent
+implemented_by: Claude Opus 5 (1M context), 2026-09-17
 rank: zzzi
 created: '2026-09-17'
 acceptance: '`docs/qa_evidence/2026-09-17-switchboard-phase1/` (Xvfb pass on a copy of the real 86-card tracker with a live model: the pane opens on Ctrl+Shift+S, an agent turn creates, moves and comments on a card through the tools, the pane follows by itself, and the Switchboard agent answers on the card); 131 new tests (78 + 37 Python, 16 C++), suite at 623 Python tests and 17 ctest groups'

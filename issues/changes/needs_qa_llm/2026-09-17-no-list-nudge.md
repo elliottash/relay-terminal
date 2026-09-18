@@ -6,7 +6,8 @@ labels: [bug]
 component: [worker]
 milestone: desktop-alpha
 workstream: agent
-assignee: implemented by Claude Opus 5 (Claude Code), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code), 2026-09-17
 rank: t2
 created: '2026-09-17'
 acceptance: '`docs/qa_evidence/2026-09-17-tasks-are-todos-only/eval/RESULTS.md` (implementer run: the nudge fires once and is correctly ignored for a single instruction); a QA session confirms a multi-part turn that skips the list gets the note and that no turn gets it twice'

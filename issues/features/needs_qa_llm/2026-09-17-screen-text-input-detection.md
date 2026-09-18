@@ -7,7 +7,8 @@ component: [gui, terminal engine]
 milestone: cross-platform
 workstream: terminal
 rank: 6y
-assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code session), 2026-09-17
 created: '2026-09-17'
 acceptance: with the Relay engine, `sudo apt upgrade` reaching "Do you want to continue? [Y/n]" shows the waiting-for-input hint and moves focus to the terminal within about a second, without false hints during downloads
 source: 'owner, 2026-09-17: "lets do the first option now, and then reading the last line with the new engine later"'

@@ -6,7 +6,8 @@ labels: [feature]
 component: [agent, worker, gui]
 milestone: desktop-alpha
 workstream: agent
-assignee: Claude Opus 5 (orchestrating) with subagents, 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (orchestrating) with subagents, 2026-09-17
 rank: '15'
 created: '2026-09-17'
 acceptance: per-workstream issues filed by the implementing agents, each with implementer evidence and a QA checklist

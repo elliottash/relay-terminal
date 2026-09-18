@@ -6,7 +6,8 @@ labels: [bug]
 component: [gui, packaging]
 milestone: beta
 workstream: terminal
-assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-18
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code session), 2026-09-18
 rank: hf
 created: '2026-09-18'
 acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`

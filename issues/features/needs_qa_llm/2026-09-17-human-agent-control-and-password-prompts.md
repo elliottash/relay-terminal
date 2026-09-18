@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui, shell-integration]
 milestone: desktop-alpha
 workstream: terminal
-assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code session), 2026-09-17
 rank: jq
 created: '2026-09-17'
 acceptance: a non-Claude model QA session runs the checklist on a real desktop and records it under `docs/qa_evidence/`

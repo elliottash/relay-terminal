@@ -6,7 +6,8 @@ labels: [feature]
 component: [router]
 milestone: 0.1-preview
 workstream: routing
-assignee: implemented by Claude Opus 5 (1M context), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (1M context), 2026-09-17
 rank: u6
 created: '2026-09-17'
 acceptance: a non-Claude model QA session runs the checklist below and records it under `docs/qa_evidence/`

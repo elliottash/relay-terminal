@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: terminal
-assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code session), 2026-09-17
 rank: tm
 created: '2026-09-17'
 acceptance: quitting Relay with several windows, tabs and split panes and reopening it brings back the same layout, each pane in its old directory with its agent conversation reattached; a fresh profile still opens a single pane

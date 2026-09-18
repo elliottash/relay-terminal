@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal
-assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code session), 2026-09-17
 rank: 4n
 created: '2026-09-17'
 acceptance: after `ls`, `grep -n` or a compiler error, Ctrl+Shift+L highlights a path or URL in the pane and repeated presses / arrows move between them, scrolling scrollback as needed; Enter opens it with the same routing as a click (explorer, preview, browser); Esc cancels

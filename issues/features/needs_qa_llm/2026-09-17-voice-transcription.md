@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: agent
-assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code session), 2026-09-17
 rank: 8p
 created: '2026-09-17'
 acceptance: a non-Claude model QA session on a real desktop with a real microphone runs the checklist and records it under `docs/qa_evidence/`

@@ -6,7 +6,8 @@ labels: [bug]
 component: [gui]
 milestone: desktop-alpha
 workstream: agent
-assignee: implemented by Claude Opus 5 (Claude Code), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code), 2026-09-17
 rank: t1
 created: '2026-09-17'
 acceptance: '`docs/qa_evidence/2026-09-17-tasks-are-todos-only/` (implementer run: 14 QtTest cases over the model and the real panel widget); a non-Claude model QA session runs the checklist below with a preset that writes todo lists and records it there'

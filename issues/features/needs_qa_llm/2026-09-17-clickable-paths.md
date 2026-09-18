@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui, shell-integration]
 milestone: desktop-alpha
 workstream: terminal
-assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code session), 2026-09-17
 rank: 2b
 created: '2026-09-17'
 acceptance: clicking a directory path in terminal output opens the explorer pane; clicking a file opens the preview pane

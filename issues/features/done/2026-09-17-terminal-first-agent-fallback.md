@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui, router]
 milestone: 0.1-preview
 workstream: routing
-assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-16
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code session), 2026-09-16
 rank: ag
 created: '2026-09-17'
 acceptance: a model QA session from a non-Claude family drives the built app and records the checks below under `docs/qa_evidence/`

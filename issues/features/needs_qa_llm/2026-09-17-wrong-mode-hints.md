@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui, router]
 milestone: desktop-alpha
 workstream: routing
-assignee: implemented by Warp agent (auto), 2026-09-17/18
+assignee: agent
+implemented_by: Warp agent (auto), 2026-09-17/18
 rank: gu
 created: '2026-09-17'
 acceptance: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`

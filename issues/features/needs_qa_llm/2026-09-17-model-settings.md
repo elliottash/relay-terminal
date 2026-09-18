@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui, worker, providers]
 milestone: desktop-alpha
 workstream: providers
-assignee: implemented by Claude Opus 5 (Claude Code, model-settings worktree), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code, model-settings worktree), 2026-09-17
 rank: i1
 created: '2026-09-17'
 acceptance: '`docs/qa_evidence/2026-09-17-model-settings/` (29 screenshots + `drive.sh`, live under Xvfb)'

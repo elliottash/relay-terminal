@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal
-assignee: widgets implemented by Claude Opus 5 (Claude Code subagent), 2026-09-17; integration into windows, tabs and panes is done by the main session
+assignee: agent
+implemented_by: widgets: Claude Opus 5 (Claude Code subagent), 2026-09-17; integration into windows, tabs and panes is done by the main session
 rank: i1
 created: '2026-09-17'
 acceptance: a non-Claude model QA session runs the checklist against the widgets inside Relay's windows and records it under `docs/qa_evidence/`

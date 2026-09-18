@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal
-assignee: implemented by Claude Opus 5 (Relay agent session), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Relay agent session), 2026-09-17
 rank: r2
 created: '2026-09-17'
 acceptance: '`docs/qa_evidence/2026-09-17-window-header/` (implementer run under Xvfb, no window manager); a non-Claude model QA session runs the checklist below on a real desktop and records it there'

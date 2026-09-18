@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: agent
-assignee: implemented by Claude Opus 5 (Claude Code, pane-title worktree), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code, pane-title worktree), 2026-09-17
 rank: zzu
 created: '2026-09-17'
 acceptance: each pane's header and each tab's label show a short agent-written summary, refreshed as the work changes; double click, /rename and /rename-tab set a name by hand that is never overwritten

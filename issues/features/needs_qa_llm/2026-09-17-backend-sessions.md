@@ -6,7 +6,8 @@ labels: [feature]
 component: [worker, agent]
 milestone: desktop-alpha
 workstream: agent (A, backend sessions)
-assignee: implemented by Claude Opus 5 (Claude Code, backend sessions worktree), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code, backend sessions worktree), 2026-09-17
 rank: f3
 created: '2026-09-17'
 acceptance: '`tests/test_sessions.py`, `tests/test_session_protocol.py`, updated `tests/test_skills.py`; live worker run in `docs/qa_evidence/2026-09-17-backend-sessions/`'

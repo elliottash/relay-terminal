@@ -6,7 +6,8 @@ labels: [bug]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal
-assignee: implemented by Claude Opus 5 (1M context) (Claude Code session), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (1M context) (Claude Code session), 2026-09-17
 rank: r1
 created: '2026-09-17'
 acceptance: '`docs/qa_evidence/2026-09-17-prompt-box-only-input/` (implementer run, both engines); a non-Claude model QA session runs the checklist below and records it there'

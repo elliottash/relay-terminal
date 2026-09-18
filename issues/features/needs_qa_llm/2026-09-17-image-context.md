@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: agent
-assignee: implemented by Claude Opus 5 (Claude Code session), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code session), 2026-09-17
 rank: '42'
 created: '2026-09-17'
 acceptance: an image pasted or dropped into the composer reaches the model; on GLM 5.3 the turn is sent to GLM 5.3 Flash automatically; presets without vision say so instead of failing. Verified live against Z.AI (swap and swap-back, answer read from the picture) and OpenRouter (refusal, nothing sent); a non-Claude model QA session runs the checklist below and records it under `docs/qa_evidence/`

@@ -6,7 +6,8 @@ labels: [feature]
 component: [router, worker, agent, providers]
 milestone: desktop-alpha
 workstream: routing, agent (F2, backend)
-assignee: implemented by Claude Opus 5 (Claude Code, backend F2 worktree), 2026-09-17
+assignee: agent
+implemented_by: Claude Opus 5 (Claude Code, backend F2 worktree), 2026-09-17
 rank: ur
 created: '2026-09-17'
 acceptance: '`tests/test_routing_thinking_skills.py` (25 tests), updated `tests/test_provider.py`, live run in `docs/qa_evidence/2026-09-17-routing-thinking-skills/NOTES.md`'

@@ -6,7 +6,8 @@ labels: [feature]
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: agent
-assignee: unassigned (backend implemented by Claude Opus 5, 2026-09-16)
+assignee: unassigned
+implemented_by: Claude Opus 5, 2026-09-16 (backend)
 rank: ra
 created: '2026-09-17'
 acceptance: 'backend: `tests/test_queue.py`; GUI: a recorded run where a prompt submitted mid-turn is queued, another interrupts, and the queue panel shows both'
