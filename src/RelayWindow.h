@@ -1025,17 +1025,35 @@ private:
     using PaletteItem = relay::ActionItem;
 
     // ----- Actions pane and Options pane (src/SettingsPane.h) -----------------------------------
-    // Two panes, one at a time, beside the focused pane (owner, 2026-09-18: a full pane, not a strip
-    // over the right edge). Ctrl+Shift+A is Actions: one filterable list of everything you can do
-    // now, with its keys — resume, the Switchboard, the model, a new pane, rewind, Options itself.
-    // Ctrl+Shift+O, Ctrl+, and the gear are Options: what persists, every setting as a real control,
-    // one tab per section. Pressing the other's key swaps the pane in place. Either search reaches
-    // both catalogs, so "Ctrl+Shift+A, type, Enter" always lands somewhere. The pane is
-    // transient: it is not saved with the layout, and closing it returns focus to the widget that
-    // had it (vim in the terminal, or the prompt box).
-    static ToolPane *settingsPaneIn(QWidget *page) {
+    // Two panes, beside the focused pane (owner, 2026-09-18: a full pane, not a strip over the
+    // right edge). Ctrl+Shift+A is Actions: one filterable list of everything you can do now, with
+    // its keys — resume, the Switchboard, the model, a new pane, rewind, Options itself.
+    // Ctrl+Shift+O, Ctrl+, and the gear are Options: what persists, every setting as a real
+    // control, one tab per section. Either search reaches both catalogs, so "Ctrl+Shift+A, type,
+    // Enter" always lands somewhere. The panes are transient: they are not saved with the layout,
+    // and closing one returns focus to the widget that had it (vim in the terminal, or the prompt).
+    //
+    // **They open side by side.** Until 2026-09-18 this was one pane in two modes and the other
+    // key swapped it in place, so a setting could not be read while the action that needed it was
+    // on screen (owner: "you cant have the options menu and actions menu both open
+    // simultaneously"). Each mode is now its own pane, and a key or a button finds, focuses or
+    // closes the pane in *its* mode and leaves the other one alone.
+    static QList<ToolPane *> settingsPanesIn(QWidget *page) {
+        QList<ToolPane *> out;
         for (QWidget *leaf : leavesIn(page))
-            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->settings()) return tool;
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->settings()) out << tool;
+        return out;
+    }
+
+    // The pane in that mode, preferring the focused one if a page somehow holds two of it (a row
+    // in Actions that reveals an option turns that pane into an Options pane in place).
+    ToolPane *settingsPaneIn(QWidget *page, relay::SettingsPane::Mode mode) const {
+        if (!page) return nullptr;
+        if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data());
+            tool && tool->settings() && pageOf(tool) == page && tool->settings()->mode() == mode)
+            return tool;
+        for (ToolPane *tool : settingsPanesIn(page))
+            if (tool->settings()->mode() == mode) return tool;
         return nullptr;
     }
 
@@ -1078,11 +1096,11 @@ private:
         return items;
     }
 
-    // Open the pane in this tab in that mode, or swap the one it has to it; `tab` picks the
-    // Options section.
+    // Open this tab's pane for that mode, or focus the one it already has; `tab` picks the
+    // Options section. A pane in the *other* mode is left where it is.
     void openSettingsPane(relay::SettingsPane::Mode mode, const QString &tab = QString(), const QString &search = QString()) {
         QWidget *page = m_tabs->currentWidget();
-        ToolPane *tool = page ? settingsPaneIn(page) : nullptr;
+        ToolPane *tool = settingsPaneIn(page, mode);
         if (!tool) {
             m_returnPane = m_active;
             m_returnFocus = QApplication::focusWidget();
@@ -1093,8 +1111,6 @@ private:
             tool = createSettingsPane(mode);
             if (anchor) insertBeside(anchor, tool, Qt::Horizontal, false);
             else if (page && page->layout()) page->layout()->addWidget(tool);
-        } else if (tool->settings()->mode() != mode) {
-            tool->settings()->setMode(mode);   // re-reads both catalogs
         } else {
             tool->settings()->rebuild();
         }
@@ -1105,9 +1121,10 @@ private:
         updateTitles();
     }
 
-    // Two keys, one pane: Ctrl+Shift+A is Actions (things to do now), Ctrl+Shift+O and the gear are
-    // Options (what persists). Each opens its pane or swaps an open one to it; pressed while its
-    // own pane has the focus, it closes it.
+    // Two keys, a pane each: Ctrl+Shift+A is Actions (things to do now), Ctrl+Shift+O and the gear
+    // are Options (what persists). Each opens its own pane, or focuses it if this tab already has
+    // one; pressed while that pane has the focus, it closes it. Neither key touches the other's
+    // pane, so both can be on screen at once.
     void toggleSettingsPane(bool actions) {
         const auto mode = actions ? relay::SettingsPane::Mode::Actions : relay::SettingsPane::Mode::Options;
         if (auto *tool = dynamic_cast<ToolPane *>(m_activeLeaf.data()); tool && tool->settings()) {
@@ -1161,7 +1178,8 @@ private:
         recent.removeAll(item.key); recent.prepend(item.key);
         QSettings().setValue(QStringLiteral("palette/recent"), QStringList(recent.mid(0, 12)));
         if (item.key == QStringLiteral("app.settings")) {
-            // Options, chosen from Actions: the pane swaps in place rather than closing and reopening.
+            // Options, chosen from Actions: Options opens beside the list it was chosen from, which
+            // stays open — the point of two panes is reading a setting and its action together.
             hint(hintId, hintText);
             openSettingsPane(relay::SettingsPane::Mode::Options);
             return;
@@ -1184,7 +1202,7 @@ private:
     // Something a setting depends on changed elsewhere (a keymap reload, a theme file): redraw.
     void refreshSettingsPanes() {
         for (int i = 0; i < m_tabs->count(); ++i)
-            if (ToolPane *tool = settingsPaneIn(m_tabs->widget(i))) tool->settings()->rebuild();
+            for (ToolPane *tool : settingsPanesIn(m_tabs->widget(i))) tool->settings()->rebuild();
     }
 
     // Settings › Local models (card #24XJ). One per window: the rows are a section of the Options
@@ -1526,10 +1544,8 @@ private:
                 QSettings().setValue(QStringLiteral("control/default"), value);
             });
         }
-        // The key stays `terminal/copy_on_select` although the behaviour is no longer terminal-only
-        // (src/CopyOnSelect.h): renaming it would turn the setting off for everyone who had it on.
         terminal.rows << toggleRow(QStringLiteral("terminal/copy_on_select"), QStringLiteral("Copy on select"),
-                                   QStringLiteral("Highlighting text copies it, in the terminal and in read-only panes"), false);
+                                   QStringLiteral("Selecting terminal text copies it"), false);
         terminal.rows << toggleRow(QStringLiteral("terminal/shell_integration"),
                                    QStringLiteral("Shell integration (OSC 7/133)"),
                                    QStringLiteral("Directory and prompt marks; applies to new panes"), false);
@@ -2239,7 +2255,7 @@ private:
             {QStringLiteral("instruction"), QStringLiteral("rules claude.md agents.md warp.md gemini memory relay.md onboarding")},
             {QStringLiteral("skill"), QStringLiteral("abilities tools refine import skills library")},
             {QStringLiteral("alias"), QStringLiteral("workflow workflows macro snippet saved command saved prompt template shortcut warp")},
-            {QStringLiteral("copy on select"), QStringLiteral("clipboard selection highlight copy primary mouse terminal pane info panes transcript preview diff board")},
+            {QStringLiteral("copy on select"), QStringLiteral("clipboard selection highlight copy")},
             {QStringLiteral("shortcut preset"), QStringLiteral("keymap keybindings hotkeys warp vscode konsole preset")},
             {QStringLiteral("inside programs"), QStringLiteral("vim nano less passthrough program keys")},
             {QStringLiteral("suggest"), QStringLiteral("autocomplete ghost ai suggestions next command prompt")},
@@ -2335,7 +2351,8 @@ private:
 
     void openSshMenu() {
         openSettingsPane(relay::SettingsPane::Mode::Actions);
-        if (ToolPane *tool = settingsPaneIn(m_tabs->currentWidget())) tool->settings()->scrollToGroup(QStringLiteral("menu:ssh"));
+        if (ToolPane *tool = settingsPaneIn(m_tabs->currentWidget(), relay::SettingsPane::Mode::Actions))
+            tool->settings()->scrollToGroup(QStringLiteral("menu:ssh"));
     }
 
     void connectToHost(const QString &target) {
@@ -2473,7 +2490,8 @@ private:
 
     void openAgentsMenu() {
         openSettingsPane(relay::SettingsPane::Mode::Actions);
-        if (ToolPane *tool = settingsPaneIn(m_tabs->currentWidget())) tool->settings()->scrollToGroup(QStringLiteral("menu:agents"));
+        if (ToolPane *tool = settingsPaneIn(m_tabs->currentWidget(), relay::SettingsPane::Mode::Actions))
+            tool->settings()->scrollToGroup(QStringLiteral("menu:agents"));
     }
 
     // The subagent pane (card #WD83): one per main pane, a tab per subagent, split beside its
@@ -3774,9 +3792,9 @@ private:
     //
     // **Which pane, when a tab somehow holds two of a type** — a restored Switchboard dropped
     // beside one that was already there: the focused one if that is of the type, otherwise the
-    // first in the tab's pane order, which is the pane the opener itself would have reused. The
-    // Settings pane is one pane in two modes, and its `paneType` follows the mode, so Actions and
-    // Options are never both lit.
+    // first in the tab's pane order, which is the pane the opener itself would have reused.
+    // Actions and Options are separate panes since 2026-09-18, each with its own `paneType`, so
+    // both buttons are lit while both are open and each click closes only its own.
     static QString paneTypeOf(QWidget *leaf) {
         if (!leaf) return {};
         const QString set = leaf->property("paneType").toString();

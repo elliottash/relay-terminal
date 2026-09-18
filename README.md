@@ -92,8 +92,9 @@ which reloads live. Copy on select is off by default (Options › Terminal).
 resume a session, open the Switchboard, pick the model, a new pane, rewind, open Options — in one
 list you can filter, recent first, each with its keys. **Options** (Ctrl+Shift+O, the gear at the
 top right, or Ctrl+,) is what *persists*: a tab per section — General, Appearance, Models, Terminal,
-Agent, Voice, Privacy, Keyboard — with every setting as a real control. Pressing the other key
-swaps the pane in place. The title bar has a button for each tool pane, left of the gear: Actions,
+Agent, Voice, Privacy, Keyboard — with every setting as a real control. The two open side by side:
+each key opens, focuses or closes its own pane and leaves the other where it is, so a setting can be
+read next to the action that uses it. The title bar has a button for each tool pane, left of the gear: Actions,
 Sessions and the Switchboard, each with the glyph its pane wears. Either search box reaches both: in Actions, an option shows as an
 "Options › …" row that takes you to it. Type, ↑ ↓, Enter runs the action or changes the row; Esc
 closes and puts focus back where it was, so nothing there needs the mouse.

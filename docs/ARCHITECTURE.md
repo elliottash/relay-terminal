@@ -1640,11 +1640,17 @@ keybindings.json).
   per section (General, Appearance, Models, Terminal, Agent, Voice, Privacy, Keyboard) and the rows as
   real controls.
 
-There is one such pane per tab, beside the focused pane in the splitter layout like the explorer and
-the Switchboard — a full pane, not a strip over the right edge (owner, 2026-09-18). Pressing the
-other pane's key swaps it in place (`SettingsPane::setMode()`, which clears the search and re-reads
-both catalogs; `RelayWindow::openSettingsPane(mode)`); so does choosing Options… in Actions. Pressed
-while its own pane has the focus, the key closes it; so do Esc on an empty search and the ✕. Closing
+Each mode is its own pane, beside the focused pane in the splitter layout like the explorer and the
+Switchboard — a full pane, not a strip over the right edge (owner, 2026-09-18). **Both can be open
+at once** (owner, 2026-09-18: "you cant have the options menu and actions menu both open
+simultaneously"); until then it was one pane whose mode the other key swapped, so a setting could
+not be read beside the action that used it. `RelayWindow::openSettingsPane(mode)` looks up the pane
+in *that* mode (`settingsPaneIn(page, mode)`) and opens one when there is none, so a key never
+reaches into the other mode's pane; `settingsPanesIn(page)` is for the callers that mean both, such
+as the redraw after a keymap or theme change. Choosing Options… in Actions opens Options beside the
+list, which stays. Pressed while its own pane has the focus, the key closes it; so do Esc on an
+empty search and the ✕. Both title-bar buttons are lit while both panes are open, and each closes
+only its own. Closing
 returns focus exactly where it was (vim in the terminal, or the prompt box). The pane is transient:
 `node()` is empty, so it is never saved with the layout, and closing it when it is the last leaf of
 the last tab puts a terminal pane beside it first rather than closing the window.
