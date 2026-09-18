@@ -201,6 +201,13 @@ add_library(relay-titles STATIC src/PaneTitles.cpp src/PaneTitles.h)
 target_include_directories(relay-titles PUBLIC src)
 target_link_libraries(relay-titles PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-titles PRIVATE -Wall -Wextra -Wpedantic)
+# Pane types and pane states (#SPBN, #XM0T): the header band's tints, the state a pane is in, the
+# most urgent one a tab shows, and the host of an ssh/mosh/telnet session. Rules only; the painting
+# is in src/PaneChrome.h.
+add_library(relay-panestatus STATIC src/PaneStatus.cpp src/PaneStatus.h)
+target_include_directories(relay-panestatus PUBLIC src)
+target_link_libraries(relay-panestatus PUBLIC ${RELAY_QT}::Gui)
+target_compile_options(relay-panestatus PRIVATE -Wall -Wextra -Wpedantic)
 # Clickable paths in terminal output (#YZTK) and the keyboard walk over them (#GWXM):
 # which spans of a line are files, folders or URLs, what they resolve to against a pane's
 # working directory, and the cursor that steps through the ordered list. Plain QtCore with
@@ -285,7 +292,7 @@ if(RELAY_BUILD_APP)
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
-    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-terminal-engine relay-screen relay-slash relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-terminal-engine relay-screen relay-slash relay-board relay-aliases ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -409,6 +416,11 @@ if(BUILD_TESTING)
     add_executable(relay-titles-tests tests/panetitles_test.cpp)
     target_link_libraries(relay-titles-tests PRIVATE relay-titles ${RELAY_QT}::Test)
     add_test(NAME titles COMMAND relay-titles-tests)
+    add_executable(relay-panestatus-tests tests/panestatus_test.cpp)
+    target_link_libraries(relay-panestatus-tests PRIVATE relay-panestatus relay-theme ${RELAY_QT}::Test)
+    add_test(NAME panestatus COMMAND relay-panestatus-tests)
+    # Reads the shipped theme files from the source tree.
+    set_tests_properties(panestatus PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
     add_executable(relay-voice-tests tests/voice_test.cpp)
     target_link_libraries(relay-voice-tests PRIVATE relay-voice ${RELAY_QT}::Test)
     add_test(NAME voice COMMAND relay-voice-tests)
