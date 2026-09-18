@@ -1450,6 +1450,13 @@ protected:
             && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton && ownsTerminalWidget(qobject_cast<QWidget *>(object))) {
             QTimer::singleShot(0, this, [this] { copySelection(); });
         }
+        // The reasoning bubble never takes the keyboard (the prompt box keeps it), so its
+        // selection is copied here on release when copy on select is on, and by Ctrl+C in the
+        // prompt box otherwise (copyThinkingSelection).
+        if (event->type() == QEvent::MouseButtonRelease && copyOnSelect() && m_thinkingView
+            && object == m_thinkingView->viewport() && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
+            QTimer::singleShot(0, this, [this] { copyThinkingSelection(); });
+        }
         // A plain click in the terminal (not a selection drag) used to give it the keyboard.
         // It no longer does, so say which key still hands the keyboard over.
         if (event->type() == QEvent::MouseButtonPress && ownsTerminalWidget(qobject_cast<QWidget *>(object)))
@@ -2164,6 +2171,13 @@ private:
                 status(QStringLiteral("Turn details: ") + event.value(QStringLiteral("text")).toString());
                 return true;
             }
+            // The × on a steer lost the race: the turn took it (or gave it back) first. The
+            // transcript or the queue already shows where it went, so this is only a status line.
+            if (id.startsWith(QStringLiteral("withdraw-"))) {
+                if (!m_withdrawnOnReturn.remove(id.mid(9)))
+                    status(QStringLiteral("Too late to withdraw · the agent already had it"));
+                return true;
+            }
             // Saved window layout: the conversation this pane was restored with could not be
             // reopened (deleted, or written by another Relay). Start fresh with one line.
             if (!id.isEmpty() && id == m_restoreRequest) {
@@ -2301,11 +2315,17 @@ private:
             m_thinkingView->clear();
             m_thinkingHeader->setText(QStringLiteral("Thinking… · %1").arg(m_model.isEmpty() ? QStringLiteral("agent") : m_model));
         }
+        // Follow the reasoning down only while the reader is at the bottom and not selecting:
+        // pinning the view on every chunk made a drag-selection jump away mid-stream, so text in
+        // the bubble could not be highlighted to copy (owner report, 2026-09-18).
+        QScrollBar *bar = m_thinkingView->verticalScrollBar();
+        const bool follow = bar->value() >= bar->maximum() - 2 && !m_thinkingView->textCursor().hasSelection()
+                            && !(QApplication::mouseButtons() & Qt::LeftButton && m_thinkingView->underMouse());
         QTextCursor cursor(m_thinkingView->document());
         cursor.movePosition(QTextCursor::End);
         QTextCharFormat format; format.setForeground(relay::theme::TextMuted); format.setFontItalic(true);
         cursor.insertText(sanitize(text), format);
-        m_thinkingView->verticalScrollBar()->setValue(m_thinkingView->verticalScrollBar()->maximum());
+        if (follow) bar->setValue(bar->maximum());
         if (!m_thinkingDismissed) placeThinking();   // it decides whether there is room to show it
     }
 
@@ -3221,7 +3241,20 @@ private:
     bool handleSessionEvent(const QString &type, const QJsonObject &event) {
         if (type == QStringLiteral("queued") && event.value(QStringLiteral("when")).toString() == QStringLiteral("steer")) {
             const QString requestId = event.value(QStringLiteral("request_id")).toString();
-            for (auto &entry : m_steering) if (entry.requestId == requestId) entry.itemId = event.value(QStringLiteral("id")).toString();
+            for (auto &entry : m_steering) {
+                if (entry.requestId != requestId) continue;
+                entry.itemId = event.value(QStringLiteral("id")).toString();
+                // × was clicked before the worker had named the item: withdraw it now.
+                if (entry.withdraw) send({{"type", "queue_remove"}, {"item", entry.itemId}, {"id", QStringLiteral("withdraw-") + requestId}});
+            }
+            return true;
+        }
+        if (type == QStringLiteral("steer_removed")) {
+            const QString requestId = event.value(QStringLiteral("request_id")).toString();
+            for (int i = 0; i < m_steering.size(); ++i)
+                if (m_steering[i].requestId == requestId) { m_steering.removeAt(i); break; }
+            toast(QStringLiteral("Withdrawn · the agent never saw it"));
+            rebuildQueueStrip(); changed();
             return true;
         }
         if (type == QStringLiteral("steer_delivered")) {
@@ -3258,7 +3291,12 @@ private:
             const QString requestId = event.value(QStringLiteral("request_id")).toString();
             for (int i = 0; i < m_steering.size(); ++i) {
                 if (m_steering[i].requestId != requestId) continue;
-                if (!event.value(QStringLiteral("requeued")).toBool()) {
+                if (m_steering[i].withdraw) {
+                    // × was clicked as the turn ended: it stays withdrawn rather than coming back,
+                    // and the worker's "not queued" answer to the × is expected, not news.
+                    m_withdrawnOnReturn.insert(requestId);
+                    toast(QStringLiteral("Withdrawn · the agent never saw it"));
+                } else if (!event.value(QStringLiteral("requeued")).toBool()) {
                     // The turn ended before another tool call: the prompt becomes the next queue item.
                     QueueEntry entry; entry.agent = true; entry.text = m_steering[i].text; entry.attachments = m_steering[i].attachments;
                     entry.id = ++m_entrySerial;
@@ -4227,7 +4265,21 @@ private:
     }
 
     // ----- steering, away recaps, AI suggestions -------------------------------------------------
-    struct SteerEntry { QString requestId, itemId, text; QJsonArray attachments; };
+    struct SteerEntry { QString requestId, itemId, text; QJsonArray attachments; bool withdraw = false; };
+
+    // The × on a "next tool call" row: withdraw a steer the running turn has not taken yet. The
+    // worker answers steer_removed; if the turn took it first, steer_delivered has already printed
+    // it into the transcript and the worker says it is no longer queued.
+    void withdrawSteer(const QString &requestId) {
+        for (auto &steer : m_steering) {
+            if (steer.requestId != requestId || steer.withdraw) continue;
+            steer.withdraw = true;
+            if (!steer.itemId.isEmpty()) send({{"type", "queue_remove"}, {"item", steer.itemId}, {"id", QStringLiteral("withdraw-") + requestId}});
+            status(QStringLiteral("Withdrawing it before the agent's next tool call…"));
+            rebuildQueueStrip();
+            return;
+        }
+    }
 
     // Enter on an empty prompt right after queuing an agent prompt while the agent works: deliver that
     // prompt at the agent's next tool call instead of after the turn.
@@ -5685,6 +5737,17 @@ private:
 
     static bool copyOnSelect() { return QSettings().value(QStringLiteral("terminal/copy_on_select"), false).toBool(); }
 
+    // What is highlighted in the reasoning bubble, to the clipboard. False when nothing is.
+    bool copyThinkingSelection() {
+        if (!m_thinkingView || !m_thinking || !m_thinking->isVisible()) return false;
+        const QString text = m_thinkingView->textCursor().selectedText().replace(QChar::ParagraphSeparator, '\n');
+        if (text.isEmpty()) return false;
+        QApplication::clipboard()->setText(text);
+        const int count = text.toUcs4().size();
+        toast(count == 1 ? QStringLiteral("1 character copied") : QStringLiteral("%L1 characters copied").arg(count));
+        return true;
+    }
+
     // A backend with no "has selection" query copies nothing when nothing is selected.
     // Copy, and treat a clipboard change as proof that text was selected; the
     // engine behaves the same way (it only writes the clipboard for a non-empty selection).
@@ -6753,6 +6816,10 @@ private:
         if (mods == Qt::NoModifier && enter && m_editor->toPlainText().trimmed().isEmpty()
             && (upgradeLastQueuedToSteer() || escalateSteerToInterrupt()))
             return true;
+        // Ctrl+C with nothing selected in the prompt box copies what is highlighted in the reasoning
+        // bubble, which cannot hold the keyboard itself.
+        if (mods == Qt::ControlModifier && k == Qt::Key_C && !m_editor->textCursor().hasSelection() && copyThinkingSelection())
+            return true;
         // Esc stops a running program, so Ctrl+C is left to copying.
         if (mods == Qt::NoModifier && k == Qt::Key_Escape && !m_agentBusy && m_editor->toPlainText().isEmpty()
             && processBusy() && m_backend) {
@@ -7706,11 +7773,22 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             layout->addWidget(label);
         }
         for (const auto &steer : std::as_const(m_steering)) {
-            auto *label = new QLabel(QStringLiteral("↪ next tool call  ✦ ") + fontMetrics().elidedText(steer.text.simplified(), Qt::ElideRight, std::max(160, width() - 220)));
+            auto *row = new QHBoxLayout;
+            auto *label = new QLabel(QStringLiteral("↪ next tool call  ✦ ") + fontMetrics().elidedText(steer.text.simplified(), Qt::ElideRight, std::max(160, width() - 250)));
             label->setObjectName(QStringLiteral("queueSteer"));
             label->setToolTip(QStringLiteral("Delivered inside the running turn at the agent's next tool call"
-                                            " · Enter on the empty prompt box interrupts the turn and sends it now"));
-            layout->addWidget(label);
+                                            " · Enter on the empty prompt box interrupts the turn and sends it now"
+                                            " · × withdraws it while it is still waiting"));
+            label->setEnabled(!steer.withdraw);
+            row->addWidget(label, 1);
+            auto *remove = new QToolButton; remove->setText(QStringLiteral("×")); remove->setFocusPolicy(Qt::NoFocus);
+            remove->setAutoRaise(true);
+            remove->setToolTip(QStringLiteral("Withdraw · the agent will not see this message"));
+            remove->setEnabled(!steer.withdraw);
+            const QString requestId = steer.requestId;
+            connect(remove, &QToolButton::clicked, this, [this, requestId] { withdrawSteer(requestId); });
+            row->addWidget(remove);
+            layout->addLayout(row);
         }
         if (!m_queueList) {
             m_queueList = new QListWidget(m_queueStrip);
@@ -8500,6 +8578,7 @@ private:
     bool m_finishedWhileAway = false, m_forkLoadPending = false, m_commandLoaded = false, m_initialIsFork = true;
     int m_turnsCompleted = 0, m_lastRecapTurns = -1, m_skillCount = 0;
     QList<SteerEntry> m_steering;
+    QSet<QString> m_withdrawnOnReturn;   // steers the turn gave back after their × was clicked
     quint64 m_lastQueuedEntryId = 0;
     QString m_lastSteerRequest;
     QElapsedTimer m_lastQueuedAt, m_lastSteeredAt, m_awaySince;

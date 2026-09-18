@@ -1,0 +1,5 @@
+{"tools": true, "messages": 2, "last_role": "user", "users": ["relative to it.\n[End of Relay context]\n\nplease plan this out"]}
+{"tools": true, "messages": 4, "last_role": "tool", "users": ["relative to it.\n[End of Relay context]\n\nplease plan this out"]}
+{"tools": false, "messages": 2, "last_role": "user", "users": ["00), or end it with stop_command.\"}\n\n### ASSISTANT\nFinished."]}
+{"tools": true, "messages": 6, "last_role": "user", "users": ["relative to it.\n[End of Relay context]\n\nplease plan this out", "e relative to it.\n[End of Relay context]\n\nsecond turn please"]}
+{"tools": true, "messages": 8, "last_role": "tool", "users": ["relative to it.\n[End of Relay context]\n\nplease plan this out", "e relative to it.\n[End of Relay context]\n\nsecond turn please"]}

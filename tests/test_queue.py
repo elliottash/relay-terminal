@@ -438,6 +438,37 @@ class SteerTests(unittest.TestCase):
         self.assertFalse(self.rec.of('interrupting'))
         self.assertEqual(p.calls, 2)
 
+    def test_remove_withdraws_a_steer_the_turn_has_not_taken(self):
+        p = self.use(GatedProvider())
+        first = self.sup.submit('first', 'now')
+        self.rec.wait(lambda e: e.get('text') == 'working on first')
+        steer = self.sup.submit('never mind this', 'steer', request_id='s1', requeue=False)
+        self.rec.wait(lambda e: e['event'] == 'queue_changed' and e.get('steering'))
+        self.sup.remove(steer)
+        removed = self.rec.wait(lambda e: e['event'] == 'steer_removed')
+        self.assertEqual((removed['id'], removed['request_id']), (steer, 's1'))
+        self.assertEqual(self.rec.of('queue_changed')[-1]['steering'], [])
+        p.release.release()
+        self.assertEqual(self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == first)['outcome'], 'done')
+        time.sleep(0.2)
+        # The turn never saw it, and it does not come back as a queue item either.
+        self.assertEqual(p.prompts, ['first'])
+        self.assertFalse(self.rec.of('steer_delivered'))
+        self.assertFalse(self.rec.of('steer_returned'))
+        if self.agent.track_requests and removed['ledger_id']:
+            self.assertEqual(self.agent.requests.find(removed['ledger_id'])['status'], 'cancelled_by_user')
+
+    def test_remove_refuses_a_steer_already_delivered(self):
+        self.use(SlowToolThenAnswer())
+        self.sup.submit('tool please', 'now')
+        self.rec.wait(lambda e: e['event'] == 'tool_started')
+        steer = self.sup.submit('also check README', 'steer', request_id='s1')
+        self.rec.wait(lambda e: e['event'] == 'steer_delivered')
+        with self.assertRaises(ValueError):
+            self.sup.remove(steer)
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        self.assertFalse(self.rec.of('steer_removed'))
+
     def test_queue_steer_upgrades_a_queued_prompt(self):
         p = self.use(SlowToolThenAnswer('sleep 1'))
         self.sup.submit('tool please', 'now')

@@ -348,7 +348,17 @@ class TurnSupervisor:
             self._lock.notify_all()
 
     def remove(self, item_id) -> None:
+        """queue_remove: a queued prompt, or a steer the running turn has not taken yet (the ×
+        on the pane's "next tool call" row). A steer the turn already took cannot be withdrawn."""
         with self._lock:
+            steer = next((i for i in self._steer if i["id"] == item_id), None)
+            if steer is not None:
+                self._steer.remove(steer)
+                self._ledger_cancel([steer], "Withdrawn by the user before the agent's next tool call.")
+                self._emit({"event": "steer_removed", "id": steer["id"], "request_id": steer.get("request_id"),
+                            "ledger_id": steer.get("ledger_id")})
+                self._changed_locked()
+                return
             for item in self._queue:
                 if item["id"] == item_id:
                     self._queue.remove(item)

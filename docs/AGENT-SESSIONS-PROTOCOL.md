@@ -424,6 +424,14 @@ while todos are open: … ignore this if it is current"). No event; no extra mod
   nothing to interrupt for, so the worker answers `escalated: false, ledger_id: null` and nothing is stopped.
   If the resubmit fails the prompt goes back to the head of the queue — a steer is never lost — and the caller
   still sees the error.
+- **Withdrawing a steer** (`queue_remove {item}` with the steer's item id from `queued {when: "steer"}`,
+  2026-09-18): a steer the running turn has not taken yet is dropped without reaching the model and without
+  coming back as a queue item; its ledger entry becomes `cancelled_by_user`. This is the × on the pane's
+  "next tool call" row. Reply: `steer_removed {id, request_id, ledger_id}`, then `queue_changed`. Once the turn
+  has taken it (`steer_delivered`) or given it back (`steer_returned`) it is no longer a steer, and
+  `queue_remove` answers the usual `error` "That prompt is not queued". The GUI sends the request with
+  `id: "withdraw-<request id>"` so that error goes to the status line, not the transcript; a steer given
+  back after its × was clicked stays withdrawn in the GUI rather than being queued again.
 - **Cancel, interrupt and failure** no longer remove the user's prompt, delivered steers or subagent notes from
   the conversation. A half-finished tool-call group is completed with
   `{"error": "Not completed: the turn stopped before this tool call finished. …"}` results, then a note says the
