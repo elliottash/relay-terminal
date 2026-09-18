@@ -24,6 +24,7 @@ from typing import Callable
 from .keybindings import KeybindingCatalog
 from .program_input import ProgramControl
 from .skills import TOOL_SPECS as SKILL_TOOLS, SkillIndex
+from .terminal_handoff import TerminalHandoff
 from .provider import Cancelled
 from .jobs import JobTable
 
@@ -141,6 +142,9 @@ class ToolExecutor:
         # Typing into the program in the user's visible pane. Offered only for a turn the user
         # handed the program over for; see relay_core/program_input.py.
         self.program = ProgramControl(emit, cancel)
+        # Handing a command to the user's real shell. Offered only when the pane says it takes
+        # them; see relay_core/terminal_handoff.py.
+        self.terminal = TerminalHandoff(emit, cancel)
         # Where run_command runs when the model gives no cwd: the directory the user's terminal is in.
         self.default_cwd = "."
         # Every command is a job; the one a tool call is waiting on is what Stop ends.
@@ -191,6 +195,8 @@ class ToolExecutor:
         # Read at every model call, so a take-over removes the tool from the next one.
         if self.program.available():
             tools = tools + [self.program.tool_spec()]
+        if self.terminal.available():
+            tools = tools + [self.terminal.tool_spec()]
         return tools
 
     def prepare(self, name: str, arguments: dict) -> Prepared:
@@ -208,6 +214,9 @@ class ToolExecutor:
             return Prepared(name, {"name": skill.id, "path": args["path"]}, f"READ SKILL FILE\n\n{skill.id}/{args['path']}")
         if name == "type_into_program":
             payload, preview = self.program.prepare(args)
+            return Prepared(name, payload, preview)
+        if name == "run_in_terminal":
+            payload, preview = self.terminal.prepare(args)
             return Prepared(name, payload, preview)
         if name == "set_keybinding":
             catalog = self.keybindings
@@ -309,6 +318,8 @@ class ToolExecutor:
             return self.skills.read_file(args["name"], args["path"])
         if name == "type_into_program":
             return self.program.execute(args)
+        if name == "run_in_terminal":
+            return self.terminal.execute(args)
         if name == "set_keybinding":
             catalog = self.keybindings
             if catalog is None or args["action"] not in catalog.actions:

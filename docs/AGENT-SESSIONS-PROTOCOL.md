@@ -1776,3 +1776,86 @@ knows the terminal at the instant of the write.
   screen in the result is the screen the keystroke produced.
 - **No separate "read the screen" tool.** The screen arrives with the grant and again with every
   result; a tool that only looks would be one more round trip for the same bytes.
+
+## 22. The agent hands a command to the user's terminal (v2.3, 2026-09-18)
+
+`run_command` is a separate Bash with no terminal, no stdin and no ssh agent, so `ssh -t`, `sudo`
+and every login flow fail there, and the agent used to print the command for the user to copy.
+`run_in_terminal` is the other channel: the pane runs the command in the user's real shell, or puts
+it in the prompt box, and tells the agent what happened when it exits. Worker side:
+`backend/relay_core/terminal_handoff.py`; tests `tests/test_terminal_handoff.py`.
+
+### 22.1 The shape of it
+
+```
+GUI    → ask {..., context: {terminal_handoff: "agent"}}
+model  → run_in_terminal {command, mode, intent, report_back?}
+worker → terminal_command {id, turn_id, command, mode, intent, report_back}
+GUI    → terminal_command_result {id, ok, action | code}
+          … the turn ends; the command runs in the user's shell …
+GUI    → ask {prompt: "<hand-over result>", ...}          (only with report_back)
+```
+
+### 22.2 `context.terminal_handoff` — whether the tool exists
+
+`"agent"`: the model chooses between `run` and `prefill`. `"prefill"`: the user's ceiling; every
+call is a prefill. Absent: the tool is not in the tool list. Any other value is an `error`. It is
+read at `ask` and never outlives the turn. A GUI that does not send it, the phone, and headless use
+behave exactly as v2.2 did.
+
+### 22.3 `run_in_terminal`
+
+| Argument | |
+|---|---|
+| `command` | 1–2000 characters, at most 50 lines, no control characters but newline and tab |
+| `mode` | `"run"`: stage it and run it now. `"prefill"`: put it in the prompt box |
+| `intent` | one line, at most 200 characters, shown to the user |
+| `report_back` | default `true`: start a follow-up turn when the command exits |
+
+The worker refuses without asking the pane when the tool was not offered (`not_offered`), when
+`bash -n` rejects the command (`syntax`, with Bash's message), and after 3 hand-overs in one turn
+(`cap`). A call the pane refuses does not count towards the cap.
+
+The result is `{ok: true, action: "started" | "prefilled", command, note, downgraded?}`.
+`downgraded` is set when the model asked for `run` and got a prefill. **The command's output is
+never in the result**: the tool returns when the command has started, not when it ends.
+
+### 22.4 `terminal_command` (worker → GUI) and `terminal_command_result` (GUI → worker)
+
+The pane answers within 20 s or the tool returns `no_reply`.
+
+| Reply | When |
+|---|---|
+| `{ok: true, action: "started"}` | the shell acknowledged the staged text by hash and Enter was sent |
+| `{ok: true, action: "prefilled"}` | the command is in the prompt box, in terminal mode |
+| `{ok: false, code: "draft"}` | the prompt box holds the user's own text; it is never overwritten |
+| `{ok: false, code: "busy"}` | `run` was not possible and neither was a prefill |
+| `{ok: false, code: "chain"}` | 3 hand-overs have run back to back with no input from the user |
+| `{ok: false, code: "failed", error}` | staging failed, or the shell did not acknowledge in 2.5 s |
+
+A `run` the pane cannot perform (a program owns the terminal, native input, shell not ready, or
+the setting says `prefill`) becomes a prefill when the prompt box is free.
+
+### 22.5 The follow-up turn
+
+When a handed-over command exits and `report_back` was set, the pane puts an agent prompt at the
+front of its queue: the command, its exit status, and the last 4000 characters of its output,
+fenced and labelled as data, never instructions. Exit status 130 (the user pressed Ctrl+C) sends
+nothing. It is an ordinary `ask`; there is no new message type. A prefilled command the user
+edited before running is reported as the command they ran.
+
+### 22.6 Remote
+
+`terminal_command` is forwarded, for the reason `program_input` is: a phone watching a pane sees
+what the agent put in the terminal. Only the desktop pane answers it.
+
+### 22.7 Notes and deviations
+
+- **Not an approval.** "No per-action tool approvals" stands. `prefill` is the agent giving the
+  user a command to finish, chosen by the agent; the `agent/terminal_handoff` setting is a
+  preference about how far `run` may go, not a prompt.
+- **The `relay-run` fence is unchanged** and still only read from a fix turn (section on the
+  terminal-mode fix loop in ARCHITECTURE). The system prompt now says so, because models that had
+  seen one fix request reused the fence in ordinary replies, where it does nothing.
+- **Same staging path as everything else**: `Pane::runInTerminal`, so a handed-over command is in
+  shell history, the command log and the conversation index like one the user typed.

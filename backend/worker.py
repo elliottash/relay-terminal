@@ -344,6 +344,12 @@ def main():
                 if agent is None:
                     raise ValueError("Configure a provider and workspace first.")
                 agent.executor.program.resolve(request)
+            elif kind == "terminal_command_result":
+                # The pane's answer to a `terminal_command` (protocol 22).
+                agent = turns.agent
+                if agent is None:
+                    raise ValueError("Configure a provider and workspace first.")
+                agent.executor.terminal.resolve(request)
             # --- end program control ---
             elif kind == "agents_status":
                 emit({"event": "agents_status", "items": subagents.list()})

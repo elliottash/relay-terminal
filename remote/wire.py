@@ -111,6 +111,9 @@ FORWARDED_EVENTS = frozenset({
     # The agent typing into the visible program: a phone watching a pane must see every keystroke
     # the agent sends and every refusal, for the same reason the desktop prints them inline.
     "program_input", "program_input_refused",
+    # The agent handing a command to the user's real shell (protocol 22): same reason. The phone
+    # only watches; the desktop pane is the one that answers it.
+    "terminal_command",
 })
 
 # Never forwarded, with the reason. Key material, provider configuration, desktop-local
