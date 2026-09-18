@@ -55,7 +55,7 @@ copied the command by hand.
 - [x] Setting `agent/terminal_handoff` (agent decides / always prefill / off) in the settings pane <!-- t:a5 -->
 - [x] Offer "Let the agent drive" when a run leaves a program in the foreground: the existing banner (#C1HH) already appears, no new code <!-- t:a6 -->
 - [x] Live run under Xvfb with a stub provider, with evidence <!-- t:a7 -->
-- [ ] One pass with a real model, to see which mode it picks and whether it still writes `relay-run` fences <!-- t:a8 -->
+- [x] One pass with a real model, to see which mode it picks <!-- t:a8 -->
 - [ ] The phone: show a `terminal_command` in `app/app.js` (it is forwarded, nothing renders it yet) <!-- t:a9 -->
 
 ## Decisions
@@ -83,7 +83,9 @@ copied the command by hand.
 
 - The capture keeps the first 64 KiB a command prints, so the tail sent to the agent is the end of
   that. A login that prints megabytes first would lose its last lines.
-- A real model has not been tried yet (task a8). The stub always does what the prompt says.
+- One real model was tried (GLM-5.3, three prompts, headless; see the evidence NOTES). Whether a
+  model that has seen a fix request in the same conversation still writes a `relay-run` fence in
+  an ordinary reply has not been tried.
 - A stale `relay-run` fence in an ordinary reply is still inert text. The system prompt now tells
   the model not to write one; nothing rewrites it if it does.
 

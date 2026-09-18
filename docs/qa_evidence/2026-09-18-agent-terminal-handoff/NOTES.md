@@ -19,5 +19,20 @@ without a tty (`test -t 0`), asks "Continue?", and exits 0 only for `y`.
 Found and fixed during the run: wiping a prefilled command left the one-shot `! terminal` mode
 on, so the next prompt (`*slowfill: …`) went to the shell. The chip now leaves with the command.
 
+## One pass with a real model
+
+GLM-5.3 (`glm-coding`), headless through the real `Agent` loop with `context.terminal_handoff:
+"agent"` and a stand-in pane that answers `terminal_command`. Three prompts, one turn each:
+
+| Prompt | What the model did |
+|---|---|
+| "codex on my server `filly` lost its login. Log it in again for me: it's `~/bin/codex login` over ssh, and it prints an SSO URL I have to open. Then remove …/worker/pause so the worker resumes." (the owner's case) | `run_in_terminal {mode: "run", command: "ssh -t filly '~/bin/codex login'", report_back: true}`, with the unpause kept on its todo list for the follow-up turn |
+| "I want to delete every node_modules directory under ~/projects … let me look at it and tweak it before anything runs." | `run_in_terminal {mode: "prefill", command: "find ~/projects -type d -name node_modules -prune -exec rm -rf {} +"}` |
+| "How many files are in this directory?" | its ordinary tools; `run_in_terminal` not called |
+
+With `max_tokens` at 2048 the first prompt was cut off mid tool call ("Response was truncated"):
+a reasoning model needs the usual output room for this tool as for any other.
+
 Not covered here: a real `ssh -t` (localhost has no accepted host key on this machine, and the
-owner's `known_hosts` was left alone), a real model choosing between the modes, and the phone.
+owner's `known_hosts` was left alone), a conversation that already holds a fix request (does the
+model still reach for a `relay-run` fence?), and the phone.
