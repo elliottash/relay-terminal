@@ -10,8 +10,8 @@ both. So nothing in app/pane-theme.css is typed by hand: this script reads
                        the local colours they are computed from (`selection`, `caution`), and the
                        monospace family list (`monoFamily`);
   * src/Pane.h         the one colour the queue list paints itself (a selected row);
-  * data/theme/themes/relay-dark.toml and relay-light.toml, the two built-in themes whose values
-                       Theme.cpp's tokens take at run time,
+  * data/theme/themes/dark-copper.toml, relay-dark.toml and relay-light.toml, the built-in themes
+                       whose values Theme.cpp's tokens take at run time,
 
 and evaluates the same expressions Qt does (`inkOn`, `blend`, `withAlpha`, QColor::lighter and
 ::darker, with Qt's own 16-bit and float arithmetic), so `--rt-accent-soft` here is the exact
@@ -30,7 +30,9 @@ Two kinds of custom property come out:
 Point sizes become `calc(var(--rt-pt) * N)`: app/pane.css sets --rt-pt per device (one desktop point
 on a laptop, more on a phone) in rem, so the browser's zoom and text-size settings still apply.
 
-Relay Dark is the default (`.relay-pane`); `.relay-pane[data-theme="relay-light"]` switches.
+Dark Copper is the default (`.relay-pane`), as it is on the desktop since the owner's "use dark
+copper by default on all builds" (2026-09-18); `.relay-pane[data-theme="relay-dark"]` and
+`[data-theme="relay-light"]` switch.
 
     scripts/gen-web-theme.py            regenerate app/pane-theme.css
     scripts/gen-web-theme.py --check    exit 1 if it is stale (tests/test_web_theme.py does this)
@@ -48,7 +50,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = Path("app/pane-theme.css")
-THEMES = ("relay-dark", "relay-light")   # the default, then the one a light desktop uses
+# The default first — relay::theme::defaultThemeId(), so a browser shows what a fresh desktop does —
+# then the two Relay themes a data-theme can still switch to.
+THEMES = ("dark-copper", "relay-dark", "relay-light")
 USHRT_MAX = 0xFFFF
 
 # The widgets the web pane draws, as Qt sees them: (css name, Qt class, object name, ancestors).

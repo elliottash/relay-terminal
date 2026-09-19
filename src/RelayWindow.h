@@ -1517,7 +1517,7 @@ private:
                                          QStringLiteral("Applies at once: the app, the terminal palette and the "
                                                         "prompt box's colours"),
                                          ids, labels, relay::theme::activeThemeId(),
-                                         QStringLiteral("relay-dark"), [this](const QString &id) {
+                                         relay::theme::defaultThemeId(), [this](const QString &id) {
                 if (!relay::theme::setActiveTheme(id)) {
                     notice(QStringLiteral("That theme could not be read."), 6000);
                     return;

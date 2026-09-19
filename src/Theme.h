@@ -103,6 +103,8 @@ void refreshThemes();
 // The theme in use. `activeThemeId()` is what QSettings stores under `theme/name`.
 const ThemeSpec &active();
 QString activeThemeId();
+// The theme a profile that never chose one gets: Dark Copper, on every build.
+QString defaultThemeId();
 // Switch. Returns false when the id is unknown. Restyles the application, regenerates the
 // terminal schemes and emits themeChanged(); no restart and, for Relay-engine panes, no new pane.
 bool setActiveTheme(const QString &id);

@@ -44,10 +44,8 @@ class WebThemeTest(unittest.TestCase):
 
     def test_theme_file_values_reach_the_css(self):
         """The base tokens are the theme files' own values, per theme."""
-        blocks = {
-            "relay-dark": self.fresh.split('.relay-pane[data-theme="relay-light"]')[0],
-            "relay-light": self.fresh.split('.relay-pane[data-theme="relay-light"]')[1].split("\n}")[0],
-        }
+        blocks = {theme_id: self.fresh.split(f'.relay-pane[data-theme="{theme_id}"]')[1].split("\n}")[0]
+                  for theme_id in ("dark-copper", "relay-dark", "relay-light")}
         for theme_id, block in blocks.items():
             ui = tomllib.loads((ROOT / "data/theme/themes" / f"{theme_id}.toml").read_text())["ui"]
             with self.subTest(theme=theme_id):
@@ -55,6 +53,34 @@ class WebThemeTest(unittest.TestCase):
                 self.assertIn(f"--rt-agent: {ui['agent'].lower()};", block)
                 self.assertIn(f"--rt-shell: {ui['shell'].lower()};", block)
                 self.assertIn(f"--rt-muted: {ui['text_muted'].lower()};", block)
+
+    def test_the_default_block_is_the_desktop_default(self):
+        """A browser with no data-theme shows what a fresh desktop shows: Dark Copper since the
+        owner's "use dark copper by default on all builds" (2026-09-18). The bare `.relay-pane`
+        selector is the one that carries it."""
+        self.assertEqual(self.gen.THEMES[0], "dark-copper")
+        first = next(line for line in self.fresh.splitlines() if line.startswith(".relay-pane"))
+        self.assertEqual(first, '.relay-pane, .relay-pane[data-theme="dark-copper"] {')
+        self.assertIn('defaultThemeId() { return QStringLiteral("dark-copper"); }',
+                      (ROOT / "src/Theme.cpp").read_text())
+
+    def test_the_app_shell_wears_the_default_theme(self):
+        """app/style.css (the pairing screen, the pane list, the header) is typed by hand, so it is
+        held to Dark Copper's own values here, and so are the colours the phone paints its status
+        bar with before the page has drawn."""
+        ui = tomllib.loads((ROOT / "data/theme/themes/dark-copper.toml").read_text())["ui"]
+        term = tomllib.loads((ROOT / "data/theme/themes/dark-copper.toml").read_text())["terminal"]
+        css = (ROOT / "app/style.css").read_text()
+        for var, key in (("--bg", "background"), ("--panel", "surface"), ("--line", "border"),
+                         ("--text", "text"), ("--muted", "text_muted"), ("--accent", "accent"),
+                         ("--ok", "success"), ("--warn", "warning"), ("--bad", "error")):
+            with self.subTest(var=var):
+                self.assertIn(f"{var}: {ui[key].lower()};", css)
+        self.assertIn(f"--term-bg: {term['background'].lower()};", css)
+        self.assertIn(f"--term-fg: {term['foreground'].lower()};", css)
+        self.assertIn(f'"theme_color": "{ui["background"].lower()}"', (ROOT / "app/manifest.webmanifest").read_text())
+        self.assertIn(f'<meta name="theme-color" content="{ui["background"].lower()}">',
+                      (ROOT / "app/index.html").read_text())
 
     def test_qt_colour_arithmetic(self):
         """QColor's own arithmetic, printed by a Qt 5.15 program on 2026-09-18:

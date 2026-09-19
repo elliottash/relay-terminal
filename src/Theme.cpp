@@ -230,12 +230,14 @@ const ThemeSpec *loadTheme(const QString &id) {
 }
 
 QString settingsThemeId() {
-    return relaySettings().value(QStringLiteral("theme/name"), QStringLiteral("relay-dark")).toString();
+    return relaySettings().value(QStringLiteral("theme/name"), defaultThemeId()).toString();
 }
 
-// The theme to use now: the chosen one, Relay Dark, or the compiled-in fallback.
+// The theme to use now: the chosen one, then the default, then Relay Dark — whose values the
+// compiled-in fallback carries — and last that fallback itself, for an install with no theme files.
 const ThemeSpec &resolveTheme(const QString &wanted) {
     if (const ThemeSpec *spec = loadTheme(wanted)) return *spec;
+    if (const ThemeSpec *spec = loadTheme(defaultThemeId())) return *spec;
     if (const ThemeSpec *spec = loadTheme(QStringLiteral("relay-dark"))) return *spec;
     return builtinDark();
 }
@@ -685,6 +687,10 @@ QPushButton#boardExecute:disabled { color: @disabled; border-color: @surface; }
 }
 
 }  // namespace
+
+// Dark Copper is what every build starts on (owner, 2026-09-18: "use dark copper by default on all
+// builds"). Only the default moved: a profile that chose a theme keeps it.
+QString defaultThemeId() { return QStringLiteral("dark-copper"); }
 
 Notifier *notifier() { static Notifier n; return &n; }
 

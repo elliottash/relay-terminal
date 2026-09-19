@@ -13,9 +13,14 @@ and the two themes the owner asked to audition as candidates for the preferred p
 |---|---|
 | `data/theme/themes/dark-copper.toml` | new — the dark candidate |
 | `data/theme/themes/ibm-beige.toml` | new — the light candidate |
-| `relay-dark`, `relay-light`, `gruvbox-dark`, `solarized-dark` | incumbents, **unchanged**; `relay-dark` stays the default |
+| `relay-dark`, `relay-light`, `gruvbox-dark`, `solarized-dark` | incumbents, **unchanged**; `solarized-dark` since removed |
 | `docs/qa_evidence/2026-09-18-copper-and-beige-themes/contrast.py` | the measuring tool; every number here comes from it |
 | `tests/theme_test.cpp` | the assertions (the existing theme test, extended) |
+
+**Outcome.** The audition ended with the owner's call: "use dark copper by default on all builds"
+(2026-09-18). `relay::theme::defaultThemeId()` is `dark-copper`, which is what a profile that never
+chose a theme gets on every build, and what a stale or missing theme name falls back to before
+Relay Dark and then the compiled-in palette. A profile that chose a theme keeps it.
 
 Reproduce every number: `python3 docs/qa_evidence/2026-09-18-copper-and-beige-themes/contrast.py
 check` (or `table <id>`, or `compare`).

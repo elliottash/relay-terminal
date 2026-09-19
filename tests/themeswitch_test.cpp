@@ -4,9 +4,10 @@
 //
 // It exists for one question the owner's 2026-09-18 decision raised — "remove the solarized dark
 // theme" — which is what happens to somebody who had already chosen it. The answer has to be that
-// Relay comes up on Relay Dark with a whole palette, not on an empty one: `resolveTheme()` falls
-// back to `relay-dark`, and then to the compiled-in theme if even that is missing. Nothing checked
-// that before, because nothing had ever removed a theme.
+// Relay comes up on the default theme with a whole palette, not on an empty one: `resolveTheme()`
+// falls back to `defaultThemeId()` — Dark Copper since the owner's "use dark copper by default on
+// all builds", the same day — then to `relay-dark`, then to the compiled-in theme if even that is
+// missing. Nothing checked that before, because nothing had ever removed a theme.
 #include "Theme.h"
 #include "ThemeFile.h"
 
@@ -45,17 +46,18 @@ private Q_SLOTS:
 
     // The thing that must not happen: a start-up that leaves the tokens, the palette and the
     // stylesheet on whatever they happened to hold.
-    void aStaleThemeNameStartsOnRelayDark() {
+    void aStaleThemeNameStartsOnTheDefault() {
+        QCOMPARE(defaultThemeId(), QStringLiteral("dark-copper"));
         auto *app = qobject_cast<QApplication *>(QCoreApplication::instance());
         QVERIFY(app);
         applyTheme(*app);
-        QCOMPARE(activeThemeId(), QStringLiteral("relay-dark"));
-        QCOMPARE(active().name, QStringLiteral("Relay Dark"));
+        QCOMPARE(activeThemeId(), QStringLiteral("dark-copper"));
+        QCOMPARE(active().name, QStringLiteral("Dark Copper"));
         QVERIFY(isComplete(active()));
-        // A whole palette, not an empty one: the tokens are Relay Dark's own values.
-        QCOMPARE(Background.name(), QStringLiteral("#0f1115"));
-        QCOMPARE(Text.name(), QStringLiteral("#e6e8ec"));
-        QCOMPARE(Action.name(), QStringLiteral("#e5844f"));
+        // A whole palette, not an empty one: the tokens are Dark Copper's own values.
+        QCOMPARE(Background.name(), QStringLiteral("#0e0f12"));
+        QCOMPARE(Text.name(), QStringLiteral("#ece6e0"));
+        QCOMPARE(Action.name(), QStringLiteral("#e56a30"));
         QCOMPARE(app->palette().color(QPalette::Window).name(), Background.name());
         QCOMPARE(app->palette().color(QPalette::WindowText).name(), Text.name());
         QVERIFY(app->styleSheet().size() > 1000);
@@ -65,6 +67,24 @@ private Q_SLOTS:
         QSettings settings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("RelayTerminal"),
                            QStringLiteral("relay"));
         QCOMPARE(settings.value(QStringLiteral("theme/name")).toString(), QStringLiteral("solarized-dark"));
+    }
+
+    // A profile that never chose a theme — every fresh install, on every build — starts on Dark
+    // Copper, and nothing is written for it: the default is a default, not a choice made for them.
+    void aProfileThatNeverChoseStartsOnDarkCopper() {
+        QSettings settings(QSettings::NativeFormat, QSettings::UserScope, QStringLiteral("RelayTerminal"),
+                           QStringLiteral("relay"));
+        const QString before = settings.value(QStringLiteral("theme/name")).toString();
+        settings.remove(QStringLiteral("theme/name"));
+        settings.sync();
+        auto *app = qobject_cast<QApplication *>(QCoreApplication::instance());
+        applyTheme(*app);
+        QCOMPARE(activeThemeId(), QStringLiteral("dark-copper"));
+        QCOMPARE(Background.name(), QStringLiteral("#0e0f12"));
+        settings.sync();
+        QVERIFY(!settings.contains(QStringLiteral("theme/name")));
+        settings.setValue(QStringLiteral("theme/name"), before);
+        settings.sync();
     }
 
     // Owner, 2026-09-18: "make actions red-orange". The Actions colour is a live token like the
