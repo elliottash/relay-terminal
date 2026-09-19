@@ -1,3 +1,9 @@
+"""The marked settings installer (GT7X, protocol 26.4).
+
+The file Relay writes is the project's `.claude/settings.local.json` — the per-developer one
+Claude Code keeps out of git — and never the shared `.claude/settings.json`: a commit of that
+would hand every teammate a hook command that does nothing but fail on their machine.
+"""
 import json
 import os
 from pathlib import Path
@@ -34,20 +40,119 @@ def read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+class WhichFile(unittest.TestCase):
+    def test_the_project_file_is_the_local_one_git_does_not_carry(self):
+        self.assertEqual(Path(".claude") / "settings.local.json", installer.SETTINGS_RELATIVE)
+        self.assertTrue(str(installer.project_settings_path("/w")).endswith(
+            "/w/.claude/settings.local.json"))
+
+    def test_the_shared_project_file_is_never_written(self):
+        with tempfile.TemporaryDirectory() as root:
+            installer.install(installer.project_settings_path(root))
+            self.assertFalse((Path(root) / ".claude" / "settings.json").exists())
+            self.assertTrue((Path(root) / ".claude" / "settings.local.json").exists())
+
+    def test_the_global_file_is_the_users_own_settings_json(self):
+        self.assertTrue(str(installer.global_settings_path("/h")).endswith("/h/.claude/settings.json"))
+
+
+class TheCommand(unittest.TestCase):
+    """A settings file is read by every claude started in that project, so the command has to be
+    harmless when there is no Relay around it: no empty expansion, no PYTHONPATH, exit 0."""
+
+    def test_it_is_a_no_op_outside_a_pane(self):
+        for command in (installer.hook_command("Stop"), installer.STATUSLINE_COMMAND):
+            with self.subTest(command=command):
+                run = subprocess.run(["/bin/sh", "-c", command], capture_output=True, text=True,
+                                     env={"PATH": os.environ.get("PATH", os.defpath)})
+                self.assertEqual((0, "", ""), (run.returncode, run.stdout, run.stderr))
+
+    def test_it_runs_the_shim_by_absolute_path_inside_a_pane(self):
+        """The old form was `"$RELAY_PYTHON" -m relay_core.guest_hook`, which needed PYTHONPATH
+        and expanded to an empty command — exit 127 — outside a pane."""
+        with tempfile.TemporaryDirectory() as root:
+            environment = {"PATH": os.environ.get("PATH", os.defpath),
+                           "RELAY_GUEST_EVENT": str(Path(root) / "guest-events"),
+                           "RELAY_RUNTIME_DIR": root, "RELAY_SESSION_TOKEN": "tok-1",
+                           "RELAY_BACKEND_DIR": BACKEND, "RELAY_PYTHON": sys.executable}
+            run = subprocess.run(["/bin/sh", "-c", installer.hook_command("Stop")],
+                                 input='{"session_id": "s"}', text=True, capture_output=True,
+                                 env=environment)
+            self.assertEqual((0, "", ""), (run.returncode, run.stdout, run.stderr))
+            spooled = list((Path(root) / "guest-events").glob("*.json"))
+            self.assertEqual(1, len(spooled))
+            envelope = json.loads(spooled[0].read_text(encoding="utf-8"))
+        self.assertEqual(("hook", "Stop"), (envelope["event"], envelope["data"]["name"]))
+        self.assertNotIn("PYTHONPATH", installer.hook_command("Stop"))
+
+
 class Install(unittest.TestCase):
     def test_empty_project_gets_every_marked_entry(self):
         with tempfile.TemporaryDirectory() as root:
             path = installer.project_settings_path(root)
             result = installer.install(path)
             settings = read(path)
-        self.assertEqual(["hooks.PreToolUse", "hooks.UserPromptSubmit", "hooks.Stop",
+        self.assertEqual(["hooks.PermissionRequest", "hooks.UserPromptSubmit", "hooks.Stop",
                           "hooks.Notification", "statusLine"], result["installed"])
         for event in installer.HOOK_EVENTS:
             command = settings["hooks"][event][0]["hooks"][0]
             self.assertEqual("command", command["type"])
-            self.assertIn(f"relay_core.guest_hook {event}", command["command"])
+            self.assertIn(f'guest_hook.py" {event}', command["command"])
             self.assertTrue(installer.marked(command))
         self.assertTrue(installer.marked(settings["statusLine"]))
+
+    def test_pretooluse_is_not_installed(self):
+        """It fires before *every* tool call, including the ones the user's own permission rules
+        allow silently; holding each of those open stalled the guest (review of 51587e3).
+        PermissionRequest fires only when claude is really about to ask."""
+        self.assertNotIn("PreToolUse", installer.HOOK_EVENTS)
+        self.assertIn("PermissionRequest", installer.HOOK_EVENTS)
+
+    def test_every_hook_carries_a_timeout(self):
+        """Claude Code's own default is 600 s, which is not a wait Relay should inherit."""
+        with tempfile.TemporaryDirectory() as root:
+            path = installer.project_settings_path(root)
+            installer.install(path)
+            settings = read(path)
+        timeouts = {event: settings["hooks"][event][0]["hooks"][0]["timeout"]
+                    for event in installer.HOOK_EVENTS}
+        self.assertEqual(installer.HOOK_TIMEOUT_DEFAULT, timeouts["Stop"])
+        # The question outlives the shim's own wait, so the shim decides when to give up.
+        from relay_core import guest_hook
+        self.assertGreater(timeouts["PermissionRequest"], guest_hook.PERMISSION_TIMEOUT_DEFAULT)
+
+    def test_the_file_keeps_its_indentation_and_its_mode(self):
+        """`save` re-serialises the whole object, so it must reproduce what it found: mkstemp
+        makes a 0600 file, and re-indenting a four-space file is a diff nobody asked for."""
+        with tempfile.TemporaryDirectory() as root:
+            path = installer.project_settings_path(root)
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps(REALISTIC, indent=4) + "\n", encoding="utf-8")
+            os.chmod(path, 0o640)
+            installer.install(path)
+            text = path.read_text(encoding="utf-8")
+            self.assertEqual(0o640, os.stat(path).st_mode & 0o777)
+        self.assertIn('\n    "permissions": {', text)
+        self.assertNotIn('\n  "permissions": {', text)
+
+    def test_a_tab_indented_file_stays_tab_indented(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = installer.project_settings_path(root)
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps(REALISTIC, indent="\t"), encoding="utf-8")
+            installer.install(path)
+            text = path.read_text(encoding="utf-8")
+        self.assertIn('\n\t"permissions": {', text)
+        self.assertFalse(text.endswith("\n"))   # the file had no trailing newline, and still has none
+
+    def test_a_new_file_is_not_left_private_to_mkstemp(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = installer.project_settings_path(root)
+            installer.install(path)
+            mode = os.stat(path).st_mode & 0o777
+        umask = os.umask(0o077)
+        os.umask(umask)
+        self.assertEqual(0o666 & ~umask, mode)
 
     def test_reinstall_is_idempotent(self):
         with tempfile.TemporaryDirectory() as root:
@@ -118,7 +223,7 @@ class Remove(unittest.TestCase):
     def test_a_mixed_group_loses_only_the_marked_command(self):
         mixed = {"hooks": {"Stop": [{"hooks": [
             {"type": "command", "command": "~/bin/mine.sh"},
-            {"type": "command", "command": installer.HOOK_COMMAND.format(event="Stop")},
+            {"type": "command", "command": installer.hook_command("Stop")},
         ]}]}}
         with tempfile.TemporaryDirectory() as root:
             path = installer.project_settings_path(root)
@@ -178,6 +283,7 @@ class CommandLine(unittest.TestCase):
             code, out, err = self.run_cli("--global", "--on", "--global-opt-in", "--home", home)
             self.assertEqual((0, True, ""), (code, out["ok"], err))
             self.assertIn("hooks", read(Path(home) / ".claude" / "settings.json"))
+            self.assertFalse((Path(home) / ".claude" / "settings.local.json").exists())
 
 
 if __name__ == "__main__":

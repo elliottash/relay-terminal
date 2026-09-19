@@ -351,22 +351,31 @@ WITHHELD_EVENTS: dict[str, str] = {
     # 2026-09-18 because the "denied by default" test had gone red waiting for somebody to; the
     # session that added it can move it to FORWARDED_EVENTS if a phone should show the chip.
     "hosted_quota": "the owner's hosted-account allowance; a reply to the desktop's own request",
-    # The guest event channel of protocol 26.3 (issue GT7X). Everything on it is pane-internal:
-    # `hook` forwards a hook's raw JSON whose tool inputs carry local file paths and contents,
-    # `bridge` carries tool arguments with whole file paths, contents and diffs, and `statusline`,
-    # `state` and `slash` feed desktop surfaces (chips, routing, the `/` popup). The subset a
-    # phone has any use for — the guest's model, context fill and busy flag — already rides
-    # `program_state` beside `guest`, so nothing is lost: same call as `board_created`.
+}
+
+# Every event name backend/relay_core and backend/worker.py emit today. The test that compares this
+# to the two lists above is the thing that makes "denied by default" true rather than aspirational.
+KNOWN_WORKER_EVENTS = frozenset(FORWARDED_EVENTS) | frozenset(WITHHELD_EVENTS)
+
+# The guest event channel of protocol 26.3 (issue GT7X). These are **not** worker events: they are
+# names in a file a guest's shim writes into a pane's runtime directory, read by the GUI process
+# and never sent over the wire at all. They are written down here so the classification is one
+# reader can find, and kept out of KNOWN_WORKER_EVENTS on purpose — folding them in would
+# pre-classify a *worker* event that one day happens to be called `state`, `hook` or `slash`, and
+# the test that catches an unclassified worker event would silently stop catching that one.
+#
+# Everything on the channel is pane-internal: `hook` forwards a hook's raw JSON whose tool inputs
+# carry local file paths and contents, `bridge` carries tool arguments with whole file paths,
+# contents and diffs, and `statusline`, `state` and `slash` feed desktop surfaces (chips, routing,
+# the `/` popup). The subset a phone has any use for — the guest's model, context fill and busy
+# flag — already rides `program_state` beside `guest`, so nothing is lost.
+GUEST_CHANNEL_EVENTS: dict[str, str] = {
     "hook": "raw guest hook JSON; tool inputs carry local file paths and contents",
     "statusline": "shim parse of the guest statusline; the pane-visible subset rides program_state",
     "state": "guest turn state; guest_busy already rides program_state",
     "bridge": "guest tool payloads carry local file paths and whole file contents",
     "slash": "guest slash catalog for the desktop composer popup",
 }
-
-# Every event name backend/relay_core and backend/worker.py emit today. The test that compares this
-# to the two lists above is the thing that makes "denied by default" true rather than aspirational.
-KNOWN_WORKER_EVENTS = frozenset(FORWARDED_EVENTS) | frozenset(WITHHELD_EVENTS)
 
 
 def may_forward(event: str) -> bool:

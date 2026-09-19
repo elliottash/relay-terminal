@@ -36,6 +36,17 @@ class AllowListTests(unittest.TestCase):
         self.assertEqual(unclassified, [], "classify these in remote/wire.py as forwarded or "
                                            "withheld before a phone can see them")
 
+    def test_the_guest_channel_names_are_not_worker_events(self):
+        """The five names on the guest event channel (protocol 26.3) are file-channel names read
+        inside the GUI process, not events the worker emits. They used to sit in WITHHELD_EVENTS,
+        which put them in KNOWN_WORKER_EVENTS — so a worker event that one day happened to be
+        called `state`, `hook` or `slash` would have arrived pre-classified and the test above
+        would never have caught it (review of 51587e3)."""
+        self.assertEqual(sorted(wire.GUEST_CHANNEL_EVENTS), ["bridge", "hook", "slash", "state", "statusline"])
+        self.assertEqual(sorted(set(wire.GUEST_CHANNEL_EVENTS) & wire.KNOWN_WORKER_EVENTS), [])
+        for name in wire.GUEST_CHANNEL_EVENTS:
+            self.assertFalse(wire.may_forward(name), name)   # desktop-local, all five of them
+
     def test_no_event_is_both_forwarded_and_withheld(self):
         self.assertEqual(sorted(wire.FORWARDED_EVENTS & set(wire.WITHHELD_EVENTS)), [])
 
