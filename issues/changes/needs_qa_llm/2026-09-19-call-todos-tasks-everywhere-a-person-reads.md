@@ -7,7 +7,7 @@ component: [gui, worker]
 milestone: desktop-alpha
 workstream: agent
 assignee: agent
-implemented_by: Claude Opus 5 subagent (Claude Code session), 2026-09-19
+implemented_by: Claude Opus 5 subagent (Claude Code session), 2026-09-19; follow-up 22651af by Claude Fable 5.1 (the coordinating session)
 rank: zzzzzzy
 created: '2026-09-19'
 acceptance: no string a person reads in Relay says "todo" — tool-call rows, palette entries, hints, toasts, panel titles, slash-command help and the user docs all say "task"; the wire names (the update_todos tool, the todos / todo_subagent messages, the /todos alias) are unchanged and no protocol version moves
