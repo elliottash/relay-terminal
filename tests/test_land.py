@@ -209,6 +209,17 @@ class LandingHunks(LandCase):
         self.assertIn("UNCLAIMED", self.tip_text("f.txt"))
         self.assertEqual(self.tip_text("other.txt"), "hello\n")
 
+    def test_whole_and_paths_accumulate_across_repeated_flags(self):
+        # `--whole a --whole b` must take both; argparse's nargs="+" alone keeps only the last.
+        edit_line(self.repo / "f.txt", 3, "WHOLE-A")
+        write(self.repo / "g.txt", "WHOLE-B\n")
+        self.land("begin", "mine", "other.txt")
+        write(self.repo / "other.txt", "hello\n")
+        out = self.land("commit", "mine", "-m", "x", "--whole", "f.txt", "--whole", "g.txt")
+        self.assertIn("WHOLE-A", self.tip_text("f.txt"))
+        self.assertEqual(self.tip_text("g.txt"), "WHOLE-B\n")
+        self.assertEqual(self.tip_text("other.txt"), "hello\n")
+
     def test_dry_run_prints_the_merged_diff_and_lands_nothing(self):
         self.land("begin", "mine", "f.txt")
         edit_line(self.repo / "f.txt", 2, "MINE")
