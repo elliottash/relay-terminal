@@ -61,14 +61,19 @@ public:
         bool underline = false;
         bool dim = false;
         QString link;
+        uint32_t fgPacked = 0;  // an SGR ink as CellColor (prose spans); 0 = none
     };
 
     // One wrapped visual row of a fold: cells [first, first + count) of a
-    // logical line.
+    // logical line, starting at column `startCol` (an insertion fold's block
+    // indent; a prose row's own first-column or hanging indent). A dropped
+    // edge space belongs to no row, so `first` of one row can sit past
+    // `first + count` of the previous.
     struct Row {
         int line = 0;
         int first = 0;
         int count = 0;
+        int startCol = 0;
     };
 
     struct Fold {
@@ -80,6 +85,12 @@ public:
         bool expanded = false;
         int anchorRow = -1;                   // absolute row of the anchor run's last row
         int anchorStartRow = -1;              // absolute row where the run starts
+        // A replacement fold (#R2WQ): the block's real rows [anchorStartRow,
+        // anchorRow] are hidden and re-wrapped from `lines` whenever the grid
+        // is not at printColumns, the width the pane printed them at. An
+        // insertion fold (a tool call's detail) ignores all three.
+        bool replacement = false;
+        int printColumns = 0;
         bool resolved() const { return anchorRow >= 0; }
         int height() const { return int(rows.size()); }
     };
@@ -103,6 +114,21 @@ public:
     void clear();
     QStringList expandedUris() const; // visual order; folds with no anchor yet last
 
+    // ---- prose blocks (#R2WQ)
+    // A replacement fold: `uri` is the OSC 8 run that covers exactly the
+    // block's rows in the grid (kProsePrefix), `lines` the block's logical
+    // lines as the pane printed them, `printColumns` the width they were
+    // wrapped at. While the grid is at that width the fold takes no rows and
+    // hides nothing; at any other width it hides the run's real rows and
+    // paints its own wrap of the lines. The URI is never interactive.
+    void setProse(const QString &uri, const QVector<FoldLine> &lines, int printColumns);
+    static bool isProseUri(const QString &uri);
+    // True while any replacement fold has taken its rows over.
+    bool proseActive() const;
+    // A real row hidden by a taken-over replacement fold (its text is the
+    // fold's, so the view treats core matches there as the fold's matches).
+    bool rowHidden(int realRow) const;
+
     // ---- layout
     // columns: the grid width. indent: how far the block is pushed in (2..4).
     // Returns true when the wrap changed (the caller repaints and re-measures).
@@ -125,10 +151,11 @@ public:
     // the view takes its old path when this is false.
     bool active() const { return !m_anchors.empty(); }
     int expandedCount() const;
-    int visualRows() const { return m_totalHeight; } // rows contributed by the folds
+    int visualRows() const { return m_totalHeight; } // net rows the folds add (may shrink)
 
     int visualTotal(int realRows) const { return realRows + m_totalHeight; }
-    // The visual row a real row is painted on.
+    // The visual row a real row is painted on. A row hidden by a replacement
+    // fold answers the block's first visual row.
     int visualOfReal(int realRow) const;
 
     struct VisualRow {
@@ -140,11 +167,20 @@ public:
     // The visual row `v`. Out-of-range rows come back as real rows, which the
     // view paints as blanks, exactly as it does past the end today.
     VisualRow at(int visualRow) const;
-    // The first visual row of a fold's block (its anchor's visual row + 1), or -1.
+    // The first visual row of a fold's block, or -1.
     int foldVisualStart(int foldIndex) const;
     // The fold whose anchor run *starts* on this absolute real row, or -1. The
     // view overpaints the chevron there, whether the fold is open or shut.
+    // Replacement folds never answer: their first cell is text, not a
+    // placeholder.
     int foldAtAnchorStart(int realRow) const;
+    // The columns a fold's rows start at: the block indent for a fold, 0 for
+    // a prose block, which is laid out like a grid row of its own.
+    int foldIndent(int foldIndex) const;
+    // The column one wrapped row of a fold starts at: every row of an
+    // insertion fold at the block indent, a prose row at its own first-column
+    // or hanging indent.
+    int rowStartCol(int foldIndex, int foldRow) const;
 
     // ---- access
     const std::vector<Fold> &folds() const { return m_folds; }
@@ -162,19 +198,25 @@ public:
 private:
     void layout(Fold *f) const;
     void rebuildAnchors();
+    // A replacement fold has taken its rows over at the current width.
+    bool takenOver(const Fold &f) const;
 
     struct Anchor {
-        int row = 0;       // absolute real row the fold hangs under
-        int height = 0;
+        int row = 0;       // insertion: the row the fold hangs under;
+                           // replacement: the last row it hides
+        int startRow = 0;  // replacement: the first row it hides
+        int height = 0;    // rows the block paints
+        int hidden = 0;    // replacement: real rows it hides; insertion: 0
+        bool replacement = false;
         int foldIndex = 0;
-        int visualAnchor = 0; // the anchor row's visual row
+        int visualStart = 0; // the block's first visual row
     };
 
     QString m_prefix;
     std::vector<Fold> m_folds;
     QHash<QString, int> m_index;
-    std::vector<Anchor> m_anchors; // expanded, resolved, non-empty; sorted by row
-    QHash<int, int> m_anchorStarts; // real row -> fold index, for every resolved fold
+    std::vector<Anchor> m_anchors; // expanded, resolved, non-empty; sorted by startRow
+    QHash<int, int> m_anchorStarts; // real row -> fold index, for every resolved insertion fold
     int m_totalHeight = 0;
     int m_columns = 80;
     int m_indent = kFoldIndent;

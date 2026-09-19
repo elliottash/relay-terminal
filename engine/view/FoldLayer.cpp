@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "FoldLayer.h"
 
+#include "core/CellTypes.h"
+
 #include <QTextBoundaryFinder>
 
 #include <algorithm>
@@ -22,6 +24,47 @@ int FoldLayer::clusterWidth(const QString &cluster)
 {
     return foldClusterWidth(cluster);
 }
+
+namespace {
+
+// The ink of an SGR parameter list, as the packed colour the view resolves
+// against the theme when it paints (#R2WQ). Only the ink matters here: a host
+// that wants bold or italic sets those flags on the span itself, and the pane
+// sets both for its prose. 0 = the default ink.
+uint32_t sgrFg(const QString &sgr)
+{
+    if (sgr.isEmpty())
+        return 0;
+    uint32_t fg = 0;
+    const QStringList params = sgr.split(QLatin1Char(';'));
+    for (int i = 0; i < params.size(); ++i) {
+        bool ok = false;
+        const int p = params.at(i).toInt(&ok);
+        if (!ok)
+            continue;
+        if (p == 39)
+            fg = 0;
+        else if (p >= 30 && p <= 37)
+            fg = CellColor::indexed(uint8_t(p - 30));
+        else if (p >= 90 && p <= 97)
+            fg = CellColor::indexed(uint8_t(p - 90 + 8));
+        else if (p == 38 && i + 1 < params.size()) {
+            bool sub = false;
+            const int mode = params.at(i + 1).toInt(&sub);
+            if (mode == 5 && i + 2 < params.size()) {
+                fg = CellColor::indexed(uint8_t(params.at(i + 2).toInt()));
+                i += 2;
+            } else if (mode == 2 && i + 4 < params.size()) {
+                fg = CellColor::rgb(uint8_t(params.at(i + 2).toInt()), uint8_t(params.at(i + 3).toInt()),
+                                    uint8_t(params.at(i + 4).toInt()));
+                i += 4;
+            }
+        }
+    }
+    return fg;
+}
+
+}  // namespace
 
 FoldLayer::FoldLayer() = default;
 
@@ -46,10 +89,12 @@ const FoldLayer::Fold *FoldLayer::fold(const QString &uri) const
 
 // ---------------------------------------------------------------- layout
 
-// Break every logical line into grapheme cells, then wrap the cells to the
-// usable width. Every wrapped row carries the block indent, so a wrapped fold
-// line reads as one block (a hanging indent); the copy path puts the cells back
-// together without it.
+// Break every logical line into grapheme cells, then wrap them to the grid
+// width with the one shared word-aware break rule (#R2WQ, src/WordWrap.h):
+// rows end between words, never inside one, and a prose block's continuation
+// rows hang under their line's marker or leading spaces. An insertion fold's
+// rows all start at the block indent, so the block reads as one inset detail;
+// the copy path puts the cells back together without it.
 void FoldLayer::layout(Fold *f) const
 {
     f->cells.clear();
@@ -60,6 +105,7 @@ void FoldLayer::layout(Fold *f) const
         for (const FoldSpan &span : line.spans) {
             if (span.text.isEmpty())
                 continue;
+            const uint32_t sgrInk = sgrFg(span.sgr);
             QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, span.text);
             int from = 0;
             while (from < span.text.size()) {
@@ -83,6 +129,7 @@ void FoldLayer::layout(Fold *f) const
                 c.underline = span.underline;
                 c.dim = span.dim;
                 c.link = span.link;
+                c.fgPacked = sgrInk;
                 if (c.width > 0)
                     cells.push_back(c);
                 from = to;
@@ -91,26 +138,30 @@ void FoldLayer::layout(Fold *f) const
         f->cells.push_back(std::move(cells));
     }
 
-    const int usable = std::max(1, m_columns - m_indent);
     for (int line = 0; line < int(f->cells.size()); ++line) {
         const std::vector<Cell> &cells = f->cells[size_t(line)];
         if (cells.empty()) {
-            f->rows.push_back(Row{line, 0, 0});
+            f->rows.push_back(Row{line, 0, 0, f->replacement ? 0 : m_indent});
             continue;
         }
-        int first = 0;
-        while (first < int(cells.size())) {
-            int used = 0, n = 0;
-            while (first + n < int(cells.size())) {
-                const int w = cells[size_t(first + n)].width;
-                if (n > 0 && used + w > usable)
-                    break;
-                used += w;
-                ++n;
-            }
-            f->rows.push_back(Row{line, first, n});
-            first += n;
+        const int blockIndent = f->replacement ? 0 : m_indent;
+        const int hang = f->replacement ? wrap::hangingIndent(f->lines[size_t(line)].text(), m_columns)
+                                        : m_indent;
+        QVector<int> widths(int(cells.size()));
+        QVector<char> startsWord(int(cells.size()), 0), spaces(int(cells.size()), 0);
+        for (int i = 0; i < int(cells.size()); ++i) {
+            widths[i] = cells[size_t(i)].width;
+            spaces[i] = cells[size_t(i)].text == QLatin1String(" ") ? 1 : 0;
         }
+        startsWord[0] = 1;
+        for (int i = 1; i < int(cells.size()); ++i)
+            startsWord[i] = !spaces[i] && spaces[size_t(i - 1)] ? 1 : 0;
+        const QVector<wrap::Row> wrapped =
+            wrap::rows(widths, startsWord, spaces, m_columns, blockIndent, hang,
+                       f->replacement ? 0 : m_indent);
+        for (const wrap::Row &r : wrapped)
+            f->rows.push_back(Row{line, r.first, r.count,
+                                  f->replacement ? r.indent : m_indent});
     }
 }
 
@@ -203,9 +254,13 @@ void FoldLayer::clear()
 QStringList FoldLayer::expandedUris() const
 {
     QStringList out;
-    for (const Anchor &a : m_anchors)
-        out << m_folds[size_t(a.foldIndex)].uri;
+    for (const Anchor &a : m_anchors) {
+        if (!a.replacement)
+            out << m_folds[size_t(a.foldIndex)].uri;
+    }
     for (const Fold &f : m_folds) {
+        if (f.replacement)
+            continue;   // prose is not the host's to re-open
         if (f.expanded && (!f.resolved() || f.height() == 0) && !out.contains(f.uri))
             out << f.uri;
     }
@@ -216,10 +271,64 @@ int FoldLayer::expandedCount() const
 {
     int n = 0;
     for (const Fold &f : m_folds) {
-        if (f.expanded)
+        if (f.expanded && !f.replacement)
             ++n;
     }
     return n;
+}
+
+// ---------------------------------------------------------------- prose blocks
+
+void FoldLayer::setProse(const QString &uri, const QVector<FoldLine> &lines, int printColumns)
+{
+    if (uri.isEmpty())
+        return;
+    int i = indexOf(uri);
+    if (i < 0) {
+        i = int(m_folds.size());
+        m_folds.push_back(Fold{});
+        m_folds.back().uri = uri;
+        m_index.insert(uri, i);
+    }
+    Fold &f = m_folds[size_t(i)];
+    f.lines = lines;
+    f.hasContent = true;
+    f.expanded = true;   // drives the anchor machinery; prose is never toggled
+    f.replacement = true;
+    f.printColumns = printColumns;
+    layout(&f);
+    rebuildAnchors();
+}
+
+bool FoldLayer::isProseUri(const QString &uri)
+{
+    return uri.startsWith(QLatin1String(kProsePrefix));
+}
+
+bool FoldLayer::proseActive() const
+{
+    for (const Anchor &a : m_anchors) {
+        if (a.replacement)
+            return true;
+    }
+    return false;
+}
+
+bool FoldLayer::rowHidden(int realRow) const
+{
+    for (const Anchor &a : m_anchors) {
+        if (a.replacement && realRow >= a.startRow && realRow <= a.row)
+            return true;
+    }
+    return false;
+}
+
+// A replacement fold takes over only away from the width its rows were printed
+// at: at that width the grid already holds exactly the rows the rule produces,
+// so the layer stands aside and the printed bytes show, byte for byte.
+bool FoldLayer::takenOver(const Fold &f) const
+{
+    return f.replacement && f.printColumns > 0 && m_columns != f.printColumns;
 }
 
 // ---------------------------------------------------------------- anchoring
@@ -264,36 +373,54 @@ void FoldLayer::rebuildAnchors()
     m_totalHeight = 0;
     for (int i = 0; i < int(m_folds.size()); ++i) {
         const Fold &f = m_folds[size_t(i)];
+        if (f.replacement) {
+            if (!f.hasContent || !f.resolved() || f.height() == 0 || !takenOver(f))
+                continue;
+            m_anchors.push_back(Anchor{f.anchorRow, f.anchorStartRow, f.height(),
+                                       f.anchorRow - f.anchorStartRow + 1, true, i, 0});
+            continue;
+        }
         if (f.anchorStartRow >= 0)
             m_anchorStarts.insert(f.anchorStartRow, i);
         if (!f.expanded || !f.resolved() || f.height() == 0)
             continue;
-        m_anchors.push_back(Anchor{f.anchorRow, f.height(), i, 0});
+        m_anchors.push_back(Anchor{f.anchorRow, f.anchorRow, f.height(), 0, false, i, 0});
     }
+    // Blocks never overlap, so ordering by the first row each touches orders
+    // the blocks as they sit in the grid.
     std::sort(m_anchors.begin(), m_anchors.end(), [this](const Anchor &a, const Anchor &b) {
-        if (a.row != b.row)
-            return a.row < b.row;
+        if (a.startRow != b.startRow)
+            return a.startRow < b.startRow;
         return m_folds[size_t(a.foldIndex)].uri < m_folds[size_t(b.foldIndex)].uri;
     });
-    int prefix = 0;
+    int shift = 0;   // visual - real, for rows above each block
     for (Anchor &a : m_anchors) {
-        a.visualAnchor = a.row + prefix;
-        prefix += a.height;
+        a.visualStart = a.startRow + shift + (a.replacement ? 0 : 1);
+        shift += a.height - a.hidden;
     }
-    m_totalHeight = prefix;
+    m_totalHeight = shift;
 }
 
 // ---------------------------------------------------------------- mapping
 
 int FoldLayer::visualOfReal(int realRow) const
 {
-    // Every fold anchored strictly above this row pushes it down.
+    // Every block above this row moves it: an insertion fold by its height, a
+    // replacement fold by the difference between the rows it paints and the
+    // rows it hides. A hidden row answers the block's first visual row.
     int shift = 0;
     for (const Anchor &a : m_anchors) {
-        if (a.row < realRow)
+        if (a.replacement) {
+            if (realRow < a.startRow)
+                break;
+            if (realRow <= a.row)
+                return a.visualStart;
+            shift += a.height - a.hidden;
+        } else {
+            if (a.row >= realRow)
+                break;
             shift += a.height;
-        else
-            break;
+        }
     }
     return realRow + shift;
 }
@@ -305,11 +432,11 @@ FoldLayer::VisualRow FoldLayer::at(int visualRow) const
         out.realRow = visualRow;
         return out;
     }
-    // The last anchor whose own visual row is above `visualRow`.
+    // The last block that starts at or above `visualRow`.
     int lo = 0, hi = int(m_anchors.size());
     while (lo < hi) {
         const int mid = (lo + hi) / 2;
-        if (m_anchors[size_t(mid)].visualAnchor < visualRow)
+        if (m_anchors[size_t(mid)].visualStart <= visualRow)
             lo = mid + 1;
         else
             hi = mid;
@@ -319,14 +446,16 @@ FoldLayer::VisualRow FoldLayer::at(int visualRow) const
         return out;
     }
     const Anchor &a = m_anchors[size_t(lo - 1)];
-    const int offset = visualRow - a.visualAnchor;
-    if (offset <= a.height) {
+    const int offset = visualRow - a.visualStart;
+    if (offset < a.height) {
         out.fold = true;
         out.foldIndex = a.foldIndex;
-        out.foldRow = offset - 1;
+        out.foldRow = offset;
         return out;
     }
-    out.realRow = a.row + (offset - a.height);
+    // The row after the block: the real row that follows the last one it
+    // covers, wherever the blocks above put it.
+    out.realRow = a.row + 1 + (offset - a.height);
     return out;
 }
 
@@ -340,9 +469,28 @@ int FoldLayer::foldVisualStart(int foldIndex) const
 {
     for (const Anchor &a : m_anchors) {
         if (a.foldIndex == foldIndex)
-            return a.visualAnchor + 1;
+            return a.visualStart;
     }
     return -1;
+}
+
+int FoldLayer::foldIndent(int foldIndex) const
+{
+    if (foldIndex < 0 || foldIndex >= int(m_folds.size()))
+        return m_indent;
+    return m_folds[size_t(foldIndex)].replacement ? 0 : m_indent;
+}
+
+int FoldLayer::rowStartCol(int foldIndex, int foldRow) const
+{
+    if (foldIndex < 0 || foldIndex >= int(m_folds.size()))
+        return m_indent;
+    const Fold &f = m_folds[size_t(foldIndex)];
+    if (!f.replacement)
+        return m_indent;
+    if (foldRow < 0 || foldRow >= int(f.rows.size()))
+        return 0;
+    return f.rows[size_t(foldRow)].startCol;
 }
 
 // ---------------------------------------------------------------- text

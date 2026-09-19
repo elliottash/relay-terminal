@@ -33,7 +33,7 @@
 #include "PaneTitles.h"
 #include "PaneUsage.h"    // the pane's own CPU / memory share, for the header chip and the tab
 #include "CallLines.h"      // one line per tool call, and what its fold holds (#TK9C)
-#include "RelayMark.h"      // the app's own mark: the button on the "Relaying – …" line (#4X53)
+#include "RelayMark.h"      // the app's own mark: the button on the "Relaying · …" line (#4X53)
 #include "DiffView.h"       // the diff pane a big edit opens
 #include "TurnTranscript.h"
 #include "ModelSettings.h"
@@ -247,19 +247,19 @@ inline Reading read(const QString &text, const QStringList &labels, bool multipl
 
 }  // namespace relay::ask
 
-// The "Relaying – …" line above the prompt box (cards #4E13, #HQ2B, #RR0G): one verb, the colour
+// The "Relaying · …" line above the prompt box (cards #4E13, #HQ2B, #RR0G): one verb, the colour
 // saying whose work it is — the agent's violet while a turn runs or subagents it started still
 // work, the terminal's blue while a program runs, amber when the turn is blocked on your answer
-// (#MQ9C). A spaced en dash stands between the verb and what is being done (owner, 2026-09-19:
-// 'add a " -- " after "Relaying"'), in every spelling the line has: "Relaying – thinking… · 5 s ·
-// step 1/256 · Esc stops", "Relaying – waiting for 1 subagent…", "Relaying – sleep…".
+// (#MQ9C). A spaced middle dot stands between the verb and what is being done (owner, 2026-09-19:
+// 'add a " -- " after "Relaying"', later 'replace " - " after relaying with cdot'), in every spelling the line has: "Relaying · thinking… · 5 s ·
+// step 1/256 · Esc stops", "Relaying · waiting for 1 subagent…", "Relaying · sleep…".
 // Left-aligned with the prompt text and in the normal weight, the caption Warp and Claude carry
 // above their composers (owner, 2026-09-19: "should be at the left and above the prompt box,
 // more like how warp . claude does it. and not in bold."): the row belongs to the box under it,
 // so it starts where that box's own text starts, and it speaks quietly while the prompt is the
 // loud thing. Painted rather than a QLabel for the same reason the header's chips are
 // (src/PaneChrome.h): the colour follows the state, and the theme can change under
-// it. Elided from the middle so a long action ("Relaying – reading src/deep/path…") never pushes
+// it. Elided from the middle so a long action ("Relaying · reading src/deep/path…") never pushes
 // the composer wide, and Ignored like the prompt box itself so a narrow pane clips it instead
 // (#G152).
 //
@@ -3560,10 +3560,10 @@ private:
         routeRow->addWidget(m_opaqueHint, 1);
         routeRow->addStretch(1);
         buildSessionControls(routeRow);        // plan chip and the context chip, next to the model
-        m_modelBox = new QComboBox;
+        m_modelBox = new CurrentTextComboBox;
         m_modelBox->setObjectName(QStringLiteral("statusPicker"));
         m_modelBox->setAccessibleName(QStringLiteral("Agent model"));
-        m_modelBox->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+        m_modelBox->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
         m_modelBox->setFocusPolicy(Qt::TabFocus);
         connect(m_modelBox, qOverload<int>(&QComboBox::activated), this, [this](int index) {
             modelBoxPicked(m_modelBox->itemData(index).toString());
@@ -3579,17 +3579,9 @@ private:
         connect(m_mic, &QToolButton::clicked, this, [this] { toggleVoice(false); });
         routeRow->addWidget(m_mic);
         updateVoiceChip();
-        // Share this pane with a phone: the same strip as voice, because both are ways of
-        // reaching the pane from somewhere other than this keyboard.
-        m_share = new QToolButton;
-        m_share->setObjectName(QStringLiteral("stripChip"));
-        m_share->setFocusPolicy(Qt::NoFocus);
-        m_share->setIcon(stripIcon(QStringLiteral("share")));
-        m_share->setIconSize(QSize(14, 14));
-        m_share->setAccessibleName(QStringLiteral("Share this pane with a phone"));
-        connect(m_share, &QToolButton::clicked, this, [this] { shareChipPressed(); });
-        routeRow->addWidget(m_share);
-        updateShareChip();
+        // Sharing moved out of this strip to the pane's chrome row (src/PaneChrome.h, owner
+        // 2026-09-19: it no longer fit beside the model and the microphone). The pane keeps the
+        // share logic; the chrome owns the button and repaints it through onShareChipChanged.
         auto *cancel = new QToolButton;
         cancel->setObjectName(QStringLiteral("interruptButton"));
         const QString cancelIcon = relay::theme::themeDataDir() + QStringLiteral("/icons/cancel.svg");
@@ -3626,10 +3618,10 @@ private:
         cornerColumn->addLayout(corner);
         cornerColumn->addStretch(1);
         inputRow->addLayout(cornerColumn);
-        // The "Relaying – …" line (cards #4E13, #HQ2B, #RR0G), the first row of the composer frame
+        // The "Relaying · …" line (cards #4E13, #HQ2B, #RR0G), the first row of the composer frame
         // so native mode hides it with the prompt box: agent work in the agent's violet, saying what
-        // it is doing right now ("Relaying – reading src/Pane.h… · 12 s · Esc stops"), a terminal
-        // program in the terminal's blue ("Relaying – sleep…"), left-aligned with the prompt text
+        // it is doing right now ("Relaying · reading src/Pane.h… · 12 s · Esc stops"), a terminal
+        // program in the terminal's blue ("Relaying · sleep…"), left-aligned with the prompt text
         // and in the normal weight above the prompt. The turn clock lived in the strip under the box until
         // #4E13; it moved up here and was restyled into this line — one place, one verb, the
         // colour saying whose work it is.
@@ -4388,7 +4380,7 @@ private:
     void printThinkingAnchor() {
         endCallRun();   // a held tool-call row ends before the anchor starts its own (#TK9C)
         beginBlock(relay::gaps::Block::Agent);   // the fold is the reply's first block (#5AWD)
-        QByteArray out = takeWrapped();
+        QByteArray out = takeWrapped() + closeProseRun();
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
         if (!m_atLineStart) out += "\r\n";
         out += "\x1b]8;;" + m_thinkingAnchor.toUtf8() + "\x1b\\";
@@ -4764,7 +4756,7 @@ private:
         // A reprinted reasoning row is the agent's own block; a call row sits with the tool rows
         // (#5AWD). Both follow the rule above them, which is a Header, so neither opens a gap.
         beginBlock(ink == Ink::Note ? relay::gaps::Block::Agent : relay::gaps::Block::Call);
-        QByteArray out = takeWrapped();
+        QByteArray out = takeWrapped() + closeProseRun();
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
         if (!m_atLineStart) out += "\r\n";
         out += "\x1b]8;;" + anchor.toUtf8() + "\x1b\\";
@@ -4862,10 +4854,11 @@ private:
     // The pane handles a click itself; another app opens it through the desktop's
     // x-scheme-handler/relay entry (see ensureUrlHandler).
     void printTurnLink(const QString &label, const QString &turnId) {
+        beginBlock(relay::gaps::Block::Call);   // the ✦ N tool calls link is set off from the prose above it (#5AWD)
         if (!shellIdleAtPrompt()) { printInline(label + QStringLiteral("  (Actions › Open last agent turn)\n"), Ink::Note); m_lastTurnId = turnId; return; }
         m_lastTurnId = turnId;
         const QByteArray url = QStringLiteral("relay://turn/%1/%2").arg(m_token, QString::fromUtf8(QUrl::toPercentEncoding(turnId))).toUtf8();
-        QByteArray out = takeWrapped();
+        QByteArray out = takeWrapped() + closeProseRun();
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
         if (!m_atLineStart) out += "\r\n";
         out += "\x1b]8;;" + url + "\x1b\\" + inkCode(Ink::Note) + sanitize(label).toUtf8() + "\x1b[0m" + "\x1b]8;;\x1b\\";
@@ -4930,7 +4923,7 @@ private:
     // through printInline, whose endCallRun() tells the cursor "something else printed", and a
     // row started after that could not be rewritten by its own result (#5AWD).
     void drawCallRow(const relay::calllines::Step &step, const QString &turnId, const QString &anchor) {
-        QByteArray out = takeWrapped();
+        QByteArray out = takeWrapped() + closeProseRun();
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
         if (step.endRun && !m_atLineStart) { out += "\r\n"; m_atLineStart = true; }
         if (step.rewrite) out += "\r\x1b[2K";
@@ -5031,6 +5024,14 @@ private:
         }
         const CallRecord record = m_calls.value(uri);
         if (record.merged) { setFold(uri, relay::calllines::foldForRun(record.members, foldPalette(), foldOptions(uri, record))); return; }
+        // A write or an edit holds its diff already, and a small one folded under its row is
+        // served from it (#WXT6): no round trip, and no "not available" once the worker's
+        // fifty-turn log has scrolled past the call. The worker path below still fills a row
+        // whose record is gone (a pane restored from scrollback).
+        if (!record.diff.isEmpty()) {
+            setFold(uri, relay::calllines::foldForDiff(record.diff, foldPalette(), foldOptions(uri, record)));
+            return;
+        }
         // The anchor already carries the turn and the first call's id, so a line whose record has
         // gone — a pane restored from saved scrollback has none at all, and `rememberCall()` is
         // bounded — can still be fetched from the worker (issue #EC58, owner 2026-09-19: "when i
@@ -5135,22 +5136,6 @@ private:
         }
         send({{"type", "tool_output_get"}, {"id", QStringLiteral("turn-") + QString::number(++m_requestId)},
               {"turn_id", ref.turn}, {"call_id", callId}});
-    }
-
-    // The inline diff of a small write or edit (at most 12 changed lines, § 23.2): printed under
-    // the line with no click at all, in the black-or-white ink on the green/red fills the rest of
-    // Relay uses (owner, 2026-09-19).
-    void printInlineDiff(const QString &unifiedDiff) {
-        const relay::ParsedDiff diff = relay::parseUnifiedDiff(unifiedDiff);
-        if (diff.isEmpty()) return;
-        for (const relay::DiffLine &line : diff.lines) {
-            if (line.kind == relay::DiffLine::FileHeader) continue;   // the row above already names the file
-            const Ink ink = line.kind == relay::DiffLine::Add      ? Ink::DiffAdd
-                          : line.kind == relay::DiffLine::Remove   ? Ink::DiffRemove
-                          : line.kind == relay::DiffLine::Hunk     ? Ink::Note
-                                                                   : Ink::ToolOutput;
-            printInline(QStringLiteral("  ") + line.text + QLatin1Char('\n'), ink);
-        }
     }
 
 public:
@@ -5606,25 +5591,15 @@ public:
 
     // The microphone chip and the palette action: start, or finish a recording that is running.
     // ----- sharing this pane with a phone --------------------------------------------------------
+    // The share button itself is the pane chrome's (src/PaneChrome.h); it wires this callback and
+    // repaints itself from it, so the pane's share logic stays here.
+    std::function<void()> onShareChipChanged;
 
     void updateShareChip() {
-        if (!m_share) return;
-        relay::RemoteShare &share = relay::RemoteShare::instance();
-        const bool sharing = share.isSharing(m_token);
-        const int guests = share.sharingModel().guestsOn(m_token);
-        m_share->setProperty("dest", sharing ? QStringLiteral("agent") : QVariant());
-        m_share->setToolTip(!sharing
-            ? QStringLiteral("Share this pane with your phone, or invite someone to it")
-            : guests == 0
-                ? QStringLiteral("Shared — click for who is here, invites and what is waiting")
-                : QStringLiteral("Shared with %1 · click for who is here and what is waiting")
-                      .arg(guests == 1 ? QStringLiteral("one other person")
-                                       : QStringLiteral("%1 other people").arg(guests)));
-        m_share->style()->unpolish(m_share);
-        m_share->style()->polish(m_share);
+        if (onShareChipChanged) onShareChipChanged();
     }
 
-    // The chip under the prompt box. Nothing shared yet: pair a phone or make an invite, which is
+    // The chrome row's share button. Nothing shared yet: pair a phone or make an invite, which is
     // the dialog. Already shared: the ongoing question is who is here and what is waiting, which
     // is the pane — and its first button opens the dialog again for one more link.
     void shareChipPressed() {
@@ -5659,7 +5634,7 @@ public:
     }
 
     // The window shares this pane because its tab is shared whole — a pane just split off, or one
-    // moved in. Never silent: the share chip lights from the first frame and a toast says who can
+    // moved in. Never silent: the share button lights from the first frame and a toast says who can
     // now see it, because the tab's guests gain it without the owner doing anything else.
     void shareUnderTab(const QString &tab) {
         relay::RemoteShare &share = relay::RemoteShare::instance();
@@ -8050,7 +8025,7 @@ private:
         beginBlock(relay::gaps::Block::Call);   // subagent lines sit with the tool rows (#5AWD)
         if (id.isEmpty() || !shellIdleAtPrompt()) { printInline(line + '\n', Ink::Note); return; }
         const QByteArray url = QStringLiteral("relay://subagent/%1/%2").arg(m_token, QString::fromUtf8(QUrl::toPercentEncoding(id))).toUtf8();
-        QByteArray out = takeWrapped();
+        QByteArray out = takeWrapped() + closeProseRun();
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
         if (!m_atLineStart) out += "\r\n";
         out += "\x1b]8;;" + url + "\x1b\\" + inkCode(Ink::Note) + sanitize(line).toUtf8() + "\x1b[0m" + "\x1b]8;;\x1b\\" + "\r\n";
@@ -8359,7 +8334,7 @@ private:
         const QString fast = keys.isEmpty() ? QStringLiteral("/continue") : keys + QStringLiteral(" or /continue");
         if (!shellIdleAtPrompt()) { printInline(QStringLiteral("▸ Continue: %1 (Actions › Continue agent turn)\n").arg(fast), Ink::Note); return; }
         const QByteArray url = QStringLiteral("relay://continue/%1").arg(m_token).toUtf8();
-        QByteArray out = takeWrapped();
+        QByteArray out = takeWrapped() + closeProseRun();
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
         if (!m_atLineStart) out += "\r\n";
         out += "\x1b]8;;" + url + "\x1b\\" + inkCode(Ink::Agent) + QByteArray("▸ Continue") + "\x1b[0m" + "\x1b]8;;\x1b\\";
@@ -9304,8 +9279,9 @@ private:
                 }
                 if (record.callIds.isEmpty()) record.callIds << call;
                 rememberCall(anchor, record);
-                // At most 12 changed lines (§ 23.2): the diff prints under the line with no click.
-                if (label.inlineDiff && !diff.isEmpty() && !step.hold) printInlineDiff(diff);
+                // A small diff (at most 12 changed lines, § 23.2) stays folded under the row
+                // (#WXT6): foldRequested() answers from the stored diff when it is clicked, so
+                // nothing is printed here and the row is one collapsed line.
             }
         } else if (type == QStringLiteral("vision_route")) {
             // Image context (protocol 17): this turn runs on another model because the pane's own
@@ -10104,7 +10080,7 @@ private:
                           : notable ? relay::log::Level::Info : relay::log::Level::Debug, line);
     }
 
-    // "Relaying – reading src/Pane.h… · 48 s · Esc stops", above the prompt box (m_busyLine,
+    // "Relaying · reading src/Pane.h… · 48 s · Esc stops", above the prompt box (m_busyLine,
     // card #4E13), so a silent turn is never indistinguishable from a hung one. Not a toast: a
     // clock that re-toasted every second covered every real toast in a turn.
     void startTurnClock() {
@@ -10156,7 +10132,7 @@ private:
         // While a card is up Esc skips the question instead (#MQ9C, owner 2026-09-19), so the line
         // offers the key that is actually live and the tooltip says where Stop went.
         const QString keyHint = asked ? QStringLiteral("Esc skips it") : QStringLiteral("%1 stops").arg(stopWord);
-        const QString label = QStringLiteral("Relaying – %1… · %2 s%3 · %4")
+        const QString label = QStringLiteral("Relaying · %1… · %2 s%3 · %4")
                                   .arg(what)
                                   .arg(seconds)
                                   .arg(m_turnStep.isEmpty() ? QString() : QStringLiteral(" · ") + m_turnStep)
@@ -10184,7 +10160,7 @@ private:
         if (wait.subagents > 0) {
             const QString subject = relay::panestatus::waitingSubject(wait);
             m_busyLine->setBusy(relay::panestatus::State::Subagents,
-                                QStringLiteral("Relaying – waiting for %1…").arg(subject),
+                                QStringLiteral("Relaying · waiting for %1…").arg(subject),
                                 QStringLiteral("%1 started by this pane's agent still running. The agents list under "
                                                 "the composer shows them; the header's relay mark blinks until they end.")
                                     .arg(subject.isEmpty() ? QStringLiteral("Background work") : subject));
@@ -10194,7 +10170,7 @@ private:
             const QString program = foregroundProgramName();
             const QString who = program.isEmpty() ? QStringLiteral("the program") : program;
             m_busyLine->setBusy(relay::panestatus::State::Running,
-                                QStringLiteral("Relaying – %1…").arg(who),
+                                QStringLiteral("Relaying · %1…").arg(who),
                                 QStringLiteral("%1 owns this terminal; prompts queue until it exits.")
                                     .arg(program.isEmpty() ? QStringLiteral("This program") : program));
             return;
@@ -10328,6 +10304,17 @@ private:
                    .arg(because, back.isEmpty() ? QStringLiteral("this pane's own model") : back);
     }
 
+    // A role's row in the flat model list (owner, 2026-09-19): the model the row runs, then the
+    // role in parentheses — "glm-5.3 (main)". The main role's model is the pane's own preset;
+    // with no preset picked yet it is the model id the pane last heard, and before anything is
+    // heard the row is the role's name alone. The pane_state menu uses the same text.
+    QString roleRowText(const QString &role) const {
+        QString model = role == QStringLiteral("main")
+            ? conciseModel(m_currentPreset, presetLabelOf(m_currentPreset)) : roleModelText(role);
+        if (role == QStringLiteral("main") && model.isEmpty()) model = m_model;
+        return model.isEmpty() ? roleLabel(role) : QStringLiteral("%1 (%2)").arg(model, role);
+    }
+
     void refreshPickers() {
         m_paneState.changed();   // pane_state (relay-terminal-71): model and mode; changed() runs this
         if (!m_modelBox) return;
@@ -10341,35 +10328,28 @@ private:
                                             m_routeLabel ? m_routeLabel->toolTip() : QString()).trimmed());
         }
         m_modelBox->clear();
-        for (const auto &model : std::as_const(m_stored)) m_modelBox->addItem(conciseModel(model.first, model.second), model.first);
-        if (m_stored.isEmpty()) m_modelBox->addItem(QStringLiteral("No stored keys"));
-        const int index = m_modelBox->findData(m_currentPreset);
-        if (index >= 0) m_modelBox->setCurrentIndex(index);
-        // Model roles (protocol 13), as their own group under the presets. Owner report,
-        // 2026-09-18: "the main use case for that is going to be swapping between the main and
-        // flash models" — Alt+F was the only way to do it, so the two roles a pane can run are
-        // rows here, the live one ticked. Picking a preset above still puts the pane back on the
-        // main agent.
-        m_modelBox->insertSeparator(m_modelBox->count());
+        // One flat list, roles first (owner direction, 2026-09-19): "model (main)", "model
+        // (flash)", "model (local)" when this machine serves one, then the other presets — no
+        // separate Main / Flash / Local section and no ticks: the collapsed box is the live row,
+        // which says it already. Owner report, 2026-09-18: "the main use case for that is going
+        // to be swapping between the main and flash models". Picking a preset below still puts
+        // the pane back on the main agent.
         QStringList paneRoles{QStringLiteral("main"), QStringLiteral("flash")};
         // The Local agent only when this machine serves something (card #JH22): a row that always
         // resolved back to Main would be a promise the pane cannot keep.
         if (hasLocalEndpoint()) paneRoles << QStringLiteral("local");
         if (!paneRoles.contains(m_agentRole)) paneRoles << m_agentRole;   // a role a session restored
+        int liveIndex = -1;
         for (const QString &role : std::as_const(paneRoles)) {
-            // A pane on another role reads as that role, not as its stored preset: the collapsed
-            // chip is the role's row, which is where it sat before these rows existed. That row is
-            // the box's current item, so it needs no tick; the main row does, because when the pane
-            // is on the main agent the box sits on the preset above.
-            const bool live = role == m_agentRole;
-            const bool selects = live && role != QStringLiteral("main");
-            const QString model = roleModelText(role);
-            m_modelBox->addItem(QStringLiteral("%1 %2%3").arg(live && !selects ? QString(QChar(0x2713)) : QStringLiteral(" "),
-                                                              roleLabel(role),
-                                                              model.isEmpty() ? QString() : QStringLiteral(" · ") + model),
-                                QStringLiteral("role:") + role);
-            if (selects) m_modelBox->setCurrentIndex(m_modelBox->count() - 1);
+            m_modelBox->addItem(roleRowText(role), QStringLiteral("role:") + role);
+            if (role == m_agentRole) liveIndex = m_modelBox->count() - 1;
         }
+        // The rest of the presets follow the role rows, in stored order — the pane's own preset
+        // is the main row already, so it is not repeated here.
+        for (const auto &model : std::as_const(m_stored))
+            if (model.first != m_currentPreset)
+                m_modelBox->addItem(conciseModel(model.first, model.second), model.first);
+        if (liveIndex >= 0) m_modelBox->setCurrentIndex(liveIndex);
         // Guest agents (26.9): Claude Code and Codex, when installed, as rows like any model — no
         // tier, no key, no worker, so they are offered in a pane with no provider at all. The row
         // is the box's current item while that guest is in the pane's foreground (picked or typed
@@ -10416,6 +10396,7 @@ private:
                   .arg(guestDisplayName(guestOfPreset(m_currentPreset)),
                        m_guestSession.isEmpty() ? QString() : QStringLiteral(" (session %1)").arg(m_guestSession.left(8)))
             : QString()));
+        m_modelBox->updateGeometry();   // the collapsed box's width follows the new current row
     }
 
     // ----- Claude Code and Codex from the model picker (GT7X, 26.9) ---------------------------
@@ -10858,23 +10839,21 @@ public:
                                    && !m_entries.first().written();
         in.queueHint = relay::panestate::queueHint(!m_selectedSteer.isEmpty(), headSteerable, m_selected >= 0);
 
-        // The chip's own text, and the rows of its menu that switch the model: the presets with a
-        // stored key (m_stored), then the agent roles. Not the gear (desktop settings) and not
+        // The chip's own text, and the rows of its menu that switch the model, in the menu's
+        // own order (owner, 2026-09-19): the roles as "model (role)", then the other presets —
+        // the pane's own preset is the main row already. Not the gear (desktop settings) and not
         // the "this turn" image row, which is not a choice.
-        QString chip = m_modelBox ? m_modelBox->currentText() : m_model;
-        in.modelLabel = chip.remove(QChar(0x2713)).trimmed();
-        for (const auto &model : std::as_const(m_stored))
-            in.choices << relay::panestate::Choice{QStringLiteral("preset:") + model.first, conciseModel(model.first, model.second),
-                                                   model.first == m_currentPreset && m_agentRole == QLatin1String("main")};
+        in.modelLabel = m_modelBox ? m_modelBox->currentText() : m_model;
         QStringList roles{QStringLiteral("main"), QStringLiteral("flash")};
         if (hasLocalEndpoint()) roles << QStringLiteral("local");
         if (!roles.contains(m_agentRole)) roles << m_agentRole;
-        for (const QString &role : std::as_const(roles)) {
-            const QString model = roleModelText(role);
-            in.choices << relay::panestate::Choice{QStringLiteral("role:") + role,
-                                                   roleLabel(role) + (model.isEmpty() ? QString() : QStringLiteral(" · ") + model),
+        for (const QString &role : std::as_const(roles))
+            in.choices << relay::panestate::Choice{QStringLiteral("role:") + role, roleRowText(role),
                                                    role == m_agentRole};
-        }
+        for (const auto &model : std::as_const(m_stored))
+            if (model.first != m_currentPreset)
+                in.choices << relay::panestate::Choice{QStringLiteral("preset:") + model.first, conciseModel(model.first, model.second),
+                                                       false};
 
         in.mode = m_modeValue;
         if (m_editor) in.placeholder = m_editor->placeholderText().isEmpty() ? m_savedPlaceholder : m_editor->placeholderText();
@@ -11344,6 +11323,186 @@ private:
         m_transcriptProgram.clear();
     }
 
+    // ----- prose blocks: Relay's own lines re-wrap when the pane is resized (#R2WQ) -----------------
+    //
+    // The word wrapper breaks a reply into rows at the width the pane had when it printed them,
+    // and writes real newlines, so a narrower pane soft-splits those rows mid-word and a wider one
+    // leaves them stranded -- the break points are frozen into the scrollback. The fix keeps the
+    // printed bytes exactly as they are and makes the *view* re-lay the block out whenever the pane
+    // is not at that width: every inline block the pane prints is wrapped in an OSC 8 run
+    // relay://prose/<pane>/<block> covering exactly its rows, and the block's logical lines -- the
+    // rendered text *before* the wrapper -- are handed to the engine beside it (setProseBlock).
+    // The engine's fold layer hides the run's real rows and paints its own wrap; at the print
+    // width it stands aside, so a pane that is never resized is byte-identical.
+
+    // One block's logical lines, collected from the ANSI the pane renders (MarkdownAnsi, the inks'
+    // own SGR) as it streams. The style of a run is kept both as flags and as the SGR parameters
+    // that set it; the view resolves the SGR against the theme when it paints, so a re-wrapped
+    // block follows a theme switch exactly as the grid's own rows do.
+    struct ProseCollector {
+        QVector<relay::FoldLine> lines;
+        relay::FoldLine line;         // the line being built
+        relay::FoldSpan open;         // the span being built (style set when it opened)
+        bool bold = false, italic = false, underline = false, faint = false;
+        int fg = -1;                  // -1 = the default ink; else an ANSI index
+        enum class Scan { Ground, Esc, Csi, Osc, OscEsc } scan = Scan::Ground;
+        QString csi;
+
+        QString currentSgr() const {
+            QStringList p;
+            if (bold) p << QStringLiteral("1");
+            if (faint) p << QStringLiteral("2");
+            if (italic) p << QStringLiteral("3");
+            if (underline) p << QStringLiteral("4");
+            if (fg >= 0) {
+                if (fg < 8) p << QString::number(30 + fg);
+                else if (fg < 16) p << QString::number(90 + fg - 8);
+                else p << QStringLiteral("38;5;") + QString::number(fg);
+            }
+            return p.join(QLatin1Char(';'));
+        }
+        void closeSpan() {
+            if (!open.text.isEmpty()) line.spans << open;
+            open = relay::FoldSpan{};
+        }
+        void applySgr(const QString &params) {
+            const QStringList ps = params.split(QLatin1Char(';'), Qt::SkipEmptyParts);
+            for (int i = 0; i < ps.size(); ++i) {
+                const int p = ps.at(i).toInt();
+                if (p == 0) { bold = italic = underline = faint = false; fg = -1; }
+                else if (p == 1) bold = true;
+                else if (p == 2) faint = true;
+                else if (p == 3) italic = true;
+                else if (p == 4 || p == 21) underline = true;
+                else if (p == 22) { bold = faint = false; }
+                else if (p == 23) italic = false;
+                else if (p == 24) underline = false;
+                else if (p == 39) fg = -1;
+                else if (p >= 30 && p <= 37) fg = p - 30;
+                else if (p >= 90 && p <= 97) fg = p - 90 + 8;
+                else if (p == 38 && i + 1 < ps.size()) {
+                    const int mode = ps.at(i + 1).toInt();
+                    if (mode == 5 && i + 2 < ps.size()) { fg = ps.at(i + 2).toInt(); i += 2; }
+                    else if (mode == 2) i += 4;   // a truecolour: no theme index to follow
+                }
+            }
+            closeSpan();   // the style change ends the span in progress
+        }
+        void feed(const QString &rendered) {
+            for (const QChar ch : rendered) {
+                switch (scan) {
+                case Scan::Ground:
+                    if (ch == QChar(0x1b)) { scan = Scan::Esc; continue; }
+                    if (ch == QLatin1Char('\n')) {
+                        closeSpan();
+                        lines << line;
+                        line = relay::FoldLine{};
+                        continue;
+                    }
+                    if (open.text.isEmpty()) {
+                        open.sgr = currentSgr();
+                        open.bold = bold; open.italic = italic;
+                        open.underline = underline; open.dim = faint;
+                    }
+                    open.text += ch;
+                    continue;
+                case Scan::Esc:
+                    if (ch == QLatin1Char('[')) { scan = Scan::Csi; csi.clear(); continue; }
+                    if (ch == QLatin1Char(']')) { scan = Scan::Osc; continue; }
+                    scan = Scan::Ground;   // a two-character escape: nothing to keep
+                    continue;
+                case Scan::Csi: {
+                    const ushort u = ch.unicode();
+                    if (u >= 0x40 && u <= 0x7e) {
+                        applySgr(csi);
+                        scan = Scan::Ground;
+                        continue;
+                    }
+                    csi += ch;   // parameters and intermediates until the final byte
+                    continue;
+                }
+                case Scan::Osc:
+                    if (ch == QChar(0x07)) { scan = Scan::Ground; continue; }
+                    if (ch == QChar(0x1b)) { scan = Scan::OscEsc; continue; }
+                    continue;
+                case Scan::OscEsc:
+                    scan = Scan::Ground;   // ST: the OSC is over
+                    continue;
+                }
+            }
+        }
+        QVector<relay::FoldLine> take() {
+            closeSpan();
+            if (!line.spans.isEmpty()) lines << line;
+            // Trailing newlines open fresh grid rows that carry no cells of the
+            // block's OSC 8 run, so they are not the block's: an empty last line
+            // (a '\n' with nothing after it) is dropped, whoever prints next
+            // owns that row. An empty line with something after it stays.
+            while (!lines.isEmpty() && lines.last().spans.isEmpty()) lines.removeLast();
+            return lines;
+        }
+    };
+
+    // The open block's URI (empty = none), its ink, the width it was printed at and its collected
+    // lines. A block opens on the first visible chunk of one ink and closes when another ink
+    // prints, an anchored row is drawn, or the inline region ends -- the same boundaries that
+    // shape the grid's own rows.
+    QString m_proseUri;
+    Ink m_proseInk = Ink::Note;
+    int m_prosePrintColumns = 0;
+    int m_proseSeq = 0;
+    ProseCollector m_prose;
+
+    static bool proseVisible(const QString &rendered) {
+        for (const QChar c : rendered)
+            if (c != QChar(0x1b) && c.unicode() > 0x20) return true;
+        return false;
+    }
+
+    QByteArray openProse(Ink ink) {
+        m_proseUri = QString::fromLatin1(relay::kProsePrefix) + m_token + QLatin1Char('/')
+                     + QString::number(++m_proseSeq);
+        m_proseInk = ink;
+        m_prosePrintColumns = m_backend ? m_backend->columns() : 0;
+        m_prose = ProseCollector{};
+        return QByteArray("\x1b]8;;") + m_proseUri.toUtf8() + QByteArray("\x1b\\");
+    }
+
+    // Ends the open block: closes the OSC 8 run and hands the block's logical lines to the engine
+    // with the width they were printed at. A block of nothing visible (a gap's bare newline) is
+    // never handed over: there is nothing to re-wrap.
+    QByteArray closeProseRun() {
+        if (m_proseUri.isEmpty()) return QByteArray();
+        const QByteArray close = QByteArray("\x1b]8;;\x1b\\");
+        const QString uri = m_proseUri;
+        QVector<relay::FoldLine> lines = m_prose.take();
+        const Ink ink = m_proseInk;
+        const int printColumns = m_prosePrintColumns;
+        m_proseUri.clear();
+        bool anyText = false;
+        for (const relay::FoldLine &l : lines)
+            if (!l.text().trimmed().isEmpty()) { anyText = true; break; }
+        if (anyText && m_backend && terminalFolds()) {
+            if (ink == Ink::User || ink == Ink::UserAgent) {
+                const quint8 role = ink == Ink::User ? relay::kFoldRoleShell : relay::kFoldRoleAgent;
+                for (relay::FoldLine &l : lines) l.role = role;
+            }
+            m_backend->setProseBlock(uri, lines, printColumns);
+        }
+        return close;
+    }
+
+    // Called at the head of every path that prints a chunk of one ink: returns the OSC 8 bytes to
+    // write before the chunk (the previous block's close when the ink changed, a new block's
+    // open), and collects the chunk's rendered text, pre-wrapper, into the open block.
+    QByteArray proseStart(Ink ink, const QString &rendered) {
+        QByteArray out;
+        if (!m_proseUri.isEmpty() && ink != m_proseInk) out += closeProseRun();
+        if (m_proseUri.isEmpty() && proseVisible(rendered)) out += openProse(ink);
+        if (!m_proseUri.isEmpty()) m_prose.feed(rendered);
+        return out;
+    }
+
     void printInline(const QString &text, Ink ink) {
         if (text.isEmpty()) return;
         if (!inlineReady()) { m_inlinePending.append({text, ink}); appendTranscript(text, ink); return; }
@@ -11353,6 +11512,7 @@ private:
         if (ink == Ink::Agent) beginBlock(relay::gaps::Block::Agent);
         else if (ink == Ink::User || ink == Ink::UserAgent) beginBlock(relay::gaps::Block::User);
         else if (ink == Ink::Tool) beginBlock(relay::gaps::Block::Call);
+        else if (ink == Ink::Recap) beginBlock(relay::gaps::Block::Recap);   // span, summary, Next ·, Open ·: one block (#5AWD)
         QByteArray out;
         if (!m_inlineOpen) {
             // A remote prompt without Relay's integration cannot be asked to redraw itself: keep
@@ -11382,12 +11542,15 @@ private:
         // Everything then goes through the word wrapper, so a line breaks between words at the
         // pane's width rather than wherever the terminal runs out of columns (src/WordWrap.h).
         if (ink == Ink::Agent) {
-            out += wrapped(m_markdown.feed(clean));
+            const QString rendered = m_markdown.feed(clean);
+            out += proseStart(ink, rendered);
+            out += wrapped(rendered);
             m_atLineStart = clean.endsWith('\n');
             writeTerminal(out);
             return;
         }
-        out += wrapped(m_markdown.finish());
+        const QString mdTail = m_markdown.finish();   // always runs: it resets the renderer
+        if (!mdTail.isEmpty()) out += proseStart(Ink::Agent, mdTail) + wrapped(mdTail);
         // A line the user typed carries a *role*, not a colour: every row of it is marked with the
         // private OSC 7772 ("shell" / "agent"), and the engine view paints that row's band and ink
         // from the theme in force when it paints (EngineBackend::applyThemeColors, ColorScheme.h).
@@ -11402,6 +11565,7 @@ private:
             // The word wrapper breaks a long line into rows of its own, so the mark goes at the
             // head of each row that holds something — never after the last newline, which would
             // hand the role to whatever prints next.
+            out += proseStart(ink, body);
             const QByteArray rows = wrapped(body) + terminalLines(m_wrap.flush());
             int from = 0;
             while (from < rows.size()) {
@@ -11420,6 +11584,7 @@ private:
         QString body = code;
         for (const QChar ch : clean) { if (ch == '\n') body += QStringLiteral("\x1b[0m\n") + code; else body += ch; }
         body += QStringLiteral("\x1b[0m");
+        out += proseStart(ink, body);
         out += wrapped(body) + terminalLines(m_wrap.flush());
         m_atLineStart = clean.endsWith('\n');
         writeTerminal(out);
@@ -11475,8 +11640,14 @@ private:
     void closeInline() {
         if (!m_inlineOpen) return;
         endCallRun();
-        if (m_markdown.holding()) writeTerminal(wrapped(m_markdown.finish()));
+        if (m_markdown.holding()) {
+            const QString tail = m_markdown.finish();
+            if (!tail.isEmpty()) writeTerminal(proseStart(Ink::Agent, tail) + wrapped(tail));
+        }
         writeTerminal(takeWrapped());
+        // The run closes before the last newline: a blank row that ends the inline region is not
+        // the block's own, and at the print width it shows exactly as printed either way.
+        writeTerminal(closeProseRun());
         if (!m_atLineStart) writeTerminal("\r\n");
         m_inlineOpen = false; m_atLineStart = true;
         holdShellResize(false);   // the cursor is on a fresh row: the shell may redraw there
@@ -14208,7 +14379,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
 
     void refreshStatusStrip() {
         if (m_interruptButton) m_interruptButton->setVisible(processBusy());
-        // The terminal's blue "Relaying – <program>…" line rides the shell poll, which is what
+        // The terminal's blue "Relaying · <program>…" line rides the shell poll, which is what
         // notices a program start and end; a turn's violet line keeps its own one-second clock.
         if (!m_agentBusy) refreshBusyLine();
     }
@@ -15014,7 +15185,6 @@ private:
     int m_menuFileLine = 0;   // the line the right-clicked path pointed at, for "Open file"
     // voice transcription (issue NY7Z): the chip, the recorder, and the clip in flight
     QToolButton *m_mic = nullptr;
-    QToolButton *m_share = nullptr;
     // Prompts from paired devices waiting on the router, by request id.
     // `author` is a display name ("alice"), never the guest id in `origin`: the row shows who
     // asked, and the id stays out of anything a person reads (card #W5N2's owner, 2026-09-18).
@@ -15055,13 +15225,13 @@ private:
     quint64 m_lastQueuedEntryId = 0;
     QString m_lastSteerRequest;
     QElapsedTimer m_lastQueuedAt, m_lastSteeredAt, m_awaySince;
-    // In-flight turn clock (issue SQAM), drawn since card #4E13 as the "Relaying – …" line
+    // In-flight turn clock (issue SQAM), drawn since card #4E13 as the "Relaying · …" line
     // above the prompt box (m_busyLine) rather than a label in the strip under it.
     QTimer *m_turnClock = nullptr;
     QElapsedTimer m_turnElapsed;
     QString m_turnStep;
     QString m_turnClockText;              // the turn's line, for pane_state's clock (relay-terminal-71)
-    PaneBusyLine *m_busyLine = nullptr;   // the "Relaying – …" line above the prompt (#4E13, #HQ2B, #RR0G)
+    PaneBusyLine *m_busyLine = nullptr;   // the "Relaying · …" line above the prompt (#4E13, #HQ2B, #RR0G)
     // "waiting for 2 subagents, 1 job . . ." in the prompt box (cards #V7QD, #KP4M): the call_ids
     // of the main agent's running agent_wait and command_output (empty when there is none), the dot
     // phase, and the timer that grows them.

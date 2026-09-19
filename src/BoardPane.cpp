@@ -850,6 +850,20 @@ private:
 
 // --------------------------------------------------------------------- card detail
 
+// Model reasoning is untrusted text: drop control characters except newline and tab, exactly as
+// every other transcript surface does (src/AgentInternalsView.cpp's sanitize).
+static QString sanitizeTrace(const QString &text)
+{
+    QString clean;
+    clean.reserve(text.size());
+    for (const QChar c : text) {
+        const ushort u = c.unicode();
+        if (u == '\n' || u == '\t' || (u >= 0x20 && u != 0x7f && !(u >= 0x80 && u < 0xa0)))
+            clean += c;
+    }
+    return clean;
+}
+
 // The right half of the Switchboard: the card as one document (body, then its thread, the way an
 // issue page reads), a reply box under it, and the pickers and links in a header above it.
 class CardDetail final : public QWidget {
@@ -1268,6 +1282,10 @@ public:
             m_reply->setPlainText(m_drafts.take(id));
             m_error->hide();
             m_streaming.clear();
+            m_thinking.clear();
+            m_thinkingDone = false;
+            m_thinkingMs = 0;
+            m_sealed.clear();
             m_executeArmed.clear();
         }
         m_id = id;
@@ -1311,17 +1329,28 @@ public:
         m_openFile->setEnabled(!m_path.isEmpty());
         m_body = board::bodyWithoutTitle(card.value(QStringLiteral("body")).toString(), title);
 
+        const int shownBefore = int(m_entries.size());
         m_entries.clear();
         const QJsonArray thread = card.value(QStringLiteral("thread")).toArray();
         for (const QJsonValue &value : thread)
             m_entries << value.toObject();
         m_threadTotal = qMax(card.value(QStringLiteral("thread_total")).toInt(), int(m_entries.size()));
+        // The shown thread shrank (an older entry rolled off the window the worker sends): the
+        // sealed blocks' anchors have shifted with it, so they go rather than land in the wrong
+        // place. A list that only grew keeps every one where it sealed.
+        if (int(m_entries.size()) < shownBefore)
+            m_sealed.clear();
         render(sameCard ? Scroll::Keep : Scroll::Top);
         m_loading = false;
     }
 
     void appendEntry(const QJsonObject &entry)
     {
+        // A thread entry is landing: the reasoning that streamed before it is sealed in place
+        // above it (#9K5H), so the entry — an answer, or a question the agent asks mid-turn —
+        // reads after the thinking it came from, exactly as the terminal's transcript orders
+        // them. The live block starts empty for whatever the model thinks next.
+        sealThinking();
         m_streaming.clear();
         m_entries << entry;
         ++m_threadTotal;
@@ -1335,6 +1364,41 @@ public:
             m_render->start();
     }
 
+    // A reasoning delta of the running turn (protocol 19.4). It streams into the thread above
+    // the answer it precedes; the render is coalesced on the same 40 ms timer the answer uses,
+    // so a long stream of deltas cannot re-render the card per chunk.
+    void appendThinking(const QString &text)
+    {
+        if (m_thinking.size() < 200000)      // the terminal's own cap (src/Pane.h)
+            m_thinking += text;
+        if (!m_render->isActive())
+            m_render->start();
+    }
+
+    // The block ended (thinking_done): its header settles to "thought for N s" — the same words
+    // the terminal's fold uses — and the tail stays on screen for the rest of the turn.
+    void finishThinking(qint64 ms)
+    {
+        m_thinkingDone = true;
+        m_thinkingMs = ms;
+        if (!m_render->isActive())
+            m_render->start();
+    }
+
+    // Move the live trace into the sealed list, anchored to the number of entries on screen
+    // when it was sealed, so a re-read that rebuilds `m_entries` from the file keeps drawing it
+    // at the same place in the thread.
+    void sealThinking()
+    {
+        if (!m_thinking.trimmed().isEmpty() || m_thinkingDone)
+            m_sealed << LiveThinking{m_thinking, m_thinkingDone, m_thinkingMs, int(m_entries.size())};
+        m_thinking.clear();
+        m_thinkingDone = false;
+        m_thinkingMs = 0;
+        while (m_sealed.size() > 12)
+            m_sealed.removeFirst();   // the thread itself only shows the last entries
+    }
+
     // While a Discuss or a Plan runs, the strip over the reply box names it and stops it, and the
     // buttons that would start another turn wait (#VZ69).
     //
@@ -1343,16 +1407,24 @@ public:
     // #A while #B is planning, and #B's answer so far and its current step are held by the view
     // rather than lost when the card was closed.
     void setBusy(bool busy, const QString &mode = QString(), const QString &streamed = QString(),
-                 const QString &progress = QString())
+                 const QString &progress = QString(), const QString &thinking = QString(),
+                 bool thinkingDone = false, qint64 thinkingMs = 0)
     {
         m_busy = busy;
         m_busyMode = busy ? (mode.isEmpty() ? QStringLiteral("discuss") : mode) : QString();
-        if (busy)
+        if (busy) {
             m_streaming = streamed;
+            m_thinking = thinking;
+            m_thinkingDone = thinkingDone;
+            m_thinkingMs = thinkingMs;
+        }
         setProgress(busy ? progress : QString());
         setModeTips();
         if (!busy)
             m_streaming.clear();
+        // The trace is *not* cleared when the turn ends: a settled block stays where it sealed
+        // until the next turn on this card starts, like the terminal's settled fold. A turn
+        // that ended with no answer (stopped, failed) leaves its trace readable in place.
         render(busy ? Scroll::Bottom : Scroll::Keep);
     }
 
@@ -1602,6 +1674,9 @@ private:
     // What the reply row can do right now, and — while a turn is running — the strip over the
     // box that names the turn and stops it. Nothing on the row changes its label any more: a
     // button that turns into "Stop" was the thing the owner could not read (#VZ69).
+    // The verb is the board's own, "Switchboarding", with a spaced dot before the status
+    // (owner, 2026-09-19: 'it says "Switchboarding · [status]..."'), after the pane's
+    // "Relaying · …" line.
     void setModeTips()
     {
         m_plan->setEnabled(!m_busy);
@@ -1613,8 +1688,8 @@ private:
                                              "its agent builds it, and the card moves to In progress (x)"));
         m_verify->setEnabled(!m_busy && hasVerifier());
         const bool planning = m_busyMode == QStringLiteral("plan");
-        m_busyLabel->setText(planning ? QStringLiteral("✦ Agent is planning…")
-                                      : QStringLiteral("✦ Agent is discussing…"));
+        m_busyLabel->setText(planning ? QStringLiteral("✦ Switchboarding · planning…")
+                                      : QStringLiteral("✦ Switchboarding · discussing…"));
         m_stop->setText(planning ? QStringLiteral("✕ Stop planning")
                                  : QStringLiteral("✕ Stop discussing"));
         m_stop->setToolTip(planning
@@ -1817,6 +1892,53 @@ private:
         cursor.insertText(text, format);
     }
 
+    // One reasoning block: the text, whether it ended, how long it ran, and — for a sealed
+    // block — how many entries were on screen when it sealed, so a re-read that rebuilds the
+    // entry list draws it at the same place in the thread.
+    struct LiveThinking {
+        QString text;
+        bool done = false;
+        qint64 ms = 0;
+        int after = 0;
+    };
+
+    // One reasoning block in the thread (#9K5H): the terminal fold's header ("thinking…" while
+    // it streams, "thought for N s" when it ends) over the tail of the trace, muted and italic
+    // like the placeholder it replaces. The end is the part being written and the part a reader
+    // of a question needs, so the tail is what shows and the cut is named, as the fold names
+    // its cut; the whole block is never written to the card file.
+    void insertThinking(QTextCursor &cursor, const LiveThinking &block, qreal base, int topMargin = 8)
+    {
+        QTextCharFormat head;
+        head.setForeground(theme::TextMuted);
+        head.setFontWeight(QFont::DemiBold);
+        head.setFontPointSize(qMax(theme::FloorPt, base * 0.9));
+        const QString label = !block.done
+            ? QStringLiteral("✦ thinking…")
+            : (block.ms > 0
+                   ? QStringLiteral("✦ thought for %1 s").arg((block.ms + 500) / 1000)
+                   : QStringLiteral("✦ thinking stopped"));
+        insertLine(cursor, label, head, topMargin);
+        const QString body = sanitizeTrace(block.text).trimmed();
+        if (body.isEmpty())
+            return;
+        constexpr int kTail = 4000;
+        QTextCharFormat trace;
+        trace.setForeground(theme::TextMuted);
+        trace.setFontItalic(true);
+        trace.setFontPointSize(qMax(theme::FloorPt, base * 0.9));
+        if (body.size() > kTail)
+            insertLine(cursor, QStringLiteral("… %1 more characters above").arg(body.size() - kTail),
+                       trace, 2);
+        const QString shown = body.size() > kTail ? body.right(kTail) : body;
+        const QStringList lines = shown.split(QLatin1Char('\n'));
+        for (int i = 0; i < lines.size(); ++i) {
+            // A blank line between paragraphs, an empty block otherwise: reasoning text is
+            // prose and the thread's own markdown blocks have air around them.
+            insertLine(cursor, lines.at(i), trace, i == 0 ? 2 : 1);
+        }
+    }
+
     // The body, then the thread under a small heading. Events (moves, status changes) are one
     // muted line each; comments get an author line and their Markdown.
     void render(Scroll scroll)
@@ -1862,7 +1984,18 @@ private:
                                               "picks it up."), muted, 4);
 
         const QDateTime now = QDateTime::currentDateTimeUtc();
+        // Entries already drawn: a sealed block anchors to the count it sealed at, so it draws
+        // before the first entry that landed under it — including one sealed over an empty
+        // thread (after 0), which draws at the top (#9K5H).
+        int drawn = 0;
+        const auto drawSealed = [this, &cursor, base, &drawn] {
+            for (int at = 0; at < m_sealed.size(); ++at)
+                if (m_sealed.at(at).after == drawn)
+                    insertThinking(cursor, m_sealed.at(at), base);
+        };
         for (const QJsonObject &entry : std::as_const(m_entries)) {
+            drawSealed();
+            ++drawn;
             const QJsonObject attrs = entry.value(QStringLiteral("attrs")).toObject();
             const QString author = entry.value(QStringLiteral("author")).toString(
                 attrs.value(QStringLiteral("author")).toString());
@@ -1901,7 +2034,11 @@ private:
             cursor.insertBlock(QTextBlockFormat(), QTextCharFormat());
             insertMarkdown(cursor, board::threadMarkdown(text, kind), base);
         }
-        if (m_busy || !m_streaming.isEmpty()) {
+        // A block sealed after the last entry on screen (or with none at all) still draws: it
+        // ran after everything the thread shows so far.
+        drawSealed();
+        const bool liveTrace = !m_thinking.trimmed().isEmpty() || m_thinkingDone;
+        if (m_busy || !m_streaming.isEmpty() || liveTrace) {
             QTextCharFormat who;
             who.setFontWeight(QFont::DemiBold);
             who.setForeground(theme::Agent);
@@ -1909,10 +2046,16 @@ private:
             if (const QString mode = board::modeTitle(m_busyMode); m_busy && !mode.isEmpty())
                 cursor.insertText(QStringLiteral("  ") + mode, muted);
             cursor.insertBlock(QTextBlockFormat(), QTextCharFormat());
+            if (liveTrace)
+                insertThinking(cursor, LiveThinking{m_thinking, m_thinkingDone, m_thinkingMs, 0}, base, 2);
             if (m_streaming.isEmpty()) {
-                QTextCharFormat thinking = muted;
-                thinking.setFontItalic(true);
-                cursor.insertText(QStringLiteral("thinking…"), thinking);
+                if (!liveTrace) {
+                    // No reasoning came from this worker (or the display is off): the old
+                    // placeholder keeps the turn's presence in the thread.
+                    QTextCharFormat thinking = muted;
+                    thinking.setFontItalic(true);
+                    cursor.insertText(QStringLiteral("thinking…"), thinking);
+                }
             } else {
                 insertMarkdown(cursor, m_streaming, base);
             }
@@ -1945,7 +2088,7 @@ private:
     QTextBrowser *m_doc = nullptr;
     RichEditor *m_reply = nullptr;
     QPushButton *m_plan = nullptr, *m_execute = nullptr, *m_verify = nullptr;
-    // The strip over the reply box while a turn runs: "✦ Agent is planning…" and the ✕ that
+    // The strip over the reply box while a turn runs: "✦ Switchboarding · planning…" and the ✕ that
     // stops it (#VZ69). Hidden the rest of the time.
     QWidget *m_busyStrip = nullptr;
     QLabel *m_busyWhat = nullptr;
@@ -1959,6 +2102,13 @@ private:
     QList<QJsonObject> m_entries;
     QHash<QString, QString> m_drafts;
     QString m_body, m_streaming, m_id, m_path;
+    // The turn's reasoning, in the thread (#9K5H). `m_thinking` is the block streaming now;
+    // `m_sealed` holds the blocks that ran before a thread entry landed under them, anchored to
+    // the entry count at which they sealed so a re-read draws them in the same place.
+    QString m_thinking;
+    bool m_thinkingDone = false;
+    qint64 m_thinkingMs = 0;
+    QList<LiveThinking> m_sealed;
     // The card as the worker last handed it over: the hash an edit is written against, and the
     // `## Issue` text an edit starts from and is compared with.
     QString m_hash, m_issue;
@@ -2248,7 +2398,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
                 QTimer::singleShot(0, this, [this] { placeNotice(); });
                 return;
             }
-            m_cardTurns.insert(card, CardTurn{mode, text, QString(), QString()});
+            m_cardTurns.insert(card, CardTurn{mode, text, QString(), QString(), QString(), false, 0});
             m_detail->setBusy(true, mode);
             // protocol 19.10: one `board_ask`, its mode "discuss" or "plan"; a plan may be wordless.
             QJsonObject ask{{QStringLiteral("type"), QStringLiteral("board_ask")},
@@ -2329,11 +2479,40 @@ void BoardView::buildListTools(QVBoxLayout *layout)
     m_listTools->addWidget(m_count);
     m_filter = new QLineEdit(tools);
     m_filter->setObjectName(QStringLiteral("boardFilter"));
-    m_filter->setPlaceholderText(QStringLiteral("Filter  —  words, label:bug, status:done, "
-                                                "folder:changes, @agent, waiting:me"));
+    m_filter->setPlaceholderText(QStringLiteral("Filter  —  any word in the card, label:bug, "
+                                                "status:done, folder:changes, @agent, waiting:me"));
     m_filter->setClearButtonEnabled(true);
     m_filter->setMinimumWidth(60);      // it gives way to the buttons rather than pushing them out
     m_listTools->addWidget(m_filter, 1);
+    // The order of the cards inside each section (owner, 2026-09-19: "add sorting options,
+    // especially by time"). A menu button rather than a fourth always-on control: the choice is
+    // made once and read all day, and the button names what is on — "Sort: Newest first".
+    m_sort = new QToolButton(tools);
+    m_sort->setObjectName(QStringLiteral("boardSort"));
+    m_sort->setPopupMode(QToolButton::InstantPopup);
+    m_sort->setCursor(Qt::PointingHandCursor);
+    m_sort->setFocusPolicy(Qt::NoFocus);
+    m_sort->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    m_sort->setToolTip(QStringLiteral("How the cards inside each section are ordered. Manual is "
+                                      "the order drag and drop writes; the time sorts reorder "
+                                      "every section and take manual reordering off."));
+    auto *sortMenu = new QMenu(m_sort);
+    const QList<QPair<QString, QString>> choices{
+        {QStringLiteral("manual"), QStringLiteral("Manual (drag order)")},
+        {QStringLiteral("newest"), QStringLiteral("Newest first")},
+        {QStringLiteral("oldest"), QStringLiteral("Oldest first")},
+        {QStringLiteral("updated"), QStringLiteral("Recently updated")}};
+    for (const auto &choice : choices) {
+        QAction *action = sortMenu->addAction(choice.second);
+        action->setCheckable(true);
+        action->setData(choice.first);
+        action->setChecked(board::sortFromId(choice.first) == m_model.sort());
+        const QString id = choice.first;
+        connect(action, &QAction::triggered, this, [this, id] { setSortOrder(id); });
+    }
+    m_sort->setMenu(sortMenu);
+    syncSortButton();
+    m_listTools->addWidget(m_sort);
     m_add = new QToolButton(tools);
     m_add->setObjectName(QStringLiteral("boardAddButton"));
     m_add->setText(QStringLiteral("+  New card (n)"));
@@ -2484,14 +2663,14 @@ void BoardView::layoutListTools()
     const int room = m_listPane->width() - 16 - inset;
     // The filter is owed a legible width before either button may sit beside it.
     const int need = m_count->sizeHint().width() + 150 + m_add->sizeHint().width()
-                     + m_cleanup->sizeHint().width() + 18;
+                     + m_cleanup->sizeHint().width() + m_sort->sizeHint().width() + 24;
     const bool wrap = room < need;
     if (wrap == m_toolsWrapped)
         return;
     m_toolsWrapped = wrap;
     QHBoxLayout *from = wrap ? m_listTools : m_toolsWrap;
     QHBoxLayout *to = wrap ? m_toolsWrap : m_listTools;
-    for (QToolButton *button : {m_add, m_cleanup}) {
+    for (QToolButton *button : {m_add, m_sort, m_cleanup}) {
         from->removeWidget(button);
         to->addWidget(button);
     }
@@ -2840,7 +3019,8 @@ void BoardView::handleEvent(const QJsonObject &event)
         if (const QString id = event.value(QStringLiteral("card_id")).toString();
             m_cardTurns.contains(id)) {
             const CardTurn &turn = m_cardTurns.value(id);
-            m_detail->setBusy(true, turn.mode, turn.streamed, turn.progress);
+            m_detail->setBusy(true, turn.mode, turn.streamed, turn.progress, turn.thinking,
+                              turn.thinkingDone, turn.thinkingMs);
         } else {
             m_detail->setBusy(false);
         }
@@ -2968,6 +3148,26 @@ void BoardView::handleEvent(const QJsonObject &event)
     if (!card.isEmpty() && m_cardTurns.contains(card)) {
         const bool here = card == m_detail->cardId();
         CardTurn &turn = m_cardTurns[card];
+        // The reasoning trace of the running turn (19.4's thinking events, which the worker
+        // tags with the card): streamed into the card's thread above the answer it precedes
+        // and sealed in place when a thread entry lands under it, so a question the agent asks
+        // mid-plan reads after the thinking it came from (#9K5H). "same as in the terminals"
+        // (owner, 2026-09-19) — the same words the terminal fold uses, in the thread's flow.
+        if (type == QStringLiteral("thinking_delta")) {
+            const QString text = event.value(QStringLiteral("text")).toString();
+            if (turn.thinking.size() < 200000)
+                turn.thinking += text;
+            if (here)
+                m_detail->appendThinking(text);
+            return;
+        }
+        if (type == QStringLiteral("thinking_done")) {
+            turn.thinkingDone = true;
+            turn.thinkingMs = event.value(QStringLiteral("elapsed_ms")).toVariant().toLongLong();
+            if (here)
+                m_detail->finishThinking(turn.thinkingMs);
+            return;
+        }
         if (type == QStringLiteral("delta")) {
             turn.streamed += event.value(QStringLiteral("text")).toString();
             if (here)
@@ -3275,6 +3475,34 @@ void BoardView::closeSections()
 }
 
 // A section folds and unfolds; which sections are folded is saved with the window's layout.
+// The sort menu's choice (and a restored pane's saved one): set the model, name it on the
+// button, redraw. Safe on a board that has not opened yet — the rows are empty until the first
+// `board` event, and the order is waiting for them.
+void BoardView::setSortOrder(const QString &id)
+{
+    const board::Sort sort = board::sortFromId(id);
+    if (sort == m_model.sort())
+        return;
+    m_model.setSort(sort);
+    syncSortButton();
+    if (m_sort)
+        for (QAction *action : m_sort->menu()->actions())
+            action->setChecked(action->data().toString() == id);
+    rebuild();
+    // The selection may have moved out from under the card: stand on it where it landed.
+    const int at = board::rowOfCard(m_rows, m_selected);
+    if (at >= 0)
+        selectRow(at);
+}
+
+// The button names what is on; the menu's tick follows the same source, so a restored pane opens
+// with both right.
+void BoardView::syncSortButton()
+{
+    if (m_sort)
+        m_sort->setText(QStringLiteral("Sort: %1").arg(board::sortTitle(m_model.sort())));
+}
+
 void BoardView::toggleSection(QString columnId)
 {
     if (columnId.isEmpty())
@@ -3430,6 +3658,13 @@ void BoardView::moveCard(const QString &id, const QString &columnId, const QStri
                         {QStringLiteral("reason"), QStringLiteral("moved in the Switchboard")}};
     const QString status = m_model.dropStatus(columnId);
     const bool sameSection = moving && m_model.sectionOf(*moving) == columnId;
+    if (sameSection && m_model.sort() != board::Sort::Manual) {
+        showNotice(QStringLiteral("The list is sorted by %1, so reordering is off. Sort by "
+                                  "Manual to drag cards around.")
+                       .arg(board::sortTitle(m_model.sort()).toLower()),
+                   true);
+        return;
+    }
     QString note;
     if (!status.isEmpty() && !sameSection) {
         // Within its own section a card keeps its exact status (Needs QA stays LLM or human).

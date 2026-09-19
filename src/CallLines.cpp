@@ -542,6 +542,14 @@ QString replyAsText(const QJsonObject &reply) {
     return lines.join(QLatin1Char('\n'));
 }
 
+QVector<FoldLine> foldForDiff(const QString &unifiedDiff, const Palette &palette,
+                              const FoldOptions &options) {
+    QVector<FoldLine> out;
+    appendDiff(out, unifiedDiff, palette);
+    capAndClose(out, palette, options);
+    return out;
+}
+
 QVector<FoldLine> foldForRun(const QVector<RunMember> &members, const Palette &palette,
                              const FoldOptions &options) {
     QVector<FoldLine> out;

@@ -236,18 +236,6 @@ void SubagentTranscriptView::drawRow(ToolCall &call) {
     rewriteLine(call, rowText(call), call.done && call.label.failed() ? Ink::Error : Ink::Tool);
 }
 
-void SubagentTranscriptView::appendDiff(const QString &diff) {
-    for (const QString &line : diff.split(QLatin1Char('\n'))) {
-        if (line.isEmpty()) continue;
-        Ink ink = Ink::ToolOutput;
-        if (line.startsWith(QLatin1Char('+')) && !line.startsWith(QStringLiteral("+++"))) ink = Ink::DiffAdd;
-        else if (line.startsWith(QLatin1Char('-')) && !line.startsWith(QStringLiteral("---"))) ink = Ink::DiffRemove;
-        else if (line.startsWith(QStringLiteral("@@")) || line.startsWith(QStringLiteral("+++"))
-                 || line.startsWith(QStringLiteral("---"))) continue;   // the fold shows the headers
-        append(QStringLiteral("    ") + line + QLatin1Char('\n'), ink);
-    }
-}
-
 int SubagentTranscriptView::indexOfCall(const QString &callId) const {
     if (callId.isEmpty()) return -1;
     for (int at = m_calls.size() - 1; at >= 0; --at) if (m_calls.at(at).callId == callId) return at;
@@ -353,13 +341,8 @@ void SubagentTranscriptView::toolResult(const QJsonObject &payload) {
     if (call.label.hasMerge && !call.label.failed()) { m_merge.clear(); m_merge.add(call.label); m_mergeHead = at; }
     else { m_merge.clear(); m_mergeHead = -1; }
 
-    // A short diff needs no click at all (§ 23.6): it prints under the line, red and green.
-    if (call.label.inlineDiff && !call.diff.isEmpty() && at == m_calls.size() - 1) {
-        appendDiff(call.diff);
-        m_calls[at].after.setKeepPositionOnInsert(false);
-        m_calls[at].after.setPosition(m_log->document()->characterCount() - 1);
-        m_calls[at].after.setKeepPositionOnInsert(true);
-    }
+    // A short diff stays behind the row's click like every other detail (#WXT6): it is already in
+    // call.detail, so toggleToolCall() draws it — nothing auto-expands here any more.
 }
 
 void SubagentTranscriptView::toolOutput(const QString &text) {

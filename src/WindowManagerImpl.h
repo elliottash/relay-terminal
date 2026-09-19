@@ -260,7 +260,8 @@ inline bool WindowManager::handleOpen(const QJsonObject &request) {
         }
         // relay://open-call/<pane-token>/<turn-id>/<call-id>: a tool-call line whose click is not a
         // fold (#TK9C, protocol § 23.6). The pane knows what its label asked to open; this only
-        // finds the pane. relay://call/… never reaches here — it belongs to the engine's fold layer.
+        // finds the pane. relay://call/… never reaches here — it belongs to the engine's fold layer —
+        // and neither does relay://prose/…, the anchor of a block the view re-wraps (#R2WQ).
         if (url.scheme() == QStringLiteral("relay") && url.host() == QStringLiteral("open-call") && parts.size() == 3) {
             const QString target = request.value(QStringLiteral("url")).toString();
             for (RelayWindow *window : std::as_const(m_windows))

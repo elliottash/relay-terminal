@@ -214,6 +214,13 @@ QVector<FoldLine> foldForReply(const QJsonObject &reply, const Palette &palette,
 // the same list the fold would have drawn rather than the result's JSON.
 QString replyAsText(const QJsonObject &reply);
 
+// One unified diff as fold rows, drawn exactly as a `detail` section of style "diff" is: the fold
+// of a write or an edit whose diff the surface already holds. A short diff folds under its row
+// *collapsed* (#WXT6), so the click answers from the stored diff with no worker round trip — and
+// still answers when the worker's fifty-turn log has scrolled past the call.
+QVector<FoldLine> foldForDiff(const QString &unifiedDiff, const Palette &palette,
+                              const FoldOptions &options);
+
 // A merged run's fold: one row per member, each linking to the file it read.
 QVector<FoldLine> foldForRun(const QVector<RunMember> &members, const Palette &palette,
                              const FoldOptions &options);

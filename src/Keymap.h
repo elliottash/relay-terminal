@@ -226,11 +226,11 @@ private:
         add("pane.focusUp", "pane", "Focus pane above", {QStringLiteral("Alt+Up")});
         add("pane.focusDown", "pane", "Focus pane below", {QStringLiteral("Alt+Down")});
         add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W"), QStringLiteral("Ctrl+Shift+W")});
-        add("pane.moveLeft", "pane", "Move pane left (swap with or dock beside the neighbor; then the Move-down key docks it beneath)",
+        add("pane.moveLeft", "pane", "Move pane left (swap with or dock beside the neighbor; past the page edge, into a column of its own; then the Move-down key docks it beneath)",
             {QStringLiteral("Ctrl+Alt+Left")});
-        add("pane.moveRight", "pane", "Move pane right (then the Move-down key docks it beneath)", {QStringLiteral("Ctrl+Alt+Right")});
-        add("pane.moveUp", "pane", "Move pane up", {QStringLiteral("Ctrl+Alt+Up")});
-        add("pane.moveDown", "pane", "Move pane down (straight after a left/right move, beneath that neighbor)", {QStringLiteral("Ctrl+Alt+Down")});
+        add("pane.moveRight", "pane", "Move pane right (past the page edge, into a column of its own; then the Move-down key docks it beneath)", {QStringLiteral("Ctrl+Alt+Right")});
+        add("pane.moveUp", "pane", "Move pane up (past the page edge, into a row of its own)", {QStringLiteral("Ctrl+Alt+Up")});
+        add("pane.moveDown", "pane", "Move pane down (straight after a left/right move, beneath that neighbor; past the page edge, into a row of its own)", {QStringLiteral("Ctrl+Alt+Down")});
         add("pane.moveToNewTab", "pane", "Move pane to a new tab (keeps the shell and agent)", {});
         add("tab.moveToNewWindow", "tab", "Move tab to a new window (keeps its panes)", {});
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+Z")});

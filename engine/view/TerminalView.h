@@ -190,6 +190,10 @@ public:
     // Set a fold's content and expand it. Spans carry their own colours, so a
     // coloured diff is the host's to build.
     void setFoldContent(const QString &uri, const QVector<FoldLine> &lines);
+    // A block of the host's own prose (#R2WQ): printed into the grid inside an
+    // OSC 8 run with `uri` (kProsePrefix), re-wrapped from `lines` whenever the
+    // grid is not at printColumns, and never interactive. See TerminalBackend.h.
+    void setProseBlock(const QString &uri, const QVector<FoldLine> &lines, int printColumns);
     void setFoldExpanded(const QString &uri, bool expanded);
     bool foldExpanded(const QString &uri) const;
     void removeFold(const QString &uri);
@@ -268,6 +272,9 @@ private:
     QColor resolve(uint32_t packed, bool foreground) const;
     void paintRow(QPainter &p, int screenRow, const Line &line, int realRow);
     void paintFoldRow(QPainter &p, int screenRow, int foldIndex, int foldRow);
+    // One re-wrapped row of a prose block (#R2WQ): painted like a grid row of
+    // the host's own, not like a fold — no tint, no rule, column 0.
+    void paintProseRow(QPainter &p, int screenRow, const FoldLayer::Fold &f, int foldRow);
     void paintCursor(QPainter &p);
     QColor groundAt(int y) const;
     QColor foldBackground() const;

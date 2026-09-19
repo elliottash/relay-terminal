@@ -3,7 +3,7 @@
 
 // The Relay mark, painted. One drawing of the app's own icon, so every surface that shows it shows
 // the same shape: the pane header's live state glyph and the tab icons (src/PaneChrome.h), and the
-// button at the left of the "Relaying – …" line that opens the Activity pane (PaneBusyLine,
+// button at the left of the "Relaying · …" line that opens the Activity pane (PaneBusyLine,
 // src/Pane.h, card #4X53). It lives in a header of its own because Pane.h is included before
 // PaneChrome.h in the one translation unit and both need it; never copy the shape instead.
 

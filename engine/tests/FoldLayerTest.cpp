@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // relay::FoldLayer: the fold layer's maths without a GUI — wrapping, the
-// visual-row <-> real-row mapping, anchoring, trimming and ordering.
+// visual-row <-> real-row mapping, anchoring, trimming and ordering, and the
+// prose blocks that replace their own rows on a resize (#R2WQ).
 #include "view/FoldLayer.h"
+
+#include "core/CellTypes.h"
 
 #include <QtTest>
 
@@ -312,6 +315,185 @@ private slots:
         QVERIFY(fold->cells[0][9].dim);
         QVERIFY(!fold->cells[0][9].fg.isValid());
         QCOMPARE(line.text(), QStringLiteral("+ added ok"));
+    }
+
+    // ---- word-aware wrapping (#R2WQ): one break rule everywhere
+
+    void foldRowsBreakBetweenWords()
+    {
+        FoldLayer f;
+        f.setGeometry(20, 3);   // 17 usable
+        f.setContent(QStringLiteral("u"),
+                     lines({QStringLiteral("commit RELAY_ENGINE_WITH_GHOSTTY describes the core")}));
+        const FoldLayer::Fold *fold = f.fold(QStringLiteral("u"));
+        QStringList rows;
+        for (int r = 0; r < fold->height(); ++r) {
+            const QString text = f.rowText(0, r);
+            QVERIFY2(!text.isEmpty(), "no empty rows while words remain");
+            rows << text;
+        }
+        // Before #R2WQ this filled rows cluster by cluster: "commit RELAY_EN".
+        QCOMPARE(rows.first().endsWith(QLatin1String("commit")), false);
+        QVERIFY(rows.join(QLatin1Char(' ')).contains(QLatin1String("commit")));
+        QVERIFY(rows.join(QLatin1Char(' ')).contains(QLatin1String("describes")));
+        // No row runs past the block's usable width.
+        for (const QString &row : rows)
+            QVERIFY2(row.size() <= 17, qPrintable(row));
+        // ... and no row ends inside a word: each row's last word is whole.
+        const QStringList words = QString(QStringLiteral("commit RELAY_ENGINE_WITH_GHOSTTY describes the core"))
+                                      .split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        for (const QString &row : rows) {
+            const QString last = row.trimmed().section(' ', -1);
+            QVERIFY2(words.contains(last) || last == row.trimmed(), qPrintable(row));
+        }
+    }
+
+    // ---- prose blocks (#R2WQ): the pane's own lines, replaced on a resize
+
+    void proseStandsAsideAtThePrintWidth()
+    {
+        FoldLayer f;
+        f.setGeometry(80, 3);
+        f.setProse(QStringLiteral("relay://prose/p/1"),
+                   lines({QStringLiteral("one two three four five six seven eight")}), 80);
+        f.setAnchor(QStringLiteral("relay://prose/p/1"), 4, 5);   // the two rows it printed at 80
+        QVERIFY(!f.active());
+        QCOMPARE(f.visualTotal(100), 100);
+        QCOMPARE(f.at(4).fold, false);
+        QCOMPARE(f.at(4).realRow, 4);
+        QCOMPARE(f.at(5).realRow, 5);
+        QCOMPARE(f.at(6).realRow, 6);
+        QVERIFY(!f.rowHidden(4));
+        QCOMPARE(f.fold(QStringLiteral("relay://prose/p/1"))->height(), 1);   // it fits at 80
+    }
+
+    void proseTakesOverAwayFromThePrintWidth()
+    {
+        FoldLayer f;
+        f.setGeometry(80, 3);
+        const QString uri = QStringLiteral("relay://prose/p/1");
+        f.setProse(uri, lines({QStringLiteral("one two three four five six seven eight nine ten")}), 80);
+        f.setAnchor(uri, 4, 5);   // two real rows at 80
+        QVERIFY(!f.active());
+        f.setGeometry(40, 3);     // narrower: the line wraps to two rows
+        QVERIFY(f.active());
+        QCOMPARE(f.fold(uri)->height(), 2);
+        QCOMPARE(f.visualTotal(100), 100);   // two painted for two hidden
+        QVERIFY(f.rowHidden(4));
+        QVERIFY(f.rowHidden(5));
+        QVERIFY(!f.rowHidden(6));
+        // The block starts where its first hidden row was; rows after it move.
+        QCOMPARE(f.visualOfReal(3), 3);
+        QCOMPARE(f.visualOfReal(4), 4);      // a hidden row answers the block's first row
+        QCOMPARE(f.visualOfReal(6), 6);
+        QVERIFY(f.at(4).fold);
+        QCOMPARE(f.at(4).foldRow, 0);
+        QVERIFY(f.at(5).fold);
+        QCOMPARE(f.at(5).foldRow, 1);
+        QCOMPARE(f.at(6).fold, false);
+        QCOMPARE(f.at(6).realRow, 6);
+        // Back at the print width it stands aside again, and the printed rows show.
+        f.setGeometry(80, 3);
+        QVERIFY(!f.active());
+        QCOMPARE(f.visualTotal(100), 100);
+        QCOMPARE(f.at(4).realRow, 4);
+        // Wider than printed: taken over too, with fewer rows than it hides.
+        f.setGeometry(120, 3);
+        QVERIFY(f.active());
+        QCOMPARE(f.fold(uri)->height(), 1);
+        QCOMPARE(f.visualTotal(100), 99);
+        QCOMPARE(f.at(4).fold, false);       // a taller block: rows below move up
+        QCOMPARE(f.at(4).realRow, 6);
+    }
+
+    void proseWrapsWithTheSharedRuleAndHangs()
+    {
+        FoldLayer f;
+        f.setGeometry(48, 3);
+        const QString uri = QStringLiteral("relay://prose/p/2");
+        f.setProse(uri, lines({QStringLiteral("• one two three four five six seven eight")}), 80);
+        f.setAnchor(uri, 0, 2);
+        QVERIFY(f.active());
+        const FoldLayer::Fold *fold = f.fold(uri);
+        QVERIFY(fold->height() > 1);
+        // The first row starts at column 0; every continuation hangs past the bullet.
+        QCOMPARE(fold->rows[0].startCol, 0);
+        for (int r = 1; r < fold->height(); ++r) {
+            QCOMPARE(fold->rows[size_t(r)].startCol, 2);
+            QVERIFY2(!f.rowText(0, int(r)).startsWith(QLatin1Char(' ')), "no leading spaces in cells");
+        }
+        // No row ends mid-word and none is stranded short by the old width.
+        for (int r = 0; r < fold->height(); ++r) {
+            const QString row = f.rowText(0, r);
+            QVERIFY2(row.size() + fold->rows[size_t(r)].startCol <= 48, qPrintable(row));
+            QVERIFY2(!row.isEmpty(), "no empty rows");
+        }
+    }
+
+    void proseKeepsItsInkAndRole()
+    {
+        FoldSpan span;
+        span.text = QStringLiteral("heading");
+        span.sgr = QStringLiteral("1;35");   // bold magenta, as MarkdownAnsi renders it
+        span.bold = true;
+        FoldLine line;
+        line.spans << span;
+        line.role = kFoldRoleAgent;
+        FoldLayer f;
+        f.setGeometry(80, 3);
+        f.setProse(QStringLiteral("relay://prose/p/3"), QVector<FoldLine>{line}, 40);
+        f.setAnchor(QStringLiteral("relay://prose/p/3"), 0, 0);
+        QVERIFY(f.active());
+        const FoldLayer::Fold *fold = f.fold(QStringLiteral("relay://prose/p/3"));
+        QCOMPARE(fold->cells[0][0].fgPacked, CellColor::indexed(5));   // ANSI 35
+        QVERIFY(fold->cells[0][0].bold);
+        QCOMPARE(fold->lines[0].role, kFoldRoleAgent);
+    }
+
+    void proseAndFoldsStack()
+    {
+        FoldLayer f;
+        f.setGeometry(80, 3);
+        const QString prose = QStringLiteral("relay://prose/p/4");
+        f.setProse(prose, lines({QStringLiteral("a b c d e f g h i j k l m n o p")}), 80);
+        f.setAnchor(prose, 2, 3);
+        f.setContent(QStringLiteral("call"), lines({QStringLiteral("1"), QStringLiteral("2")}));
+        f.setAnchor(QStringLiteral("call"), 6, 6);
+        // At 80 the call fold still inserts; the prose block stands aside.
+        QCOMPARE(f.visualTotal(20), 22);
+        // At 48 the prose block takes its two rows over: one painted row.
+        f.setGeometry(48, 3);
+        QCOMPARE(f.fold(prose)->height(), 1);
+        QCOMPARE(f.visualTotal(20), 19);
+        QVERIFY(f.at(2).fold);               // the prose block
+        QCOMPARE(f.at(2).foldIndex, f.indexOf(prose));
+        QCOMPARE(f.at(3).realRow, 4);        // the row after the hidden span
+        QVERIFY(f.at(7).fold);               // the call fold's rows, under row 6
+        QCOMPARE(f.at(9).realRow, 7);
+        // Round trip for every row that is not hidden.
+        for (int r = 0; r < 20; ++r) {
+            if (f.rowHidden(r))
+                continue;
+            QCOMPARE(f.at(f.visualOfReal(r)).realRow, r);
+        }
+    }
+
+    void proseIsNeverAFoldAnchor()
+    {
+        QVERIFY(FoldLayer::isProseUri(QStringLiteral("relay://prose/p/1")));
+        QVERIFY(!FoldLayer::isProseUri(QStringLiteral("relay://call/p/1/2")));
+        QVERIFY(!FoldLayer::isProseUri(QString()));
+        FoldLayer f;
+        f.setPrefix(QStringLiteral("relay://call/"));
+        QVERIFY(!f.isAnchorUri(QStringLiteral("relay://prose/p/1")));
+        f.setGeometry(80, 3);
+        f.setProse(QStringLiteral("relay://prose/p/5"), lines({QStringLiteral("x")}), 40);
+        f.setAnchor(QStringLiteral("relay://prose/p/5"), 0, 0);
+        // The chevron is an insertion fold's; prose rows are text from column 0.
+        QCOMPARE(f.foldAtAnchorStart(0), -1);
+        QCOMPARE(f.rowStartCol(0, 0), 0);
+        // ... and prose is not offered to the host as an open fold.
+        QVERIFY(!f.expandedUris().contains(QStringLiteral("relay://prose/p/5")));
     }
 };
 

@@ -161,6 +161,12 @@ void VTermBackend::setFoldContent(const QString &uri, const QVector<FoldLine> &l
         m_view->setFoldContent(uri, lines);
 }
 
+void VTermBackend::setProseBlock(const QString &uri, const QVector<FoldLine> &lines, int printColumns)
+{
+    if (m_view)
+        m_view->setProseBlock(uri, lines, printColumns);
+}
+
 void VTermBackend::setFoldExpanded(const QString &uri, bool expanded)
 {
     if (m_view)

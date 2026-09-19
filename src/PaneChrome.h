@@ -199,7 +199,7 @@ inline void paintTypeGlyph(QPainter &p, const QRectF &box, ps::Glyph glyph, cons
 }
 
 // The Relay mark itself moved to src/RelayMark.h on 2026-09-19 (#4X53): the button on the
-// "Relaying – …" line paints the same mark, and that line lives in Pane.h, which is included
+// "Relaying · …" line paints the same mark, and that line lives in Pane.h, which is included
 // before this header. `relay::chrome::paintRelayMark` is unchanged and still lands here.
 
 // A pane state's glyph. Each has its own shape so it reads without colour: a ring (idle), the
@@ -495,7 +495,8 @@ public:
         // which are unticked in the section checkboxes.
         if (m_board) return {{"board", QJsonObject{{"workspace", m_board->workspace()},
                                                    {"collapsed", m_board->collapsedSections()},
-                                                   {"hidden", m_board->hiddenSections()}}}};
+                                                   {"hidden", m_board->hiddenSections()},
+                                                   {"sort", m_board->sortOrder()}}}};
         if (m_subagent) return m_subagent->node();
         // The Activity pane (card #QT8C) comes back open beside its owner, empty until the
         // next event; `owner` is the owner's scrollback id, the key the subagent pane uses too.
@@ -605,6 +606,10 @@ public:
             ->setProperty("keysFrom", QStringLiteral("pane.splitRight"));
         button(row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
         button(row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
+        // Sharing moved here from the prompt-box strip (owner, 2026-09-19: it no longer fit
+        // beside the model and the microphone). First in the row, before the ⓘ RelayWindow
+        // adds: shared-or-not is the one pane state worth seeing from across the window.
+        if (auto *pane = dynamic_cast<Pane *>(leaf)) buildShare(row, pane);
         // The header gives up exactly this much room for good, so the title and the folder line
         // never re-elide.
         adjustSize();
@@ -796,6 +801,9 @@ protected:
 public:
     void refreshTooltips() {
         for (auto *b : findChildren<QToolButton *>()) {
+            // A button whose tooltip is its live state (the share button) keeps it: the generic
+            // label-plus-key text would replace it with nothing, knowing no label or key for it.
+            if (b->property("liveTooltip").toBool()) continue;
             const QString keysFrom = b->property("keysFrom").toString();
             const QString keys = Keymap::instance().shortcutText(keysFrom.isEmpty() ? b->property("action").toString() : keysFrom);
             b->setToolTip(b->property("label").toString() + (keys.isEmpty() ? QString() : QStringLiteral("  (") + keys + ')'));
@@ -824,7 +832,7 @@ private:
         m_phoneChip = new PaneHeaderChip(relay::panestatus::Glyph::Phone);
         m_phoneChip->setText(QStringLiteral("phone"));
         m_phoneChip->setToolTip(QStringLiteral("Shared with your phone: it sees this pane and can type into it.\n"
-                                               "The share chip under the prompt box shows the code or stops it."));
+                                               "The share button in the pane's top-right corner shows the code or stops it."));
         m_remoteChip->hide(); m_phoneChip->hide();
         row->insertWidget(0, m_glyph);
         // The subagent badge reads with the glyph: both are what this pane's agent is doing now
@@ -846,6 +854,50 @@ private:
         };
         header->installEventFilter(this);
         pane->installEventFilter(this);
+    }
+
+    // A terminal pane's share button (owner, 2026-09-19: it outgrew the prompt-box strip). The
+    // pane keeps every bit of the share logic — Pane::shareChipPressed, the RemoteShare state —
+    // and repaints this button through Pane::onShareChipChanged; the chrome owns only the button.
+    void buildShare(QHBoxLayout *row, Pane *pane) {
+        if (!row || !pane) return;
+        m_share = new QToolButton(this);
+        m_share->setObjectName(QStringLiteral("paneChromeButton"));
+        m_share->setAutoRaise(true);
+        m_share->setFocusPolicy(Qt::NoFocus);
+        m_share->setCursor(Qt::PointingHandCursor);
+        const QString icon = relay::theme::themeDataDir() + QStringLiteral("/icons/share.svg");
+        if (QFileInfo::exists(icon)) m_share->setIcon(QIcon(icon)); else m_share->setText(QStringLiteral("↗"));
+        m_share->setIconSize(QSize(13, 13));
+        m_share->setProperty("liveTooltip", true);   // refreshTooltips() leaves its state text alone
+        m_share->setAccessibleName(QStringLiteral("Share this pane with a phone"));
+        connect(m_share, &QToolButton::clicked, pane, [pane] { pane->shareChipPressed(); });
+        row->insertWidget(0, m_share);
+        QPointer<PaneChrome> guard(this);
+        pane->onShareChipChanged = [guard] { if (guard) guard->refreshShare(); };
+        refreshShareFor(pane);
+    }
+
+    void refreshShare() { refreshShareFor(dynamic_cast<Pane *>(parentWidget())); }
+
+    // The state the strip's chip used to wear (Pane::updateShareChip, before the move): the
+    // agent's violet while shared, and a tooltip that says who is here rather than what the
+    // button does.
+    void refreshShareFor(Pane *pane) {
+        if (!m_share || !pane) return;
+        relay::RemoteShare &share = relay::RemoteShare::instance();
+        const bool sharing = share.isSharing(pane->sessionToken());
+        const int guests = share.sharingModel().guestsOn(pane->sessionToken());
+        m_share->setProperty("dest", sharing ? QStringLiteral("agent") : QVariant());
+        m_share->setToolTip(!sharing
+            ? QStringLiteral("Share this pane with your phone, or invite someone to it")
+            : guests == 0
+                ? QStringLiteral("Shared — click for who is here, invites and what is waiting")
+                : QStringLiteral("Shared with %1 · click for who is here and what is waiting")
+                      .arg(guests == 1 ? QStringLiteral("one other person")
+                                       : QStringLiteral("%1 other people").arg(guests)));
+        m_share->style()->unpolish(m_share);
+        m_share->style()->polish(m_share);
     }
 
     // The remote band covers the pane's title row, inside the frame, down to half the gap below it.
@@ -1210,6 +1262,7 @@ private:
     PaneSubagentBadge *m_subagentBadge = nullptr;
     PaneHeaderChip *m_remoteChip = nullptr, *m_phoneChip = nullptr;
     PaneUsageChip *m_usageChip = nullptr;
+    QToolButton *m_share = nullptr;   // terminal panes: share this pane with a phone (was the strip's chip)
     RemoteBackdrop *m_backdrop = nullptr;
     relay::panestatus::State m_state = relay::panestatus::State::Idle;
     bool m_remote = false, m_phone = false, m_guestDriving = false;

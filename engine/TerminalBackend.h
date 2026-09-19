@@ -11,6 +11,8 @@
 // All methods are called on the GUI thread; all callbacks run on the GUI thread.
 #pragma once
 
+#include "WordWrap.h"
+
 #include <QByteArray>
 #include <QColor>
 #include <QFont>
@@ -44,10 +46,22 @@ struct FoldSpan {
     bool underline = false;
     bool dim = false;
     QString link;         // non-empty: clickable, reported through onLinkActivated
+    // An SGR parameter list ("1;35"), for prose the pane printed as ANSI
+    // (#R2WQ): the view resolves it against the theme *when it paints*, so a
+    // re-wrapped block follows a theme switch exactly as the grid's own rows
+    // do. Empty = default ink; ignored by spans that carry an explicit fg.
+    QString sgr;
 };
+
+// Row roles for prose lines (#R2WQ): the values of MarkUserShell and
+// MarkUserAgent in the engine's CellTypes.h, so a re-wrapped row the user
+// typed keeps the band and ink the theme gives that role.
+inline constexpr quint8 kFoldRoleShell = 1 << 4;
+inline constexpr quint8 kFoldRoleAgent = 1 << 5;
 
 struct FoldLine {
     QVector<FoldSpan> spans;
+    quint8 role = 0;      // 0 = no role (kFoldRoleShell / kFoldRoleAgent)
     QString text() const; // the spans joined
 };
 
@@ -56,6 +70,13 @@ struct FoldLine {
 // host that has to know how many *rows* its content will take needs this too,
 // because the wrap happens at `columns - indent` (FoldLayer::layout()).
 inline constexpr int kFoldIndent = 3;
+
+// The OSC 8 URI prefix of a prose block anchor (#R2WQ): the pane wraps each
+// block of its own output — agent prose, a line the user typed — in
+// relay://prose/<pane>/<block>, covering exactly the block's rows, and hands
+// the same URI to setProseBlock(). Such a URI is an anchor for the view's
+// re-wrap layer, never an interactive link: no hover, no cursor, no click.
+inline constexpr const char kProsePrefix[] = "relay://prose/";
 
 // Grid columns one grapheme cluster occupies (1 or 2). East Asian Wide /
 // Fullwidth and the pictographs are two cells: the emulator cores decide this
@@ -93,11 +114,12 @@ inline int foldClusterWidth(const QString &cluster)
 }
 
 // `lines` broken at `usable` columns, one FoldLine per row the view will paint:
-// the same hard wrap FoldLayer::layout() does, so a host can cap what it hands
-// over in *rendered* rows rather than in logical lines. Laying the result out
-// again is a no-op -- every line already fits -- which engine/tests/
-// FoldLayerTest.cpp asserts against the layer itself. `usable` is the grid width
-// less kFoldIndent; zero or less gives the lines back unchanged.
+// the same word-aware wrap FoldLayer::layout() does — break before a word that
+// would cross the edge, drop a space that would — so a host can cap what it
+// hands over in *rendered* rows rather than in logical lines. Laying the
+// result out again is a no-op -- every line already fits -- which engine/tests/
+// FoldLayerTest.cpp asserts against the layer itself. `usable` is the grid
+// width less kFoldIndent; zero or less gives the lines back unchanged.
 inline QVector<FoldLine> wrapFoldLines(const QVector<FoldLine> &lines, int usable)
 {
     if (usable <= 0)
@@ -105,43 +127,76 @@ inline QVector<FoldLine> wrapFoldLines(const QVector<FoldLine> &lines, int usabl
     QVector<FoldLine> out;
     out.reserve(lines.size());
     for (const FoldLine &line : lines) {
-        FoldLine row;
-        int used = 0;
-        bool any = false;
-        for (const FoldSpan &span : line.spans) {
-            if (span.text.isEmpty())
+        // Flatten to the same grapheme clusters FoldLayer::layout() lays out
+        // (tabs and controls become spaces, zero-width clusters drop), then
+        // ask the shared rule where the rows end.
+        struct Cluster {
+            QString text;
+            int width;
+            int span;
+        };
+        QVector<Cluster> clusters;
+        for (int s = 0; s < line.spans.size(); ++s) {
+            const QString &text = line.spans[size_t(s)].text;
+            if (text.isEmpty())
                 continue;
-            QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, span.text);
-            FoldSpan part = span;
-            part.text.clear();
+            QTextBoundaryFinder finder(QTextBoundaryFinder::Grapheme, text);
             int from = 0;
-            while (from < span.text.size()) {
+            while (from < text.size()) {
                 finder.setPosition(from);
                 int to = finder.toNextBoundary();
                 if (to <= from)
                     to = from + 1;
-                const QString cluster = span.text.mid(from, to - from);
+                Cluster c;
+                c.text = text.mid(from, to - from);
+                if (c.text == QLatin1String("\t"))
+                    c.text = QStringLiteral(" ");
+                if (c.text.size() == 1 && c.text.at(0) < QChar(0x20))
+                    c.text = QStringLiteral(" ");
+                c.width = foldClusterWidth(c.text);
+                c.span = s;
+                if (c.width > 0)
+                    clusters.push_back(c);
                 from = to;
-                const int width = foldClusterWidth(cluster);
-                if (width <= 0)
-                    continue;               // zero-width: the layer drops it too
-                if (used > 0 && used + width > usable) {
-                    if (!part.text.isEmpty()) { row.spans << part; part.text.clear(); }
-                    out << row;
-                    row = FoldLine{};
-                    used = 0;
-                }
-                part.text += cluster;
-                used += width;
-                any = true;
             }
-            if (!part.text.isEmpty())
-                row.spans << part;
         }
-        // An empty logical line is one empty row on the grid, exactly as the
-        // layer lays it out; a line of nothing but zero-width cells is too.
-        if (!row.spans.isEmpty() || !any)
+        const int n = clusters.size();
+        if (n == 0) {
+            out << FoldLine{};   // an empty logical line is one empty row
+            continue;
+        }
+        QVector<int> widths(n);
+        QVector<char> startsWord(n, 0), spaces(n, 0);
+        for (int i = 0; i < n; ++i) {
+            widths[size_t(i)] = clusters[size_t(i)].width;
+            spaces[size_t(i)] = clusters[size_t(i)].text == QLatin1String(" ") ? 1 : 0;
+        }
+        startsWord[0] = 1;
+        for (int i = 1; i < n; ++i)
+            startsWord[size_t(i)] = !spaces[size_t(i)] && spaces[size_t(i - 1)] ? 1 : 0;
+        const QVector<wrap::Row> rows = wrap::rows(widths, startsWord, spaces, usable, 0, 0);
+        for (const wrap::Row &r : rows) {
+            FoldLine row;
+            FoldSpan part;
+            bool open = false;
+            for (int i = r.first; i < r.first + r.count; ++i) {
+                const FoldSpan &source = line.spans[size_t(clusters[size_t(i)].span)];
+                if (!open || part.sgr != source.sgr || part.fg != source.fg || part.bg != source.bg
+                    || part.bold != source.bold || part.italic != source.italic
+                    || part.underline != source.underline || part.dim != source.dim
+                    || part.link != source.link) {
+                    if (open && !part.text.isEmpty())
+                        row.spans << part;
+                    part = source;
+                    part.text.clear();
+                    open = true;
+                }
+                part.text += clusters[size_t(i)].text;
+            }
+            if (open && !part.text.isEmpty())
+                row.spans << part;
             out << row;
+        }
     }
     return out;
 }
@@ -357,6 +412,23 @@ public:
     {
         Q_UNUSED(uri);
         return false;
+    }
+
+    // ---- prose blocks (#R2WQ); needs the Folds capability
+    //
+    // A block of the host's own output — agent prose, a line the user typed —
+    // that was printed into the grid wrapped in an OSC 8 run carrying `uri`
+    // (see kProsePrefix). The pane hands the block's *logical* lines, the text
+    // before it was wrapped, together with printColumns, the width it was
+    // wrapped at. The view re-wraps the lines itself whenever the pane is not
+    // at that width, replacing the block's real rows; at that width it stands
+    // aside and the grid's own rows show, byte for byte as printed. A URI
+    // under kProsePrefix is never interactive.
+    virtual void setProseBlock(const QString &uri, const QVector<FoldLine> &lines, int printColumns)
+    {
+        Q_UNUSED(uri);
+        Q_UNUSED(lines);
+        Q_UNUSED(printColumns);
     }
 
     // ---- host callbacks (GUI thread)

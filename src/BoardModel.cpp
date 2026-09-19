@@ -162,6 +162,47 @@ QString tabTitle(const QString &id)
     return text;
 }
 
+QString sortId(Sort sort)
+{
+    switch (sort) {
+    case Sort::NewestFirst:
+        return QStringLiteral("newest");
+    case Sort::OldestFirst:
+        return QStringLiteral("oldest");
+    case Sort::RecentlyUpdated:
+        return QStringLiteral("updated");
+    case Sort::Manual:
+        break;
+    }
+    return QStringLiteral("manual");
+}
+
+Sort sortFromId(const QString &id)
+{
+    if (id == QStringLiteral("newest"))
+        return Sort::NewestFirst;
+    if (id == QStringLiteral("oldest"))
+        return Sort::OldestFirst;
+    if (id == QStringLiteral("updated"))
+        return Sort::RecentlyUpdated;
+    return Sort::Manual;
+}
+
+QString sortTitle(Sort sort)
+{
+    switch (sort) {
+    case Sort::NewestFirst:
+        return QStringLiteral("Newest first");
+    case Sort::OldestFirst:
+        return QStringLiteral("Oldest first");
+    case Sort::RecentlyUpdated:
+        return QStringLiteral("Recently updated");
+    case Sort::Manual:
+        break;
+    }
+    return QStringLiteral("Manual");
+}
+
 QString issueHeading()
 {
     return QStringLiteral("Issue");
@@ -777,6 +818,7 @@ Card Card::fromJson(const QJsonObject &object)
     card.text = object.value(QStringLiteral("text")).toString();
     card.milestone = object.value(QStringLiteral("milestone")).toString();
     card.created = object.value(QStringLiteral("created")).toString();
+    card.updated = object.value(QStringLiteral("updated")).toString();
     card.topic = object.value(QStringLiteral("topic")).toString();
     card.labels = stringList(object.value(QStringLiteral("labels")));
     card.threadEntries = object.value(QStringLiteral("thread_entries")).toInt();
@@ -1031,11 +1073,33 @@ const Card *Model::card(const QString &id) const
     return it == m_cards.constEnd() ? nullptr : &it.value();
 }
 
-QList<Card> Model::sorted(QList<Card> cards, bool newestFirst) const
+namespace {
+
+// The time a sort keys on: RecentlyUpdated wants the card's own `updated` (falling back to
+// `created` when the worker sent none, so an old worker still gets a sensible order — the two
+// spellings compare lexicographically, a date sorting before that day's timestamps); the other
+// sorts want `created` outright.
+QString sortTime(const Card &card, Sort sort)
 {
-    std::sort(cards.begin(), cards.end(), [newestFirst](const Card &a, const Card &b) {
-        if (newestFirst && a.created != b.created)
+    if (sort == Sort::RecentlyUpdated && !card.updated.isEmpty())
+        return card.updated;
+    return card.created;
+}
+
+}  // namespace
+
+QList<Card> Model::sorted(QList<Card> cards, bool closedSection) const
+{
+    std::sort(cards.begin(), cards.end(), [this, closedSection](const Card &a, const Card &b) {
+        // A time sort is the whole order, in every section alike; Manual is the board's own rank,
+        // with the closed sections newest first as they always have been.
+        if (m_sort != Sort::Manual) {
+            const QString at = sortTime(a, m_sort), bt = sortTime(b, m_sort);
+            if (at != bt)
+                return m_sort == Sort::OldestFirst ? at < bt : at > bt;
+        } else if (closedSection && a.created != b.created) {
             return a.created > b.created;
+        }
         if (a.rank != b.rank)
             return a.rank < b.rank;
         return a.path < b.path;

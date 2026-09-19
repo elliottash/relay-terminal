@@ -18,8 +18,8 @@
 //    headers of tabs and panes. they are busy"), and what it said is in the glyph's tooltip
 //    (stateLabel) and, as a sentence, on the line above the prompt box — left-aligned with the
 //    prompt text and in the normal
-//    weight (#HQ2B), a spaced en dash between the verb and the action (#RR0G, owner 2026-09-19):
-//    "Relaying – <action>…", the action a gerund of
+//    weight (#HQ2B), a spaced middle dot between the verb and the action (#RR0G, owner 2026-09-19; cdot, owner 2026-09-19):
+//    "Relaying · <action>…", the action a gerund of
 //    what the agent is doing ("thinking", "reading src/Pane.h"), or the program's name for
 //    terminal work. A tab with anything live carries a blinking dot in that colour (liveMarker),
 //    whatever news its icon is showing. The desktop's reduce-motion signal (a cursor flash time

@@ -6,8 +6,8 @@
 // A tool call is **one line** (docs/AGENT-SESSIONS-PROTOCOL.md § 23, card #TK9C): "reading x.py"
 // while it runs, rewritten in the same row to "read x.py · 412 lines" when it lands. Clicking the
 // line folds its detail open underneath — the command and its output, the arguments, the diff —
-// and clicking it again folds it shut. A short diff (`inline_diff`) prints under the line with no
-// click at all, added lines green and removed lines red, and a run of consecutive reads or
+// and clicking it again folds it shut. A diff folds behind that same click however short it is
+// (#WXT6: nothing auto-expands), and a run of consecutive reads or
 // listings collapses into "read 6 files · 4,100 lines".
 #include "SubagentsPanel.h"
 #include "ToolLabel.h"
@@ -104,8 +104,6 @@ private:
     // The row as it should read now: the fold arrow, the ✗ of a failure, and the label's line.
     QString rowText(const ToolCall &call) const;
     void drawRow(ToolCall &call);
-    // Prints a unified diff under the row, added lines green and removed lines red.
-    void appendDiff(const QString &diff);
     int callAt(int blockNumber) const;
     int indexOfCall(const QString &callId) const;
     void forgetCalls();

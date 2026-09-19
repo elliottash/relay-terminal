@@ -859,7 +859,8 @@ QColor TerminalView::foldRule() const
 // One wrapped row of an open fold: the block's tint across the width, a rule
 // down its left edge, and the row's cells in the terminal's own grid and font
 // starting at the indent. Spans bring their own colours (a diff's red and
-// green), so the host decides what the detail looks like.
+// green), so the host decides what the detail looks like. A prose block's row
+// is painted by paintProseRow instead, as a row of the grid it replaces.
 void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int foldRow)
 {
     const std::vector<FoldLayer::Fold> &folds = m_folds.folds();
@@ -868,6 +869,10 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
     const FoldLayer::Fold &f = folds[size_t(foldIndex)];
     if (foldRow < 0 || foldRow >= int(f.rows.size()))
         return;
+    if (f.replacement) {
+        paintProseRow(p, screenRow, f, foldRow);
+        return;
+    }
     const FoldLayer::Row &row = f.rows[size_t(foldRow)];
     const int y = m_padding + screenRow * m_ch;
     const int baseline = y + m_ascent;
@@ -969,6 +974,131 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
     for (const Batch &b : batches) {
         QGlyphRun run;
         run.setRawFont(m_raw[b.variant]);
+        run.setGlyphIndexes(b.glyphs);
+        run.setPositions(b.positions);
+        p.setPen(b.qcolor);
+        p.drawGlyphRun(QPointF(0, 0), run);
+    }
+}
+
+// One row of a re-wrapped prose block (#R2WQ): painted as a row of the grid it
+// replaces, in the terminal's own font and colours resolved from the theme at
+// paint time — so a block the pane printed bold magenta headings in keeps them
+// after a resize, and a theme switch recolours it like any grid row. A line the
+// user typed keeps its role's band and ink (OSC 7772's promise, kept by the
+// layer instead of the core while the block is taken over).
+void TerminalView::paintProseRow(QPainter &p, int screenRow, const FoldLayer::Fold &f, int foldRow)
+{
+    if (foldRow < 0 || foldRow >= int(f.rows.size()))
+        return;
+    const FoldLayer::Row &row = f.rows[size_t(foldRow)];
+    if (row.line < 0 || row.line >= int(f.cells.size()))
+        return;
+    const std::vector<FoldLayer::Cell> &cells = f.cells[size_t(row.line)];
+    const int y = m_padding + screenRow * m_ch;
+    const int baseline = y + m_ascent;
+
+    const quint8 role = row.line < f.lines.size() ? f.lines[size_t(row.line)].role : 0;
+    const bool roleAgent = role & kFoldRoleAgent, roleShell = !roleAgent && (role & kFoldRoleShell);
+    const QColor roleBand = roleAgent ? m_scheme.userAgentBand : roleShell ? m_scheme.userShellBand : QColor();
+    const QColor roleInk = roleAgent ? m_scheme.userAgentInk : roleShell ? m_scheme.userShellInk : QColor();
+    if (roleBand.isValid())
+        p.fillRect(QRect(m_padding, y, m_cols * m_cw, m_ch), roleBand);
+
+    struct Batch {
+        int variant;
+        QRgb color;
+        QColor qcolor;
+        QVector<quint32> glyphs;
+        QVector<QPointF> positions;
+    };
+    std::vector<Batch> batches;
+    auto batchFor = [&](int variant, const QColor &color) -> Batch & {
+        for (Batch &b : batches) {
+            if (b.variant == variant && b.color == color.rgba())
+                return b;
+        }
+        batches.push_back({variant, color.rgba(), color, {}, {}});
+        return batches.back();
+    };
+
+    int selFrom = 0, selTo = -1;
+    const int foldIndex = m_folds.indexOf(f.uri);
+    const bool selected = foldIndex >= 0 && foldSelectionRange(foldIndex, foldRow, &selFrom, &selTo);
+    const std::vector<FoldSearch::RowMatch> hits =
+        foldIndex >= 0 ? m_foldSearch.rowMatches(m_folds, foldIndex, foldRow)
+                       : std::vector<FoldSearch::RowMatch>();
+
+    int col = row.startCol;
+    for (int i = row.first; i < row.first + row.count && i < int(cells.size()); ++i) {
+        const FoldLayer::Cell &c = cells[size_t(i)];
+        if (col + c.width > m_cols)
+            break;
+        const int x = m_padding + col * m_cw;
+        QColor fg = c.fg.isValid() ? c.fg
+                  : c.fgPacked ? resolve(c.fgPacked, true)
+                               : m_scheme.foreground;
+        if (roleInk.isValid() && !c.fg.isValid() && !c.fgPacked)
+            fg = roleInk;
+        bool hit = false, hitCurrent = false;
+        for (const FoldSearch::RowMatch &h : hits) {
+            if (i >= h.from && i < h.to) {
+                hit = true;
+                hitCurrent = hitCurrent || h.current;
+            }
+        }
+        if (c.bg.isValid())
+            p.fillRect(QRect(x, y, c.width * m_cw, m_ch), c.bg);
+        else if (roleBand.isValid())
+            p.fillRect(QRect(x, y, c.width * m_cw, m_ch), roleBand);
+        if (selected && col >= selFrom && col <= selTo)
+            p.fillRect(QRect(x, y, c.width * m_cw, m_ch), m_scheme.selection);
+        if (hit)
+            p.fillRect(QRect(x, y, c.width * m_cw, m_ch), hitCurrent ? m_scheme.searchCurrent : m_scheme.searchMatch);
+        if (c.dim) {
+            const QColor under = hit ? (hitCurrent ? m_scheme.searchCurrent : m_scheme.searchMatch)
+                : (selected && col >= selFrom && col <= selTo) ? m_scheme.selection
+                : c.bg.isValid()                               ? c.bg
+                : roleBand.isValid()                            ? roleBand
+                                                               : groundAt(y);
+            fg = faintInk(fg, under);
+        }
+        const bool hovered = screenRow == m_hoverRow && col >= m_hoverStart && col <= m_hoverEnd;
+        if (c.underline || !c.link.isEmpty() || hovered) {
+            const int uy = baseline + std::max(1, m_descent / 3);
+            p.fillRect(QRect(x, uy, c.width * m_cw, 1), hovered || !c.link.isEmpty() ? m_scheme.link : fg);
+        }
+        if (!c.link.isEmpty())
+            fg = m_scheme.link;
+        if (hit)
+            fg = m_scheme.searchText;
+        const int variant = (c.bold ? 1 : 0) | (c.italic ? 2 : 0);
+        const std::u32string cps = c.text.toStdU32String();
+        if (!cps.empty() && cps[0] != U' ') {
+            if (cps.size() == 1 && cps[0] >= 0x2500 && cps[0] <= 0x259F
+                && drawBoxCharacter(p, cps[0], QRect(x, y, m_cw, m_ch), fg)) {
+                // drawn as a rectangle, like the real grid's box characters
+            } else if (cps.size() == 1 && glyphFor(variant, cps[0])) {
+                Batch &b = batchFor(variant, fg);
+                b.glyphs.push_back(glyphFor(variant, cps[0]));
+                b.positions.push_back(QPointF(x, baseline));
+            } else {
+                p.save();
+                p.setClipRect(QRect(x, y, c.width * m_cw, m_ch));
+                p.setFont(wantsEmojiFont(cps, c.width) ? m_emojiFont : m_fonts[variant]);
+                p.setPen(fg);
+                if (wantsEmojiFont(cps, c.width))
+                    p.drawText(QRect(x, y, c.width * m_cw, m_ch), Qt::AlignCenter, c.text);
+                else
+                    p.drawText(QPointF(x, baseline), c.text);
+                p.restore();
+            }
+        }
+        col += c.width;
+    }
+    for (const Batch &b : batches) {
+        QGlyphRun run;
+        run.setRawFont(m_raw[size_t(b.variant)]);
         run.setGlyphIndexes(b.glyphs);
         run.setPositions(b.positions);
         p.setPen(b.qcolor);
@@ -1616,8 +1746,11 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
     const Line &l = m_frame.lines[size_t(row)];
 
     // An OSC 8 hyperlink: the program itself said what the text points at.
+    // A prose anchor (#R2WQ) is not a link — it only names the block the view
+    // re-wraps — so the row reads as ordinary text and the scan below still
+    // finds the paths and URLs inside it.
     const QString uri = m_session->withCore([&](VtCore &core) { return core.hyperlinkAt(row, c.col); });
-    if (!uri.isEmpty() && c.col < int(l.cells.size())) {
+    if (!uri.isEmpty() && !FoldLayer::isProseUri(uri) && c.col < int(l.cells.size())) {
         const uint32_t id = l.cells[size_t(c.col)].link;
         int s = c.col, e = c.col;
         while (s > 0 && l.cells[size_t(s - 1)].link == id && id)
@@ -1923,10 +2056,28 @@ void TerminalView::resolveFoldAnchors()
     m_foldAnchorsDirty = false;
     m_foldResolveAt.restart();
     const QString prefix = m_folds.prefix();
-    if (prefix.isEmpty() || m_folds.folds().empty())
+    if (m_folds.folds().empty())
         return;
-    const std::vector<VtCore::HyperlinkRun> runs =
-        m_session->withCore([&](VtCore &c) { return c.hyperlinkRuns(prefix); });
+    // Two anchor families live in the grid: fold anchors (relay://call/) and
+    // prose anchors (relay://prose/, #R2WQ), each its own OSC 8 run. One walk
+    // per prefix, only for the prefixes something is waiting on.
+    bool anyProse = false;
+    for (const FoldLayer::Fold &f : m_folds.folds()) {
+        if (f.replacement) {
+            anyProse = true;
+            break;
+        }
+    }
+    std::vector<VtCore::HyperlinkRun> runs;
+    if (!prefix.isEmpty())
+        runs = m_session->withCore([&](VtCore &c) { return c.hyperlinkRuns(prefix); });
+    if (anyProse) {
+        const std::vector<VtCore::HyperlinkRun> prose =
+            m_session->withCore([](VtCore &c) {
+                return c.hyperlinkRuns(QString::fromLatin1(kProsePrefix));
+            });
+        runs.insert(runs.end(), prose.begin(), prose.end());
+    }
 
     QVector<QString> seen;
     const int before = m_folds.visualRows();
@@ -2060,6 +2211,24 @@ void TerminalView::setFoldIndent(int cells)
         m_forceFull = true;
         scheduleFrame();
     }
+}
+
+// A prose block (#R2WQ): laid out like a fold but painted as grid rows, and
+// only while the pane is not at the width the block was printed at.
+void TerminalView::setProseBlock(const QString &uri, const QVector<FoldLine> &lines, int printColumns)
+{
+    if (uri.isEmpty())
+        return;
+    const int anchor = m_folds.known(uri) ? m_folds.fold(uri)->anchorRow : -1;
+    const int keep = anchor >= 0 ? screenRowOfReal(anchor) : -1;
+    m_folds.setGeometry(m_cols, m_folds.indent());
+    m_folds.setProse(uri, lines, printColumns);
+    if (!m_foldResolveAt.isValid())
+        m_foldResolveAt.start();
+    keepFoldAnchorInPlace(anchor, keep);
+    m_foldSearch.invalidate();
+    refreshSearchLabel();
+    invalidateFoldAnchors();
 }
 
 void TerminalView::setFoldContent(const QString &uri, const QVector<FoldLine> &lines)
@@ -2292,9 +2461,11 @@ QString TerminalView::visualSelectedText() const
                     break;
                 int from = 0, to = m_cols - 1;
                 foldSelectionRange(r.foldIndex, rr.foldRow, &from, &to);
-                // Grid columns back to cell indices: the block starts at the indent.
-                const int firstCell = row.first + std::max(0, from - m_folds.indent());
-                const int lastCell = row.first + std::min(row.count, std::max(0, to - m_folds.indent() + 1));
+                // Grid columns back to cell indices: the row starts at its own
+                // first column (a prose continuation row hangs, a fold indents).
+                const int indent = m_folds.rowStartCol(r.foldIndex, rr.foldRow);
+                const int firstCell = row.first + std::max(0, from - indent);
+                const int lastCell = row.first + std::min(row.count, std::max(0, to - indent + 1));
                 line += m_folds.cellsText(r.foldIndex, lineIndex, firstCell, lastCell);
                 ++v;
             }
@@ -2387,7 +2558,7 @@ QString TerminalView::foldLinkAt(const CellPos &c, int *startCol, int *endCol) c
         return QString();
     const FoldLayer::Row &row = f.rows[size_t(v.foldRow)];
     const std::vector<FoldLayer::Cell> &cells = f.cells[size_t(row.line)];
-    int col = m_folds.indent();
+    int col = m_folds.rowStartCol(v.foldIndex, v.foldRow);
     for (int i = row.first; i < row.first + row.count && i < int(cells.size()); ++i) {
         const FoldLayer::Cell &cell = cells[size_t(i)];
         if (c.col >= col && c.col < col + cell.width && !cell.link.isEmpty()) {
@@ -2397,7 +2568,7 @@ QString TerminalView::foldLinkAt(const CellPos &c, int *startCol, int *endCol) c
             while (to + 1 < row.first + row.count && to + 1 < int(cells.size())
                    && cells[size_t(to + 1)].link == cell.link)
                 ++to;
-            int x = m_folds.indent();
+            int x = m_folds.rowStartCol(v.foldIndex, v.foldRow);
             for (int k = row.first; k < from; ++k)
                 x += cells[size_t(k)].width;
             *startCol = x;
@@ -2417,7 +2588,8 @@ QStringList TerminalView::visibleRowsText() const
     for (int i = 0; i < m_rows; ++i) {
         const FoldLayer::VisualRow v = visualAt(i);
         if (v.fold) {
-            out << QString(m_folds.indent(), QLatin1Char(' ')) + m_folds.rowText(v.foldIndex, v.foldRow);
+            out << QString(m_folds.rowStartCol(v.foldIndex, v.foldRow), QLatin1Char(' '))
+                + m_folds.rowText(v.foldIndex, v.foldRow);
             continue;
         }
         const int frameRow = v.realRow - m_frame.viewportTop;
@@ -2782,9 +2954,18 @@ int TerminalView::searchStep(bool backwards, int *index)
         core.count = m_session->withCore([](VtCore &c) { return c.searchMatchCount(); });
         core.step = [this](bool back) {
             FoldSearch::CorePos p;
+            // A row a replacement fold hides is painted as the fold's own row,
+            // so the core's match there is the fold's match: step past it. The
+            // bound is the whole cycle, for the needle that matches nowhere
+            // visible at all.
+            int guard = 0;
             m_session->withCore([&](VtCore &c) {
-                p.index = c.searchStep(back);
-                p.row = c.searchCurrentRow();
+                const int bound = c.searchMatchCount() + 1;
+                do {
+                    p.index = c.searchStep(back);
+                    p.row = c.searchCurrentRow();
+                    ++guard;
+                } while (p.index >= 0 && p.row >= 0 && m_folds.rowHidden(p.row) && guard < bound);
             });
             p.valid = p.index >= 0 && p.row >= 0;
             return p;

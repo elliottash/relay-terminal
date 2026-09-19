@@ -4,8 +4,12 @@
 // Blank lines between the kinds of thing the terminal transcript prints (#5AWD).
 //
 // A turn's transcript is a sequence of blocks: the user's ✦ line, the "▸ model" header, the
-// agent's prose, and ▸ tool-call rows. The owner asked for a blank line between content types —
-// prose and tool calls, one user message and the next — and none inside a run of tool calls.
+// agent's prose, the ▸ tool-call rows, the "✦ N tool calls" link that sums a run of them up, and
+// a "Recap ·" block. The owner asked for a blank line between content types — prose and tool
+// calls, one user message and the next — and none inside a run of tool calls. The link and the
+// recap read as content types too (owner, 2026-09-19: "in between agent messages, user messages,
+// or tool calls, there should be a blank line"): the link is set off from the prose above it,
+// and the recap from whatever printed before it.
 //
 // The pane keeps the kind of the last block it printed and asks this before starting the next.
 // Nothing here writes anything; the pane does, and tests/transcriptgaps_test.cpp checks the rule
@@ -17,7 +21,8 @@ enum class Block {
     User,     // a ✦ line the user typed (a prompt, a steer, an answer)
     Header,   // the turn's "▸ model" line, or a "── request ──" separator
     Agent,    // the agent's prose, and its thinking fold
-    Call,     // a ▸ tool-call row, a subagent line, a turn-limit line
+    Call,     // a ▸ tool-call row, a subagent line, a turn-limit line, the ✦ N tool calls link
+    Recap,    // a "Recap ·" header and the summary, Next · and Open · lines under it
 };
 
 // True when a blank line goes before a block of kind `next` that follows one of kind `prev`.

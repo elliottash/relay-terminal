@@ -89,7 +89,10 @@ add_library(relay-terminal-engine STATIC ${RELAY_ENGINE_SOURCES})
 target_include_directories(relay-terminal-engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 find_package(Threads REQUIRED)
 # relay-outputlinks is PUBLIC: view/TerminalView.h names relay::links::Cursor.
-target_link_libraries(relay-terminal-engine PUBLIC ${RELAY_QT}::Widgets relay-outputlinks PRIVATE relay-vterm-c Threads::Threads)
+# relay-markdown is PUBLIC: TerminalBackend.h includes src/WordWrap.h for the
+# shared word-aware break rule (#R2WQ), which is QtCore-only with PUBLIC src
+# includes, so this is no cycle.
+target_link_libraries(relay-terminal-engine PUBLIC ${RELAY_QT}::Widgets relay-outputlinks relay-markdown PRIVATE relay-vterm-c Threads::Threads)
 if(UNIX AND NOT APPLE)
     target_link_libraries(relay-terminal-engine PRIVATE util) # forkpty
 endif()

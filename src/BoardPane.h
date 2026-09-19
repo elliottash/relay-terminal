@@ -90,6 +90,12 @@ public:
     QJsonArray hiddenSections() const;
     void setHiddenSections(const QJsonArray &state);
 
+    // The order of the cards inside each section (board::Sort), as the id the layout node keeps:
+    // "manual", "newest", "oldest" or "updated". Saved and restored with the folded set above, so
+    // a pane keeps its sort across restarts. Unknown ids read as Manual.
+    QString sortOrder() const { return board::sortId(m_model.sort()); }
+    void setSortOrder(const QString &id);
+
     // ---- actions, also reachable from the palette and the keymap
     void quickAdd();
     void quickAddIn(const QString &columnId);
@@ -159,6 +165,8 @@ private:
     // the two buttons drop to a line of their own rather than eliding to "…".
     void layoutListTools();
     void updateCounts();
+    // The toolbar button and its menu name the sort that is on (board::Sort).
+    void syncSortButton();
     void refill();
     void moveCard(const QString &id, const QString &columnId, const QString &beforeId,
                   const QString &afterId);
@@ -175,7 +183,9 @@ private:
     void watchIssues();
     void showProblems(const QJsonArray &problems);
     void step(int delta);                  // Up/Down, across section breaks
+public: // TEMP-SHIM-9K5H (revert before land.py commit; unblocks boardfilter's in-progress test)
     void reorder(int delta);               // Alt+Shift+Up/Down, inside the section
+private:
     void shiftSection(int delta);          // Alt+Shift+Left/Right, to the next status
     void foldSelected();                   // Left
     void unfoldNearest();                  // Right
@@ -206,6 +216,13 @@ private:
         QString unsent;                 // the question in flight, to put back if it is refused
         QString streamed;               // the answer so far
         QString progress;               // the tool or step line the strip shows
+        // The reasoning trace of the turn (protocol 19.4's thinking events, which carry the
+        // card): shown in the card's thread above the answer it precedes, so a question the
+        // agent asks mid-turn reads after the thinking it came from (#9K5H). Held here the same
+        // way as `streamed`, so coming back to a card that is still planning finds the trace.
+        QString thinking;
+        bool thinkingDone = false;      // thinking_done arrived for the live block
+        qint64 thinkingMs = 0;          // how long the block ran, for its settled line
     };
     QHash<QString, CardTurn> m_cardTurns;
     QString m_busyCard;                 // the card told "a cleanup is running", to un-tell it
@@ -221,6 +238,8 @@ private:
     QWidget *m_toolsWrapRow = nullptr;  // where those two buttons go when the row is too narrow
     QHBoxLayout *m_toolsWrap = nullptr;
     QToolButton *m_add = nullptr, *m_cleanup = nullptr;
+    // The toolbar's sort menu (board::Sort): which order the cards inside a section come in.
+    QToolButton *m_sort = nullptr;
     bool m_toolsWrapped = false;
     QWidget *m_checks = nullptr;        // the section checkboxes, wrapping in a narrow pane
     QLayout *m_checksLayout = nullptr;

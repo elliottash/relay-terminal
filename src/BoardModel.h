@@ -24,6 +24,10 @@ namespace board {
 struct Card {
     QString id, title, status, tab, assignee, waitingOn, rank, path, implementedBy, milestone,
             created, topic;
+    // When the card last changed on disk — its file's mtime, or its thread file's if that is
+    // later — as an ISO timestamp from the worker (protocol 19.2 `updated`). Empty from an older
+    // worker or a card with no file, and then the RecentlyUpdated sort falls back to `created`.
+    QString updated;
     // The signature of the model that closed this card out of a QA lane, stamped by the worker
     // (#T71W). Empty on everything else, and that is what puts a `done` card in Verified rather
     // than in Done — the section is derived, not a status of its own.
@@ -64,6 +68,22 @@ struct Tab {
 
 // "in-progress" -> "In progress"; used for section headers, chips and thread lines.
 QString statusTitle(const QString &status);
+
+// ---- sorting -----------------------------------------------------------------
+//
+// How the cards inside each section are ordered (owner, 2026-09-19: "add sorting options,
+// especially by time"). `Manual` is the board's own rank — the order drags and Alt+Shift+↑↓
+// write — and the closed sections stay newest first under it, as they always were. The three
+// time sorts take over *every* section alike and take the manual reorder off (a rank nobody can
+// see is a rank nobody can write), so what is on screen and what a drag would say never disagree.
+enum class Sort { Manual, NewestFirst, OldestFirst, RecentlyUpdated };
+// The id the pane's layout node keeps ("manual", "newest", "oldest", "updated") and back; an
+// unknown id reads as Manual, so a saved pane survives a sort being renamed away.
+QString sortId(Sort sort);
+Sort sortFromId(const QString &id);
+// "Manual", "Newest first", "Oldest first", "Recently updated" — the menu's entries and the
+// toolbar button's word for what is on.
+QString sortTitle(Sort sort);
 
 // What a section collects when `board.yaml` does not override it (`column_statuses:`), which is
 // `board.COLUMN_STATUSES` on the worker's side. The gear writes an override only where the board
@@ -277,6 +297,9 @@ public:
     // ---- cards
     const Card *card(const QString &id) const;
     QList<Card> cards(const QString &columnId) const;   // filtered, ordered
+    // The order the cards inside a section come in (above). `rows()` and `cards()` both follow it.
+    void setSort(Sort sort) { m_sort = sort; }
+    Sort sort() const { return m_sort; }
     // Which section this card belongs in, or empty when no section collects its status.
     QString sectionOf(const Card &card) const;
     int openCount() const;                               // filtered, not done or dropped
@@ -315,6 +338,7 @@ private:
     QStringList m_statusChoices;                 // every status a section may collect
     QMap<QString, Card> m_cards;                 // by id
     QString m_filter;
+    Sort m_sort = Sort::Manual;
 };
 
 }  // namespace board

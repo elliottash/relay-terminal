@@ -26,9 +26,11 @@ QString visible(const QString &word) {
     return text;
 }
 
+}  // namespace
+
 // What a line's first word has to be for its continuation rows to indent past it: a bullet, a
 // checkbox, a quote bar, or an ordinal ("1." / "2)"). MarkdownAnsi's markers, and the raw ones.
-bool isMarker(const QString &word) {
+bool wrap::isMarker(const QString &word) {
     static const QString bullets = QStringLiteral("•◦▪▸‣☐☑▎-*+>");
     if (word.size() == 1 && bullets.contains(word.at(0))) return true;
     if (word.size() < 2 || word.size() > 4) return false;
@@ -39,7 +41,101 @@ bool isMarker(const QString &word) {
     return true;
 }
 
-}  // namespace
+// The hanging indent of a logical line, from its visible text: past the marker when the first
+// word is one, else the leading spaces, and never past half the row. This is WordWrap::
+// endOfFirstWord()'s decision, stated for a whole line — the marker case counts the marker and
+// the space after it, because the wrapper sets the indent at the space that follows a marker.
+int wrap::hangingIndent(const QString &lineText, int columns) {
+    int lead = 0;
+    while (lead < lineText.size() && lineText.at(lead) == QLatin1Char(' ')) ++lead;
+    int end = lead;
+    while (end < lineText.size() && lineText.at(end) != QLatin1Char(' ')) ++end;
+    const QString firstWord = lineText.mid(lead, end - lead);
+    int indent = lead;
+    if (!firstWord.isEmpty() && isMarker(firstWord)) {
+        int wordWidth = 0;
+        uint high = 0;
+        for (int i = 0; i < firstWord.size(); ++i) {
+            const uint u = firstWord.at(i).unicode();
+            if (QChar(firstWord.at(i)).isHighSurrogate()) { high = u; continue; }
+            wordWidth += WordWrap::cellWidth(high && QChar(firstWord.at(i)).isLowSurrogate()
+                                                 ? QChar::surrogateToUcs4(high, u) : u);
+            high = 0;
+        }
+        indent = lead + wordWidth + 1;   // the marker, and the space after it
+    }
+    if (columns > 0 && indent > columns / 2) indent = 0;
+    return indent;
+}
+
+// The whole-line form of the rule emitWord() applies as it streams: fill a row
+// until the next word would cross the edge, then break before that word on a
+// row that starts at the hanging indent. A word that does not fit on any row
+// is broken at the edge exactly where the terminal would break it, and a space
+// that would cross the edge is dropped.
+QVector<wrap::Row> wrap::rows(const QVector<int> &widths, const QVector<char> &startsWord,
+                              const QVector<char> &spaces, int columns, int firstIndent,
+                              int hangIndent, int edgeIndent) {
+    QVector<Row> out;
+    const int n = widths.size();
+    if (n == 0 || columns <= 0) {
+        out.push_back(Row{0, n, firstIndent});
+        return out;
+    }
+    // Each word's total width, so the break decision sees the whole word, not its first cell.
+    QVector<int> wordWidth(n, 0);
+    for (int i = 0; i < n; ++i) {
+        if (!startsWord[size_t(i)] && i > 0) continue;
+        int w = 0, j = i;
+        while (j < n && !spaces[size_t(j)]) { w += widths[size_t(j)]; ++j; }
+        for (int k = i; k < j; ++k) wordWidth[k] = w;
+        i = j > i ? j - 1 : i;
+    }
+    int first = 0, used = firstIndent;
+    int indent = firstIndent;   // the columns the row being filled starts at
+    int i = 0;
+    while (i < n) {
+        const int w = widths[size_t(i)];
+        const bool cellFits = used + w <= columns;
+        // The word decision sees the whole word: a row ends *before* a word
+        // that would cross the edge, not at the cell where it runs out. A cell
+        // inside a word only breaks at the edge, which is where the terminal
+        // breaks a word wider than a row — and such a continuation row starts
+        // at edgeIndent, the terminal's own column 0 for prose.
+        const bool wordFits = !startsWord[size_t(i)] || used + wordWidth[size_t(i)] <= columns;
+        if (used > indent && spaces[size_t(i)] && !cellFits) {
+            // An edge space opens no row: drop it — and the whole run of spaces
+            // that follows, which in the byte stream all sit at the edge. The
+            // row ends here; the next word starts the next row, and the
+            // dropped cells must not sit inside the range of either row.
+            out.push_back(Row{first, i - first, indent});
+            while (i < n && spaces[size_t(i)])
+                ++i;
+            first = i;
+            indent = hangIndent;
+            used = hangIndent;
+            continue;
+        }
+        if ((used > indent && !cellFits) || (used > indent && startsWord[size_t(i)] && !wordFits)) {
+            out.push_back(Row{first, i - first, indent});
+            first = i;
+            // A row that starts a word hangs; a row that continues a word
+            // broken at the edge starts where the terminal's own wrap leaves
+            // the cursor.
+            indent = startsWord[size_t(i)] ? hangIndent : edgeIndent;
+            used = indent;
+            continue;   // the cell is laid out again, at the head of the new row
+        }
+        used += w;
+        ++i;
+    }
+    // A line that ended on a dropped edge space has already emitted its last
+    // row; only an empty line (or an all-dropped one, which cannot happen)
+    // still needs the one empty row.
+    if (first < n || out.empty())
+        out.push_back(Row{first, n - first, indent});
+    return out;
+}
 
 int WordWrap::cellWidth(uint cp) {
     if (cp < 0x300) return 1;
@@ -83,7 +179,7 @@ void WordWrap::newline(QString &out) {
 // after it), else the leading spaces. More than half the line is no indent at all.
 void WordWrap::endOfFirstWord() {
     if (m_lead != Lead::Spaces) return;
-    if (!m_overlong && isMarker(visible(m_word))) { m_lead = Lead::Marker; return; }
+    if (!m_overlong && wrap::isMarker(visible(m_word))) { m_lead = Lead::Marker; return; }
     m_lead = Lead::Done;
     m_indent = m_col;
     if (m_columns > 0 && m_indent > m_columns / 2) m_indent = 0;
