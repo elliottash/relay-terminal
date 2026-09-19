@@ -12,7 +12,7 @@ rank: zzzzzzza
 created: '2026-09-19'
 acceptance: every state of the busy line above the prompt box shows a spaced en dash after "Relaying" — the agent turn, a turn blocked on background work, a turn blocked on a question, and a terminal program
 source: 'issues/feature_intake.txt, 2026-09-19'
-links: {commits: [], evidence: [docs/qa_evidence/2026-09-19-relaying-dash/], github: null, plans: [], related: [4E13, HQ2B, 4X53, 0STR]}
+links: {commits: [ffbbd3d], evidence: [docs/qa_evidence/2026-09-19-relaying-dash/], github: null, plans: [], related: [4E13, HQ2B, 4X53, 0STR]}
 ---
 # A dash after "Relaying"
 

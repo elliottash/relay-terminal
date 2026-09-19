@@ -12,7 +12,7 @@ rank: zzzzzzzb
 created: '2026-09-19'
 acceptance: a pane header carries the state glyph, the title, the chips and the bare terminal path — no live state word, no "TERMINAL"/"AGENT WORKSPACE" labels, and no path at all when the title is already the folder's name; the glyph's tooltip still says the state and the header tooltip still has both paths
 source: 'issues/feature_intake.txt, 2026-09-19'
-links: {commits: [], evidence: [docs/qa_evidence/2026-09-19-header-state-word-and-path/], github: null, plans: [], related: [V8KT, XM0T, YMSR, D03W, RR0G, 4E13]}
+links: {commits: [202aabc], evidence: [docs/qa_evidence/2026-09-19-header-state-word-and-path/], github: null, plans: [], related: [V8KT, XM0T, YMSR, D03W, RR0G, 4E13]}
 ---
 # The pane header loses the state word, and the right-hand label becomes just the path
 
