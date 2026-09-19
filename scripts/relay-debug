@@ -62,6 +62,13 @@ handle SIGWINCH nostop noprint pass
 handle SIGUSR1 nostop noprint pass
 handle SIGUSR2 nostop noprint pass
 run
+# `run` comes back either because Relay stopped on a signal or because it exited. Only the first
+# has a stack, and asking for one after a clean exit is an error that makes gdb — and this script —
+# fail a run in which nothing went wrong.
+if !$_isvoid($_exitcode)
+  echo \n===== relay exited normally =====\n
+  print $_exitcode
+else
 echo \n===== relay stopped =====\n
 # Bounded on purpose. A stack overflow — the first crash this caught was 17,000 identical frames —
 # makes an unbounded `bt full` take longer to print than anyone will wait, and buries the two ends
@@ -78,6 +85,7 @@ echo \n----- every thread, 25 frames each -----\n
 thread apply all bt 25
 echo \n----- registers -----\n
 info registers
+end
 echo \n===== end =====\n
 GDB
 
