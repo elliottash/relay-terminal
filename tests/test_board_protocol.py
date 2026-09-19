@@ -16,6 +16,7 @@ from pathlib import Path
 
 import unittest.mock
 
+import fake_cards
 import fake_github as FG
 from relay_core import board as B
 from relay_core import board_protocol as P
@@ -86,17 +87,28 @@ class ProtocolTest(unittest.TestCase):
         self.turns = StubTurns()
         self.commands = P.BoardCommands(self.turns, self.events.append)
         self.commands.configure(str(self.repo), {})
+        # A card turn runs on that card's own agent, on its own thread (19.16): these are those
+        # agents, with no model behind them.
+        self.cards = fake_cards.CardAgents(self.commands, str(self.repo), self.events)
 
     def tearDown(self):
+        self.commands.cards.drop()
         self.tmp.cleanup()
 
     def send(self, **request):
         self.events.clear()
         self.commands.dispatch(request)
+        if self.cards.autowait:
+            self.cards.wait()
         return self.events
 
     def of(self, name):
         return [e for e in self.events if e["event"] == name]
+
+    def asked(self, card_id):
+        """The owner's last question on a card: a finished turn's answer sits behind it."""
+        return [e for e in self.board.thread(card_id)
+                if e.author == "owner" and e.kind == "comment"][-1]
 
     def make_card(self, title="Voice mode", text="add voice transcribe mode", **kw):
         events = self.send(type="board_create", id="r1", tab="features", status="inbox",
@@ -274,17 +286,20 @@ class WriteTests(ProtocolTest):
 class AskTests(ProtocolTest):
     def test_the_question_is_recorded_before_the_agent_sees_it(self):
         card_id = self.make_card()
+        self.cards.hold(card_id)                       # the turn waits; the card does not
         events = self.send(type="board_ask", id="a1", card=card_id, text="where should this run?")
         appended = [e for e in events if e["event"] == "board_thread_appended"][0]
         self.assertEqual(appended["card_id"], card_id)
         self.assertEqual(appended["author"], "owner")
         self.assertEqual([e.text for e in self.board.thread(card_id)][-1], "where should this run?")
+        self.cards.agent(card_id).release()
+        self.assertTrue(self.cards.wait())
 
     def test_the_first_question_seeds_the_conversation_from_the_card_and_its_thread(self):
         card_id = self.make_card()
         self.send(type="board_ask", card=card_id, text="where should this run?")
-        prompt = self.turns.submitted[-1]["prompt"]
-        self.assertEqual(self.turns.resets, 1)
+        prompt = self.cards.prompts[-1]["prompt"]
+        self.assertEqual(self.cards.builds, [card_id])
         self.assertIn(f"[Switchboard card #{card_id}", prompt)
         self.assertIn("add voice transcribe mode", prompt)
         self.assertIn("--- thread", prompt)
@@ -294,16 +309,21 @@ class AskTests(ProtocolTest):
         card_id = self.make_card()
         self.send(type="board_ask", card=card_id, text="one")
         self.send(type="board_ask", card=card_id, text="two")
-        self.assertEqual(self.turns.resets, 1)
-        self.assertEqual(self.turns.submitted[-1]["prompt"], "two")
+        self.assertEqual(self.cards.builds, [card_id])     # one conversation, kept
+        self.assertEqual(self.cards.prompts[-1]["prompt"], "two")
 
     def test_switching_card_reseeds(self):
         first = self.make_card()
         second = self.make_card(title="Clickable paths", text="clicking a path opens a pane")
         self.send(type="board_ask", card=first, text="one")
         self.send(type="board_ask", card=second, text="two")
-        self.assertEqual(self.turns.resets, 2)
-        self.assertIn(f"#{second}", self.turns.submitted[-1]["prompt"])
+        # Each card has its own conversation now, so the second is seeded without disturbing
+        # the first: asking about #first again continues where it left off (19.16).
+        self.assertEqual(self.cards.builds, [first, second])
+        self.assertIn(f"#{second}", self.cards.prompts[-1]["prompt"])
+        self.send(type="board_ask", card=first, text="three")
+        self.assertEqual(self.cards.builds, [first, second])
+        self.assertEqual(self.cards.prompts[-1]["prompt"], "three")
 
     def test_an_edit_to_the_card_reseeds_the_conversation(self):
         card_id = self.make_card()
@@ -312,35 +332,42 @@ class AskTests(ProtocolTest):
         card.set("assignee", "agent")
         self.board.save(card)
         self.send(type="board_ask", card=card_id, text="two")
-        self.assertEqual(self.turns.resets, 2)
-        self.assertIn("assignee", self.turns.submitted[-1]["prompt"])
+        self.assertEqual(self.cards.builds, [card_id, card_id])
+        self.assertIn("assignee", self.cards.prompts[-1]["prompt"])
 
     def test_the_turn_events_are_tagged_with_the_card(self):
         card_id = self.make_card()
-        self.send(type="board_ask", card=card_id, text="one")
-        tagged = self.commands.observe({"event": "delta", "text": "hi"})
-        self.assertEqual(tagged["card_id"], card_id)
-        self.assertEqual(self.commands.observe({"event": "queued"}).get("card_id"), None)
+        events = self.send(type="board_ask", card=card_id, text="one")
+        deltas = [e for e in events if e["event"] == "delta"]
+        self.assertTrue(deltas)
+        self.assertEqual({e.get("card_id") for e in deltas}, {card_id})
+        self.assertEqual({e.get("mode") for e in deltas}, {"discuss"})
+        done = [e for e in events if e["event"] == "done"][-1]
+        self.assertEqual((done["card_id"], done["mode"]), (card_id, "discuss"))
 
     def test_the_answer_is_appended_to_the_thread_when_the_turn_finishes(self):
         card_id = self.make_card()
+        self.cards.hold(card_id)
         self.send(type="board_ask", card=card_id, text="where should this run?")
-        for chunk in ("Run it ", "in the cloud."):
-            self.commands.observe({"event": "delta", "text": chunk})
-        self.events.clear()
-        self.commands.observe({"event": "done", "turn_id": "t-4"})
+        agent = self.cards.agent(card_id)
+        agent.answer = ["Run it ", "in the cloud."]
+        agent.release()
+        self.assertTrue(self.cards.wait())
         entries = self.board.thread(card_id)
         self.assertEqual(entries[-1].text, "Run it in the cloud.")
         self.assertEqual(entries[-1].author, "agent")
-        self.assertTrue([e for e in self.events if e["event"] == "board_thread_appended"])
+        self.assertTrue([e for e in self.events if e["event"] == "board_thread_appended"
+                         and e.get("author") == "agent"])
 
     def test_a_failed_turn_writes_nothing(self):
         card_id = self.make_card()
+        self.cards.hold(card_id)
         self.send(type="board_ask", card=card_id, text="one")
-        self.commands.observe({"event": "delta", "text": "half an answ"})
         before = len(self.board.thread(card_id))
-        self.commands.observe({"event": "error", "text": "provider down"})
-        self.commands.observe({"event": "done", "turn_id": "t-5"})
+        agent = self.cards.agent(card_id)
+        agent.answer, agent.outcome = ["half an answ"], "error"
+        agent.release()
+        self.assertTrue(self.cards.wait())
         self.assertEqual(len(self.board.thread(card_id)), before)
 
     def test_a_missing_card_and_empty_text_are_refused(self):
@@ -349,6 +376,73 @@ class AskTests(ProtocolTest):
             self.commands.dispatch({"type": "board_ask", "card": "AAAA", "text": "x"})
         with self.assertRaises(ValueError):
             self.commands.dispatch({"type": "board_ask", "card": card_id, "text": "  "})
+
+    def test_a_second_turn_on_the_same_card_is_refused_while_the_first_runs(self):
+        card_id = self.make_card()
+        self.cards.hold(card_id)
+        self.send(type="board_ask", card=card_id, text="one")
+        self.assertTrue(self.cards.wait_running())
+        events = self.send(type="board_ask", id="a2", card=card_id, text="two")
+        refusal = [e for e in events if e.get("code") == "board_busy"][0]
+        self.assertEqual(refusal["card_id"], card_id)
+        self.assertIn(f"#{card_id}", refusal["text"])
+        # A refused ask leaves no trace on the card.
+        self.assertEqual([e.text for e in self.board.thread(card_id)][-1], "one")
+        self.cards.agent(card_id).release()
+        self.assertTrue(self.cards.wait())
+
+    def test_two_cards_are_planned_at_the_same_time(self):
+        first = self.make_card()
+        second = self.make_card(title="Clickable paths", text="clicking a path opens a pane")
+        self.cards.hold(first)
+        self.cards.hold(second)
+        self.send(type="board_ask", card=first, mode="plan")
+        self.send(type="board_ask", card=second, mode="plan")
+        self.assertTrue(self.cards.wait_running(2))
+        self.assertEqual(sorted(self.commands.cards.running_cards()), sorted([first, second]))
+        # Each is planning its own card, with its own scope.
+        for card_id in (first, second):
+            scope = self.cards.tools[card_id].card_scope
+            self.assertEqual((scope.mode, scope.card_id), ("plan", card_id))
+        for card_id in (first, second):
+            self.cards.agent(card_id).release()
+        self.assertTrue(self.cards.wait())
+        self.assertEqual(self.commands.cards.running_cards(), [])
+
+    def test_the_fourth_card_is_refused_with_the_running_ones_named(self):
+        ids = [self.make_card(title=f"Card {n}", text=f"body {n}") for n in range(4)]
+        for card_id in ids:
+            self.cards.hold(card_id)
+        for card_id in ids[:3]:
+            self.send(type="board_ask", card=card_id, mode="plan")
+        self.assertTrue(self.cards.wait_running(3))
+        events = self.send(type="board_ask", id="a4", card=ids[3], mode="plan")
+        refusal = [e for e in events if e.get("code") == "board_busy"][0]
+        self.assertEqual(sorted(refusal["cards"]), sorted(ids[:3]))
+        for card_id in ids[:3]:
+            self.assertIn(f"#{card_id}", refusal["text"])
+        for card_id in ids[:3]:
+            self.cards.agent(card_id).release()
+        self.assertTrue(self.cards.wait())
+
+    def test_board_cancel_stops_one_card_and_leaves_the_other_running(self):
+        first = self.make_card()
+        second = self.make_card(title="Clickable paths", text="clicking a path opens a pane")
+        self.cards.hold(first)
+        self.cards.hold(second)
+        self.send(type="board_ask", card=first, mode="plan")
+        self.send(type="board_ask", card=second, mode="plan")
+        self.assertTrue(self.cards.wait_running(2))
+        events = self.send(type="board_cancel", id="c1", card=first)
+        answered = [e for e in events if e["event"] == "board_cancelled"][0]
+        self.assertEqual((answered["card_id"], answered["stopped"]), (first, True))
+        for _ in range(200):
+            if self.commands.cards.running_cards() == [second]:
+                break
+            time.sleep(0.005)
+        self.assertEqual(self.commands.cards.running_cards(), [second])
+        self.cards.agent(second).release()
+        self.assertTrue(self.cards.wait())
 
     def test_observe_is_a_no_op_before_any_question(self):
         event = {"event": "delta", "text": "hi"}
@@ -654,13 +748,19 @@ class CleanupTests(ProtocolTest):
         self.assertEqual(len(self.turns.submitted), 1)
 
     def test_a_cleanup_is_refused_while_a_card_question_runs(self):
+        # Cards run in parallel with each other (19.16) but never with a cleanup: it merges,
+        # splits and moves the very cards those turns are talking about.
         card_id = self.make_card()
+        self.cards.hold(card_id)
         self.send(type="board_ask", card=card_id, text="where should this run?")
-        self.turns.busy = True
+        self.assertTrue(self.cards.wait_running())
         refused = self.start()[0]
         self.assertEqual(refused["code"], "board_busy")
         self.assertEqual(refused["card_id"], card_id)
+        self.assertEqual(refused["cards"], [card_id])
         self.assertTrue(refused["agent_busy"])
+        self.cards.agent(card_id).release()
+        self.assertTrue(self.cards.wait())
 
     def test_a_cleanup_without_a_configured_agent_is_refused(self):
         self.turns.agent = None
@@ -678,78 +778,93 @@ class ModeTests(ProtocolTest):
         self.agent_tools = self.commands.agent_tools(str(self.repo), {})
         self.turns.agent = StubBoardAgent(self.agent_tools)
 
+    def scope(self, card_id):
+        """The scope the turn on this card ran under (19.16: on that card's own tools)."""
+        return self.cards.agent(card_id).scope_during
+
     def test_no_mode_is_a_discuss_and_the_thread_says_so(self):
         card_id = self.make_card()
         events = self.send(type="board_ask", id="a1", card=card_id, text="is this still wanted?")
         appended = self.of("board_thread_appended")[0]
         self.assertEqual(appended["mode"], "discuss")
-        self.assertEqual(self.board.thread(card_id)[-1].attrs.get("mode"), "discuss")
-        prompt = self.turns.submitted[-1]["prompt"]
+        self.assertEqual(self.asked(card_id).attrs.get("mode"), "discuss")
+        prompt = self.cards.prompts[-1]["prompt"]
         self.assertIn(f"[Discuss · #{card_id}]", prompt)
         self.assertTrue(prompt.endswith("is this still wanted?"))
-        self.assertEqual(self.agent_tools.card_scope.mode, "discuss")
+        self.assertEqual(self.scope(card_id).mode, "discuss")
         self.assertTrue(events)
 
     def test_a_plan_needs_no_words_and_carries_the_plan_brief(self):
         card_id = self.make_card()
         self.send(type="board_ask", id="p1", card=card_id, mode="plan")
-        entry = self.board.thread(card_id)[-1]
+        entry = self.asked(card_id)
         self.assertEqual((entry.author, entry.attrs.get("mode"), entry.text),
                          ("owner", "plan", "Plan this card."))
-        prompt = self.turns.submitted[-1]["prompt"]
+        prompt = self.cards.prompts[-1]["prompt"]
         self.assertIn(f"[Plan · #{card_id}]", prompt)
         self.assertIn("## Plan", prompt)
         self.assertIn(f"[Switchboard card #{card_id}", prompt)      # seeded first
-        self.assertEqual(self.agent_tools.card_scope.mode, "plan")
-        self.assertEqual(self.agent_tools.card_scope.card_id, card_id)
+        self.assertEqual(self.scope(card_id).mode, "plan")
+        self.assertEqual(self.scope(card_id).card_id, card_id)
+        # And it is closed again once the turn's thread unwinds.
+        self.assertIsNone(self.cards.tools[card_id].card_scope)
 
     def test_a_plan_with_a_note_passes_it_verbatim(self):
         card_id = self.make_card()
         self.send(type="board_ask", card=card_id, mode="plan", text="keep it to the backend")
-        self.assertEqual(self.board.thread(card_id)[-1].text, "keep it to the backend")
-        self.assertTrue(self.turns.submitted[-1]["prompt"].endswith("keep it to the backend"))
+        self.assertEqual(self.asked(card_id).text, "keep it to the backend")
+        self.assertTrue(self.cards.prompts[-1]["prompt"].endswith("keep it to the backend"))
 
     def test_the_brief_is_sent_when_the_mode_changes_and_not_twice_for_discuss(self):
         card_id = self.make_card()
+        self.cards.autowait = True
         self.send(type="board_ask", card=card_id, text="one")
-        self.commands.observe({"event": "done", "turn_id": "t-1"})
         self.send(type="board_ask", card=card_id, text="two")
-        self.assertEqual(self.turns.submitted[-1]["prompt"], "two")
-        self.commands.observe({"event": "done", "turn_id": "t-2"})
+        self.assertEqual(self.cards.prompts[-1]["prompt"], "two")
         self.send(type="board_ask", card=card_id, mode="plan")
-        self.assertIn("[Plan ·", self.turns.submitted[-1]["prompt"])
-        self.commands.observe({"event": "done", "turn_id": "t-3"})
+        self.assertIn("[Plan ·", self.cards.prompts[-1]["prompt"])
         self.send(type="board_ask", card=card_id, text="three")
-        self.assertIn("[Discuss ·", self.turns.submitted[-1]["prompt"])
+        self.assertIn("[Discuss ·", self.cards.prompts[-1]["prompt"])
 
     def test_the_answer_and_the_turn_events_carry_the_mode_and_the_scope_ends(self):
         card_id = self.make_card()
-        self.send(type="board_ask", card=card_id, mode="plan")
-        self.assertEqual(self.commands.observe({"event": "delta", "text": "Planned."})["mode"], "plan")
-        self.events.clear()
-        done = self.commands.observe({"event": "done", "turn_id": "t-4"})
+        self.cards.hold(card_id)
+        events = self.send(type="board_ask", card=card_id, mode="plan")
+        self.cards.agent(card_id).answer = ["Planned."]
+        self.cards.agent(card_id).release()
+        self.assertTrue(self.cards.wait())
+        self.assertEqual([e["mode"] for e in events if e["event"] == "delta"], ["plan"])
+        done = [e for e in events if e["event"] == "done"][-1]
         self.assertEqual(done["mode"], "plan")
-        self.assertIsNone(self.agent_tools.card_scope)
+        self.assertIsNone(self.cards.tools[card_id].card_scope)
         entry = self.board.thread(card_id)[-1]
         self.assertEqual((entry.author, entry.attrs.get("mode"), entry.text), ("agent", "plan", "Planned."))
-        self.assertEqual(self.of("board_thread_appended")[0]["mode"], "plan")
+        self.assertEqual([e["mode"] for e in events if e["event"] == "board_thread_appended"
+                          and e.get("author") == "agent"], ["plan"])
 
     def test_what_is_said_before_and_after_a_tool_call_stays_two_paragraphs(self):
         card_id = self.make_card()
+        self.cards.hold(card_id)
         self.send(type="board_ask", card=card_id, mode="plan")
-        self.commands.observe({"event": "delta", "text": "Writing the plan."})
-        self.commands.observe({"event": "tool_started", "name": "board_update_card"})
-        self.commands.observe({"event": "delta", "text": "The plan is on the card."})
-        self.commands.observe({"event": "done", "turn_id": "t-5"})
+        agent = self.cards.agent(card_id)
+        agent.answer = ["Writing the plan.", "The plan is on the card."]
+        agent.tools_at = [(1, "board_update_card")]
+        agent.release()
+        self.assertTrue(self.cards.wait())
         self.assertEqual(self.board.thread(card_id)[-1].text,
                          "Writing the plan.\n\nThe plan is on the card.")
 
     def test_a_failed_or_stopped_turn_ends_the_scope_too(self):
         card_id = self.make_card()
         for outcome in ("error", "cancelled"):
+            self.cards.hold(card_id)
             self.send(type="board_ask", card=card_id, mode="plan")
-            self.commands.observe({"event": outcome})
-            self.assertIsNone(self.agent_tools.card_scope, outcome)
+            agent = self.cards.agent(card_id)
+            agent.outcome = outcome
+            agent.release()
+            self.assertTrue(self.cards.wait())
+            self.assertIsNone(self.cards.tools[card_id].card_scope, outcome)
+            self.cards.gates.pop(card_id, None)
 
     def test_an_unknown_mode_and_an_empty_discuss_are_refused_before_anything_is_written(self):
         card_id = self.make_card()
@@ -759,7 +874,7 @@ class ModeTests(ProtocolTest):
             with self.assertRaises(ValueError):
                 self.commands.dispatch({"type": "board_ask", "card": card_id, **request})
         self.assertEqual(len(self.board.thread(card_id)), before)
-        self.assertIsNone(self.agent_tools.card_scope)
+        self.assertIsNone(self.commands.cards.session(card_id))
 
     def test_a_plan_is_refused_while_a_cleanup_runs(self):
         card_id = self.make_card()
@@ -917,12 +1032,15 @@ class PerProjectTests(ProtocolTest):
         self.assertEqual(self.commands._ask_text, [])
         self.assertIsNone(self.commands._brief_mode)
         self.assertEqual(self.commands._snapshot, {})
-        # The next question seeds a fresh conversation instead of continuing the old card's.
-        resets = self.turns.resets
+        # The card conversations of the board we left are gone with it, and the next question
+        # seeds a fresh one (19.16).
+        self.assertEqual(self.commands.cards.running_cards(), [])
+        self.assertIsNone(self.commands.cards.session(card_id))
+        built = len(self.cards.builds)
         new_card = self.make_card(title="Other card", text="on the other board")
         self.send(type="board_ask", card=new_card, text="and this?")
-        self.assertEqual(self.turns.resets, resets + 1)
-        self.assertIn(f"[Switchboard card #{new_card}", self.turns.submitted[-1]["prompt"])
+        self.assertEqual(len(self.cards.builds), built + 1)
+        self.assertIn(f"[Switchboard card #{new_card}", self.cards.prompts[-1]["prompt"])
         # Losing the board entirely clears it too.
         self.commands.configure(str(boardless_dir(self)), {})
         self.assertIsNone(self.commands.tools)

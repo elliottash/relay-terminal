@@ -21,6 +21,7 @@ from pathlib import Path
 
 from . import board as B
 from . import board_import as I
+from . import board_turns
 from . import forge_github as GH
 from . import forge_sync as F
 from . import logs
@@ -31,7 +32,7 @@ from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
                           normalize_id)
 
 TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
-         "board_move", "board_comment", "board_undo", "board_ask", "board_check",
+         "board_move", "board_comment", "board_undo", "board_ask", "board_cancel", "board_check",
          "board_cleanup", "board_init", "board_init_answer", "board_folder",
          # Initializing a project and importing what is already in it (19.13,
          # docs/PROJECT-INIT-AND-IMPORT.md section 8).
@@ -73,6 +74,19 @@ MAX_ASK_TEXT = 32768
 #: large board fits; the agent reads the cards it cares about with `board_read`.
 MAX_CLEANUP_ROSTER = 400
 MAX_CLEANUP_NOTE = 4000
+
+
+def _turn_phrase(mode: str | None) -> str:
+    """What a running card turn is called in a refusal: "a plan", "a question", "a turn"."""
+    return {"plan": "a plan", "discuss": "a question"}.get(mode or "", "a turn")
+
+
+def _cards_phrase(cards: list[str]) -> str:
+    """"a turn on #A", "turns on #A and #B", "turns on #A, #B and #C"."""
+    ids = [f"#{c}" for c in cards]
+    if len(ids) == 1:
+        return f"a turn on {ids[0]}"
+    return "turns on " + (", ".join(ids[:-1]) + " and " + ids[-1] if ids else "the board")
 
 
 def parse_board(block) -> dict:
@@ -165,6 +179,13 @@ class BoardCommands:
         #: The id of the `forge_sync_*` request whose thread is running, or None (19.14). One
         #: sync at a time: two runs against one repository would post the same comment twice.
         self._forge_run = None
+        #: The live card conversations (19.16, `relay_core.board_turns`): one agent, one
+        #: conversation and one `CardScope` per card, so Plan on #A and Discuss on #B run at
+        #: the same time. Cards were serialized through the worker's single turn runner until
+        #: 2026-09-19; the cleanup below still is, because it rewrites the whole board.
+        self.cards = board_turns.CardTurns(
+            self.emit, lambda card_id, emit: self._build_card_agent(card_id, emit),
+            on_answer=self._card_answer)
 
     # ---- wiring ---------------------------------------------------------------
     def configure(self, workspace: str | None, request: dict | None = None) -> dict | None:
@@ -254,6 +275,9 @@ class BoardCommands:
         current = self.tools.board.root if self.tools is not None else None
         if root is not None and root == current:
             return
+        # The card conversations belong to the board we are leaving, and their agents hold that
+        # board's tools: stop them and forget them rather than let them write into it (19.16).
+        self.cards.drop()
         self._snapshot = {}
         self._ask_card = self._ask_hash = self._ask_turn = None
         self._ask_text = []
@@ -304,6 +328,67 @@ class BoardCommands:
         if cancel is not None:
             self.init.cancel = cancel
         agent.refresh_system_prompt()
+
+    def _build_card_agent(self, card_id: str, emit):
+        """Build the agent one card's turns run on (19.16): the pane's provider, its own rest.
+
+        The provider config, the skills, the roles chain and the failover switches are the pane
+        agent's, so a card turn answers on the model the Switchboard is configured with and
+        fails over the way the pane does.  Everything that carries state is this card's own: its
+        conversation, its `cancel_event` (so Stop on one card cannot stop another) and — the
+        point of the exercise — its own `BoardTools`, which is where `card_scope` lives.  That
+        is why enforcing what a Plan may touch needed no change in `board_tools.py`.
+
+        There is no request ledger, no todo tool and no completion check: a card turn is one
+        prompt answered into a card thread, not a pane's unit of work.
+        """
+        from .agent import Agent          # late: agent.py pulls in the whole tool executor
+        from .tools import Workspace
+        main = self._agent()
+        if main is None:
+            raise ValueError("Configure a provider and workspace first.")
+        tools = self.agent_tools(self.workspace, {"board": self.settings["raw"]})
+        if tools is None:
+            raise ValueError("The Switchboard agent has no board tools here "
+                             "(this project has no board.yaml, or its autonomy is off).")
+        workspace = str(tools.board.repo)
+        agent = Agent(main.config, workspace, emit,
+                      max_steps=main.max_steps, max_tool_calls=main.max_tool_calls,
+                      skills=getattr(main.executor, "skills", None),
+                      preset_id=main.preset.id if main.preset else None,
+                      roles=main.roles, board=tools, effort=getattr(main, "effort", None),
+                      track_requests=False, todo_tool=False, completion_check=False,
+                      stall_timeout_s=main.stall_timeout_s,
+                      failover=getattr(main, "failover", True),
+                      failover_hosted=getattr(main, "failover_hosted", False))
+        # Options › Security (#3KB7): a card turn reads the repository, so the owner's extra
+        # readable roots and extra secret patterns are its rules too.
+        policy = getattr(main.executor, "policy", None)
+        if policy is not None:
+            agent.executor.policy = policy
+            agent.executor.workspace = Workspace(workspace, policy)
+        if getattr(main, "instructions", None) is not None:
+            agent.set_instructions(main.instructions)
+        return agent, tools
+
+    def _card_answer(self, session, turn_id, answer: str) -> None:
+        """A card turn finished with something to say: it goes on that card's thread (19.10)."""
+        tools = self.tools
+        if tools is None:
+            return
+        card = tools.board.card_by_id(session.card_id)
+        if card is None:                                        # deleted while the turn ran
+            return
+        agent = session.agent
+        tools.board.append_thread(session.card_id, answer, author="agent", kind="comment",
+                                  private=card.private, mode=session.mode,
+                                  model=getattr(getattr(agent, "config", None), "model", None),
+                                  turn=f"{getattr(agent, 'session_id', '')}/{turn_id}" if turn_id else None)
+        # A Discuss that edited the card, or a Plan that wrote its `## Plan`, changed the file:
+        # the next question on it reseeds from that version (the seed hash no longer matches),
+        # so the conversation never argues with a stale copy.
+        self._send({"event": "board_thread_appended", "card_id": session.card_id, "author": "agent",
+                    "kind": "comment", "text": answer, "turn_id": turn_id, "mode": session.mode})
 
     def _board_became_ready(self) -> None:
         """A board was created: both halves of the tools and the system prompt catch up at once."""
@@ -771,6 +856,8 @@ class BoardCommands:
             self.emit(self._changed())
         elif kind == "board_ask":
             self._ask(request, rid)
+        elif kind == "board_cancel":
+            self._cancel_card(request, rid)
         elif kind == "board_cleanup":
             self._cleanup(request, rid)
         elif kind == "board_init":
@@ -790,23 +877,41 @@ class BoardCommands:
         return True
 
     # ---- who may start a turn --------------------------------------------------
-    def _busy_error(self, rid, what: str) -> bool:
-        """One agent turn at a time in the Switchboard worker.  True when it refused.
+    def _busy_error(self, rid, what: str, card_id: str | None = None) -> bool:
+        """What may start now (19.16).  True when it refused, with `board_busy` sent.
 
-        A card's ask and a whole-board cleanup share the one worker and the one conversation,
-        so the second of them is refused rather than queued: a cleanup that ran while the user
-        was talking to a card would rewrite the card under the conversation.  The GUI shows the
-        refusal and offers Stop; `cancel` stops whichever is running.
+        Turns on **different cards run at the same time**, each on its own agent and
+        conversation (`relay_core.board_turns`); three at once by default.  Three things are
+        still refused rather than queued:
+
+        * a **second turn on the same card** — two agents writing one card's `## Plan` would
+          each undo the other, and the thread would interleave two answers;
+        * **anything while a cleanup runs**, and a cleanup while anything runs — a cleanup
+          merges, splits and moves cards across the whole board, including the ones being
+          talked about;
+        * a **fourth** concurrent card turn, so a board full of cards cannot open a dozen
+          paid streams with a dozen clicks.
+
+        The GUI shows the refusal and offers Stop; `board_cancel {card}` stops one card's turn.
         """
-        busy = bool(getattr(self.turns, "busy", False))
-        running = ("a Switchboard cleanup" if self._cleanup_log is not None else
-                   f"a question on #{self._ask_card}" if self._ask_card and busy else
-                   "an agent turn" if busy else "")
-        if not running:
+        cleanup = self._cleanup_log is not None
+        running_cards = self.cards.running_cards()
+        if cleanup:
+            running, busy_card = "a Switchboard cleanup", None
+        elif card_id is not None and card_id in running_cards:
+            running, busy_card = f"{_turn_phrase(self.cards.mode_of(card_id))} on #{card_id}", card_id
+        elif card_id is None and (running_cards or bool(getattr(self.turns, "busy", False))):
+            # A cleanup wants the board to itself.
+            running = _cards_phrase(running_cards) if running_cards else "an agent turn"
+            busy_card = running_cards[0] if running_cards else None
+        elif card_id is not None and self.cards.full():
+            running = _cards_phrase(running_cards)
+            busy_card = running_cards[0] if running_cards else None
+        else:
             return False
         self.emit({"event": "error", "id": rid, "code": "board_busy", "agent_busy": True,
-                   "cleanup_running": self._cleanup_log is not None,
-                   "card_id": self._ask_card if self._cleanup_log is None else None,
+                   "cleanup_running": cleanup, "card_id": busy_card,
+                   "cards": running_cards,
                    "text": f"The Switchboard agent is busy with {running}. Stop it first, then "
                            f"start {what}."})
         return True
@@ -903,48 +1008,49 @@ class BoardCommands:
                              + (" (it may be empty for a plan)." if mode == "discuss" else "."))
         text = text.strip()
         # Checked before the question is appended, so a refused ask leaves no trace on the card.
-        if self._busy_error(rid, "the plan" if mode == "plan" else "the question"):
+        if self._busy_error(rid, "the plan" if mode == "plan" else "the question", card_id=card_id):
             return
         card = tools.board.card_by_id(card_id)
         if card is None:
             raise ValueError(f"no card #{card_id} on this board.")
-        agent_tools = getattr(getattr(self.turns, "agent", None), "board", None)
         card_hash = B.file_hash(card.path)
         # The owner's message is part of the record before the agent ever sees it. The mode goes
         # with it, so the thread reads "Plan ·" / "Discuss ·" in Relay and `mode=plan` in the file.
         said = text or "Plan this card."
         entry = tools.board.append_thread(card_id, said, author=str(request.get("author") or "owner"),
                                           kind="comment", private=card.private, mode=mode)
-        seeded = self._ask_card == card_id and self._ask_hash == card_hash
-        if not seeded:
-            self.turns.reset()
-            self._ask_card, self._ask_hash = card_id, card_hash
-            self._brief_mode = None
-        prompt = (text if mode == "discuss" and self._brief_mode == "discuss"
+        # This card's own conversation (19.16). It is seeded from the card file the first time
+        # and whenever the file has changed since; a second question on an unchanged card
+        # continues where it left off, which the single shared conversation could only do for
+        # whichever card was asked last.
+        session = self.cards.session(card_id)
+        seeded = session is not None and session.seed_hash == card_hash
+        prompt = (text if mode == "discuss" and seeded and session.brief_mode == "discuss"
                   else mode_prompt(mode, card_id, text))
-        self._brief_mode = mode
         if not seeded:
+            self.cards.forget(card_id)
             prompt = seed_block(tools.board, card) + "\n\n" + prompt
-        self._ask_text = []
-        self._ask_turn = None
-        self._ask_mode = mode
+        # Which card was asked last, for the messages that name one.
+        self._ask_card, self._ask_hash, self._ask_mode = card_id, card_hash, mode
         self._send({"event": "board_thread_appended", "id": rid, "card_id": card_id,
                     "entry_id": entry.entry_id, "author": "owner", "kind": "comment", "text": said,
                     "mode": mode})
-        # What the mode may touch is enforced by the agent's tools for the length of the turn,
-        # not only asked for in the brief (protocol 19.10).
-        if agent_tools is not None:
-            agent_tools.begin_card_turn(mode, card_id)
-        try:
-            self.turns.submit(prompt, "now", rid, None, None)
-        except Exception:
-            self._end_card_turn()
-            raise
+        # What the mode may touch is enforced for the length of the turn by this card's own
+        # tools, not only asked for in the brief (protocol 19.10): `CardTurns.start` opens the
+        # scope on them and closes it when the turn's thread unwinds.
+        self.cards.start(card_id, mode, prompt, rid, seed_hash=card_hash)
 
-    def _end_card_turn(self) -> None:
-        agent_tools = getattr(getattr(self.turns, "agent", None), "board", None)
-        if agent_tools is not None:
-            agent_tools.end_card_turn()
+    def _cancel_card(self, request: dict, rid) -> None:
+        """`board_cancel {card}`: stop one card's turn (19.16), or every card turn without one.
+
+        The worker-wide `cancel` stops the pane agent's turn — here, a cleanup. A card turn runs
+        on its own agent, so stopping it needs to name the card; stopping a plan on #A must not
+        stop the one on #B.
+        """
+        card_id = normalize_id(request.get("card")) if request.get("card") else ""
+        stopped = self.cards.stop(card_id) if card_id else bool(self.cards.stop_all())
+        self._send({"event": "board_cancelled", "id": rid, "card_id": card_id or None,
+                    "stopped": stopped, "cards": self.cards.running_cards()})
 
     # ---- board_cleanup: one agent turn over the whole board ----------------------
     def _cleanup(self, request: dict, rid) -> None:
@@ -1024,49 +1130,10 @@ class BoardCommands:
             self._settle_pending_board()
         if self._cleanup_log is not None:
             return self._observe_cleanup(event)
-        if self._ask_card is None:
-            return event
-        name = event.get("event")
-        if name == "turn_started" or (name == "status" and self._ask_turn is None):
-            self._ask_turn = event.get("turn_id") or self._ask_turn
-        if name in ("delta", "answer") and isinstance(event.get("text"), str):
-            self._ask_text.append(event["text"])
-        # What the model says before a tool call and after it are two paragraphs, not one run-on
-        # line ("…Writing the plan.The plan is on #ZW95", live Plan turn, 2026-09-18).
-        if name == "tool_started" and self._ask_text and not self._ask_text[-1].endswith("\n\n"):
-            self._ask_text.append("\n\n")
-        if name in ("delta", "done", "error", "cancelled", "turn_summary", "thinking",
-                    "thinking_done", "tool_started", "tool_result", "status"):
-            event = {**event, "card_id": self._ask_card}
-        if name in ("delta", "done", "error", "cancelled", "turn_summary", "turn_started"):
-            event = {**event, "mode": self._ask_mode}
-        if name == "done":
-            self._end_card_turn()
-            self._finish_ask(event.get("turn_id"))
-        elif name in ("error", "cancelled"):
-            self._end_card_turn()
-            self._ask_text = []
+        # A card turn is no longer one of *this* agent's turns (19.16): it runs on the card's own
+        # agent, and `relay_core.board_turns` tags and collects it there. Only a cleanup still
+        # comes through here.
         return event
-
-    def _finish_ask(self, turn_id) -> None:
-        answer = "".join(self._ask_text).strip()
-        self._ask_text = []
-        card_id, tools = self._ask_card, self.tools
-        if not answer or card_id is None or tools is None:
-            return
-        card = tools.board.card_by_id(card_id)
-        if card is None:                                        # pragma: no cover - deleted mid-turn
-            return
-        agent = getattr(self.turns, "agent", None)
-        tools.board.append_thread(card_id, answer, author="agent", kind="comment",
-                                  private=card.private, mode=self._ask_mode,
-                                  model=getattr(getattr(agent, "config", None), "model", None),
-                                  turn=f"{getattr(agent, 'session_id', '')}/{turn_id}" if turn_id else None)
-        # A Discuss that edited the card, or a Plan that wrote its `## Plan`, changed the file:
-        # the next question reseeds from it, so the conversation never argues with a stale copy.
-        # An answer that changed nothing keeps the seeded conversation.
-        self._send({"event": "board_thread_appended", "card_id": card_id, "author": "agent",
-                    "kind": "comment", "text": answer, "turn_id": turn_id, "mode": self._ask_mode})
 
     def _observe_cleanup(self, event: dict) -> dict:
         """Tag a cleanup turn's events so the pane shows them on the board, not on a card."""

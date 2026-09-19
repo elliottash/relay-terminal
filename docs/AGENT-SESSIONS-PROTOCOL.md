@@ -2242,8 +2242,9 @@ entry holding the old and the new title or `## Issue`, an event line per write, 
 the agent to say in its reply what it changed. The plan is the card's own `## Plan` section —
 design 12.4, "plan mode writes the plan onto a card", rather than a separate `type: plan` card; a
 card whose `links.plans` names plan cards has them read as context. The scope ends on the turn's
-`done`, `error` or `cancelled`. **Busy** is 19.9's rule unchanged: one turn at a time, a Plan
-refused while a cleanup runs (`board_busy`, text "… then start the plan."), nothing written.
+`done`, `error` or `cancelled`. **Busy** is 19.16's rule since 2026-09-19: turns on *different*
+cards run at the same time, a second turn on the *same* card is refused, and so is anything while
+a cleanup runs (`board_busy`, text "… then start the plan."), with nothing written.
 
 **Execute** (no message). The pane (a) sends `board_update {patch: {fields: {assignee: "agent"}}}`
 against the hash the card was read at, unless it is already the agent's; (b) `board_move {status:
@@ -2531,6 +2532,51 @@ once per preset.
 from the same function — *"Verify #K7Q2 with Codex (installed) · then GLM-5.3 (key) · skipped
 Claude: implemented this card · unavailable Kimi: no key"* — with this machine's availability.
 
+### 19.16 Several cards at once: one agent per card (v3.3, 2026-09-19)
+
+Owner, 2026-09-19: *"multiple agents working on planning switchboard cards doesnt seem to work …
+if i was planning in one card, i couldnt plan in another card."* It could not: the whole
+Switchboard worker had one `TurnSupervisor`, one conversation and one `CardScope`, so the second
+`board_ask` was refused with `board_busy` and moving to another card reset the conversation of the
+one you left. `relay_core.board_turns.CardTurns` gives **each card its own agent**, built from the
+pane agent's provider config, with its own conversation, its own `cancel_event` and its own
+`BoardTools` — which is where `card_scope` lives, so what a Plan may touch (19.10) is enforced per
+turn with no change to the tools themselves.
+
+**What may start.** `board_ask` is refused with `board_busy` when
+
+| | because |
+|---|---|
+| a turn is already running on **that card** | two agents writing one card's `## Plan` would each undo the other, and its thread would interleave two answers |
+| a **cleanup** is running | it merges, splits and moves the very cards the turns are talking about (19.9) |
+| **three** card turns are already running | `board_turns.MAX_RUNNING`; a board of a hundred cards must not open a hundred paid streams from a hundred clicks |
+
+A cleanup, an import and a GitHub sync are refused in turn while any card turn runs. The error
+gains **`cards`**, the ids running right now, beside the `card_id` and `cleanup_running` it already
+carried; its text names them ("busy with turns on #A, #B and #C"). Nothing is written to a card by
+a refused ask, exactly as before.
+
+**Conversations.** A card's session outlives its turn, so a second question on an unchanged card
+continues where it left off — which the single conversation could only do for whichever card was
+asked last. The seeding rule is otherwise 19.6's: the card file's hash is kept with the session,
+and a card that changed since reseeds from the file. `board_turns.MAX_SESSIONS` (6) conversations
+are kept; past that the least recently used card reseeds next time. Pointing the worker at another
+board (`set_board`, `configure`) stops and forgets all of them.
+
+**Events** are unchanged and still carry `card_id` and `mode` (19.10): each turn tags its own, so
+two cards streaming at once are told apart by `card_id` alone. They do not pass through the pane
+agent's observers — a card turn is not a pane turn, and never was one in anything but wiring.
+
+**`board_cancel {card?}`** — new. The worker-wide `cancel` stops the pane agent's turn, which here
+is a cleanup; a card turn runs on its own agent, so stopping it names the card. Without `card` it
+stops every card turn. It answers `board_cancelled {card_id, stopped, cards}`, where `cards` is
+what is still running.
+
+```json
+{"type": "board_cancel", "id": "c1", "card": "K7Q2"}
+{"event": "board_cancelled", "id": "c1", "card_id": "K7Q2", "stopped": true, "cards": ["M3XJ"]}
+```
+
 ### 19.17 Hiding and showing a board's folder (v3.4, 2026-09-19)
 
 Owner, 2026-09-19: new boards are created in `.switchboard/` from now on, so the cards do not
@@ -2583,7 +2629,6 @@ The **"Hidden Switchboard folder" option** (`board/hidden_folder` in `QSettings`
 only what a board created from now on is called (`new_board_folder()` / `newBoardFolder()`) and
 never touches a board that already exists. Turning it off does not send `board_folder`, and sending
 `board_folder` does not change the option.
-
 
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 

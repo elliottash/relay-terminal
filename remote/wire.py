@@ -261,6 +261,9 @@ FORWARDED_EVENTS = frozenset({
     # A whole-board cleanup (protocol 19.9) is board activity too: the phone shows its progress
     # and its changelog the same way the desktop does.
     "board_cleanup_started", "board_cleanup_summary",
+    # Which card turns are still running after a Stop (protocol 19.16): a phone showing a card
+    # as busy has to learn that it is not any more, and it is the same board activity.
+    "board_cancelled",
     # The agent typing into the visible program: a phone watching a pane must see every keystroke
     # the agent sends and every refusal, for the same reason the desktop prints them inline.
     "program_input", "program_input_refused",
