@@ -18,6 +18,7 @@ import os
 import posixpath
 import re
 import selectors
+import shlex
 import signal
 import stat
 import subprocess
@@ -83,6 +84,136 @@ def remote_path(name: str, policy: security.Policy = security.EMPTY) -> str:
     return posixpath.normpath(name)
 
 
+# ----- the recursive-walk cost guard (card #2Y96) ------------------------------------------------
+#
+# Owner, 2026-09-19: a pane standing in `$HOME` or `/` keeps its wide sandbox — the agent works
+# here without per-action approvals by design, and narrowing the sandbox by depth would be theatre.
+# What is guarded is the **cost**, not the permission: a recursive search or listing whose root is
+# the home directory, `/`, or a directory the home sits under (`/home`) takes minutes and comes
+# back with nothing the model can use, so it is refused with a message that says what to pass
+# instead. An explicit path below one of those roots is always allowed, and a non-recursive
+# `list_directory` of `$HOME` or `/` is untouched — listing one directory is cheap.
+#
+# Like the command denylist (relay_core/security.py) this is honoured, not unevadable: it reads the
+# obvious spellings of the walking programs. A command that hides its root in a variable runs, and
+# the entry, byte and time ceilings elsewhere are what bound it then.
+
+#: Programs that walk a whole tree unless told otherwise.
+WALKERS_ALWAYS = {"rg", "ripgrep", "ag", "ack", "ack-grep", "fd", "fdfind", "find", "rgrep",
+                  "tree", "du", "ncdu"}
+#: Programs that walk only with a recursion flag, and the long flags that turn it on. A bundled
+#: short flag is read letter by letter, so `grep -rn` and `ls -laR` are caught too.
+WALKERS_FLAGGED = {"grep": ("--recursive", "--dereference-recursive"),
+                   "egrep": ("--recursive", "--dereference-recursive"),
+                   "fgrep": ("--recursive", "--dereference-recursive"),
+                   "ls": ("--recursive",)}
+#: Of those, the ones whose first positional argument is a pattern rather than a path.
+WALKERS_PATTERN_FIRST = {"grep", "egrep", "fgrep", "rgrep", "rg", "ripgrep", "ag", "ack",
+                         "ack-grep", "fd", "fdfind"}
+#: Words in front of the program that are not the thing that walks.
+WALK_PREFIXES = {"sudo", "doas", "command", "builtin", "nohup", "time", "exec", "env", "nice",
+                 "ionice", "stdbuf", "xargs"}
+
+
+def home_dir() -> Path:
+    """The user's home as the tools see it (`$HOME`, so a test can move it)."""
+    return Path(os.path.normpath(os.path.expanduser("~")))
+
+
+def wide_root(path: Path, home: Path | None = None) -> str | None:
+    """Why `path` is too wide to crawl, in words the refusal can use — or None if it is fine."""
+    home = home or home_dir()
+    candidate = Path(os.path.normpath(str(path)))
+    if str(candidate) == os.sep:
+        return "the whole filesystem"
+    if candidate == home:
+        return "the home directory"
+    try:
+        if home.is_relative_to(candidate):
+            return "a directory the home directory sits under"
+    except ValueError:
+        pass
+    return None
+
+
+def _walk_path(word: str, cwd: Path) -> Path:
+    """One argument as the directory a walk would start at. `~` and `$HOME` are spelled out because
+    that is how a model writes "my home"; a glob is cut back to the literal directory above it, so
+    `du -sh /*` is read as a walk of `/`."""
+    text = os.path.expanduser(word.replace("${HOME}", "~").replace("$HOME", "~"))
+    cut = min((text.index(character) for character in "*?[" if character in text), default=-1)
+    if cut >= 0:
+        head = text[:cut]
+        text = head if head.endswith(os.sep) else os.path.dirname(head)
+        if not text:
+            text = os.sep if word.startswith(os.sep) else "."
+    if not text:
+        return cwd
+    return Path(os.path.normpath(text if os.path.isabs(text) else os.path.join(str(cwd), text)))
+
+
+def _walk_roots(segment: str, cwd: Path) -> list[Path]:
+    """The roots one command in a Bash line would walk, or [] if it walks nothing."""
+    try:
+        words = shlex.split(segment)
+    except ValueError:
+        words = segment.split()
+    program = ""
+    rest: list[str] = []
+    for i, word in enumerate(words):
+        if "=" in word and not word.startswith("-") and word.split("=", 1)[0].isidentifier():
+            continue                                    # FOO=bar before the program
+        if word.startswith("-"):
+            continue
+        name = os.path.basename(word)
+        if name in WALK_PREFIXES:
+            continue
+        program, rest = name, words[i + 1:]
+        break
+    if not program:
+        return []
+    flags = [word for word in rest if word.startswith("-")]
+    if program in WALKERS_FLAGGED:
+        long_flags = WALKERS_FLAGGED[program]
+        recursive = any(flag in long_flags or (not flag.startswith("--") and
+                        any(letter in flag[1:] for letter in ("R" if program == "ls" else "rR")))
+                        for flag in flags)
+        if not recursive:
+            return []
+    elif program not in WALKERS_ALWAYS:
+        return []
+    positional = [word for word in rest if not word.startswith("-")]
+    if program == "find":
+        # find's paths come first and stop at the first predicate (`find . -name x`).
+        paths = []
+        for word in rest:
+            if word.startswith("-"):
+                break
+            paths.append(word)
+    elif program in WALKERS_PATTERN_FIRST:
+        # The first positional is the pattern; with none left, the walk starts at the cwd.
+        paths = positional[1:]
+    else:
+        paths = positional
+    return [_walk_path(word, cwd) for word in paths] or [cwd]
+
+
+def walk_cost_refusal(command: str, cwd: Path, home: Path | None = None) -> str | None:
+    """The message a too-wide recursive walk is refused with, or None to let it run (card #2Y96)."""
+    if not isinstance(command, str) or not command.strip():
+        return None
+    home = home or home_dir()
+    for segment in security.segments(command):
+        for root in _walk_roots(segment, cwd):
+            if why := wide_root(root, home):
+                narrower = cwd if not wide_root(cwd, home) else root
+                return (f"Searching all of {root} ({why}) would take minutes and return little, so "
+                        f"Relay refuses it: this is a cost limit, not a permission one. Pass a "
+                        f"narrower path — e.g. {narrower / '<subdirectory>'} — or ask the user which "
+                        f"directory they mean. A single non-recursive listing of {root} is allowed.")
+    return None
+
+
 def spec(name: str, description: str, properties: dict, required: list[str]) -> dict:
     return {"type": "function", "function": {"name": name, "description": description,
             "parameters": {"type": "object", "properties": properties, "required": required,
@@ -93,7 +224,8 @@ TOOLS = [
          "Waits up to timeout_seconds (default 30, at most 1800) for the command to finish. A command still running then is NOT killed: "
          "the result has still_running: true, a job_id and the output so far; read more with command_output (it can wait) and end it with stop_command. "
          "Set timeout_seconds to the time a long build or test suite needs; do not ask the user how long it takes. For a server or watcher that should keep running, set background: true and stop it when done. "
-         "There is no tty and stdin is closed, so a command that prompts, needs sudo or logs in somewhere fails instead of waiting: hand that one to run_in_terminal when the tool is offered.",
+         "There is no tty and stdin is closed, so a command that prompts, needs sudo or logs in somewhere fails instead of waiting: hand that one to run_in_terminal when the tool is offered. "
+         "A recursive search or listing (grep -r, rg, find, du, ls -R) whose root is the home directory, / or a directory above the home is refused because it would take minutes: give it a narrower path.",
          {"command": {"type": "string"}, "cwd": {"type": "string", "description": "Workspace-relative directory; default '.'"},
           "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": MAX_WAIT,
                               "description": "Seconds to wait before handing a still-running command back as a job; default 30."},
@@ -421,6 +553,11 @@ class ToolExecutor:
             cwd = self.workspace.resolve(args["cwd"])
             if not cwd.is_dir():
                 raise ValueError("Command working directory must be a directory.")
+            # Card #2Y96: a recursive walk of the home directory or `/` is refused on cost. Checked
+            # here only, unlike the denylist: the answer depends on the command and the cwd, neither
+            # of which changes between prepare and execute.
+            if message := walk_cost_refusal(command, cwd):
+                raise ValueError(message)
             return Prepared(name, args, f"RUN COMMAND\n\nWorking directory: {cwd}\n{wait}\n\n{command}", cwd)
         if host:
             return self._prepare_remote_file(name, args, host)

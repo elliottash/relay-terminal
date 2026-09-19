@@ -1684,12 +1684,26 @@ prepared, `tool_started` carries a preview, and it executes immediately.
 |---|---|
 | `run_command` | `/bin/bash --noprofile --norc -c` in the workspace (or a workspace-relative `cwd`), new session, stdin `/dev/null`. Timeout 1–120 s, default 30. Output streamed as `tool_output`, 32 KiB returned. The process group gets SIGTERM then SIGKILL. Environment scrubbed: names containing KEY/TOKEN/SECRET/PASSWORD/CREDENTIAL/COOKIE, `RELAY_*`, `BASH_ENV`, `ENV`, `PYTHONPATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `SSH_AUTH_SOCK`, `BASH_FUNC_*`. Sets `TERM=dumb`, `PAGER=cat`, `GIT_TERMINAL_PROMPT=0`. |
 | `read_file` | UTF-8 regular file, 128 KiB, no NUL bytes |
-| `list_directory` | at most 200 entries |
+| `list_directory` | at most 200 entries; never recursive, so it is allowed in any directory, `$HOME` and `/` included |
 | `write_file` | parent must exist; unified diff in the preview; the file's SHA-256 is rechecked before an atomic replace that keeps its mode |
 | `edit_file` | replaces one exact string in an existing file (`old_string` → `new_string`, `replace_all` for every occurrence); refuses a file that does not exist, a string it cannot find, and one that occurs more than once without `replace_all`; same guards, SHA-256 recheck, atomic replace and checkpoint undo as `write_file`; neither is offered in plan mode |
 | `set_keybinding` | offered when the GUI sent a catalog (section 4) |
 | `load_skill`, `read_skill_file` | offered when at least one skill is indexed |
 | `ask_user` | asks the user 1–4 questions and **blocks the turn** until the pane answers (`backend/relay_core/questions.py`, protocol 27, card #MQ9C). `options` is optional: with them a number is the answer and `0` skips, without them the question is open and whatever is typed is the answer; `/skip` passes. The pane prints the card in the amber "needs human" ink and goes to the `NeedsYou` state. Offered in both modes, never to a subagent, which cannot reach the user; plan mode's prompt additionally tells the planner to use it before `write_plan` rather than guess |
+
+**The recursive-walk cost guard (card #2Y96).** A pane's workspace is the directory the pane is
+in, so a pane standing in `$HOME` or `/` gets a very wide sandbox. The owner accepted that on
+2026-09-19 — the agent works here without per-action approvals, and narrowing the sandbox by depth
+would be theatre — and what Relay guards instead is the **cost**: `run_command` refuses a recursive
+search or listing whose root is the home directory, `/`, or a directory the home sits under
+(`/home`), because crawling it takes minutes and returns nothing usable. The refusal names a
+narrower path to pass (`<cwd>/<subdirectory>`). Recognised walkers are `find`, `rg`/`ag`/`ack`,
+`fd`, `tree`, `du`, and `grep`/`ls` with `-r`/`-R`; the root is the command's own path argument, or
+the cwd when it has none. An explicit path below a wide root always runs, a non-recursive
+`list_directory` of `$HOME` or `/` is untouched, and the board's `search_files` shares the guard
+(`relay_core/board_tools.py`). Like the command denylist this is honoured, not unevadable — a root
+hidden in a variable runs, bounded by the entry, byte and time ceilings as before
+(`tools.walk_cost_refusal`).
 
 File tools accept absolute paths and `..`, but every path is resolved and must land
 inside the workspace. Symlinks anywhere in the workspace part of the path, paths that

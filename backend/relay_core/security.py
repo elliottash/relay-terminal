@@ -137,6 +137,12 @@ def _segments(command: str) -> list[str]:
     return [part.strip() for part in parts if part.strip()]
 
 
+def segments(command: str) -> list[str]:
+    """Where one command in a Bash line ends and the next begins. Public because the recursive-walk
+    cost guard in relay_core/tools.py (card #2Y96) has to split a line the same way this does."""
+    return _segments(command)
+
+
 # Words that stand in front of the program without being the thing that runs. A rule of `apt` has
 # to refuse `sudo apt`, so these are stepped over to find the program — and a rule of `sudo` has to
 # refuse `sudo apt` too, which is the whole reason `_programs` returns them as well.

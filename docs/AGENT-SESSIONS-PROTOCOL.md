@@ -180,6 +180,15 @@ conversation is stopped on a new conversation, when a subagent's run ends, and w
 exits. The pane prints `▸ still running as job-N` / `■ stopped job-N` for these results. Only
 the 16 most recent finished jobs are remembered; `command_output` on an older one is an error.
 
+**Too wide to crawl (card #2Y96, 2026-09-19).** `run_command` refuses, at prepare time, a recursive
+search or listing whose root is the user's home directory, `/`, or a directory the home sits under:
+`grep -r`/`ls -R`, `find`, `rg`, `ag`, `ack`, `fd`, `tree`, `du`, read with their own path argument
+or the cwd when they have none. The error names the root, says it is a cost limit and not a
+permission one, and gives the shape of a narrower path (`<cwd>/<subdirectory>`), so the model can
+act on it without asking. This is the answer to the wide sandbox a pane in `$HOME` gets: the
+sandbox stays wide, the crawl does not happen. An explicit path below such a root is always
+allowed, and `list_directory` — which never recurses — works in `$HOME` and `/` as before.
+
 The pane lists the jobs the model was handed back (src/JobsPanel.h, under the prompt box and the
 running-agents list). The worker sends `jobs {jobs: [{job_id, command, running, exit_code, stopped,
 elapsed_ms}]}` whenever that list changes (a job handed back, one ending, a new conversation
@@ -2223,7 +2232,9 @@ A call outside the mode is refused with `code: "board_mode_refused"` (board tool
 tool error naming Execute (the rest). `search_files {pattern, path?, glob?}` is new and exists only
 in a card turn: a case-insensitive (unless the pattern has a capital) regular-expression search of
 the workspace's text files, ≤80 matching lines as `path:line: text`, skipping `.git`, build and
-cache folders, binaries, files over 1 MiB, symlinks and the file tools' secret names. Before
+cache folders, binaries, files over 1 MiB, symlinks and the file tools' secret names. It shares
+`run_command`'s recursive-walk cost guard (card #2Y96): in a workspace that is the home directory
+or `/`, `search_files` without a `path` is refused with the same "pass a narrower path" message. Before
 2026-09-18 a card's "Ask the agent" ran with every pane tool, commands and file writes included.
 
 A Discuss edit is `board_update_card` / `board_move_card` as before: hash-checked, a `rewrite`

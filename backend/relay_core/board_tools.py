@@ -659,7 +659,8 @@ SEARCH_SPEC = spec(
     "search_files",
     "Search the workspace's text files for a regular expression (Python syntax, case-insensitive "
     "unless it has an uppercase letter). Returns up to 80 matching lines as path:line: text. "
-    "Read-only. Use it to find where something is defined before reading the file.",
+    "Read-only. Use it to find where something is defined before reading the file. When the workspace "
+    "is the home directory or /, pass `path`: crawling all of it is refused as too slow.",
     {"pattern": {"type": "string", "description": "Regular expression, e.g. 'def board_ask|board_ask\\('."},
      "path": {"type": "string", "description": "Workspace-relative directory or file to search; default '.'."},
      "glob": {"type": "string", "description": "Only files whose name matches, e.g. '*.py' or '*.cpp'."}},
@@ -702,7 +703,7 @@ class CardScope:
 
 def search_workspace(root: Path, args: dict) -> dict:
     """`search_files`: a read-only grep over the workspace, with the file tools' secret guard."""
-    from .tools import Workspace                       # late: tools imports nothing of ours
+    from .tools import Workspace, wide_root            # late: tools imports nothing of ours
     if set(args) - {"pattern", "path", "glob"}:
         raise BoardToolError("search_files takes pattern, path and glob.")
     pattern = args.get("pattern")
@@ -721,6 +722,12 @@ def search_workspace(root: Path, args: dict) -> dict:
         start = workspace.root if rel in (".", "./") else workspace.resolve(str(rel))
     except (ValueError, OSError) as exc:
         raise BoardToolError(str(exc)) from exc
+    # Card #2Y96, the same cost guard run_command has: a card turn whose workspace is the home
+    # directory or `/` must be given a path before it crawls. The ceilings below still apply.
+    if why := wide_root(start):
+        raise BoardToolError(f"Searching all of {start} ({why}) would take minutes and return little, "
+                             f"so Relay refuses it — this is a cost limit, not a permission one. Pass "
+                             f"`path` naming the directory to search, e.g. {start / '<subdirectory>'}.")
     import fnmatch
 
     def secret(parts) -> bool:

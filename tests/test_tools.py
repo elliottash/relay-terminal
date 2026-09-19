@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from relay_core import board_tools, tools as tools_mod
 from relay_core.tools import ToolExecutor, MAX_OUTPUT
 from relay_core.provider import Cancelled
 
@@ -225,3 +226,93 @@ class ToolTests(unittest.TestCase):
         self.cancel.set()
         with self.assertRaises(Cancelled): self.tools.execute(prepared)
         self.assertEqual(path.read_text(), 'alpha\n')
+
+
+# ----- the recursive-walk cost guard (card #2Y96) -----------------------------------------------
+#
+# Owner's decision, 2026-09-19: a pane in $HOME or / keeps its wide sandbox, and what is refused is
+# the cost of crawling it. A narrower path always runs; a non-recursive list never stops working.
+class WalkCostTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name) / 'home' / 'someone'
+        (self.home / 'work' / 'repo').mkdir(parents=True)
+        self.cancel = threading.Event()
+        self.events = []
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def executor(self, cwd: Path) -> ToolExecutor:
+        return ToolExecutor(str(cwd), self.events.append, self.cancel)
+
+    def refuse(self, command, cwd=None):
+        """The refusal a run_command prepare gives, or None when it is allowed through."""
+        with patch.dict(os.environ, {'HOME': str(self.home)}):
+            tools = self.executor(cwd or self.home)
+            try:
+                tools.prepare('run_command', {'command': command})
+            except ValueError as error:
+                return str(error)
+            return None
+
+    def test_wide_roots_named(self):
+        home = self.home
+        self.assertEqual(tools_mod.wide_root(Path('/'), home), 'the whole filesystem')
+        self.assertEqual(tools_mod.wide_root(home, home), 'the home directory')
+        self.assertEqual(tools_mod.wide_root(home.parent, home), 'a directory the home directory sits under')
+        self.assertIsNone(tools_mod.wide_root(home / 'work', home))
+        self.assertIsNone(tools_mod.wide_root(Path('/usr/share'), home))
+
+    def test_recursive_search_from_home_is_refused_with_a_narrower_path(self):
+        for command in ('grep -rn needle .', 'grep -r needle', 'rg needle', 'find . -name "*.py"',
+                        'ls -laR', 'du -sh', 'fd needle', 'tree'):
+            message = self.refuse(command)
+            self.assertIsNotNone(message, command)
+            self.assertIn('the home directory', message)
+            self.assertIn(str(self.home / '<subdirectory>'), message)
+            self.assertIn('cost limit, not a permission one', message)
+
+    def test_filesystem_root_and_above_the_home_are_refused(self):
+        self.assertIn('the whole filesystem', self.refuse('grep -r needle /'))
+        self.assertIn('the whole filesystem', self.refuse('du -sh /*'))
+        self.assertIn('the whole filesystem', self.refuse('find / -name relay'))
+        self.assertIn('sits under', self.refuse(f'rg needle {self.home.parent}'))
+        self.assertIn('the home directory', self.refuse('grep -r needle ~'))
+        self.assertIn('the home directory', self.refuse('grep -r needle "$HOME"'))
+
+    def test_a_narrower_path_runs(self):
+        self.assertIsNone(self.refuse('grep -rn needle work'))
+        self.assertIsNone(self.refuse('rg needle work/repo'))
+        self.assertIsNone(self.refuse(f'find {self.home / "work"} -name "*.py"'))
+        self.assertIsNone(self.refuse('du -sh work'))
+
+    def test_non_recursive_commands_and_listing_stay_allowed(self):
+        self.assertIsNone(self.refuse('grep needle notes.txt'))
+        self.assertIsNone(self.refuse('ls -la'))
+        self.assertIsNone(self.refuse('git status'))
+        with patch.dict(os.environ, {'HOME': str(self.home)}):
+            tools = self.executor(self.home)
+            result = tools.execute(tools.prepare('list_directory', {'path': '.'}))
+        self.assertEqual([entry['name'] for entry in result['entries']], ['work'])
+
+    def test_a_walk_anywhere_in_the_line_is_caught(self):
+        self.assertIsNotNone(self.refuse('cd work && echo hi; grep -r needle ~'))
+        self.assertIsNotNone(self.refuse('find / -name x | head -5'))
+        self.assertIsNotNone(self.refuse('sudo du -sh /'))
+
+    def test_a_pane_below_the_home_is_untouched(self):
+        cwd = self.home / 'work' / 'repo'
+        self.assertIsNone(self.refuse('grep -rn needle .', cwd=cwd))
+        self.assertIsNone(self.refuse('rg needle', cwd=cwd))
+        # Even from a narrow pane, naming a wide root is still refused.
+        self.assertIsNotNone(self.refuse('grep -r needle ~', cwd=cwd))
+        self.assertIn(str(cwd / '<subdirectory>'), self.refuse('rg needle /', cwd=cwd))
+
+    def test_the_board_search_tool_shares_the_guard(self):
+        with patch.dict(os.environ, {'HOME': str(self.home)}):
+            with self.assertRaises(board_tools.BoardToolError) as caught:
+                board_tools.search_workspace(self.home, {'pattern': 'needle'})
+            self.assertIn('cost limit', str(caught.exception))
+            found = board_tools.search_workspace(self.home, {'pattern': 'needle', 'path': 'work'})
+        self.assertEqual(found['matches'], [])

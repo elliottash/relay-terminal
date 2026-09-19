@@ -44,7 +44,24 @@ project filter, project instructions discovery, `plans_dir`, terminal history, a
       unattached tab in the current directory (`src/main.cpp`, `startFresh`); today it only
       restores, which is the second reason the old project seemed to follow the owner around.
 
-## Open for the owner
+- [x] A **cost guard** on recursive walks, so the wide sandbox a pane in `$HOME` gets is not a wide
+      crawl: `run_command` refuses a recursive search or listing rooted at the home directory, `/`
+      or a directory the home sits under, naming a narrower path to pass. Shipped 2026-09-19 —
+      `tools.walk_cost_refusal`, shared with the board's `search_files`.
+
+## Open for the owner — answered
 
 A pane in `$HOME` or `/` gets a very wide sandbox under 6a. Cap it (refuse file tools above some
 depth until a folder is chosen), or accept it?
+
+**Owner, 2026-09-19: accept it, and add a cost guard rather than a permission guard.** The agent
+acts here without per-action approvals by design, so refusing file tools by depth would be theatre —
+a pane in `$HOME` may read and write in `$HOME`. What is refused is the **cost** of crawling it: a
+recursive search or listing (`grep -r`, `ls -R`, `find`, `rg`, `ag`, `ack`, `fd`, `tree`, `du`)
+whose effective root is the home directory, the filesystem root, or a directory above the home
+(`/home`) comes back with an error that says so and gives the shape of a narrower path, which the
+model can act on without asking. A non-recursive `list_directory` of those directories stays
+allowed, an explicit path below them always runs, and the existing entry, byte and time ceilings are
+unchanged. The board's card-turn `search_files` shares the guard. Like the command denylist it is
+honoured, not unevadable (`backend/relay_core/tools.py`, "the recursive-walk cost guard";
+`docs/ARCHITECTURE.md` › Tools; protocol section 11, "Too wide to crawl").
