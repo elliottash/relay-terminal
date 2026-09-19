@@ -5,7 +5,9 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDir>
 #include <QEvent>
+#include <QFileDialog>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -86,7 +88,56 @@ bool askBeforeReset(const QString &sectionTitle) {
     return box.clickedButton() == reset;
 }
 
+// A page carries a dot on its tab when something on it is not what Relay ships with — the same
+// question the ↺ on a row answers, asked of the whole page, so a changed option is visible from a
+// tab you are not looking at.
+bool sectionChanged(const SettingsSection &section) {
+    for (const SettingRow &row : section.rows)
+        if (row.changed && row.reset) return true;
+    return false;
+}
+
+// The Browse… button's picker, replaced by tests. It starts where the box points, so Browse… on a
+// folder you already chose opens there rather than at home.
+std::function<QString(QWidget *, const QString &)> g_folderChooser;
+
+QString chooseFolder(QWidget *parent, const QString &start) {
+    const QString where = start.isEmpty() ? QDir::homePath() : start;
+    if (g_folderChooser) return g_folderChooser(parent, where);
+    return QFileDialog::getExistingDirectory(parent, QStringLiteral("Choose a folder"), where,
+                                             QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+}
+
 }  // namespace
+
+void SettingsPane::setFolderChooser(std::function<QString(QWidget *parent, const QString &start)> chooser) {
+    g_folderChooser = std::move(chooser);
+}
+
+// ----- the watch ------------------------------------------------------------------------------------
+
+SettingsWatch &SettingsWatch::instance() {
+    static SettingsWatch watch;
+    return watch;
+}
+
+void SettingsWatch::listen(QObject *context, std::function<void()> changed) {
+    if (!context || !changed) return;
+    m_listeners.append({QPointer<QObject>(context), std::move(changed)});
+}
+
+void SettingsWatch::notify() {
+    if (m_scheduled) return;            // one delivery for a burst: a page reset writes many rows
+    m_scheduled = true;
+    QTimer::singleShot(0, [this] {
+        m_scheduled = false;
+        for (int i = int(m_listeners.size()) - 1; i >= 0; --i)
+            if (!m_listeners.at(i).first) m_listeners.removeAt(i);
+        const auto listeners = m_listeners;   // a callback may close a pane, and so drop a listener
+        for (const auto &listener : listeners)
+            if (listener.first) listener.second();
+    });
+}
 
 // ----- reset to defaults ---------------------------------------------------------------------------
 
@@ -185,6 +236,9 @@ SettingsPane::SettingsPane(Mode mode, std::function<QList<SettingsSection>()> se
         }
         buildResults(needle);
     });
+    // Every pane redraws when any of them writes a value, so two Options panes — in two tabs or two
+    // windows — never disagree about what a setting is.
+    SettingsWatch::instance().listen(this, [this] { rebuild(); });
     build();
 }
 
@@ -282,7 +336,11 @@ void SettingsPane::build() {
     for (const SettingsSection &section : std::as_const(m_sectionCache)) {
         if (m_mode == Mode::Actions) break;
         m_tabIds << section.id;
-        m_tabs->addTab(section.title);
+        const bool touched = sectionChanged(section);
+        m_tabs->addTab(touched ? section.title + QStringLiteral(" •") : section.title);
+        if (touched)
+            m_tabs->setTabToolTip(m_tabs->count() - 1,
+                                  QStringLiteral("Something on this page is not what Relay ships with"));
         auto *scroll = new QScrollArea;
         scroll->setObjectName(QStringLiteral("settingsPage"));
         scroll->setWidgetResizable(true);
@@ -409,9 +467,28 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
     label->setMinimumWidth(std::min(words + 2, metrics.averageCharWidth() * 18));
     box->addLayout(text, 1);
 
-    // Every control writes through the row's callback and then asks for a rebuild, so rows that
-    // describe other rows ("Flash · glm-5.3-flash") never go stale. Focus and scroll survive it.
-    auto after = [this] { QMetaObject::invokeMethod(this, [this] { rebuild(); }, Qt::QueuedConnection); };
+    // Every control writes through the row's callback and then says so, which redraws this pane —
+    // so rows that describe other rows ("Flash · glm-5.3-flash") never go stale — and every other
+    // Options pane with it. Focus and scroll survive the rebuild, and the rebuild happens on the
+    // event loop, never inside the signal of the control it is about to delete.
+    auto after = [] { SettingsWatch::instance().notify(); };
+
+    // The changed indicator and the way back in one mark: a row whose value is not what Relay
+    // ships with carries a ↺ between its words and its control (finding 8 of card #XZZB). It asks
+    // nothing first, where the page's "Reset to defaults" does — one row is one value, in front of
+    // you, and set again in a click; a page is everything on it and cannot be undone row by row.
+    if (row.changed && row.reset) {
+        auto *undo = new QPushButton(QStringLiteral("↺"));
+        undo->setObjectName(QStringLiteral("settingsRowReset"));
+        undo->setFlat(true);
+        undo->setCursor(Qt::PointingHandCursor);
+        undo->setFocusPolicy(Qt::TabFocus);
+        undo->setToolTip(QStringLiteral("Back to what Relay ships with"));
+        undo->setAccessibleName(QStringLiteral("Reset %1 to what Relay ships with").arg(row.label));
+        connect(undo, &QPushButton::clicked, this, [fn = row.reset, after] { fn(); after(); });
+        box->addWidget(undo);
+    }
+
     Row entry;
     entry.id = row.id;
     entry.widget = line;
@@ -467,6 +544,23 @@ QWidget *SettingsPane::settingRow(const SettingRow &row) {
         });
         entry.activate = [edit] { edit->setFocus(Qt::OtherFocusReason); edit->selectAll(); };
         box->addWidget(edit);
+        // A path row is browsed to, not only typed: the box keeps working exactly as it did, and
+        // the button fills it in. The write goes through the row's own callback, so a folder picked
+        // here and a folder typed there are the same edit.
+        if (row.browse) {
+            auto *pick = new QPushButton(QStringLiteral("Browse…"));
+            pick->setObjectName(QStringLiteral("settingsBrowse"));
+            pick->setFocusPolicy(Qt::TabFocus);
+            pick->setAccessibleName(QStringLiteral("Choose a folder for %1").arg(row.label));
+            connect(pick, &QPushButton::clicked, this, [this, edit, fn = row.onText, after] {
+                const QString picked = chooseFolder(this, edit->text().trimmed());
+                if (picked.isEmpty()) return;             // cancelled: the row keeps what it had
+                edit->setText(picked);
+                if (fn) fn(picked);
+                after();
+            });
+            box->addWidget(pick);
+        }
         break;
     }
     case SettingRow::Number: {

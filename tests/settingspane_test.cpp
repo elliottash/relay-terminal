@@ -3,6 +3,7 @@
 #include "LocalModelsSettings.h"
 
 #include <QApplication>
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -48,6 +49,7 @@ QList<SettingsSection> catalog(State *state) {
         row.kind = SettingRow::Toggle; row.id = QStringLiteral("option:thinking");
         row.label = QStringLiteral("Show thinking"); row.detail = QStringLiteral("Stream reasoning above the prompt");
         row.checked = state->thinking;
+        row.changed = !state->thinking;       // as the real helpers do: the builder knows the default
         row.onToggle = [state](bool on) { state->thinking = on; };
         row.reset = [state] { state->thinking = true; };
         general.rows << row;
@@ -57,6 +59,7 @@ QList<SettingsSection> catalog(State *state) {
         row.kind = SettingRow::Number; row.id = QStringLiteral("option:steps");
         row.label = QStringLiteral("Step limit per turn"); row.detail = QStringLiteral("Model calls");
         row.number = state->steps; row.minimum = 1; row.maximum = 500;
+        row.changed = state->steps != 50;
         row.onNumber = [state](int value) { state->steps = value; };
         row.reset = [state] { state->steps = 50; };
         general.rows << row;
@@ -73,6 +76,7 @@ QList<SettingsSection> catalog(State *state) {
         row.options = QStringList{QStringLiteral("dark"), QStringLiteral("light")};
         row.optionLabels = QStringList{QStringLiteral("Relay Dark"), QStringLiteral("Relay Light")};
         row.current = state->theme;
+        row.changed = state->theme != QStringLiteral("dark");
         row.onChoose = [state](const QString &id) { state->theme = id; };
         row.reset = [state] { state->theme = QStringLiteral("dark"); };
         appearance.rows << row;
@@ -91,6 +95,8 @@ QList<SettingsSection> catalog(State *state) {
         row.label = QStringLiteral("Plans folder"); row.detail = QStringLiteral("Absolute folder for plans");
         row.aliases = QStringLiteral("planning spec design");
         row.text = state->plans;
+        row.changed = !state->plans.isEmpty();
+        row.browse = true;                    // the Plans folder row, which is a folder on disk
         row.onText = [state](const QString &value) { state->plans = value; };
         row.reset = [state] { state->plans.clear(); };
         agent.rows << row;
@@ -227,6 +233,19 @@ SettingRow rowById(const SettingsSection &section, const QString &id) {
 }
 
 bool hasRow(const SettingsSection &section, const QString &id) { return !rowById(section, id).id.isEmpty(); }
+
+// The line drawn for a row id, on whichever page it lives (every page is built, shown or not).
+QWidget *rowWidget(const SettingsPane &pane, const QString &id) {
+    for (QWidget *candidate : pane.findChildren<QWidget *>(QStringLiteral("settingsRow")))
+        if (candidate->property("rowId").toString() == id) return candidate;
+    return nullptr;
+}
+
+// One of that line's own buttons: the ↺ (settingsRowReset) or the Browse… (settingsBrowse).
+QPushButton *rowButton(const SettingsPane &pane, const QString &id, const QString &objectName) {
+    QWidget *line = rowWidget(pane, id);
+    return line ? line->findChild<QPushButton *>(objectName) : nullptr;
+}
 
 QJsonObject bonsai() {
     return QJsonObject{{"id", "local:bonsai"}, {"label", "bonsai-2-27b"}, {"base_url", "http://127.0.0.1:8080/v1"},
@@ -944,6 +963,110 @@ private slots:
         QCOMPARE(wire.sent.size(), sent + 1);
         QCOMPARE(wire.last(QStringLiteral("local_endpoint_delete")).value(QStringLiteral("endpoint_id")).toString(),
                  QStringLiteral("local:bonsai"));
+    }
+
+    // ----- what a changed row says, and the way back from it (card #XZZB) -------------------------
+
+    void aRowAwayFromItsDefaultCarriesAResetMarkAndPutsADotOnItsTab() {
+        State state;
+        state.thinking = false;                      // General: one row is not what Relay ships with
+        SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
+        pane.show();
+        auto *tabs = pane.findChild<QTabBar *>(QStringLiteral("settingsTabs"));
+        QVERIFY(tabs);
+        QCOMPARE(tabs->tabText(0), QStringLiteral("General •"));
+        QCOMPARE(tabs->tabText(1), QStringLiteral("Appearance"));     // nothing on that page was touched
+        QVERIFY(rowButton(pane, QStringLiteral("option:thinking"), QStringLiteral("settingsRowReset")));
+        QVERIFY(!rowButton(pane, QStringLiteral("option:steps"), QStringLiteral("settingsRowReset")));
+        // Keyboard's row declares no default at all, so there is nothing to offer and no dot.
+        QVERIFY(!rowButton(pane, QStringLiteral("option:hints"), QStringLiteral("settingsRowReset")));
+        QCOMPARE(tabs->tabText(3), QStringLiteral("Keyboard"));
+
+        // The mark is the way back: one click, no question asked, and the row stops being marked.
+        rowButton(pane, QStringLiteral("option:thinking"), QStringLiteral("settingsRowReset"))->click();
+        QCOMPARE(state.thinking, true);
+        QTest::qWait(30);                            // the redraw the write asks for
+        QVERIFY(!rowButton(pane, QStringLiteral("option:thinking"), QStringLiteral("settingsRowReset")));
+        QCOMPARE(pane.findChild<QTabBar *>(QStringLiteral("settingsTabs"))->tabText(0), QStringLiteral("General"));
+    }
+
+    void theBrowseButtonOnAPathRowWritesWhatWasPicked() {
+        State state;
+        QStringList openedAt;
+        SettingsPane::setFolderChooser([&openedAt](QWidget *, const QString &start) {
+            openedAt << start;
+            return QStringLiteral("/srv/plans");
+        });
+        SettingsPane pane(SettingsPane::Mode::Options, [&] { return catalog(&state); }, [&] { return actions(&state); });
+        pane.show();
+        pane.showTab(QStringLiteral("agent"));
+        QVERIFY(!rowButton(pane, QStringLiteral("option:steps"), QStringLiteral("settingsBrowse")));   // not a path
+        auto *browse = rowButton(pane, QStringLiteral("option:plans"), QStringLiteral("settingsBrowse"));
+        QVERIFY(browse);
+        browse->click();
+        QCOMPARE(state.plans, QStringLiteral("/srv/plans"));
+        QCOMPARE(openedAt, QStringList{QDir::homePath()});      // an empty box means home
+        QTest::qWait(30);
+        // Chosen once, it opens where the row now points; cancelling leaves the row as it is.
+        SettingsPane::setFolderChooser([&openedAt](QWidget *, const QString &start) {
+            openedAt << start;
+            return QString();
+        });
+        rowButton(pane, QStringLiteral("option:plans"), QStringLiteral("settingsBrowse"))->click();
+        QCOMPARE(openedAt.size(), 2);
+        QCOMPARE(openedAt.at(1), QStringLiteral("/srv/plans"));
+        QCOMPARE(state.plans, QStringLiteral("/srv/plans"));
+        SettingsPane::setFolderChooser({});                     // the real picker again
+    }
+
+    // ----- a value is never one edit out of date (finding 3 of card #XZZB) ------------------------
+
+    void everyOpenPaneRedrawsWhenAValueIsWrittenAnywhereElse() {
+        State state;
+        auto sections = [&] { return catalog(&state); };
+        auto items = [&] { return actions(&state); };
+        SettingsPane first(SettingsPane::Mode::Options, sections, items);
+        SettingsPane second(SettingsPane::Mode::Options, sections, items);
+        first.show();
+        second.show();
+        auto thinkingBox = [](const SettingsPane &pane) {
+            QWidget *line = rowWidget(pane, QStringLiteral("option:thinking"));
+            return line ? line->findChild<QCheckBox *>() : nullptr;
+        };
+        QVERIFY(thinkingBox(first) && thinkingBox(first)->isChecked());
+        QVERIFY(thinkingBox(second)->isChecked());
+
+        // An edit in one pane reaches the other — the second pane is in another tab, or another
+        // window, and used to sit there showing what the setting used to be.
+        thinkingBox(first)->toggle();
+        QCOMPARE(state.thinking, false);
+        QTest::qWait(30);
+        QVERIFY(!thinkingBox(second)->isChecked());
+
+        // And a write from outside both panes — a dialog, a page reset, a keymap reload — reaches
+        // them the same way, through the watch.
+        state.theme = QStringLiteral("light");
+        relay::SettingsWatch::instance().notify();
+        QTest::qWait(30);
+        for (SettingsPane *pane : {&first, &second}) {
+            pane->showTab(QStringLiteral("appearance"));
+            QWidget *line = rowWidget(*pane, QStringLiteral("option:theme"));
+            auto *combo = line ? line->findChild<QComboBox *>() : nullptr;
+            QVERIFY(combo);
+            QCOMPARE(combo->currentData().toString(), QStringLiteral("light"));
+        }
+    }
+
+    void theWatchForgetsAPaneThatHasClosed() {
+        State state;
+        {
+            SettingsPane closing(SettingsPane::Mode::Options, [&] { return catalog(&state); },
+                                 [&] { return actions(&state); });
+            closing.show();
+        }
+        relay::SettingsWatch::instance().notify();
+        QTest::qWait(30);                            // nothing to deliver to: no dangling callback
+        QVERIFY(true);
     }
 };
 

@@ -34,6 +34,7 @@
 #include <QHash>
 #include <QJsonObject>
 #include <QList>
+#include <QPair>
 #include <QPointer>
 #include <QString>
 #include <QStringList>
@@ -82,6 +83,14 @@ struct SettingRow {
     // row that stands for a thing rather than a value — a button, a saved server, an info line —
     // leaves it empty and is never touched by a reset.
     std::function<void()> reset;
+    // Whether the value on this row is *not* what Relay ships with. Whoever builds the row knows
+    // its default and says so here; the pane then draws a ↺ between the row's words and its
+    // control — the changed indicator and the way back in one mark — and a dot on the section's
+    // tab. A row with no `reset` has nothing to go back to and is never marked.
+    bool changed = false;
+    // Text rows: a Browse… button beside the box that picks a folder, for a row whose value is a
+    // path (the Plans folder). A path is mistyped far more easily than it is browsed to.
+    bool browse = false;
 };
 
 struct SettingsSection {
@@ -98,6 +107,28 @@ struct SettingsSection {
 // headless. Append the result to the section's rows: last on the page, under everything it undoes.
 SettingRow resetRow(const SettingsSection &section, std::function<void(int count)> after,
                     std::function<bool(const QString &sectionTitle)> ask = {});
+
+// A setting was written somewhere other than the pane in front of you: an Options pane in another
+// tab or another window, a dialog, a page reset, a keymap or theme reload. Every SettingsPane alive
+// in this process listens here and redraws itself, so a value on screen is never one edit behind
+// (finding 3 of card #XZZB — until 2026-09-19 a pane only rebuilt on its own edits, and the others
+// sat there showing what the setting used to be).
+//
+// A notification is delivered on the event loop and several in a row collapse into one delivery, so
+// it is safe to call from inside a control's own signal handler: the rebuild it causes deletes that
+// control, and it must not happen while the control is still emitting.
+class SettingsWatch {
+public:
+    static SettingsWatch &instance();
+    // `context` owns the subscription: a pane that closes is dropped rather than called.
+    void listen(QObject *context, std::function<void()> changed);
+    void notify();
+
+private:
+    SettingsWatch() = default;
+    QList<QPair<QPointer<QObject>, std::function<void()>>> m_listeners;
+    bool m_scheduled = false;
+};
 
 // A runnable action, or a submenu of them. `checked` marks the current choice; `stayOpen` says
 // running it changes state the pane should show at once rather than closing. `typed` lets a
@@ -156,6 +187,12 @@ public:
     void activateCurrent();
 
     static int fuzzyScore(const QString &needle, const QString &haystack);
+
+    // What the Browse… button of a `browse` row opens, given what is in the box (empty for the
+    // home folder); it answers with the folder chosen, or an empty string if nobody chose one. It
+    // is a folder picker by default and exists as a seam because a QFileDialog cannot be clicked
+    // headless — the same reason resetRow() takes its `ask`.
+    static void setFolderChooser(std::function<QString(QWidget *parent, const QString &start)> chooser);
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;
