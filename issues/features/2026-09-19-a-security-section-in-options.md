@@ -11,7 +11,7 @@ rank: zzzzzzm
 created: '2026-09-19'
 acceptance: Options has a Security section that gathers every setting governing what the agent may reach, adds the ones Relay has no control for today, and states in one place what is allowed by default and what is never allowed
 source: 'conversation, 2026-09-19: "add a security options menu with various secruity options like that, not just relay - relay, but more of the approvals options on warp. look at warp options for advice on that."'
-links: {plans: [], commits: [77118fd], evidence: ['docs/qa_evidence/2026-09-19-security-section/'], related: [R5TC, V2HM, C1HH, D8J3, S5SH, SSRQ, JN7X], github: null}
+links: {plans: [], commits: [77118fd, 4181bd1, 051a17c], evidence: ['docs/qa_evidence/2026-09-19-security-section/'], related: [R5TC, V2HM, C1HH, D8J3, S5SH, SSRQ, JN7X], github: null}
 ---
 # A Security section in Options, gathering what the agent may reach
 
@@ -131,7 +131,7 @@ but shipping one set first is the smaller step and matches how Relay's other set
       not apply (#S5SH)
 - [x] User patterns added to `looks_secret()` (`tools.py:50-55`), extend-only, with the built-ins <!-- t:f4 -->
       shown and not removable
-- [ ] An OSC 52 row driving `setClipboardWriteAllowed()` (`engine/view/TerminalView.h:111`), <!-- t:g6 -->
+- [x] An OSC 52 row driving `setClipboardWriteAllowed()` (`engine/view/TerminalView.h:111`), <!-- t:g6 -->
       default off
 - [ ] "Where your prompts go", beside the hosted-inference switch <!-- t:h8 -->
 - [ ] `docs/VALIDATION.md`'s "Security boundaries" section becomes the written statement this <!-- t:j1 -->
@@ -166,10 +166,12 @@ so that one splits on whitespace.
 - [ ] `security/unattended_full_tools` and `agent/cross_pane`. Both govern something #R5TC has not <!-- t:m5 -->
       built yet — there is no unattended turn in Relay today — and a control that does nothing is
       worse than no control, so they land with that card.
-- [ ] The OSC 52 row. `setClipboardWriteAllowed()` is on `TerminalView` but not on the <!-- t:n7 -->
-      `TerminalBackend` interface the Pane speaks to, so it needs a virtual added to the engine
-      interface and an implementation in `VTermBackend` — more than a settings row. Clipboard
-      writes are off today, which is the safe default, and reads are never answered.
+- [x] The OSC 52 row — landed in `051a17c`. `setClipboardWriteAllowed()` was on `TerminalView` <!-- t:n7 -->
+      but not on the `TerminalBackend` interface the Pane speaks to, so the gate was unreachable;
+      a `ClipboardWrite` capability, the `VTermBackend` override and `Pane::applyClipboardPolicy()`
+      are the missing rung. Off by default, verified live in both states. Reads stay impossible and
+      have no switch. Note `run_command` output never reaches the emulator, so the agent copies by
+      running the escape in the pane's own terminal.
 - [ ] Moving `agent/terminal_handoff`, `isolation/*`, the turn bounds and `agent/audit_requests` <!-- t:p9 -->
       onto this page. Mechanical, but it touches every reader of each key and `src/RelayWindow.h`
       had three sessions editing it today; worth doing in one quiet pass rather than beside a
