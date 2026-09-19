@@ -11,7 +11,7 @@ rank: zzzzzzm
 created: '2026-09-19'
 acceptance: Options has a Security section that gathers every setting governing what the agent may reach, adds the ones Relay has no control for today, and states in one place what is allowed by default and what is never allowed
 source: 'conversation, 2026-09-19: "add a security options menu with various secruity options like that, not just relay - relay, but more of the approvals options on warp. look at warp options for advice on that."'
-links: {plans: [], commits: [a68712d, 0b30397, 60af091], evidence: ['docs/qa_evidence/2026-09-19-security-section/'], related: [R5TC, V2HM, C1HH, D8J3, S5SH, SSRQ, JN7X], github: null}
+links: {plans: [], commits: [a68712d, 0b30397, 60af091, 6f8aa86], evidence: ['docs/qa_evidence/2026-09-19-security-section/'], related: [R5TC, V2HM, C1HH, D8J3, S5SH, SSRQ, JN7X], github: null}
 ---
 # A Security section in Options, gathering what the agent may reach
 
@@ -160,6 +160,12 @@ One design note worth keeping: there is no multi-line row kind, so each list is 
 own separator, and each detail line says which. A command rule may contain spaces
 (`git push --force*`) so that list splits on commas; a secret pattern may contain a comma (`x{1,3}`)
 so that one splits on whitespace.
+
+**`6f8aa86` — the quiet pass.** `agent/terminal_handoff`, the isolation group, the three turn-bound
+rows and `agent/audit_requests` moved from Agent and Terminal onto Security, keys unchanged — every
+reader, `agentOptionsChanged` and `requestOptions()` are key-based. The chain limit
+(`kMaxHandoffChain`) is named on the hand-off row; the compaction threshold and the two model-call
+timeouts stay on Agent. Verified building on a clean export of main plus exactly those hunks.
 
 ## Still to do
 
