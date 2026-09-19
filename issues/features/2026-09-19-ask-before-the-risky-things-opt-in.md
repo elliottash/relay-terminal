@@ -35,7 +35,7 @@ which is a smaller move than it sounds and is the one the owner asked for.
 
 ## The checklist
 
-Each row is `allow` (the recommended setting) or `ask`. There is no "never": #3KB7's denylist is
+Seven rows. Each is `allow` (the recommended setting) or `ask`. There is no "never": #3KB7's denylist is
 where "never" lives, and two mechanisms for the same thing would be two places to look.
 
 | Capability | What raises a card when it is set to ask |
@@ -44,7 +44,6 @@ where "never" lives, and two mechanisms for the same thing would be two places t
 | `create` | `write_file` on a path that does not exist yet |
 | `delete_or_move` | a `run_command` whose program is destructive — `rm`, `mv`, `shred`, `truncate`, `dd`, `mkfs`, `chmod -R`, `chown -R` — or a redirection that truncates an existing file |
 | `read_outside` | a `read_file` or `list_directory` that resolved into one of #3KB7's extra readable folders rather than the workspace |
-| `command` | any `run_command` at all |
 | `terminal` | `run_in_terminal`, which reaches the user's real interactive shell |
 | `program` | `type_into_program` under a delegation grant |
 | `network` | a `run_command` whose program reaches the network — `curl`, `wget`, `scp`, `rsync`, `ssh`, and `git push`/`git fetch`/`git pull` |
@@ -138,11 +137,9 @@ It runs with your user's permissions, inside the pane's workspace.
   ending a turn.
 - 2026-09-19, agent: the cautious set applies until the first-run choice is made, rather than
   allow-all. "You have to explicitly pick that" only means something if not picking is different.
+- 2026-09-19, owner: **no `command` row** — a card before every `run_command` is left out. Asked
+  whether it was worth offering at all, given it is the row a cautious user most wants and the one
+  that makes Relay unusable if ticked: "leave it out." So there is no way to be asked before an
+  ordinary command; `delete_or_move` and `network` cover the commands worth stopping, and #3KB7's
+  denylist covers the ones worth refusing outright.
 
-## Open question (owner)
-
-**Is `command` — a card before *every* `run_command` — worth offering at all?** It is the row a
-risk-averse user will most want and the one that makes Relay unusable if ticked: a single turn can
-run dozens of commands. Warp offers it (`execute_commands: always_ask`) and defaults this machine to
-`always_allow`. It is listed above; say if it should be left out, or kept with a warning on the row
-that it will stop the agent constantly.

@@ -143,6 +143,14 @@ def segments(command: str) -> list[str]:
     return _segments(command)
 
 
+def programs(segment: str) -> list[str]:
+    """Every program name one segment runs: the prefix words it runs through (`sudo`, `env`, …) and
+    then the program itself. Public for the same reason `segments` is — the approval classifier
+    (relay_core/approvals.py, card #K2FV) has to read a line exactly as the denylist does, or the
+    two would disagree about what `sudo rm` is."""
+    return _programs(segment)
+
+
 # Words that stand in front of the program without being the thing that runs. A rule of `apt` has
 # to refuse `sudo apt`, so these are stepped over to find the program — and a rule of `sudo` has to
 # refuse `sudo apt` too, which is the whole reason `_programs` returns them as well.
