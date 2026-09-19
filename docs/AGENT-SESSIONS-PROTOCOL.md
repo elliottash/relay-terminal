@@ -3979,10 +3979,14 @@ remains for a claude the user started themselves whose own settings ask.
 **What a first launch can open on.** Neither bypass flag has a first-run acceptance. Claude Code's
 TUI does show its **workspace trust** dialog once per project directory (default "No, exit": a
 bare Enter ends the guest; the answer is remembered in `~/.claude.json`), which `-p` skips and
-`--dangerously-skip-permissions` does not cover; and Codex opens on a **"Hooks need review"**
-screen when a plugin of the user's own (the owner's `codex-warp`, here) ships hooks it has not
-trusted. Both are the guest's own dialogs in the pane's terminal, answered there; Relay does not
-answer them for the user.
+`--dangerously-skip-permissions` does not cover; and Codex opened on a **"Hooks need review"**
+screen whenever an enabled hook's hash was not the one it had on record — any plugin's hooks, not
+Relay's (the owner met it through `codex-warp`'s five). The owner asked never to see it, so the
+launch carries `--dangerously-bypass-hook-trust` beside the other bypass flag: the user's own hooks
+run without that review, for this invocation only, and nothing is written to Codex's trust
+records. Claude's trust dialog has no flag and stays the guest's own, answered in the pane's
+terminal; Relay does not answer it for the user. The headless harness of section 29 meets
+neither: `-p` skips claude's dialog, and `codex app-server` skips an untrusted hook silently.
 
 **The flags, verified.** Against the installed CLIs on 2026-09-19. Claude Code **2.1.278** has
 `--settings <file-or-json>`, `--ide`, `--dangerously-skip-permissions`, `-r/--resume` and

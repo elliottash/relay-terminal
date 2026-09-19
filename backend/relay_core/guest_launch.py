@@ -31,7 +31,7 @@ two modules stay as libraries; their command lines are gone.
 Verified against the installed CLIs on 2026-09-19 (Claude Code 2.1.278: `--settings
 <file-or-json>`, `--dangerously-skip-permissions`, `-r`, `--fork-session`; Codex 0.155.1:
 `-c <key=value>` on the plain launch and on `resume` / `fork`,
-`--dangerously-bypass-approvals-and-sandbox` on all three).
+`--dangerously-bypass-approvals-and-sandbox` and `--dangerously-bypass-hook-trust` on all three).
 
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 26.9. Card:
 issues/features/2026-09-19-claude-codex-guest-integration.md (GT7X).
@@ -51,6 +51,12 @@ SETTINGS_DIR = "guest"                        # under the pane's runtime dir, mo
 CLAUDE_SETTINGS_NAME = "claude-settings.json"  # what `claude --settings` is handed
 CLAUDE_BYPASS = "--dangerously-skip-permissions"
 CODEX_BYPASS = "--dangerously-bypass-approvals-and-sandbox"
+# Codex stops on a full-screen "Hooks need review" dialog whenever an enabled hook's hash is not
+# the one it has on record — any plugin's hooks, not Relay's (Relay adds none; the owner met it
+# through the Warp plugin's five). The guest already runs with approvals and the sandbox bypassed
+# on the owner's instruction, so its own hooks run without that review too, for this invocation
+# only: nothing is written to the trust records in ~/.codex/config.toml.
+CODEX_HOOK_TRUST = "--dangerously-bypass-hook-trust"
 # `codex resume <id>` / `codex fork <id>`: the subcommand comes first and the flags after it,
 # before the id (verified against `codex resume --help` / `codex fork --help`).
 CODEX_SUBCOMMANDS = ("resume", "fork")
@@ -141,13 +147,14 @@ def codex_overrides(python: str | None = None) -> list[str]:
 
 
 def codex_argv(python: str | None = None, extra=()) -> list[str]:
-    """`codex [resume|fork] -c … --dangerously-bypass-approvals-and-sandbox [rest…]`.
+    """`codex [resume|fork] -c … --dangerously-bypass-approvals-and-sandbox
+    --dangerously-bypass-hook-trust [rest…]`.
 
     A sessions row's `extra` starts with the subcommand (`resume <id>`, `fork <id>`), which has
     to stay in front of the flags; anything else is appended after them.
     """
     extra = list(extra)
-    flags = [*codex_overrides(python), CODEX_BYPASS]
+    flags = [*codex_overrides(python), CODEX_BYPASS, CODEX_HOOK_TRUST]
     if extra and extra[0] in CODEX_SUBCOMMANDS:
         return ["codex", extra[0], *flags, *extra[1:]]
     return ["codex", *flags, *extra]

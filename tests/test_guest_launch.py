@@ -84,7 +84,8 @@ class Argv(unittest.TestCase):
     def test_codex_carries_notify_and_the_bypass_as_overrides(self):
         argv = guest_launch.codex_argv("/usr/bin/python3")
         self.assertEqual("codex", argv[0])
-        self.assertEqual("--dangerously-bypass-approvals-and-sandbox", argv[-1])
+        self.assertEqual(["--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"],
+                         argv[-2:])
         overrides = [argv[i + 1] for i, word in enumerate(argv) if word == "-c"]
         self.assertEqual(2, len(overrides))
         notify = next(o for o in overrides if o.startswith("notify="))
@@ -102,6 +103,8 @@ class Argv(unittest.TestCase):
                 self.assertEqual(["codex", sub], argv[:2])
                 self.assertEqual("0195-abc", argv[-1])
                 self.assertIn("--dangerously-bypass-approvals-and-sandbox", argv)
+                # No "Hooks need review" screen in front of a resumed session either.
+                self.assertIn("--dangerously-bypass-hook-trust", argv)
 
     def test_the_overrides_parse_as_toml(self):
         """`-c` values are parsed as TOML by codex; a value that does not parse is taken as a raw
