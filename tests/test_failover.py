@@ -114,6 +114,17 @@ class CandidateTests(unittest.TestCase):
             found = resolver({'glm': 'k', 'kimi': 'k'}).failover_candidates('main', {'glm-coding'})
         self.assertEqual([r.preset_id for r in found], ['kimi'])
 
+    def test_a_hostname_the_caller_names_is_skipped_like_a_tried_preset(self):
+        # The pane's own endpoint may match no preset at all, so its host cannot be expressed as a
+        # preset id: `hosts` is how the agent says "this one is already down".
+        with mock.patch('relay_core.hosted.available', return_value=False):
+            found = resolver({'glm': 'k', 'glm-coding': 'k', 'kimi': 'k'}).failover_candidates(
+                'main', set(), {'API.Z.AI'})
+        self.assertEqual([r.preset_id for r in found], ['kimi'])
+        with mock.patch('relay_core.hosted.available', return_value=False):
+            found = resolver({'glm': 'k', 'kimi': 'k'}).failover_candidates('main', set(), ())
+        self.assertEqual([r.preset_id for r in found], ['kimi', 'glm'])
+
     def test_no_key_no_candidate_and_the_tried_ones_are_not_returned(self):
         with mock.patch('relay_core.hosted.available', return_value=False):
             self.assertEqual(resolver({}).failover_candidates('main', {'glm'}), [])
@@ -376,6 +387,65 @@ class FailoverTests(unittest.TestCase):
         self.assertEqual(agent.config.model, MAIN.model)        # the restore ran, and kept nothing
         self.assertEqual(agent.apply_pending_model(at='turn_end')['model'], target.model)
         self.assertEqual(agent.config.model, target.model)
+
+    def test_a_pane_on_its_own_base_url_never_gets_the_turn_handed_back_to_that_host(self):
+        # No preset matches this endpoint, so `self.preset` is None and the tried-preset set is
+        # empty: without the host the pane is on, the glm preset on the same host looks like a
+        # fresh provider and the turn would be sent straight back to the service that is down.
+        config = ProviderConfig('https://api.z.ai/v1', 'glm-experimental', 'pane-key')
+        self.stubs['glm-experimental'] = Refuser(ProviderError('Provider HTTP 503.'))
+        self.stubs['kimi-k3'] = Answerer()
+        agent = self.agent(roles=resolver({'glm': 'k', 'glm-coding': 'k', 'kimi': 'k'},
+                                          config, None),
+                           config=config, preset_id=None)
+        self.assertIsNone(agent.preset)
+        with mock.patch('relay_core.hosted.available', return_value=False):
+            agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual([e['to_model'] for e in self.retries() if e['reason'] == 'failover'],
+                         ['kimi-k3'])
+
+    def test_the_tier_is_the_panes_own_and_is_decided_once_for_the_turn(self):
+        # By the second move `self.config` is a spare provider's, so re-deriving the tier would
+        # read that provider's tier table: a Flash turn could finish on a Main model.
+        error = ProviderError('Provider HTTP 503 for everyone.')
+        self.stubs[FLASH.model] = Refuser(error)
+        self.stubs['kimi-k2.7-code-highspeed'] = Refuser(error)
+        self.stubs['gpt-5.6-terra'] = Answerer()
+        agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k'}, FLASH, 'glm'),
+                           config=FLASH)
+        with mock.patch.object(Agent, '_failover_tier', autospec=True,
+                               side_effect=Agent._failover_tier) as tier:
+            with mock.patch('relay_core.hosted.available', return_value=False):
+                agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual(tier.call_count, 1)                    # asked once, not once per move
+        self.assertEqual([e['to_model'] for e in self.retries() if e['reason'] == 'failover'],
+                         ['kimi-k2.7-code-highspeed', 'gpt-5.6-terra'])
+
+    def test_a_save_while_the_turn_is_failed_over_records_the_panes_own_model(self):
+        # `_autosave_soon` fires every MID_TURN_SAVE_S, and a title or summary thread saves from
+        # its own thread: neither may write the spare provider into the session file, which is what
+        # the sessions list, the resume picker and the index read.
+        self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 429.'))
+        saved = {}
+
+        class Saver:
+            calls = 0
+
+            def complete(_self, messages, tools, emit, cancel):
+                _self.calls += 1
+                saved.update(agent.session_data())
+                return {'role': 'assistant', 'content': 'from the spare'}
+
+        self.stubs['kimi-k3'] = Saver()
+        agent = self.agent(roles=resolver({'kimi': 'k'}))
+        agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual(saved['model'], MAIN.model)
+        self.assertEqual(saved['preset'], 'glm')
+        # The spare still counts as a model this conversation ran on.
+        self.assertEqual(agent.session_data()['model'], MAIN.model)
 
     def test_the_turn_reports_the_first_failure_not_the_last_providers(self):
         first = ProviderError('The pane key was rejected: HTTP 401 for glm-5.3.')

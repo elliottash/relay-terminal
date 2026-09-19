@@ -1522,13 +1522,23 @@ class Agent:
             swap = {"turn_id": record["turn_id"], "provider": self.provider, "config": self.config,
                     "preset": self.preset, "window": self.context.window, "effort": self.effort,
                     "tried": {self.preset.id} if self.preset else set(), "switches": 0,
+                    # The tier is the pane's, decided once: by the second move `self.config` is
+                    # already a spare provider's, and asking it again would read that provider's
+                    # tier table instead - a Flash turn on a provider with no Flash of its own
+                    # would answer "main" and finish the turn on a Main model.
+                    "tier": self._failover_tier(),
+                    # Hostnames already asked, the pane's own first. `failover_candidates` derives
+                    # them from the preset ids it is given, which says nothing about a pane on a
+                    # base URL that matches no preset (`self.preset is None`) - and that pane's own
+                    # host is exactly the one a failover must not hand the turn back to.
+                    "hosts": {_host(self.config.base_url)},
                     # What the turn's error says if the chain also fails: the model that failed
                     # first, its exception, and the names of the providers tried after it.
                     "from_model": self.config.model, "first_error": exc, "names": []}
         if swap["switches"] >= self.FAILOVER_PROVIDERS:
             return False
         try:
-            candidates = self.roles.failover_candidates(self._failover_tier(), swap["tried"])
+            candidates = self.roles.failover_candidates(swap["tier"], swap["tried"], swap["hosts"])
         except Exception as bad:                            # a failover must never break the turn
             logs.event(_log, "provider_failover_unavailable", level_name="error",
                        session=self.session_id, turn=record["turn_id"], step=step,
@@ -1539,6 +1549,7 @@ class Agent:
             return False
         target = candidates[0]
         swap["tried"].add(target.preset_id)
+        swap["hosts"].add(_host(target.config.base_url))
         swap["switches"] += 1
         self._failover = swap
         from_model = self.config.model
@@ -2267,22 +2278,41 @@ class Agent:
             self.emit(self.title_event())
             self.emit(self.summary_event())
 
+    def _own_model(self) -> tuple[str, object, str | None]:
+        """The pane's own (model, preset, effort), not the one a failed-over turn is borrowing.
+
+        A mid-turn autosave (`_autosave_soon`, every MID_TURN_SAVE_S) can land while `_begin_failover`
+        has the pane on a spare provider, and `self.config`/`self.preset`/`self.effort` are that
+        provider's until `_end_failover` puts them back. Written to the session file, they would say
+        the conversation is on a model the user never chose - in the sessions list, the resume
+        picker and the full-text index - and a save from a background title or summary thread could
+        read them half swapped, mid-`_adopt_model`. The swap keeps the originals, so they are read
+        from there while it is up. The vision and plan swaps do not touch `self.config` at all.
+        """
+        swap = self._failover
+        if swap is None:
+            return self.config.model, self.preset, self.effort
+        return swap["config"].model, swap["preset"], swap["effort"]
+
     def session_data(self) -> dict:
+        model, preset, effort = self._own_model()
         return {"version": STATE_VERSION, "kind": "relay_session", "id": self.session_id, "title": self.title,
                 "title_source": self.title_source, "title_turn": self.title_turn,
                 # The agent-written summary for the session list, and the branch it was written on.
                 "summary": self.summary, "summary_turn": self.summary_turn, "summary_time": self.summary_time,
                 "branch": self.refresh_branch(),
                 "created": self.created, "updated": time.time(), "workspace": str(self.executor.workspace.root),
-                "model": self.config.model, "preset": self.preset.id if self.preset else None,
-                "effort": self.effort, "mode": self.mode, "turns": self.turns, "epoch": self.epoch,
+                "model": model, "preset": preset.id if preset else None,
+                "effort": effort, "mode": self.mode, "turns": self.turns, "epoch": self.epoch,
                 "messages": self.messages[1:],
                 "snapshots": {k: v[1:] for k, v in self.snapshots.items()},
                 "checkpoints": self.checkpoints.to_json(),
                 "requests": self.requests.to_json(), "todos": self.todos.to_json(), "plan_path": self.plan_path,
                 "open_requests": self.requests.open_count(),
                 # Session info (card #Y63Z): models used and provider-reported usage.
-                "models": sessions_usage.models_with(self.models_used, self.config.model),
+                # `models` is every model that actually served this conversation, so a failover
+                # target belongs in it; `model` above is the pane's own.
+                "models": sessions_usage.models_with(self.models_used, model),
                 "usage": dict(self.usage_totals),
                 "instructions": list(self.instructions.loaded) if self.instructions else []}
 

@@ -491,7 +491,7 @@ class RoleResolver:
         return self._main(role)
 
     # ----- failover (card #G9VE) ----------------------------------------------------------
-    def failover_candidates(self, tier: str, exclude) -> list[Resolved]:
+    def failover_candidates(self, tier: str, exclude, hosts=()) -> list[Resolved]:
         """Providers a failing turn may move to: the tier's own model on every other keyed preset,
         in the catalog's order, and Relay Free last of all (owner, 2026-09-19).
 
@@ -502,19 +502,23 @@ class RoleResolver:
         ``exclude`` is the preset ids already tried this turn, the failing provider first: each
         provider is asked once, after its own transport retries. A preset whose endpoint has the
         same hostname as one already tried is skipped too: Z.AI's standard API and its Coding Plan
-        are two keys for one service, and a service that is down is down for both. A preset without
+        are two keys for one service, and a service that is down is down for both. ``hosts`` names
+        those hostnames directly, for the caller that knows one no preset id can express — a pane on
+        a base URL of its own matches no preset, and handing its turn straight back to the same host
+        under a preset's key is the one move this rule exists to stop. A preset without
         a stored key never appears, because a turn must not start spending a key the user did not
         choose, and neither does a local endpoint: it is not a keyed preset, and its answers are the
         deterministic kind a failover would only repeat.
         """
         tier = validate_tier(tier)
-        hosts = {_hostname(PRESETS[p].base_url) for p in exclude if p in PRESETS}
-        hosts.discard("")
+        skip_hosts = {_hostname(PRESETS[p].base_url) for p in exclude if p in PRESETS}
+        skip_hosts |= {(h or "").lower() for h in hosts}
+        skip_hosts.discard("")
         out: list[Resolved] = []
         for preset_id, preset in PRESETS.items():
             if preset_id in exclude or preset.hosted:
                 continue
-            if _hostname(preset.base_url) in hosts:
+            if _hostname(preset.base_url) in skip_hosts:
                 continue
             if not self.has_key(preset_id):
                 continue

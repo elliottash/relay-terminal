@@ -1009,7 +1009,9 @@ New event, emitted before the retried model call:
 `provider_retry {turn_id?, reason: "stall" | "truncated" | "http" | "failover" | "failover_ended",
 attempt, max_attempts, seconds, step, text}`
 
-`seconds` is sent only for `"stall"`, and `turn_id` is absent only for `"http"`, which the transport
+`seconds` is sent only for `"stall"`; `step` is sent by everything the agent emits and not by
+`"http"` or `"failover_ended"` (the transport does not know the step, and the restore is not at one);
+`turn_id` is absent only for `"http"`, which the transport
 emits without knowing the turn. `"http"` is the transport's retry of a refused request (below);
 `"failover"` and `"failover_ended"` are the move to another provider and the return from it
 (15.2.2), and name the model and preset they move from and to.
@@ -1038,6 +1040,13 @@ until it reopens, a spent `quota_exhausted` allowance is never waited out; the 4
 (13.9) makes a second HTTP call for the same request and continues the first's count and budget
 rather than starting a fresh six. A local model server is excluded — its 5xx are deterministic,
 and its loading 503 keeps its own fixed wait inside the first-token budget.
+
+The two layers do not wait twice over: the transport's budget is spent inside one `complete()`, and
+the failover in 15.2.2 does not wait at all — it swaps the provider and asks again straight away. So
+one model step is bounded by (1 + `MAX_STALL_RETRIES`) × (`retry_budget` + the idle deadline) per
+provider, times at most three providers: a shade under 18 minutes at the defaults (60 s deadline,
+120 s budget), and 2 minutes for a pane with failover off and a provider that refuses rather than
+stalls. A step cut off at the output limit (15.2.1) adds one more call on the same provider.
 
 `turn_summary` is unchanged; the retry is not a new turn and the ledger entry stays `in_progress`.
 
