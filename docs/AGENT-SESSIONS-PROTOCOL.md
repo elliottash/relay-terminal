@@ -3636,9 +3636,13 @@ the codex tail of 26.6, the launch helper of 26.9) is therefore given an explici
 and the backend appended to `PYTHONPATH`. A shim a guest runs is fine either way: it is a child of
 that pane's own shell.
 
-**`program_state` additions.** Three optional fields join `guest` (21.4, mirrored in 21.2):
+**`program_state` additions.** Four optional fields join `guest` (21.4, mirrored in 21.2):
 `guest_model` (string, 64 max), `guest_context_pct` (int 0-100, present only when known),
-`guest_busy` (bool; a guest turn is running). Nothing else in the pane state changes.
+`guest_busy` (bool; a guest turn is running) and `guest_session` (string, 200 max: which of the
+guest's own sessions is running in this pane, so the worker can tail that one transcript while it
+runs — 26.7. The pane learns it from the launch, from a claude hook's `session_id` or from the
+codex tail's `thread_id`, in that order of availability, and a pane that cannot say leaves the
+field out). Nothing else in the pane state changes.
 
 **No settings file to install into.** There is no per-project setup and no Guests page: a guest is
 configured at launch, from the command line, and nothing is written into a project's `.claude/` or
@@ -3979,8 +3983,7 @@ resolve a session id against the directory they start in — claude by the `<cwd
 holding its transcripts — so the same argv run elsewhere reports an unknown session.
 `guest_sessions.resume_spawn()` returns the pair as `{argv, cwd}`. A session's id is the one its
 transcript file is named after, which is both what the guest resumes by and what the index row is
-keyed on. Search spans all sources; the active pane's live transcript is tailed so a running
-session appears without a rescan; `guest_sessions.reconcile(index, limit=N)` reads only the N
+keyed on. Search spans all sources; `guest_sessions.reconcile(index, limit=N)` reads only the N
 newest transcripts per source and therefore prunes nothing (only a full reconcile drops rows
 whose transcript is gone); `limit` counts files, and a limit of zero or less reads none.
 
@@ -4027,6 +4030,18 @@ truth; when a transcript names none, `claude_workspace_from_slug` walks the real
 takes the components that slugify to what the name says, falling back to the naive split only when
 the directory is gone or two children are spelled alike. The value is not cosmetic: it becomes the
 row's `workspace`.
+
+**The running session is tailed, so its row moves with the turn** (task t:t1). A reconcile is at
+most every five seconds and re-reads a transcript; a `GuestTail` follows the one session the pane
+is running and reads only what was appended. Which session that is has to be *known*, never
+guessed, or two claudes in one directory tail each other (review B7): a Tier A pane takes it from
+its harness, and a Tier B pane sends it in `program_state.guest_session` (26.3) — from the launch,
+which tells claude its `--session-id`, or for a guest the user started themselves from a claude
+hook's own `session_id` or the codex tail's `thread_id`. The tail borrows the ticks that already
+exist rather than adding a timer: a `conversations` request polls it before it considers a
+reconcile, and a pane event re-emits the last listing when the tail moved, which is what makes a
+row move in front of an open, idle Sessions pane. It never runs when guest indexing is off, and
+stops if that is turned off while it runs.
 
 **`resume_cwd` is the raw cwd, not the resolved one** (review B4). A row's `workspace` is
 normalised (`Path.resolve()`) so that grouping and filters agree with the rest of Relay, but claude
