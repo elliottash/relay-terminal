@@ -61,6 +61,7 @@
 #include "Aliases.h"
 #include "MarkdownAnsi.h"
 #include "WordWrap.h"
+#include "TranscriptGaps.h" // a blank line between blocks of different kinds (#5AWD)
 #include "OutputLinks.h"
 #include "SlashCommands.h"
 #include "view/TerminalView.h"
@@ -2060,6 +2061,7 @@ public:
     void clearTerminal() {
         if (!m_backend) return;
         closeInline();
+        m_lastBlock = relay::gaps::Block::None;   // a cleared screen does not open with a blank line
         if (shellIdleAtPrompt()) {
             m_backend->clearScrollback();
             m_backend->sendInput(QByteArrayLiteral("\x0c"));
@@ -3977,6 +3979,7 @@ private:
                 block <= 1 ? QStringLiteral("thinking") : QStringLiteral("thinking-%1").arg(block));
             m_thinkingUserToggled = false;   // a new block starts unprejudiced
             m_thinkingFoldOpen = true;
+            turnHeader();   // "▸ model" first, then its reasoning: one block, no gap between (#5AWD)
             printThinkingAnchor();
             setFold(m_thinkingAnchor, thinkingFoldLines(m_thinkingAnchor, true));
             const QString key = Keymap::instance().shortcutText(QStringLiteral("agent.thinkingPanel"));
@@ -3992,6 +3995,7 @@ private:
     // overpaints with ▸ or ▾, the convention every tool row uses (#TK9C).
     void printThinkingAnchor() {
         endCallRun();   // a held tool-call row ends before the anchor starts its own (#TK9C)
+        beginBlock(relay::gaps::Block::Agent);   // the fold is the reply's first block (#5AWD)
         QByteArray out = takeWrapped();
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
         if (!m_atLineStart) out += "\r\n";
@@ -4275,6 +4279,9 @@ private:
 
     // Draws one row where the cursor is, exactly as `step` asks. The trailing newline is held back
     // while a run of reads may still grow, so the next result rewrites the row without a cursor-up.
+    // beginBlock(Call) goes *before* m_callCursor.start()/result(), never here: a gap prints
+    // through printInline, whose endCallRun() tells the cursor "something else printed", and a
+    // row started after that could not be rewritten by its own result (#5AWD).
     void drawCallRow(const relay::calllines::Step &step, const QString &turnId, const QString &anchor) {
         QByteArray out = takeWrapped();
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
@@ -7420,6 +7427,7 @@ private:
     // A ✦ start or finish line that is also a terminal hyperlink (OSC 8) to relay://subagent/<pane>/<id>:
     // a click opens the subagent's tab, like the strip row. Printed plain while a program runs.
     void printSubagentLine(const QString &line, const QString &id) {
+        beginBlock(relay::gaps::Block::Call);   // subagent lines sit with the tool rows (#5AWD)
         if (id.isEmpty() || !shellIdleAtPrompt()) { printInline(line + '\n', Ink::Note); return; }
         const QByteArray url = QStringLiteral("relay://subagent/%1/%2").arg(m_token, QString::fromUtf8(QUrl::toPercentEncoding(id))).toUtf8();
         QByteArray out = takeWrapped();
@@ -8612,6 +8620,7 @@ private:
             // its final form, so nothing is drawn until the result arrives.
             if (shellIdleAtPrompt()) {
                 m_callCursor.setCells(callLineCells());
+                beginBlock(relay::gaps::Block::Call);   // a blank line after prose, none inside a run (#5AWD)
                 const relay::calllines::Step step = m_callCursor.start(call, label);
                 if (!step.nothing) drawCallRow(step, turn, callAnchor(step, turn, label));
                 // With the stream on, the output goes under the line: the row is finished here.
@@ -8650,6 +8659,7 @@ private:
                 printInline(QStringLiteral("▸ ") + label.line() + QLatin1Char('\n'),
                             label.failed() ? Ink::Error : Ink::Tool);
             } else {
+                beginBlock(relay::gaps::Block::Call);   // already Call after its start: no gap (#5AWD)
                 m_callCursor.setCells(callLineCells());
                 const relay::calllines::Step step = m_callCursor.result(call, label, callLineCells());
                 const QString anchor = callAnchor(step, turn, label);
@@ -10686,6 +10696,9 @@ private:
         endCallRun();   // a held tool-call row ends before anything else prints (#TK9C)
         const QString clean = sanitize(text);
         if (clean.isEmpty()) return;
+        if (ink == Ink::Agent) beginBlock(relay::gaps::Block::Agent);
+        else if (ink == Ink::User || ink == Ink::UserAgent) beginBlock(relay::gaps::Block::User);
+        else if (ink == Ink::Tool) beginBlock(relay::gaps::Block::Call);
         QByteArray out;
         if (!m_inlineOpen) {
             // A remote prompt without Relay's integration cannot be asked to redraw itself: keep
@@ -10792,6 +10805,19 @@ private:
     // and once it is written the cursor is already at the start of a line (#TK9C).
     void ensureLineStart() { endCallRun(); if (m_inlineOpen && !m_atLineStart) printInline(QStringLiteral("\n"), Ink::Note); }
 
+    // A block of kind `next` is about to print: a blank line first when it follows a block of
+    // another kind (#5AWD, the rule is src/TranscriptGaps.h). Prose and ▸ rows are set apart, a run
+    // of rows stays single-spaced, and a ✦ line the user typed is set off from whatever came before
+    // it — including the previous turn, across the closed block and the shell prompt between.
+    // Notes, errors and tool output carry no kind: they stay attached to the block they follow.
+    void beginBlock(relay::gaps::Block next) {
+        const bool gap = relay::gaps::gapBefore(m_lastBlock, next);
+        m_lastBlock = next;
+        if (!gap) return;
+        ensureLineStart();
+        printInline(QStringLiteral("\n"), Ink::Note);   // Note: carries no kind, so no recursion
+    }
+
     void closeInline() {
         if (!m_inlineOpen) return;
         endCallRun();
@@ -10862,6 +10888,7 @@ private:
     void turnHeader() {
         if (m_turnHeader) return;
         m_turnHeader = true;
+        beginBlock(relay::gaps::Block::Header);   // set off from the ✦ line; what follows joins it (#5AWD)
         ensureLineStart();
         printInline(QStringLiteral("▸ ") + (m_model.isEmpty() ? QStringLiteral("agent") : m_model) + '\n', Ink::Note);
     }
@@ -14046,6 +14073,7 @@ private:
     QString m_submitMode, m_model, m_turnText, m_fixCommand;
     int m_fixAttempt = 0;
     bool m_fixWatch = false, m_fixArmed = false, m_fixAwaitingAgent = false, m_turnHeader = false;
+    relay::gaps::Block m_lastBlock = relay::gaps::Block::None;   // what printed last (#5AWD)
     // run_in_terminal (protocol 22). m_handoffId: the terminal_command still to be answered.
     // Prefill: a reporting command sits in the prompt box. Next: the command being staged reports.
     // Armed: the running command reports when it exits. Chain: runs since the user last typed.

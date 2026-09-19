@@ -1008,6 +1008,16 @@ engine writes them into its parser.
 - `closeInline` sends Ctrl+X Ctrl+P, so Readline redraws the prompt. While more queued turns
   are pending, the prompt is not redrawn between turns.
 - Tool calls print one line each; see "Tool-call lines" below.
+- **One blank line between blocks of different kinds** (#5AWD): the user's ✦ line, the
+  `▸ model` header, the agent's prose and the ▸ tool rows are the kinds (`relay::gaps::Block`,
+  `src/TranscriptGaps.h`, tested headless). `Pane::beginBlock` prints the gap before a block
+  whose kind differs from the last one printed — never before the first, never between two of
+  the same kind (a run of tool rows stays single-spaced), never right after the header, which
+  sits on top of what follows it — and a ✦ line is set off from the previous turn even across
+  the closed block and the shell prompt in between. Notes, errors, diffs and tool output carry
+  no kind and stay attached. For a tool row the gap goes *before* `LineCursor::start()` /
+  `result()` are asked, because it prints through `printInline`, whose `endCallRun()` tells the
+  cursor something else printed and would stop the result rewriting its running row in place.
 - If the D-Bus session is not found, output goes to stderr.
 
 ### Tool-call lines

@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+// Blank lines between the kinds of thing the terminal transcript prints (#5AWD).
+//
+// A turn's transcript is a sequence of blocks: the user's ✦ line, the "▸ model" header, the
+// agent's prose, and ▸ tool-call rows. The owner asked for a blank line between content types —
+// prose and tool calls, one user message and the next — and none inside a run of tool calls.
+//
+// The pane keeps the kind of the last block it printed and asks this before starting the next.
+// Nothing here writes anything; the pane does, and tests/transcriptgaps_test.cpp checks the rule
+// headless.
+namespace relay::gaps {
+
+enum class Block {
+    None,     // nothing printed yet, or the screen was cleared
+    User,     // a ✦ line the user typed (a prompt, a steer, an answer)
+    Header,   // the turn's "▸ model" line, or a "── request ──" separator
+    Agent,    // the agent's prose, and its thinking fold
+    Call,     // a ▸ tool-call row, a subagent line, a turn-limit line
+};
+
+// True when a blank line goes before a block of kind `next` that follows one of kind `prev`.
+// Never before the first block, never after a header (the header introduces what follows it),
+// and never between two blocks of the same kind: a run of calls stays single-spaced, and so do
+// two consecutive prose deltas.
+inline bool gapBefore(Block prev, Block next)
+{
+    if (prev == Block::None || next == Block::None) return false;
+    if (prev == Block::Header) return false;
+    return prev != next;
+}
+
+}  // namespace relay::gaps
