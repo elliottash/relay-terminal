@@ -4677,10 +4677,20 @@ private:
         QWidget *parent = anchor->parentWidget();
         if (auto *splitter = dynamic_cast<QSplitter *>(parent); splitter && splitter->orientation() == orientation) {
             const int index = splitter->indexOf(anchor);
+            // Only the anchor's share is split between it and the newcomer; the panes beside them
+            // keep the sizes the person gave them (owner, 2026-09-19). Read before the insert,
+            // which is when the list still describes the splitter. An empty answer means there is
+            // nothing worth keeping — a splitter not yet laid out — and equal shares are then as
+            // good as any.
+            const QList<int> kept = relay::panes::sizesAfterDock(splitter->sizes(), index);
             splitter->insertWidget(before ? index : index + 1, pane);
-            QList<int> equal;
-            for (int i = 0; i < splitter->count(); ++i) equal.append(1000);
-            splitter->setSizes(equal);
+            if (kept.size() == splitter->count()) {
+                splitter->setSizes(kept);
+            } else {
+                QList<int> equal;
+                for (int i = 0; i < splitter->count(); ++i) equal.append(1000);
+                splitter->setSizes(equal);
+            }
         } else {
             auto *wrapper = newSplitter(orientation);
             if (auto *outer = dynamic_cast<QSplitter *>(parent)) {

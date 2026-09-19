@@ -81,6 +81,25 @@ Direction dropEdge(const QPoint &local, const QSize &size);
 // (Ctrl+H, which hides the prompt box) shrank a pane in a three-pane row to almost nothing.
 QList<QPointer<QSplitter>> enclosingSplitters(QWidget *pane);
 
+// ----- docking a pane beside a neighbour (owner, 2026-09-19) -----------------------------------
+//
+// Inserting a pane into a splitter that already runs that way used to give every child an equal
+// share: a wide terminal next to a narrow file pane, and docking a third pane beside the terminal
+// made all three the same width — an arrangement the person had made, undone by a keystroke. Only
+// the anchor's share is divided now, half to it and half to the newcomer, and every other child
+// keeps the size it had. The chord and the drag both dock through RelayWindow::insertBeside, so
+// this is the arithmetic for both.
+//
+// `sizes` is QSplitter::sizes() as it is BEFORE the insertion and `anchorIndex` the anchor's place
+// in it; the result has one more entry, in splitter order, summing to the same total and ready for
+// setSizes() after the insert. The two halves are floor then ceil, as a fresh two-pane splitter
+// divides itself, so which of them is the new pane does not change the numbers.
+//
+// An empty list means there is nothing to keep: no sizes, an index outside them, or an anchor with
+// no room to give (a splitter that has not been laid out yet reads as zeros). The caller then
+// falls back rather than writing a size of 0 for the pane it just docked.
+QList<int> sizesAfterDock(const QList<int> &sizes, int anchorIndex);
+
 // Put sizes recorded from enclosingSplitters() back. A splitter that has gone away, or whose
 // children changed in between so the sizes no longer describe it, is skipped.
 void restoreSizes(const QList<QPointer<QSplitter>> &splitters, const QList<QList<int>> &sizes);

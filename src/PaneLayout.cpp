@@ -139,6 +139,20 @@ bool chordKeyKeepsWindow(int key, const QString &actionId) {
            || actionId == QLatin1String("pane.moveDown");
 }
 
+QList<int> sizesAfterDock(const QList<int> &sizes, int anchorIndex) {
+    if (anchorIndex < 0 || anchorIndex >= sizes.size()) return {};
+    const int share = sizes.at(anchorIndex);
+    if (share <= 0) return {};
+    QList<int> out;
+    out.reserve(sizes.size() + 1);
+    for (int i = 0; i < sizes.size(); ++i) {
+        if (i != anchorIndex) { out.append(sizes.at(i)); continue; }
+        out.append(share / 2);
+        out.append(share - share / 2);
+    }
+    return out;
+}
+
 void restoreSizes(const QList<QPointer<QSplitter>> &splitters, const QList<QList<int>> &sizes) {
     for (int i = 0; i < splitters.size() && i < sizes.size(); ++i) {
         QSplitter *splitter = splitters.at(i);

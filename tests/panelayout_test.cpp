@@ -16,6 +16,7 @@
 #include <QTest>
 
 #include <memory>
+#include <numeric>
 #include <utility>
 
 using namespace relay::panes;
@@ -165,6 +166,63 @@ private Q_SLOTS:
         QCOMPARE(order(other.get()), QStringLiteral("X"));
         swapInSplitter(nullptr, paneNamed(splitter.get(), QStringLiteral("A")), paneNamed(splitter.get(), QStringLiteral("B")));
         QCOMPARE(order(splitter.get()), QStringLiteral("A,B"));
+    }
+
+    // ----- docking a pane beside a neighbour (owner, 2026-09-19) ------------------------------
+
+    // Docking used to hand every child of the splitter an equal share, so a keystroke undid the
+    // widths the person had dragged. Only the anchor's share is divided.
+    void dockingSplitsOnlyTheAnchorsShare() {
+        // Two panes, the newcomer beside the wide one: the narrow one is not touched.
+        QCOMPARE(sizesAfterDock({300, 690}, 1), QList<int>({300, 345, 345}));
+        QCOMPARE(sizesAfterDock({300, 690}, 0), QList<int>({150, 150, 690}));
+        // Three panes, the newcomer beside the middle: both ends keep what they had.
+        QCOMPARE(sizesAfterDock({200, 500, 300}, 1), QList<int>({200, 250, 250, 300}));
+        // An odd share divides floor then ceil, as a fresh two-pane splitter divides itself.
+        QCOMPARE(sizesAfterDock({201, 300}, 0), QList<int>({100, 101, 300}));
+        // Nothing is created or lost: the splitter still adds up to what it did.
+        for (const QList<int> &sizes : {QList<int>{300, 690}, QList<int>{200, 500, 300}, QList<int>{201, 300}})
+            for (int i = 0; i < sizes.size(); ++i) {
+                const QList<int> after = sizesAfterDock(sizes, i);
+                QCOMPARE(after.size(), sizes.size() + 1);
+                QCOMPARE(std::accumulate(after.cbegin(), after.cend(), 0),
+                         std::accumulate(sizes.cbegin(), sizes.cend(), 0));
+            }
+    }
+
+    // What cannot be divided says so, rather than sizing the pane that was just docked to nothing.
+    void dockingRefusesWhatItCannotDivide() {
+        QVERIFY(sizesAfterDock({}, 0).isEmpty());
+        QVERIFY(sizesAfterDock({300, 690}, -1).isEmpty());
+        QVERIFY(sizesAfterDock({300, 690}, 2).isEmpty());
+        QVERIFY(sizesAfterDock({0, 0}, 0).isEmpty());          // a splitter not laid out yet
+        QVERIFY(sizesAfterDock({300, 0, 690}, 1).isEmpty());   // an anchor with no room to give
+    }
+
+    // The arithmetic against a real QSplitter, the way RelayWindow::insertBeside uses it: read the
+    // sizes, insert, set them. The panes that were not the anchor come out with the widths they
+    // had, which is the whole of the fix; equal shares would have made all four 250.
+    void dockingKeepsTheOtherPanesWidths() {
+        std::unique_ptr<QSplitter> splitter(splitterOf(Qt::Horizontal, {QStringLiteral("A"), QStringLiteral("B"), QStringLiteral("C")}));
+        splitter->setHandleWidth(0);
+        splitter->setChildrenCollapsible(false);
+        splitter->resize(1000, 400);
+        splitter->setSizes({200, 500, 300});
+        splitter->show();
+        const int anchorIndex = 1;
+        const QList<int> kept = sizesAfterDock(splitter->sizes(), anchorIndex);
+        auto *docked = new QLabel(QStringLiteral("D"));
+        docked->setObjectName(QStringLiteral("D"));
+        splitter->insertWidget(anchorIndex + 1, docked);
+        QCOMPARE(kept.size(), splitter->count());
+        splitter->setSizes(kept);
+        QCOMPARE(order(splitter.get()), QStringLiteral("A,B,D,C"));
+        const QList<int> after = splitter->sizes();
+        QCOMPARE(after.size(), 4);
+        QVERIFY2(std::abs(after.at(0) - 200) <= 2, qPrintable(QStringLiteral("A is %1").arg(after.at(0))));
+        QVERIFY2(std::abs(after.at(3) - 300) <= 2, qPrintable(QStringLiteral("C is %1").arg(after.at(3))));
+        QVERIFY2(std::abs(after.at(1) - after.at(2)) <= 2, "the anchor and the newcomer halve its share");
+        QVERIFY2(after.at(1) > 200, "and neither half is the equal share the splitter used to force");
     }
 
     // ----- the edge a dragged pane is dropped on ----------------------------------------------
