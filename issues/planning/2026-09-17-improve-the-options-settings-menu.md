@@ -76,3 +76,35 @@ per finished edit), 7 (the whole toggle row is clickable), 9 (headings inside Ag
 is redrawn on keymap reload and theme reload, not on every external write), 8 (per-row reset and a
 changed indicator), 11 (confirm before "Start a fresh window set"), the Browse… button for path rows,
 and export/import (#05J2).
+
+## Update (2026-09-19): the rest of the list, except #05J2
+
+Findings 3, 8 and 11 and the Browse… button are implemented (`64e6448` the pane, and the catalog
+half beside it). What each one turned into:
+
+- **3 — a value is never one edit behind.** `relay::SettingsWatch` (src/SettingsPane.h) is one
+  process-wide place to say a setting was written. Every live `SettingsPane` listens and redraws, so
+  an Options pane in another tab or another window follows an edit made anywhere — a control on
+  another pane, a page reset, a keymap or theme reload, a saved local model. Delivery is queued and
+  a burst collapses into one, because the rebuild deletes the control whose signal asked for it.
+  `RelayWindow::refreshSettingsPanes()` is now that notify, and a window coming forward while it
+  shows an Options pane redraws it, which catches the writers that cannot announce themselves: a
+  dialog that has just closed, a hand-edited `relay.conf`, a second Relay.
+- **8 — the changed indicator and the per-row reset are one mark.** A row whose value is not what
+  Relay ships with carries a ↺ between its words and its control, and its page carries a dot on its
+  tab. The row says so itself (`SettingRow::changed`, set by every row helper and by the four rows
+  written out by hand), so the pane knows no settings keys. The ↺ asks nothing first — one row, in
+  front of you, set again in a click — where the page's "Reset to defaults" asks.
+- **11 — "Start a fresh window set" asks first.** It is one row down an Actions list, nothing on
+  screen changes when it runs, and what it throws away (every window, tab, pane and directory that
+  would have come back) only shows at the next start.
+- **Browse…** on the Plans folder row (`SettingRow::browse`), writing through the row's own callback
+  so a folder picked and a folder typed are the same edit. `SettingsPane::setFolderChooser` is the
+  seam tests use, since a QFileDialog cannot be clicked headless.
+
+That leaves **only #05J2** (export/import, and optional sync) from the proposals above, which is its
+own card. Tier 3's "About/footer" and the "Applies to the next conversation" chip were not done and
+are not lost work: both are cosmetic and neither has been asked for since the pane replaced the
+dialog — raise them again if the pane ever gets an About line.
+
+Evidence: `docs/qa_evidence/2026-09-19-options-menu-followups/`.
