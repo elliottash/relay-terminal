@@ -105,6 +105,13 @@ links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-19-agent-int
   something; the in-progress block at close time is not in the ledger (its row is written when
   the block ends), so closing mid-reasoning reprints the rows before it and the fresh inline fold
   then shows the whole block; `agent/thinking_display=never` is said once in the pane.
+- **Renamed to Activity (#4X53, 2026-09-19.)** Every user-facing string this card shipped as
+  "Agent internals" now reads "Activity" (keymap label, palette row, pane band, the view's
+  title, the moved-thinking anchor, the shortcut hint, the docs). Nothing in the code was
+  renamed: the action is still `agent.internalsPane`, the pane type `internals`, the classes
+  `AgentInternalsView` / `InternalsLedger`, the layout node `{"internals": …}`, so saved
+  sessions and keymaps carry over. #4X53 also put a relay-mark button on the "Relaying – …"
+  line that opens this pane.
 
 ## Not in this card
 

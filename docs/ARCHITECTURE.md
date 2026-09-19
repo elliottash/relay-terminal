@@ -745,7 +745,7 @@ Default window shortcuts:
 | Toggle terminal/agent input | Ctrl+I | Restart stopped shell/agent | Ctrl+Shift+R |
 | Interrupt agent with prompt | Ctrl+Alt+Enter | Step through links in the output | Ctrl+Shift+L |
 | Conversation info (the ⓘ view) | Alt+I | Subagents / Flash / Reasoning panes | Alt+A / Alt+F / Alt+R |
-| Agent internals pane | Alt+Shift+R | | |
+| Activity pane | Alt+Shift+R | | |
 
 The session manager (`/resume`, `agent.resume`) is Ctrl+Shift+Y, Warp's key for its conversations menu. Options and
 resume have no plain-Ctrl twin (owner, 2026-09-18): Ctrl+O and Ctrl+Y belong to the shell.
@@ -1098,17 +1098,18 @@ arrived). How much of this runs at all is `agent/thinking_display` — `collapse
 settings file that still has the `agent/show_thinking` bool is migrated in place on first read.
 Alt+R (`agent.thinkingPanel`) toggles the latest fold, live while it streams and the last turn's
 afterwards, and every refusal toasts. The text is kept per turn whatever the display mode —
-`m_turnThinking` feeds the turn pane and the internals pane too: the turn view holds the reasoning
+`m_turnThinking` feeds the turn pane and the Activity pane too: the turn view holds the reasoning
 and redraws it with the log, so the `turn_transcript` reply that lands after the pane opens no
 longer wipes it (#K48R), and the fold's 4 Hz flush keeps an open one current while the block
-streams. The capped fold's "open in pane" row goes to the internals pane (below), on that turn's
+streams. The capped fold's "open in pane" row goes to the Activity pane (below), on that turn's
 block. `turn_summary` (sent just before `done`) is stored
 per pane (last 50) and, when the turn used tools, prints `✦ N tool calls · T s` wrapped in an
 OSC 8 hyperlink to `relay://turn/<pane token>/<turn id>`. The live `tool_output {text}` stream and
 the stored reply `tool_output {stored: true, …}` share a name; the GUI branches on `stored`.
 
-**The agent internals pane** (card #QT8C; Alt+Shift+R, `agent.internalsPane`, the palette's
-"Agent internals", or the reasoning fold's "open in pane"). One `ToolPane(Kind::Internals)` per
+**The Activity pane** (card #QT8C; named "Activity" by #4X53, which left every identifier — the
+action `agent.internalsPane`, the pane type `internals`, the classes, the layout node — spelled
+"internals"; Alt+Shift+R, the palette's "Activity", or the reasoning fold's "open in pane"). One `ToolPane(Kind::Internals)` per
 terminal pane, inserted beside it like the turn and diff panes, hosting `relay::AgentInternalsView`
 (`src/AgentInternalsView.*`): a scrolling log of the pane's reasoning and tool calls, live and in
 order — a muted rule per turn carrying the request's first line, each reasoning block as
@@ -1131,7 +1132,7 @@ the reprint waits for `inlineReady()` (`flushInline` drains it once a program gi
 back); the ledger hands its rows over once, so open-and-close-again prints nothing twice; and it
 keeps at most the last 50 turns (the worker's own detail bound), older ones collapsing to one
 `… N earlier turns` row. Opening the pane mid-block settles the inline fold's row to
-`✦ thinking moved to the internals pane` and the view continues the block; closing it mid-block
+`✦ thinking moved to the Activity pane` and the view continues the block; closing it mid-block
 starts a fresh inline anchor for what follows. Closing the owner takes the pane along with nothing
 reprinted (the `destroyed` connection's context is the owner). The pane is saved in the layout as
 `{"internals": {cwd, owner}}` and restored beside the pane whose scrollback id it names, empty
