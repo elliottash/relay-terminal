@@ -127,10 +127,16 @@ public:
     // `control_answer {pane, participant, grant}`. An empty participant with `grant` false is the
     // owner taking a pane back from whoever holds it (`control_revoke`).
     void answerControl(const QString &paneId, const QString &participant, bool grant);
-    // `control_take {pane}`: the owner's own keystroke landed in a pane a guest was driving. Sent
-    // from Pane's event filter, which never swallows the key that sent it.
+    // `control_take {pane}`: the owner's own keystroke landed in a pane somebody else was
+    // driving — a guest, or one of the owner's own paired devices, because section 10.3 has one
+    // holder and the phone is in the same book. Sent from Pane's event filter, which never
+    // swallows the key that sent it.
     void takeControl(const QString &paneId);
     void answerPrompt(const QString &promptId, bool approve);
+    // `invite_email`: post the link the dialog is showing. Desktop-only, like the other invite
+    // names; the answer comes back as inviteSent().
+    void emailInvite(const QString &url, const QString &to, const QString &role,
+                     const QString &expiry, const QString &pane);
     void pauseShare(const QString &paneId, bool on);
     void endShare(const QString &paneId);
     void setShareOptions(const QString &paneId, bool promptsImmediate, bool presentOnly);
@@ -160,6 +166,7 @@ signals:
                       const QString &fingerprint, const QString &code, const QString &peer);
     void devicesChanged(const QJsonArray &items);
     void failed(const QString &message);
+    void inviteSent(bool ok, const QString &message);
     void sharingChanged();
     // An `invite` line: the link to hand out, its QR, and what it grants.
     void inviteReady(const QString &url, const relay::QrMatrix &qr, const QString &role,
@@ -261,6 +268,10 @@ private:
     QLabel *m_inviteQr = nullptr;
     QLineEdit *m_inviteUrl = nullptr;
     QPushButton *m_inviteCopy = nullptr;
+    // Emailing the link is the same act as copying it: the link is already minted, this posts it.
+    QLineEdit *m_inviteTo = nullptr;
+    QString m_inviteRoleValue, m_inviteExpiryText;   // what the link that is on screen grants
+    QPushButton *m_inviteSend = nullptr;
     QString m_inviteLink;
 };
 
