@@ -3,6 +3,8 @@
 // ordering, the row list the one scrolling view draws, and the `#` picker's ranking. No worker,
 // no files, no network.
 #include "BoardModel.h"
+
+#include "Projects.h"
 #include "BoardPane.h"
 
 #include <QCheckBox>
@@ -308,16 +310,20 @@ void BoardModelTests::theFilterLanguageMatchesEveryTerm()
     QVERIFY(Model::matches(card, QStringLiteral("folder:changes")));
     QVERIFY(Model::matches(card, QStringLiteral("folder:bugs")));
     QVERIFY(!Model::matches(card, QStringLiteral("folder:marketing")));
-    // Either spelling of the board folder is stripped off the path first (#JN7X): a card on a
-    // board made from 2026-09-18 on is in `switchboard/`, one filed before that in `issues/`.
+    // Every spelling of the board folder is stripped off the path first (#JN7X, and the hidden
+    // folder of 2026-09-19): `.switchboard/` on a board made now, `switchboard/` on one from
+    // between the two decisions, `issues/` on one filed before either.
     QCOMPARE(card.folder(), QStringLiteral("changes"));
-    Card fresh = card;
-    fresh.path = QStringLiteral("switchboard/changes/2026-09-18-voice.md");
-    QCOMPARE(fresh.folder(), QStringLiteral("changes"));
-    QVERIFY(Model::matches(fresh, QStringLiteral("folder:changes")));
-    Card privateCard = card;
-    privateCard.path = QStringLiteral("switchboard/.private/changes/2026-09-18-voice.md");
-    QCOMPARE(privateCard.folder(), QStringLiteral("changes"));
+    for (const QString &folder : relay::projects::boardFolders()) {
+        Card moved = card;
+        moved.path = folder + QStringLiteral("/changes/2026-09-18-voice.md");
+        QCOMPARE(moved.folder(), QStringLiteral("changes"));
+        QVERIFY(Model::matches(moved, QStringLiteral("folder:changes")));
+        Card privateCard = card;
+        privateCard.path = folder + QStringLiteral("/.private/changes/2026-09-18-voice.md");
+        QCOMPARE(privateCard.folder(), QStringLiteral("changes"));
+        QVERIFY(Model::matches(privateCard, QStringLiteral("folder:changes")));
+    }
     QVERIFY(Model::matches(card, QStringLiteral("@agent")));
     QVERIFY(!Model::matches(card, QStringLiteral("@dana")));
     QVERIFY(Model::matches(card, QStringLiteral("waiting:me")));

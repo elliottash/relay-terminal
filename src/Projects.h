@@ -13,13 +13,16 @@
 //   * Attaching is always an explicit action (opening the Switchboard, `/card`, the `#` picker,
 //     executing a card, …). Each of those is one of the closed set of reasons below, and it is the
 //     reason a project is written into the registry.
-//   * **A project's board lives in the project**, in a folder called `switchboard/` whose marker is
-//     `switchboard/board.yaml`. Relay never creates it behind the user's back: the folder appears
-//     only after they answer the one-time "Initialize a project and create a Switchboard here?"
-//     question. That is what `Board::Uninitialized` and `Board::needsConsent` say.
-//   * Boards that already live at `issues/board.yaml` keep working exactly as they are; they are
-//     found by the same walk and used where they are. `switchboard/` wins if a project somehow has
-//     both, because that is the name Relay creates today.
+//   * **A project's board lives in the project**, in a folder called `.switchboard/` whose marker
+//     is `.switchboard/board.yaml` — hidden since the owner's decision of 2026-09-19, and shown as
+//     `switchboard/` when the "Hidden Switchboard folder" option is off. Relay never creates it
+//     behind the user's back: the folder appears only after they answer the one-time "Initialize a
+//     project and create a Switchboard here?" question. That is what `Board::Uninitialized` and
+//     `Board::needsConsent` say.
+//   * Boards that already live at `switchboard/board.yaml` or `issues/board.yaml` keep working
+//     exactly as they are; they are found by the same walk and used where they are. Nothing moves
+//     by itself: `boardFolders()` is the one precedence order, and the one action that renames a
+//     folder is the user's own "Hide this board's folder" (backend `board_folder`, protocol 19.15).
 //   * The registry of known projects is removable: every record carries why it became known and
 //     when. A "no, do not make a Switchboard here" answer is remembered too (`decline()`), so the
 //     same project is not asked about twice; an explicit `/init` clears it.
@@ -47,11 +50,40 @@ constexpr int kSchemaVersion = 1;
 
 // ----- where a board is kept ---------------------------------------------------------------------
 
-// The folder Relay creates for a new project's board, and its marker file.
+// The folders a board may be kept in, and the marker file that makes one a board.
+// `.switchboard/` is what Relay creates since 2026-09-19; `switchboard/` is what it created between
+// 2026-09-18 and then; `issues/` is the original spelling, including this repository's own.
+inline constexpr const char *kHiddenBoardFolder = ".switchboard";
 inline constexpr const char *kBoardFolder = "switchboard";
-inline constexpr const char *kBoardMarkerFile = "board.yaml";
-// The folder boards were kept in before 2026-09-18. Still found, still used in place, never made.
 inline constexpr const char *kLegacyBoardFolder = "issues";
+inline constexpr const char *kBoardMarkerFile = "board.yaml";
+
+// The three above, in precedence order: `.switchboard`, `switchboard`, `issues`. **Reading is
+// tolerant and ordered**: every lookup walks this one list and the first folder that holds
+// `board.yaml` is the board. It mirrors `BOARD_FOLDERS` in backend/relay_core/board.py exactly, in
+// the same order, and tests/projects_test.cpp reads that file to keep the two from drifting.
+QStringList boardFolders();
+
+// The folder a *new* board goes in: `.switchboard` hidden, `switchboard` shown. Pure.
+QString newBoardFolder(bool hidden);
+
+// ----- the "Hidden Switchboard folder" option ---------------------------------------------------
+//
+// QSettings, default **on** (owner, 2026-09-19). It decides the folder a board is *created* in and
+// nothing else: it never moves a board that exists and never changes what is read.
+inline constexpr const char *kHiddenFolderSetting = "board/hidden_folder";
+bool hiddenBoardFolder();
+// `newBoardFolder(hiddenBoardFolder())`: what a board created right now would be called.
+QString newBoardFolder();
+
+// ----- the default project for loose cards ------------------------------------------------------
+//
+// A card filed in a tab attached to nothing needs somewhere to go. There is no board outside a
+// project any more (the personal inbox was dropped on 2026-09-19, card #916B), so the answer is one
+// optional setting: a project folder the user chose, empty by default. Empty, or a path that is no
+// longer a directory, means "ask me" — the project picker, and the init question behind it.
+inline constexpr const char *kDefaultProjectSetting = "board/default_project";
+QString defaultProject();
 
 // ----- why a project became known --------------------------------------------------------------
 //
@@ -83,9 +115,9 @@ inline constexpr const char *kBoardNone = "none";   // no board yet (or none wan
 
 // The project a live terminal cwd is in, or an empty string. Filesystem walk only:
 //
-//   1. the nearest ancestor (the directory itself first) holding `switchboard/board.yaml` or
-//      `issues/board.yaml` — an initialised project wins however far up it is, because that marker
-//      is a deliberate statement and `.git` is not;
+//   1. the nearest ancestor (the directory itself first) holding a board: any of `boardFolders()`
+//      with a `board.yaml` in it — an initialised project wins however far up it is, because that
+//      marker is a deliberate statement and `.git` is not;
 //   2. otherwise the nearest ancestor holding a `.git` entry. A *file* counts as well as a
 //      directory, so a linked worktree and a submodule are projects like any other checkout;
 //   3. otherwise empty.
@@ -100,11 +132,11 @@ inline constexpr const char *kBoardNone = "none";   // no board yet (or none wan
 // *inside* a dotfiles `$HOME` still wins.
 QString candidateFor(const QString &cwd);
 
-// The board folder a project already has: `<project>/switchboard` when that holds a `board.yaml`,
-// otherwise `<project>/issues` when that does, otherwise empty. `switchboard/` wins when a project
-// has both — it is the name Relay creates, and the older folder is left alone rather than merged.
-// An empty result means "not initialised", which is the only thing that raises the consent
-// question. Impure, by nature; `chooseBoard()` takes the answer as an argument.
+// The board folder a project already has: the first of `boardFolders()` that holds a `board.yaml`,
+// otherwise empty. The earlier spelling in that order wins when a project has more than one folder,
+// and the others are left alone rather than merged. An empty result means "not initialised", which
+// is the only thing that raises the consent question. Impure, by nature; `chooseBoard()` takes the
+// answer as an argument.
 QString boardDirOf(const QString &project);
 
 // ----- the key of a project ----------------------------------------------------------------------
@@ -154,12 +186,11 @@ struct Board {
         None,            // no project, so no board
         InRepo,          // a board folder that is there now
         Uninitialized,   // a project with no board: `dir` is where one *would* go, if the user says yes
-        Inbox,           // `<boardsRoot>/inbox/switchboard`, for cards filed with no project attached
     };
     Kind kind = None;
     QString dir;                // the board folder; empty for None
-    QString project;            // the project it belongs to; empty for None and Inbox
-    QString key;                // keyFor(project); empty for None and Inbox
+    QString project;            // the project it belongs to; empty for None
+    QString key;                // keyFor(project); empty for None
     bool needsConsent = false;  // nothing may be written here until the user answers "initialize?"
 
     bool isValid() const { return kind != None && !dir.isEmpty(); }
@@ -167,38 +198,30 @@ struct Board {
     bool isWritable() const { return isValid() && !needsConsent; }
 };
 
-// `<GenericDataLocation>/relay/boards`, i.e. `$XDG_DATA_HOME/relay/boards`. Only the personal inbox
-// lives here now; a project's own board never does. Empty when there is no writable data location.
-QString boardsRoot();
-
-// Which board a project's cards belong to. **Pure**: it stats nothing, so the two facts it cannot
-// know — the board folder the project already has, and what Relay already recorded about it — are
-// passed in. `known` may be null; `existingBoardDir` is what `boardDirOf()` returned.
+// Which board a project's cards belong to. **Pure**: it stats nothing and reads no settings, so the
+// three facts it cannot know — the board folder the project already has, what Relay already recorded
+// about it, and the folder a new board would be created in — are passed in. `known` may be null;
+// `existingBoardDir` is what `boardDirOf()` returned; an empty `newFolder` means `kHiddenBoardFolder`.
 //
 //   * empty or relative `project`   -> None. A board never lives at a relative path.
 //   * `existingBoardDir` non-empty  -> InRepo, at exactly that folder. Wherever the board already
-//                                      is, in `switchboard/` or in an older `issues/`, that is
-//                                      where the cards are; Relay does not move it.
-//   * otherwise                     -> Uninitialized at `<project>/switchboard`, with needsConsent.
+//                                      is, hidden or in an older `switchboard/` or `issues/`, that
+//                                      is where the cards are; Relay does not move it.
+//   * otherwise                     -> Uninitialized at `<project>/<newFolder>`, with needsConsent.
 //                                      That is where a board *would* go. Nothing may be created
 //                                      there until the user answers the one-time question.
 //
-// `boardsRoot` is taken so callers pass the same root they give `inbox()`; a project's board no
-// longer lives under it, so it does not affect the result.
+// There is no board outside a project: the personal inbox was dropped on 2026-09-19 (#916B), and a
+// loose card goes to `defaultProject()` or to the project the user picks.
 //
 // `project` is expected to be the absolute, canonical path `candidateFor()` returns; the key is
 // derived from it without a stat, so a path that is absolute but not canonical gets a key
 // `keyFor()` would not agree with.
 Board chooseBoard(const QString &project, const QString &existingBoardDir, const Record *known,
-                  const QString &boardsRoot);
+                  const QString &newFolder = QString());
 
-// The personal inbox: `<boardsRoot>/inbox/switchboard`, where a card filed with no project attached
-// goes. It is in Relay's own data directory, so it belongs to nobody's repository and needs no
-// consent. Empty `boardsRoot` yields None.
-Board inbox(const QString &boardsRoot);
-
-// The `board` field a Board maps to. Only InRepo is a board that exists, so everything else — a
-// project waiting to be initialised, and the inbox, which is not a project — reads as kBoardNone.
+// The `board` field a Board maps to. Only InRepo is a board that exists, so a project waiting to be
+// initialised — and no project at all — reads as kBoardNone.
 QString boardKindName(Board::Kind kind);
 
 // ----- the registry of known projects ------------------------------------------------------------
@@ -278,9 +301,9 @@ QString stateDirectory();
 QString defaultPath();
 
 // The impure convenience over chooseBoard(): calls boardDirOf(), looks the project up in `known`
-// (may be null) and calls chooseBoard() with boardsRoot(). A project the user has already declined
-// still comes back Uninitialized — the Board says where a board would go, and the caller asks the
-// registry whether it is allowed to raise the question again.
+// (may be null) and calls chooseBoard() with `newBoardFolder()`, the option's answer. A project the
+// user has already declined still comes back Uninitialized — the Board says where a board would go,
+// and the caller asks the registry whether it is allowed to raise the question again.
 Board boardFor(const QString &project, const Registry *known = nullptr);
 
 }  // namespace projects

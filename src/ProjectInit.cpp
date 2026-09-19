@@ -34,8 +34,10 @@ const QLatin1String kCards("cards");
 const QLatin1String kConvertible("convertible");
 const QLatin1String kItems("items");
 
-// The board folder's name, so a change to `projects::kBoardFolder` moves both at once.
-QString folderName() { return QString::fromLatin1(relay::projects::kBoardFolder); }
+// The folder a yes would create: `.switchboard`, or `switchboard` when the "Hidden Switchboard
+// folder" option is off. Read here rather than spelled out, so the question names the folder the
+// user will actually get.
+QString folderName() { return relay::projects::newBoardFolder(); }
 
 QString trimmedString(const QJsonValue &value)
 {

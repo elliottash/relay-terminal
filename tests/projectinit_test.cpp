@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // "Initialize a project and create a Switchboard here?" (src/ProjectInit.h, protocol 19.12/19.13).
 //
-// The owner's rule of 2026-09-18 is that `<project>/switchboard/` appears only after one yes, and
+// The owner's rule of 2026-09-18 is that the board folder appears only after one yes -- and since
+// 2026-09-19 that folder is hidden, so the question names `<project>/.switchboard/` unless the
+// "Hidden Switchboard folder" option is off. Only five acts may ask, and
 // that only five acts may ask. Both halves are rules, not pixels, so both are tested here with no
 // window and no worker: `decide()` is the whole table, and `questionFrom()` turns one
 // `project_probe_result` into the lines the pane draws.
@@ -12,9 +14,12 @@
 #include "ProjectInit.h"
 #include "Projects.h"
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSettings>
+#include <QTemporaryDir>
 #include <QtTest>
 
 using namespace relay::projectinit;
@@ -77,6 +82,8 @@ class ProjectInitTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase();
+
     // ----- the triggers -------------------------------------------------------------------------
     void everyTriggerIsAnAttachReason();
     void triggerNamesRoundTrip();
@@ -103,7 +110,23 @@ private slots:
     void theWindowOffersItPassivelyAndRemembersTheAnswer();
     void aGuestsPaneNeverDrawsTheQuestion();
     void theseEventsStayOnTheDesktop();
+
+private:
+    // The folder the question names comes from the "Hidden Switchboard folder" option, so these
+    // cases read and write QSettings: they get their own store, never the developer's.
+    QTemporaryDir m_settings;
 };
+
+void ProjectInitTests::initTestCase()
+{
+    QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminalTest"));
+    QCoreApplication::setApplicationName(QStringLiteral("projectinit-test"));
+    QVERIFY(m_settings.isValid());
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_settings.path());
+    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, m_settings.path());
+    QSettings().clear();
+}
 
 // ----- the triggers ---------------------------------------------------------------------------
 
@@ -246,14 +269,23 @@ void ProjectInitTests::aGuestIsNeverAskedAndNeitherIsASecondQuestion()
 void ProjectInitTests::theQuestionNamesTheFolderItWouldCreate()
 {
     QCOMPARE(titleLine(), QStringLiteral("Initialize a project and create a Switchboard here?"));
-    QCOMPARE(boardFolderFor(kProject), kProject + QStringLiteral("/switchboard"));
-    QCOMPARE(boardFolderFor(kProject + QStringLiteral("/")), kProject + QStringLiteral("/switchboard"));
+    // Hidden by default (owner, 2026-09-19), so that is what the question offers to create.
+    QCOMPARE(boardFolderFor(kProject), kProject + QStringLiteral("/.switchboard"));
+    QCOMPARE(boardFolderFor(kProject + QStringLiteral("/")), kProject + QStringLiteral("/.switchboard"));
     QCOMPARE(boardFolderFor(QString()), QString());
     // One folder, named, and the sentence says nothing else is written.
     const QString line = folderLineFor(kProject);
-    QVERIFY(line.contains(kProject + QStringLiteral("/switchboard/")));
+    QVERIFY(line.contains(kProject + QStringLiteral("/.switchboard/")));
     QVERIFY(line.contains(QStringLiteral("nothing else")));
     QVERIFY(!line.contains(QStringLiteral("issues")));
+
+    // With the option off the question names the folder the user will actually get, rather than a
+    // hidden one it would then have to explain.
+    QSettings().setValue(QLatin1String(relay::projects::kHiddenFolderSetting), false);
+    QCOMPARE(boardFolderFor(kProject), kProject + QStringLiteral("/switchboard"));
+    QVERIFY(folderLineFor(kProject).contains(kProject + QStringLiteral("/switchboard/")));
+    QSettings().remove(QLatin1String(relay::projects::kHiddenFolderSetting));
+    QCOMPARE(boardFolderFor(kProject), kProject + QStringLiteral("/.switchboard"));
 }
 
 void ProjectInitTests::theProbeBecomesCheckboxesAndNotes()
@@ -261,7 +293,7 @@ void ProjectInitTests::theProbeBecomesCheckboxesAndNotes()
     const Question question = questionFrom(probeFixture());
     QVERIFY(question.isValid());
     QCOMPARE(question.project, kProject);
-    QCOMPARE(question.folder, kProject + QStringLiteral("/switchboard"));
+    QCOMPARE(question.folder, kProject + QStringLiteral("/.switchboard"));
     QCOMPARE(question.items, 30);
 
     // One checkbox per tracker, in the probe's order, labelled with the probe's own summary.
@@ -295,7 +327,7 @@ void ProjectInitTests::anEmptyProbeIsAQuestionWithNoFindings()
     QVERIFY(question.imports.isEmpty());
     QVERIFY(question.notes.isEmpty());
     QCOMPARE(question.title, titleLine());
-    QCOMPARE(question.folder, kProject + QStringLiteral("/switchboard"));
+    QCOMPARE(question.folder, kProject + QStringLiteral("/.switchboard"));
     QVERIFY(!questionFrom(QJsonObject{}).isValid());
 }
 
@@ -340,8 +372,8 @@ void ProjectInitTests::tickedBoxesBecomeImportKinds()
 void ProjectInitTests::theOneQuietLineAfterAYes()
 {
     QCOMPARE(createdLine(kProject, -1),
-             QStringLiteral("Switchboard created in /home/e/src/widgetworks/switchboard/"));
-    QVERIFY(createdLine(kProject, 23).endsWith(QStringLiteral("switchboard/ · 23 card(s) imported")));
+             QStringLiteral("Switchboard created in /home/e/src/widgetworks/.switchboard/"));
+    QVERIFY(createdLine(kProject, 23).endsWith(QStringLiteral(".switchboard/ · 23 card(s) imported")));
     QVERIFY(createdLine(kProject, 0).endsWith(QStringLiteral("nothing left to import")));
     QCOMPARE(createdLine(QString(), 3), QString());
     // A no says what was remembered and how to undo it; "not now" says only how to come back.

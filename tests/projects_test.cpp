@@ -12,6 +12,10 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QCoreApplication>
+#include <QRegularExpression>
+#include <QSettings>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -35,16 +39,18 @@ bool touch(const QString &path)
     return true;
 }
 
-// A project whose board is in the folder Relay creates today.
+// A project whose board is in the folder Relay creates today: hidden (owner, 2026-09-19).
+bool makeHiddenBoard(const QString &dir) { return touch(dir + QStringLiteral("/.switchboard/board.yaml")); }
+// A project whose board was made between 2026-09-18 and 2026-09-19, when the folder was shown.
 bool makeBoard(const QString &dir) { return touch(dir + QStringLiteral("/switchboard/board.yaml")); }
 // A project whose board predates 2026-09-18 and is still where it was.
 bool makeLegacyBoard(const QString &dir) { return touch(dir + QStringLiteral("/issues/board.yaml")); }
 bool makeGitDir(const QString &dir) { return QDir().mkpath(dir + QStringLiteral("/.git")); }
 bool makeGitFile(const QString &dir) { return touch(dir + QStringLiteral("/.git")); }
 
-// The registry and boardsRoot() name their own paths under $XDG_DATA_HOME, so a test that touches
-// them points that at a temporary directory and puts the old value back. Copied from
-// tests/windowstate_test.cpp, which does the same for the scrollback store.
+// The registry names its own path under $XDG_DATA_HOME, so a test that touches it points that at a
+// temporary directory and puts the old value back. Copied from tests/windowstate_test.cpp, which
+// does the same for the scrollback store.
 class DataHome {
 public:
     DataHome()
@@ -76,6 +82,21 @@ class ProjectsTest : public QObject {
 
 private slots:
 
+    // The two options this model reads live in QSettings, so the tests get their own store rather
+    // than the developer's. QSettings::setPath and not QStandardPaths::setTestModeEnabled: the
+    // registry's own path comes from GenericDataLocation, which the DataHome cases below point at a
+    // temporary directory of their own and which test mode would redirect underneath them.
+    void initTestCase()
+    {
+        QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminalTest"));
+        QCoreApplication::setApplicationName(QStringLiteral("projects-test"));
+        QVERIFY(m_settings.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_settings.path());
+        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, m_settings.path());
+        QSettings().clear();
+    }
+
     // ----- candidateFor -------------------------------------------------------------------------
 
     void candidateNothingFound()
@@ -99,23 +120,27 @@ private slots:
         QCOMPARE(candidateFor(QStringLiteral("../src")), QString());
     }
 
-    void candidateFindsBothBoardFolders()
+    void candidateFindsEveryBoardFolder()
     {
         QTemporaryDir root;
         QVERIFY(root.isValid());
-        const QString fresh = root.path() + QStringLiteral("/fresh");
+        const QString hidden = root.path() + QStringLiteral("/hidden");
+        const QString shown = root.path() + QStringLiteral("/shown");
         const QString legacy = root.path() + QStringLiteral("/legacy");
-        QVERIFY(QDir().mkpath(fresh + QStringLiteral("/src")));
+        QVERIFY(QDir().mkpath(hidden + QStringLiteral("/src")));
+        QVERIFY(QDir().mkpath(shown + QStringLiteral("/src")));
         QVERIFY(QDir().mkpath(legacy + QStringLiteral("/src")));
-        QVERIFY(makeBoard(fresh));
+        QVERIFY(makeHiddenBoard(hidden));
+        QVERIFY(makeBoard(shown));
         // A board that was already at issues/board.yaml keeps working exactly as it is.
         QVERIFY(makeLegacyBoard(legacy));
-        QCOMPARE(candidateFor(fresh + QStringLiteral("/src")), normalize(fresh));
+        QCOMPARE(candidateFor(hidden + QStringLiteral("/src")), normalize(hidden));
+        QCOMPARE(candidateFor(shown + QStringLiteral("/src")), normalize(shown));
         QCOMPARE(candidateFor(legacy + QStringLiteral("/src")), normalize(legacy));
 
         // An empty folder is not a board: only the marker file makes one.
         const QString bare = root.path() + QStringLiteral("/bare");
-        QVERIFY(QDir().mkpath(bare + QStringLiteral("/switchboard")));
+        QVERIFY(QDir().mkpath(bare + QStringLiteral("/.switchboard")));
         QCOMPARE(candidateFor(bare), QString());
     }
 
@@ -154,6 +179,15 @@ private slots:
         QVERIFY(makeLegacyBoard(legacyOuter));
         QVERIFY(makeBoard(freshInner));
         QCOMPARE(candidateFor(freshInner + QStringLiteral("/src")), normalize(freshInner));
+
+        QTemporaryDir third;
+        QVERIFY(third.isValid());
+        const QString shownOuter = third.path() + QStringLiteral("/outer");
+        const QString hiddenInner = shownOuter + QStringLiteral("/packages/inner");
+        QVERIFY(QDir().mkpath(hiddenInner));
+        QVERIFY(makeBoard(shownOuter));
+        QVERIFY(makeHiddenBoard(hiddenInner));
+        QCOMPARE(candidateFor(hiddenInner + QStringLiteral("/src")), normalize(hiddenInner));
     }
 
     void candidateNearestGitWins()
@@ -210,10 +244,46 @@ private slots:
 
     // ----- boardDirOf ---------------------------------------------------------------------------
 
-    void boardDirOfPrefersTheNewFolder()
+    void theBoardFoldersAreOneOrderedList()
+    {
+        // The order both languages walk. `BOARD_FOLDERS` in backend/relay_core/board.py is read
+        // here rather than repeated, so the two cannot drift.
+        QCOMPARE(boardFolders(), (QStringList{QStringLiteral(".switchboard"),
+                                              QStringLiteral("switchboard"), QStringLiteral("issues")}));
+        QFile python(QStringLiteral(RELAY_SOURCE_DIR "/backend/relay_core/board.py"));
+        QVERIFY(python.open(QIODevice::ReadOnly | QIODevice::Text));
+        const QString text = QString::fromUtf8(python.readAll());
+        const QRegularExpressionMatch tuple =
+            QRegularExpression(QStringLiteral("^BOARD_FOLDERS = \\(([^)]*)\\)$"),
+                               QRegularExpression::MultilineOption)
+                .match(text);
+        QVERIFY2(tuple.hasMatch(), "backend/relay_core/board.py has no BOARD_FOLDERS tuple");
+        const QStringList names = tuple.captured(1).split(QLatin1Char(','), Qt::SkipEmptyParts);
+        QCOMPARE(names.size(), boardFolders().size());
+        for (int i = 0; i < names.size(); ++i) {
+            // Each name in the tuple, resolved to the string it is assigned, in tuple order.
+            const QRegularExpressionMatch assigned =
+                QRegularExpression(QStringLiteral("^%1 = \"([^\"]*)\"$").arg(names.at(i).trimmed()),
+                                   QRegularExpression::MultilineOption)
+                    .match(text);
+            QVERIFY2(assigned.hasMatch(), qPrintable(names.at(i)));
+            QCOMPARE(assigned.captured(1), boardFolders().at(i));
+        }
+
+        // Hidden is the folder a board is created in, and the option is the only thing that
+        // changes that. It never changes what is read.
+        QCOMPARE(newBoardFolder(true), QStringLiteral(".switchboard"));
+        QCOMPARE(newBoardFolder(false), QStringLiteral("switchboard"));
+    }
+
+    void boardDirOfWalksTheFoldersInOrder()
     {
         QTemporaryDir root;
         QVERIFY(root.isValid());
+
+        const QString hidden = root.path() + QStringLiteral("/hidden");
+        QVERIFY(makeHiddenBoard(hidden));
+        QCOMPARE(boardDirOf(hidden), hidden + QStringLiteral("/.switchboard"));
 
         const QString fresh = root.path() + QStringLiteral("/fresh");
         QVERIFY(makeBoard(fresh));
@@ -223,21 +293,24 @@ private slots:
         QVERIFY(makeLegacyBoard(legacy));
         QCOMPARE(boardDirOf(legacy), legacy + QStringLiteral("/issues"));
 
-        // Both present: `switchboard/` is what Relay makes today, so it wins and the older folder
-        // is left where it is rather than merged.
+        // Several present: the first of `boardFolders()` wins and the others are left where they
+        // are rather than merged.
         const QString both = root.path() + QStringLiteral("/both");
         QVERIFY(makeBoard(both));
         QVERIFY(makeLegacyBoard(both));
         QCOMPARE(boardDirOf(both), both + QStringLiteral("/switchboard"));
+        QVERIFY(makeHiddenBoard(both));
+        QCOMPARE(boardDirOf(both), both + QStringLiteral("/.switchboard"));
 
         // A folder with no marker in it is not a board.
         const QString bare = root.path() + QStringLiteral("/bare");
         QVERIFY(QDir().mkpath(bare + QStringLiteral("/issues")));
+        QVERIFY(QDir().mkpath(bare + QStringLiteral("/.switchboard")));
         QCOMPARE(boardDirOf(bare), QString());
         QCOMPARE(boardDirOf(root.path() + QStringLiteral("/nothing")), QString());
         QCOMPARE(boardDirOf(QString()), QString());
         // A trailing slash is not a different project.
-        QCOMPARE(boardDirOf(fresh + QLatin1Char('/')), fresh + QStringLiteral("/switchboard"));
+        QCOMPARE(boardDirOf(hidden + QLatin1Char('/')), hidden + QStringLiteral("/.switchboard"));
     }
 
     // ----- keyFor -------------------------------------------------------------------------------
@@ -297,13 +370,12 @@ private slots:
 
     void chooseBoardTable()
     {
-        const QString roots = QStringLiteral("/data/relay/boards");
         const QString project = QStringLiteral("/srv/alpha");
         const QString key = keyFor(project);
         QVERIFY(!key.isEmpty());
 
         // No project at all: no board, and nothing to ask about.
-        const Board none = chooseBoard(QString(), QString(), nullptr, roots);
+        const Board none = chooseBoard(QString(), QString(), nullptr);
         QCOMPARE(none.kind, Board::None);
         QVERIFY(none.dir.isEmpty());
         QVERIFY(none.project.isEmpty());
@@ -313,30 +385,38 @@ private slots:
         QVERIFY(!none.isWritable());
 
         // A relative path can never be a board's home.
-        QCOMPARE(chooseBoard(QStringLiteral("alpha"), QStringLiteral("alpha/switchboard"), nullptr, roots).kind,
+        QCOMPARE(chooseBoard(QStringLiteral("alpha"), QStringLiteral("alpha/.switchboard"), nullptr).kind,
                  Board::None);
 
         // A board that is already there is used exactly where it is.
-        const Board fresh = chooseBoard(project, QStringLiteral("/srv/alpha/switchboard"), nullptr, roots);
+        const Board fresh = chooseBoard(project, QStringLiteral("/srv/alpha/.switchboard"), nullptr);
         QCOMPARE(fresh.kind, Board::InRepo);
-        QCOMPARE(fresh.dir, QStringLiteral("/srv/alpha/switchboard"));
+        QCOMPARE(fresh.dir, QStringLiteral("/srv/alpha/.switchboard"));
         QCOMPARE(fresh.project, project);
         QCOMPARE(fresh.key, key);
         QVERIFY(!fresh.needsConsent);
         QVERIFY(fresh.isValid());
         QVERIFY(fresh.isWritable());
 
-        // Including one that predates the rename: Relay never moves it.
-        const Board legacy = chooseBoard(project, QStringLiteral("/srv/alpha/issues"), nullptr, roots);
-        QCOMPARE(legacy.kind, Board::InRepo);
-        QCOMPARE(legacy.dir, QStringLiteral("/srv/alpha/issues"));
-        QVERIFY(legacy.isWritable());
+        // Including one that predates either rename: Relay never moves it.
+        for (const QString &dir : {QStringLiteral("/srv/alpha/switchboard"),
+                                   QStringLiteral("/srv/alpha/issues")}) {
+            const Board older = chooseBoard(project, dir, nullptr);
+            QCOMPARE(older.kind, Board::InRepo);
+            QCOMPARE(older.dir, dir);
+            QVERIFY(older.isWritable());
+        }
 
         // No board yet: `dir` is where one *would* go, and nothing may be written until the user
         // has answered the one-time question.
-        const Board uninitialized = chooseBoard(project, QString(), nullptr, roots);
+        // Hidden is the default, and `newFolder` is how the option reaches a pure function.
+        const Board uninitialized = chooseBoard(project, QString(), nullptr);
         QCOMPARE(uninitialized.kind, Board::Uninitialized);
-        QCOMPARE(uninitialized.dir, QStringLiteral("/srv/alpha/switchboard"));
+        QCOMPARE(uninitialized.dir, QStringLiteral("/srv/alpha/.switchboard"));
+        QCOMPARE(chooseBoard(project, QString(), nullptr, newBoardFolder(false)).dir,
+                 QStringLiteral("/srv/alpha/switchboard"));
+        QCOMPARE(chooseBoard(project, QString(), nullptr, newBoardFolder(true)).dir,
+                 uninitialized.dir);
         QCOMPARE(uninitialized.project, project);
         QCOMPARE(uninitialized.key, key);
         QVERIFY(uninitialized.needsConsent);
@@ -348,49 +428,67 @@ private slots:
         known.path = project;
         known.key = key;
         known.board = QString::fromLatin1(kBoardRepo);
-        known.boardDir = QStringLiteral("/srv/alpha/switchboard");
-        QCOMPARE(chooseBoard(project, QString(), &known, roots).kind, Board::Uninitialized);
-        QVERIFY(chooseBoard(project, QString(), &known, roots).needsConsent);
+        known.boardDir = QStringLiteral("/srv/alpha/.switchboard");
+        QCOMPARE(chooseBoard(project, QString(), &known).kind, Board::Uninitialized);
+        QVERIFY(chooseBoard(project, QString(), &known).needsConsent);
 
         // A record's key is used as given, so a project that moved keeps its conversations.
         Record moved = known;
         moved.key = QStringLiteral("0123456789abcdef");
-        QCOMPARE(chooseBoard(project, QString(), &moved, roots).key, QStringLiteral("0123456789abcdef"));
-
-        // The boards root no longer decides anything about a project's own board.
-        QCOMPARE(chooseBoard(project, QString(), nullptr, QString()).kind, Board::Uninitialized);
-        QCOMPARE(chooseBoard(project, QStringLiteral("/srv/alpha/switchboard"), nullptr, QString()).dir,
-                 QStringLiteral("/srv/alpha/switchboard"));
+        QCOMPARE(chooseBoard(project, QString(), &moved).key, QStringLiteral("0123456789abcdef"));
 
         // A trailing slash on either side is not a different board.
-        QCOMPARE(chooseBoard(project + QLatin1Char('/'), QStringLiteral("/srv/alpha/switchboard/"),
-                             nullptr, roots)
+        QCOMPARE(chooseBoard(project + QLatin1Char('/'), QStringLiteral("/srv/alpha/.switchboard/"),
+                             nullptr)
                      .dir,
-                 QStringLiteral("/srv/alpha/switchboard"));
-        QCOMPARE(chooseBoard(project + QLatin1Char('/'), QString(), nullptr, roots).dir,
-                 uninitialized.dir);
+                 QStringLiteral("/srv/alpha/.switchboard"));
+        QCOMPARE(chooseBoard(project + QLatin1Char('/'), QString(), nullptr).dir, uninitialized.dir);
     }
 
-    void inboxAndKindNames()
+    void theKindsAreTheThreeAProjectCanBeIn()
     {
-        const QString roots = QStringLiteral("/data/relay/boards");
-        const Board box = inbox(roots);
-        QCOMPARE(box.kind, Board::Inbox);
-        // The personal inbox stays in Relay's own data directory: it is in nobody's repository, so
-        // there is nothing to consent to.
-        QCOMPARE(box.dir, QStringLiteral("/data/relay/boards/inbox/switchboard"));
-        QVERIFY(box.project.isEmpty());
-        QVERIFY(box.key.isEmpty());
-        QVERIFY(!box.needsConsent);
-        QVERIFY(box.isValid());
-        QVERIFY(box.isWritable());
-        QCOMPARE(inbox(roots + QLatin1Char('/')).dir, box.dir);
-        QCOMPARE(inbox(QString()).kind, Board::None);
-
+        // There is no fourth kind: the personal inbox was dropped on 2026-09-19 (card #916B). Every
+        // board is in a project, and a card filed with no project goes to `defaultProject()` or to
+        // the project the user picks.
         QCOMPARE(boardKindName(Board::InRepo), QString::fromLatin1(kBoardRepo));
         QCOMPARE(boardKindName(Board::Uninitialized), QString::fromLatin1(kBoardNone));
         QCOMPARE(boardKindName(Board::None), QString::fromLatin1(kBoardNone));
-        QCOMPARE(boardKindName(Board::Inbox), QString::fromLatin1(kBoardNone));
+    }
+
+    // ----- the option and the default project ---------------------------------------------------
+
+    void theHiddenFolderOptionIsOnByDefault()
+    {
+        QSettings().remove(QLatin1String(kHiddenFolderSetting));
+        QVERIFY(hiddenBoardFolder());
+        QCOMPARE(newBoardFolder(), QStringLiteral(".switchboard"));
+        QSettings().setValue(QLatin1String(kHiddenFolderSetting), false);
+        QVERIFY(!hiddenBoardFolder());
+        QCOMPARE(newBoardFolder(), QStringLiteral("switchboard"));
+        QSettings().setValue(QLatin1String(kHiddenFolderSetting), true);
+        QCOMPARE(newBoardFolder(), QStringLiteral(".switchboard"));
+        QSettings().remove(QLatin1String(kHiddenFolderSetting));
+    }
+
+    void theDefaultProjectIsEmptyUntilTheUserChoosesOne()
+    {
+        QSettings().remove(QLatin1String(kDefaultProjectSetting));
+        QCOMPARE(defaultProject(), QString());
+
+        QTemporaryDir root;
+        QVERIFY(root.isValid());
+        QSettings().setValue(QLatin1String(kDefaultProjectSetting), root.path());
+        QCOMPARE(defaultProject(), normalize(root.path()));
+
+        // A project that has been moved or deleted reads as unset, so the picker asks again rather
+        // than a card being written somewhere that is no longer there.
+        QSettings().setValue(QLatin1String(kDefaultProjectSetting),
+                             root.path() + QStringLiteral("/gone"));
+        QCOMPARE(defaultProject(), QString());
+        // Whitespace is not a project either.
+        QSettings().setValue(QLatin1String(kDefaultProjectSetting), QStringLiteral("   "));
+        QCOMPARE(defaultProject(), QString());
+        QSettings().remove(QLatin1String(kDefaultProjectSetting));
     }
 
     void boardForProbesTheFilesystem()
@@ -401,11 +499,15 @@ private slots:
         QVERIFY(root.isValid());
 
         const QString fresh = root.path() + QStringLiteral("/withboard");
-        QVERIFY(makeBoard(fresh));
+        QVERIFY(makeHiddenBoard(fresh));
         const Board found = boardFor(fresh);
         QCOMPARE(found.kind, Board::InRepo);
-        QCOMPARE(found.dir, normalize(fresh) + QStringLiteral("/switchboard"));
+        QCOMPARE(found.dir, normalize(fresh) + QStringLiteral("/.switchboard"));
         QVERIFY(found.isWritable());
+
+        const QString shown = root.path() + QStringLiteral("/shown");
+        QVERIFY(makeBoard(shown));
+        QCOMPARE(boardFor(shown).dir, normalize(shown) + QStringLiteral("/switchboard"));
 
         const QString legacy = root.path() + QStringLiteral("/legacy");
         QVERIFY(makeLegacyBoard(legacy));
@@ -415,7 +517,8 @@ private slots:
         QVERIFY(QDir().mkpath(plain));
         const Board waiting = boardFor(plain);
         QCOMPARE(waiting.kind, Board::Uninitialized);
-        QCOMPARE(waiting.dir, normalize(plain) + QStringLiteral("/switchboard"));
+        // Where a board *would* go: the option's answer, hidden unless it was turned off.
+        QCOMPARE(waiting.dir, normalize(plain) + QLatin1Char('/') + newBoardFolder());
         QVERIFY(waiting.needsConsent);
 
         // Declining does not change where a board would go; it only says whether Relay may ask.
@@ -426,7 +529,6 @@ private slots:
         QVERIFY(registry.isDeclined(plain));
 
         QCOMPARE(boardFor(QString()).kind, Board::None);
-        QVERIFY(boardsRoot().startsWith(home.path()));
     }
 
     // ----- the registry -------------------------------------------------------------------------
@@ -751,10 +853,13 @@ private slots:
         QVERIFY(home.valid());
         QCOMPARE(defaultPath(), home.path() + QStringLiteral("/relay/state/projects.json"));
         QCOMPARE(stateDirectory(), home.path() + QStringLiteral("/relay/state"));
-        QCOMPARE(boardsRoot(), home.path() + QStringLiteral("/relay/boards"));
         // An empty constructor argument means the default, which is what the application uses.
         QCOMPARE(Registry().path(), defaultPath());
     }
+
+private:
+    // Where this test's QSettings live, so the developer's own options are never read or written.
+    QTemporaryDir m_settings;
 };
 
 QTEST_MAIN(ProjectsTest)

@@ -11,6 +11,7 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QSaveFile>
+#include <QSettings>
 #include <QStandardPaths>
 #include <algorithm>
 
@@ -37,16 +38,27 @@ const QLatin1String kGitEntry(".git");
 qint64 secondsOr(qint64 now) { return now > 0 ? now : QDateTime::currentSecsSinceEpoch(); }
 
 // `<dir>/<folder>` — the board folder itself, not its marker.
-QString boardFolderIn(const QString &dir, const char *folder)
+QString boardFolderIn(const QString &dir, const QString &folder)
 {
-    return dir + QLatin1Char('/') + QLatin1String(folder);
+    return dir + QLatin1Char('/') + folder;
 }
 
 // True when `<dir>/<folder>/board.yaml` is there, which is the only thing that makes a directory a
-// board. A bare `switchboard/` folder with nothing in it is not one.
-bool hasBoardMarker(const QString &dir, const char *folder)
+// board. A bare `.switchboard/` folder with nothing in it is not one.
+bool hasBoardMarker(const QString &dir, const QString &folder)
 {
     return QFileInfo::exists(boardFolderIn(dir, folder) + QLatin1Char('/') + QLatin1String(kBoardMarkerFile));
+}
+
+// The first of `boardFolders()` that holds a board in `dir`, or empty. The one walk of the
+// precedence order: `candidateFor()` and `boardDirOf()` both go through it, so "which folder is the
+// board" is decided in one place on this side, as `board.board_folder()` is on the backend's.
+QString boardFolderOf(const QString &dir)
+{
+    const QStringList folders = boardFolders();
+    for (const QString &folder : folders)
+        if (hasBoardMarker(dir, folder)) return boardFolderIn(dir, folder);
+    return {};
 }
 
 // The cleaned absolute spelling of a path, without asking the filesystem anything.
@@ -95,6 +107,39 @@ QJsonObject jsonFrom(const Record &record)
 
 }  // namespace
 
+// ----- where a board is kept ---------------------------------------------------------------------
+
+QStringList boardFolders()
+{
+    // Precedence order, the same order as `BOARD_FOLDERS` in backend/relay_core/board.py: the first
+    // of these that holds a `board.yaml` is the board. Hidden first, because that is what Relay
+    // creates since 2026-09-19; the two older spellings are read for ever and never moved.
+    return {QString::fromLatin1(kHiddenBoardFolder), QString::fromLatin1(kBoardFolder),
+            QString::fromLatin1(kLegacyBoardFolder)};
+}
+
+QString newBoardFolder(bool hidden)
+{
+    return QString::fromLatin1(hidden ? kHiddenBoardFolder : kBoardFolder);
+}
+
+bool hiddenBoardFolder()
+{
+    return QSettings().value(QLatin1String(kHiddenFolderSetting), true).toBool();
+}
+
+QString newBoardFolder() { return newBoardFolder(hiddenBoardFolder()); }
+
+QString defaultProject()
+{
+    const QString stored = QSettings().value(QLatin1String(kDefaultProjectSetting)).toString().trimmed();
+    if (stored.isEmpty()) return {};
+    const QString path = normalize(stored);
+    // A project the user chose and then moved or deleted is not an error and not a silent write
+    // somewhere else: it reads as unset, and the picker (or the init question) asks again.
+    return QFileInfo(path).isDir() ? path : QString();
+}
+
 // ----- reasons ---------------------------------------------------------------------------------
 
 QStringList reasons()
@@ -129,7 +174,7 @@ QString candidateFor(const QString &cwd)
     // A plain string walk, not QDir::cdUp(): cdUp() refuses to step into a directory that is not
     // there, which would stop the walk dead on a pane whose cwd has just been deleted.
     for (QString here = start;;) {
-        if (hasBoardMarker(here, kBoardFolder) || hasBoardMarker(here, kLegacyBoardFolder)) return here;
+        if (!boardFolderOf(here).isEmpty()) return here;
         // A linked worktree and a submodule have `.git` as a *file*; both are projects.
         if (firstGit.isEmpty() && QFileInfo::exists(here + QLatin1Char('/') + kGitEntry)) firstGit = here;
         const QString parent = QFileInfo(here).path();
@@ -142,12 +187,9 @@ QString candidateFor(const QString &cwd)
 QString boardDirOf(const QString &project)
 {
     if (project.isEmpty()) return {};
-    const QString root = QDir::cleanPath(project);
-    // `switchboard/` wins when a project has both: it is the folder Relay creates today, and the
-    // older one is left where it is rather than merged into it.
-    if (hasBoardMarker(root, kBoardFolder)) return boardFolderIn(root, kBoardFolder);
-    if (hasBoardMarker(root, kLegacyBoardFolder)) return boardFolderIn(root, kLegacyBoardFolder);
-    return {};
+    // The first folder of `boardFolders()` that holds a `board.yaml` wins when a project has more
+    // than one; the others are left where they are rather than merged into it.
+    return boardFolderOf(QDir::cleanPath(project));
 }
 
 // ----- the key of a project ----------------------------------------------------------------------
@@ -179,31 +221,19 @@ QString nameFor(const QString &path)
 
 // ----- records and boards ------------------------------------------------------------------------
 
-QString boardsRoot()
-{
-    const QString data = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
-    if (data.isEmpty()) return {};
-    return data + QStringLiteral("/relay/boards");
-}
-
 QString boardKindName(Board::Kind kind)
 {
     switch (kind) {
     case Board::InRepo: return QString::fromLatin1(kBoardRepo);
     case Board::None:
-    case Board::Uninitialized:
-    case Board::Inbox: break;
+    case Board::Uninitialized: break;
     }
     return QString::fromLatin1(kBoardNone);
 }
 
 Board chooseBoard(const QString &project, const QString &existingBoardDir, const Record *known,
-                  const QString &boardsRoot)
+                  const QString &newFolder)
 {
-    // A project's board lives in the project since 2026-09-18; the root is still taken so callers
-    // pass one root to chooseBoard() and inbox() alike.
-    Q_UNUSED(boardsRoot);
-
     Board board;
     // QFileInfo::isAbsolute() is a look at the string, not at the disk, so this stays pure.
     if (project.isEmpty() || !QFileInfo(project).isAbsolute()) return board;
@@ -216,8 +246,9 @@ Board chooseBoard(const QString &project, const QString &existingBoardDir, const
     board.key = (known && !known->key.isEmpty()) ? known->key : digest(cleaned);
 
     if (!existingBoardDir.isEmpty()) {
-        // Wherever the board already is — `switchboard/` or an older `issues/` — that is where the
-        // cards are. Relay uses it in place and never moves it.
+        // Wherever the board already is — hidden, or an older `switchboard/` or `issues/` — that is
+        // where the cards are. Relay uses it in place and never moves it; only the user's own "Hide
+        // this board's folder" does that.
         board.kind = Board::InRepo;
         board.dir = QDir::cleanPath(existingBoardDir);
         board.needsConsent = false;
@@ -227,19 +258,11 @@ Board chooseBoard(const QString &project, const QString &existingBoardDir, const
     // No board yet. `dir` is where one would go; nothing may be written there until the user has
     // answered "Initialize a project and create a Switchboard here?" for themselves.
     board.kind = Board::Uninitialized;
-    board.dir = boardFolderIn(cleaned, kBoardFolder);
+    // Hidden unless the caller says otherwise, so a Board built by a test or by a pure caller says
+    // what Relay ships with rather than nothing.
+    board.dir = boardFolderIn(cleaned, newFolder.isEmpty() ? QString::fromLatin1(kHiddenBoardFolder)
+                                                           : newFolder);
     board.needsConsent = true;
-    return board;
-}
-
-Board inbox(const QString &boardsRoot)
-{
-    if (boardsRoot.isEmpty()) return {};
-    Board board;
-    board.kind = Board::Inbox;
-    // Relay's own data directory, so it is in nobody's repository and there is nothing to consent to.
-    board.dir = boardFolderIn(QDir::cleanPath(boardsRoot) + QStringLiteral("/inbox"), kBoardFolder);
-    board.needsConsent = false;
     return board;
 }
 
@@ -250,7 +273,7 @@ Board boardFor(const QString &project, const Registry *known)
     Record record;
     if (known) record = known->record(normalized);
     return chooseBoard(normalized, boardDirOf(normalized), record.isValid() ? &record : nullptr,
-                       boardsRoot());
+                       newBoardFolder());
 }
 
 // ----- the registry of known projects ------------------------------------------------------------

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "BoardModel.h"
 
+#include "Projects.h"
+
 #include <QRegularExpression>
 
 #include <QJsonValue>
@@ -790,12 +792,14 @@ bool Card::parked() const
 
 QString Card::folder() const
 {
-    // `switchboard/changes/2026-09-17-x.md`, or `switchboard/.private/changes/…` for a private
-    // card. A board filed before 2026-09-18 keeps its folder's older name, `issues/` (#JN7X).
+    // `.switchboard/changes/2026-09-17-x.md`, or `.switchboard/.private/changes/…` for a private
+    // card. Every spelling of the board folder is stripped — `projects::boardFolders()` is the one
+    // list — and so is `.private/`, which is why a leading dotted part goes too. A board filed
+    // before 2026-09-19 keeps its folder's older name, `switchboard/` or `issues/` (#JN7X).
+    const QStringList folders = relay::projects::boardFolders();
     QStringList parts = path.split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    while (!parts.isEmpty() && (parts.first() == QStringLiteral("switchboard")
-                                || parts.first() == QStringLiteral("issues")
-                                || parts.first().startsWith(QLatin1Char('.'))))
+    while (!parts.isEmpty()
+           && (folders.contains(parts.first()) || parts.first().startsWith(QLatin1Char('.'))))
         parts.removeFirst();
     return parts.size() > 1 ? parts.first() : QString();
 }
