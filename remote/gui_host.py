@@ -81,8 +81,13 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"prompt_ask","id":"<prompt id>","participant":"<id>","name":"alice","pane":"p1",
      "text":"the whole prompt","when":"now","plan":""}      a guest's prompt, waiting for you
     {"t":"control_ask","pane":"p1","participant":"<id>","name":"alice"}   ...for the keyboard
-    {"t":"control","pane":"p1","holder":"participant:<id>","name":"alice"}   who is driving now;
-                                              `holder` is "owner", "agent" or "participant:<id>"
+    {"t":"control","pane":"p1","holder":"participant:<id>","name":"alice","device":"",
+     "device_name":""}                        who is driving now; `holder` is "owner", "agent" or
+                                              "participant:<id>". `device` is the id of one of the
+                                              owner's own paired devices when that is what is
+                                              driving — the desktop needs it to know its keystroke
+                                              has a pane to take back — and `device_name` is what
+                                              to call it. Neither crosses the wire to a guest
     {"t":"share_state","pane":"p1","paused":true,"reason":"away"}   why guests cannot act:
                                               "owner" (you paused) or "away" (present-only)
 
@@ -449,6 +454,10 @@ class Sidecar:
         # A public link (cloudflared quick tunnel): the third address, for someone who is on
         # neither the network nor the tailnet. Mutually exclusive with the tailnet one.
         self.served_by_cloudflare = False
+        # Guests already emailed about, so a reconnection is not a second mail (see
+        # _notify_new_joiners).
+        self._notified: set[str] = set()
+        self.desktop_name = ""      # what `start` was told to call this machine, for the mail
         self.server = None
         self.store = None
         self.serving: asyncio.Task | None = None
@@ -619,6 +628,7 @@ class Sidecar:
         self.served_by_cloudflare = False
         # Detection is two `tailscale` calls, so it happens off the loop: a wedged CLI must not
         # hold the share button down.
+        self.desktop_name = str(message.get("name") or "")
         self.found = await asyncio.to_thread(tailnet_mod.probe)
         if message.get("tls", True):
             # One listener on every interface; which address goes in the QR is a separate choice,
@@ -638,8 +648,13 @@ class Sidecar:
                                   approver=self.ask, name=message.get("name", "this desktop"),
                                   knock_approver=self.knock, prompt_approver=self.prompt,
                                   control_approver=self.control)
+        # `device` is the id of the owner's own paired device holding the pane, empty when the
+        # desktop, the agent or a guest holds it. The desktop needs it to know that its keystroke
+        # has somebody to take the pane back *from* (section 10.3).
         self.host.on_control(lambda pane, holder, name: self.emit(
-            {"t": "control", "pane": pane, "holder": holder, "name": name}))
+            {"t": "control", "pane": pane, "holder": holder, "name": name,
+             "device": self.host.control.device(pane) or "",
+             "device_name": self.host.control.holder(pane).name}))
         self.host.on_share_state(lambda pane, paused, reason: self.emit(
             {"t": "share_state", "pane": pane, "paused": paused, "reason": reason}))
         # One `window_active` signal, two readers: the notification presence rule of section 9 and
@@ -831,16 +846,15 @@ class Sidecar:
             panes = [message.get("pane", "")]
         try:
             expires = float(message.get("expires") or 0) or guests_mod.DEFAULT_EXPIRY
-            wanted = int(message.get("uses") or 1)
-            # pane_state/cloudflare (relay-terminal-71): a link worth several admissions is a room
-            # of colleagues at a desk on a LAN address, and twenty admissions for whoever it is
-            # forwarded to on a public one. While the tunnel is the address, one link admits one
-            # person; switching back to the LAN or tailnet lifts it again.
-            uses = 1 if self.served_by_cloudflare else wanted
+            # A public link admits as many people as the owner asked for, the same as on the LAN
+            # or the tailnet. A one-use clamp was built here on 2026-09-18 and the owner chose
+            # against it the same day: he wants to send one link to a group. What stands between a
+            # forwarded link and the pane is unchanged and is the part that matters — every guest
+            # knocks, and the owner admits each one by hand, and is emailed when one joins.
             invite, url = await self.host.invite_create(
                 [str(pane) for pane in panes if pane],
                 str(message.get("role") or wire.VIEWER),
-                expires_in=expires, uses=uses)
+                expires_in=expires, uses=int(message.get("uses") or 1))
         except wire.WireError as error:
             self.emit({"t": "error", "message": error.message})
             return
@@ -848,7 +862,8 @@ class Sidecar:
                  "role": invite.role, "panes": invite.panes, "uses": invite.uses_left,
                  "expires": invite.seconds_left()}
         if self.served_by_cloudflare:
-            reply["note"] = "Over a public link, one link admits one person."
+            reply["note"] = ("Over a public link, anyone this link is forwarded to can knock. "
+                             "You admit each person by hand.")
         self.emit(reply)
 
     async def invite_email(self, message: dict) -> None:
@@ -927,6 +942,7 @@ class Sidecar:
         """``participants {items}``: who is on which pane, for the sharing dialog."""
         if self.host is None:
             return
+        self._notify_new_joiners()
         online = {channel.participant_id for channel in self.host.channels.values()
                   if channel.participant_id and not channel.closed}
         self.emit({"t": "participants", "items": [
@@ -940,6 +956,29 @@ class Sidecar:
             {"id": invite.invite_id, "panes": invite.panes, "role": invite.role,
              "uses": invite.uses_left, "expires": invite.seconds_left()}
             for invite in self.host.guests.live_invites()]})
+
+    def _notify_new_joiners(self) -> None:
+        """Email the owner the first time each guest joins (owner, 2026-09-18: "you get an email
+        when someone joins").
+
+        Once per participant, and never for a reconnection: a phone on a train would otherwise
+        send a mail every time it changed network. Failures are silent here — the Sharing pane is
+        already showing who is on the pane, and a mail that did not send is not worth a dialog.
+        """
+        if self.host is None:
+            return
+        for guest in self.host.guests.live():
+            if guest.participant_id in self._notified:
+                continue
+            self._notified.add(guest.participant_id)
+            pane = guest.panes[0] if guest.panes else ""
+            self._spawn_notify(guest.name, pane, guest.role)
+
+    def _spawn_notify(self, name: str, pane: str, role: str) -> None:
+        async def run() -> None:
+            await asyncio.to_thread(email_mod.notify_joined, name, pane=pane, role=role,
+                                    desktop=self.desktop_name)
+        asyncio.get_running_loop().create_task(run())
 
     def report_devices(self) -> None:
         if self.devices is None:

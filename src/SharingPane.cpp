@@ -249,10 +249,20 @@ void Model::addPromptAsk(const QJsonObject &line, qint64 nowMs)
     add(request);
 }
 
-void Model::setControl(const QString &pane, const QString &holder, const QString &name)
+void Model::setControl(const QString &pane, const QString &holder, const QString &name,
+                       const QString &device, const QString &deviceName)
 {
     m_holder.insert(pane, holder);
     m_holderName.insert(pane, name);
+    // Only an "owner" holder can be a device of the owner's, and the hub sends an empty `device`
+    // for the desktop itself — so this clears as soon as the pane comes back to the keyboard.
+    if (device.isEmpty()) {
+        m_holderDevice.remove(pane);
+        m_holderDeviceName.remove(pane);
+    } else {
+        m_holderDevice.insert(pane, device);
+        m_holderDeviceName.insert(pane, deviceName);
+    }
     const QString driver = holder.startsWith(QStringLiteral("participant:"))
                                ? holder.mid(QStringLiteral("participant:").size()) : QString();
     for (Participant &person : m_participants) {
@@ -384,6 +394,14 @@ QString Model::driverOn(const QString &pane) const
     return named.isEmpty() ? id : named;
 }
 
+QString Model::deviceDriverOn(const QString &pane) const
+{
+    const QString device = m_holderDevice.value(pane);
+    if (device.isEmpty()) return QString();
+    const QString name = m_holderDeviceName.value(pane);
+    return name.isEmpty() ? device : name;
+}
+
 int Model::guestsOn(const QString &pane) const
 {
     return int(participantsOn(pane).size());
@@ -401,6 +419,17 @@ ChipState Model::chip(const QString &pane, bool phone) const
         state.tooltip = QStringLiteral(
             "%1 holds this pane's keyboard, so their keys reach this terminal.\n"
             "Type here and you take it straight back.").arg(driver);
+        return state;
+    }
+    // One of the owner's own devices took over. It is still the owner driving (section 10.3), so
+    // this is not `guestDriving` — but the header has to say it, or the pane looks idle while a
+    // phone types into it.
+    const QString device = deviceDriverOn(pane);
+    if (!device.isEmpty()) {
+        state.text = QStringLiteral("%1 is typing").arg(device);
+        state.tooltip = QStringLiteral(
+            "%1 holds this pane's keyboard, so what you type there reaches this terminal.\n"
+            "Type here and you take it straight back.").arg(device);
         return state;
     }
     if (guests == 0) {

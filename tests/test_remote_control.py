@@ -204,6 +204,12 @@ class Harness:
         return next(item for item in self.host._items() if item["id"] == pane)
 
 
+def lines_typed(harness) -> list[str]:
+    """The whole lines that reached the source. `control_request` writes an empty `keys` to the
+    source to claim the pane, so counting everything it was sent counts that too."""
+    return [text for kind, _, text, _ in harness.source.typed if kind == "line"]
+
+
 async def drain(client, kind, timeout=5.0):
     """Every message of a kind that has arrived, without waiting for one that has not."""
     found = []
@@ -267,6 +273,42 @@ class ControlBookTests(unittest.TestCase):
         self.changes.clear()
         self.book.claim_device("p1", "dev1")          # the source echoing its own driver back
         self.assertEqual(self.changes, [])
+
+    def test_typing_claims_a_free_keyboard_and_never_takes_one(self):
+        """Section 6.6's implicit claim, and the three states in which it is not one."""
+        self.assertTrue(self.book.claim_device("p1", "dev1", "Pixel 9", by_typing=True))
+        self.assertEqual(self.book.field("p1"), "remote:dev1")
+        # The same device typing again holds what it holds.
+        self.assertTrue(self.book.may_type("p1", "dev1"))
+        # Another device of the owner's does not take it by typing.
+        self.assertFalse(self.book.may_type("p1", "dev2"))
+        self.assertFalse(self.book.claim_device("p1", "dev2", by_typing=True))
+        self.assertEqual(self.book.field("p1"), "remote:dev1")
+        # Nor does one take it from a guest, or from the agent.
+        self.book.grant("p1", "g1", "alice")
+        self.assertFalse(self.book.claim_device("p1", "dev1", by_typing=True))
+        self.book.observe("p1", "agent")
+        self.assertFalse(self.book.claim_device("p1", "dev1", by_typing=True))
+
+    def test_the_owners_keystroke_is_not_undone_by_the_phones_next_line(self):
+        """#W5N2's live drive, shots 13a and 13b: the take-back has to outlast one keystroke."""
+        self.book.claim_device("p1", "dev1", "Pixel 9", by_typing=True)
+        self.assertTrue(self.book.take("p1"))
+        self.assertEqual(self.book.label("p1"), "owner")
+        self.assertIsNone(self.book.device("p1"))
+        self.assertFalse(self.book.may_type("p1", "dev1"), "typing would take it straight back")
+        self.assertFalse(self.book.claim_device("p1", "dev1", by_typing=True))
+        # Asking for it is still allowed at any moment: the phone is the owner's, not a guest's.
+        self.assertTrue(self.book.claim_device("p1", "dev1", "Pixel 9"))
+        self.assertEqual(self.book.field("p1"), "remote:dev1")
+        # And once it has been asked for, the pane is no longer "taken back".
+        self.assertTrue(self.book.may_type("p1", "dev1"))
+
+    def test_handing_it_back_leaves_the_keyboard_free(self):
+        """A device that gives the keyboard up may take it again by typing: nobody took it."""
+        self.book.claim_device("p1", "dev1", "Pixel 9")
+        self.assertTrue(self.book.release("p1", control_mod.OWNER, "dev1"))
+        self.assertTrue(self.book.may_type("p1", "dev1"))
 
 
 # ---- control handoff ---------------------------------------------------------------------------
@@ -469,6 +511,111 @@ class ControlTests(unittest.TestCase):
                 await device.send({"t": "control_release", "pane": "pane-1"})
                 await harness.settle()
                 self.assertEqual(harness.pane_item()["control"], "human")
+                await client.close()
+                await device.close()
+        run(main())
+
+    def test_the_phone_and_a_guest_never_both_hold_the_keyboard(self):
+        """#W5N2's live drive found them both believing they had it (shots 13a, 13b)."""
+        async def main():
+            async with Harness() as harness:
+                device, record = await harness.owner_device()
+                client, joined = await harness.guest()
+
+                await device.send({"t": "control_request", "pane": "pane-1"})
+                await device.expect("agent", timeout=10)
+                self.assertEqual(harness.pane_item()["control"], f"remote:{record.device_id}")
+                mine = (await drain(device, "control"))[-1]
+                self.assertEqual(mine["holder"], "owner")
+                self.assertEqual(mine["device"], record.device_id,
+                                 "the phone cannot follow a handoff it cannot recognise")
+                theirs = (await drain(client, "control"))[-1]
+                self.assertEqual(theirs["holder"], "owner")
+                self.assertNotIn("device", theirs, "a guest is never told which device it is")
+
+                # The owner hands the keyboard to the guest. There is one token, so the phone
+                # loses it — is told so, and is refused when it types anyway.
+                harness.host.grant_control("pane-1", joined.participant)
+                told = (await drain(device, "control"))[-1]
+                self.assertEqual(told["holder"], f"participant:{joined.participant}")
+                self.assertNotIn("device", told)
+                await device.send({"t": "line", "pane": "pane-1", "text": "echo from the phone"})
+                with self.assertRaises(wire.WireError) as caught:
+                    await device.expect("never", timeout=5)
+                self.assertEqual(caught.exception.code, "not_driving")
+                self.assertEqual(lines_typed(harness), [])
+                self.assertEqual(harness.pane_item()["control"],
+                                 f"participant:{joined.participant}")
+                await client.close()
+                await device.close()
+        run(main())
+
+    def test_the_owners_keystroke_takes_the_pane_back_from_their_own_phone(self):
+        """Section 10.3: the keystroke takes control back from *whoever* holds it, and what the
+        phone sends next is refused like anybody else's."""
+        async def main():
+            async with Harness() as harness:
+                device, record = await harness.owner_device()
+                await device.send({"t": "control_request", "pane": "pane-1"})
+                await device.expect("agent", timeout=10)
+                await device.send({"t": "line", "pane": "pane-1", "text": "echo driving"})
+                await harness.settle()
+                self.assertEqual(lines_typed(harness), ["echo driving"])
+
+                # The owner typed in the pane: `control_take` from the desktop (10.5).
+                self.assertTrue(harness.host.take_control("pane-1"))
+                back = (await drain(device, "control"))[-1]
+                self.assertEqual(back["holder"], "owner")
+                self.assertNotIn("device", back, "nobody remote holds it now")
+                self.assertEqual(harness.pane_item()["control"], "human")
+
+                await device.send({"t": "line", "pane": "pane-1", "text": "echo after the owner"})
+                with self.assertRaises(wire.WireError) as caught:
+                    await device.expect("never", timeout=5)
+                self.assertEqual(caught.exception.code, "not_driving")
+                self.assertEqual(lines_typed(harness), ["echo driving"],
+                                 "the second line must not land")
+                self.assertIn("control_take", harness.audit_kinds())
+
+                # Taking it over again is one tap, and then the phone types as before.
+                await device.send({"t": "control_request", "pane": "pane-1"})
+                await device.expect("agent", timeout=10)
+                await device.send({"t": "line", "pane": "pane-1", "text": "echo asked again"})
+                await harness.settle()
+                self.assertEqual(lines_typed(harness), ["echo driving", "echo asked again"])
+                await device.close()
+        run(main())
+
+    def test_the_owners_own_device_is_told_who_is_on_the_pane(self):
+        """Section 10.3 fans `participants` out to everyone on the pane — the owner's devices
+        included, or the phone cannot show who is here."""
+        async def main():
+            async with Harness() as harness:
+                device, _ = await harness.owner_device()
+                client, joined = await harness.guest()
+                people = (await drain(device, "participants"))[-1]
+                self.assertEqual(people["pane"], "pane-1")
+                self.assertEqual([item["name"] for item in people["items"]], ["alice"])
+                self.assertFalse(any(item["you"] for item in people["items"]),
+                                 "a device is not one of the participants")
+                self.assertTrue(all(item["online"] for item in people["items"]))
+
+                # And on every handoff, with `driving` following the one book.
+                harness.host.grant_control("pane-1", joined.participant)
+                people = (await drain(device, "participants"))[-1]
+                self.assertTrue(people["items"][0]["driving"])
+                await client.close()
+                await device.close()
+        run(main())
+
+    def test_a_viewing_device_is_told_the_same_list(self):
+        """`view` is enough to be told who is here: it is reading, not typing."""
+        async def main():
+            async with Harness() as harness:
+                device, _ = await harness.owner_device(capability=wire.VIEW)
+                client, _ = await harness.guest()
+                people = (await drain(device, "participants"))[-1]
+                self.assertEqual([item["name"] for item in people["items"]], ["alice"])
                 await client.close()
                 await device.close()
         run(main())

@@ -39,6 +39,7 @@ class ScrollbackSource(panes_mod.DemoPaneSource):
         super().__init__()
         self.rows, self.cols, self.total = rows, cols, history
         self._screen_callbacks: list = []
+        self.typed: list[tuple] = []
 
     # -- the seams the hub looks for when a source has a screen ---------------------------------
 
@@ -50,6 +51,18 @@ class ScrollbackSource(panes_mod.DemoPaneSource):
 
     def release_device(self, device: str) -> None:
         return
+
+    # -- taking over. `control_request` writes an empty `keys` to claim the pane, so a source with
+    # a screen needs these three even when the test only cares about who is driving.
+
+    async def send_keys(self, pane: str, data: bytes, *, device: str) -> None:
+        self.typed.append(("keys", pane, data, device))
+
+    async def send_line(self, pane: str, text: str, *, device: str) -> None:
+        self.typed.append(("line", pane, text, device))
+
+    async def paste(self, pane: str, text: str, *, device: str) -> None:
+        self.typed.append(("paste", pane, text, device))
 
     @classmethod
     def _row(cls, screen_row: int, absolute: int) -> dict:
@@ -479,6 +492,113 @@ class BrowserClientTests(unittest.TestCase):
                         "(() => { const w = document.getElementById('screen-wrap');"
                         " return w.scrollWidth - w.clientWidth; })()"), 0,
                         "the terminal grid is wider than its container")
+
+                    problems = [line for line in browser.console
+                                if "EXCEPTION" in line or "error:" in line.lower()]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 180))
+
+    def test_the_phone_follows_the_control_token(self):
+        """#W5N2, shots 13a and 13b: the owner types at the desktop while the phone holds the
+        keyboard. One holder per pane (section 10.3), so the phone has to hear about it — flip to
+        Watching, say who has it, and keep the half-typed line, which is what a guest's client
+        already does. Before this it went on saying "You have the keyboard"."""
+        async def main():
+            async with Harness(capability=wire.FULL, source=ScrollbackSource) as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                mode = "document.getElementById('term-mode').textContent"
+                note = "document.getElementById('term-note').textContent"
+                typed = "document.getElementById('composer-text').value"
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    await browser.evaluate("document.querySelectorAll('.pane-row')[0].click()")
+                    await browser.wait_for(shown('screen-thread'))
+                    await browser.wait_for(shown('terminal-pane'), timeout=20)
+                    self.assertEqual(await browser.evaluate(mode), "Watching")
+
+                    # Take over, and half-type a line into the box.
+                    await browser.evaluate("document.getElementById('term-take').click()")
+                    await browser.wait_for(f"{mode} === 'You have the keyboard'", timeout=20)
+                    # The chip flips as soon as the request is away; the token is the hub's
+                    # answer, so wait for the book rather than assuming the two are one step.
+                    pane = ""
+                    for _ in range(100):
+                        await asyncio.sleep(0.05)
+                        held = [name for name, who in harness.host.control.holders.items()
+                                if who.who == harness.devices.live()[0].device_id]
+                        if held:
+                            pane = held[0]
+                            break
+                    self.assertTrue(pane, "taking over claims the one control token")
+                    await browser.evaluate(
+                        "(() => { document.getElementById('composer-text').value = 'rm -r bui';"
+                        " return true; })()")
+
+                    # The owner types in the pane at the desktop: `control_take` (10.5).
+                    self.assertTrue(harness.host.take_control(pane))
+                    await browser.wait_for(f"{mode} === 'Watching'", timeout=20)
+                    self.assertEqual(await browser.evaluate(note),
+                                     "Read only until you take over.")
+                    self.assertEqual(await browser.evaluate(typed), "rm -r bui",
+                                     "losing the keyboard must not lose what was typed")
+                    # Take over is offered again; Hand back is not.
+                    self.assertFalse(await browser.evaluate(
+                        "document.getElementById('term-take').hidden"))
+                    self.assertTrue(await browser.evaluate(
+                        "document.getElementById('term-release').hidden"))
+                    self.assertIn("still here", await browser.evaluate(
+                        "document.getElementById('thread-note').textContent"))
+
+                    # And one tap gets it back, because the owner's phone is the owner.
+                    await browser.evaluate("document.getElementById('term-take').click()")
+                    await browser.wait_for(f"{mode} === 'You have the keyboard'", timeout=20)
+
+                    problems = [line for line in browser.console
+                                if "EXCEPTION" in line or "error:" in line.lower()]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 180))
+
+    def test_the_phone_shows_who_else_is_on_the_pane(self):
+        """Section 10.3 fans `participants` out to everyone on the pane, the owner's own devices
+        included — so the phone can say who is here (#W5N2)."""
+        async def main():
+            async with Harness(capability=wire.FULL, source=ScrollbackSource) as harness:
+                url, _ = await harness.host.open_pairing()
+                browser = Browser()
+                await browser.start()
+                presence = "document.getElementById('term-presence').textContent"
+                try:
+                    await browser.navigate(url)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    await browser.evaluate("document.querySelectorAll('.pane-row')[0].click()")
+                    await browser.wait_for(shown('screen-thread'))
+                    await browser.wait_for(shown('terminal-pane'), timeout=20)
+                    self.assertTrue(await browser.evaluate(
+                        "document.getElementById('term-presence').hidden"),
+                        "nobody else is here yet")
+
+                    # Somebody is let in to the pane. The invite and the record are the real
+                    # ones; only her socket is missing, which is what `online: false` means and
+                    # what the row says.
+                    invite, _ = await harness.host.invite_create(["pane-1"], wire.EDITOR)
+                    guest = harness.host.guests.admit(invite, bytes(range(32)), "alice",
+                                                      "Chrome", wire.EDITOR)
+                    harness.host.send_participants("pane-1")
+                    await browser.wait_for(f"{presence}.includes('alice')", timeout=20)
+                    self.assertEqual(await browser.evaluate(presence), "alice is away")
+                    self.assertFalse(await browser.evaluate(
+                        "document.getElementById('term-presence').hidden"))
+
+                    # And every handoff re-sends the list, so the line follows the one token.
+                    self.assertTrue(harness.host.grant_control("pane-1", guest.participant_id))
+                    await browser.wait_for(f"{presence} === 'alice is typing'", timeout=20)
 
                     problems = [line for line in browser.console
                                 if "EXCEPTION" in line or "error:" in line.lower()]

@@ -29,6 +29,14 @@ let historySeq = 0;
 let historyRequest = null;
 let tab = 'agent';
 let driving = false;
+let myDevice = '';          // this device's own id, from the pairing record
+// Who holds this pane's keyboard, from the last `control` (section 10.3). One holder per pane
+// across the owner's own devices, the agent and any guests — this device included, which is why
+// it has to be followed rather than assumed from the last button that was tapped.
+let holder = 'owner';
+let holderName = '';
+let holderDevice = '';
+let presence = [];          // the `participants` rows for the open pane
 let sticky = { ctrl: false, alt: false };
 let directKeys = false;
 let passwordEntry = false;  // the owner's per-device switch (welcome.password_entry)
@@ -95,6 +103,7 @@ async function startPairing(link) {
 // ---- connecting -------------------------------------------------------------------------------
 
 async function afterConnect(record) {
+  myDevice = record.deviceId || '';
   $('desktop-name').textContent = record.desktopName || 'desktop';
   $('capability').textContent = record.capability;
   capability = record.capability;
@@ -404,6 +413,11 @@ function openPane(paneId) {
   answerNode = null;
   driving = false;
   directKeys = false;
+  holder = 'owner';
+  holderName = '';
+  holderDevice = '';
+  presence = [];
+  renderPresence();
   openTerminal();
   show('thread');
   rrp.send({ t: 'pane_focus', pane: paneId }).catch(() => {});
@@ -420,6 +434,8 @@ function closePane() {
   closePaneView();
   current = null;
   driving = false;
+  presence = [];
+  renderPresence();
   show('inbox');
 }
 
@@ -527,10 +543,66 @@ function updateDriveUi() {
   if (!allowed) {
     $('term-note').textContent = 'This device is paired for viewing only.';
   } else if (!driving) {
-    $('term-note').textContent = 'Read only until you take over.';
+    // Said here rather than once when the handoff arrives, because the row is repainted from the
+    // pane list about once a second and a note written beside it would not survive.
+    $('term-note').textContent = someoneElseHasIt()
+      ? `${holderLabel()} has the keyboard.` : 'Read only until you take over.';
   } else {
     $('term-note').textContent = '';
   }
+}
+
+// Somebody other than this device holds the pane: the desktop itself, the agent, a guest, or
+// another phone of the owner's. "Nobody" is never the answer — the desktop holds it by default.
+function someoneElseHasIt() {
+  if (driving) return false;
+  if (holder === 'agent' || holder.startsWith('participant:')) return true;
+  return holder === 'owner' && !!holderDevice && holderDevice !== myDevice;
+}
+
+function holderLabel() {
+  if (holder === 'agent') return 'The agent';
+  if (holder.startsWith('participant:')) return holderName || 'A guest';
+  return holderName || 'The desktop';
+}
+
+// `control` (section 10.3): one holder per pane, and this device is it only when the pane is held
+// by one of the owner's devices and that device is this one — a guest sees `owner` for the whole
+// of the owner's side, so the id is what tells the phone its own take-over from the desktop's.
+// Whatever is half-typed stays in the box: losing the keyboard must not lose the words, which is
+// the rule the guest client already follows.
+function onControl(message) {
+  if (!message || !current || message.pane !== current) return;
+  holder = String(message.holder || 'owner');
+  holderName = String(message.name || '');
+  holderDevice = String(message.device || '');
+  const held = holder === 'owner' && !!holderDevice && holderDevice === myDevice;
+  const lost = driving && !held;
+  driving = held;
+  if (!driving) directKeys = false;
+  updateDriveUi();
+  if (lost) {
+    threadNote(holder === 'owner' && !holderDevice
+      ? 'The desktop took the keyboard back. What you typed is still here.'
+      : `${holderLabel()} has the keyboard now. What you typed is still here.`);
+  }
+  renderPresence();
+}
+
+// Who else is on this pane (section 10.3). One line under the terminal: the desktop's guests,
+// what each of them is doing, and nothing about the owner's own devices — a device is not a
+// participant, so every row here is somebody else.
+function renderPresence() {
+  const row = $('term-presence');
+  if (!row) return;
+  const words = presence.map((item) => {
+    const name = item.name || 'someone';
+    if (item.driving) return `${name} is typing`;
+    if (item.online === false) return `${name} is away`;
+    return `${name} is watching`;
+  });
+  row.textContent = words.join(' · ');
+  row.hidden = words.length === 0;
 }
 
 // Direct typing: every key goes straight to the program, so a tablet with a keyboard behaves
@@ -1195,6 +1267,15 @@ rrp.addEventListener('panes', (event) => {
 
 rrp.addEventListener('agent', (event) => onAgent(event.detail));
 
+rrp.addEventListener('control', (event) => onControl(event.detail));
+
+rrp.addEventListener('participants', (event) => {
+  const message = event.detail || {};
+  if (!current || message.pane !== current) return;
+  presence = Array.isArray(message.items) ? message.items : [];
+  renderPresence();
+});
+
 // pane_state and the text of a row taken back for editing (section 16). Both name a pane; one
 // for a pane this device is not looking at is ignored rather than drawn over the open one.
 rrp.addEventListener('pane_state', (event) => {
@@ -1300,6 +1381,8 @@ window.addEventListener('DOMContentLoaded', () => {
   }, true);
   $('thread-back').addEventListener('click', closePane);
   buildKeyRow();
+  // Both of these set the local flag as well as sending: the desktop's `control` is what makes
+  // it true, and it follows immediately, but the button must not look dead until it arrives.
   $('term-take').addEventListener('click', () => {
     rrp.send({ t: 'control_request', pane: current })
       .then(() => { driving = true; updateDriveUi(); $('composer-text').focus(); })

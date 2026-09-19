@@ -117,8 +117,12 @@ public:
     void addKnock(const QJsonObject &line, qint64 nowMs);
     void addControlAsk(const QJsonObject &line, qint64 nowMs);
     void addPromptAsk(const QJsonObject &line, qint64 nowMs);
-    // `control {pane, holder, name}`: "owner", "agent" or "participant:<id>".
-    void setControl(const QString &pane, const QString &holder, const QString &name);
+    // `control {pane, holder, name, device, device_name}`: the holder is "owner", "agent" or
+    // "participant:<id>". `device` is set when what holds the pane is one of the owner's own
+    // paired devices — the phone is the owner, so the wire says "owner" either way, and this is
+    // how the desktop knows its keystroke has somebody to take the pane back from (section 10.3).
+    void setControl(const QString &pane, const QString &holder, const QString &name,
+                    const QString &device = QString(), const QString &deviceName = QString());
     // `share_state {pane, paused, reason}`: why guests cannot act — "owner" (you paused it) or
     // "away" (present-only, and Relay's window is not the one you are looking at).
     void setShareState(const QString &pane, bool paused, const QString &reason);
@@ -147,6 +151,9 @@ public:
     QList<Invite> invitesOn(const QString &pane) const;
     // The guest driving this pane, by name; empty when the owner or the agent holds it.
     QString driverOn(const QString &pane) const;
+    // One of the owner's own devices driving this pane, by the name it paired under ("Pixel 9")
+    // and its id if it has no name; empty when the desktop, the agent or a guest holds it.
+    QString deviceDriverOn(const QString &pane) const;
     int guestsOn(const QString &pane) const;
     int waitingOn(const QString &pane) const { return int(requests(pane).size()); }
     int waiting() const { return int(m_requests.size()); }
@@ -163,6 +170,8 @@ private:
     QList<Request> m_requests;
     QHash<QString, QString> m_holder;     // pane -> holder string from `control`
     QHash<QString, QString> m_holderName; // pane -> the name the hub gave
+    QHash<QString, QString> m_holderDevice;     // pane -> the owner's device driving it, if any
+    QHash<QString, QString> m_holderDeviceName; // pane -> what to call that device
     QHash<QString, ShareOptions> m_options;
     QHash<QString, QString> m_pauseReason;
     QList<SharedPane> m_shared;

@@ -827,6 +827,10 @@ class Host:
         pane = message.get("pane")
         if isinstance(pane, str) and pane and not participant.may_see(pane):
             return None
+        if kind == "control" and "device" in message:
+            # Which of the owner's devices holds the pane is the owner's business: to a guest the
+            # holder is "owner", with no device id in it (section 10.3).
+            return {name: value for name, value in message.items() if name != "device"}
         if kind == "agent":
             event = (message.get("event") or {}).get("event", "")
             if not wire.may_forward_to_guest(event):
@@ -924,21 +928,50 @@ class Host:
         return self.name
 
     def control_message(self, pane: str) -> dict:
-        return {"t": "control", "pane": pane, "holder": self.control.label(pane),
-                "name": self.holder_name(pane)}
+        """The `control` of section 10.3, plus one field a guest never sees.
+
+        ``holder`` is ``owner`` for the desktop **and** for the owner's own phone, because an
+        owner's paired device driving *is* the owner driving, and a guest is told no more than
+        that. But the phone itself has to know whether the hand on the keyboard is its own — it
+        cannot flip its drive UI to "Watching" otherwise — so the message carries ``device``, the
+        id of the owner's device holding the pane, and :meth:`guest_view` takes it off on the way
+        to a participant.
+        """
+        holder = self.control.holder(pane)
+        message = {"t": "control", "pane": pane, "holder": holder.label,
+                   "name": self.holder_name(pane)}
+        if holder.kind == control_mod.OWNER and holder.who:
+            message["device"] = holder.who
+        return message
 
     def send_participants(self, pane: str) -> None:
-        """Tell everyone on a pane who is on it. Called on join, leave, role change, removal and
-        every handoff."""
-        items = self.participants_on(pane)
+        """Tell **everyone on a pane** who is on it — section 10.3's word, which includes the
+        owner's own paired devices. Called on join, leave, role change, removal and every handoff.
+
+        A guest's copy marks their own row `you`; a device of the owner's is not a participant, so
+        every row of its copy is somebody else and `you` is false on all of them. Nothing else
+        differs: `guest_view` is about what a *participant* may be told, and the owner's phone is
+        the owner.
+        """
         for channel in list(self.channels.values()):
-            if channel.participant_id is None:
-                continue
-            participant = channel.participant
-            if participant is None or not participant.may_see(pane):
-                continue
-            mine = [{**item, "you": item["id"] == channel.participant_id} for item in items]
-            self._spawn(channel.send({"t": "participants", "pane": pane, "items": mine}))
+            if channel.participant_id is not None:
+                participant = channel.participant
+                if participant is None or not participant.may_see(pane):
+                    continue
+            else:
+                capability = channel.capability()
+                if capability is None or not wire.allows(capability, wire.VIEW):
+                    continue
+                if pane not in channel.subscribed:
+                    continue
+            self._spawn(channel.send(self.participants_message(pane, channel)))
+
+    def participants_message(self, pane: str, channel: Channel) -> dict:
+        """One channel's copy of the list. A device is not a participant, so `you` is false on
+        every row of its copy; a guest's own row is the one marked."""
+        return {"t": "participants", "pane": pane,
+                "items": [{**item, "you": item["id"] == channel.participant_id}
+                          for item in self.participants_on(pane)]}
 
     def _to_pane(self, pane: str, message: dict) -> None:
         """Everyone on a pane: every participant scoped to it, and every device watching it.
@@ -1747,6 +1780,13 @@ class Host:
             await channel.send(item)
         if self.screens:
             await channel.send(self.source.screen_snapshot(pane))
+        # Who is driving and who is here, the moment one of the owner's devices opens the pane —
+        # the same two things a joining guest is told (`_tell_pane_state`). Without them a phone
+        # opening a pane a guest is already typing in believes the keyboard is free until the
+        # next handoff. Sent to this channel alone: nobody else's view of the pane changed.
+        if channel.participant_id is None:
+            await channel.send(self.control_message(pane))
+            await channel.send(self.participants_message(pane, channel))
 
     async def _on_pane_blur(self, channel: Channel, message: dict) -> None:
         pane = message.get("pane", "")
@@ -1871,13 +1911,22 @@ class Host:
             raise wire.WireError("not_permitted", "this desktop is not sharing a terminal.")
         return self._pane_of(message)
 
-    def _typing_pane(self, channel: Channel, message: dict) -> str:
+    def _typing_pane(self, channel: Channel, message: dict, *, claim: str = "typing") -> str:
         """The pane this input may reach, or the refusal that says why not.
 
         For a participant, in this order: the share is not paused (10.5), they hold the pane's
         control token (10.3), and only then anything about whether this desktop streams a
         terminal — a guest who is not driving is refused for that reason and not for some detail
         of the desktop's plumbing.
+
+        For one of the owner's own devices, ``claim`` says what this message is:
+
+        * ``"typing"`` — `keys`, `line`, `paste`. Typing *is* taking control (section 6.6 has no
+          separate claim), but only while the keyboard is the device's to take: section 10.3
+          refuses input from anyone who is not the holder, and that includes the owner's phone
+          once the owner has taken the pane back at the desktop or handed it to a guest;
+        * ``"take"`` — `control_request`, which is the asking, so it always claims;
+        * ``"none"`` — `control_release`, which is about giving it up and needs no claim at all.
         """
         if channel.participant_id is not None:
             pane = self._pane_of(message)
@@ -1890,11 +1939,11 @@ class Host:
             return self._screen_pane(channel, message)
         pane = self._screen_pane(channel, message)
         self._check_not_secret(pane)
-        if channel.device_id:
-            # One of the owner's own devices typing *is* taking control (section 6.6 has no
-            # separate claim), and it is the same state a guest's turn at the keyboard uses.
-            self.control.claim_device(pane, channel.device_id,
-                                      name=(channel.device.name if channel.device else ""))
+        if channel.device_id and claim != "none":
+            name = channel.device.name if channel.device else ""
+            if claim != "take" and not self.control.may_type(pane, channel.device_id):
+                raise wire.WireError("not_driving", "you are not driving this pane.")
+            self.control.claim_device(pane, channel.device_id, name=name)
         return pane
 
     def _check_not_secret(self, pane: str) -> None:
@@ -1965,7 +2014,7 @@ class Host:
                 return
             await self.ask_owner_about_control(channel, participant, pane)
             return
-        pane = self._typing_pane(channel, message)
+        pane = self._typing_pane(channel, message, claim="take")
         await self.source.send_keys(pane, b"", device=channel.device_id)
         await channel.send({"t": "agent", "pane": pane,
                             "event": {"event": "status", "text": "You have the keyboard."}})
@@ -1979,7 +2028,7 @@ class Host:
                                   pane=pane)
                 self.control.release(pane, control_mod.PARTICIPANT, channel.participant_id)
             return
-        pane = self._typing_pane(channel, message)
+        pane = self._typing_pane(channel, message, claim="none")
         self.audit.record("control_release", device=channel.device_id, pane=pane)
         self.control.release(pane, control_mod.OWNER, channel.device_id or "")
         self.source.release(pane, channel.device_id)

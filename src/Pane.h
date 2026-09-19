@@ -3732,19 +3732,29 @@ public:
         return true;
     }
 
-    // A guest is driving this pane and the owner has just typed in it. docs/REMOTE-PROTOCOL.md
-    // section 10.3: the owner's physical keystroke always takes control back, without asking. It
-    // is the same rule as taking a running program back from the agent, so it is applied in the
-    // same two places — setNative(), where endDelegation() already does it for the agent (card
-    // #C1HH), and the key filter, for a keystroke that never goes through setNative(). The key
-    // itself is never swallowed: this only sends the line that says who is driving.
+    // Somebody else is driving this pane and the owner has just typed in it.
+    // docs/REMOTE-PROTOCOL.md section 10.3: the owner's physical keystroke always takes control
+    // back, without asking. It is the same rule as taking a running program back from the agent,
+    // so it is applied in the same two places — setNative(), where endDelegation() already does
+    // it for the agent (card #C1HH), and the key filter, for a keystroke that never goes through
+    // setNative(). The key itself is never swallowed: this only sends the line that says who is
+    // driving.
+    //
+    // "Somebody else" is a guest **or** one of the owner's own paired devices: section 10.3 has
+    // one holder per pane and the owner's phone is in the same book, so a `control_take` that
+    // only fired for guests left the phone believing it still had the keyboard and its next line
+    // still landing (#W5N2's live drive, shots 13a and 13b).
     void takeBackFromGuest() {
         relay::RemoteShare &share = relay::RemoteShare::instance();
         if (!share.isSharing(m_token)) return;
         const QString driver = share.sharingModel().driverOn(m_token);
-        if (driver.isEmpty()) return;
+        const QString device = driver.isEmpty() ? share.sharingModel().deviceDriverOn(m_token)
+                                                : QString();
+        if (driver.isEmpty() && device.isEmpty()) return;
         share.takeControl(m_token);
-        toast(QStringLiteral("You typed — this pane is yours again, not %1's.").arg(driver));
+        toast(driver.isEmpty()
+                  ? QStringLiteral("You typed — this pane is yours again, not %1's.").arg(device)
+                  : QStringLiteral("You typed — this pane is yours again, not %1's.").arg(driver));
     }
 
     // The window posting on this pane's behalf: somebody knocking, asking for the keyboard or

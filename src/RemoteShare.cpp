@@ -369,7 +369,9 @@ void RemoteShare::handle(const QJsonObject &message)
     } else if (kind == QLatin1String("control")) {
         m_sharing.setControl(message.value(QStringLiteral("pane")).toString(),
                              message.value(QStringLiteral("holder")).toString(),
-                             message.value(QStringLiteral("name")).toString());
+                             message.value(QStringLiteral("name")).toString(),
+                             message.value(QStringLiteral("device")).toString(),
+                             message.value(QStringLiteral("device_name")).toString());
         emit sharingModelChanged();
     } else if (kind == QLatin1String("share_state")) {
         // Why guests cannot act: "owner" (you paused it) or "away" (present-only, and this is not
@@ -1112,18 +1114,14 @@ void RemoteShareDialog::showAddresses(const QJsonArray &addresses)
     // colleagues at a desk, and the same link on a public URL is that many admissions for whoever
     // it is forwarded to. The sidecar clamps it either way; capping the box here is so the number
     // on screen is the number that will happen. Switching back to the LAN or tailnet lifts it.
+    // A public link admits as many people as the owner picks, the same as any other address
+    // (owner, 2026-09-18: one link for a group). What changes is who can reach the door, so the
+    // note says that, and says the part that has not changed: each person is admitted by hand.
     if (publicLink) {
-        m_inviteUses->setRange(1, 1);
-        m_inviteUses->setValue(1);
-        m_inviteUses->setToolTip(QStringLiteral(
-            "Over a public link, one link admits one person. Choose another address to share one "
-            "link with several people."));
-        m_inviteNote->setText(QStringLiteral("Over a public link, one link admits one person."));
+        m_inviteNote->setText(QStringLiteral("Over a public link, anyone this link is forwarded to "
+                                             "can knock. You admit each person by hand."));
         m_inviteNote->show();
-    } else if (m_inviteUses->maximum() == 1) {
-        m_inviteUses->setRange(1, 20);
-        m_inviteUses->setToolTip(QStringLiteral(
-            "How many people the link may let in. One link, one person, is the usual thing."));
+    } else if (m_inviteNote->text().startsWith(QLatin1String("Over a public link"))) {
         m_inviteNote->clear();
     }
     m_addressNote->setText(reason.isEmpty()

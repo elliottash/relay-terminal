@@ -92,6 +92,9 @@
         <button type="button" id="term-take">Take over</button>
         <button type="button" id="term-release" hidden>Hand back</button>
       </div>
+      <!-- Who else is on this pane (protocol 10.3): "alice is typing · bob is watching". The
+           desktop fans `participants` out to everyone on the pane, its own devices included. -->
+      <div id="term-presence" class="muted small" hidden></div>
       <!-- Focus target for direct typing: a real field, so a tablet's keyboard opens and every
            key reaches keydown. It is never read; the bytes go straight out. -->
       <input id="term-capture" type="text" autocapitalize="off" autocomplete="off"

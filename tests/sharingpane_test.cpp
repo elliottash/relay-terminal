@@ -39,6 +39,7 @@ private slots:
     void controlAndPromptCarryTheirOwnClocks();
     void requestsLapseOnTheHubsClock();
     void whoIsDriving();
+    void theOwnersOwnPhoneIsADriverToo();
     void removingSomeoneTakesTheirQuestions();
     void endingAShareForgetsIt();
     void theChipSaysWhatIsGoingOn();
@@ -204,6 +205,34 @@ void SharingTest::whoIsDriving()
     QVERIFY(!model.participantsOn(QStringLiteral("p1")).first().driving);
     model.setControl(QStringLiteral("p1"), QStringLiteral("agent"), QStringLiteral("agent"));
     QVERIFY(model.driverOn(QStringLiteral("p1")).isEmpty());
+}
+
+void SharingTest::theOwnersOwnPhoneIsADriverToo()
+{
+    // Section 10.3 has one holder per pane and the owner's phone is in the same book, so the wire
+    // says `holder: "owner"` for it — with the device beside it, which is how the desktop knows
+    // its keystroke has a pane to take back (#W5N2).
+    Model model;
+    model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")}});
+    QVERIFY(model.deviceDriverOn(QStringLiteral("p1")).isEmpty());
+
+    model.setControl(QStringLiteral("p1"), QStringLiteral("owner"), QStringLiteral("this desktop"),
+                     QStringLiteral("dev1"), QStringLiteral("Pixel 9"));
+    QCOMPARE(model.deviceDriverOn(QStringLiteral("p1")), QStringLiteral("Pixel 9"));
+    QVERIFY(model.driverOn(QStringLiteral("p1")).isEmpty());   // it is not a guest
+    ChipState chip = model.chip(QStringLiteral("p1"), true);
+    QCOMPARE(chip.text, QStringLiteral("Pixel 9 is typing"));
+    QVERIFY(!chip.guestDriving);                               // the owner is still the owner
+
+    // A device with no name it paired under is still a driver, by id.
+    model.setControl(QStringLiteral("p1"), QStringLiteral("owner"), QString(),
+                     QStringLiteral("dev2"), QString());
+    QCOMPARE(model.deviceDriverOn(QStringLiteral("p1")), QStringLiteral("dev2"));
+
+    // The keyboard coming back to the desktop clears it — `control` carries no device then.
+    model.setControl(QStringLiteral("p1"), QStringLiteral("owner"), QStringLiteral("this desktop"));
+    QVERIFY(model.deviceDriverOn(QStringLiteral("p1")).isEmpty());
+    QCOMPARE(model.chip(QStringLiteral("p1"), true).text, QStringLiteral("phone"));
 }
 
 void SharingTest::removingSomeoneTakesTheirQuestions()

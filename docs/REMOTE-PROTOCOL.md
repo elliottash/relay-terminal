@@ -762,18 +762,21 @@ Five wrong secrets burn the invite, as with pairing. The record keeps a **hash**
 never the secret: the plaintext exists once, in the link the owner hands out, so a restarted desktop
 can still admit someone holding the link and can no longer re-display the link itself.
 
-**Over a public link, one link admits one person** (owner, 2026-09-18, sharing with colleagues).
-While the sidecar serves the app through a cloudflared quick tunnel (section 14), `invite_create`
-clamps `uses` to 1 whatever was asked for, and the `invite` reply carries the clamped number and a
-sentence saying so; the share dialog caps its own control to match, and switching back to the LAN
-or tailnet address lifts both. A multi-use link on a LAN address is a room of colleagues at a desk;
-the same link on an address the internet can reach is that many admissions for anyone it is
-forwarded to.
+**A public link admits as many people as the owner asked for** (owner, 2026-09-18). The address
+the app is served from does not change what an invite grants: `uses` is honoured over a cloudflared
+quick tunnel exactly as on the LAN or the tailnet, because one link sent to a group is the point of
+having a public link at all. A one-use clamp was built for that case and removed the same day; it
+is recorded here so that nobody adds it back as an obvious improvement. What the `invite` reply
+carries over a tunnel is a warning rather than a restriction: *"Over a public link, anyone this
+link is forwarded to can knock. You admit each person by hand."*
 
-**Admission is always by hand.** There is no auto-admit: `admit_nobody` is the hub's default
-approver, and every guest knocks and is let in by the owner, with a role. That is what makes a
-leaked link survivable — the link gets someone to the door, not through it. Any future away-mode
-that admits without a person watching must refuse while a tunnel is up.
+**Admission is always by hand, and the owner is told.** There is no auto-admit: `admit_nobody` is
+the hub's default approver, and every guest knocks and is let in by the owner, with a role. That is
+what makes a multi-use or leaked link survivable — the link gets someone to the door, not through
+it. The owner is emailed the first time each guest joins (`remote/email.py`, `notify` in
+`~/.config/relay/email.json`), once per person and never on a reconnection, so a link that admits
+five people does not mean five arrivals nobody saw. Any future away-mode that admits without a
+person watching must refuse while a tunnel is up.
 
 An invite link is not a pairing link and cannot be used as one: `pair_prove` on a channel whose room
 belongs to a live invite is refused. No message on an invite channel reaches the paired-device
@@ -819,10 +822,10 @@ unknown key still has the handshake refused with no explanation at all.
 
 | Type | Direction | Body |
 |---|---|---|
-| `participants` | desktop → everyone on the pane | `{pane, items: [{id, name, role, driving, online, you}]}`, sent on join, leave, role change, removal and every handoff |
+| `participants` | desktop → everyone on the pane | `{pane, items: [{id, name, role, driving, online, you}]}`, sent on join, leave, role change, removal and every handoff. **Everyone** includes the owner's own paired devices watching that pane: a device is not a participant, so every row of its copy has `you: false` |
 | `control_request` | editor → desktop | `{pane}`, as section 6.6. For a participant it is a request, not a grant |
 | `control_pending` | desktop → that editor | `{pane}` while the owner decides; lapses after 60 s |
-| `control` | desktop → everyone on the pane | `{pane, holder: "owner" \| "agent" \| "participant:<id>", name}` |
+| `control` | desktop → everyone on the pane | `{pane, holder: "owner" \| "agent" \| "participant:<id>", name}`, plus `device` — the id of the owner's own device holding the pane — on the copy sent to the owner's devices and to the desktop. A guest's copy never carries it: to them the holder is `owner`, and which phone of the owner's it is is not theirs to know. The owner's phone needs it because `owner` alone cannot tell it whether the hand on the keyboard is its own |
 | `control` (refusal) | desktop → the editor who asked | the same, plus `reason: "refused" \| "lapsed"`. A grant needs no private answer: the handoff above already said so, to everybody |
 | `control_release` | holder → desktop | `{pane}`, as section 6.6 |
 
@@ -840,9 +843,14 @@ handing the program to the agent, a pause, a socket closing, a removal, a demoti
 and each change fans out one `control` and one `participants` to everyone on the pane.
 
 **The owner's physical keystroke in the pane always takes control back**, without asking
-(`control_take`, 10.5), and the participant is told with `control`; anything of theirs already in
+(`control_take`, 10.5), and the holder is told with `control`; anything of theirs already in
 flight is refused with `not_driving` like anyone else's. Input from anyone who is not the holder is
-refused with `not_driving`. A participant's input is refused at a password prompt exactly as a
+refused with `not_driving` — **including one of the owner's own `full` devices**. A device's typing
+claims the keyboard by itself (6.6) only while the keyboard is free: once the owner has taken the
+pane back at the desktop, or handed it to a guest, that device asks for it again with
+`control_request` rather than taking it by typing. Otherwise the keystroke that took the pane back
+would be undone by the phone's very next line, and the phone and the desktop would share the
+keyboard instead of taking turns. A participant's input is refused at a password prompt exactly as a
 device's is — the hub refuses it from the source's own fresh termios read before the source refuses
 it again at the write — and they are never offered the password field or its nonce.
 
