@@ -35,6 +35,7 @@ from .provider import Cancelled
 MAX_TEXT = 2000            # one answer, a short command, or a few lines for an editor
 MAX_LINES = 50
 MAX_INTENT = 200
+MAX_GUEST_SESSION = 200    # a guest's own session id, as the index keys it (protocol 26.7)
 MAX_SCREEN = 8000          # the screen snapshot the model is shown, in characters
 DEFAULT_MAX_WRITES = 20    # writes per turn
 MAX_WRITES_LIMIT = 200
@@ -112,13 +113,17 @@ def validate_grant(grant) -> dict:
     if not isinstance(grant, dict) or set(grant) - {"granted", "reason", "program", "guest", "question",
                                                     "kind", "masked", "alt_screen", "waiting", "max_writes",
                                                     "screen", "screen_source", "guest_model", "guest_context_pct",
-                                                    "guest_busy"}:
+                                                    "guest_busy", "guest_session"}:
         raise ValueError("context.program_control has an unknown field.")
     for key in ("granted", "masked", "alt_screen", "waiting", "guest_busy"):
         if grant.get(key) is not None and type(grant[key]) is not bool:
             raise ValueError(f"context.program_control.{key} must be a boolean.")
     for key, limit in (("reason", 60), ("program", 200), ("guest", 40), ("question", 400),
-                       ("kind", 40), ("screen_source", 40), ("guest_model", 64)):
+                       ("kind", 40), ("screen_source", 40), ("guest_model", 64),
+                       # Tier B (protocol 26.7): which session of its own the guest in this pane's
+                       # shell is writing. The guests' ids are their own (a dashed UUID today), so
+                       # this is a length cap and not a shape, exactly as the index's is.
+                       ("guest_session", MAX_GUEST_SESSION)):
         value = grant.get(key)
         if value is not None and (not isinstance(value, str) or len(value) > limit):
             raise ValueError(f"context.program_control.{key} must be text of at most {limit} characters.")
@@ -146,6 +151,9 @@ class ProgramControl:
         self._lock = threading.Lock()
         self._pending: dict[str, list] = {}
         self.default_max_writes = DEFAULT_MAX_WRITES
+        # Who wants to hear about a `program_state` besides the turn: the worker's session
+        # commands follow the guest named in it (protocol 26.7). See `watch()`.
+        self._watcher: Callable[["ProgramControl"], None] | None = None
         self.reset()
 
     # ----- state ---------------------------------------------------------------------------
@@ -154,6 +162,10 @@ class ProgramControl:
         self.reason = ""
         self.program = ""
         self.guest = ""
+        # Which of the guest's own sessions is running in this pane (protocol 26.7). The worker
+        # follows its transcript while it runs, so the Sessions pane sees the turn the user is
+        # watching rather than the one the last background reconcile found.
+        self.guest_session = ""
         self.guest_model = ""
         self.guest_context_pct = None   # unknown until a statusline event says otherwise (26.3)
         self.guest_busy = False
@@ -170,7 +182,8 @@ class ProgramControl:
     def _apply(self, state: dict) -> None:
         if "granted" in state:
             self.granted = bool(state.get("granted"))
-        for key in ("reason", "program", "guest", "guest_model", "question", "kind", "screen_source"):
+        for key in ("reason", "program", "guest", "guest_session", "guest_model", "question", "kind",
+                    "screen_source"):
             if key in state:
                 self[key] = state.get(key) or ""
         for key in ("masked", "alt_screen", "waiting", "guest_busy"):
@@ -185,6 +198,16 @@ class ProgramControl:
 
     def __setitem__(self, key: str, value) -> None:
         setattr(self, key, value)
+
+    def watch(self, callback: Callable[["ProgramControl"], None] | None) -> None:
+        """Be told after every `program_state` this pane sends.
+
+        The pane is the only thing that knows a guest is running in its shell (Tier B, protocol
+        26.7), and `program_state` is the only message that says so, so what follows that guest's
+        transcript listens here rather than in `backend/worker.py`: the handler there already
+        calls `update()` and needs no line of its own. One watcher — the worker is one pane.
+        """
+        self._watcher = callback
 
     def begin_turn(self, grant) -> None:
         """A turn starts: the grant on this prompt is the only consent this turn has."""
@@ -204,6 +227,14 @@ class ProgramControl:
         self._apply(validate_grant({k: v for k, v in state.items() if k not in ("type", "id")}))
         if not self.granted:
             self.fail_pending(self._revoke_code())
+        watcher = self._watcher
+        if watcher is not None:
+            try:
+                watcher(self)
+            except Exception:
+                # A listener is a bystander. A take-over has to reach the turn whatever a guest
+                # tail made of the same message, so nothing it does can fail this update.
+                pass
         return self.summary()
 
     def _revoke_code(self) -> str:
@@ -220,7 +251,8 @@ class ProgramControl:
 
     def summary(self) -> dict:
         summary = {"granted": self.granted, "reason": self.reason, "program": self.program,
-                   "guest": self.guest, "guest_model": self.guest_model, "guest_busy": self.guest_busy,
+                   "guest": self.guest, "guest_session": self.guest_session,
+                   "guest_model": self.guest_model, "guest_busy": self.guest_busy,
                    "kind": self.kind, "masked": self.masked,
                    "waiting": self.waiting, "writes": self.writes, "max_writes": self.max_writes,
                    "screen_source": self.screen_source}

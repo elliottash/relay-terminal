@@ -414,13 +414,25 @@ class GuestSessionRows(unittest.TestCase):
                             cwd=cwd, session_id=session_id)
 
     def ask(self, **extra):
-        """One `conversations` request over every source, answered from the index."""
+        """One `conversations` request over every source, answered from the index.
+
+        The answer wanted is the one `handle` emits on *this* thread. Counting events and taking
+        the next one raced the background refresh, which emits `conversations` of its own — for
+        whatever request was latest when it started — so a listing that named only Relay's own
+        sources sometimes read back the guest-laden answer of the listing before it.
+        """
         request = {'id': 'c', 'scope': 'all',
                    'sources': ['agent', 'terminal', 'claude', 'codex']}
         request.update(extra)
-        before = len(self.rec.of('conversations'))
-        self.cmds.handle('conversations', request)
-        return self.rec.of('conversations')[before]
+        mine, me, previous = [], threading.get_ident(), self.rec.hook
+        self.rec.hook = lambda event: (mine.append(event)
+                                       if event.get('event') == 'conversations'
+                                       and threading.get_ident() == me else None)
+        try:
+            self.cmds.handle('conversations', request)
+        finally:
+            self.rec.hook = previous
+        return mine[0]
 
     def listed(self, event):
         return {item['session_id']: item for item in event['items']}
@@ -433,6 +445,198 @@ class GuestSessionRows(unittest.TestCase):
             if want(items) or time.monotonic() > deadline:
                 return items
             time.sleep(0.05)
+
+    # ----- the pane's own guest, followed while it runs ----------------------------------------
+    def claude_turn_lines(self, session_id, *, cwd, index, prompt, reply):
+        """One turn's worth of claude lines, in the order claude writes them."""
+        from test_guest_sessions import claude_prompt_line, claude_reply_line, claude_tool_result_line
+        return [claude_prompt_line(prompt, index=index, session_id=session_id, cwd=cwd),
+                claude_tool_result_line(index=index, session_id=session_id, cwd=cwd),
+                claude_reply_line(reply, index=index, session_id=session_id, cwd=cwd)]
+
+    def start_claude(self, session_id, *, cwd, prompt='fix the pane drag', reply='Fixed it in Pane.h.'):
+        """A transcript with one turn and no title lines, so more turns can be *appended* to it —
+        which is what a running guest does, and what the tail is there to read."""
+        from test_guest_sessions import claude_header, write_claude
+        lines = claude_header(session_id) + self.claude_turn_lines(
+            session_id, cwd=cwd, index=0, prompt=prompt, reply=reply)
+        return write_claude(self.home, lines, cwd=cwd, session_id=session_id)
+
+    def append_turn(self, path, session_id, *, cwd, index, prompt, reply):
+        with path.open('a', encoding='utf-8') as handle:
+            for line in self.claude_turn_lines(session_id, cwd=cwd, index=index, prompt=prompt, reply=reply):
+                handle.write(json.dumps(line) + '\n')
+        return path
+
+    def wire_agent(self, provider=None, cwd=''):
+        """A `configure`'s hand-off: the pane's new Agent, which may be a guest harness (Tier A),
+        and its `ProgramControl`, which is where its `program_state` messages land (Tier B)."""
+        from types import SimpleNamespace
+        from relay_core.program_input import ProgramControl
+        control = ProgramControl(lambda event: None, threading.Event())
+        self.cmds.note_agent(SimpleNamespace(
+            provider=provider, executor=SimpleNamespace(program=control,
+                                                        workspace=SimpleNamespace(root=cwd))))
+        return control
+
+    def pane_program(self):
+        """The pane's `ProgramControl` with no guest behind the prompt box: Tier B only."""
+        return self.wire_agent()
+
+    def tier_a_agent(self, session_id, *, cwd):
+        """A pane whose *agent* is a guest harness (29.3). On `guest_harness_fake`: no test here
+        starts a real claude either."""
+        from guest_harness_fake import FakeHarness
+        from relay_core import guest_harness_provider as ghp
+        from relay_core.provider import ProviderConfig
+        harness = FakeHarness([], session_id=session_id)
+        harness.start(cwd=cwd)
+        provider = ghp.HarnessProvider(ProviderConfig('harness://claude', 'claude-fake', '', {}, 32_768),
+                                       harness, 'claude')
+        self.addCleanup(provider.close)
+        return provider, self.wire_agent(provider, cwd=cwd)
+
+    def test_a_tier_a_pane_tails_the_session_its_harness_holds(self):
+        """29.3: the pane's agent *is* the guest, and the harness knows which of the guest's own
+        sessions it is — nothing has to tell Relay. What the user runs in the terminal below is
+        their own shell and may not take the tail off the pane's agent."""
+        self.no_reconcile()
+        cwd = str(self.root / 'repo')
+        mine = '44444444-0000-4000-8000-000000000044'
+        theirs = '44444444-0000-4000-8000-000000000045'
+        path = self.start_claude(mine, cwd=cwd, prompt='the harness')
+        self.start_claude(theirs, cwd=cwd, prompt='the terminal')
+        provider, control = self.tier_a_agent(mine, cwd=cwd)
+        self.assertEqual(mine, provider.session_id)
+        items = self.settled(lambda rows: mine in rows)
+        self.assertIn(mine, items)
+        self.assertEqual(path, self.cmds.guest_tail.path)
+        control.update({'guest': 'claude', 'guest_session': theirs})
+        self.assertEqual(path, self.cmds.guest_tail.path)
+        self.assertNotIn(theirs, self.listed(self.ask()))
+
+    def no_reconcile(self):
+        """Hold the background scan off. Anything that reaches the listing after this came from
+        the tail, which is the whole claim these tests make."""
+        from relay_core import guest_sessions
+        nothing = {'added': 0, 'refreshed': 0, 'removed': 0, 'ms': 0}
+        patch = mock.patch.object(guest_sessions, 'reconcile', lambda index, *a, **k: dict(nothing))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_a_tier_b_guest_is_tailed_without_waiting_for_a_reconcile(self):
+        """The guest runs in the pane's own shell, so the worker hears of it only through
+        `program_state` — which carries the guest and the session it was launched with. From then
+        on its row follows the transcript, with the reconcile held off entirely."""
+        self.no_reconcile()
+        cwd = str(self.root / 'repo')
+        session = '77777777-0000-4000-8000-000000000077'
+        path = self.start_claude(session, cwd=cwd)
+        control = self.pane_program()
+        self.assertIsNone(self.cmds.guest_tail)
+        control.update({'guest': 'claude', 'guest_session': session})
+        items = self.settled(lambda rows: session in rows)
+        self.assertIn(session, items, 'the tail did not index the running session')
+        self.assertEqual(2, items[session]['message_count'])       # one prompt and one reply
+        self.assertEqual(path, self.cmds.guest_tail.path)
+        # …and it keeps up: the guest answers again and the next listing has the new turn.
+        self.append_turn(path, session, cwd=cwd, index=1, prompt='and the drop?', reply='Done.')
+        before = path.read_bytes()
+        items = self.settled(lambda rows: rows.get(session, {}).get('message_count') == 4)
+        self.assertEqual(4, items[session]['message_count'])
+        self.assertEqual(before, path.read_bytes(), 'the transcript belongs to the guest')
+
+    def test_the_row_moves_while_nobody_is_typing(self):
+        """The Sessions pane re-lists when the user touches it, not on a timer. A guest answering
+        in front of an open, idle pane still moves its row: every `program_state` the pane sends
+        while the guest works is a tick, and a tick that finds new turns sends the listing the
+        pane last asked for over again, under that listing's own id."""
+        self.no_reconcile()
+        quick = mock.patch.object(session_protocol, 'GUEST_TAIL_POLL_EVERY', 0.0)
+        quick.start()
+        self.addCleanup(quick.stop)
+        cwd = str(self.root / 'repo')
+        session = '33333333-0000-4000-8000-000000000033'
+        path = self.start_claude(session, cwd=cwd)
+        control = self.pane_program()
+        control.update({'guest': 'claude', 'guest_session': session})
+        self.settled(lambda rows: session in rows)     # the pane has listed at least once
+        state = self.cmds._guest_state()
+        deadline = time.monotonic() + 10
+        while state['running'] and time.monotonic() < deadline:
+            time.sleep(0.01)
+        # From here nothing asks for a listing. The guest answers, and all the pane says is that
+        # its guest is busy.
+        self.append_turn(path, session, cwd=cwd, index=1, prompt='and the drop?', reply='Done.')
+        control.update({'guest': 'claude', 'guest_busy': True})
+        event = self.rec.wait(lambda e: e['event'] == 'conversations' and any(
+            item.get('session_id') == session and item.get('message_count') == 4
+            for item in e['items']))
+        self.assertEqual('c', event['id'])
+
+    def test_two_claudes_in_one_directory_tail_their_own_sessions(self):
+        """Why the session id is not optional (GT7X review, B7): two claudes in one project write
+        two transcripts in the same folder, so "the newest file" is whichever of them typed last."""
+        self.no_reconcile()
+        cwd = str(self.root / 'repo')
+        mine = '88888888-0000-4000-8000-000000000088'
+        theirs = '88888888-0000-4000-8000-000000000089'
+        path = self.start_claude(mine, cwd=cwd, prompt='mine')
+        other = self.start_claude(theirs, cwd=cwd, prompt='theirs')   # written second: the newest
+        os.utime(other, (path.stat().st_mtime + 10, path.stat().st_mtime + 10))
+        control = self.pane_program()
+        control.update({'guest': 'claude', 'guest_session': mine})
+        items = self.settled(lambda rows: mine in rows)
+        self.assertEqual(path, self.cmds.guest_tail.path)
+        self.assertNotIn(theirs, items, 'the pane indexed the other claude of the same directory')
+        # The other one answers. It is not this pane's session, so nothing of it reaches the row.
+        self.append_turn(other, theirs, cwd=cwd, index=1, prompt='theirs again', reply='Done.')
+        items = self.settled(lambda rows: theirs in rows, timeout=1.0)
+        self.assertNotIn(theirs, items)
+        self.assertEqual(2, items[mine]['message_count'])
+        self.assertEqual(path, self.cmds.guest_tail.path)
+
+    def test_indexing_the_guests_off_means_no_tail(self):
+        """Options > Privacy (review B1): off, Relay opens nothing of the guests' — including the
+        session running in the pane. It stops one that is already following, because the setting
+        can be turned off while the guest is answering."""
+        self.no_reconcile()
+        cwd = str(self.root / 'repo')
+        session = '66666666-0000-4000-8000-000000000066'
+        path = self.start_claude(session, cwd=cwd)
+        self.cmds.index_guests = False
+        control = self.pane_program()
+        control.update({'guest': 'claude', 'guest_session': session})
+        items = self.settled(lambda rows: session in rows, timeout=1.0)
+        self.assertNotIn(session, items)
+        self.assertIsNone(self.cmds.guest_tail)
+        # On again: the same want is still held, so the row arrives without another program_state.
+        self.ask(index_guests=True)
+        self.assertIn(session, self.settled(lambda rows: session in rows))
+        self.assertIsNotNone(self.cmds.guest_tail)
+        # And off again while it runs.
+        self.ask(index_guests=False)
+        self.settled(lambda rows: self.cmds.guest_tail is None, timeout=5.0)
+        self.assertIsNone(self.cmds.guest_tail)
+        self.assertTrue(path.exists(), 'the transcript belongs to the guest')
+
+    def test_the_guest_leaving_stops_the_tail(self):
+        self.no_reconcile()
+        cwd = str(self.root / 'repo')
+        session = '55555555-0000-4000-8000-000000000055'
+        self.start_claude(session, cwd=cwd)
+        control = self.pane_program()
+        control.update({'guest': 'claude', 'guest_session': session})
+        self.settled(lambda rows: session in rows)
+        self.assertIsNotNone(self.cmds.guest_tail)
+        # A `program_state` that names the guest but no session says nothing about which session
+        # is being written, so it leaves the tail alone…
+        control.update({'guest': 'claude'})
+        self.assertIsNotNone(self.cmds.guest_tail)
+        # …and the guest exiting stops it. The row stays in the index; the reconcile owns it again.
+        control.update({'guest': ''})
+        self.assertIsNone(self.cmds.guest_tail)
+        self.assertIn(session, self.listed(self.ask()))
 
     # ----- the listing ------------------------------------------------------------------------
     def test_a_guest_session_is_listed_with_its_own_resume_command(self):

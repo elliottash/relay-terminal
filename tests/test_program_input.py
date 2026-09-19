@@ -346,6 +346,48 @@ class GuestStateTests(ControlTestCase):
                 validate_grant({"granted": True, **bad})
 
 
+class GuestSessionTests(ControlTestCase):
+    """`guest_session` on `program_state` (protocol 26.7): which of the guest's own sessions is
+    running in this pane's shell. It is what lets the worker follow that one transcript while the
+    guest answers — two claudes in one directory write two — so it rides beside `guest` in
+    validate_grant, _apply and summary, exactly as the other guest fields do."""
+
+    def test_the_session_is_carried_beside_the_guest(self):
+        session = 'ea11ece1-7ec2-4597-8639-32fb1f43f073'
+        summary = self.control.update({'guest': 'claude', 'guest_session': session})
+        self.assertEqual(('claude', session), (summary['guest'], summary['guest_session']))
+        self.assertEqual(session, self.control.guest_session)
+
+    def test_a_state_that_does_not_mention_it_keeps_it(self):
+        session = 'ea11ece1-7ec2-4597-8639-32fb1f43f073'
+        self.control.update({'guest': 'claude', 'guest_session': session})
+        self.assertEqual(session, self.control.update({'guest': 'claude', 'guest_busy': True})['guest_session'])
+        # The guest leaving takes it with it.
+        self.assertEqual('', self.control.update({'guest': '', 'guest_session': ''})['guest_session'])
+
+    def test_bad_values_are_refused(self):
+        for bad in ({'guest_session': 5}, {'guest_session': 'x' * 201}, {'guest_session': ['a']}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                validate_grant({'granted': True, **bad})
+        validate_grant({'granted': True, 'guest_session': 'x' * 200})
+
+    def test_a_watcher_hears_every_state_and_cannot_break_one(self):
+        """What follows the guest's transcript listens here rather than in the worker's handler,
+        so `program_state` reaches it with no line of worker.py's own. It is a bystander: a take-over
+        has to revoke the grant whatever the listener makes of the same message."""
+        seen = []
+        self.control.watch(lambda control: seen.append((control.guest, control.guest_session)))
+        self.control.begin_turn(GRANT)
+        self.control.update({'guest': 'claude', 'guest_session': 'abc'})
+        # The second one names no session, so the last one stands (the pane sends the field on
+        # every state; the worker stops following on `guest` alone).
+        self.control.update({'granted': False, 'reason': 'take_over', 'guest': ''})
+        self.assertEqual([('claude', 'abc'), ('', 'abc')], seen)
+        self.assertFalse(self.control.granted)
+        self.control.watch(lambda control: 1 / 0)
+        self.assertFalse(self.control.update({'granted': False, 'reason': 'take_over'})['granted'])
+
+
 class ExecutorTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

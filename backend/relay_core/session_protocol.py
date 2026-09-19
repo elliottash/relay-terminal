@@ -14,6 +14,7 @@ import sqlite3
 import threading
 import time
 import uuid
+import weakref
 from urllib.parse import urlsplit
 
 from . import (alias_import, aliases, attachments, conv_index, guest_harness_provider,
@@ -38,6 +39,12 @@ MAX_GUEST_ID = 200
 # How often a `conversations` request may set a guest reconcile going (seconds). The pane queries
 # on every keystroke; the guests' files do not change that fast.
 GUEST_RECONCILE_EVERY = 5.0
+# How often the *pane's own* guest is tailed (protocol 26.7), and how often a tail whose guest has
+# not written its first line yet tries again. A poll is a stat and, only when the file grew, the
+# bytes the guest appended, which is why it may run far oftener than the reconcile — the whole
+# point is that the row moves while the user is watching it rather than at the next scan.
+GUEST_TAIL_POLL_EVERY = 0.5
+GUEST_TAIL_RETRY_EVERY = 1.0
 
 TYPES = {"set_model", "set_effort", "context", "compact", "checkpoints", "rewind", "fork", "load_state",
          "sessions", "resume", "recap_request", "set_mode", "plan_execute", "scan_instructions",
@@ -163,6 +170,7 @@ def configured_fields(agent) -> dict:
     # Protocol 29.3: a pane whose agent is a guest harness says which guest, and which session of
     # the guest's own, so the GUI can label the pane and the sessions row can be resumed.
     fields.update(guest_harness_provider.configured_fields(agent))
+    _note_configured(agent)
     if agent.instructions:
         fields["instructions_max_bytes"] = agent.instructions.cap
         fields["instructions_bytes"] = len(agent.instructions.section.encode("utf-8"))
@@ -171,6 +179,21 @@ def configured_fields(agent) -> dict:
         if agent.instructions.skipped:
             fields["instructions_skipped"] = agent.instructions.skipped[:50]
     return fields
+
+
+# This worker's `SessionCommands`, weakly. `configure` is handled in `backend/worker.py`, which
+# calls `configured_fields()` above with the new Agent and holds no reference to the commands
+# object; a worker is one pane and one `SessionCommands`, so the instance registers itself here
+# and that call is the hand-off. Nothing else uses it.
+_COMMANDS = None
+
+
+def _note_configured(agent) -> None:
+    """A `configure` built a new Agent for this pane: hand it to the session commands, which
+    follow the pane's guest session while it runs (protocol 26.7, `SessionCommands.note_agent`)."""
+    commands = _COMMANDS() if _COMMANDS is not None else None
+    if commands is not None:
+        commands.note_agent(agent)
 
 
 def load_attachments(request: dict, turns) -> list[dict] | None:
@@ -214,6 +237,17 @@ class SessionCommands:
         # Alias import previews (protocol 20), held until the matching apply names one.
         self._alias_previews: dict[str, list] = {}
         self._alias_lock = threading.Lock()
+        # The pane's live guest session (protocol 26.7), followed while it runs. One tail per
+        # worker, built on first use; see `_tail_poll`. `_tail_at` is the single throttle — the
+        # GuestTail's own is turned off (`min_poll=0`) so there are not two of them disagreeing.
+        self._tail: guest_sessions.GuestTail | None = None
+        self._tail_lock = threading.Lock()
+        self._tail_want: tuple[str, str, str] | None = None   # (source, workspace, session id)
+        self._tail_on = False        # `start()` has found the transcript and the rows are being kept
+        self._tail_owner = ""        # "agent" (Tier A) or "program" (Tier B); see `_follow`
+        self._tail_at = 0.0          # monotonic of the last poll or start attempt
+        global _COMMANDS
+        _COMMANDS = weakref.ref(self)
 
     @staticmethod
     def handles(kind) -> bool:
@@ -288,6 +322,9 @@ class SessionCommands:
                 guest_harness_provider.attach(agent, guest_provider)
             else:
                 agent.set_model(config, preset_id, window)
+            # Protocol 26.7: the pane's live guest session follows the switch — onto the new
+            # harness's own session, or, for a pane that has just left its guest, onto nothing.
+            self.follow_agent_guest(agent)
             self.on_model_changed(agent)
 
         def decide(idle: bool) -> dict:
@@ -445,9 +482,11 @@ class SessionCommands:
             self.maybe_title()
 
     def observe(self, event: dict) -> None:
-        """Worker emit hook for main-turn events: a finished turn may be owed a fresh pane title."""
+        """Worker emit hook for main-turn events: a finished turn may be owed a fresh pane title,
+        and a guest pane's turn is the guest writing its transcript (`_guest_tick`)."""
         if event.get("event") in ("done", "error", "cancelled"):
             self.maybe_title()
+        self._guest_tick()
 
     def maybe_title(self) -> None:
         """Write the pane title on a cheap chores-role side call, when the cadence says one is owed.
@@ -858,17 +897,22 @@ class SessionCommands:
     def _guest_refresh(self, request, sources) -> None:
         """Bring the guest rows in line with `~/.claude` and `~/.codex` — off the request path.
 
-        The listing is answered from the index straight away; the reconcile runs on its own
-        thread, and only if the answer actually changed does a second `conversations` event
-        replace the list the pane drew. A reconcile is incremental (a transcript whose mtime
-        matches the indexed one is not read at all: warm, it is no work), but the *first* one
-        over a long claude history is seconds of parsing, which is exactly why it may not sit in
-        front of the answer. One at a time, and no oftener than `GUEST_RECONCILE_EVERY` seconds,
-        so typing in the search box does not queue a rescan per keystroke.
+        The listing is answered from the index straight away; the work runs on its own thread, and
+        only if the answer actually changed does a second `conversations` event replace the list
+        the pane drew. Two things happen on that thread, and they run at different rates:
+
+        * **the pane's own guest** is tailed first (`_tail_poll`, protocol 26.7): a stat, and the
+          bytes the guest appended since the last tick. That is the row the user is watching, so it
+          is followed as often as the pane lists, down to `GUEST_TAIL_POLL_EVERY`;
+        * **every other guest session** is reconciled, at most once every `GUEST_RECONCILE_EVERY`
+          seconds. A reconcile is incremental (a transcript whose mtime matches the indexed one is
+          not read at all: warm, it is no work), but the *first* one over a long claude history is
+          seconds of parsing, which is exactly why it may not sit in front of the answer, and why
+          typing in the search box may not queue a rescan per keystroke.
 
         The second answer is built for the **latest** request, not for the one that happened to
-        set the rescan going: the user has gone on typing in the meantime, and re-sending an
-        older query's results under the same id would put the wrong list in front of them.
+        set the work going: the user has gone on typing in the meantime, and re-sending an older
+        query's results under the same id would put the wrong list in front of them.
         """
         if not any(source in conv_index.GUEST_SOURCES for source in sources):
             return
@@ -876,28 +920,58 @@ class SessionCommands:
         now = time.monotonic()
         with state["lock"]:
             state["request"] = request         # even when this one is throttled away
-            if state["running"] or (state["at"] and now - state["at"] < GUEST_RECONCILE_EVERY):
+            if state["running"]:
+                return
+            # The reconcile keeps its own five-second throttle; the tail is the reason a listing
+            # in between still starts the thread.
+            rescan = not state["at"] or now - state["at"] >= GUEST_RECONCILE_EVERY
+            if not rescan and not self._tail_due():
                 return
             state["running"] = True
+        self._guest_work(request, rescan)
+
+    def _guest_tick(self) -> None:
+        """Something a running guest may have written about just happened — the pane sent a
+        `program_state`, or a turn event went by. Poll the tail, and if it moved, send the pane
+        the listing it last asked for, again.
+
+        This is what keeps the row moving while nobody is typing. The Sessions pane re-lists when
+        the user touches it and *not* on a timer, so leaving the poll to `conversations` alone
+        would leave a guest answering in front of an open, idle pane moving only at the next
+        reconcile — the thing this is here to fix. It adds no timer and no thread of its own: it
+        borrows the background slot the reconcile uses, and costs a lock and a clock read when
+        there is no guest to follow or no listing to answer.
+        """
+        if self._tail_want is None:
+            return                              # the common case: no guest, no work, no locks
+        state = getattr(self, "_guests", None)
+        if state is None:
+            return
+        with state["lock"]:
+            request = state["request"]
+            if request is None or state["running"] or not self._tail_due():
+                return
+            state["running"] = True
+        self._guest_work(request, rescan=False)
+
+    def _guest_work(self, request, rescan: bool) -> None:
+        """The background half, with `state["running"]` already claimed by the caller."""
+        state = self._guest_state()
 
         def work():
+            changed = False
             try:
-                # Off: nothing under ~/.claude or ~/.codex is read and the guest rows leave the
-                # index; the pins and the names are kept for when it goes back on (26.7).
-                outcome = guest_sessions.reconcile(self.index(), enabled=self.index_guests)
-            except (OSError, ValueError, sqlite3.Error) as exc:
-                # A guest's files are not Relay's to depend on: an unreadable home is a log line,
-                # never an error on a listing the user already has in front of them.
-                logs.event(_guest_log, "guest reconcile failed", error=str(exc)[:200])
-                return None
-            except Exception:
-                logs.event(_guest_log, "guest reconcile failed", error="unexpected")
-                return None
+                # The pane's own guest first: it is cheap, and it is the row that moves while the
+                # user is looking at it.
+                changed = self._tail_poll()
+                if rescan:
+                    changed = self._reconcile_guests() or changed
             finally:
                 with state["lock"]:
                     state["running"] = False
-                    state["at"] = time.monotonic()
-            if not (outcome["added"] or outcome["refreshed"] or outcome["removed"]):
+                    if rescan:
+                        state["at"] = time.monotonic()
+            if not changed:
                 return None
             with state["lock"]:
                 latest = state["request"]
@@ -907,6 +981,194 @@ class SessionCommands:
                 return None
 
         self._background("guest_sessions", request.get("id"), work)
+
+    def _reconcile_guests(self) -> bool:
+        """One scan of the guests' homes. True when the rows changed."""
+        try:
+            # Off: nothing under ~/.claude or ~/.codex is read and the guest rows leave the
+            # index; the pins and the names are kept for when it goes back on (26.7).
+            outcome = guest_sessions.reconcile(self.index(), enabled=self.index_guests)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            # A guest's files are not Relay's to depend on: an unreadable home is a log line,
+            # never an error on a listing the user already has in front of them.
+            logs.event(_guest_log, "guest reconcile failed", error=str(exc)[:200])
+            return False
+        except Exception:
+            logs.event(_guest_log, "guest reconcile failed", error="unexpected")
+            return False
+        return bool(outcome["added"] or outcome["refreshed"] or outcome["removed"])
+
+    # ----- the pane's own guest session, while it runs (protocol 26.7) ------------------------
+    #
+    # A reconcile is a scan on a timer: while a guest is answering in front of the user its row in
+    # the Sessions pane would sit still for as much as five seconds. `guest_sessions.GuestTail`
+    # follows the one transcript that matters instead, and this is what tells it which one. There
+    # are two ways a guest gets into a pane and each answers that question differently:
+    #
+    #   Tier A (29.3) the pane's *agent* is the guest's headless harness, which knows its own
+    #           guest id and session id — `note_agent` at configure, `_set_model` on a switch.
+    #   Tier B  the guest runs as a TUI in the pane's own shell, and the only thing the worker
+    #           hears is `program_state`, which carries `guest` and `guest_session` (the id the
+    #           pane passed on the launch line). `_program_state` is called from there.
+    #
+    # The session id is not optional. Two claudes started in one directory write two transcripts
+    # in the same project folder, and "the newest file" is whichever of the two typed last, so
+    # without it each pane would tail the other's session the moment the other answered (GT7X
+    # review, B7). `LiveTail.for_session` takes the id and opens exactly that file.
+
+    @property
+    def guest_tail(self) -> guest_sessions.GuestTail | None:
+        """The tail that is following this pane's guest, or None when none is."""
+        return self._tail if self._tail_on else None
+
+    def note_agent(self, agent) -> None:
+        """A `configure` built this pane a new Agent (via `configured_fields`).
+
+        Two wires: the new agent's `ProgramControl` is the one the pane's `program_state` messages
+        will land in (Tier B), and the agent itself may be a guest harness (Tier A).
+        """
+        program = getattr(getattr(agent, "executor", None), "program", None)
+        watch = getattr(program, "watch", None)
+        if callable(watch):
+            watch(self._program_state)
+        self.follow_agent_guest(agent)
+
+    def follow_agent_guest(self, agent) -> None:
+        """Tier A: follow the session of the harness this pane's agent runs on, if it runs on one.
+
+        A pane that is not on a guest follows nothing — which is also what stops the tail when the
+        pane reconfigures onto another model.
+        """
+        provider = guest_harness_provider.agent_provider(agent)
+        if provider is None:
+            self._unfollow("agent")
+            return
+        workspace = ""
+        root = getattr(getattr(agent, "executor", None), "workspace", None)
+        if root is not None:
+            workspace = str(getattr(root, "root", "") or "")
+        self._follow("agent", provider.guest_id, workspace, provider.session_id)
+
+    def _program_state(self, program) -> None:
+        """Tier B: the pane says what is running in its terminal (`ProgramControl.watch`).
+
+        A pane whose *agent* is a guest harness keeps following that: its terminal is the user's
+        own shell and whatever is in it is not this pane's agent. `guest` going empty — the guest
+        exited, or something else came to the foreground — stops the tail. A `program_state` that
+        names the guest but not a session leaves the tail alone rather than dropping it: an older
+        pane never sends the field at all, and the state it does send says nothing about which
+        session is being written.
+        """
+        if self._tail_owner == "agent":
+            return
+        source = (getattr(program, "guest", "") or "").strip()
+        if not source:
+            self._unfollow("program")
+            return
+        session = (getattr(program, "guest_session", "") or "").strip()
+        if session:
+            self._follow("program", source, self._workspace({}), session)
+        # The pane sends one of these whenever the guest's statusline, its busy flag or the screen
+        # in front of it changes, which is as often as a guest working says anything at all. That
+        # is the tick a Tier B guest has: no turn of Relay's is running, so nothing else moves.
+        self._guest_tick()
+
+    def _guests_indexed(self) -> bool:
+        """Whether Relay may read the guests' files at all (Options > Privacy, review B1)."""
+        return guest_sessions.guests_enabled() if self.index_guests is None else bool(self.index_guests)
+
+    def _follow(self, owner: str, source: str, workspace: str, session_id: str) -> None:
+        """Follow this guest session from the next tick. Nothing is read here: `start()` parses a
+        resumed transcript from its first byte, and the protocol thread is not the place for it."""
+        session_id = (session_id or "").strip()[:MAX_GUEST_ID]
+        if source not in conv_index.GUEST_SOURCES or not session_id:
+            return
+        want = (source, workspace or "", session_id)
+        with self._tail_lock:
+            if self._tail_owner == owner and self._tail_want == want:
+                return
+            if self._tail is not None:
+                self._tail.stop()          # a different session: the old one is the reconcile's again
+            self._tail_want, self._tail_owner = want, owner
+            self._tail_on, self._tail_at = False, 0.0
+
+    def _unfollow(self, owner: str) -> None:
+        """Stop following, if what is being followed is this owner's. A Tier B guest in the
+        terminal is not ended by a `configure`, and a Tier A harness is not ended by a program
+        leaving the foreground, so neither may stop the other's tail."""
+        with self._tail_lock:
+            if self._tail_want is None or self._tail_owner != owner:
+                return
+            tail = self._tail
+            self._tail_want, self._tail_owner = None, ""
+            self._tail_on, self._tail_at = False, 0.0
+        if tail is not None:
+            tail.stop()
+
+    def close(self) -> None:
+        """The worker is going away: nothing is being followed any more."""
+        with self._tail_lock:
+            tail = self._tail
+            self._tail_want, self._tail_owner = None, ""
+            self._tail_on, self._tail_at = False, 0.0
+        if tail is not None:
+            tail.stop()
+
+    def _tail_due(self) -> bool:
+        """Whether a poll now would do anything: nothing followed is no, and two listings inside
+        one interval are one poll (the pane lists on every keystroke)."""
+        with self._tail_lock:
+            if self._tail_want is None:
+                return False
+            every = GUEST_TAIL_POLL_EVERY if self._tail_on else GUEST_TAIL_RETRY_EVERY
+            return not self._tail_at or time.monotonic() - self._tail_at >= every
+
+    def _tail_poll(self) -> bool:
+        """Put what the pane's guest has written since the last tick into the index. True when the
+        rows changed, which is what asks the listing to be sent again.
+
+        Indexing off (review B1) reads nothing and stops a tail that was running: the setting can
+        be turned off while a guest is answering, and the whole promise of it is that Relay then
+        does not open the guests' files. A guest that has not written its first line yet has no
+        transcript to open and `start()` says so; the want is kept and tried again on the next
+        tick rather than thrown away, no oftener than `GUEST_TAIL_RETRY_EVERY`.
+        """
+        if not self._guests_indexed():
+            with self._tail_lock:
+                tail, running = self._tail, self._tail_on
+                self._tail_on, self._tail_at = False, 0.0
+            if running and tail is not None:
+                tail.stop()
+            return False
+        with self._tail_lock:
+            want, started = self._tail_want, self._tail_on
+            if want is None:
+                return False
+            every = GUEST_TAIL_POLL_EVERY if started else GUEST_TAIL_RETRY_EVERY
+            now = time.monotonic()
+            if self._tail_at and now - self._tail_at < every:
+                return False
+            self._tail_at = now
+            if self._tail is None:
+                # `min_poll=0`: the cadence is this method's, so there is one throttle and not two.
+                self._tail = guest_sessions.GuestTail(min_poll=0.0)
+            tail = self._tail
+        try:
+            if started:
+                return tail.poll()
+            source, workspace, session_id = want
+            if not tail.start(self.index(), source, workspace or None, session_id=session_id):
+                return False
+            with self._tail_lock:
+                if self._tail_want == want:
+                    self._tail_on = True
+            return True
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            logs.event(_guest_log, "guest tail failed", error=str(exc)[:200])
+            return False
+        except Exception:
+            logs.event(_guest_log, "guest tail failed", error="unexpected")
+            return False
 
     def _conversations(self, request):
         for name in ("model", "file", "branch"):
