@@ -31,11 +31,27 @@ struct Harness {
         model.onStatus = [this](const QString &text) { statuses << text; };
         model.onChanged = [this] { ++changes; };
     }
-    void start(const char *id, bool background = true) {
+    void start(const char *id, bool background = true, const char *todoId = "") {
         model.handle(QJsonObject{{"event", "subagent_started"}, {"id", id}, {"type", "explore"},
-                                 {"description", "Summarize fixture"}, {"background", background}, {"model", "kimi-k3"}, {"effort", "low"}});
+                                 {"description", "Summarize fixture"}, {"background", background}, {"model", "kimi-k3"},
+                                 {"effort", "low"}, {"todo_id", todoId}});
     }
 };
+
+// One `todos` event for the strip's task half: each entry is "id:status[:subagent[:running]]".
+void feedTodos(relay::RequestLedgerModel *ledger, const QStringList &items) {
+    QByteArray body;
+    for (const QString &item : items) {
+        const QStringList parts = item.split(QLatin1Char(':'));
+        if (!body.isEmpty()) body += ",";
+        body += "{'id':'" + parts.value(0).toLatin1() + "','text':'text of " + parts.value(0).toLatin1()
+                + "','status':'" + parts.value(1).toLatin1() + "','request_ids':[]";
+        if (parts.size() > 2) body += ",'subagent':'" + parts.value(2).toLatin1() + "'";
+        if (parts.size() > 3) body += ",'subagent_running':true";
+        body += "}";
+    }
+    ledger->handle(json(("{'event':'todos','items':[" + body + "]}").constData()));
+}
 }  // namespace
 
 class SubagentsTests : public QObject {
@@ -552,6 +568,163 @@ private slots:
         restored.dropEnded();
         QCOMPARE(restored.ids(), QStringList{QStringLiteral("a2")});
         QCOMPARE(empties, 0);
+    }
+
+    // ----- the strip under the composer, task half (owner, 2026-09-19) --------------------------
+
+    // "the open task list could be nice to have underneat the prompt": the strip comes up for tasks
+    // alone and goes away when neither half has anything.
+    void stripShowsTasksWithoutSubagents() {
+        Harness h;
+        relay::RequestLedgerModel ledger;
+        SubagentsPanel panel(&h.model, &ledger);
+        QStringList openedTasks;
+        panel.onOpenTask = [&](const QString &id) { openedTasks << id; };
+        panel.refresh();
+        QVERIFY(panel.isHidden());                     // no subagents, no tasks
+        feedTodos(&ledger, {QStringLiteral("T1:completed"), QStringLiteral("T2:completed")});
+        panel.refresh();
+        QVERIFY(panel.isHidden());                     // a finished list is not an open task list
+        feedTodos(&ledger, {QStringLiteral("T1:completed"), QStringLiteral("T2:in_progress"), QStringLiteral("T3:pending")});
+        panel.refresh();
+        QVERIFY(!panel.isHidden());
+        QCOMPARE(panel.stripLayout().taskRows(), 3);
+        QCOMPARE(panel.stripLayout().subagentRows(), 0);
+        panel.resize(700, panel.sizeHint().height());
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        panel.enter();
+        QCOMPARE(panel.selectedColumn(), int(SubagentsPanel::Tasks));
+        QCOMPARE(panel.selectedRow(), 1);
+        QCOMPARE(panel.selectedTodoId(), QStringLiteral("T1"));
+        QVERIFY(panel.selectedId().isEmpty());         // no subagent is selected in the task column
+        QTest::keyClick(&panel, Qt::Key_Down);
+        QCOMPARE(panel.selectedTodoId(), QStringLiteral("T2"));
+        QTest::keyClick(&panel, Qt::Key_Return);       // no subagent on T2: the task list, on T2
+        QCOMPARE(openedTasks, QStringList{QStringLiteral("T2")});
+        QTest::keyClick(&panel, Qt::Key_End);
+        QCOMPARE(panel.selectedTodoId(), QStringLiteral("T3"));
+        // main + 3 task rows, nothing hidden.
+        QCOMPARE(panel.sizeHint().height(), 4 * (panel.fontMetrics().height() + 6) + 6);
+        // Nothing left open: the strip goes away again.
+        feedTodos(&ledger, {QStringLiteral("T1:completed"), QStringLiteral("T2:completed"), QStringLiteral("T3:completed")});
+        panel.refresh();
+        QVERIFY(panel.isHidden());
+    }
+
+    // "with subagents on the left and tasks on the right": Left/Right cross between the columns,
+    // Enter opens the task's subagent when it has one, and S hands a delegable task to a new one.
+    void stripPairsSubagentsWithTasks() {
+        Harness h;
+        relay::RequestLedgerModel ledger;
+        SubagentsPanel panel(&h.model, &ledger);
+        QStringList opened, openedTasks, handed;
+        int mouseTask = 0;
+        panel.onOpen = [&](const QString &id) { opened << id; };
+        panel.onOpenTask = [&](const QString &id) { openedTasks << id; };
+        panel.onRunTaskAsSubagent = [&](const QString &id) { handed << id; };
+        panel.onMouseOpenTask = [&] { ++mouseTask; };
+        h.start("a2", true, "T2");
+        feedTodos(&ledger, {QStringLiteral("T1:completed"), QStringLiteral("T2:in_progress:a2:running"),
+                            QStringLiteral("T3:pending")});
+        panel.refresh();
+        QCOMPARE(panel.stripLayout().subagentRows(), 1);
+        QCOMPARE(panel.stripLayout().taskRows(), 3);
+        panel.resize(700, panel.sizeHint().height());
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        panel.enter();
+        // Row 1 has no agent, so the selection lands on what is there: T1, in the task column.
+        QCOMPARE(panel.selectedColumn(), int(SubagentsPanel::Tasks));
+        QCOMPARE(panel.selectedTodoId(), QStringLiteral("T1"));
+        QTest::keyClick(&panel, Qt::Key_Left);         // the nearest left cell below: a2, on row 2
+        QCOMPARE(panel.selectedColumn(), int(SubagentsPanel::Subagents));
+        QCOMPARE(panel.selectedRow(), 2);
+        QCOMPARE(panel.selectedId(), QStringLiteral("a2"));
+        QTest::keyClick(&panel, Qt::Key_Return);       // a subagent cell still opens its tab
+        QCOMPARE(opened, QStringList{QStringLiteral("a2")});
+        QTest::keyClick(&panel, Qt::Key_Right);
+        QCOMPARE(panel.selectedColumn(), int(SubagentsPanel::Tasks));
+        QCOMPARE(panel.selectedTodoId(), QStringLiteral("T2"));
+        QTest::keyClick(&panel, Qt::Key_Return);       // T2 has a listed subagent: open it
+        QCOMPARE(opened.size(), 2);
+        QCOMPARE(opened.last(), QStringLiteral("a2"));
+        QVERIFY(openedTasks.isEmpty());
+        QTest::keyClick(&panel, Qt::Key_S);            // a2 is already running it: nothing to hand
+        QVERIFY(handed.isEmpty());
+        QTest::keyClick(&panel, Qt::Key_Down);
+        QCOMPARE(panel.selectedTodoId(), QStringLiteral("T3"));
+        QTest::keyClick(&panel, Qt::Key_X);            // a task is not dismissible
+        QTest::keyClick(&panel, Qt::Key_Delete);
+        QCOMPARE(h.model.rows().size(), 1);
+        QCOMPARE(panel.stripLayout().taskRows(), 3);
+        QTest::keyClick(&panel, Qt::Key_S);
+        QCOMPARE(handed, QStringList{QStringLiteral("T3")});
+        QTest::keyClick(&panel, Qt::Key_Home);
+        QCOMPARE(panel.selectedRow(), 0);
+        QTest::keyClick(&panel, Qt::Key_S);            // the main row hands out nothing
+        QCOMPARE(handed.size(), 1);
+        // A click in the right half selects that task and does what Enter does, then teaches the keys.
+        const int rowH = panel.fontMetrics().height() + 6;
+        QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier, QPoint(520, 2 + rowH * 3 + rowH / 2));
+        QCOMPARE(panel.selectedColumn(), int(SubagentsPanel::Tasks));
+        QCOMPARE(panel.selectedTodoId(), QStringLiteral("T3"));
+        QCOMPARE(openedTasks, QStringList{QStringLiteral("T3")});
+        QCOMPARE(mouseTask, 1);
+        // A click in the left half stays on the subagent side.
+        QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier, QPoint(60, 2 + rowH * 2 + rowH / 2));
+        QCOMPARE(panel.selectedColumn(), int(SubagentsPanel::Subagents));
+        QCOMPARE(opened.size(), 3);
+        QCOMPARE(mouseTask, 1);
+        if (!qEnvironmentVariableIsEmpty("RELAY_STRIP_SHOT")) panel.grab().save(qEnvironmentVariable("RELAY_STRIP_SHOT"));
+    }
+
+    // The strip is as tall as the taller column, never more than five rows, plus the "+N" line.
+    void stripHeightFollowsTheTallerColumn() {
+        Harness h;
+        relay::RequestLedgerModel ledger;
+        SubagentsPanel panel(&h.model, &ledger);
+        const int rowH = panel.fontMetrics().height() + 6;
+        h.start("a1"); h.start("a2");
+        panel.refresh();
+        QCOMPARE(panel.sizeHint().height(), 3 * rowH + 6);           // main + 2 agents
+        feedTodos(&ledger, {QStringLiteral("T1:in_progress"), QStringLiteral("T2:pending"), QStringLiteral("T3:pending"),
+                            QStringLiteral("T4:pending")});
+        panel.refresh();
+        QCOMPARE(panel.stripLayout().rows.size(), 4);                // max(2 agents, 4 tasks)
+        QCOMPARE(panel.sizeHint().height(), 5 * rowH + 6);
+        feedTodos(&ledger, {QStringLiteral("T1:in_progress"), QStringLiteral("T2:pending"), QStringLiteral("T3:pending"),
+                            QStringLiteral("T4:pending"), QStringLiteral("T5:pending"), QStringLiteral("T6:pending"),
+                            QStringLiteral("T7:pending")});
+        panel.refresh();
+        QCOMPARE(panel.stripLayout().rows.size(), 5);                // capped at kMaxVisible
+        QCOMPARE(panel.stripLayout().hiddenTasks, 2);
+        QCOMPARE(panel.sizeHint().height(), 7 * rowH + 6);           // main + 5 rows + "+2 tasks"
+    }
+
+    // The fold exists because the subagent pane is open; with no subagents there is nothing to fold
+    // to, so a task-only strip stays open. With both, the one line says how many tasks are open.
+    void stripFoldsOnlyWhileSubagentsExist() {
+        Harness h;
+        relay::RequestLedgerModel ledger;
+        SubagentsPanel panel(&h.model, &ledger);
+        const int rowH = panel.fontMetrics().height() + 6;
+        feedTodos(&ledger, {QStringLiteral("T1:in_progress"), QStringLiteral("T2:pending")});
+        panel.refresh();
+        panel.setFolded(true, QStringLiteral("Alt+A"));
+        QVERIFY(panel.folded());
+        QCOMPARE(panel.sizeHint().height(), 3 * rowH + 6);           // still the full strip
+        QVERIFY(!panel.isHidden());
+        h.start("a1");
+        panel.refresh();
+        QCOMPARE(panel.sizeHint().height(), rowH + 6);               // now there is a pane to fold into
+        QCOMPARE(panel.foldedText(), QStringLiteral("1 subagent running · 2 tasks open · Alt+A to open"));
+        feedTodos(&ledger, {QStringLiteral("T1:in_progress"), QStringLiteral("T2:completed")});
+        panel.refresh();
+        QCOMPARE(panel.foldedText(), QStringLiteral("1 subagent running · 1 task open · Alt+A to open"));
+        feedTodos(&ledger, {QStringLiteral("T1:completed"), QStringLiteral("T2:completed")});
+        panel.refresh();
+        QCOMPARE(panel.foldedText(), QStringLiteral("1 subagent running · Alt+A to open"));   // unchanged wording
     }
 };
 

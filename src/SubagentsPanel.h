@@ -2,6 +2,8 @@
 #pragma once
 // Subagents UI (Claude Code style): a model fed by the worker's subagent_* events and the
 // running-agents list shown under a pane's composer. See docs/AGENT-SESSIONS-PROTOCOL.md section 8.
+#include "RequestLedger.h"
+
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -91,14 +93,56 @@ private:
     qint64 m_mainTokens = -1;
 };
 
-// The running-agents list under the composer: a `main` row plus one row per subagent.
-// Hidden when there are no subagents. Up/Down move, Enter (or a click) opens the subagent's tab, x or Delete stops a
-// running agent or dismisses a finished row, m picks the row's model, Esc (or Up past the first row)
-// returns to the composer.
+// ----- the strip under the composer: subagents on the left, the open task list on the right ----
+// Owner, 2026-09-19: "the open task list could be nice to have underneat the prompt … if you have
+// both subagents and tasks, try to split it horizontally … a subagent with two tasks gets two rows".
+
+// One row of the strip under the composer: at most one subagent on the left, at most one task on
+// the right. A subagent working N tasks gets N rows, one per task; `subagentRepeats` is set on the
+// second and later of them, where the strip draws a continuation mark instead of the name again.
+struct StripRow {
+    QString subagentId;             // empty: the left cell is blank on this row
+    QString todoId;                 // empty: the right cell is blank on this row
+    bool subagentRepeats = false;   // same subagent as the row above
+    bool linked = false;            // this row's subagent is the one working this row's task
+};
+
+// What the strip draws, computed with no widgets so it can be unit tested.
+struct StripLayout {
+    QList<StripRow> rows;
+    int hiddenSubagents = 0;   // listed subagents that did not fit
+    int hiddenTasks = 0;       // tasks of the current list outside the window
+    int windowStart = 0;       // index into the current list of the first task shown
+    int taskTotal = 0;         // tasks in the current list (all statuses)
+    int openTasks = 0;         // of those, LedgerTodo::open()
+    int subagentRows() const;  // rows with a non-empty subagentId
+    int taskRows() const;      // rows with a non-empty todoId
+};
+
+// The current task list: allTodos() filtered to currentBatch(), in list order. Empty for nullptr.
+QList<LedgerTodo> currentTaskList(const RequestLedgerModel *ledger);
+
+// The first row of the window of at most `maxRows` over `statuses` (the current task list, in
+// order), centred on the marginal task: the first "in_progress", else the first status that is
+// none of completed/done/cancelled/cancelled_by_user. No marginal task (all settled) puts the
+// window at the tail. <= maxRows statuses always returns 0.
+int marginalWindowStart(const QStringList &statuses, int maxRows);
+
+// The work strip under the composer: a `main` row, then up to kMaxVisible rows pairing the running
+// agents (left) with the current open task list (right). Hidden when there is neither a subagent nor
+// an open task. Up/Down move, Left/Right cross between the columns. On a subagent: Enter (or a
+// click) opens its tab, x or Delete stops a running agent or dismisses a finished row, m picks the
+// row's model. On a task: Enter opens its subagent when it has one, else the task list on that task,
+// and S hands a delegable task to a new background subagent. Esc (or Up past the first row) returns
+// to the composer.
 class SubagentsPanel final : public QWidget {
     Q_OBJECT
 public:
-    explicit SubagentsPanel(SubagentModel *model, QWidget *parent = nullptr);
+    // `ledger` (the task list) may be null: the strip is then subagents only, exactly as before.
+    explicit SubagentsPanel(SubagentModel *model, RequestLedgerModel *ledger = nullptr,
+                            QWidget *parent = nullptr);
+
+    enum Column { Subagents = 0, Tasks = 1 };
 
     std::function<void(const QString &id)> onOpen;
     std::function<void(const QString &id)> onStop;
@@ -111,6 +155,12 @@ public:
     // Folded: the subagent pane is open, so the list is one line ("2 subagents running · Alt+A to
     // open"). Enter or a click on it calls onOpenPane.
     std::function<void()> onOpenPane;
+    // Enter (or a click) on a task row that has no subagent: open the task list on this todo.
+    std::function<void(const QString &todoId)> onOpenTask;
+    // S on a task row whose todo is delegable(): hand it to a new background subagent.
+    std::function<void(const QString &todoId)> onRunTaskAsSubagent;
+    // A task row was reached with the mouse: teach the keyboard path.
+    std::function<void()> onMouseOpenTask;
 
     // Called after the model changed. Visible when allowed and there are subagents.
     void refresh();
@@ -125,6 +175,9 @@ public:
     void enter();
     int selectedRow() const { return m_selected; }   // 0 = main, 1.. = subagents
     QString selectedId() const;
+    QString selectedTodoId() const;          // the selected row's todo id, empty in the subagent column
+    int selectedColumn() const { return m_column; }
+    const StripLayout &stripLayout() const { return m_layout; }
     static constexpr int kMaxVisible = 5;
 
     QSize sizeHint() const override;
@@ -143,14 +196,38 @@ private:
     int firstVisible() const;
     int visibleCount() const;
     int rowAt(const QPoint &pos) const;
+    int columnAt(const QPoint &pos) const;
+    int leftWidth() const;
+    // The fold exists because the subagent pane is open; with no subagents there is nothing to fold
+    // to, so a tasks-only strip stays open.
+    bool foldedNow() const { return m_folded && !m_model->isEmpty(); }
+    const LedgerTodo *todoFor(const QString &id) const;
+    // True while the strip has a task column: the layout drives the rows. With no tasks the panel
+    // keeps its original subagent-only paths (scrolling included), unchanged.
+    bool tasksMode() const { return m_layout.taskRows() > 0; }
+    int rowCount() const;
+    void rebuild();
+    void selectRow(int row);
+    void moveColumn(int column);
+    void openSelected();
     void act(bool stop);
     void pickModel(int row);
     SubagentModel *m_model;
+    RequestLedgerModel *m_ledger = nullptr;
+    StripLayout m_layout;
+    QList<LedgerTodo> m_tasks;        // the current task list, as of the last rebuild()
+    bool m_taskRunning = false;       // a task of that list is in_progress: keep ticking
+    int m_column = Subagents;
     QHash<int, QRect> m_modelChips;   // row index (1.. = subagents) -> model chip, from the last paint
     int m_selected = 1;
     bool m_allowed = true, m_folded = false;
     QString m_foldKeys;
     QTimer m_tick;
 };
+
+// The whole strip body. `ledger` may be null (subagents-only). Never returns more than `maxRows`
+// rows. Deterministic: same models in, same rows out.
+StripLayout layoutStrip(const SubagentModel &subagents, const RequestLedgerModel *ledger,
+                        int maxRows = SubagentsPanel::kMaxVisible);
 
 }  // namespace relay

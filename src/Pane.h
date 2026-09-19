@@ -6076,7 +6076,11 @@ private:
         // Beneath the prompt box, as in Claude Code: Down from the prompt moves into it. It takes
         // layout space like the growing editor does, so the terminal gives up a few rows while
         // subagents are listed.
-        m_agentsPanel = new relay::SubagentsPanel(&m_subagents, this);
+        // Owner, 2026-09-19: the strip carries the open task list too — subagents on the left, the
+        // current batch's tasks on the right, one row per (subagent, task) pair, so it shows up
+        // with tasks alone and is hidden only when there is neither. Hence the ledger here: the
+        // panel reads both models and refresh() is the single entry point for either changing.
+        m_agentsPanel = new relay::SubagentsPanel(&m_subagents, &m_ledger, this);
         layout->addWidget(m_agentsPanel);
         m_agentsPanel->onOpen = [this](const QString &id) { openSubagent(id); };
         m_agentsPanel->onOpenPane = [this] { openSubagentPane(); };
@@ -6090,6 +6094,18 @@ private:
         m_agentsPanel->onStop = [this](const QString &id) { stopSubagent(id); toast(QStringLiteral("Stopping ") + id); };
         m_agentsPanel->onExit = [this] { focusInput(); };
         m_agentsPanel->onPickModel = [this](const QString &id, const QPoint &at) { pickSubagentModel(id, at); };
+        // The task half of the strip (owner, 2026-09-19): Enter opens the task list on that task, S
+        // hands it to a background subagent — the same two acts the floating list offers.
+        m_agentsPanel->onOpenTask = [this](const QString &todoId) { openTask(todoId); };
+        m_agentsPanel->onRunTaskAsSubagent = [this](const QString &todoId) {
+            send({{"type", "todo_subagent"}, {"id", QStringLiteral("req-%1").arg(++m_requestId)}, {"todo_id", todoId}});
+            status(QStringLiteral("Handing %1 to a subagent…").arg(todoId));
+        };
+        m_agentsPanel->onMouseOpenTask = [this] {
+            hint(QStringLiteral("tasks.strip.open.mouse"),
+                 relay::ShortcutHints::nextTime(QStringLiteral("↓ from the prompt, then → and Enter"),
+                                                QStringLiteral("open a task")));
+        };
         m_subagents.onChanged = [this] {
             if (m_subagentTabs) m_subagentTabs->syncRows(m_subagents);   // tabs follow the list's rows
             m_agentsPanel->refresh();
@@ -6213,6 +6229,8 @@ private:
         if (m_agentsPanel && m_agentsPanel->isVisible()) m_agentsPanel->setFocus();
     }
 
+    // The strip under the prompt (subagents on the left, the open tasks on the right) shows only
+    // while the composer does — with the composer hidden there is no prompt for it to hang under.
     void placeSubagentsPanel() {
         if (!m_agentsPanel) return;
         m_agentsPanel->setAllowed(!m_composer || m_composer->isVisible());
@@ -6299,6 +6317,9 @@ private:
         m_ledger.onChanged = [this] {
             updateWorkChip();
             if (m_requestsPanel) m_requestsPanel->refresh();
+            // The task half of the strip under the prompt. The guard is required: this lambda is
+            // installed while the composer is still being built, long before setupSubagentsUi().
+            if (m_agentsPanel) { m_agentsPanel->refresh(); placeSubagentsPanel(); }
         };
         Keymap::instance().listen(this, [this] { updateWorkChip(); });
         updateWorkChip();
@@ -6365,7 +6386,13 @@ private:
             if (task.batch != batch) continue;
             if (++shown > 8) break;
             QAction *row = menu->addAction(relay::RequestLedgerModel::todoGlyph(task.status) + QStringLiteral("  ") + task.text,
-                                           this, [this] { openRequests(); });
+                                           this, [this] {
+                                               openRequests();
+                                               // The slow path to a task now has a fast one: the strip under the prompt.
+                                               hint(QStringLiteral("tasks.strip.open.mouse"),
+                                                    relay::ShortcutHints::nextTime(QStringLiteral("↓ from the prompt, then →"),
+                                                                                   QStringLiteral("the open tasks are under the prompt")));
+                                           });
             row->setToolTip(task.note);
         }
         if (!shown) menu->addAction(QStringLiteral("No task list yet"))->setEnabled(false);
@@ -6476,6 +6503,12 @@ public:
         m_requestsPanel->show();
         m_requestsPanel->raise();
         m_requestsPanel->enter();
+    }
+
+    // Enter on a task in the strip: the task list, opened on that task.
+    void openTask(const QString &todoId) {
+        openRequests();
+        if (m_requestsPanel && !todoId.isEmpty()) m_requestsPanel->select(todoId);
     }
 
     void closeRequests() {
@@ -9533,7 +9566,10 @@ private:
                 }
             }
         }
-        // --- subagents UI: Down on the last line (history at the draft) enters the running-agents list.
+        // --- subagents UI: Down on the last line (history at the draft) enters the strip under the
+        // prompt — the running agents and, since 2026-09-19, the open tasks beside them. The
+        // isVisible() test already covers the tasks-only case, where the strip shows with no
+        // subagents at all; ←/→ then move between the two columns inside the widget.
         // Up stays queue/history; the @ picker and a queue selection above already took their keys.
         if (mods == Qt::NoModifier && k == Qt::Key_Down && m_agentsPanel && m_agentsPanel->isVisible()
             && m_editor->textCursor().blockNumber() == m_editor->document()->blockCount() - 1 && m_editor->atDraft()) {
