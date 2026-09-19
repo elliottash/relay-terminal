@@ -46,6 +46,7 @@
 // answers RemoteShare's signals and reads sharing::Model for the pane-header chip.
 #include "RemoteShare.h"
 #include "SharingPane.h"
+#include "RemotePane.h"   // Relay-to-Relay: a pane another desktop shares, opened here
 
 #include <QAbstractButton>
 #include <QDateTime>
@@ -953,6 +954,7 @@ private:
                 notice(QStringLiteral("Shortcuts file: ") + Keymap::instance().path());
         }
         else if (id == QStringLiteral("agent.subagentPane")) toggleSubagentPane();   // card #WD83
+        else if (id == QStringLiteral("remote.openShared")) openSharedPaneDialog();   // Relay-to-Relay
         else if (!pane) return;
         else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
         else if (id == QStringLiteral("pane.restartShell")) pane->restartStopped();
@@ -2118,6 +2120,9 @@ private:
                                     : guests > 0 ? QStringLiteral("%1 here · invites, roles and what is waiting").arg(guests)
                                                  : QStringLiteral("Who is here, live invites, and what is waiting for you"),
                                     QStringLiteral("pane.sharing"));
+            items << actionItem(terminal, QStringLiteral("Open a shared pane…"),
+                                QStringLiteral("A pane your other desktop shares, here as one of your devices"),
+                                QStringLiteral("remote.openShared"));
         }
         items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Stop the running program · Esc in the prompt box") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
         items << actionItem(terminal, QStringLiteral("Take control"),
@@ -2989,6 +2994,25 @@ public:
         }
         updateTitles();
         return tool;
+    }
+
+    // Relay-to-Relay (src/RemotePane.h): pair with the other desktop, pick one of its panes, and
+    // it opens beside the active pane. Transient like the other hosted views: not saved.
+    void openSharedPaneDialog() {
+        QPointer<RelayWindow> self(this);
+        relay::RemotePaneDialog::open(this, [self](relay::RemotePane *view) {
+            if (!self || !self->m_activeLeaf) { delete view; return; }
+            auto *tool = new ToolPane(ToolPane::Kind::Info, view, view, self->activeCwd());
+            tool->setProperty("paneType", QStringLiteral("shared"));
+            tool->setProperty("paneLabel", QStringLiteral("Shared pane"));
+            relay::theme::polishWindow(tool);
+            QPointer<ToolPane> guard(tool);
+            view->onTitleChanged = [guard] { if (auto *w = windowOf(guard)) w->updateTitles(); };
+            self->insertBeside(self->m_activeLeaf, tool, self->m_activeLeaf->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+            self->setActiveLeaf(tool);
+            focusLeaf(tool);
+            self->updateTitles();
+        });
     }
 
     // Every Sharing pane in this window. `onlyClocks` is the one-second tick: it moves the

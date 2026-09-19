@@ -359,6 +359,15 @@ target_include_directories(relay-sharing PUBLIC src)
 target_link_libraries(relay-sharing PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-sharing PRIVATE -Wall -Wextra -Wpedantic)
 
+# Relay-to-Relay: a pane shared by another desktop, opened here as the owner's own device — the
+# screen painter, the pane_state view, and the `remote/viewer.py` sidecar that holds the session.
+add_library(relay-remotepane STATIC src/RemotePane.cpp src/RemotePane.h)
+target_include_directories(relay-remotepane PUBLIC src)
+target_link_libraries(relay-remotepane PUBLIC relay-highlight relay-hints ${RELAY_QT}::Widgets)
+target_compile_definitions(relay-remotepane PRIVATE
+    RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay" RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_options(relay-remotepane PRIVATE -Wall -Wextra -Wpedantic)
+
 # Relay's own terminal engine (engine/, docs/ENGINE.md). The library is built and linked
 # into the app (RELAY_HAVE_ENGINE, --engine=relay); the manual harness and the benchmark
 # are extra targets behind RELAY_BUILD_ENGINE.
@@ -381,7 +390,7 @@ if(RELAY_BUILD_APP)
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS DBus Network)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels)
-    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing ${RELAY_QT}::DBus ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::DBus ${RELAY_QT}::Network)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -457,6 +466,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-sharing-tests PRIVATE relay-sharing ${RELAY_QT}::Test)
     add_test(NAME sharing COMMAND relay-sharing-tests)
     set_tests_properties(sharing PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-remotepane-tests tests/remotepane_test.cpp)
+    target_link_libraries(relay-remotepane-tests PRIVATE relay-remotepane ${RELAY_QT}::Test)
+    add_test(NAME remotepane COMMAND relay-remotepane-tests)
+    set_tests_properties(remotepane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;RELAY_KEYRING=off")
     set_tests_properties(requests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-windowstate-tests tests/windowstate_test.cpp)
     target_link_libraries(relay-windowstate-tests PRIVATE relay-windowstate ${RELAY_QT}::Test)

@@ -274,6 +274,9 @@ private:
         // for me" surface. No default key either — it opens by itself when someone knocks, and
         // the share chip and the palette are the other two ways in.
         add("pane.sharing", "terminal", "Sharing: who is on your shared panes, and what is waiting for you", {});
+        // Relay-to-Relay: a pane another desktop shares, opened here as one of your own devices. No
+        // default key, like pane.share: pairing is a deliberate act and the palette is the way in.
+        add("remote.openShared", "terminal", "Open a shared pane: a pane your other desktop shares, here as one of your devices", {});
         add("agent.interrupt", "agent", "Send to the agent; while it is busy, interrupt it and send now (prompt box)",
             {QStringLiteral("Ctrl+Return"), QStringLiteral("Ctrl+Enter"), QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
         add("agent.provider", "agent", "Provider and API keys (advanced endpoint settings)", {});
