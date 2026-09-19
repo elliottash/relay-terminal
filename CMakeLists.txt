@@ -179,7 +179,7 @@ target_compile_options(relay-fileindex PRIVATE -Wall -Wextra -Wpedantic)
 
 # Rotating diagnostics log (~/.local/share/relay/logs/relay.log). Plain QtCore so the rotation,
 # level and redaction rules can be tested without a window.
-add_library(relay-logging STATIC src/Logging.cpp src/Logging.h)
+add_library(relay-logging STATIC src/Logging.cpp src/Logging.h src/CrashLog.cpp src/CrashLog.h)
 target_include_directories(relay-logging PUBLIC src)
 target_link_libraries(relay-logging PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-logging PRIVATE -Wall -Wextra -Wpedantic)
@@ -453,6 +453,10 @@ if(RELAY_BUILD_APP)
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         RELAY_VERSION="${PROJECT_VERSION}")
     target_compile_options(relay PRIVATE -Wall -Wextra -Wpedantic)
+    # -rdynamic puts the app's own symbols in the dynamic table, which is the difference between a
+    # crash report (src/CrashLog.h) that names the function and one that gives a bare offset. It
+    # costs a larger symbol table in an already large binary and nothing at run time.
+    target_link_options(relay PRIVATE -rdynamic)
     install(TARGETS relay RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     # The build id (owner, 2026-09-19): 2026-09-19.14H.01 — the date, the hour, the count that hour.
     # POST_BUILD runs exactly when `relay` was relinked, so the number counts real builds; it is

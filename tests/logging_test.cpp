@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Rotating diagnostics log (issue SQAM): location, permissions, level filtering, rotation and
 // redaction. Uses a private XDG_DATA_HOME, so it never touches the real profile.
+#include "CrashLog.h"
 #include "Logging.h"
 
 #include <QDir>
@@ -9,6 +10,11 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include <signal.h>
+#include <sys/prctl.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 class LoggingTest : public QObject {
     Q_OBJECT
@@ -73,6 +79,43 @@ private slots:
         QVERIFY(QFile::exists(path + QStringLiteral(".3")));
         QVERIFY(!QFile::exists(path + QStringLiteral(".4")));
         QVERIFY(QFileInfo(path + QStringLiteral(".1")).size() <= 6 * 1024 * 1024);
+    }
+
+    // A fatal signal must leave its frames in relay.log and still kill the process the way it was
+    // killed — a crash that a handler turns into a clean exit is a crash that hides from apport,
+    // from a debugger and from the exit status. Run in a child: this one really does crash.
+    void crashHandlerWritesFramesAndStillDies() {
+        relay::log::info(QStringLiteral("gui_start version=0.1.0"));
+        const QString path = relay::log::filePath();
+        const qint64 before = QFileInfo(path).size();
+        ::fflush(nullptr);
+        const pid_t child = ::fork();
+        QVERIFY(child >= 0);
+        if (child == 0) {
+            // No core for this one: the deliberate crash of a test should not be reported to the
+            // machine's crash handler as if Relay had died.
+            ::prctl(PR_SET_DUMPABLE, 0);
+            (void)::freopen("/dev/null", "w", stderr);   // the report’s copy on stderr is not test output
+            relay::crashlog::install(QStringLiteral("test-build.1"));
+            ::raise(SIGSEGV);
+            ::_exit(97);   // unreachable: the handler re-raises and the default action kills us
+        }
+        int status = 0;
+        QCOMPARE(::waitpid(child, &status, 0), child);
+        QVERIFY2(WIFSIGNALED(status), "the child exited instead of dying of the signal");
+        QCOMPARE(WTERMSIG(status), SIGSEGV);
+
+        const QString report = read(path).mid(int(before));
+        QVERIFY2(report.contains(QStringLiteral("gui_crash signal=11 name=SIGSEGV")), qPrintable(report));
+        QVERIFY(report.contains(QStringLiteral("build=test-build.1")));
+        QVERIFY(report.contains(QStringLiteral("gui_crash_frames_begin count=")));
+        QVERIFY(report.contains(QStringLiteral("gui_crash_frames_end")));
+        // The frames themselves: at least the handler's own address, in backtrace_symbols_fd's
+        // shape, which `addr2line -e` reads.
+        QVERIFY(report.contains(QStringLiteral("logging-tests")) || report.contains(QLatin1Char('[')));
+        // And it is a log line like any other: ISO timestamp, level, source.
+        QVERIFY(QRegularExpression(QStringLiteral("\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z ERROR relay.gui gui_crash "))
+                    .match(report).hasMatch());
     }
 
     void levelNamesRoundTrip() {

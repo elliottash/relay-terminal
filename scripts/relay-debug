@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Run Relay under gdb so that a crash leaves a backtrace behind.
+#
+# Relay's own crash handler (src/CrashLog.h) writes the faulting frames into relay.log, which is
+# enough to name the function most of the time. This is the heavier instrument for when it is not:
+# gdb holds the whole process, so the crash report has every thread's stack, the arguments and the
+# locals — and it works even when the crash is somewhere the in-process handler cannot reach.
+#
+# It is needed because nothing else on this machine keeps a core: kernel.core_pattern pipes to
+# apport, and apport ignores a binary that does not belong to a package, which build/relay never
+# does ("executable does not belong to a package, ignoring" in /var/log/apport.log). So a crash
+# leaves nothing at all unless Relay is started through this.
+#
+#   scripts/relay-debug                     # the saved window layout, as the launcher starts it
+#   scripts/relay-debug --workspace ~/src   # extra arguments go to relay
+#   scripts/relay-debug --log /tmp/x.log    # where the report goes (default: beside relay.log)
+#
+# The report is written as it happens and the path is printed at start and at exit, so it can be
+# read from another session while Relay is still up.
+set -uo pipefail
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+binary=$root/build/relay
+log=
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --log) log=${2:-}; shift 2 || true ;;
+        --log=*) log=${1#--log=}; shift ;;
+        --binary) binary=${2:-}; shift 2 || true ;;
+        --binary=*) binary=${1#--binary=}; shift ;;
+        -h|--help) sed -n '3,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --) shift; break ;;
+        *) break ;;
+    esac
+done
+
+command -v gdb >/dev/null || { echo "relay-debug: gdb is not installed (apt install gdb)" >&2; exit 127; }
+[[ -x $binary ]] || { echo "relay-debug: no $binary — run scripts/relay-build first" >&2; exit 127; }
+
+if [[ -z $log ]]; then
+    dir=${XDG_DATA_HOME:-$HOME/.local/share}/relay/logs
+    mkdir -p "$dir" && chmod 700 "$dir" 2>/dev/null
+    log=$dir/relay-gdb.$(date +%Y%m%d-%H%M%S).log
+fi
+
+commands=$(mktemp -t relay-debug.XXXXXX.gdb)
+trap 'rm -f "$commands"' EXIT
+cat > "$commands" <<'GDB'
+set pagination off
+set confirm off
+set print thread-events off
+# Relay forks for every pane's shell and worker; gdb follows the parent and lets the child go.
+set follow-fork-mode parent
+set detach-on-fork on
+# Signals the app uses itself must pass through untouched, or gdb stops a working Relay dead.
+handle SIGPIPE nostop noprint pass
+handle SIGCHLD nostop noprint pass
+handle SIGWINCH nostop noprint pass
+handle SIGUSR1 nostop noprint pass
+handle SIGUSR2 nostop noprint pass
+run
+echo \n===== relay stopped =====\n
+# Whatever it stopped for, this is the state it stopped in.
+bt full
+echo \n----- every thread -----\n
+thread apply all bt
+echo \n----- registers -----\n
+info registers
+echo \n===== end =====\n
+GDB
+
+echo "relay-debug: $binary under gdb — report: $log"
+# stdbuf so the report is on disk as it is written, not when gdb exits.
+stdbuf -oL -eL gdb -q -batch -x "$commands" --args "$binary" "$@" 2>&1 | stdbuf -oL tee "$log"
+status=${PIPESTATUS[0]}
+echo "relay-debug: gdb exited ($status) — report: $log"
+exit "$status"

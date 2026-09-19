@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Logging.h"
 
+#include "CrashLog.h"   // the crash report's copy in this file follows the level set here
+
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -119,6 +121,9 @@ QString scrub(const QString &text) {
 void write(Level messageLevel, const QString &message) {
     if (messageLevel == Level::Off) return;
     const Level configured = level();
+    // Cheap enough to do on every line, and it is the only moment the crash handler can learn that
+    // the level changed: it may not read QSettings from a signal.
+    relay::crashlog::noteLogEnabled(configured != Level::Off);
     if (configured == Level::Off || rank(messageLevel) > rank(configured)) return;
     const QString path = filePath();
     if (path.isEmpty()) return;

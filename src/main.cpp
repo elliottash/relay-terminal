@@ -25,6 +25,7 @@
 #include "RequestsPanel.h"
 #include "Conversations.h"         // conversation list, search and the Ctrl+F find bar
 #include "Logging.h"               // rotating diagnostics log (~/.local/share/relay/logs)
+#include "CrashLog.h"              // …and what a crash writes into it before it goes
 #include "TerminalBackends.h"
 #include "TerminalBackend.h"
 #include "WindowState.h"   // saved window layout ("reopen where I left off")
@@ -276,6 +277,9 @@ int main(int argc, char **argv) {
     // From here on, stderr is no longer the only record: a launcher-started Relay keeps one too.
     relay::log::installMessageHandler();
     relay::buildinfo::capture();   // which build this process is, before a rebuild can move the file
+    // A fatal signal writes its frames into that log before the process dies: two crashes on
+    // 2026-09-19 left nothing but a gap, because apport drops unpackaged binaries and keeps no core.
+    relay::crashlog::install(relay::buildinfo::running().id);
     relay::log::info(QStringLiteral("gui_start version=%1 build=%4 pid=%2 level=%3")
                          .arg(QStringLiteral(RELAY_VERSION)).arg(QCoreApplication::applicationPid())
                          .arg(relay::log::levelName(relay::log::level()), relay::buildinfo::running().id));
