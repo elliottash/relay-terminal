@@ -403,15 +403,17 @@ buttons under a card's reply box, after **Comment**: **Discuss** (the accent but
   conventions (`implemented_by`, `#ID` in every commit message, the hashes in `links.commits`, the
   QA lane when it lands). A card with neither a plan nor an `acceptance` line asks once, on the
   card, in the error line under it ("Execute again (x) … or Plan (p) first") — no dialog. **`x`**.
-- **One turn at a time, per card as before.** While a Discuss or a Plan runs, *its* button is Stop
-  (`cancel`) and the other two are disabled; the agent's streaming reply is headed with the mode.
-  The cleanup/busy interplay of 4.8 applies to both modes.
+- **One turn at a time, per card as before.** While a Discuss or a Plan runs the other modes are
+  disabled and the agent's streaming reply is headed with the mode. *(Until #VZ69 the running
+  mode's own button became **Stop**; since 4.12 it is the strip over the reply box, and Discuss and
+  Comment have no buttons at all.)* The cleanup/busy interplay of 4.8 applies to both modes.
 - **The thread names the mode** on every entry that has one: "owner  Plan · 2 min ago",
   "✦ agent  Discuss · glm-5". Entries from before carry no mode and read as they did.
 - **Keys** (card view): `e` edit, `d` or Tab to the reply box, Enter discuss, `p` / Ctrl+Enter plan,
   `x` execute, Ctrl+Shift+Enter comment only. On the list, `p` and `x` open the selected card and
-  do the same. A click on any of the three buttons shows its key once (WARP.md hint rule;
-  hint ids `board.plan`, `board.execute`, `board.discuss`).
+  do the same. A click on a button shows its key once (WARP.md hint rule; hint ids `board.plan`,
+  `board.execute`, `board.verify`, and `board.edit` for the pencil. `board.discuss` went with the
+  Discuss button in 4.12: Enter *is* the fast path, so there is no slow path left to teach).
 - **Before this**, the card's ask ran on a worker with every pane tool, so "ask the agent" could run
   commands and write files from a card thread. Discuss and Plan now cannot; that is Execute's job.
 
@@ -505,6 +507,46 @@ checkbox agrees by construction.
   `implemented by`, because on the card the exact string is the point.
 - **Its fold and its checkbox are ordinary.** It is not folded by default (Done and Deferred still
   are): the owner asked for the section in order to see it.
+
+### 4.12 The card reads as one page: a pencil, a seam, and a box that does the talking (#VZ69, owner 2026-09-19)
+
+Owner, on the card detail as 4.9 left it: *"there should be a promponent pencil edit button, rather
+than the small 'edit' button at the top"*, *"there should be a clearer dematcation between the issue
+and the convo thread"*, *"remove comment / discuss buttons. i would say you just press enter in the
+prompt box to discuss / comment"*, *"'stop' button isnt intuitive, it should be stop planning i
+guess, or there should be an X next to 'agent planning'"*, and on quick add: *"when you first press
+enter to add a new card, it should open the edit box, the editable issue part. the first thing you
+enter in teh top row thing makes the title, not the issue content."* Evidence:
+`docs/qa_evidence/2026-09-19-switchboard-card-ux/`.
+
+- **The pencil is on the title.** `✎ Edit (e)` moves out of the row of muted text buttons at the top
+  of the card and sits at the right of the title line, outlined in the accent
+  (`QToolButton#boardEditPencil`). It is the only control on a card that is styled as obviously
+  pressable, because it is the one the owner reaches for most; `#ID → prompt (t)`, `Open file (o)`
+  and the close cross stay quiet text at the top, where they were. Clicking the title and
+  double-clicking the text still open the same editor, and `e` still does it from the keyboard.
+- **The thread opens on a seam.** The card's own words and the conversation about them are two
+  surfaces: the `THREAD · n` heading sits on a ground of its own the width of the document, with a
+  hairline rule above it (`insertRule()`, a two-pixel block in the border ink — `QTextDocument` has
+  no themeable rule of its own, and a row of box characters would wrap and be copied with the
+  text). Bolder ink alone was what the owner could not see.
+- **Discuss and Comment have no buttons.** They are what the box does: **Enter** discusses,
+  **Ctrl+Shift+Enter** leaves a comment with no model call, and the placeholder says both. The row
+  keeps only what is *not* typing into the box — **Plan (p)**, **Execute (x)** and, in a QA lane,
+  **Verify (v)**. The empty-thread line teaches the same three keys instead of naming buttons.
+- **Stopping a turn is a strip, not a mode-swapped button.** While a turn runs, a line over the
+  reply box reads `✦ Agent is planning…` or `✦ Agent is discussing…` with `✕ Stop planning` /
+  `✕ Stop discussing` at its right (`boardBusyStrip`, `boardBusyLabel`, `boardStop`); the buttons
+  that would start another turn are disabled and keep their own labels. This replaces 4.9's rule
+  that the running mode's button becomes **Stop** — which only worked while that mode *had* a
+  button, and Discuss no longer does. `cancel` is sent exactly as before.
+- **Quick add makes a title and then asks for the issue.** The field takes one line ("Title of a
+  new card in Ready to start — Enter opens it, Esc closes"); on `board_written` the pane closes the
+  field, opens the new card and starts editing it with the cursor in the issue box. The worker
+  still seeds `## Issue` with that line — it is the owner's words, and the card format keeps them
+  verbatim — so the editor offers it **selected**: the first keystroke replaces it, and Esc or an
+  empty save leaves the card exactly as the field made it. The field no longer stays open for a
+  burst of cards; `n` reopens it.
 
 ## 5. Referencing cards from the terminal
 

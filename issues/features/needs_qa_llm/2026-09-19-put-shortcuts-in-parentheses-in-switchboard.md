@@ -38,3 +38,11 @@ put shortcuts in parentheses in switchboard, eg (n) after new card. (x) after ex
 - [ ] Under Xvfb, a live board shows `+  New card (n)`, `←  Back to board (Esc)`, `Undo (Ctrl+Z)`, and an open card shows `Edit (e)` / `#ID → prompt (t)` / `Open file (o)` / `Comment (Ctrl+Shift+Enter)` / `Discuss (Enter)` / `Plan (p)` / `Execute (x)` / `Cancel (Esc)` / `Save (Ctrl+Enter)`.
 - [ ] At ~350 px pane width the reply row and header row still fit or wrap cleanly (skipped this session at the owner's request).
 - [ ] `Clean up`, the cleanup panel, `Stop` and the `m_keys` legend are unchanged.
+
+**Superseded in part by #VZ69 (2026-09-19):** the card detail lost its Comment and Discuss buttons
+(Enter and Ctrl+Shift+Enter in the reply box do both now), the running mode's button no longer
+becomes "Stop" (a strip over the reply box does it, labelled "✕ Stop planning" / "✕ Stop
+discussing"), and "Edit (e)" is now the pencil "✎ Edit (e)" at the right of the title. QA this card
+against the labels that still exist: `+  New card (n)`, `←  Back to board (Esc)`, `Undo (Ctrl+Z)`,
+`✎ Edit (e)`, `#ID → prompt (t)`, `Open file (o)`, `Plan (p)`, `Execute (x)`, `Verify (v)`,
+`Cancel (Esc)`, `Save (Ctrl+Enter)`.

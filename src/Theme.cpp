@@ -681,6 +681,12 @@ QLabel#boardEmpty { color: @muted; }
 QLabel#boardKeys { color: @muted; font-size: 9pt; padding: 4px 10px; border-top: 1px solid @boardMetalDim; }
 QLabel#boardCardRef { color: @muted; font-family: "@mono"; }
 QLabel#boardCardTitle { color: @text; font-size: 12pt; font-weight: 600; }
+/* The pencil that edits the card sits on the title it edits, outlined in the accent (#VZ69). On a
+   card whose other tools are muted text buttons, exactly one control is obviously pressable, and
+   it is the one the owner reaches for most. */
+QToolButton#boardEditPencil { color: @accent; background: transparent; border: 1px solid @accentBorder; border-radius: 6px; padding: 3px 10px; }
+QToolButton#boardEditPencil:hover { color: @accentText; background: @accent; border-color: @accent; }
+QToolButton#boardEditPencil:disabled { color: @disabled; background: transparent; border-color: @surface; }
 /* Editing the card's own words: the title in place, and `## Issue` where the document was. */
 QLineEdit#boardCardTitleEdit { color: @text; font-size: 12pt; font-weight: 600; background: @surface; border: 1px solid @accentBorder; border-radius: 6px; padding: 2px 6px; }
 QFrame#boardEdit { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
@@ -695,6 +701,12 @@ QLabel#boardCardError { color: @error; }
 QFrame#boardReply { background: @surface; border: 1px solid @border; border-radius: 8px; }
 QPlainTextEdit#boardReplyEditor { background: transparent; border: none; padding: 2px; }
 QPushButton#boardReplyButton, QFrame#boardReply QPushButton#primary { padding: 4px 12px; }
+/* While a turn runs: the line that names it in the agent's colour, and the button that ends it.
+   The stop is quiet until the pointer is on it, then it is the error colour — it is the only
+   control on the card that throws work away (#VZ69). */
+QLabel#boardBusyLabel { color: @agent; font-size: 9.5pt; }
+QToolButton#boardStop { color: @muted; background: transparent; border: 1px solid @border; border-radius: 4px; padding: 2px 8px; }
+QToolButton#boardStop:hover { color: @error; background: @raised; border-color: @error; }
 /* Execute hands the card to a terminal pane's agent (#XS6Q): the agent's colour, outlined, so
    it reads as the step that leaves the board rather than a third way of asking. */
 QPushButton#boardExecute { padding: 4px 12px; color: @agent; border-color: @agent; }

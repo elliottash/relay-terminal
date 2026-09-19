@@ -265,6 +265,9 @@ private:
     bool m_detailSized = false;     // the split was sized for the open card already
     bool m_replyOnOpen = false;     // `c` before the card arrived: focus its reply box then
     bool m_editOnOpen = false;      // `e` before the card arrived: start editing it then
+    // That edit is a card the quick-add field has just made, whose `## Issue` is the one line
+    // typed there. The editor offers that line selected rather than as settled text (#VZ69).
+    bool m_editOnOpenFresh = false;
     QString m_actionOnOpen;         // `p` / `x` / `v` before the card arrived: "plan", "execute", "verify"
     QTimer *m_follow = nullptr;     // the open card follows the selection, debounced
     QTimer *m_dragScroll = nullptr; // scrolls the list while a card is dragged near an edge

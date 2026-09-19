@@ -859,13 +859,10 @@ public:
         m_ref->setObjectName(QStringLiteral("boardCardRef"));
         top->addWidget(m_ref);
         top->addStretch();
-        m_edit = textButton(QStringLiteral("Edit (e)"),
-                            QStringLiteral("Edit the title and the issue text (e)"));
         m_toPrompt = textButton(QStringLiteral("#ID → prompt (t)"),
                                 QStringLiteral("Insert this card's #ID in the terminal's prompt (t)"));
         m_openFile = textButton(QStringLiteral("Open file (o)"),
                                 QStringLiteral("Open the card's Markdown file in a pane (o)"));
-        top->addWidget(m_edit);
         top->addWidget(m_toPrompt);
         top->addWidget(m_openFile);
         m_close = new QToolButton(this);
@@ -876,13 +873,20 @@ public:
         top->addWidget(m_close);
         layout->addLayout(top);
 
+        // The title, and at its right the pencil that edits it (owner, #VZ69: "there should be a
+        // prominent pencil edit button, rather than the small 'edit' button at the top"). It sits
+        // on the thing it edits rather than among the card's other tools, and it is outlined in the
+        // accent, so it is the one control on the card that cannot be missed. Its key stays in the
+        // label (#QG60), and the pencil says what the words mean before they are read.
+        auto *titleRow = new QHBoxLayout;
+        titleRow->setSpacing(8);
         m_title = new QLabel(this);
         m_title->setWordWrap(true);
         m_title->setObjectName(QStringLiteral("boardCardTitle"));
         m_title->setCursor(Qt::IBeamCursor);
         m_title->setToolTip(QStringLiteral("Click to edit the title (e)"));
         m_title->installEventFilter(this);
-        layout->addWidget(m_title);
+        titleRow->addWidget(m_title, 1);
         // The same line, as a field: editing swaps the two so the title never jumps.
         m_titleEdit = new QLineEdit(this);
         m_titleEdit->setObjectName(QStringLiteral("boardCardTitleEdit"));
@@ -890,7 +894,15 @@ public:
         m_titleEdit->setToolTip(QStringLiteral("Enter saves, Esc cancels"));
         m_titleEdit->installEventFilter(this);
         m_titleEdit->hide();
-        layout->addWidget(m_titleEdit);
+        titleRow->addWidget(m_titleEdit, 1);
+        m_edit = new QToolButton(this);
+        m_edit->setObjectName(QStringLiteral("boardEditPencil"));
+        m_edit->setText(QStringLiteral("✎ Edit (e)"));
+        m_edit->setToolTip(QStringLiteral("Edit the title and the issue text (e)"));
+        m_edit->setCursor(Qt::PointingHandCursor);
+        m_edit->setFocusPolicy(Qt::NoFocus);
+        titleRow->addWidget(m_edit, 0, Qt::AlignTop);
+        layout->addLayout(titleRow);
 
         auto *pickers = new QHBoxLayout;
         pickers->setSpacing(6);
@@ -974,6 +986,28 @@ public:
         auto *replyLayout = new QVBoxLayout(reply);
         replyLayout->setContentsMargins(8, 6, 8, 6);
         replyLayout->setSpacing(4);
+        // While the agent is working on this card, a strip over the box says so and carries the
+        // one control that stops it (owner, #VZ69: "'stop' button isnt intuitive, it should be
+        // stop planning i guess, or there should be an X next to 'agent planning'"). It is both:
+        // the line names the mode, and the button is an ✕ that says what it stops. Before this
+        // the running mode's own button turned into a bare "Stop", which only worked while that
+        // mode had a button at all — Discuss no longer does.
+        m_busyStrip = new QWidget(reply);
+        m_busyStrip->setObjectName(QStringLiteral("boardBusyStrip"));
+        auto *busyRow = new QHBoxLayout(m_busyStrip);
+        busyRow->setContentsMargins(0, 0, 0, 4);
+        busyRow->setSpacing(6);
+        m_busyLabel = new QLabel(m_busyStrip);
+        m_busyLabel->setObjectName(QStringLiteral("boardBusyLabel"));
+        busyRow->addWidget(m_busyLabel, 1);
+        m_stop = new QToolButton(m_busyStrip);
+        m_stop->setObjectName(QStringLiteral("boardStop"));
+        m_stop->setCursor(Qt::PointingHandCursor);
+        m_stop->setFocusPolicy(Qt::NoFocus);
+        busyRow->addWidget(m_stop, 0);
+        m_busyStrip->hide();
+        replyLayout->addWidget(m_busyStrip);
+
         m_reply = new RichEditor(reply);
         m_reply->setObjectName(QStringLiteral("boardReplyEditor"));
         m_reply->setPlaceholders({QStringLiteral("Reply — Enter discusses, Ctrl+Enter plans, Ctrl+Shift+Enter only comments"),
@@ -984,13 +1018,11 @@ public:
         auto *buttons = new QHBoxLayout;
         buttons->setSpacing(6);
         buttons->addStretch(1);
-        m_comment = new QPushButton(QStringLiteral("Comment (Ctrl+Shift+Enter)"), reply);
-        m_comment->setObjectName(QStringLiteral("boardReplyButton"));
-        m_comment->setToolTip(QStringLiteral("Append to the thread without calling a model (Ctrl+Shift+Enter)"));
-        // The three things the agent can do with a card (#XS6Q, owner 2026-09-18): talk it
-        // through and change it, write its plan, or take it to a terminal pane and build it.
-        m_discuss = new QPushButton(QStringLiteral("Discuss (Enter)"), reply);
-        m_discuss->setObjectName(QStringLiteral("primary"));
+        // Discuss and Comment have no buttons (owner, #VZ69: "remove comment / discuss buttons. i
+        // would say you just press enter in the prompt box to discuss / comment"). They are what
+        // the box itself does — Enter discusses, Ctrl+Shift+Enter only comments — and the
+        // placeholder above says so. What is left on the row is the three things that are *not*
+        // typing into the box: Plan, and the two that leave the board.
         m_plan = new QPushButton(QStringLiteral("Plan (p)"), reply);
         m_plan->setObjectName(QStringLiteral("boardReplyButton"));
         m_execute = new QPushButton(QStringLiteral("Execute (x)"), reply);
@@ -1001,12 +1033,10 @@ public:
         m_verify = new QPushButton(QStringLiteral("Verify (v)"), reply);
         m_verify->setObjectName(QStringLiteral("boardExecute"));
         m_verify->hide();
-        for (QPushButton *button : {m_comment, m_discuss, m_plan, m_execute, m_verify}) {
+        for (QPushButton *button : {m_plan, m_execute, m_verify}) {
             button->setFocusPolicy(Qt::NoFocus);   // Tab stays between the reply box and the card
             button->setProperty("fullLabel", button->text());   // what fitButtons() shortens from
         }
-        buttons->addWidget(m_comment);
-        buttons->addWidget(m_discuss);
         buttons->addWidget(m_plan);
         buttons->addWidget(m_execute);
         buttons->addWidget(m_verify);
@@ -1020,16 +1050,7 @@ public:
         connect(m_render, &QTimer::timeout, this, [this] { render(Scroll::Follow); });
 
         // A click is the slow path: each says its key once (WARP.md hint rule).
-        connect(m_discuss, &QPushButton::clicked, this, [this] {
-            if (stopIfBusy(QStringLiteral("discuss")))
-                return;
-            if (onModeHint)
-                onModeHint(QStringLiteral("discuss"));
-            submit(QStringLiteral("discuss"));
-        });
         connect(m_plan, &QPushButton::clicked, this, [this] {
-            if (stopIfBusy(QStringLiteral("plan")))
-                return;
             if (onModeHint)
                 onModeHint(QStringLiteral("plan"));
             plan();
@@ -1044,7 +1065,10 @@ public:
                 onModeHint(QStringLiteral("verify"));
             verify();
         });
-        connect(m_comment, &QPushButton::clicked, this, [this] { submit(QString()); });
+        connect(m_stop, &QToolButton::clicked, this, [this] {
+            if (m_busy && onCancel)
+                onCancel();
+        });
         connect(m_edit, &QToolButton::clicked, this, [this] {
             if (onEditHint)
                 onEditHint();
@@ -1293,7 +1317,8 @@ public:
             m_render->start();
     }
 
-    // While a Discuss or a Plan runs, its own button is Stop and the other two wait.
+    // While a Discuss or a Plan runs, the strip over the reply box names it and stops it, and the
+    // buttons that would start another turn wait (#VZ69).
     void setBusy(bool busy, const QString &mode = QString())
     {
         m_busy = busy;
@@ -1343,7 +1368,11 @@ public:
     // Both at once and in one write, because they are one thought: the card says what the issue
     // is, and its title is that in a line. The document becomes the editor, the reply box stands
     // down, and Save sends one `board_update` patch hash-checked against the file we read.
-    void beginEdit(bool titleFirst)
+    // `selectIssue` is the card that was just created from the quick-add field: its `## Issue` is
+    // the one line that was typed there, and that line is the *title*, not the issue (owner,
+    // #VZ69). Offering it selected says so without throwing it away — the first keystroke
+    // replaces it, and Ctrl+Enter or Esc leaves the card exactly as the field made it.
+    void beginEdit(bool titleFirst, bool selectIssue = false)
     {
         if (m_id.isEmpty())
             return;
@@ -1364,7 +1393,10 @@ public:
             m_titleEdit->selectAll();
         } else {
             m_issueEdit->setFocus();
-            m_issueEdit->moveCursor(QTextCursor::End);
+            if (selectIssue)
+                m_issueEdit->selectAll();
+            else
+                m_issueEdit->moveCursor(QTextCursor::End);
         }
     }
 
@@ -1523,35 +1555,30 @@ private:
         onReply(text, mode);
     }
 
-    // The running mode's button stops it; the others are off until it is done.
-    bool stopIfBusy(const QString &mode)
-    {
-        if (!m_busy)
-            return false;
-        if (mode == m_busyMode && onCancel)
-            onCancel();
-        return true;
-    }
-
+    // What the reply row can do right now, and — while a turn is running — the strip over the
+    // box that names the turn and stops it. Nothing on the row changes its label any more: a
+    // button that turns into "Stop" was the thing the owner could not read (#VZ69).
     void setModeTips()
     {
-        const auto set = [this](QPushButton *button, const QString &mode, const QString &label,
-                                const QString &tip) {
-            const bool running = m_busy && m_busyMode == mode;
-            setLabel(button, running ? QStringLiteral("Stop") : label);
-            button->setToolTip(running ? QStringLiteral("Stop the Switchboard agent") : tip);
-            button->setEnabled(!m_busy || running);
-        };
-        set(m_discuss, QStringLiteral("discuss"), QStringLiteral("Discuss (Enter)"),
-            QStringLiteral("Talk the card through with the agent; it may edit the title, the issue, "
-                           "the labels or the status as you go (Enter)"));
-        set(m_plan, QStringLiteral("plan"), QStringLiteral("Plan (p)"),
-            QStringLiteral("The agent reads the code and writes the card's plan; it changes no code "
-                           "and no other card. Anything typed goes with it (p, or Ctrl+Enter)"));
+        m_plan->setEnabled(!m_busy);
+        m_plan->setToolTip(QStringLiteral("The agent reads the code and writes the card's plan; it "
+                                          "changes no code and no other card. Anything typed goes "
+                                          "with it (p, or Ctrl+Enter)"));
         m_execute->setEnabled(!m_busy);
         m_execute->setToolTip(QStringLiteral("Hand the card to a new terminal pane beside the board: "
                                              "its agent builds it, and the card moves to In progress (x)"));
         m_verify->setEnabled(!m_busy && hasVerifier());
+        const bool planning = m_busyMode == QStringLiteral("plan");
+        m_busyLabel->setText(planning ? QStringLiteral("✦ Agent is planning…")
+                                      : QStringLiteral("✦ Agent is discussing…"));
+        m_stop->setText(planning ? QStringLiteral("✕ Stop planning")
+                                 : QStringLiteral("✕ Stop discussing"));
+        m_stop->setToolTip(planning
+                               ? QStringLiteral("Stop the agent before it finishes the plan. "
+                                                "Anything it has already written to the card stays.")
+                               : QStringLiteral("Stop the agent's reply. Anything it has already "
+                                                "written to the card stays."));
+        m_busyStrip->setVisible(m_busy);
         fitButtons();
     }
 
@@ -1563,14 +1590,7 @@ private:
         return at > 0 && label.endsWith(QLatin1Char(')')) ? label.left(at) : label;
     }
 
-    // Set a reply-row label and remember it at full length, so shortening is never one-way.
-    static void setLabel(QPushButton *button, const QString &text)
-    {
-        button->setProperty("fullLabel", text);
-        button->setText(text);
-    }
-
-    // The reply row carries each key in its label (#QG60: "Discuss (Enter)"). Five of those do not
+    // The reply row carries each key in its label (#QG60: "Execute (x)"). Three of those do not
     // fit a narrow card — CardDetail's own minimum width lets the layout squeeze a button below its
     // size hint, and the label then paints cut off at both ends — so when the row is tight the keys
     // drop out of the labels first, the way a card row drops its decorative badges before its
@@ -1580,7 +1600,7 @@ private:
     {
         if (!isVisible() || !m_replyFrame || m_replyFrame->isHidden())
             return;
-        const QList<QPushButton *> row{m_comment, m_discuss, m_plan, m_execute, m_verify};
+        const QList<QPushButton *> row{m_plan, m_execute, m_verify};
         const int spacing = 6, margins = 16;
         int wide = 0, shown = 0;
         for (QPushButton *button : row) {
@@ -1726,6 +1746,21 @@ private:
         cursor.insertFragment(QTextDocumentFragment(&part));
     }
 
+    // A hairline the width of the document: an empty block two pixels tall, painted in the border
+    // ink. QTextDocument has no rule of its own that a theme can colour — Markdown's `---` takes
+    // the palette's — and a row of box-drawing characters would wrap and be copied with the text.
+    void insertRule(QTextCursor &cursor, int topMargin)
+    {
+        QTextBlockFormat rule;
+        rule.setTopMargin(topMargin);
+        rule.setBottomMargin(0);
+        rule.setLineHeight(2, QTextBlockFormat::FixedHeight);
+        rule.setBackground(theme::Border);
+        QTextCharFormat hairline;
+        hairline.setFontPointSize(1);
+        cursor.insertBlock(rule, hairline);
+    }
+
     void insertLine(QTextCursor &cursor, const QString &text, const QTextCharFormat &format,
                     int topMargin)
     {
@@ -1761,11 +1796,24 @@ private:
                                                 : QStringLiteral("THREAD");
         if (m_threadTotal > shown)
             threadTitle += QStringLiteral("  (last %1)").arg(shown);
-        insertLine(cursor, threadTitle, heading, 22);
+        // The card's own words end here and the conversation about them begins, and the reader has
+        // to see the seam (owner, #VZ69: "there should be a clearer dematcation between the issue
+        // and the convo thread"). A heading in bolder ink was not it: the thread gets a rule the
+        // width of the document and then its own ground under the heading, so the two halves of
+        // the card are two surfaces rather than one column of text with a louder line in it.
+        insertRule(cursor, 22);
+        QTextBlockFormat band;
+        band.setTopMargin(0);
+        band.setBottomMargin(10);
+        band.setLeftMargin(8);
+        band.setBackground(mix(theme::Surface, theme::Text, 0.07));
+        cursor.insertBlock(band, heading);
+        cursor.insertText(threadTitle, heading);
         if (m_entries.isEmpty() && !m_busy)
-            insertLine(cursor, QStringLiteral("No replies yet. Discuss the card with the agent, have "
-                                              "it Plan the work, Execute it in a terminal pane, or "
-                                              "leave a comment for whoever picks it up."), muted, 4);
+            insertLine(cursor, QStringLiteral("No replies yet. Enter in the box below discusses the "
+                                              "card with the agent, Ctrl+Enter has it Plan the work, "
+                                              "and Ctrl+Shift+Enter leaves a comment for whoever "
+                                              "picks it up."), muted, 4);
 
         const QDateTime now = QDateTime::currentDateTimeUtc();
         for (const QJsonObject &entry : std::as_const(m_entries)) {
@@ -1850,8 +1898,12 @@ private:
     QToolButton *m_close = nullptr, *m_toPrompt = nullptr, *m_openFile = nullptr, *m_edit = nullptr;
     QTextBrowser *m_doc = nullptr;
     RichEditor *m_reply = nullptr;
-    QPushButton *m_discuss = nullptr, *m_plan = nullptr, *m_execute = nullptr, *m_comment = nullptr;
-    QPushButton *m_verify = nullptr;
+    QPushButton *m_plan = nullptr, *m_execute = nullptr, *m_verify = nullptr;
+    // The strip over the reply box while a turn runs: "✦ Agent is planning…" and the ✕ that
+    // stops it (#VZ69). Hidden the rest of the time.
+    QWidget *m_busyStrip = nullptr;
+    QLabel *m_busyLabel = nullptr;
+    QToolButton *m_stop = nullptr;
     QFrame *m_replyFrame = nullptr, *m_editFrame = nullptr;
     QLineEdit *m_titleEdit = nullptr;
     QPlainTextEdit *m_issueEdit = nullptr;
@@ -2150,8 +2202,6 @@ void BoardView::buildChrome(QVBoxLayout *layout)
             onHint(QStringLiteral("board.execute"), QStringLiteral("x"));
         else if (mode == QStringLiteral("verify"))
             onHint(QStringLiteral("board.verify"), QStringLiteral("v"));
-        else
-            onHint(QStringLiteral("board.discuss"), QStringLiteral("Enter"));
     };
     m_detail->onMove = [this](const QString &what, const QString &value) {
         const QString card = m_detail->cardId();
@@ -2434,7 +2484,8 @@ void BoardView::buildQuickAdd(QVBoxLayout *layout)
     row->setContentsMargins(8, 5, 8, 3);
     auto *field = new QLineEdit(m_quickAddRow);
     field->setObjectName(QStringLiteral("boardQuickAdd"));
-    field->setToolTip(QStringLiteral("The text is kept verbatim as the card's request"));
+    field->setToolTip(QStringLiteral("The card's title, kept verbatim. Enter creates the card and "
+                                     "opens it with its issue ready to type"));
     row->addWidget(field);
     m_quickAdd = field;
     m_quickAddRow->hide();
@@ -2655,7 +2706,9 @@ void BoardView::handleEvent(const QJsonObject &event)
         updateDetailLayout();
         if (m_editOnOpen) {
             m_editOnOpen = false;
-            m_detail->beginEdit(false);
+            const bool fresh = m_editOnOpenFresh;
+            m_editOnOpenFresh = false;
+            m_detail->beginEdit(false, fresh);
         } else if (!m_actionOnOpen.isEmpty()) {
             const QString action = m_actionOnOpen;
             m_actionOnOpen.clear();
@@ -2688,7 +2741,16 @@ void BoardView::handleEvent(const QJsonObject &event)
         QString note = m_pendingNotes.take(requestId);
         if (kind == QStringLiteral("board_create")) {
             note = QStringLiteral("Created #%1").arg(card);
-            m_selected = card;   // the new card is the selection, so Enter opens it
+            // The quick-add field took the title; the card itself takes the issue (owner, #VZ69:
+            // "when you first press enter to add a new card, it should open the edit box, the
+            // editable issue part … the first thing you enter in the top row thing makes the
+            // title, not the issue content"). So the new card is the selection, it opens, and it
+            // opens *editing*, with the cursor in the issue box — which is the same path `e`
+            // takes, and it waits for the card to arrive the same way.
+            m_selected = card;
+            closeQuickAdd();
+            m_editOnOpenFresh = true;
+            editSelected();
         }
         if (kind == QStringLiteral("board_comment"))
             return;              // the thread itself shows it
@@ -3226,9 +3288,10 @@ void BoardView::quickAdd()
 }
 
 // The field sits over the list rather than inside a section: with one long list, a field at a
-// section's head would be scrolled out of sight as often as not. It names the section it adds
-// to. Enter adds the card and keeps the field open for the next one (a burst of ideas is the
-// common case); Esc, or leaving it empty, closes it.
+// section's head would be scrolled out of sight as often as not. It names the section it adds to,
+// and it takes the card's *title*: Enter creates the card and opens it with the cursor in its
+// issue box (#VZ69), so the one line here is never mistaken for the whole card. Esc, or leaving it
+// empty, closes it.
 void BoardView::quickAddIn(const QString &columnId)
 {
     if (!m_open)
@@ -3244,7 +3307,7 @@ void BoardView::quickAddIn(const QString &columnId)
     if (id.isEmpty())
         return;
     m_quickAddColumn = id;
-    m_quickAdd->setPlaceholderText(QStringLiteral("New card in %1 — Enter adds, Esc closes")
+    m_quickAdd->setPlaceholderText(QStringLiteral("Title of a new card in %1 — Enter opens it, Esc closes")
                                        .arg(sectionTitle(id)));
     m_quickAddRow->show();
     m_quickAdd->setFocus();
@@ -3265,9 +3328,16 @@ void BoardView::openSelected()
         return;
     }
     // A card being edited is not swapped for another one under the typing: the selection may
-    // move on the list, but the open card stays until the edit is saved or dropped.
-    if (detailOpen() && m_detail->editing())
+    // move on the list, but the open card stays until the edit is saved or dropped. Whatever was
+    // queued for the card that is not going to open goes with it, rather than waiting to happen
+    // to the next card that does.
+    if (detailOpen() && m_detail->editing()) {
+        m_editOnOpen = false;
+        m_editOnOpenFresh = false;
+        m_replyOnOpen = false;
+        m_actionOnOpen.clear();
         return;
+    }
     send({{QStringLiteral("type"), QStringLiteral("board_card_get")},
           {QStringLiteral("card"), m_selected}});
 }
@@ -3279,7 +3349,9 @@ void BoardView::openSelected()
 void BoardView::editSelected()
 {
     if (detailOpen() && (m_selected.isEmpty() || m_detail->cardId() == m_selected)) {
-        m_detail->beginEdit(false);
+        const bool fresh = m_editOnOpenFresh;
+        m_editOnOpenFresh = false;
+        m_detail->beginEdit(false, fresh);
         return;
     }
     if (m_selected.isEmpty())

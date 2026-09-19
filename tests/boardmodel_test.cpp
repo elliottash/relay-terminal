@@ -16,7 +16,9 @@
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
+#include <QTextBlock>
 #include <QTextBrowser>
+#include <QTextDocument>
 #include <QToolButton>
 #include <QTimeZone>
 #include <QJsonDocument>
@@ -157,7 +159,7 @@ private slots:
     void theProgressLineKeepsOffAnOpenCardsControls();
     void theTitleAndTheIssueAreEditedOnTheCardAndSavedThroughTheWorker();
     void anEditIsKeptWhenTheCardChangedUnderIt();
-    void aCardOffersDiscussPlanAndExecuteAndTheThreadNamesTheMode();
+    void theBoxDiscussesAndTheRowPlansOrLeavesTheBoard();
     void executeHandsTheCardToAPaneAndMovesItToInProgress();
     void theExecuteTaskCarriesTheBoardsConventions();
     void aRewriteShowsBeforeAboveTheOldTextAndAfterAboveTheNew();
@@ -1270,7 +1272,8 @@ void BoardModelTests::quickAddNamesTheSectionItAddsTo()
     view.selectCard(QStringLiteral("K7Q2"));
     view.quickAdd();
     QVERIFY(!strip->isHidden());
-    QCOMPARE(field->placeholderText(), QStringLiteral("New card in Ready to start — Enter adds, Esc closes"));
+    QCOMPARE(field->placeholderText(),
+             QStringLiteral("Title of a new card in Ready to start — Enter opens it, Esc closes"));
     field->setText(QStringLiteral("clickable paths in the output"));
     QTest::keyClick(field, Qt::Key_Return);
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_create"));
@@ -1278,15 +1281,47 @@ void BoardModelTests::quickAddNamesTheSectionItAddsTo()
     QCOMPARE(sent.last().value("text").toString(), QStringLiteral("clickable paths in the output"));
     // With no tabs a new card is filed in the board's first category folder; `m` re-files it.
     QCOMPARE(sent.last().value("tab").toString(), QStringLiteral("features"));
-    // The field stays open for the next card, and Esc closes it.
-    QVERIFY(!strip->isHidden());
-    QVERIFY(field->text().isEmpty());
-    QTest::keyClick(field, Qt::Key_Escape);
+
+    // Owner, #VZ69: "when you first press enter to add a new card, it should open the edit box,
+    // the editable issue part. the first thing you enter in teh top row thing makes the title,
+    // not the issue content." So the write comes back, the field closes, and the card is asked
+    // for; when it arrives it is already being edited, with the cursor in the issue box.
+    const QString createId = sent.last().value("id").toString();
+    view.handleEvent(QJsonObject{{"event", "board_written"}, {"id", createId},
+                                 {"kind", "board_create"}, {"card_id", "N3W1"},
+                                 {"write_id", "w1"}});
     QVERIFY(strip->isHidden());
+    QCOMPARE(view.selectedCard(), QStringLiteral("N3W1"));
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_card_get"));
+    QCOMPARE(sent.last().value("card").toString(), QStringLiteral("N3W1"));
+    // The worker seeds the new card's `## Issue` with the line that was typed, because that line
+    // is the owner's own words and the card format keeps them verbatim.
+    view.handleEvent(card("N3W1", "clickable paths in the output",
+                          "clickable paths in the output", "h1"));
+    auto *issue = view.findChild<QPlainTextEdit *>(QStringLiteral("boardIssueEditor"));
+    auto *titleField = view.findChild<QLineEdit *>(QStringLiteral("boardCardTitleEdit"));
+    QVERIFY(issue);
+    QVERIFY(!issue->isHidden());
+    // The cursor is in the issue box, not the title: the title is already typed. (`hasFocus()`
+    // asks the window system, which an offscreen test has none of; `focusWidget()` is the same
+    // question asked of the widget tree.)
+    QCOMPARE(view.focusWidget(), static_cast<QWidget *>(issue));
+    QCOMPARE(titleField->text(), QStringLiteral("clickable paths in the output"));
+    // And that line is offered *selected*: it is the title, not the issue (owner, #VZ69), so the
+    // first thing typed replaces it — while Esc or an empty save leaves the card as the field
+    // made it, rather than blanking the only words the card has.
+    QCOMPARE(issue->toPlainText(), QStringLiteral("clickable paths in the output"));
+    QCOMPARE(issue->textCursor().selectedText(), QStringLiteral("clickable paths in the output"));
+    // The reply box stands down while the card is being written.
+    QVERIFY(view.findChild<QFrame *>(QStringLiteral("boardReply"))->isHidden());
 
     // Nothing is created straight into Done: `n` there falls back to the first section.
+    view.closeDetail();
     view.quickAddIn(relay::board::doneSection());
-    QCOMPARE(field->placeholderText(), QStringLiteral("New card in Inbox — Enter adds, Esc closes"));
+    QCOMPARE(field->placeholderText(),
+             QStringLiteral("Title of a new card in Inbox — Enter opens it, Esc closes"));
+    QTest::keyClick(field, Qt::Key_Escape);
+    QVERIFY(strip->isHidden());
 }
 
 // Owner, 2026-09-18: "after adding a card, i couldn't edit the title or the task." Both are
@@ -1306,6 +1341,20 @@ void BoardModelTests::theTitleAndTheIssueAreEditedOnTheCardAndSavedThroughTheWor
     QVERIFY(title);
     QVERIFY(issue);
     QVERIFY(title->isHidden());     // a card is read until it is edited
+
+    // The way in by mouse is a pencil on the title itself, not a text button among the card's
+    // tools (owner, #VZ69). It carries its key like every other button here (#QG60), and it goes
+    // quiet while the editor it opened is up.
+    auto *pencil = view.findChild<QToolButton *>(QStringLiteral("boardEditPencil"));
+    QVERIFY(pencil);
+    QCOMPARE(pencil->text(), QStringLiteral("✎ Edit (e)"));
+    QVERIFY(pencil->isEnabled());
+    pencil->click();
+    QVERIFY(!title->isHidden());
+    QVERIFY(!pencil->isEnabled());
+    QTest::keyClick(issue, Qt::Key_Escape);
+    QVERIFY(title->isHidden());
+    QVERIFY(pencil->isEnabled());
 
     // `e` turns the title and the card's own words into fields, seeded from the file.
     view.editSelected();
@@ -1401,22 +1450,31 @@ QPushButton *button(relay::BoardView &view, const QString &text)
 }
 }  // namespace
 
-void BoardModelTests::aCardOffersDiscussPlanAndExecuteAndTheThreadNamesTheMode()
+// Owner, #VZ69: "remove comment / discuss buttons. i would say you just press enter in the prompt
+// box to discuss / comment" and "'stop' button isnt intuitive, it should be stop planning i guess,
+// or there should be an X next to 'agent planning'".
+void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
     view.handleEvent(card("K7Q2", "K7Q2 card", "the issue", "h1"));
-    QVERIFY(button(view, QStringLiteral("Discuss")));
+    // Discuss and Comment are what the box does, so they have no buttons; what is left on the row
+    // is Plan and the two that leave the board.
+    QVERIFY(!button(view, QStringLiteral("Discuss")));
+    QVERIFY(!button(view, QStringLiteral("Comment")));
     QVERIFY(button(view, QStringLiteral("Plan")));
     QVERIFY(button(view, QStringLiteral("Execute")));
     QVERIFY(!button(view, QStringLiteral("Ask the agent")));
     // Every button that has a key shows it in parentheses (#QG60).
-    QCOMPARE(button(view, QStringLiteral("Comment"))->text(), QStringLiteral("Comment (Ctrl+Shift+Enter)"));
-    QCOMPARE(button(view, QStringLiteral("Discuss"))->text(), QStringLiteral("Discuss (Enter)"));
     QCOMPARE(button(view, QStringLiteral("Plan"))->text(), QStringLiteral("Plan (p)"));
     QCOMPARE(button(view, QStringLiteral("Execute"))->text(), QStringLiteral("Execute (x)"));
+    auto *strip = view.findChild<QWidget *>(QStringLiteral("boardBusyStrip"));
+    auto *busy = view.findChild<QLabel *>(QStringLiteral("boardBusyLabel"));
+    auto *stop = view.findChild<QToolButton *>(QStringLiteral("boardStop"));
+    QVERIFY(strip);
+    QVERIFY(strip->isHidden());
 
     // Enter in the reply box discusses.
     auto *reply = view.findChild<QPlainTextEdit *>(QStringLiteral("boardReplyEditor"));
@@ -1425,25 +1483,31 @@ void BoardModelTests::aCardOffersDiscussPlanAndExecuteAndTheThreadNamesTheMode()
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_ask"));
     QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("discuss"));
     QCOMPARE(sent.last().value("text").toString(), QStringLiteral("Is this still wanted?"));
-    // While it runs, Discuss is Stop and the other two wait.
-    QVERIFY(button(view, QStringLiteral("Stop")));
+    // While it runs, the strip over the box says which turn it is and carries the one control
+    // that ends it; the buttons that would start another turn wait.
+    QVERIFY(!strip->isHidden());
+    QCOMPARE(busy->text(), QStringLiteral("✦ Agent is discussing…"));
+    QCOMPARE(stop->text(), QStringLiteral("✕ Stop discussing"));
     QVERIFY(!button(view, QStringLiteral("Plan"))->isEnabled());
     QVERIFY(!button(view, QStringLiteral("Execute"))->isEnabled());
     view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}, {"mode", "discuss"}});
-    QVERIFY(button(view, QStringLiteral("Discuss")));
+    QVERIFY(strip->isHidden());
     QVERIFY(button(view, QStringLiteral("Plan"))->isEnabled());
 
-    // `p` plans with an empty box: no text travels, and the Plan button becomes Stop.
+    // `p` plans with an empty box: no text travels, the strip names the plan, and its ✕ cancels.
     sent.clear();
     view.cardAction(QStringLiteral("plan"));
     QCOMPARE(sent.size(), 1);
     QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("plan"));
     QVERIFY(!sent.last().contains("text"));
-    QVERIFY(!button(view, QStringLiteral("Plan")));
-    QVERIFY(!button(view, QStringLiteral("Discuss"))->isEnabled());
-    button(view, QStringLiteral("Stop"))->click();
+    QVERIFY(!strip->isHidden());
+    QCOMPARE(busy->text(), QStringLiteral("✦ Agent is planning…"));
+    QCOMPARE(stop->text(), QStringLiteral("✕ Stop planning"));
+    QVERIFY(!button(view, QStringLiteral("Plan"))->isEnabled());
+    stop->click();
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("cancel"));
     view.handleEvent(QJsonObject{{"event", "cancelled"}, {"card_id", "K7Q2"}});
+    QVERIFY(strip->isHidden());
 
     // Ctrl+Enter plans with what was typed as the note.
     sent.clear();
@@ -1462,9 +1526,27 @@ void BoardModelTests::aCardOffersDiscussPlanAndExecuteAndTheThreadNamesTheMode()
                     {"attrs", QJsonObject{{"mode", "discuss"}, {"model", "glm-5"}}}, {"text", "Retitled it."}}});
     withThread.insert("thread_total", 2);
     view.handleEvent(withThread);
-    const QString doc = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"))->toPlainText();
+    auto *browser = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
+    const QString doc = browser->toPlainText();
     QVERIFY2(doc.contains(QStringLiteral("owner  Plan")), qPrintable(doc));
     QVERIFY2(doc.contains(QStringLiteral("✦ agent  Discuss · glm-5")), qPrintable(doc));
+
+    // The card's own words and the conversation about them are two surfaces, not one column of
+    // text with a louder line in it (owner, #VZ69: "there should be a clearer dematcation between
+    // the issue and the convo thread"): the thread opens on a rule the width of the document, and
+    // its heading has a ground of its own.
+    QTextBlock band, rule;
+    for (QTextBlock block = browser->document()->begin(); block.isValid(); block = block.next())
+        if (block.text().startsWith(QStringLiteral("THREAD"))) {
+            band = block;
+            rule = block.previous();
+        }
+    QVERIFY(band.isValid());
+    QVERIFY(band.blockFormat().background().style() != Qt::NoBrush);
+    QVERIFY(rule.isValid());
+    QVERIFY(rule.text().isEmpty());
+    QVERIFY(rule.blockFormat().background().style() != Qt::NoBrush);
+    QCOMPARE(rule.blockFormat().lineHeightType(), int(QTextBlockFormat::FixedHeight));
     QCOMPARE(relay::board::modeTitle(QStringLiteral("plan")), QStringLiteral("Plan"));
     QVERIFY(relay::board::modeTitle(QStringLiteral("comment")).isEmpty());
 }
