@@ -582,6 +582,31 @@ class TaskMasterTest(ProbeCase):
                          [("Pick a backend", "done"), ("Write the adapter", "in-progress"),
                           ("Expire old sessions", "open")])
 
+    def test_subtask_dependencies_are_kept_as_positions_in_the_checklist(self):
+        # Sibling ids (`[1]`) and this task's own fully-qualified ones (`"2.2"`) both become a
+        # position in `tasks`; `board_import` turns them into `blocked_by=` markers.
+        self.assertEqual(self.by_id["master/1"].task_depends, {2: [1]})
+        self.assertEqual(self.by_id["master/2"].task_depends, {2: [1], 3: [2]})
+        self.assertEqual(self.by_id["master/2"].to_dict()["tasks"][2]["blocked_by"], [2])
+
+    def test_a_subtask_that_depends_on_another_task_names_that_task(self):
+        self.write(".taskmaster/tasks/tasks.json", json.dumps({"tasks": [
+            {"id": 1, "title": "First", "status": "pending"},
+            {"id": 2, "title": "Second", "status": "pending", "subtasks": [
+                {"id": 1, "title": "Needs the other task", "dependencies": ["1.2"]},
+                {"id": 2, "title": "Needs a whole task", "dependencies": ["1.1"]}]}]}))
+        items = {i.source_id: i for i in self.items("taskmaster")}
+        # A bare number inside a subtask is a *sibling* (Task Master's own rule), so both of
+        # these have to be written fully qualified to mean the other task.
+        self.assertEqual(items["master/2"].task_depends, {1: ["master/1"], 2: ["master/1"]})
+
+    def test_a_subtask_dependency_on_nothing_is_dropped_rather_than_faked(self):
+        self.write(".taskmaster/tasks/tasks.json", json.dumps({"tasks": [
+            {"id": 1, "title": "Only", "status": "pending", "subtasks": [
+                {"id": 1, "title": "One", "dependencies": [1, 9, "", None]}]}]}))
+        items = {i.source_id: i for i in self.items("taskmaster")}
+        self.assertEqual(items["master/1"].task_depends, {})
+
     def test_details_and_test_strategy_are_kept(self):
         body = self.by_id["master/1"].body
         self.assertIn("### Details", body)

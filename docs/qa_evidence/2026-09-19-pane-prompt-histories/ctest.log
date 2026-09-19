@@ -1,0 +1,13 @@
+== make -f CMakeFiles/Makefile2 relay prompthistory-tests editor-tests (build/), 2026-09-19T01:19:50-04:00
+exit 0: the full app and both test targets build with the per-pane history change
+
+== ctest -R 'prompthistory|editor'
+Test project /home/elliott/repos/relay-terminal/build
+    Start 1: editor
+1/2 Test #1: editor ...........................   Passed    0.13 sec
+    Start 2: prompthistory
+2/2 Test #2: prompthistory ....................   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.14 sec

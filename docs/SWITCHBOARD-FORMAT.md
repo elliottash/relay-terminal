@@ -1,18 +1,30 @@
-# Switchboard file format (reference, phase 0)
+# Switchboard file format (reference)
 
-The Switchboard **is** `issues/`: plain Markdown in git that works without Relay, on GitHub and in
-any editor. This is the normative reference for the bytes; the product design is in
+The Switchboard **is** a folder in the project: plain Markdown in git that works without Relay, on
+GitHub and in any editor. This is the normative reference for the bytes; the product design is in
 [`SWITCHBOARD-DESIGN.md`](SWITCHBOARD-DESIGN.md) and [`TASKS-AND-MEMORY-DESIGN.md`](TASKS-AND-MEMORY-DESIGN.md).
+
+**The folder is `switchboard/`** on a board created from 2026-09-18 on, and `issues/` on one that
+existed before that — including this repository's own, which stays `issues/` and is never
+converted. Both names are in `board.BOARD_FOLDERS`, newest first, and every lookup walks that one
+list in that one order, so `switchboard/board.yaml` wins in a project that somehow has both. The
+trees below are written with `issues/` because that is the one in this repository; read the first
+path element as *the board folder*, whichever of the two a project has.
 
 Implementation: `backend/relay_core/board.py` (parsing, ids, ranks, task markers, thread appends,
 atomic hash-checked writes, the check rules) and `scripts/relay-board.py` (`check`, `index`,
-`migrate`). Neither calls a model or the network. Phase 0 ships the format and the tooling only:
-no agent tools, no UI, no note scanning, no GitHub sync.
+`migrate`). Neither calls a model or the network. This document stays the format alone; what reads
+and writes it has grown past phase 0 — the agent tools and the pane (`AGENT-SESSIONS-PROTOCOL.md`
+§19), the importers ([`PROJECT-INIT-AND-IMPORT.md`](PROJECT-INIT-AND-IMPORT.md)) and the GitHub
+sync ([`GITHUB-SYNC.md`](GITHUB-SYNC.md)) — and all of them write exactly these bytes.
 
 ## 1. Tree
 
 ```text
-issues/board.yaml              tabs, columns, autonomy (committed config)
+issues/board.yaml              tabs, columns, autonomy (committed config); the marker that
+                               says this project has a Switchboard at all
+                               (`switchboard/board.yaml` in a project initialized from
+                               2026-09-18 on — same bytes, same rules)
 issues/BOARD.md                generated index; never hand-edited
 issues/<category>/             features/ changes/ design/ marketing/ … = tabs
 issues/<category>/<state>/     needs_qa_llm/ needs_qa_human/ needs_review/ needs_labels/
@@ -157,6 +169,11 @@ conflict on. There is always room before, after and between two ranks.
 - `card=M3XJ` means the item is mirrored by a card; `blocked_by=a3,#M3XJ` stores dependencies
   (never the derived "blocked" state). One nesting level: deeper structure means the sub-item
   should be a card, and `check` warns.
+- **Writing one.** `board_update_card`'s `tasks` takes `blocked_by` per item: a number is the
+  1-based position of another item in the same call — how a fresh list names items that have no
+  ids yet — an item id is one already on the card, and `#K7Q2` is a card. `board.set_task_blockers`
+  assigns the ids first, then refuses a reference to nothing, a self-reference and a cycle, since
+  all three are `check` errors.
 - Writing tasks rewrites only the task lines: every other byte of the body, and of the file, is
   preserved.
 
@@ -218,6 +235,11 @@ private memory (`.private/<category>/`, `.private/threads/`, `.private/memory/`)
 through `issues/.gitignore`, and a private card also carries `private: true`; `check` reports a
 card whose flag and location disagree, and any private file that git is tracking. Caveats: a git
 worktree does not see it and `git clean -fdx` deletes it.
+
+Two per-machine files live there beside the cards, and neither is a card: `forge-sync.json` (the
+GitHub sync's state, `docs/GITHUB-SYNC.md` §3) and `forge-logins.yaml` — or `.json` — the person →
+GitHub login map, which is per user rather than committed. `Board.card_paths()` only walks `*.md`
+two levels down, so `check` ignores both.
 
 ## 6. `scripts/relay-board.py`
 

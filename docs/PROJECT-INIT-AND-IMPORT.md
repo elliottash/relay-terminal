@@ -45,6 +45,19 @@ non-compliant notes", is `docs/SWITCHBOARD-DESIGN.md`.
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+Since 2026-09-19 this is **inline in the pane**, not a dialog: a block in the pane's own column
+directly under the terminal, beside the thinking panel and the queue strip, so the terminal
+reflows into what is left and nothing floats over it (the owner's rule — new surfaces are panes or
+inline in the pane). It carries three buttons, `[ Not now ] [ No ] [ Yes ]`, and answers to `y`,
+`n` and `Esc` with Tab walking the checkboxes. `src/ProjectInitBlock.h` draws it;
+`src/ProjectInit.h` decides when it appears and what every line of it says.
+
+**Not now is not a no.** A no is remembered on disk (`projects::Registry::decline()`) and nothing
+asks again, in any tab, after any restart, until `/init`. "Not now" only stops the quietest
+trigger — the first prompt sent to the agent — for the rest of that Relay session, and every
+explicit act asks again. The five acts that may ask at all, and nothing else, are listed in
+`AGENT-SESSIONS-PROTOCOL.md` §19.12.
+
 Three rules the GUI must keep:
 
 1. **The checkboxes are unchecked.** Importing is a separate decision from initializing.
@@ -249,6 +262,11 @@ Beads' integer priorities are read as `0 = critical, 1 = high, 2 = medium, 3 = l
 A Beads `parent-child` edge becomes the `parent` field, which is also a legal card field.
 Beads' non-blocking edge types (`related`, `discovered-from`, `tracks`, …) are not imported.
 
+Dependencies **between the items of one card** are written too, as the `blocked_by=` marker of
+`SWITCHBOARD-FORMAT.md` §2.5 (Task Master's subtasks are the only source that has them). The same
+two rules hold: a sibling becomes that item's marker, a dependency on another *task* becomes
+`blocked_by=#CARD` for the card that task imported as, and anything outside the run is dropped.
+
 ### 4.4 The seven, one by one
 
 #### `checklist` — `TODO.md`, `NOTES.md`, `IDEAS.md`, `ROADMAP.md`, `PLAN.md`
@@ -336,10 +354,14 @@ looking for a `master` key:
 | `priority` (`high`/`medium`/`low`) | rank order |
 | `dependencies` | `blocked_by`, scoped to the tag |
 | `subtasks[]` | `## Tasks`, one item each, keeping its own status |
+| `subtasks[].dependencies` | `blocked_by=` on that item: a sibling by its marker, another task by its card |
 
 One card per **task**, not per subtask: a subtask is a checklist item, which is what the board
 calls the same thing. Ids are read as `int | string` and dependencies likewise, because real
-files hold both although the docs say number.
+files hold both although the docs say number. Inside a subtask's `dependencies`, a bare number is
+a **sibling** subtask (Task Master's own rule); `"4.2"` is task 4's second subtask, and when task
+4 is not this one it is read as a dependency on task 4's card, because the board has no way to
+name an item of a card it is not on.
 
 #### `spec-kit` — github/spec-kit
 
@@ -507,10 +529,10 @@ here.
 
 ---
 
-## 8. Protocol
+## 8. Protocol (wired 2026-09-18; `AGENT-SESSIONS-PROTOCOL.md` §19.13)
 
-Three request/response pairs, to be added to `docs/AGENT-SESSIONS-PROTOCOL.md` §19 beside
-`board_init` (19.12) when they are wired into the worker.
+Three request/response pairs on the worker that owns the board
+(`board_protocol.BoardCommands`), beside `board_init` (19.12).
 
 ### `project_probe` → `project_probe_result`
 
@@ -521,9 +543,12 @@ Three request/response pairs, to be added to `docs/AGENT-SESSIONS-PROTOCOL.md` �
 {"event": "project_probe_result", "id": 41, ...}     // §3, verbatim
 ```
 
-Sent when the GUI is about to ask the init question. `project` is required and is a path; the
-worker never falls back to its own cwd. Safe to send for a project that already has a board —
-the answer says so in `board` — and safe to send repeatedly: it writes nothing.
+Sent when the GUI is about to ask the init question. `project` is **required, absolute and a
+directory**; a missing, empty or relative one is an `error`, and the worker never falls back to
+its own cwd — the process runs wherever the GUI started it. Safe to send for a project that
+already has a board — the answer says so in `board`, and the event then also carries that board's
+`root` — and safe to send repeatedly: it writes nothing. `kinds` (optional here too) limits the
+run to some of `TRACKER_KINDS`; an unknown kind is an error. This message needs no board.
 
 ### `board_import_propose` → `board_import_proposals`
 
@@ -566,21 +591,32 @@ already on the board, so the dialog can say "23 of 30, 7 already imported". Noth
 
 `keys` is the ticked subset of the last `board_import_proposals`, so the user's choice is what
 is written and the worker re-derives the proposals rather than trusting text sent back to it.
-A `board_changed` event follows, as for any other write.
+Each card row is `{id, source_key, path, status, tab}`, and `skipped` lists the requested keys
+that produced no card — already imported, or no longer in the project. A `board_changed` event
+follows, as for any other write.
 
-Ordering: `board_import_apply` requires a board, so it comes **after** `board_init`. The GUI
-sends `board_init` (the user said yes), then `board_import_apply` with whatever was ticked.
+Ordering: `board_import_apply` requires a board **that exists**, so it comes **after**
+`board_init`; an uninitialized one answers `error` rather than creating the board on the way
+through, which is what a single `board_create` does (19.12). The GUI sends `board_init` (the user
+said yes), then `board_import_apply` with whatever was ticked. `project` defaults to the pane's
+own board's project and may not name a different one. Like every other write here it goes through
+the Switchboard worker's busy guard (`code: "board_busy"`).
+
+All three reply events are desktop-only in `remote/wire.py`: they are a survey of one directory on
+this machine, every path in them is local, and they answer a dialog only the desktop shows.
 
 ---
 
 ## 9. Known limits
 
-* **A Task Master subtask's dependencies are not written.** The board's task items do carry a
-  `blocked_by=` marker (`SWITCHBOARD-FORMAT.md` §2.5), but `board_update_card` has no way to
-  set one — `board_tools._task_items` preserves an existing marker and cannot create one — so a
-  subtask-level dependency is dropped rather than faked. Card-level dependencies are written
-  normally. Fixing it means changing `board_tools.py`, which belongs with whoever owns that
-  file.
+* ~~A Task Master subtask's dependencies are not written.~~ **Fixed 2026-09-18.**
+  `board_update_card`'s `tasks` now takes `blocked_by` per item (`SWITCHBOARD-FORMAT.md` §2.5):
+  a number is the 1-based position of another item in the same call, which is how a list that has
+  no ids yet names itself; a string is an item id already on the card, or `#K7Q2`. The importer
+  uses it, so a subtask that waits for a sibling gets a `blocked_by=` marker, and one that waits
+  for another *task* is blocked by that task's card — a card is the nearest the format can say,
+  since an item cannot name an item of another card. A reference to nothing, a self-reference and
+  a cycle are all refused, because `check` calls all three errors.
 * **spec-kit, Kiro and OpenSpec import one card per directory**, capped at 100 checklist items;
   a spec with more says so in its body and the rest stay in the file. If a card per phase turns
   out to be what people want, that is a product decision, not a parser change.

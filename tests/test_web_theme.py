@@ -105,7 +105,6 @@ class WebThemeTest(unittest.TestCase):
         props = defined_properties(self.fresh)
         for name in ("--qss-toast-background", "--qss-queueTitle-color", "--qss-queueTitle-letter-spacing",
                      "--qss-queueHint-color", "--qss-queueSteer-color", "--qss-queueRunning-color",
-                     "--qss-thinkingOverlay-background", "--qss-thinkingView-font-family",
                      "--qss-transcriptHeader-color", "--qss-composer-border-radius",
                      "--qss-stripChip-border", "--qss-stripChip-font-size", "--qss-statusPicker-padding",
                      "--rt-queue-row-selected", "--rt-mono", "--rt-pt"):

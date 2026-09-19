@@ -1351,11 +1351,18 @@ only thing that decides what a given device sees, and `src/PaneState.{h,cpp}` bu
  "model":{"label":"fake · local","choices":[{"id":"m1","label":"Kimi K2 · Main","current":false}]},
  "composer":{"mode":"auto|shell|agent","placeholder":"…","modes":["auto","shell","agent"]},
  "context":{"label":"96% left","percent_left":96},
+ "allowance":{"label":"Free · 73% left","percent_left":73,"warn":false,"detail":"182,400 of 250,000 tokens today · resets at 02:00"},
  "sessions":{"rows":[{"id":"s1","title":"…","when":"14:02","current":true,"running":false}],"can_new":true}}
 ```
 
 - `seq` rises; a client ignores anything older than what it has drawn. `running` is null when
   nothing runs. Any field may be missing, and a client renders what it was given.
+- **`allowance` is the Relay Free chip** ([RELAY-FREE.md](RELAY-FREE.md)), published only while the
+  pane is on the hosted preset and a quota figure has arrived: the whole object is absent
+  otherwise, and a state that stops carrying it hides the chip (the pane moved to a provider with
+  a key). The desktop writes every word of it — `label`, `warn` (read off `percent_left`, warning
+  at 10 % and below) and `detail`, which a view shows as the chip's title — so it holds no secret
+  and offers nothing to press: every level sees it, and no client type exists for it.
 - **A row's `actions` are the whole truth about it.** The client offers those and nothing else; the
   pane checks the row still offers the action when the answer arrives, because the client was
   necessarily looking at an older state.

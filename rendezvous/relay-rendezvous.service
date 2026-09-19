@@ -1,0 +1,49 @@
+# relay-rendezvous: the hosted rendezvous and web app at join.relay-terminal.ai
+# (docs/REMOTE-PROTOCOL.md sections 8 and 10.7).
+#
+# It routes bytes it cannot read: every payload it copies is inside a Noise session, and a meeting
+# code's PIN never reaches it (CPace). What it keeps is ciphertext in flight and metadata — desktop
+# ids and public keys, rooms on their own ttl, code-to-room maps on theirs, never the 7-day log.
+#
+# Install (the runbook for elliott-main-1 has the whole procedure):
+#   rsync the repo's remote/, rendezvous/ and app/ to /opt/relay-rendezvous/ (root-owned)
+#   cp rendezvous/relay-rendezvous.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now relay-rendezvous
+# The Cloudflare Tunnel routes join.relay-terminal.ai straight to 127.0.0.1:8791, as it routes
+# api.relay-terminal.ai to the gateway: no nginx vhost, so nothing here can touch the shared nginx.
+
+[Unit]
+Description=Relay rendezvous and web app (join.relay-terminal.ai)
+Documentation=https://github.com/elliottash/relay-terminal/blob/main/docs/REMOTE-PROTOCOL.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=relay-rendezvous
+Group=relay-rendezvous
+WorkingDirectory=/opt/relay-rendezvous
+# --static serves app/ through remote/httpd.py's strict handler — the same one every desktop's
+# sidecar uses: a fixed root, nothing outside it, the app's CSP, no caching.
+ExecStart=/usr/bin/python3 -m rendezvous.server \
+    --host 127.0.0.1 --port 8791 \
+    --db /var/lib/relay-rendezvous/rendezvous.sqlite3 \
+    --static /opt/relay-rendezvous/app
+Restart=on-failure
+RestartSec=3
+
+# The process needs its database directory and nothing else of the filesystem.
+StateDirectory=relay-rendezvous
+StateDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

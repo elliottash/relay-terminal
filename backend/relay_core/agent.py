@@ -45,6 +45,7 @@ from .tools import Prepared, ToolExecutor, Workspace
 
 MAX_SNAPSHOTS = 3
 MAX_TURN_LOG = 50           # turns whose tool results and transcript stay available (protocol 11)
+MID_TURN_SAVE_S = 10.0      # how often a turn still running writes its session (_autosave_soon)
 TRANSCRIPT_CONTENT_CAP = 8000
 SUMMARY_PREVIEW_CAP = 160
 # Turn limits (owner decision 2026-09-17: 50 model steps, 150 tool calls, configurable). Hitting one ends the
@@ -156,6 +157,7 @@ You do not automatically see terminal history or output. Ask for relevant output
 A command still running at its timeout comes back as a job you can read with command_output or end with stop_command; start a server or watcher with run_command background: true, and stop your jobs when you no longer need them.
 Keep the final response direct and describe what was actually verified.
 Format replies as Markdown; the terminal renders it: headings, **bold**, *italics*, `inline code` for commands, paths and identifiers, fenced code blocks with a language for code and multi-line commands, bulleted or numbered lists for steps, and tables for comparisons.
+Lead with the main point in bold when you finish, hit a problem, or need something from the user — **Done:**, **Problem:**, **Need:** labels — and the terminal colours those three.
 Keep it terminal-friendly: short paragraphs, no HTML, no images.
 The type_into_program tool types into the interactive program in the user's visible terminal pane; it is offered only for a turn in which the user handed you that program, and when it is absent you cannot type into their terminal and must say so instead of pretending.
 Never type into a password or passphrase prompt.
@@ -340,6 +342,9 @@ class Agent:
         self._turn_ctx = None
         # The model swap an image turn is running under, or None (issue EM1E).
         self._vision: dict | None = None
+        # The model swap a plan-mode turn is running under, or None (owner, 2026-09-19): the
+        # planning role serves plan turns, the pane's own model every other turn.
+        self._planning: dict | None = None
         # The failover swap a turn is running under, or None (card #G9VE): the pane's own
         # provider, config and preset, put back when the turn ends.
         self._failover: dict | None = None
@@ -383,6 +388,8 @@ class Agent:
         # thread's older state after the other's newer state.
         self._save_lock = threading.Lock()
         self._last_usage = None
+        # When the session file was last written; _autosave_soon throttles the mid-turn ones.
+        self._last_save = 0.0
         # Protocol 11: per-turn tool results, thinking time and transcript for the last MAX_TURN_LOG turns.
         self.turn_log: OrderedDict[str, dict] = OrderedDict()
         self._turn_record = None
@@ -557,6 +564,12 @@ class Agent:
             tools = tools + self.subagents.tool_specs()
         return tools + extra
 
+    @property
+    def _routed(self) -> dict | None:
+        """The per-turn model swap in force, if any: a vision swap nests inside a plan swap, so
+        the vision one is the model actually serving while both are up."""
+        return self._vision or self._planning
+
     def _effort_style(self) -> str:
         return effort_style(self.preset, self.config.extra, self.config.base_url)
 
@@ -636,7 +649,7 @@ class Agent:
         with self._model_lock:
             fit = self.switch_fit(config, window)
             same = ((config.base_url, config.model) == (self.config.base_url, self.config.model)
-                    and not self._vision and not self._failover)
+                    and not self._routed and not self._failover)
             if "refuse" in fit and not same:
                 return {"applies": "refused", "reason": fit["refuse"], "context_window": window}
             if not idle:
@@ -671,11 +684,12 @@ class Agent:
         preset = resolve_preset(preset_id, config.base_url, config.model)
         window = context_window or context_window_for(preset)
         with self._model_lock:
-            running = self._vision["model"] if self._vision else self.config.model
+            routed = self._routed
+            running = routed["model"] if routed else self.config.model
             # `self.config` is the failover provider's while a turn is failed over (#G9VE), so a
             # switch to the model named there is a real switch, not a no-op to be dropped.
             if ((config.base_url, config.model) == (self.config.base_url, self.config.model)
-                    and not self._vision and not self._failover):
+                    and not routed and not self._failover):
                 self._pending_model = None
                 if self._switching is not None:
                     self._switching["cancelled"] = True
@@ -683,9 +697,10 @@ class Agent:
             self._pending_model = {"config": config, "preset_id": preset_id, "window": context_window,
                                    "on_applied": on_applied, "fields": dict(fields or {}),
                                    "refused_fields": refused_fields}
-            # An image turn stays on its vision model to the end: the new model applies after it,
-            # and so does a turn that has failed over — `_end_failover` would undo a step switch.
-            applies = "turn_end" if (self._vision or self._failover) else "next_step"
+            # A routed turn (plan mode, or an image turn on its vision model) stays on the swapped
+            # model to the end: the new model applies after it, and so does a turn that has failed
+            # over — `_end_failover` would undo a step switch.
+            applies = "turn_end" if (routed or self._failover) else "next_step"
             outcome = {"applies": applies, "in_flight_model": running, "context_window": window}
             if self.switch_fit(config, window)["compacts"]:
                 outcome["will_compact"] = True
@@ -729,9 +744,9 @@ class Agent:
         """
         with self._model_lock:
             pending = self._pending_model
-            # A failed-over turn is a vision turn for this purpose: a switch landing at a step
+            # A failed-over turn is a routed turn for this purpose: a switch landing at a step
             # boundary would be overwritten by `_end_failover`, so it waits for the turn's end.
-            if pending is None or (at == "step" and (self._vision or self._failover)):
+            if pending is None or (at == "step" and (self._routed or self._failover)):
                 return None
             self._pending_model = None
             window = _pending_window(pending)
@@ -1137,6 +1152,7 @@ class Agent:
             ctx["opening"] = [item["id"]]
             message["relay_requests"] = [item["id"]]
         add(message)
+        self._autosave_soon()
         steps = 0
         calls_used = 0
         over_budget_steps = 0
@@ -1144,6 +1160,10 @@ class Agent:
         batch = None               # subagents: `agent` calls started for the current response
         pictures = image_attachments(attachments)
         try:
+            if self.mode == "plan":
+                # Plan mode runs on its own model role (owner, 2026-09-19), decided before the
+                # image routing so a vision swap nests inside the plan one.
+                self._begin_plan_turn(turn_id)
             if pictures:
                 # Decide the model first: a refusal must not leave a half-built image message behind,
                 # and a swap has to be in place before the first model call (issue EM1E).
@@ -1196,6 +1216,7 @@ class Agent:
                 ctx["since_todos"] += 1
                 self._close_thinking(record)
                 add(message)
+                self._autosave_soon()
                 if self._last_usage:
                     self.context.record_usage(self._last_usage, self.messages, self.tools())
                 self.emit(self.context_event())
@@ -1243,6 +1264,7 @@ class Agent:
                                 result = self.subagents.run_tool(func["name"], args, call["id"], batch, self.cancel_event)
                                 add({"role": "tool", "tool_call_id": call["id"],
                                      "content": json.dumps(result, ensure_ascii=False)})
+                                self._autosave_soon()
                                 ms = int((time.monotonic() - call_started) * 1000)
                                 label = tool_labels.result_label(func["name"], label_args, result, ms=ms)
                                 self._record_tool(record, call["id"], func["name"], preview, result, ms,
@@ -1263,6 +1285,7 @@ class Agent:
                         except (OSError, ValueError, UnicodeError) as exc:
                             result = {"error": str(exc)[:2000]}
                     add({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, ensure_ascii=False)})
+                    self._autosave_soon()
                     ms = int((time.monotonic() - call_started) * 1000)
                     label = tool_labels.result_label(func["name"], label_args, result, ms=ms,
                                                      existed=label_existed)
@@ -1304,8 +1327,9 @@ class Agent:
                 failed["resets_at"] = reported.resets_at
             self._end_turn(record, failed)
         finally:
-            # Backstop: _end_turn already did both for every normal end state (issue EM1E).
+            # Backstop: _end_turn already did all three for every normal end state (issue EM1E).
             self._end_vision_turn()
+            self._end_plan_turn()
             self._end_failover()
             self._forget_images()
             # Consent to type into the user's program never outlives the turn it was given for.
@@ -1376,6 +1400,52 @@ class Agent:
         self.emit({"event": "vision_route_ended", "turn_id": swap["turn_id"], "model": swap["back_to"],
                    "was": swap["model"], "text": f"Back to {swap['back_to']}."})
 
+    # ----- plan turns (owner, 2026-09-19) -----------------------------------------------
+    def _begin_plan_turn(self, turn_id: str) -> dict | None:
+        """Route one plan-mode turn to the planning role, for that turn only.
+
+        The role's default is the pane's own model pushed to max reasoning; when it resolves back
+        to the main agent (the provider has no effort knob, or the effort is already max) there is
+        nothing to swap and no event is sent, exactly like an image the main model can read.
+        """
+        target = self.roles.planning_target() if self.roles is not None else None
+        if target is None or (target.config.model == self.config.model
+                              and target.config.base_url == self.config.base_url
+                              and target.config.extra == self.config.extra):
+            return None
+        swap = {"turn_id": turn_id, "provider": self.provider, "back_to": self.config.model,
+                "model": target.config.model}
+        self._planning = swap
+        if not self._injected_provider:
+            self.provider = _provider_for(target.config, self.stall_timeout_s)
+        logs.event(_log, "plan_route", session=self.session_id, turn=turn_id,
+                   from_model=self.config.model, to_model=target.config.model,
+                   host=_host(target.config.base_url), effort=target.effort, source=target.source)
+        if target.config.model != self.config.model:
+            text = (f"Plan mode · this turn runs on {target.config.model}, "
+                    f"then back to {self.config.model}.")
+        else:
+            text = (f"Plan mode · this turn runs on {target.config.model} at "
+                    f"{target.effort or 'max'} reasoning.")
+        self.emit({"event": "plan_route", "turn_id": turn_id, "model": target.config.model,
+                   "from_model": self.config.model, "preset": target.preset_id,
+                   "base_url": target.config.base_url, "source": target.source,
+                   "effort": target.effort, "scope": "turn", "text": text})
+        self.emit({"event": "status", "text": f"Plan turn · {target.config.model}"})
+        return swap
+
+    def _end_plan_turn(self) -> None:
+        """Put the pane's own provider back after a plan turn. Always runs, however the turn ended
+        (after the vision swap, which nests inside it), before the turn's terminal event so
+        done/error/cancelled stay last."""
+        swap, self._planning = self._planning, None
+        if not swap:
+            return
+        if not self._injected_provider:
+            self.provider = swap["provider"]
+        self.emit({"event": "plan_route_ended", "turn_id": swap["turn_id"], "model": swap["back_to"],
+                   "was": swap["model"], "text": f"Back to {swap['back_to']}."})
+
     def _forget_images(self) -> None:
         """Replace every image still in the conversation with its description and path.
 
@@ -1437,15 +1507,15 @@ class Agent:
     def _begin_failover(self, exc: Exception, record: dict, step: int) -> bool:
         """Move this turn to the next failover provider. False when there is nowhere to go.
 
-        Refused while a vision swap owns the provider (it made its own choice for this turn),
-        with no roles resolver (a subagent or a test agent: it cannot know which providers are
+        Refused while a vision or plan swap owns the provider (each made its own choice for this
+        turn), with no roles resolver (a subagent or a test agent: it cannot know which providers are
         keyed), for an injected provider (its owner decides), when the option is off, once this
         call has streamed part of an answer — the user is reading it, and a second provider would
         write a second answer under it, which is the rule the stall retry follows (15.2) — and on
         cancel: a stopped turn stays stopped.
         """
         if (not self.failover or self.roles is None or self._injected_provider or self._vision
-                or self._produced_output or self.cancel_event.is_set()):
+                or self._planning or self._produced_output or self.cancel_event.is_set()):
             return False
         swap = self._failover
         if swap is None:
@@ -1799,8 +1869,10 @@ class Agent:
                    error=_error_text(event), leaked_socket=leaked or None)
         # An image is context for its own turn only (issue EM1E): the model swap goes back and the
         # pictures leave the conversation here, before the terminal event, so that stays last. A
-        # failover swap goes back in the same place, and for the same reason (card #G9VE).
+        # plan turn's own swap (owner, 2026-09-19) ends the same way, around the vision one, and
+        # so does a failover swap, for the same reason (card #G9VE).
         self._end_vision_turn()
+        self._end_plan_turn()
         self._end_failover()
         self._forget_images()
         self.emit(self.turn_summary(record))
@@ -2215,6 +2287,7 @@ class Agent:
                 "instructions": list(self.instructions.loaded) if self.instructions else []}
 
     def autosave(self) -> None:
+        self._last_save = time.monotonic()
         if self.store is None or (self.turns == 0 and not self.store.path(self.session_id).exists()):
             return
         try:
@@ -2223,6 +2296,18 @@ class Agent:
                 self.store.save(self.session_data())
         except OSError as exc:
             self.emit({"event": "status", "text": f"Session not saved ({type(exc).__name__})."})
+
+    def _autosave_soon(self) -> None:
+        """Write the session while its turn is still running, at most every MID_TURN_SAVE_S.
+
+        The session files are what the sessions list and the full-text index are built from, so a
+        conversation has to reach the disk before its turn ends: a long first turn would otherwise
+        be missing from search — and lost if Relay stopped — while the user is looking at it. The
+        throttle keeps a turn that calls tools in a loop from rewriting the file on every call.
+        """
+        if time.monotonic() - self._last_save < MID_TURN_SAVE_S:
+            return
+        self.autosave()
 
 
 def transcript_item(message: dict) -> dict:

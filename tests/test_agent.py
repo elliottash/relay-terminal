@@ -91,6 +91,10 @@ class SystemPromptTests(unittest.TestCase):
         from relay_core import agent as agent_module
         self.assertIn("Format replies as Markdown", agent_module.SYSTEM)
         self.assertIn("fenced code blocks", agent_module.SYSTEM)
+        # The main point is asked for in bold, and the terminal colours three labels (card #CVHT).
+        self.assertIn("Lead with the main point in bold", agent_module.SYSTEM)
+        for label in ("**Done:**", "**Problem:**", "**Need:**"):
+            self.assertIn(label, agent_module.SYSTEM)
 
 
 class StallRetryTests(unittest.TestCase):

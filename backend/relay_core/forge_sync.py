@@ -79,9 +79,19 @@ FOOTER_MARKER = "<!-- relay-sync -->"
 TAB_LABEL = "tab:"
 STATUS_LABEL = "status:"
 
-#: Thread entry kinds that become issue comments.  `event` (card moved, card created) and the
-#: machine kinds stay local: the issue already shows the state change as labels.
+#: Thread entry kinds that *could* become issue comments.  `event` (card moved, card created) and
+#: the machine kinds stay local whatever the configuration says: the issue already shows the state
+#: change as labels.
 COMMENT_KINDS = ("comment", "question", "decision", "evidence", "progress", "note")
+
+#: Owner, 2026-09-18: which of those are public by default.  A thread carries two sorts of entry —
+#: what somebody said about the work (`comment`, `question`, `decision`, `note`) and what an agent
+#: did while doing it (`progress`, `evidence`: run logs, screenshot paths, QA folders).  The first
+#: sort belongs on the issue; the second is Relay's working record and would be noise on a public
+#: tracker, so it stays here unless `board.yaml` asks for it:
+#:
+#:     github: {comment_kinds: [comment, question, decision, note, progress]}
+DEFAULT_COMMENT_KINDS = ("comment", "question", "decision", "note")
 
 #: How many issues a first sync may create before it needs `confirm_bulk`.  Creating 186 public
 #: issues by accident is the failure this number exists to prevent.
@@ -89,6 +99,16 @@ DEFAULT_CREATE_CAP = 20
 
 #: Where the state lives, relative to the board root.
 STATE_FILE = f"{B.PRIVATE_FOLDER}/forge-sync.json"
+
+#: The person -> GitHub login map, which is **per user** and never committed (owner, 2026-09-18):
+#: two people syncing one board do not agree about who `Elliott` is on their forge, and a login is
+#: somebody's account name rather than a property of the project.  So it lives in the same
+#: gitignored private root as the state file, and `board.yaml` holds only what the project shares.
+#: Either spelling is read, the first that exists winning; `.json` matches the state file beside
+#: it, `.yaml` matches `board.yaml` for a person editing it by hand.  Neither is a card, so
+#: `relay-board.py check` never looks at it.
+LOGINS_FILES = (f"{B.PRIVATE_FOLDER}/forge-logins.yaml", f"{B.PRIVATE_FOLDER}/forge-logins.yml",
+                f"{B.PRIVATE_FOLDER}/forge-logins.json")
 
 STATE_VERSION = 1
 
@@ -543,21 +563,77 @@ FIELD_NAMES = ("title", "prose", "tasks", "labels", "status", "tab", "assignee")
 
 
 # ----------------------------------------------------------------------- tab helpers
+#
+# One copy, in `board`, shared with `board_tools.BoardTools`: the sync writes card files and has
+# to put them where the pane's own writes would (`board.tab_of` and friends).  These names stay
+# because the engine and its tests read like this.
 
-def tab_folders(board: B.Board) -> dict[str, str]:
-    return {str(t["id"]): str(t["folder"]) for t in board.tabs() if t.get("folder")}
-
-
-def tab_of(board: B.Board, card: B.Card) -> str:
-    category = board.category_of(card.path) if card.path else ""
-    for tab_id, folder in tab_folders(board).items():
-        if folder == category:
-            return tab_id
-    return category
+tab_folders = B.tab_folders
+tab_of = B.tab_of
+category_for_tab = B.category_for_tab
 
 
-def category_for_tab(board: B.Board, tab: str) -> str:
-    return tab_folders(board).get(tab, tab)
+# --------------------------------------------------------------- the board's configuration
+
+def read_logins(board: B.Board) -> dict[str, str]:
+    """The person -> GitHub login map for *this* user, or `{}` (see `LOGINS_FILES`).
+
+    The file is either a bare map, or one under a `logins:` key.  Anything unreadable, or not a
+    map of scalars, is no map at all: an unsyncable assignee is a field the engine leaves alone,
+    which is a great deal better than failing the run over a private file somebody mistyped.
+    """
+    for name in LOGINS_FILES:
+        path = board.root / name
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        try:
+            data = json.loads(raw) if path.suffix == ".json" else B.parse_yaml(raw)
+        except (ValueError, B.BoardError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        if isinstance(data.get("logins"), dict):
+            data = data["logins"]
+        return {str(k): str(v) for k, v in data.items()
+                if isinstance(v, (str, int)) and not isinstance(v, bool) and str(v).strip()}
+    return {}
+
+
+def board_config(board: B.Board) -> dict:
+    """`board.yaml`'s `github:` block plus this user's login map, as `ForgeSync` kwargs.
+
+    What is in `board.yaml` is what the project agrees on and commits — the repository, an
+    Enterprise `base_url`, the bulk `create_cap`, the `default_tab` an imported issue lands in,
+    and which thread kinds may be posted publicly.  The login map is not one of those; it is
+    read from the private root (`read_logins`).
+    """
+    block = board.config().get("github") if board.config_path.is_file() else None
+    block = block if isinstance(block, dict) else {}
+    out: dict = {"repo": "", "base_url": None, "create_cap": DEFAULT_CREATE_CAP,
+                 "default_tab": None, "comment_kinds": list(DEFAULT_COMMENT_KINDS),
+                 "login_map": read_logins(board)}
+    for key in ("repo", "base_url", "default_tab"):
+        value = block.get(key)
+        if isinstance(value, str) and value.strip():
+            out[key] = value.strip()
+    cap = block.get("create_cap")
+    if isinstance(cap, int) and not isinstance(cap, bool) and cap >= 0:
+        out["create_cap"] = cap
+    kinds = block.get("comment_kinds")
+    if isinstance(kinds, (list, tuple)):
+        wanted = [str(k).strip().lower() for k in kinds]
+        unknown = [k for k in wanted if k not in COMMENT_KINDS]
+        if unknown:
+            raise ForgeError(f"board.yaml github.comment_kinds: unknown entry "
+                             f"{', '.join(sorted(set(unknown)))}; the kinds a thread has are "
+                             f"{', '.join(COMMENT_KINDS)}.")
+        out["comment_kinds"] = [k for k in COMMENT_KINDS if k in wanted]
+    # A `login_map:` in board.yaml is deliberately **not** read: it would commit other people's
+    # account names to the project, and two people syncing one board do not agree about them.
+    # Without the private file there is no map, and an assignee is a field the sync leaves alone.
+    return out
 
 
 # ------------------------------------------------------------------------- the state
@@ -571,6 +647,14 @@ class SyncState:
                            "issues_etag": "", "last_seen": ""}
         self.load()
         self.data.setdefault("cards", {})
+        #: The repository this state was last written for, when it is not the one asked for.
+        #: `ForgeSync._refuse_second_repo` turns it into a refusal; nothing is thrown away here.
+        self.other_repo = ""
+        self.other_cards = 0
+        if repo and self.data.get("repo") and self.data.get("repo") != repo:
+            self.other_repo = str(self.data["repo"])
+            self.other_cards = sum(1 for e in (self.data.get("cards") or {}).values()
+                                   if isinstance(e, dict) and e.get("number"))
         if repo and self.data.get("repo") != repo:
             # A board pointed at a different repository starts a fresh mapping rather than
             # pushing one project's cards onto another's issues.
@@ -787,17 +871,22 @@ class ForgeSync:
     def __init__(self, board: B.Board, provider: ForgeProvider, *, state_path: str | os.PathLike | None = None,
                  login_map: dict | None = None, create_cap: int = DEFAULT_CREATE_CAP,
                  default_tab: str | None = None, clock: Callable[[], float] = time.time,
-                 import_issues: bool = True,
+                 import_issues: bool = True, comment_kinds: Sequence[str] | None = None,
                  on_progress: Callable[[dict], None] | None = None):
         self.board = board
         self.guard = PrivacyGuard(board)
         self.provider = GuardedProvider(provider, self.guard)
         self.repo = getattr(provider, "repo", "") or ""
         self.state = SyncState(Path(state_path) if state_path else board.root / STATE_FILE, self.repo)
+        self._refuse_second_repo()
         self.login_map = {str(k): str(v) for k, v in (login_map or {}).items()}
         self.reverse_logins = {v.lower(): k for k, v in self.login_map.items()}
         self.create_cap = int(create_cap)
         self.default_tab = default_tab
+        #: Which thread kinds go out as public comments (`DEFAULT_COMMENT_KINDS`, or the
+        #: `github: {comment_kinds: [...]}` override read by `board_config`).
+        wanted = set(comment_kinds if comment_kinds is not None else DEFAULT_COMMENT_KINDS)
+        self.comment_kinds = tuple(k for k in COMMENT_KINDS if k in wanted)
         self.clock = clock
         self.import_issues = import_issues
         #: Called after every card a run applies, with `{card, title, action, number, done,
@@ -807,6 +896,32 @@ class ForgeSync:
         #: The comment listing each linked card's plan already paid for, so `run()` does not ask
         #: twice.  `None` means the listing answered 304 and there is nothing to do.
         self._comment_cache: dict[str, list | None] = {}
+
+    # ---- one board, one repository -------------------------------------------
+    def _refuse_second_repo(self) -> None:
+        """A board whose cards are already linked to another repository is not re-pointed here.
+
+        Owner, 2026-09-18: one board syncs to one repository.  `links.github` holds a single
+        `owner/repo#n`, so a second repository would either overwrite those links or file every
+        card again as a new issue over there — and the first sync against the new repository is
+        exactly when nobody is watching.  So it is refused, by name, before any request is made.
+        Moving a board deliberately means clearing the links (and the state file) first.
+        """
+        linked = self.state.other_cards
+        other = self.state.other_repo
+        for card in self.shared_cards():
+            value = (card.front.get("links") or {}).get("github") if isinstance(
+                card.front.get("links"), dict) else None
+            match = re.match(r"^(?P<repo>[^#\s]+)#\d+$", str(value or "").strip())
+            if match and match.group("repo") != self.repo:
+                other = other or match.group("repo")
+                linked += 1
+        if other and linked:
+            raise ForgeError(
+                f"This board is already synced with {other} ({linked} card(s) linked). One board "
+                f"syncs to one repository, so it will not be pointed at {self.repo}: nothing has "
+                f"been sent. To move it, clear `links.github` on those cards and delete "
+                f"{STATE_FILE} first.")
 
     # ---- what syncs ----------------------------------------------------------
     def shared_cards(self) -> list[B.Card]:
@@ -1262,15 +1377,14 @@ class ForgeSync:
                 card.set("status", status)
                 tab = merged.tab if "tab" in pull and merged.tab else tab_of(self.board, card)
                 category = category_for_tab(self.board, tab) or self.board.category_of(card.path)
-                target_dir = self.board.base_for(card.private) / card.expected_folder(category)
-                target = target_dir / card.path.name
-                if target != card.path and not target.exists():
+                # `board.card_target_path` is what `BoardTools._move` asks too, so a card pulled
+                # into `done` here lands in the same folder the pane would have moved it to.
+                target = B.card_target_path(self.board, card, category)
+                if target is not None and not target.exists():
                     moved_to = target
         self.board.save(card, base_hash=base_hash)
         if moved_to is not None:
-            moved_to.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(card.path, moved_to)
-            card.path = moved_to
+            B.move_card_file(card, moved_to)
         self.board.append_thread(
             card.id, f"- ✦ pulled from {self.repo}: {', '.join(sorted(pull))}",
             author=SYNC_AUTHOR, kind="event", private=card.private, via="github", repo=self.repo)
@@ -1306,7 +1420,7 @@ class ForgeSync:
     def _entries_to_push(self, card: B.Card, known) -> list[B.ThreadEntry]:
         out = []
         for entry in sorted(self.board.thread(card.id, card.private), key=lambda e: e.entry_id):
-            if entry.kind not in COMMENT_KINDS:
+            if entry.kind not in self.comment_kinds:
                 continue
             if entry.attrs.get("via") == "github" or entry.attrs.get("github_comment"):
                 continue                       # it came from there; pushing it back is the echo
@@ -1457,15 +1571,7 @@ class ForgeSync:
         card.set("links", links)
         if fields.assignee:
             card.set("assignee", fields.assignee)
-        folder = self.board.root / card.expected_folder(category)
-        folder.mkdir(parents=True, exist_ok=True)
-        path = folder / B.card_filename(card.title)
-        for n in range(2, 60):
-            if not path.exists():
-                break
-            path = folder / B.card_filename(f"{card.title}-{n}")
-        card.path = path
-        B.atomic_write(path, card.to_text())
+        path = B.write_new_card(self.board, card, category)
         self.board.append_thread(card.id, f"- ✦ imported from {self.repo}#{issue.number}",
                                  author=SYNC_AUTHOR, kind="event", via="github", repo=self.repo)
         entry = self.state.card(card.id)

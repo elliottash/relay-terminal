@@ -246,6 +246,9 @@ FORWARDED_EVENTS = frozenset({
     # User-facing like model_changed, not routing internals like route: the owner's decision for
     # #EM1E is that Relay says when it swaps to a vision model, and a phone is a user surface.
     "vision_route", "vision_route_ended", "vision_unavailable",
+    # Same call for a plan-mode turn's model (protocol 13.11, #Z0VG): the pane prints a ◆ line
+    # when a plan turn runs on the planning role's model, so a phone watching the pane sees it too.
+    "plan_route", "plan_route_ended",
     # Pane titles and tab labels: what a phone needs to label the panes it is showing. The
     # session summary (protocol 18.4) is the same thing at greater length - this pane's own
     # description, written from this pane's own conversation, which the phone is already watching.
@@ -322,6 +325,21 @@ WITHHELD_EVENTS: dict[str, str] = {
     # CLIENT_TYPES, so a remote participant has no way to take part in either.
     "board_state": "desktop-local administration; carries local file paths",
     "board_init_request": "desktop-local administration; the desktop's own dialog",
+    # Initializing a project and importing what is already in it (protocol 19.13). The probe's
+    # answer is a survey of one directory on this machine — every path in it is local, and it is
+    # read for a dialog only the desktop can show; the proposals and what an import created carry
+    # the same paths. Same call as `board_state`: the *cards* an import made reach a phone in the
+    # `board_changed` that follows, which is the part a phone can use.
+    "project_probe_result": "desktop-local administration; local file paths",
+    "board_import_proposals": "desktop-local administration; local file paths",
+    "board_imported": "desktop-local administration; local file paths",
+    # Syncing the board with its GitHub repository (protocol 19.14). Started from the desktop
+    # (`forge_sync_plan`/`forge_sync_run` are not in CLIENT_TYPES), and the plan, the per-card
+    # progress and the summary all name the repository, the local card paths and whatever the
+    # forge refused. The card changes themselves arrive as `board_changed`.
+    "forge_sync_planned": "desktop-local administration; local file paths",
+    "forge_sync_progress": "desktop-local administration; local file paths",
+    "forge_sync_done": "desktop-local administration; local file paths",
     "reset": "desktop-local administration",
     "rewound": "desktop-local administration",
     "fork_state": "opaque conversation state",

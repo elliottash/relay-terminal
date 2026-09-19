@@ -16,11 +16,11 @@ and the exit status is non-zero on any FAIL.
 
 | Picture | Evidence |
 | --- | --- |
-| `options-01-guests-section.png` | The section renders: the three rows (Claude Code in this project, Also in ~/.claude/settings.json, Codex notifications) are on screen after arriving at the tab. |
-| `options-02-global-guarded.png` | The global row while the project row is off: the guard notice ("…the global entries only ever add to the project ones") is shown, and `guests/global_install` was never written to settings. |
-| `options-03-project-on.png` | Row 1 turned on by keyboard: the notice names the settings file it wrote; the project's `.claude/settings.json` now carries the `--relay-guest` marker and still holds the user's own hook. |
-| `options-04-codex-conflict.png` | Codex into a config with the user's own `notify`: the conflict message is shown and `~/.codex/config.toml` is byte-for-byte unchanged. |
-| `options-05-project-off.png` | Row 1 turned off again: the marked entries came out of the settings file; the user's own hook stayed. |
+| `implementer-options-01-guests-section.png` | The section renders: the three rows (Claude Code in this project, Also in ~/.claude/settings.json, Codex notifications) are on screen after arriving at the tab. |
+| `implementer-options-02-global-guarded.png` | The global row while the project row is off: the guard notice ("…the global entries only ever add to the project ones") is shown, and `guests/global_install` was never written to settings. |
+| `implementer-options-03-project-on.png` | Row 1 turned on by keyboard: the notice names the settings file it wrote; the project's `.claude/settings.json` now carries the `--relay-guest` marker and still holds the user's own hook. |
+| `implementer-options-04-codex-conflict.png` | Codex into a config with the user's own `notify`: the conflict message is shown and `~/.codex/config.toml` is byte-for-byte unchanged. |
+| `implementer-options-05-project-off.png` | Row 1 turned off again: the marked entries came out of the settings file; the user's own hook stayed. |
 
 ## Result
 

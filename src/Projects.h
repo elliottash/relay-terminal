@@ -67,8 +67,9 @@ inline constexpr const char *kReasonRestored = "restored";         // a saved la
 inline constexpr const char *kReasonRepoBoard = "repo-board";      // its board was already in the repo
 inline constexpr const char *kReasonInitCommand = "init-command";  // `/init` initialised it
 inline constexpr const char *kReasonAgentCard = "agent-card";      // an agent filed a card against it
+inline constexpr const char *kReasonAgentWork = "agent-work";      // the user set the agent to work in it
 
-// The ten reasons above, in that order.
+// The eleven reasons above, in that order.
 QStringList reasons();
 bool isReason(const QString &reason);
 

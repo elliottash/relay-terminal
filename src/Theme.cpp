@@ -398,15 +398,23 @@ QPlainTextEdit#planText { background: @bg; border: none; font-family: "@mono"; f
 QLabel#planNotice { color: @muted; }
 QFrame#queueStrip QToolButton { color: @muted; border: 1px solid transparent; border-radius: 4px; padding: 1px 6px; }
 QFrame#queueStrip QToolButton:hover { color: @text; border-color: @border; }
+/* "Initialize a project and create a Switchboard here?" — a row of the pane's own column under the
+   terminal, never a dialog and never an overlay (src/ProjectInitBlock.h). */
+QFrame#projectInit { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
+QLabel#projectInitTitle { color: @text; font-weight: 600; }
+QLabel#projectInitPath { color: @muted; font-family: "@mono"; font-size: 9pt; }
+QLabel#projectInitHeading { color: @muted; font-weight: 600; letter-spacing: 1px; font-size: 9pt; }
+QLabel#projectInitNote { color: @muted; font-size: 9pt; }
+QCheckBox#projectInitBox { color: @text; font-size: 9pt; }
+QPushButton#projectInitButton { color: @muted; background: @raised; border: 1px solid @border; border-radius: 6px; padding: 3px 12px; }
+QPushButton#projectInitButton:hover { color: @text; border-color: @muted; }
+QPushButton#projectInitButton:focus { color: @text; border-color: @accent; }
+QPushButton#projectInitYes { color: @text; border-color: @accentBorder; }
 QFrame#paneBanner { background: @raised; border: 1px solid @caution; border-radius: 8px; }
 QFrame#paneBanner QLabel { color: @text; }
 QFrame#transcript { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
-/* Thinking floats over the terminal, so it stays quiet: dark gray chrome, not the accent, and a
-   background below @surface so it reads as behind the output rather than on top of it. */
-QFrame#thinkingOverlay { background: @bg; border: 1px solid @border; border-radius: 8px; }
 QLabel#transcriptHeader { color: @muted; }
 QPlainTextEdit#transcriptView { background: transparent; border: none; font-family: "@mono"; font-size: 10pt; }
-QPlainTextEdit#thinkingView { background: transparent; border: none; color: @muted; font-family: "@mono"; font-size: 10pt; }
 QLabel#toast { background: @raised; color: @text; border: 1px solid @accentBorder; border-radius: 8px; padding: 6px 12px; }
 /* The share dialog's link and its note (src/RemoteShare.cpp). */
 QLabel#shareNote { color: @muted; font-size: 9.5pt; }

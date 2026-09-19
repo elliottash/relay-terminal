@@ -23,6 +23,10 @@ from urllib.parse import urlsplit
 GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_FRAME = 1 << 21          # 2 MiB: RRP frames are capped at 1 MiB plus overhead
 MAX_HEADERS = 64 * 1024
+# What Relay calls itself on the wire, as the backend does (backend/relay_core/provider.py). Not
+# optional in practice: Cloudflare, in front of join.relay-terminal.ai, answers 403 to a request
+# that arrives with no User-Agent or with Python's default one.
+USER_AGENT = "Relay/0.1"
 
 OP_CONT, OP_TEXT, OP_BINARY, OP_CLOSE, OP_PING, OP_PONG = 0x0, 0x1, 0x2, 0x8, 0x9, 0xA
 
@@ -281,6 +285,8 @@ async def connect(url: str, *, ssl_context=None, headers: dict[str, str] | None 
     host = parts.hostname if port in (80, 443) else f"{parts.hostname}:{port}"
     lines = [f"GET {target} HTTP/1.1", f"Host: {host}", "Upgrade: websocket", "Connection: Upgrade",
              f"Sec-WebSocket-Key: {key}", "Sec-WebSocket-Version: 13"]
+    if not any(name.lower() == "user-agent" for name in (headers or {})):
+        lines.append(f"User-Agent: {USER_AGENT}")
     for name, value in (headers or {}).items():
         lines.append(f"{name}: {value}")
     writer.write(("\r\n".join(lines) + "\r\n\r\n").encode())

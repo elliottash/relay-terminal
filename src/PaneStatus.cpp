@@ -37,13 +37,33 @@ QString stateLabel(State state) {
     case State::Idle: return QStringLiteral("Terminal idle");
     case State::Running: return QStringLiteral("Command running");
     case State::Subagents: return QStringLiteral("Subagents working");
-    case State::Working: return QStringLiteral("Agent working");
+    case State::Working: return QStringLiteral("Relaying…");
     case State::Recommends: return QStringLiteral("The agent suggests a command · it is in the prompt box");
     case State::Done: return QStringLiteral("Agent done");
     case State::Failed: return QStringLiteral("Agent turn failed");
     case State::NeedsYou: return QStringLiteral("Needs you");
     }
     return {};
+}
+
+bool isLive(State state) {
+    return state == State::Running || state == State::Working || state == State::Subagents;
+}
+
+State liveMarker(const QList<State> &states) {
+    bool running = false;
+    for (State s : states) {
+        if (s == State::Working || s == State::Subagents) return State::Working;   // agent work
+        if (s == State::Running) running = true;
+    }
+    return running ? State::Running : State::Idle;
+}
+
+qreal pulseScale(int phase) {
+    // Card #4E13: a blink, not a breath — full size and a small step alternating on the 600 ms
+    // clock. Still a scale, never an opacity, so the ink keeps its contrast at both steps.
+    static const qreal steps[]{1.0, 0.62, 1.0, 0.62};
+    return phase < 0 ? 1.0 : steps[phase % 4];
 }
 
 State resolve(const Facts &facts, quint64 seenSerial) {
@@ -217,11 +237,18 @@ double luminance(const QColor &c) {
     return 0.2126 * channel(c.red()) + 0.7152 * channel(c.green()) + 0.0722 * channel(c.blue());
 }
 
-// Moves `color` towards black or white, whichever is further from the ground, until it reaches
-// `ratio` against it. Colours that already do are returned as they are.
+// Moves `color` towards black or white — whichever pole the ground is *actually* further from —
+// until it reaches `ratio` against it. Colours that already do are returned as they are.
+//
+// The pole is chosen by measured contrast, not by isLight's 0.35 luminance split: between roughly
+// 0.18 and 0.35 luminance only black can reach 4.5:1, while isLight still calls that a dark ground
+// and sends the walk towards white, which cannot get there — so the loop ran to the end and
+// returned white with the promise unmet. The ssh band's fill on the beige theme is one such ground
+// (card #YMSR put the subagent badge's number on it, and the 4.5:1 assertion caught it).
 QColor atLeast(const QColor &color, const QColor &ground, double ratio) {
     if (contrast(color, ground) >= ratio) return color;
-    const QColor pole = isLight(ground) ? QColor(Qt::black) : QColor(Qt::white);
+    const QColor black(Qt::black), white(Qt::white);
+    const QColor pole = contrast(black, ground) >= contrast(white, ground) ? black : white;
     for (int step = 1; step <= 20; ++step) {
         const QColor tried = mix(pole, color, step / 20.0);
         if (contrast(tried, ground) >= ratio) return tried;
@@ -370,6 +397,34 @@ QColor stateInk(State state, const Tokens &t) {
     case State::NeedsYou: return t.warning;
     }
     return t.muted;
+}
+
+QColor stateText(State state, const QColor &ground, const Tokens &t) {
+    return atLeast(stateInk(state, t), ground, 4.5);
+}
+
+// ----- the subagent badge (card #YMSR) ---------------------------------------------------------
+QString subagentBadgeText(int live) {
+    return live > 0 ? QString::number(live) : QString();
+}
+
+QString subagentBadgeTooltip(int live, const QString &keys) {
+    if (live <= 0) return {};
+    QString text = countOf(live, QStringLiteral("subagent")) + QStringLiteral(" running in this pane");
+    if (!keys.isEmpty()) text += QStringLiteral(" · ") + keys + QStringLiteral(" opens the subagents pane");
+    return text;
+}
+
+BadgeStyle subagentBadgeStyle(const QColor &ground, const Tokens &tokens) {
+    // The violet the Subagents state's own glyph and word are drawn in, tinted like a chip (the
+    // phone chip's strength) so the badge sits in the header row as a chip rather than as a block.
+    // The number is text, so its ink is lifted to 4.5:1 on that tint; the star beside it is a glyph
+    // and gets more than it needs from the same ink.
+    BadgeStyle style;
+    style.fill = mix(tokens.agent, ground, isLight(ground) ? 0.12 : 0.16);
+    style.line = mix(tokens.agent, ground, 0.45);
+    style.ink = atLeast(tokens.agent, style.fill, 4.5);
+    return style;
 }
 
 double contrast(const QColor &a, const QColor &b) {

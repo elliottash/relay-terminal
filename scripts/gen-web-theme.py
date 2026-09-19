@@ -22,7 +22,7 @@ Two kinds of custom property come out:
   --rt-<token>             every `@token` of the stylesheet (`@accentBorder` → --rt-accent-border),
                            every Theme.h colour, the terminal palette and the text sizes;
   --qss-<widget>-<prop>    what Qt's cascade gives each widget the pane view draws: the `#toast`,
-                           `#queueTitle`, `#queueHint`, `#thinkingOverlay`, `#composer`, `#stripChip`
+                           `#queueTitle`, `#queueHint`, `#composer`, `#stripChip`
                            … rules, with their type rules (`QLabel { … }`) folded in the way Qt
                            folds them. A state rule (`:hover`, `[dest="agent"]`) becomes
                            --qss-<widget>-<state>-<prop>.
@@ -58,11 +58,11 @@ USHRT_MAX = 0xFFFF
 # The widgets the web pane draws, as Qt sees them: (css name, Qt class, object name, ancestors).
 # The cascade below gives each one what the desktop's stylesheet gives the real widget.
 WIDGETS = [
+    # The reasoning bubble is the phone's own surface (the desktop's reasoning is a terminal
+    # fold now, issue T8CN), so it draws straight from the --rt- tokens in app/pane.css.
     ("pane", "QWidget", "pane", []),
     ("toast", "QLabel", "toast", ["pane"]),
-    ("thinkingOverlay", "QFrame", "thinkingOverlay", ["pane"]),
-    ("transcriptHeader", "QLabel", "transcriptHeader", ["pane", "thinkingOverlay"]),
-    ("thinkingView", "QPlainTextEdit", "thinkingView", ["pane", "thinkingOverlay"]),
+    ("transcriptHeader", "QLabel", "transcriptHeader", ["pane"]),
     ("queueStrip", "QFrame", "queueStrip", ["pane"]),
     ("queueTitle", "QLabel", "queueTitle", ["pane", "queueStrip"]),
     ("queueHint", "QLabel", "queueHint", ["pane", "queueStrip"]),

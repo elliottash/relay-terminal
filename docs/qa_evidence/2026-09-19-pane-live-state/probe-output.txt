@@ -1,0 +1,18 @@
+== devicePixelRatio 1 ==                                     (any/vis pixels, 16 px logical)
+tab: Running breathes              dpr=1   0-1:   56/ 40   1-2:   46/ 30   2-3:   46/ 30   3-0:   56/ 40   1-3:    0/  0
+tab: Working breathes              dpr=1   0-1:   52/ 52   1-2:   44/ 36   2-3:   44/ 36   3-0:   52/ 52   1-3:    0/  0
+tab: Subagents breathes            dpr=1   0-1:   60/ 52   1-2:   54/ 41   2-3:   54/ 41   3-0:   60/ 52   1-3:    0/  0
+tab: Failed + Running dot          dpr=1   0-1:   40/ 33   1-2:   40/ 31   2-3:   40/ 31   3-0:   40/ 33   1-3:    0/  0
+tab: Failed + Working dot          dpr=1   0-1:   40/ 33   1-2:   40/ 31   2-3:   40/ 31   3-0:   40/ 33   1-3:    0/  0
+head: Running breathes             dpr=1   0-1:   62/ 52   1-2:   52/ 38   2-3:   52/ 38   3-0:   62/ 52   1-3:    0/  0
+head: Working breathes             dpr=1   0-1:   60/ 52   1-2:   44/ 44   2-3:   44/ 44   3-0:   60/ 52   1-3:    0/  0
+head: Subagents breathes           dpr=1   0-1:   63/ 57   1-2:   54/ 46   2-3:   54/ 46   3-0:   63/ 57   1-3:    0/  0
+== devicePixelRatio 2 ==                                     (any/vis pixels, 16 px logical)
+tab: Running breathes              dpr=2   0-1:  100/ 92   1-2:  104/ 98   2-3:  104/ 98   3-0:  100/ 92   1-3:    0/  0
+tab: Working breathes              dpr=2   0-1:  116/108   1-2:  100/ 92   2-3:  100/ 92   3-0:  116/108   1-3:    0/  0
+tab: Subagents breathes            dpr=2   0-1:  155/140   1-2:  129/105   2-3:  129/105   3-0:  155/140   1-3:    0/  0
+tab: Failed + Running dot          dpr=2   0-1:  111/ 99   1-2:  101/ 79   2-3:  101/ 79   3-0:  111/ 99   1-3:    0/  0
+tab: Failed + Working dot          dpr=2   0-1:  111/ 99   1-2:  101/ 79   2-3:  101/ 79   3-0:  111/ 99   1-3:    0/  0
+head: Running breathes             dpr=2   0-1:  130/122   1-2:  111/105   2-3:  111/105   3-0:  130/122   1-3:    0/  0
+head: Working breathes             dpr=2   0-1:  132/116   1-2:  108/100   2-3:  108/100   3-0:  132/116   1-3:    0/  0
+head: Subagents breathes           dpr=2   0-1:  156/147   1-2:  145/129   2-3:  145/129   3-0:  156/147   1-3:    0/  0

@@ -199,7 +199,11 @@ TOOL_SPECS = [
                         "text": {"type": "string"},
                         "status": {"type": "string", "enum": list(B.ITEM_STATUSES)},
                         "item_id": {"type": "string", "description": "Keep an existing item's id (two characters)."},
-                        "card": {"type": "string", "description": "Id of a card that mirrors this item."}},
+                        "card": {"type": "string", "description": "Id of a card that mirrors this item."},
+                        "blocked_by": {"type": "array", "description": "What has to happen first: the "
+                                       "1-based number of another task in this same list, an existing "
+                                       "item id, or #CARD. Replaces this item's markers.",
+                                       "items": {"type": ["integer", "string"]}}},
                         "required": ["text"], "additionalProperties": False}}},
          ["id", "base_hash"]),
     spec("board_move_card",
@@ -1282,27 +1286,15 @@ class BoardTools:
         return {str(t.get("id")): t for t in self.board.tabs() if t.get("id")}
 
     def _category_for_tab(self, tab: str) -> str:
-        tabs = self._tab_map()
-        entry = tabs.get(str(tab).strip().lower())
-        if entry is None:
-            known = ", ".join(sorted(k for k, v in tabs.items() if v.get("folder"))) or "(none)"
-            raise BoardToolError(f"unknown tab {tab!r}; this board has: {known}")
-        folder = entry.get("folder")
-        if not folder:
-            raise BoardToolError(f"tab {tab!r} is a filter across categories, not a folder; "
-                                 "pick a category tab for the card.")
-        return str(folder)
+        # `board.category_for_tab` is the one copy of this: the sync engine writes cards too and
+        # has to agree about which folder a tab means. Only the exception type is ours.
+        try:
+            return B.category_for_tab(self.board, tab, strict=True)
+        except B.BoardError as exc:
+            raise BoardToolError(str(exc)) from exc
 
     def _tab_of(self, card: B.Card) -> str:
-        if card.type == "plan":
-            return "planning"
-        if card.type == "memory":
-            return "memory"
-        category = self.board.category_of(card.path) if card.path else ""
-        for tab_id, entry in self._tab_map().items():
-            if entry.get("folder") == category:
-                return tab_id
-        return category
+        return B.tab_of(self.board, card)
 
     def _row(self, card: B.Card, thread_counts: dict[str, int]) -> dict:
         # The full row of protocol 19.2. `created`, the task counts and `milestone` were promised
@@ -1406,7 +1398,8 @@ class BoardTools:
                 "issue_heading": next((h for h in section_headings(card.body)
                                        if _heading_matches(h, B.ISSUE_HEADING)), B.ISSUE_HEADING),
                 "tasks": [{"item_id": t.item_id, "text": t.text, "status": t.status,
-                           "done": t.done, "depth": t.depth, "card": t.card}
+                           "done": t.done, "depth": t.depth, "card": t.card,
+                           "blocked_by": list(t.blocked_by)}
                           for t in card.tasks()],
                 "thread_total": len(entries),
                 "thread": [{"entry_id": e.entry_id, "author": e.author, "kind": e.kind,
@@ -1504,17 +1497,10 @@ class BoardTools:
             links = dict(card.front.get("links") or {})
             links["related"] = related
             card.set("links", links)
-        folder = self.board.root / card.expected_folder(category)
-        folder.mkdir(parents=True, exist_ok=True)
-        path = folder / B.card_filename(title)
-        for n in range(2, 60):
-            if not path.exists():
-                break
-            path = folder / B.card_filename(f"{title}-{n}")
-        if path.exists():
-            raise BoardToolError("could not find a free file name for the card.")
-        card.path = path
-        B._atomic_write(path, card.to_text())
+        try:
+            path = B.write_new_card(self.board, card, category)
+        except B.BoardError as exc:
+            raise BoardToolError(str(exc)) from exc
 
         self.creates_this_turn += 1
         self.writes_this_turn += 1
@@ -1708,17 +1694,14 @@ class BoardTools:
         if rank is not None:
             card.set("rank", rank)
 
-        target_dir = self.board.base_for(card.private) / card.expected_folder(category)
-        target = target_dir / card.path.name
-        moved_from = card.path if target != card.path else None
-        if target != card.path and target.exists():
+        target = B.card_target_path(self.board, card, category)
+        moved_from = card.path if target is not None else None
+        if target is not None and target.exists():
             raise BoardToolError(f"a different file already sits at {target.relative_to(self.board.repo)}.")
         size = self._thread_size(card)
         self.board.save(card, base_hash=base_hash)
-        if moved_from is not None:
-            target_dir.mkdir(parents=True, exist_ok=True)
-            os.replace(card.path, target)
-            card.path = target
+        if target is not None:
+            B.move_card_file(card, target)
 
         self.writes_this_turn += 1
         parts = []
@@ -2128,6 +2111,9 @@ def _task_items(raw, card: B.Card) -> list[B.TaskItem]:
         raise BoardToolError("tasks must be an array of at most 100 items.")
     existing = {i.item_id: i for i in card.tasks() if i.item_id}
     out: list[B.TaskItem] = []
+    #: Position in `out` -> what blocks it, for the items that named something. An item that
+    #: says nothing about `blocked_by` keeps whatever marker its line already carried.
+    blockers: dict[int, list] = {}
     for index, entry in enumerate(raw, 1):
         if not isinstance(entry, dict):
             raise BoardToolError(f"task {index} must be an object.")
@@ -2145,7 +2131,34 @@ def _task_items(raw, card: B.Card) -> list[B.TaskItem]:
                           blocked_by=list(keep.blocked_by) if keep else [])
         if entry.get("card"):
             item.card = normalize_id(entry["card"], f"task {index} card")
+        if entry.get("blocked_by") is not None:
+            refs = entry["blocked_by"]
+            if not isinstance(refs, list) or len(refs) > 20:
+                raise BoardToolError(f"task {index}: blocked_by must be an array of at most "
+                                     "20 references.")
+            # A number is the 1-based position of another task in this same array (1-based
+            # here, as `task {index}` is in every message of this file; 0-based inside
+            # `board.set_task_blockers`). A string is an item id on this card, or `#K7Q2`.
+            resolved = []
+            for ref in refs:
+                if isinstance(ref, bool) or not isinstance(ref, (int, str)):
+                    raise BoardToolError(f"task {index}: blocked_by takes the number of another "
+                                         "task in this list, an item id, or #CARD.")
+                if isinstance(ref, int):
+                    if not 1 <= ref <= len(raw):
+                        raise BoardToolError(f"task {index}: blocked_by {ref} is not one of the "
+                                             f"{len(raw)} tasks you sent.")
+                    if ref == index:
+                        raise BoardToolError(f"task {index} cannot block itself.")
+                    ref -= 1
+                resolved.append(ref)
+            blockers[len(out)] = resolved
         out.append(item)
+    if blockers:
+        try:
+            B.set_task_blockers(out, blockers)
+        except B.BoardError as exc:
+            raise BoardToolError(str(exc)) from exc
     return out
 
 

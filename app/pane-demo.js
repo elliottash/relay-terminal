@@ -18,10 +18,10 @@ import { trackViewport } from './viewport.js';
 
 trackViewport();
 
-// The fixtures, by name. A static page cannot list a directory, and these are the six states
+// The fixtures, by name. A static page cannot list a directory, and these are the seven states
 // worth looking at: idle, a busy queue, long reasoning, a paused queue, a view-only device (no
-// actions, no model choices) and a long session list.
-const FIXTURES = ['idle', 'busy_queue', 'thinking_long_tail', 'paused_queue', 'view_only', 'sessions_50'];
+// actions, no model choices), a long session list and a Relay Free allowance running low.
+const FIXTURES = ['idle', 'busy_queue', 'thinking_long_tail', 'paused_queue', 'view_only', 'sessions_50', 'allowance'];
 const FIXTURE_DIR = '../tests/fixtures/pane_state/';
 
 const $ = (id) => document.getElementById(id);

@@ -146,7 +146,7 @@ Documented fallbacks, not implemented: alacritty_terminal (Rust FFI), xterm.js i
 | Links | `stepLink(delta, Link*, index*, count*)`, `endLinkWalk()`, `linkWalkActive()`, `setPlainClickOpensLinks(on)` — the keyboard walk over every file, folder and URL in the screen and the scrollback (`Ctrl+Shift+L`) |
 | Callbacks | `onLinkActivated(target, line, column)` (OSC 8 URI, URL, or absolute path with `:line:col`), `onTitleChanged`, `onCwdChanged`, `onAltScreenChanged`, `onBell`, `onPromptMark(kind 'A'..'D', exitCode)`, `onOutput(bytes)` (opt-in via `setOutputCallbackEnabled`), `onFinished(exitCode)` |
 
-| Folds | `setFoldPrefix()`, `setFoldContent(uri, lines)`, `setFoldExpanded()`, `foldExpanded()`, `removeFold()`, `clearFolds()`, `expandedFolds()`, `toggleFold(uri)`, callback `onFoldRequested(uri)` — the detail of one agent tool call, unfolded inside the grid (see **Folds** below) |
+| Folds | `setFoldPrefix()`, `setFoldContent(uri, lines)`, `setFoldExpanded()`, `foldExpanded()`, `removeFold()`, `clearFolds()`, `expandedFolds()`, `toggleFold(uri)`, callback `onFoldRequested(uri)` — the detail of one agent tool call or one reasoning block, unfolded inside the grid (see **Folds** below) |
 
 Capabilities reported by `VTermBackend`: ScreenText, Scrollback, AltScreenState, LinkClicks,
 Osc8Links, PromptMarks, CwdTracking, DisplayInjection, Search, ScrollControl, LinkWalk,
@@ -276,6 +276,36 @@ byte for byte the path it was before.
 
 Folds are neither painted, hit-tested nor searched while a full-screen program owns the grid, and
 come back when it leaves. Mouse-reporting programs get their clicks as before.
+
+### The reasoning fold (issue T8CN)
+
+Tool calls are not the only thing that folds: reasoning streams into a fold of its own. The first
+`thinking_delta` of a block prints an anchor row — `▸ ✦ thinking…`, Note ink, column 0 like every
+anchor — hyperlinked to `relay://call/<pane>/<turn>/thinking` (`thinking-2`, `thinking-3`, … for
+the later blocks of a model that resumes reasoning after its answer), and the fold opens with its
+first content. What it holds is the pane's own buffer rendered as markdown
+(`calllines::foldForMarkdown`), the tail while it streams (the last 12 000 characters — the end is
+the part being written), capped at 400 rows with a final row linking to the turn pane, which keeps
+the whole of every block. A click on a settled anchor answers from the same buffer: no worker
+round trip, however old the turn.
+
+Updates are coalesced to ~4 Hz (one 250 ms single-shot at a time) — re-rendering the buffer as
+markdown per chunk would burn the CPU on a long stream. Because `setFoldContent()` opens what it
+sets, a flush first asks `foldExpanded()`: a fold the reader has clicked shut is marked
+user-toggled and never pushed content again, which would reopen it over their click. On
+`thinking_done` the fold gets its final content and collapses unless the reader toggled it or
+`agent/thinking_display` is `always`, and the anchor row is rewritten in place to
+`▸ ✦ thought for N s` (`✦ thinking stopped` when the stream died mid-reasoning, `{chars: 0}`);
+the rewrite guards on the cursor still sitting on the empty row under the anchor — the shell
+redrawing its prompt, or output pushing the anchor into history, means the finished line prints
+as a new row instead. `agent/thinking_display` says how much of this runs at all: `collapse` (the
+default), `always`, `never` — which leaves the single `✦ thought for N s` Note line of the old
+design and no fold; a settings file that still has the `agent/show_thinking` bool is migrated in
+place on first read. Alt+R (`agent.thinkingPanel`) toggles the latest fold — live while it
+streams, the last turn's afterwards — and every refusal toasts, or the key would read as dead.
+All of it is in `src/Pane.h` (`thinkingDelta` … `finishThinkingFold`), on the same fold layer as
+the tool calls; evidence in
+[qa_evidence/2026-09-19-thinking-fold/](qa_evidence/2026-09-19-thinking-fold/).
 
 ### Limits (2026-09-18)
 

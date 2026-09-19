@@ -1,0 +1,57 @@
+=== repro-agent-mid-turn.py — run after the fix (2026-09-19 01:1x)
+
+t≈1s: session file exists = True, turns = 1, messages = 3, turn still running = True
+t≈3s: session file exists = True, turns = 1, messages = 3, turn still running = True
+t≈5s: session file exists = True, turns = 1, messages = 3, turn still running = True
+after the turn: file exists = True | turns = 1
+   saved turns: 1 messages: 4
+tool calls seen by the executor: ['run_command']
+
+=== repro-search-during-turn.py — run after the fix
+
+session dir: /tmp/relay-midturn-pdilppwu/relay/sessions/e16e3eb2ed857812
+during the turn, searching 'flux': 1 item(s) ['how much flux does the capacitor hold?']
+during the turn, searching 'capacitor': 1 item(s) ['how much flux does the capacitor hold?']
+during the turn, searching 'gigawatts': 0 item(s) []
+session file on disk during the turn: True
+after the turn, searching 'gigawatts': ['how much flux does the capacitor hold?']
+
+=== repro-agent-mid-turn.py — the same script recorded before the fix (2026-09-19 01:0x)
+
+t≈1s: session file exists = False, turns = 1, messages = 3, turn still running = True
+t≈3s: session file exists = False, turns = 1, messages = 3, turn still running = True
+t≈5s: session file exists = False, turns = 1, messages = 3, turn still running = True
+after the turn: file exists = True | turns = 1
+   saved turns: 1 messages: 4
+tool calls seen by the executor: ['run_command']
+
+=== The owner's own machine, read-only, 2026-09-19 00:53 (the report's context)
+
+Five panes open in the running Relay held a session id with no file under
+~/.local/share/relay/sessions/<digest>/ and so no row in ~/.local/share/relay/index.db, while their
+workers logged tool activity for minutes:
+
+  session           first → last tool line    tool lines   blobs dir
+  d9316a7f9595      04:43 → 04:58            106          -
+  6ffe5e5d778c      04:34 → 04:58             87          00:58
+  051a76390ac9      04:36 → 04:59             48          00:47
+  3f3095efa14d      04:22 → 04:57             75          00:32
+  ab127aae0856      04:26 → 04:26              1          -
+
+(The blobs dirs are the checkpoints of the writes those turns made: the work was on disk, the
+conversation was not.) The index held 90 of the 92 session files of the workspace in the pane's
+report; the two missing were exactly the live ones.
+
+=== The rest of the search, verified against the owner's own index (scope = their project)
+
+`verify-search-on-real-data.sh` runs the current build under Xvfb on a jail holding a copy of the
+real sessions and index, drives the Sessions pane with xdotool and OCRs the screenshots:
+
+  typing "pelican"       -> "1 session(s), 1 match(es) in this project · 0 ms" + the matching turn
+  typing "superseded"    -> "3 session(s), 4 match(es) in this project · 1 ms"
+  typing "qa_evidence"   -> "16 session(s), 209 match(es) in this project · 6 ms"
+
+and 47 query shapes run straight against the index (operators, quotes, prefixes, punctuation,
+case, unbalanced quotes, emoji) all answer without an error, and 28 words sampled out of 80 saved
+session files are all found in the index (the one exception was a word that occurs only inside a
+`[Relay context: …]` block, which is deliberately not indexed).

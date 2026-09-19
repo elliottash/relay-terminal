@@ -817,7 +817,7 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
                                     : m_model->tokenSplit();
     drawRow(QRect(0, 2, width(), h), focused && m_selected == 0, m_model->mainBusy() ? QStringLiteral("●") : QStringLiteral("○"),
             m_model->mainBusy() ? theme::Accent : theme::TextMuted, QStringLiteral("main"), theme::Text, nameWidth,
-            (m_model->mainBusy() ? QStringLiteral("working") : QStringLiteral("idle")) + QStringLiteral("   ") + hint,
+            (m_model->mainBusy() ? QStringLiteral("relaying…") : QStringLiteral("idle")) + QStringLiteral("   ") + hint,
             mainMetrics, QString(), false);
 
     // The rows of the body: the layout's pairs when there are tasks, the scrolled subagent window

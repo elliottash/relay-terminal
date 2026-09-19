@@ -133,6 +133,19 @@ QJsonObject build(qint64 seq, const Inputs &in, Tokens &choiceTokens, Tokens &se
                         {QStringLiteral("percent_left"), in.percentLeft < 0 ? QJsonValue(QJsonValue::Null)
                                                                             : QJsonValue(std::min(100, in.percentLeft))}};
 
+    // The Relay Free chip, and only while the pane is on the hosted preset with a figure arrived:
+    // no object at all otherwise, so a pane that switches to a provider with a key takes the chip
+    // off every view. The label and detail are the desktop chip's own words (section 16's rule);
+    // warn is read off the same percentage the desktop's chip warns by.
+    QJsonObject allowance;
+    if (!in.allowanceLabel.simplified().isEmpty()) {
+        const int left = in.allowanceLeft < 0 ? -1 : std::min(100, in.allowanceLeft);
+        allowance = QJsonObject{{QStringLiteral("label"), clip(in.allowanceLabel)},
+                                {QStringLiteral("percent_left"), left < 0 ? QJsonValue(QJsonValue::Null) : QJsonValue(left)},
+                                {QStringLiteral("warn"), left >= 0 && left <= 10},
+                                {QStringLiteral("detail"), clip(in.allowanceDetail)}};
+    }
+
     QJsonArray sessionRows;
     for (const Session &session : in.sessions) {
         if (sessionRows.size() >= kSessionsMax) break;
@@ -146,17 +159,19 @@ QJsonObject build(qint64 seq, const Inputs &in, Tokens &choiceTokens, Tokens &se
     QJsonObject sessions{{QStringLiteral("rows"), sessionRows}, {QStringLiteral("can_new"), in.canNew},
                          {QStringLiteral("can_open"), in.canOpen}};
 
-    return QJsonObject{{QStringLiteral("t"), QStringLiteral("pane_state")},
-                       {QStringLiteral("v"), kVersion},
-                       {QStringLiteral("pane"), in.pane},
-                       {QStringLiteral("seq"), seq},
-                       {QStringLiteral("turn"), turn},
-                       {QStringLiteral("thinking"), thinking},
-                       {QStringLiteral("queue"), queue},
-                       {QStringLiteral("model"), model},
-                       {QStringLiteral("composer"), composer},
-                       {QStringLiteral("context"), context},
-                       {QStringLiteral("sessions"), sessions}};
+    QJsonObject out{{QStringLiteral("t"), QStringLiteral("pane_state")},
+                    {QStringLiteral("v"), kVersion},
+                    {QStringLiteral("pane"), in.pane},
+                    {QStringLiteral("seq"), seq},
+                    {QStringLiteral("turn"), turn},
+                    {QStringLiteral("thinking"), thinking},
+                    {QStringLiteral("queue"), queue},
+                    {QStringLiteral("model"), model},
+                    {QStringLiteral("composer"), composer},
+                    {QStringLiteral("context"), context},
+                    {QStringLiteral("sessions"), sessions}};
+    if (!allowance.isEmpty()) out.insert(QStringLiteral("allowance"), allowance);
+    return out;
 }
 
 Publisher::Publisher(Gather gather, Sink sink, Wanted wanted, int intervalMs)

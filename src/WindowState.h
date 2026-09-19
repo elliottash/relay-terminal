@@ -10,6 +10,11 @@
 //   node := {"split": "h"|"v", "children": [node, ...], "sizes": [int, ...]}
 //         | {"pane": {cwd, workspace, engine, engine_core, agent_role, preset, model, effort,
 //                     agent_mode, input_mode, session_id, scrollback}}
+//
+// The `scrollback` id is the pane's own id for what outlives a restart: it names both this pane's
+// saved terminal text (scrollback/<id>.txt below) and its prompt-box history
+// (prompt-history/<id>.txt, src/PromptHistory.h), which is why the two stores are pruned
+// together.
 //         | {"explorer"|"preview"|"plan": {"path": "..."}}
 //
 // This header holds the parts that do not need a window: reading and writing the file, clamping a
@@ -109,6 +114,7 @@ QString resolveDirectory(const QString &cwd, const QString &workspace, const QSt
 // A restored pane used to come back empty (owner report, 2026-09-18). Its text now travels beside
 // the layout: one file per pane in `$XDG_DATA_HOME/relay/state/scrollback/<id>.txt` (0600), named
 // after the `scrollback` id the pane node carries, written the same atomic way windows.json is.
+// The same id also names the pane's prompt history (src/PromptHistory.h).
 //
 // **Text, not cells.** What is saved is what `TerminalBackend::scrollbackText()` reports — the
 // lines, in order, without colour. Two reasons. The engine hands the host text: cells and their

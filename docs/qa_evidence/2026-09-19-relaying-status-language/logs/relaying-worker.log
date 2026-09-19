@@ -1,0 +1,4 @@
+2026-09-19T06:48:02.090Z INFO relay.worker pane=3e46749f worker_start version=0.1.0 pid=2270386 level=info
+2026-09-19T06:48:02.125Z INFO relay.worker pane=3e46749f configured model=stub host=127.0.0.1 role=main skills=1 agents=2 stall_s=60 session=4390594e378f4176b299206ed342d8de
+2026-09-19T06:48:14.369Z INFO relay.agent pane=3e46749f turn_start session=4390594e378f4176b299206ed342d8de turn=245ae2ad5d9e4fc39d78ad635d5b09ec model=stub host=127.0.0.1 mode=build effort=high prompt_chars=9 messages=1 stall_s=60 max_steps=256
+2026-09-19T06:48:26.672Z INFO relay.worker pane=3e46749f worker_stop pid=2270386

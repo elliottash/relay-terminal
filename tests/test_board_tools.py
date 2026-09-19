@@ -410,6 +410,69 @@ class UpdateTests(BoardToolsTest):
             "id": self.card_id, "base_hash": self.hash,
             "tasks": [{"text": "x", "status": "nearly"}]}))
 
+    # ---- task dependencies (`blocked_by=`, format 2.5) -------------------------
+    def tasks_of(self, card_id=None):
+        return self.board.card_by_id(card_id or self.card_id).tasks()
+
+    def test_a_new_item_can_be_blocked_by_another_new_item(self):
+        # The importer's case: neither item exists yet, so the reference is a position in the
+        # list being written and the ids are settled here.
+        self.tools.run("board_update_card", {
+            "id": self.card_id, "base_hash": self.hash,
+            "tasks": [{"text": "Pick a backend"},
+                      {"text": "Write the adapter", "blocked_by": [1]},
+                      {"text": "Expire old sessions", "blocked_by": [2]}]})
+        items = self.tasks_of()
+        self.assertEqual([i.blocked_by for i in items],
+                         [[], [items[0].item_id], [items[1].item_id]])
+        line = self.board.card_by_id(self.card_id).body.splitlines()
+        self.assertIn(f"blocked_by={items[0].item_id}", "\n".join(line))
+        self.assertEqual(self.board.check(), [])
+
+    def test_an_item_id_and_a_card_reference_are_both_accepted(self):
+        other = self.create(title="Push to talk", request="right-alt")
+        self.tools.run("board_update_card", {"id": self.card_id, "base_hash": self.hash,
+                                             "tasks": [{"text": "First"}, {"text": "Second"}]})
+        first = self.tasks_of()[0]
+        current = self.tools.run("board_read", {"id": self.card_id})["hash"]
+        self.tools.run("board_update_card", {
+            "id": self.card_id, "base_hash": current,
+            "tasks": [{"text": "First", "item_id": first.item_id},
+                      {"text": "Second", "blocked_by": [first.item_id, f"#{other}"]}]})
+        self.assertEqual(self.tasks_of()[1].blocked_by, [first.item_id, f"#{other}"])
+        self.assertEqual(self.board.check(), [])
+
+    def test_a_blocker_that_is_not_there_a_self_reference_and_a_cycle_are_all_refused(self):
+        for tasks, why in (
+                ([{"text": "a"}, {"text": "b", "blocked_by": [9]}], "out of range"),
+                ([{"text": "a", "blocked_by": [1]}], "itself"),
+                ([{"text": "a", "blocked_by": [2]}, {"text": "b", "blocked_by": [1]}], "cycle"),
+                ([{"text": "a"}, {"text": "b", "blocked_by": ["zz"]}], "unknown item id"),
+                ([{"text": "a"}, {"text": "b", "blocked_by": ["#nope"]}], "not a card id")):
+            result = self.tools.run("board_update_card", {"id": self.card_id,
+                                                          "base_hash": self.hash, "tasks": tasks})
+            self.assertIn("error", result, why)
+            self.assertEqual(self.tasks_of(), [], f"{why}: the card was written anyway")
+
+    def test_an_item_that_says_nothing_keeps_the_marker_it_had(self):
+        card = self.board.card_by_id(self.card_id)
+        card.body = card.body.rstrip("\n") + "\n\n## Tasks\n- [ ] One <!-- t:a3 -->\n" \
+                                              "- [ ] Two <!-- t:b7 blocked_by=a3 -->\n"
+        B.atomic_write(card.path, card.to_text())
+        current = self.tools.run("board_read", {"id": self.card_id})["hash"]
+        self.tools.run("board_update_card", {
+            "id": self.card_id, "base_hash": current,
+            "tasks": [{"text": "One", "item_id": "a3"},
+                      {"text": "Two renamed", "item_id": "b7"}]})
+        self.assertEqual([i.blocked_by for i in self.tasks_of()], [[], ["a3"]])
+
+    def test_board_read_reports_what_blocks_each_item(self):
+        self.tools.run("board_update_card", {
+            "id": self.card_id, "base_hash": self.hash,
+            "tasks": [{"text": "One"}, {"text": "Two", "blocked_by": [1]}]})
+        tasks = self.tools.run("board_read", {"id": self.card_id})["tasks"]
+        self.assertEqual(tasks[1]["blocked_by"], [tasks[0]["item_id"]])
+
 
 # --------------------------------------------------------------------------- move
 
@@ -1185,6 +1248,56 @@ class BoardFolderResolutionTests(unittest.TestCase):
         deep = self.dir / "outer" / "inner" / "src" / "deep"
         deep.mkdir(parents=True)
         self.assertEqual(T.find_board_root(deep), inner)
+
+
+# ------------------------------------------- the placement helpers both writers share
+
+class SharedPlacementTests(BoardToolsTest):
+    """`board.tab_of` / `category_for_tab` / `write_new_card` / `card_target_path`.
+
+    They were one copy in `BoardTools` and another in `forge_sync`; these tests are here so the
+    de-duplication is a change of address and not a change of behaviour.
+    """
+
+    def test_the_tools_and_the_module_agree_about_tabs_and_folders(self):
+        card_id = self.create()
+        card = self.board.card_by_id(card_id)
+        self.assertEqual(self.tools._tab_of(card), "features")
+        self.assertEqual(B.tab_of(self.board, card), self.tools._tab_of(card))
+        self.assertEqual(self.tools._category_for_tab("bugs"), "changes")
+        self.assertEqual(B.category_for_tab(self.board, "bugs", strict=True), "changes")
+
+    def test_an_unknown_tab_and_a_filter_tab_are_refused_in_the_same_words(self):
+        with self.assertRaises(T.BoardToolError) as unknown:
+            self.tools._category_for_tab("nope")
+        self.assertIn("unknown tab 'nope'; this board has:", str(unknown.exception))
+        with self.assertRaises(T.BoardToolError) as filtered:
+            self.tools._category_for_tab("done")
+        self.assertIn("is a filter across categories", str(filtered.exception))
+        # A reader takes a tab at face value; only a writer is strict.
+        self.assertEqual(B.category_for_tab(self.board, "nope"), "nope")
+
+    def test_a_created_card_lands_where_write_new_card_puts_it(self):
+        first = self.board.card_by_id(self.create(title="Same title"))
+        second = self.board.card_by_id(
+            self.create(title="Same title", not_duplicate_of=[first.id]))
+        self.assertEqual(first.path.parent, self.root / "features")
+        self.assertEqual(second.path.parent, first.path.parent)
+        self.assertNotEqual(first.path, second.path)      # the free-name loop, once
+
+    def test_a_move_uses_card_target_path(self):
+        card_id = self.create()
+        card = self.board.card_by_id(card_id)
+        card.set("status", "deferred")
+        self.assertEqual(B.card_target_path(self.board, card, "features"),
+                         self.root / "features" / "deferred" / card.path.name)
+        self.tools.run("board_move_card", {"id": card_id, "status": "deferred", "reason": "go"})
+        self.assertEqual(self.board.card_by_id(card_id).path.parent,
+                         self.root / "features" / "deferred")
+
+    def test_card_target_path_is_none_when_the_card_is_already_there(self):
+        card = self.board.card_by_id(self.create())
+        self.assertIsNone(B.card_target_path(self.board, card, "features"))
 
 
 if __name__ == "__main__":       # pragma: no cover

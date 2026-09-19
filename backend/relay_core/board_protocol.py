@@ -16,9 +16,15 @@ from __future__ import annotations
 
 import os
 import secrets
+import threading
 from pathlib import Path
 
 from . import board as B
+from . import board_import as I
+from . import forge_github as GH
+from . import forge_sync as F
+from . import logs
+from . import project_probe as PP
 from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
                           BoardTools, BoardToolError, ToolContext, board_at, board_for,
                           card_brief, cleanup_brief, find_board_root, named_board_root,
@@ -26,7 +32,12 @@ from .board_tools import (BOARD_STATES, CARD_MODES, PLAN_HEADING, BoardInit,
 
 TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
          "board_move", "board_comment", "board_undo", "board_ask", "board_check",
-         "board_cleanup", "board_init", "board_init_answer"}
+         "board_cleanup", "board_init", "board_init_answer",
+         # Initializing a project and importing what is already in it (19.13,
+         # docs/PROJECT-INIT-AND-IMPORT.md section 8).
+         "project_probe", "board_import_propose", "board_import_apply",
+         # Two-way sync with GitHub issues (19.14, docs/GITHUB-SYNC.md section 8).
+         "forge_sync_plan", "forge_sync_run"}
 
 #: What every message here says when the pane has no board at all (protocol 19.1).  Both folder
 #: names, because a project may carry either and neither is wrong.
@@ -36,6 +47,21 @@ NO_BOARD_ERROR = ("This project has no Switchboard (no switchboard/board.yaml, a
 #: The owner-side messages that may be the first thing a project's board ever hears.  Only a
 #: create can be: the other three name a card, and an uninitialized board has none.
 INIT_WRITES = ("board_create",)
+
+#: What an import or a sync says when the pane's board has not been created yet (19.13, 19.14).
+#: Both write cards, and a card needs a board.yaml; the GUI's path is `board_init` first.
+NOT_INITIALIZED_ERROR = ("This project has no Switchboard yet. Create one first "
+                         "(board_init), then import or sync into it.")
+
+#: `board_import_apply`: how many keys one message may carry.  The proposals themselves are
+#: capped by `board_import.MAX_PROPOSALS`; this is the wire.
+MAX_IMPORT_KEYS = 1000
+
+#: The `code` a failed `forge_sync_*` answers with (19.14), so the GUI can offer the right thing:
+#: signing in, waiting until `retry_at`, or just saying what happened.
+FORGE_ERROR_CODES = {"ForgeAuthError": "forge_auth", "ForgeRateLimited": "forge_rate_limited",
+                     "ForgeUnavailable": "forge_unavailable", "ForgePrivacyError": "forge_privacy",
+                     "ForgeError": "forge_failed"}
 
 #: How much of a card the Switchboard agent is seeded with (design 5, "Attach").
 SEED_BODY_BYTES = 16384
@@ -124,6 +150,9 @@ class BoardCommands:
         self._cleanup_tools = None
         self._cleanup_log = None
         self._cleanup_id = None
+        #: The id of the `forge_sync_*` request whose thread is running, or None (19.14). One
+        #: sync at a time: two runs against one repository would post the same comment twice.
+        self._forge_run = None
 
     # ---- wiring ---------------------------------------------------------------
     def configure(self, workspace: str | None, request: dict | None = None) -> dict | None:
@@ -364,6 +393,230 @@ class BoardCommands:
             raise ValueError(NO_BOARD_ERROR)
         return self.tools
 
+    def _need_ready(self) -> BoardTools:
+        """The tools, for a message that writes cards: an uninitialized board is not one.
+
+        `board_create` may create the board on the way through (19.12) because the user typed
+        one card and can be asked about it.  An import of thirty items and a sync with a public
+        repository are not that: the GUI initializes the board first and sends this after.
+        """
+        tools = self._need()
+        if tools.state != "ready" or not tools.exists():
+            raise ValueError(NOT_INITIALIZED_ERROR)
+        return tools
+
+    # ---- initializing a project: the probe and the importer (19.13) -------------
+    def _project(self, request: dict, what: str) -> Path:
+        """The project a `project_probe`/`board_import_*` names.
+
+        Required, absolute and a directory.  **Never the worker's own cwd**: the process runs in
+        whatever directory the GUI happened to start it in, and probing that instead of the
+        project the user is looking at would read a tree nobody asked about (and, for an import,
+        write cards from it).  A missing, empty or relative `project` is an error, not a default.
+        """
+        value = request.get("project")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{what} needs `project`: the absolute path of the project "
+                             "directory. There is no default.")
+        path = Path(value.strip()).expanduser()
+        if not path.is_absolute():
+            raise ValueError(f"{what} project must be an absolute path; got {value.strip()!r}.")
+        if not path.is_dir():
+            raise ValueError(f"{what}: {path} is not a directory.")
+        return Path(os.path.abspath(path))
+
+    def _kinds(self, request: dict):
+        kinds = request.get("kinds")
+        if kinds is None:
+            return None
+        if not isinstance(kinds, list) or not all(isinstance(k, str) for k in kinds):
+            raise ValueError("kinds must be a list of tracker kinds, or omitted for all of them.")
+        unknown = sorted(set(kinds) - set(PP.TRACKER_KINDS))
+        if unknown:
+            raise ValueError(f"unknown tracker kind(s): {', '.join(unknown)}; known: "
+                             f"{', '.join(PP.TRACKER_KINDS)}.")
+        return list(kinds)
+
+    def _board_for_project(self, project: Path) -> B.Board | None:
+        """The board this project already has: the pane's own when it is that project's."""
+        if self.tools is not None and self.tools.exists() and Path(self.tools.board.repo) == project:
+            return self.tools.board
+        root = B.board_folder(project)
+        return B.Board(root, project) if root is not None else None
+
+    def _project_probe(self, request: dict, rid) -> None:
+        """`project_probe`: what is in a project, read-only and offline (19.13).
+
+        Needs no board — it is what the GUI asks *before* there is one — and writes nothing, so
+        it is safe to send for a project that already has a board and safe to send twice.
+        """
+        project = self._project(request, "project_probe")
+        result = PP.probe(project, kinds=self._kinds(request))
+        event = {"event": "project_probe_result", "id": rid, **result}
+        board = self._board_for_project(project)
+        if board is not None:
+            event["root"] = str(board.root)
+        self.emit(event)
+
+    def _import_propose(self, request: dict, rid) -> None:
+        """`board_import_propose`: the cards an import would create.  Writes nothing."""
+        project = self._project(request, "board_import_propose")
+        kinds = self._kinds(request)
+        board = self._board_for_project(project)
+        try:
+            proposals = I.propose(project, kinds, board=board)
+            skipped = len(I.skipped_keys(project, kinds, board=board))
+        except (I.ImportError_, PP.ProbeError, B.BoardError, OSError) as exc:
+            raise ValueError(str(exc)) from exc
+        event = {"event": "board_import_proposals", "id": rid, "project": str(project),
+                 "proposals": [p.to_dict() for p in proposals], "skipped": skipped}
+        if board is not None:
+            event["root"] = str(board.root)
+        self.emit(event)
+
+    def _import_apply(self, request: dict, rid) -> None:
+        """`board_import_apply`: create cards for the keys the user ticked (19.13).
+
+        The keys are re-derived here rather than trusted: the GUI sends back the *keys* of the
+        last `board_import_proposals`, and the proposals themselves are read again from the
+        project, so nothing a client sent becomes a card body.
+        """
+        tools = self._need_ready()
+        project = (self._project(request, "board_import_apply") if request.get("project")
+                   else Path(tools.board.repo))
+        if Path(tools.board.repo) != project:
+            raise ValueError(f"This pane's Switchboard is {tools.board.root}, which is not in "
+                             f"{project}. Point the pane at that project first (set_board).")
+        keys = request.get("keys")
+        if not isinstance(keys, list) or not keys or not all(isinstance(k, str) for k in keys):
+            raise ValueError("board_import_apply needs `keys`: the source keys the user ticked.")
+        if len(keys) > MAX_IMPORT_KEYS:
+            raise ValueError(f"board_import_apply takes at most {MAX_IMPORT_KEYS} keys.")
+        wanted = list(dict.fromkeys(keys))
+        if self._forge_busy(rid, "import into this board"):
+            return
+        if self._busy_error(rid, "the import"):
+            return
+        tab = request.get("tab")
+        if tab is not None and not (isinstance(tab, str) and tab.strip()):
+            raise ValueError("board_import_apply tab must be a tab id.")
+        tools.context.actor = "import"
+        try:
+            proposals = I.propose(project, self._kinds(request), board=tools.board)
+            chosen = [p for p in proposals if p.source_key in set(wanted)]
+            created = I.apply(tools, chosen, tab=tab.strip() if tab else None, actor="import",
+                              emit=self.emit)
+        except (I.ImportError_, BoardToolError, PP.ProbeError, B.BoardError, OSError) as exc:
+            raise ValueError(str(exc)) from exc
+        finally:
+            tools.context.actor = "owner"
+        cards = []
+        for card_id in created:
+            card = tools.board.card_by_id(card_id)
+            if card is None:                              # pragma: no cover - deleted mid-import
+                continue
+            cards.append({"id": card_id, "source_key": I.source_key_of(card),
+                          "path": str(card.path.relative_to(tools.board.repo)),
+                          "status": card.status, "tab": B.tab_of(tools.board, card)})
+        done = {c["source_key"] for c in cards}
+        self._send({"event": "board_imported", "id": rid, "project": str(project),
+                    "cards": cards, "skipped": [k for k in wanted if k not in done]})
+        self.emit(self._changed())
+
+    # ---- GitHub sync (19.14) ---------------------------------------------------
+    def _forge_busy(self, rid, what: str) -> bool:
+        """True when a sync is running, and the caller was told.  One writer at a time.
+
+        A sync writes card files from its own thread, so an import (or a second sync) alongside
+        it would have two writers on one card.  Both are user actions with a button behind them,
+        so the second is refused rather than queued.
+        """
+        if self._forge_run is None:
+            return False
+        self.emit({"event": "error", "id": rid, "code": "forge_busy",
+                   "text": f"A sync with this board's repository is running. Wait for it to "
+                           f"finish, then {what}."})
+        return True
+
+    def _forge_sync(self, kind: str, request: dict, rid) -> None:
+        """`forge_sync_plan` / `forge_sync_run`: the Switchboard against its repository.
+
+        The network part runs on a thread, like `hosted_quota` (13.9), so the message loop never
+        waits on GitHub; **exactly one** terminal event follows either way —
+        `forge_sync_planned`, `forge_sync_done`, or `error`. The error text is scrubbed and names
+        the exception rather than carrying a traceback, and no credential is ever in it: the
+        provider holds the token and never hands it over (`GitHubProvider._safe`).
+        """
+        tools = self._need_ready()
+        if self._forge_busy(rid, "start another sync"):
+            return
+        if self._busy_error(rid, "the sync"):
+            return
+        board = tools.board
+        try:
+            config = F.board_config(board)
+        except (F.ForgeError, B.BoardError, OSError) as exc:
+            raise ValueError(str(exc)) from exc
+        repo = request.get("repo") or config["repo"]
+        base_url = request.get("base_url") or config["base_url"]
+        for name, value in (("repo", repo), ("base_url", base_url)):
+            if value is not None and not isinstance(value, str):
+                raise ValueError(f"{name} must be a string.")
+        if not repo:
+            raise ValueError("This board has no repository: put `github: {repo: owner/name}` in "
+                             f"{board.root.name}/board.yaml, or send `repo` with the message.")
+        dry_run = kind == "forge_sync_plan"
+        confirm_bulk = bool(request.get("confirm_bulk"))
+        root = str(board.root)
+        self._forge_run = rid
+
+        def progress(row: dict, rid=rid, root=root) -> None:
+            self.emit({"event": "forge_sync_progress", "id": rid, "root": root, **row})
+
+        def work() -> None:
+            try:
+                provider = GH.provider_for(
+                    str(repo).strip(),
+                    base_url=str(base_url).strip() if base_url else None)
+                engine = F.ForgeSync(board, provider, login_map=config["login_map"],
+                                     create_cap=config["create_cap"],
+                                     default_tab=config["default_tab"],
+                                     comment_kinds=config["comment_kinds"],
+                                     on_progress=None if dry_run else progress)
+                result = (engine.plan() if dry_run else engine.run(confirm_bulk=confirm_bulk)).to_dict()
+            except Exception as exc:
+                # One terminal event, whatever went wrong: an unreachable forge, a refused
+                # token, a board pointed at a second repository, a bug here.  A `ForgeError`
+                # says something the user can act on, so it is passed through (scrubbed); any
+                # other exception is a bug in this code and says only what it was.
+                forge = isinstance(exc, F.ForgeError)
+                event = {"event": "error", "id": rid, "root": root,
+                         "code": FORGE_ERROR_CODES.get(type(exc).__name__, "forge_sync_failed"),
+                         "text": logs.scrub(str(exc))[:2000] if forge and str(exc).strip()
+                                 else f"The sync failed ({type(exc).__name__})."}
+                retry_at = getattr(exc, "retry_at", None)
+                if retry_at:
+                    event["retry_at"] = int(retry_at)
+                    event["retry_at_text"] = exc.retry_at_text
+                if not forge:
+                    logs.event(logs.get("board"), "forge_sync_crashed", level_name="error",
+                               error=type(exc).__name__, msg=str(exc)[:300])
+                self.emit(event)
+                return
+            finally:
+                self._forge_run = None
+            name = "forge_sync_planned" if dry_run else "forge_sync_done"
+            self.emit({"event": name, "id": rid, "root": root, **result})
+            if not dry_run:
+                # A sync writes card files outside BoardTools, so the pane is told the same way
+                # any other write tells it.
+                try:
+                    self.emit(self._changed())
+                except (B.BoardError, OSError):            # pragma: no cover - unreadable tree
+                    pass
+
+        threading.Thread(target=work, name="relay-forge-sync", daemon=True).start()
+
     # ---- events ----------------------------------------------------------------
     def _tag(self, event: dict) -> dict:
         """Name the board an event is about (protocol 19.2), once, for every board event.
@@ -471,6 +724,14 @@ class BoardCommands:
             self._init(request, rid)
         elif kind == "board_init_answer":
             self._init_answer(request, rid)
+        elif kind == "project_probe":
+            self._project_probe(request, rid)
+        elif kind == "board_import_propose":
+            self._import_propose(request, rid)
+        elif kind == "board_import_apply":
+            self._import_apply(request, rid)
+        elif kind in ("forge_sync_plan", "forge_sync_run"):
+            self._forge_sync(kind, request, rid)
         return True
 
     # ---- who may start a turn --------------------------------------------------

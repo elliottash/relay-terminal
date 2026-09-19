@@ -49,13 +49,13 @@ DEFAULT_CONTEXT_WINDOW = 128_000  # conservative fallback for unknown/custom mod
 # --- output limits ------------------------------------------------------------------------------
 # What one model call may be asked to produce, per model, from the provider's own documentation
 # (verified 2026-09-18; the URL sits next to each entry below). This is *not* a fraction of the
-# context window: the two are published independently, and Gemini 3.1 Pro is the proof — a larger
-# window than GLM-5.3 and half the output cap (65,536 against 131,072). Reasoning is spent from this
-# budget on every provider that streams it, so it is also the ceiling on how long a model may think
-# in one step (card #G5MK).
+# context window: the two are published independently, and Gemini 3.1 Pro is the proof — the same
+# 1,048,576-token window as GLM-5.3 and half the output cap (65,536 against 131,072). Reasoning is
+# spent from this budget on every provider that streams it, so it is also the ceiling on how long a
+# model may think in one step (card #G5MK).
 #
 # The fallback is deliberately conservative: an endpoint Relay cannot name — a custom base URL, an
-# aggregator route, anything behind a gateway — may cap output far lower than its window suggests
+# OpenRouter route, anything behind a gateway — may cap output far lower than its window suggests
 # (OpenRouter's DeepInfra route for Kimi K3 allows 16,384), and a request over the cap is refused
 # outright rather than trimmed.
 DEFAULT_MAX_OUTPUT = 32_768
@@ -153,9 +153,15 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
            1_000_000, "relay", "included", "https://relay-terminal.ai/free.html",
            "Included with Relay, no API key. Prompts go to Relay's hosted service, then to the model provider.",
            provider="Relay", plan="Included", hosted=True,
-           # The gateway rebuilds the upstream request and owns the output cap per role
-           # (docs/RELAY-FREE.md); the desktop asks for no more than the conservative fallback.
-           max_output=DEFAULT_MAX_OUTPUT),
+           # The gateway owns the real cap and applies it per role, clamping rather than refusing
+           # (`min(max_tokens, role.max_output_tokens)` in gateway/validate.py). This is the cap it
+           # serves the Main role, the one a pane's turns run on: 16,000
+           # (gateway/gateway.example.json; Flash 12,000 and Lite 512 are clamped down from here).
+           # Asking for the old 32,768 fallback was not refused, but it made Relay's own number
+           # twice the truth — the reserve it holds back, and the budget a cut-off turn reports.
+           # Server-side and remotely configurable, so this tracks the shipped config, not a
+           # provider's published limit like the rows above.
+           max_output=16_000),
     Preset("kimi", "Kimi · K3", "https://api.moonshot.ai/v1", "kimi-k3", {"reasoning_effort": "high"},
            1_048_576, "kimi", "payg", "https://platform.kimi.ai/console/api-keys",
            "Moonshot platform, pay-as-you-go.",
@@ -218,7 +224,7 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
     Preset("gemini", "Google · Gemini 3.1 Pro", "https://generativelanguage.googleapis.com/v1beta/openai",
            "gemini-3.1-pro-preview", {"reasoning_effort": "high"}, 1_048_576, "gemini", "payg",
            "https://aistudio.google.com/apikey", "Gemini API key from AI Studio.",
-           # "1M / 64k" — a larger window than GLM-5.3 and half the output cap, which is why Relay
+           # "1M / 64k" — the same window as GLM-5.3 and half the output cap, which is why Relay
            # reads this per model instead of as a share of the window
            # (https://ai.google.dev/gemini-api/docs/gemini-3).
            provider="Google (Gemini)", plan="Pay-as-you-go", max_output=65_536),

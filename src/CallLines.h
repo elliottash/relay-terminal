@@ -16,9 +16,9 @@
 //   * the fold's content: § 23.5's `detail` sections, or a merged run's member lines, as the
 //     engine's FoldLine spans.
 //
-// Pure: QtCore, QColor and the two parsers this shares with the other surfaces (ToolLabel,
-// DiffView). No widget, no theme — the colours arrive in a Palette the caller fills from the live
-// theme tokens.
+// Pure: QtCore, QColor and the three parsers this shares with the other surfaces (ToolLabel,
+// DiffView, MarkdownAnsi). No widget, no theme — the colours arrive in a Palette the caller fills
+// from the live theme tokens.
 #include "TerminalBackend.h"   // relay::FoldSpan, relay::FoldLine
 #include "ToolLabel.h"
 
@@ -187,6 +187,15 @@ QVector<FoldLine> foldForRun(const QVector<RunMember> &members, const Palette &p
 // One muted row — what a fold says when the turn is gone from the worker's log, or the pane has no
 // worker to ask.
 QVector<FoldLine> foldForNote(const QString &text, const Palette &palette);
+
+// Markdown (agent reasoning) as fold rows: rendered by the streaming renderer the terminal's prose
+// uses (MarkdownAnsi), then its ANSI mapped onto the fold's palette — prose muted (it is chrome
+// around the reply), code and links in the code colour, headings plain text, **Problem:** red.
+// Empty input comes back empty; the caller decides what a fold with nothing to show says. Beyond
+// `maxLines` rows the *earliest* lines go, with a note saying how many: the tail is where the
+// reasoning ended.
+QVector<FoldLine> foldForMarkdown(const QString &markdown, const Palette &palette,
+                                  const FoldOptions &options);
 
 // Control characters and escape sequences out of stored output: a fold row is text, and the view
 // paints it; an ANSI escape left in it would be drawn as mojibake.

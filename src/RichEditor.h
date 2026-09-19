@@ -22,17 +22,21 @@ public:
     bool atDraft() const { return m_historyIndex == m_history.size(); }
 
     // Keep this box's history in a file instead of only in this session (src/PromptHistory.h):
-    // what is in the file now is loaded, and every later remember() is appended to it. One file
-    // serves every prompt box, so a browse that starts here first takes in whatever the panes
-    // beside it have added. A box that never calls this — the Switchboard's reply box — keeps the
-    // session-only history it always had.
+    // what is in the file now is loaded, and every later remember() is appended to it. The file
+    // is this pane's own — one per pane, not one shared — so Up and Down walk what was typed at
+    // this pane, and a pane reopened after a close or a restart picks its history back up. A box
+    // that never calls this — the Switchboard's reply box — keeps the session-only history it
+    // always had.
     void useHistoryFile(const QString &path);
     // Re-read the file when it has changed since the last read. Called when a browse begins.
     void refreshHistory();
-    // "Clear prompt history": the file is gone, so every box open on it drops its copy at once.
+    // "Clear prompt history": the store is gone, so every box open on it drops its copy at once.
     // A box part-way through a browse would otherwise keep offering what was just forgotten until
     // it came back to its draft. What is in a box is left alone: it is the person's text now.
     static void forgetHistory(const QString &path);
+    // The same, for every box whatever file it is on: the store is one directory now, and
+    // clearing it has to reach a pane whose file is already gone.
+    static void forgetAllHistory();
 
     // Ghost text: a dim suggestion drawn after the cursor when it sits at the end of the text.
     // Grow with the text instead of standing empty: one line when idle, up to maxLines, then scroll.

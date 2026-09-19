@@ -257,6 +257,20 @@ class ThinkingStreamTests(unittest.TestCase):
         _, events = self.parse(sse({'reasoning_content': 'hmm'}) + sse(finish='stop') + b'data: [DONE]\n\n')
         self.assertEqual(events[-1]['event'], 'thinking_done')
 
+    def test_reasoning_resuming_after_the_answer_gets_its_own_done(self):
+        # GLM interleaves: reasoning, a partial answer, more reasoning, the final answer. Each block
+        # is closed by its own thinking_done, so a reasoning fold's second anchor does not read
+        # "thinking…" for the rest of the session (issue T8CN).
+        data = sse({'reasoning_content': 'first.'}) + sse({'content': 'Checking. '})
+        data += sse({'reasoning_content': 'second.'}) + sse({'content': 'Done.'})
+        data += sse(finish='stop') + b'data: [DONE]\n\n'
+        _, events = self.parse(data)
+        kinds = [e['event'] for e in events if e['event'] in ('thinking_delta', 'thinking_done', 'delta')]
+        self.assertEqual(kinds, ['thinking_delta', 'thinking_done', 'delta',
+                                'thinking_delta', 'thinking_done', 'delta'])
+        dones = [e for e in events if e['event'] == 'thinking_done']
+        self.assertEqual([d['chars'] for d in dones], [len('first.'), len('second.')])
+
     def test_elapsed_counts_from_request_start(self):
         # GLM buffers reasoning and sends it in one burst; the time before the burst is thinking time too.
         provider = ChatProvider(ProviderConfig('http://127.0.0.1:1/v1', 'm', ''))

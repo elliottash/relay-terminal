@@ -193,14 +193,27 @@ class ResumeCommand(unittest.TestCase):
             with self.subTest(session_id=session_id), self.assertRaises(ValueError):
                 guest_sessions.resume_command("claude", session_id)
 
+    def test_resume_spawn_carries_the_working_directory(self):
+        """claude looks a session up under the directory it is started in, so the argv alone
+        cannot resume one: the pane must chdir to the session's workspace first."""
+        self.assertEqual({"argv": ["claude", "-r", CLAUDE_ID], "cwd": CWD},
+                         guest_sessions.resume_spawn("claude", CLAUDE_ID, CWD))
+        self.assertEqual({"argv": ["codex", "fork", CODEX_ID], "cwd": CWD},
+                         guest_sessions.resume_spawn("codex", CODEX_ID, CWD, fork=True))
+        # No workspace on the record is "" — the spawner keeps the pane's own directory.
+        self.assertEqual("", guest_sessions.resume_spawn("claude", CLAUDE_ID, None)["cwd"])
+        with self.assertRaises(ValueError):
+            guest_sessions.resume_spawn("gemini", CLAUDE_ID, CWD)
+
 
 class RecordFields(unittest.TestCase):
     def test_to_record_is_exactly_the_protocol_shape(self):
         record = guest_sessions.to_record(
             {"source": "claude", "id": CLAUDE_ID, "title": "  pane   drag \n fix ", "mtime": 1234.5,
              "workspace": CWD, "message_count": 4, "entries": [{"text": "x"}]})
-        self.assertEqual({"source", "id", "title", "mtime", "workspace", "message_count", "resume_command"},
-                         set(record))
+        self.assertEqual({"source", "id", "title", "mtime", "workspace", "message_count",
+                          "resume_command", "resume_cwd"}, set(record))
+        self.assertEqual(CWD, record["resume_cwd"], "the argv is spawned in the session's own cwd")
         self.assertEqual(("claude", CLAUDE_ID, "pane drag fix", 1234.5, CWD, 4,
                           ["claude", "-r", CLAUDE_ID]),
                          (record["source"], record["id"], record["title"], record["mtime"],
@@ -223,6 +236,10 @@ class RecordFields(unittest.TestCase):
         out = guest_sessions.annotate_items([agent, claude, codex])
         self.assertEqual(agent, out[0], "a non-guest item is returned as the index gave it")
         self.assertEqual(["claude", "-r", CLAUDE_ID], out[1]["resume_command"])
+        # The spawn payload is complete: the directory the command has to run in comes with it.
+        self.assertEqual([CWD, CWD], [out[1]["resume_cwd"], out[2]["resume_cwd"]])
+        self.assertEqual([CWD, CWD], [out[1]["workspace"], out[2]["workspace"]])
+        self.assertNotIn("resume_cwd", out[0], "a non-guest row gains nothing")
         self.assertEqual((CLAUDE_ID, 6.0, 4), (out[1]["id"], out[1]["mtime"], out[1]["message_count"]))
         self.assertEqual("pane drag", out[1]["title"], "the index's own fields stay put")
         self.assertEqual(["codex", "resume", CODEX_ID], out[2]["resume_command"])
@@ -299,6 +316,27 @@ class ClaudeParsing(unittest.TestCase):
     def test_unreadable_file_is_none(self):
         self.assertIsNone(guest_sessions.parse_claude_transcript(self.root / "missing.jsonl"))
 
+    def test_the_file_name_is_the_session_id_even_when_a_line_disagrees(self):
+        """claude resolves `-r <id>` to `<slug>/<id>.jsonl`, so the name is what resumes — and
+        it is the key `_walk` looks a file up by before reading it, so the record must carry the
+        same one or the index row it wrote is never found again (see the reconcile test)."""
+        named = "4" * 8 + "-0000-4000-8000-000000000004"
+        parsed, _ = self.parse(claude_lines(session_id="inside-says-something-else"),
+                               session_id=named)
+        self.assertEqual(named, parsed["id"])
+
+    def test_a_timestamp_without_a_zone_is_utc_not_local_time(self):
+        """Both guests write UTC. Read as local time, a naive stamp lands hours from the ones
+        beside it that do carry the `Z`, which misdates the session in the listing."""
+        aware = claude_prompt_line("first ask")
+        aware["timestamp"] = "2026-09-17T01:13:47.871Z"
+        naive = claude_prompt_line("second ask", index=1)
+        naive["timestamp"] = "2026-09-17T01:13:47.871"
+        for line in (aware, naive):
+            parsed, _ = self.parse([line])
+            with self.subTest(timestamp=line["timestamp"]):
+                self.assertAlmostEqual(1789607627.871, parsed["created"], places=3)
+
     def test_garbage_lines_are_skipped(self):
         path = write_claude(self.home, claude_lines())
         with open(path, "a", encoding="utf-8") as handle:
@@ -373,6 +411,21 @@ class CodexDatabase(unittest.TestCase):
         alien = self.home / ".codex" / "state_9.sqlite"
         alien.write_text("not a database")
         self.assertEqual({}, guest_sessions.codex_thread_meta(alien))
+
+    def test_a_home_whose_path_holds_uri_punctuation_still_reads(self):
+        """The read-only handle is a `file:` URI. Pasted together by hand, a `?` in the path
+        starts the query, a `#` starts the fragment and a `%` introduces an escape, so a user
+        whose home holds any of them gets no titles at all."""
+        for name in ("pct-%-home", "hash-#-home", "query-?-home", "all-%-#-?-home"):
+            with self.subTest(name=name):
+                home = self.root / name
+                (home / ".codex").mkdir(parents=True)
+                db = write_state_db(home, [{"id": CODEX_ID, "rollout_path": "/x/rollout-1.jsonl",
+                                            "cwd": CWD, "title": "ls", "name": "Diff view"}])
+                self.assertEqual("Diff view", guest_sessions.codex_thread_meta(db)[CODEX_ID]["name"])
+                self.assertEqual("Diff view",
+                                 guest_sessions.codex_thread_meta(guest.codex_state_db(str(home)))
+                                 [CODEX_ID]["name"])
 
     def test_the_highest_state_database_wins(self):
         write_state_db(self.home, [{"id": CODEX_ID, "rollout_path": "/x/rollout-1.jsonl",
@@ -522,6 +575,36 @@ class IndexIntegration(unittest.TestCase):
                          {record["id"]: record["title"]
                           for record in guest_sessions.list_sessions(self.index)}[CLAUDE_ID])
 
+    def test_a_limited_reconcile_never_drops_the_rows_it_did_not_look_at(self):
+        """`limit` caps the scan at the N newest transcripts per source. Those are the only
+        files it stats, so it cannot tell a session that went away from one it simply did not
+        read: pruning on that would leave the pane holding the newest N and nothing else."""
+        for index in range(5):
+            path = write_claude(self.home, claude_lines(custom_title=f"session {index}"),
+                                session_id=f"{index}" * 8 + "-0000-4000-8000-00000000000" + str(index))
+            os.utime(path, (1000 + index, 1000 + index))
+        first = guest_sessions.reconcile(self.index, str(self.home))
+        self.assertEqual((7, 0, 0), (first["added"], first["refreshed"], first["removed"]))
+        capped = guest_sessions.reconcile(self.index, str(self.home), limit=2)
+        self.assertEqual(0, capped["removed"], "a capped scan may not prune")
+        self.assertEqual(7, len(guest_sessions.list_sessions(self.index)))
+        # A full reconcile still prunes: that is the run that stats every file.
+        self.claude.unlink()
+        self.assertEqual(1, guest_sessions.reconcile(self.index, str(self.home))["removed"])
+        self.assertEqual(6, len(guest_sessions.list_sessions(self.index)))
+
+    def test_a_transcript_whose_id_line_disagrees_is_still_skipped_next_time(self):
+        """The row is keyed by the id the file's name carries, which is the id `_walk` looks a
+        file up by before parsing it. Keyed by an in-file `sessionId` that disagrees, the skip
+        would never fire and every reconcile would re-read the whole transcript."""
+        named = "5" * 8 + "-0000-4000-8000-000000000005"
+        write_claude(self.home, claude_lines(session_id="not-the-file-name", custom_title="odd one"),
+                     session_id=named)
+        guest_sessions.reconcile(self.index, str(self.home))
+        self.assertIn(named, [record["id"] for record in guest_sessions.list_sessions(self.index)])
+        again = guest_sessions.reconcile(self.index, str(self.home))
+        self.assertEqual((0, 0, 0), (again["added"], again["refreshed"], again["removed"]))
+
     def test_reconcile_drops_the_row_but_never_the_transcript(self):
         guest_sessions.reconcile(self.index, str(self.home))
         self.rollout.unlink()
@@ -590,6 +673,38 @@ class IndexIntegration(unittest.TestCase):
         titles = {record["id"]: record["title"] for record in guest_sessions.list_sessions(self.index)}
         self.assertEqual("my pane session", titles[CLAUDE_ID])
 
+    def user_fields(self, session_id=CLAUDE_ID) -> tuple[str, int]:
+        row = self.index.search("", sources=["claude", "codex"], scope="all")["items"]
+        item = {entry["session_id"]: entry for entry in row}[session_id]
+        return item["title"], item["pinned"]
+
+    def test_update_guest_merges_the_user_fields_one_key_at_a_time(self):
+        """`custom_title` and `pinned` are independent: naming a session must not unpin it and
+        pinning one must not throw its name away."""
+        guest_sessions.reconcile(self.index, str(self.home))
+        parsed = guest_sessions.parse_claude_transcript(self.claude)
+        self.index.rename(CLAUDE_ID, "my pane session")
+        self.index.set_pinned(CLAUDE_ID, True)
+        # A writer that mentions only the pin keeps the name.
+        self.index.update_guest({**parsed, "pinned": True})
+        self.assertEqual(("my pane session", 1), self.user_fields())
+        # A writer that mentions only the name keeps the pin.
+        self.index.update_guest({**parsed, "custom_title": "renamed again"})
+        self.assertEqual(("renamed again", 1), self.user_fields())
+        # And each of them can still clear its own field.
+        self.index.update_guest({**parsed, "pinned": False})
+        self.assertEqual(("renamed again", 0), self.user_fields())
+        self.index.update_guest({**parsed, "custom_title": ""})
+        self.assertEqual(("pane-drag-fix", 0), self.user_fields())
+
+    def test_update_guest_without_either_key_keeps_both(self):
+        guest_sessions.reconcile(self.index, str(self.home))
+        self.index.rename(CLAUDE_ID, "my pane session")
+        self.index.set_pinned(CLAUDE_ID, True)
+        os.utime(self.claude, None)
+        guest_sessions.reconcile(self.index, str(self.home))
+        self.assertEqual(("my pane session", 1), self.user_fields())
+
 
 # ----- the live tail -------------------------------------------------------------------------------
 
@@ -652,6 +767,39 @@ class LiveTail(unittest.TestCase):
                          (record["source"], record["title"], record["message_count"]))
         self.append(path, [codex_reply_line("a second answer")])
         self.assertEqual(3, tail.refresh()["message_count"])
+
+    def test_the_codex_threads_database_is_read_once_per_interval(self):
+        """Reading it is a fresh connection, a `PRAGMA table_info` and a `SELECT` over every
+        thread the user ever had. The pane refreshes as fast as the guest writes, so the tail
+        caches it; a thread's name changes about once a session."""
+        path = write_codex(self.home, codex_lines())
+        write_state_db(self.home, [{"id": CODEX_ID, "rollout_path": str(path), "cwd": CWD,
+                                    "title": "ls", "name": "Pelican search"}])
+        real, reads = guest_sessions.codex_thread_meta, []
+
+        def counted(db_path):
+            reads.append(db_path)
+            return real(db_path)
+
+        guest_sessions.codex_thread_meta = counted
+        try:
+            tail = guest_sessions.LiveTail(path, home=str(self.home))
+            self.assertEqual("Pelican search", tail.record()["title"])
+            self.append(path, [codex_reply_line("a second answer")])
+            self.assertEqual(3, tail.refresh()["message_count"])
+            self.append(path, [codex_reply_line("a third answer")])
+            self.assertEqual(4, tail.refresh()["message_count"])
+            self.assertEqual(1, len(reads), "three parses, one read of the database")
+            self.assertEqual("Pelican search", tail.record()["title"], "still named from the cache")
+            # Past the interval the tail picks a rename up again.
+            tail._meta_at -= guest_sessions.LiveTail.META_REFRESH
+            write_state_db(self.home, [{"id": CODEX_ID, "rollout_path": str(path), "cwd": CWD,
+                                        "title": "ls", "name": "Renamed thread"}], version=6)
+            self.append(path, [codex_reply_line("a fourth answer")])
+            self.assertEqual("Renamed thread", tail.refresh()["title"])
+            self.assertEqual(2, len(reads))
+        finally:
+            guest_sessions.codex_thread_meta = real
 
     def test_a_tail_of_a_missing_file_is_empty(self):
         tail = guest_sessions.LiveTail(self.root / "gone.jsonl", home=str(self.home))

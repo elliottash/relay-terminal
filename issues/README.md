@@ -3,6 +3,13 @@
 File-based tracker. One Markdown issue per file, named `YYYY-MM-DD-short-slug.md`.
 Conventions follow the global `issue-tracking` skill (`~/.warp/skills/issue-tracking/SKILL.md`).
 
+**This folder is Relay's own Switchboard.** Since 2026-09-18 a board Relay creates in a project
+is called `switchboard/`; a board that already existed keeps the name it has, and this one is
+`issues/`. Nothing converts it, and both names are equally valid everywhere — Relay looks for
+`switchboard/board.yaml` and then `issues/board.yaml`. So the paths below are this repository's,
+and a project initialized today has the same tree under `switchboard/`. The bytes of every file
+here are specified in [`docs/SWITCHBOARD-FORMAT.md`](../docs/SWITCHBOARD-FORMAT.md).
+
 **QA lane:** implemented work waits in `*/needs_qa_llm/` for a QA session by a non-Claude model;
 the current list is in [`docs/VALIDATION.md`](../docs/VALIDATION.md#the-qa-lane).
 

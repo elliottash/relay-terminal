@@ -249,8 +249,9 @@ class Client:
         import urllib.request
         from urllib.parse import quote
         try:
-            with urllib.request.urlopen(f"{self.rendezvous}/v1/codes/{quote(code, safe='')}",
-                                        timeout=20) as response:
+            request = urllib.request.Request(f"{self.rendezvous}/v1/codes/{quote(code, safe='')}",
+                                             headers={"User-Agent": ws.USER_AGENT})
+            with urllib.request.urlopen(request, timeout=20) as response:
                 return str(json.loads(response.read())["room"])
         except urllib.error.HTTPError as error:
             if error.code == 429:

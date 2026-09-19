@@ -74,7 +74,7 @@ written straight onto the spool rather than through the shim, so the envelope an
 exercised on their own, plus a `state` event moving the busy field. The strip reads `Claude Opus`
 and `94%`, and the chip carries its `warn` property at or above 90%.
 
-`claude-hooks-05-guest-gone.png` — the stand-in guest is killed, and the chip goes with it: the
+`implementer-claude-hooks-05-guest-gone.png` — the stand-in guest is killed, and the chip goes with it: the
 screen says `workspace` and no longer `Claude Opus` or `94%`, because the pane's program poll sees
 the foreground program is no longer a guest and clears the guest state.
 

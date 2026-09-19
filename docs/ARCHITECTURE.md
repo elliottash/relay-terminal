@@ -279,9 +279,11 @@ draws no title of its own). It is cached: whoever writes it calls `PaneChrome::r
 The focused pane keeps its outline; the band is inside it and never recolours it.
 
 **States.** A terminal pane is in exactly one `relay::panestatus::State`, least urgent first:
-idle (ring), running (triangle), subagents working (star and two dots), agent working (four-point
-star), recommends a command (prompt chevron), done (tick), failed (disc with a cross), needs you
-(diamond with `!`). Each has its own shape, so none depends on colour. `Pane::statusFacts()` reads
+idle (ring), running / subagents working / agent working (the Relay mark itself, card #4E13 — the
+terminal's blue for a command, the agent's violet for agent work), recommends a command (prompt
+chevron), done (tick), failed (disc with a cross), needs you (diamond with `!`). Every still state
+has its own shape, so none of the news depends on colour; the live states are one mark in the
+work's own colour, and the word beside the title says whose work it is. `Pane::statusFacts()` reads
 what the pane already keeps — `m_agentBusy`, the subagent model's live count, `processBusy()`, the
 screen prompt / waiting / password state, a `run_in_terminal` prefill in the prompt box — and the
 last finished turn (`m_finishSerial`, its outcome, and whether the reply ended on a question or left
@@ -291,6 +293,42 @@ news until the pane has been the focused pane of the current tab in the active w
 (`PaneChrome::seenSerial`). The header shows the pane's own state as a glyph before the title; the
 tab icon is the most urgent state among its panes (a tab with no terminal shows its first special
 pane's type glyph). The poll runs every 400 ms and repaints a tab icon only when it changes.
+
+**Live states** (card #V8KT, owner 2026-09-19: "its not clear enough if a pane agent or program is
+running… the icons / anims should use blue for terminal work happening and violet for agent work
+happening"). Running, Working and Subagents are work happening *now*, and their marks move
+(`relay::panestatus::isLive`): the header glyph is the Relay mark itself, blinking on the waiting
+dots' 600 ms clock (card #4E13: full size and a dimmed step alternating — `pulseScale`, a scale,
+never an opacity, so the ink keeps its contrast), the state's word sits beside it ("Command
+running", "Relaying…", "Subagents working" — `stateLabel`) in the work's own colour lifted to 4.5:1
+on the header's ground (`stateText`), and a tab with anything live carries a blinking corner dot
+in that colour (`liveMarker`: the agent's violet whenever agent work — a turn or subagents — is
+live, else the terminal's blue) even when its icon is showing more urgent news, so "is something
+running over there?" never waits for the icon's turn. The dot yields its corner to the ssh mark
+and takes the one across. The same word sits bold above the prompt box (`Pane::PaneBusyLine`, card
+#4E13): "Relaying <action>… · N s · Esc stops" in the agent's violet while a turn runs — the action
+a gerund of the live tool call, or what the pane waits for — and "Relaying <program>…" in the
+terminal's blue while a program owns the terminal. The desktop's reduce-motion signal — a cursor
+flash time of 0, the same one that stills the caret and the waiting dots — draws every live mark at
+rest, and the news states (done, failed, needs you) never move: they pull the eye by being news.
+
+**The subagent badge** (card #YMSR, owner 2026-09-19: "in the pane header, add a badge with a
+number for number of subagents, if applicable") is how many agents that pane's agent has
+running, in the header beside the state's word: a violet chip carrying the agent's own
+four-point star and the count. It counts *live* subagents — waiting or running — which is the
+same number `Facts::liveSubagents` resolves a state from, so the badge and the state's glyph
+cannot disagree about the pane; an agent that finished is not work happening now, and the strip
+under the composer is where the ones that ended are read. Zero is not a "0":
+`relay::panestatus::subagentBadgeText` returns nothing and `PaneChrome::PaneSubagentBadge`
+hides itself, which is what "if applicable" asks for and what keeps a pane that has never
+started a subagent looking exactly as it did before. Its tooltip says the count in words and
+teaches the key that opens the subagents pane (Alt+A, `agent.subagentPane`, read live as the
+folded strip does). It is a read-out, not a button: a press on the header moves the pane.
+`relay::panestatus::subagentBadgeStyle` is the chip's fill, hairline and ink on whatever ground
+it lands on — the pane's background, or the ssh band's fill, which is where a mid-tone ground
+exposed `atLeast` choosing its pole by `isLight`'s 0.35 split rather than by measured contrast
+and returning white under 4.5:1; the helper now takes the pole that really is further from the
+ground, and the test asserts the number's 4.5:1 in every shipped theme on both grounds.
 
 **Resource meters** (card #D03W, owner 2026-09-19: "would it be possible to have small X%, X%
 indicators for CPU and RAM usage by pane and tab?"). What a pane costs this machine: CPU and
@@ -350,9 +388,10 @@ in-memory list per process, shared by every window: newest first, a kind per ent
 killed for memory, a password prompt waiting, a finished subagent, and the pane's own agent turn
 finishing, failing, or ending on a question ("Agent needs you", also when it left a command in the
 prompt box that its next turn waits on) — only when the user is not watching that pane
-(`Pane::watched()`: the active window, the current tab, the focused pane); #XM0T. Working, running,
-subagents and a suggested command are glyphs only (see "Pane types, pane states and remote
-sessions"). Each entry carries the pane's session token, so clicking it
+(`Pane::watched()`: the active window, the current tab, the focused pane); #XM0T. Working, running
+and subagents are the live marks (a blinking glyph, its word, the tab's dot — see "Pane types,
+pane states and remote sessions"); a suggested command is a glyph only. Each entry carries the
+pane's session token, so clicking it
 calls `WindowManager::focusPane()` → `RelayWindow::revealPane()` and lands on that pane in
 whatever window it now lives.
 
@@ -434,15 +473,21 @@ nothing is re-run.
 
 The prompt box's Up/Down history used to live in the `RichEditor` and die with the pane (owner
 report, 2026-09-18: "conversation history isnt persisting on exit and re-open. i cant do up arrows
-to see what i did before"). It is now a file: `$XDG_DATA_HOME/relay/state/prompt-history.txt`
-(0600, in the 0700 directory `windows.json` is in), `relay::prompthistory` in
-`src/PromptHistory.h`.
+to see what i did before"). It first became one shared file, which the owner then corrected
+(2026-09-19: "the up/down history seems to be getting commands from other panes, not just mine" —
+"i want pane histories for up/down"). It is now one file per pane:
+`$XDG_DATA_HOME/relay/state/prompt-history/<id>.txt` (0600, in a 0700 tree beside `windows.json`),
+`relay::prompthistory` in `src/PromptHistory.h`.
 
-- **One history per person**, not one per pane, like a shell's. Every prompt box reads the same
-  file, so a new pane opens with what was typed in the pane beside it, and a browse that starts in
-  an open box first re-reads the file (`RichEditor::refreshHistory()`, on the Up that leaves the
-  draft) to take in what the other panes have added since. The file is only re-read when its size
-  or mtime has changed, so an idle box does no work.
+- **One history per pane.** The file is keyed by the pane's layout id — the same `scrollback` id
+  that names its saved terminal text (`src/WindowState.h`) — so Up and Down walk only what was
+  typed at that pane: the pane beside it has its own file, and a pane opened now starts empty. The
+  id survives a restart (the pane is restored with it) and a close-and-reopen ("restore last
+  closed" carries the node, id and all), which is what keeps the history the pane's own while
+  still outliving it. A browse that starts re-reads the pane's file first
+  (`RichEditor::refreshHistory()`, on the Up that leaves the draft), which is how a prompt written
+  at the door by a paired phone is there; the file is only re-read when its size or mtime has
+  changed, so an idle box does no work.
 - **Appended as it is submitted**, never on the way out: one O_APPEND write per line, so a Relay
   that is killed rather than quit loses nothing and two Relays running at once interleave their
   lines instead of overwriting each other. The whole file is rewritten only to trim it, once it
@@ -455,16 +500,22 @@ to see what i did before"). It is now a file: `$XDG_DATA_HOME/relay/state/prompt
   enters the composer's document at all — it is typed in the separate masked field.
 - **A line typed away from the desktop counts too** (owner, 2026-09-18: "these should always be
   saved"). `Pane::submitRemote()` writes a prompt from a paired phone, tablet or guest browser
-  straight to the file — before it is routed, so one that bounces off an unconfigured agent is
-  still recallable, and never through the composer, whose draft and browse position belong to
-  whoever is at the desk. A remote *shell* command was already kept, by the same path as a local
+  straight to that pane's file — before it is routed, so one that bounces off an unconfigured
+  agent is still recallable, and never through the composer, whose draft and browse position
+  belong to whoever is at the desk. It is recalled in the pane it was sent to. A remote *shell* command was already kept, by the same path as a local
   one. `append()` stores a line identical to the one already at the end only once, which is what
   keeps the routed case (written at the door, then remembered again when the command runs) to a
   single entry — a prompt box can only dedupe against its own last line.
-- **Forgetting it.** The palette action `history.clear` ("Clear prompt history") confirms, deletes
-  the file and calls `RichEditor::forgetHistory()`, which drops the copy every open prompt box
-  holds — including one part-way through a browse, which would otherwise keep offering what was
-  just forgotten. Text already in a box is left alone: it is the person's now.
+- **Forgetting it.** The palette action `history.clear` ("Clear prompt history") confirms,
+  removes the whole per-pane directory (and the pre-2026-09-19 shared file, should one be left)
+  and calls `RichEditor::forgetAllHistory()`, which drops the copy every open prompt box holds —
+  including one part-way through a browse, which would otherwise keep offering what was just
+  forgotten. Text already in a box is left alone: it is the person's now.
+- **Bounded like the scrollback store.** Each pane's file is trimmed to its newest 1,000 entries
+  once it passes 512 KiB, and files whose pane is gone for good are pruned whenever the window
+  layout is written — the saved layout and the recently-closed list are the ids worth keeping,
+  the same list that prunes `state/scrollback/`. "Start a fresh window set" drops the store with
+  the layout: without the layout, no pane is coming back to claim its file.
 
 ## 4. Keyboard: Keymap, presets, palette
 
@@ -480,14 +531,17 @@ and records the hint only when that toast actually appears, asking the gates aga
 waiting behind other toasts costs none of its showings. Idle tips work the same way
 (`nextIdleTip()` picks, the pane records on display, and only into a pane with no toast up).
 Toasts are events and queue: while one is up the next waits, the one up keeps at least 1.5 s (its
-own time if shorter), identical consecutive toasts collapse. The agent turn clock ("thinking ·
-48 s · Esc stops") is state, not a toast: it lives in the strip under the prompt box, left of the
-context chip, while a turn runs. **Waiting on background work** (cards #V7QD and #KP4M): when the
-pane's main ("orchestrator") agent is blocked on the subagents or the jobs it started, the prompt
-box's own placeholder says so — "waiting for 2 subagents, 1 job . . .", the dots growing every
-600 ms — and the turn clock says "waiting for 2 subagents, 1 job · 48 s · Esc stops" instead of
-"thinking". `relay::panestatus::waitingLines` (`src/PaneStatus.{h,cpp}`, beside the pane states,
-because it belongs to neither model) holds the rule: a kind counts when some of it is live *and*
+own time if shorter), identical consecutive toasts collapse. The agent turn clock is state, not a
+toast: while a turn runs, the bold line above the prompt box says "Relaying <action>… · 48 s · Esc
+stops" in the agent's violet, right-aligned (`Pane::PaneBusyLine`, card #4E13) — the action a
+gerund of the live tool call ("thinking", "reading src/Pane.h") — and a program that owns the
+terminal gets the same line in the terminal's blue, "Relaying <program>…". **Waiting on
+background work** (cards #V7QD and #KP4M): when the pane's main ("orchestrator") agent is blocked
+on the subagents or the jobs it started, the prompt box's own placeholder says so — "waiting for
+2 subagents, 1 job . . .", the dots growing every 600 ms — and the busy line says "Relaying
+waiting for 2 subagents… · 48 s · Esc stops" instead of "thinking". `relay::panestatus::waitingLines`
+(`src/PaneStatus.{h,cpp}`, beside the pane states, because it belongs to neither model) holds the
+rule: a kind counts when some of it is live *and*
 either the main agent is explicitly blocked on it — `agent_wait`, a live foreground subagent, or a
 `command_output` call, which waits on a job — or no turn of its own is running. Only the kinds
 actually waited on are named, so a turn blocked on `agent_wait` while a background job also runs
@@ -501,7 +555,7 @@ no timer at all. `nextTime(shortcut, what)` builds the
 text from the live Keymap, so rebinding changes the hint and unbound actions get none. Current
 triggers: toolbar and palette activations of actions with shortcuts, pane buttons, the tab "+",
 tab close and ⧉ buttons, the plug's "Join with a code…" (→ `/join CODE`, `remote.join.button`), clicking into another pane, mouse model/effort/mode pickers, clicking
-the directory line (`@`), the queue × (on a steer row → ↑ then Shift+Delete), dragging a queued row
+the directory line (`@`), the palette's Update action (→ `/update`, `update.palette`), the queue × (on a steer row → ↑ then Shift+Delete), dragging a queued row
 (→ ↑ then Ctrl+↑↓; dropped above the steers → Ctrl+↑ sends it at the next tool call), `/shell ` and `/agent ` (`!`, `*`), `/help` (→ `?` in an
 empty prompt box), palette rewinds, pane
 drags, the first `relay://` link, a click on the pane's ⓘ button (→ `agent.info`, Alt+I; → `/status` only while nothing is bound), the Tasks chip and `/tasks`, `/requests`, `/todos` (→ `agent.requests`, Ctrl+Shift+K), Continue
@@ -926,11 +980,23 @@ screen. Output is buffered, and also shown live in the **transcript panel** abov
 when <program> exits", at most about 40% of the pane height, × hides it until the program
 exits. On the next `ready` event the buffer prints into the terminal and the panel resets.
 
-**Thinking and turn summaries (protocol 11).** `thinking_delta` text streams into a floating
-`thinkingOverlay` over the bottom of the terminal (not the transcript panel: that is in the
-layout, and resizing the terminal makes Readline redraw its prompt mid-output) when
-`agent/show_thinking` is on (default). `thinking_done` hides it and prints one Note line,
-`✦ thought for N s` (skipped for `chars: 0`). `turn_summary` (sent just before `done`) is stored
+**Thinking and turn summaries (protocol 11).** `thinking_delta` text streams into a **fold** in
+the terminal's own grid, under an anchor row of its own — `▸ ✦ thinking…`, column 0, hyperlinked
+to `relay://call/<pane token>/<turn id>/thinking` (`thinking-2`, … for a model that resumes
+reasoning after its answer) — opened with the first delta, updated coalesced (~4 Hz, the last
+12 000 characters rendered as markdown, capped at 400 rows with an "open in pane" row to
+`relay://turn/…`; a click on a settled anchor answers from the pane's buffer, no worker round
+trip). A reader who folds it away mid-stream is not asked again: the flush notices
+`foldExpanded()` disagreeing and stops pushing — `setFoldContent` opens what it sets, which would
+reopen over their click. `thinking_done` settles the fold, collapses it unless the reader toggled
+it or the setting is `always`, and rewrites the anchor row in place to `▸ ✦ thought for N s` (a
+stream that stopped mid-reasoning, `chars: 0`, gets `✦ thinking stopped` and still a fold of what
+arrived). How much of this runs at all is `agent/thinking_display` — `collapse` (default),
+`always`, `never`, which leaves the legacy single `✦ thought for N s` Note line and no fold; a
+settings file that still has the `agent/show_thinking` bool is migrated in place on first read.
+Alt+R (`agent.thinkingPanel`) toggles the latest fold, live while it streams and the last turn's
+afterwards, and every refusal toasts. The text is kept per turn whatever the display mode —
+`m_turnThinking` feeds the turn pane too. `turn_summary` (sent just before `done`) is stored
 per pane (last 50) and, when the turn used tools, prints `✦ N tool calls · T s` wrapped in an
 OSC 8 hyperlink to `relay://turn/<pane token>/<turn id>`. The live `tool_output {text}` stream and
 the stored reply `tool_output {stored: true, …}` share a name; the GUI branches on `stored`.
@@ -1262,7 +1328,8 @@ tool call, capped tool output, Relay-run terminal command and captured command o
 mirrored into an external-content FTS5 table by triggers.
 
 The index is a **cache**, never the source of truth: `SessionStore.save` refreshes a session's rows
-on every autosave, `reconcile()` (run once per worker, on its first conversation command) picks up
+on every autosave — including the throttled mid-turn ones, so a conversation being had is already
+searchable — `reconcile()` (run once per worker, on its first conversation command) picks up
 files the index missed and drops rows whose file is gone, and `index_rebuild` recreates everything
 from the session JSON. A corrupt database is deleted and recreated, in the constructor and again if
 SQLite reports corruption mid-query; a v1 database is migrated in place to v2 (subagent threads),
@@ -1414,7 +1481,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   chain ends in failure the turn reports the *first* provider's error, not the last one's. Options ›
   Models can turn it off (`agent/failover`).
 - Extra request keys are limited to `thinking`, `reasoning`, `reasoning_effort`,
-  `temperature`, `top_p`. `max_tokens` is **0 or 256–131072**, and 0 — the default, and every fallback when `provider/max_tokens` is unset — means *automatic*: the model's own documented output cap (`presets.max_output`; GLM-5.3 and Kimi K3 131072, GPT-6 Astra 128000, Gemini 3.1 Pro **65536**, an aggregator or an endpoint Relay cannot name 32768, a local server a quarter of its served window). A pinned number is kept but never sent above that cap, because a request over it is refused rather than trimmed. Output caps are published per model and are not a share of the context window: Gemini has a larger window than GLM-5.3 and half the output.
+  `temperature`, `top_p`. `max_tokens` is **0 or 256–131072**, and 0 — the default, and every fallback when `provider/max_tokens` is unset — means *automatic*: the model's own documented output cap (`presets.max_output`; GLM-5.3 and Kimi K3 131072, GPT-6 Astra 128000, Gemini 3.1 Pro **65536**, an aggregator, the hosted gateway or an endpoint Relay cannot name 32768, a local server a quarter of its served window). A pinned number is kept but never sent above that cap, because a request over it is refused rather than trimmed. Output caps are published per model and are not a share of the context window: Gemini has a larger window than GLM-5.3 and half the output.
 - Limits: 8 MiB request and response, 2 MiB per SSE event, 16 tool calls per response,
   30 s socket timeout. Cancel closes the response from another thread.
 - Tool-call fragments are assembled by index. `reasoning_content` and OpenRouter's
@@ -1695,6 +1762,102 @@ sourced) always shows a preview of exactly what would be stored, with the origin
 the worker writes from its own copy of that preview. The agent may propose an alias for a command
 run three times or more — a suggestion only, logged in `worker.log`.
 
+## 11a. Guest agents: Claude Code and Codex in a pane
+
+A **guest** is a CLI agent process (Claude Code, Codex) running in an ordinary terminal pane — not
+a Relay worker, not a BYOK preset. Relay's posture is the same as Warp's guest terminal agent
+("Relay does not try to turn Claude Code into a second worker backend; it observes, and it touches
+a guest only through the guest's own sanctioned surfaces", issue `GT7X`): no reverse-engineered
+internals, no keystroke automation, and any contact beyond observation is a step Relay offers and
+the user confirms — Relay never reaches into a project on its own. The reference spec is
+`docs/AGENT-SESSIONS-PROTOCOL.md` section 26, whose contracts (§26.3–26.8) are binding; every
+deviation from this section is written down there. Guests are **local-only**: none of the pane's
+`guest_model` / `guest_context_pct` / `guest_busy` state or the five guest event kinds crosses the
+wire to a remote host (`WITHHELD_EVENTS` in `remote/wire.py`, one regression test). The module
+root is `backend/relay_core/guest.py`; everything else is `guest_*.py` (no exceptions).
+
+- **Detection** (`guest.py`, and the pane's foreground watch): one `GuestSpec` per tool and
+  `classify_command()` over the live foreground argv — mirrored in C++ where the pane already
+  classifies its foreground process, one rule in two languages kept side by side — so a pane
+  *knows* it is running claude or codex (`Pane::guest()`) without scraping the screen.
+  `detect_installations()` answers what is installed from the tool itself (binary, version,
+  config dir), and an unreadable install is "installed, details unknown", never a guess.
+  Install state is never inferred from files by the GUI either: it is the installers' own
+  `--status` (below), re-read each time the Guests page is shown.
+- **One event channel** (§26.3): everything a guest phase learns reaches its pane as one
+  envelope — `{"token", "sequence", "event", "guest", "data"}`, the event one of `hook`,
+  `statusline`, `state`, `bridge`, `slash` — written by the single `shell/guest-event.py`
+  helper as a whole-file atomic replace of `guest.json` in the pane's runtime dir, which the
+  pane polls **by inode** beside `state.json` and dispatches in `Pane::pollGuestEvent`. The
+  pane accepts only its own pane token and a fresh sequence, and a missing `RELAY_GUEST_EVENT`
+  makes the helper a no-op that writes nowhere, so the entries Relay leaves in a tool's
+  settings are inert in an ordinary terminal. All five kinds are withheld from the wire, and
+  any future one is refused by the same regression test until an explicit owner decision adds
+  it to `KNOWN_EVENTS`.
+- **Claude hooks and the statusline shim** (§26.4, `guest_install.py` + `guest_hook.py`):
+  marked, additive entries in the project's `.claude/settings.json` — hooks `PreToolUse`,
+  `UserPromptSubmit`, `Stop` and `Notification` calling `"$RELAY_PYTHON" -m relay_core.guest_hook
+  <event>`, plus a `statusLine` shim that feeds the pane's guest chip while claude still
+  renders its own line. Every Relay command carries the `--relay-guest` marker, and turning
+  Guests off removes exactly the marked entries and nothing else. A statusline the user wrote
+  themselves is kept, not overwritten (the chip then simply has nothing to show), and a
+  `PreToolUse` is answered as a Relay question on the pane — never auto-approved. The global
+  `~/.claude/settings.json` gets the same entries only behind a second, explicit opt-in, and
+  only ever in addition to the project install.
+- **Codex: `notify` and the rollout tail** (§26.6, `guest_codex.py`): Codex has no IDE bridge
+  and no project scope, so its two marked entries — `notify` (run at the end of a turn with
+  the JSON payload as one argv item) and `[tui] notification_condition = "always"` (Codex
+  otherwise stays quiet in the focused terminal) — live in the user's `~/.codex/config.toml`
+  and fire in every terminal, which is exactly why the channel's no-op invariant matters. A
+  small TOML *document* model keeps every untouched byte untouched — enabling then disabling
+  returns the file byte for byte — and a key the user already owns is a hard
+  `SettingsConflict`, never overwritten. What the pane knows about a codex turn comes from
+  `notify` (which also reaches Relay's notification centre) and from tailing the newest
+  rollout under `~/.codex/sessions/YYYY/MM/DD/`; the app-server daemon stays Tier A.
+- **The Claude IDE bridge** (§26.5, `guest_bridge.py`, one sidecar per GUI run): Relay plays
+  the *editor* side of Claude Code's IDE integration — JSON-RPC 2.0 over a loopback-only
+  WebSocket, discovered upstream's own way: `CLAUDE_CODE_SSE_PORT` and
+  `ENABLE_IDE_INTEGRATION` in the pane's shell environment (`guest.bridge_env`, injected when
+  the terminal starts) and the `~/.claude/ide/<port>.lock` file a claude started anywhere
+  reads to find the same server. It serves the twelve IDE tools; `getDiagnostics` answers
+  `[]` — Relay has no LSP source, documented rather than faked. `openDiff` is the blocking
+  one: the unified diff travels the one channel as a `bridge` event, the pane shows Relay's
+  diff view ("claude proposes changes to …"), and the call returns only when the user decides
+  — `FILE_SAVED`, after the *sidecar* writes the file, so the GUI never writes a user file —
+  or `DIFF_REJECTED`, which is also what an unmatched, timed-out or abandoned request gets,
+  because a guest left hanging is worse than a guest told no. Every path an openDiff names
+  must `realpath`-resolve inside the one pane's workspace, checked again at the moment of the
+  write. `guest.diffSave` accepts the open proposal from the keyboard and carries the
+  feature's shortcut hint ("Next time: %1 saves claude's change").
+- **Sessions** (§26.7, `guest_sessions.py`): Claude's `~/.claude/projects/<cwd-slug>/`
+  transcripts and Codex's `~/.codex/sessions/` rollouts are two more Conversations sources
+  (`claude`, `codex`) beside Relay's own sessions and subagent threads. A record is
+  `{source, id, title, mtime, workspace, message_count, resume_command}`, and
+  `resume_command` is always the tool's own (`claude -r <id>`, `codex resume <id>`, and their
+  fork variants) — resuming is the tool's affair, run in a pane like any other command. The
+  index is a cache as everywhere else (`guest_sessions.reconcile()` on the worker's first
+  conversation command), and rename / pin / delete stay index-only: Relay never edits the
+  tool's files.
+- **Composer and input** (`guest_slash.py`, `src/Pane.h`): the pane builds the guest's slash
+  catalog from a static `relay_core.guest_slash` scan (claude: the built-ins plus the skills
+  and legacy-command locations it documents; codex: the stable TUI set), refreshed by live
+  `slash` events, and shows those commands in the `/` menu marked as the guest's own. Picking
+  one sends it to the pane as plain text — queued while the guest is busy ("Queued · sent to
+  <guest> when it is ready") — and the router treats a guest pane's composer as terminal
+  input throughout, the translator passing only what a TUI can take.
+- **Options** (Settings › Guests, `src/RelayWindow.h`): the rows are a thin front end over
+  the two installer command lines — `relay_core.guest_install` (project scope, and global
+  behind its own opt-in) and `relay_core.guest_codex` — each run with `-S -u -m` and the
+  shipped backend *appended* to PYTHONPATH, so the user's own environment keeps precedence.
+  The rows never guess at the files: showing the page re-reads `--status`, every apply draws
+  its state from the installer's own JSON answer, and the notice names the file that was
+  written — including the cases where what the user wrote themselves was kept because it is
+  theirs. No row declares a reset: off is what Relay ships, and off is idempotent.
+
+The pane's guest state rides the ordinary `program_state` (`guest_model`, `guest_context_pct`,
+`guest_busy`) so the title bar, tab labels and remote clients that are allowed to see process
+state can render it; it is stripped from wire frames like the rest of the guest surface.
+
 ## 12. Keys, keyring and imports
 
 `backend/relay_core/keystore.py`. A model server on this machine has no key and no entry here: its
@@ -1812,7 +1975,7 @@ highlighted row (runs an action, flips a toggle, opens a choice, focuses a field
 ← → switch Options tabs while the search is empty, Esc clears the search and then closes; Esc
 in a control goes back to the search first. What was taken from the reference apps is written at the
 top of `src/SettingsPane.h`: Warp's search-first sections with instant apply, Claude Code's Enter/Esc
-panel that returns to the prompt, opencode's one command list that carries the toggles too.
+panel that returns to the prompt, JetBrains' and VS Code's action list kept apart from settings.
 
 ## 13. Per-pane isolation
 

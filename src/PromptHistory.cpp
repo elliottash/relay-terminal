@@ -12,15 +12,36 @@
 namespace relay {
 namespace prompthistory {
 
-QString defaultDirectory() {
-    const QString data = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
-    if (data.isEmpty()) return {};
-    return data + QStringLiteral("/relay/state");
+namespace {
+// The same shape windowstate::isScrollbackId accepts (src/WindowState.cpp): a pane token, a UUID
+// without braces. Duplicated rather than shared so this library stays QtCore-only and standalone.
+bool isPaneId(const QString &id) {
+    if (id.size() < 8 || id.size() > 64) return false;
+    for (const QChar c : id) {
+        const ushort u = c.unicode();
+        const bool ok = (u >= '0' && u <= '9') || (u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z') || u == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
 }
 
-QString defaultPath() {
-    const QString dir = defaultDirectory();
-    return dir.isEmpty() ? QString() : dir + QStringLiteral("/prompt-history.txt");
+QString directory() {
+    const QString data = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    if (data.isEmpty()) return {};
+    return data + QStringLiteral("/relay/state/prompt-history");
+}
+
+QString pathFor(const QString &paneId) {
+    const QString dir = directory();
+    if (dir.isEmpty() || !isPaneId(paneId)) return {};
+    return dir + QLatin1Char('/') + paneId + QStringLiteral(".txt");
+}
+
+QString legacyPath() {
+    const QString data = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    if (data.isEmpty()) return {};
+    return data + QStringLiteral("/relay/state/prompt-history.txt");
 }
 
 QString encode(const QString &entry) {
@@ -132,14 +153,35 @@ bool append(const QString &path, const QString &entry, QString *error) {
     return true;
 }
 
-bool clear(const QString &path, QString *error) {
+bool clearDirectory(const QString &dir, QString *error) {
     if (error) error->clear();
-    if (path.isEmpty()) return true;
-    QFile file(path);
-    if (!file.exists()) return true;
-    if (file.remove()) return true;
-    if (error) *error = file.errorString();
+    if (dir.isEmpty()) return true;
+    if (!QDir(dir).exists()) return true;
+    if (QDir(dir).removeRecursively()) return true;
+    if (error) *error = QStringLiteral("Could not remove %1.").arg(dir);
     return false;
+}
+
+bool clearAll(QString *error) {
+    if (error) error->clear();
+    if (!clearDirectory(directory(), error)) return false;
+    // The file every pane shared until 2026-09-19: nothing reads it, but forgetting everything
+    // means it goes too.
+    const QString legacy = legacyPath();
+    if (!legacy.isEmpty() && QFile::exists(legacy) && !QFile::remove(legacy)) {
+        if (error) *error = QStringLiteral("Could not remove %1.").arg(legacy);
+        return false;
+    }
+    return true;
+}
+
+int prune(const QString &dir, const QStringList &keepPaneIds) {
+    if (dir.isEmpty()) return 0;
+    int removed = 0;
+    const auto files = QDir(dir).entryInfoList({QStringLiteral("*.txt")}, QDir::Files);
+    for (const QFileInfo &file : files)
+        if (!keepPaneIds.contains(file.completeBaseName()) && QFile::remove(file.absoluteFilePath())) ++removed;
+    return removed;
 }
 
 }  // namespace prompthistory

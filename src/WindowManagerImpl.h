@@ -104,10 +104,13 @@ inline void WindowManager::writeWindows(const QJsonArray &windows) {
     if (!relay::windowstate::write(m_statePath, relay::windowstate::document(windows), &error))
         fprintf(stderr, "relay: could not save the window layout: %s\n", qPrintable(error));
     // The saved layout is the list of panes that can still come back, so it is also the list of
-    // scrollback files worth keeping: everything else belonged to a pane that is gone for good.
-    // So is the recently-closed list: its panes are gone from the layout but not for good.
-    relay::windowstate::pruneScrollback(relay::windowstate::scrollbackIds(windows)
-                                        + relay::closed::scrollbackIds(closedRecords()));
+    // scrollback and prompt-history files worth keeping: everything else belonged to a pane that
+    // is gone for good. So is the recently-closed list: its panes are gone from the layout but
+    // not for good. Both stores are keyed by the same pane ids.
+    const QStringList keep = relay::windowstate::scrollbackIds(windows)
+                              + relay::closed::scrollbackIds(closedRecords());
+    relay::windowstate::pruneScrollback(keep);
+    relay::prompthistory::prune(relay::prompthistory::directory(), keep);
 }
 
 inline void WindowManager::saveLayoutNow() { writeWindows(captureWindows()); }
@@ -195,8 +198,11 @@ inline void WindowManager::forgetSavedLayout(bool suspend) {
     m_saveSuspended = suspend;
     if (!m_statePath.isEmpty()) QFile::remove(m_statePath);
     // Forgetting the layout forgets the terminal text with it: the saved scrollback is only there
-    // to fill the panes the layout brings back, and it is the more private half of the pair.
+    // to fill the panes the layout brings back, and it is the more private half of the pair. The
+    // prompt-history store goes the same way: it is per pane, and without the layout no pane is
+    // coming back to claim its file.
     relay::windowstate::removeAllScrollback();
+    relay::prompthistory::clearAll();
     // The recently-closed list goes the same way on disk: it names that text and those
     // conversations. It stays in memory, so what was closed in this run can still be reopened.
     if (!m_closedPath.isEmpty()) QFile::remove(m_closedPath);

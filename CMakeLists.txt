@@ -37,8 +37,8 @@ set(RELAY_KF KF${RELAY_QT_MAJOR})
 message(STATUS "Relay: building against ${RELAY_QT}")
 find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
 
-# The prompt box's history file: `$XDG_DATA_HOME/relay/state/prompt-history.txt`, shared by every
-# pane and kept across restarts. QtCore only, so it is tested headless.
+# The prompt box's history files: `$XDG_DATA_HOME/relay/state/prompt-history/<pane-id>.txt`, one
+# per pane and kept across restarts. QtCore only, so it is tested headless.
 add_library(relay-prompthistory STATIC src/PromptHistory.cpp src/PromptHistory.h)
 target_include_directories(relay-prompthistory PUBLIC src)
 target_link_libraries(relay-prompthistory PUBLIC ${RELAY_QT}::Core)
@@ -65,7 +65,7 @@ target_compile_options(relay-board PRIVATE -Wall -Wextra -Wpedantic)
 # removable registry of known projects under `$XDG_DATA_HOME/relay/state/projects.json`. QtCore only
 # and deliberately not part of relay-board, which links Widgets: candidateFor() is called on every
 # cwd change and must stay a filesystem walk with no git subprocess and no GUI behind it.
-add_library(relay-projects STATIC src/Projects.cpp src/Projects.h)
+add_library(relay-projects STATIC src/Projects.cpp src/Projects.h src/ProjectInit.cpp src/ProjectInit.h)
 target_include_directories(relay-projects PUBLIC src)
 target_link_libraries(relay-projects PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-projects PRIVATE -Wall -Wextra -Wpedantic)
@@ -269,10 +269,6 @@ add_library(relay-remotesession STATIC src/RemoteSession.cpp src/RemoteSession.h
 target_include_directories(relay-remotesession PUBLIC src)
 target_link_libraries(relay-remotesession PUBLIC ${RELAY_QT}::Core ${RELAY_QT}::Network)
 target_compile_options(relay-remotesession PRIVATE -Wall -Wextra -Wpedantic)
-# Files on the host a pane is logged into (#S5SH, docs/SSH-AND-MOSH.md section 9): the shell
-# quoting and the remote scripts that fetch and save one file over the user's own ssh connection,
-# and the batched `test -e` cache that says which paths in the output are the host's. The quoting,
-# the scripts and the "it changed under us" decision are plain rules; only QProcess touches ssh.
 # The shortcut-hint registry (WARP.md, "Shortcut hints"): how often a hint has been shown, when it
 # may be shown again, and the "Next time: …" wording. Plain QtCore over QSettings — a library
 # rather than a file in the app, so a pane widget can teach its own shortcut too (#S5SH).
@@ -280,7 +276,10 @@ add_library(relay-hints STATIC src/Hints.cpp src/Hints.h)
 target_include_directories(relay-hints PUBLIC src)
 target_link_libraries(relay-hints PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-hints PRIVATE -Wall -Wextra -Wpedantic)
-
+# Files on the host a pane is logged into (#S5SH, docs/SSH-AND-MOSH.md section 9): the shell
+# quoting and the remote scripts that fetch and save one file over the user's own ssh connection,
+# and the batched `test -e` cache that says which paths in the output are the host's. The quoting,
+# the scripts and the "it changed under us" decision are plain rules; only QProcess touches ssh.
 add_library(relay-remotefiles STATIC src/RemoteFiles.cpp src/RemoteFiles.h)
 target_include_directories(relay-remotefiles PUBLIC src)
 target_link_libraries(relay-remotefiles PUBLIC ${RELAY_QT}::Core)
@@ -364,7 +363,7 @@ target_compile_options(relay-toollabel PRIVATE -Wall -Wextra -Wpedantic)
 # on the include path for relay::FoldLine alone (a declaration -- the engine is not linked in).
 add_library(relay-calllines STATIC src/CallLines.cpp src/CallLines.h)
 target_include_directories(relay-calllines PUBLIC src ${CMAKE_CURRENT_SOURCE_DIR}/engine)
-target_link_libraries(relay-calllines PUBLIC relay-toollabel relay-diffview)
+target_link_libraries(relay-calllines PUBLIC relay-toollabel relay-diffview relay-markdown)
 target_compile_options(relay-calllines PRIVATE -Wall -Wextra -Wpedantic)
 
 add_library(relay-requests STATIC src/RequestLedger.cpp src/RequestLedger.h src/RequestsPanel.cpp src/RequestsPanel.h)
@@ -427,7 +426,7 @@ if(RELAY_BUILD_APP)
     install(FILES data/icons/org.relayterminal.Relay.svg data/icons/org.relayterminal.Relay-symbolic.svg
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
     # dataRoot() prepends <data>/scripts to PATH and points RELAY_OPEN_HELPER at relay-open.
-    install(PROGRAMS scripts/relay-open scripts/relay-agent.py scripts/relay-local.py DESTINATION ${CMAKE_INSTALL_DATADIR}/relay/scripts)
+    install(PROGRAMS scripts/relay-open scripts/relay-agent.py scripts/relay-local.py scripts/relay-update.py DESTINATION ${CMAKE_INSTALL_DATADIR}/relay/scripts)
     install(FILES packaging/org.relayterminal.Relay.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
     install(FILES README.md packaging/copyright DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/relay)
     include(packaging/cpack.cmake)
@@ -479,13 +478,6 @@ if(BUILD_TESTING)
     target_link_libraries(relay-fileindex-tests PRIVATE relay-fileindex ${RELAY_QT}::Test)
     add_test(NAME fileindex COMMAND relay-fileindex-tests)
 
-    add_executable(relay-closedstack-tests tests/closedstack_test.cpp)
-    target_link_libraries(relay-closedstack-tests PRIVATE relay-windowstate ${RELAY_QT}::Test)
-    add_test(NAME closedstack COMMAND relay-closedstack-tests)
-    add_executable(relay-closedlist-tests tests/closedlist_test.cpp)
-    target_link_libraries(relay-closedlist-tests PRIVATE relay-closedlist ${RELAY_QT}::Test)
-    add_test(NAME closedlist COMMAND relay-closedlist-tests)
-    set_tests_properties(closedlist PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-requests-tests tests/requests_test.cpp)
     target_link_libraries(relay-requests-tests PRIVATE relay-requests ${RELAY_QT}::Test)
     add_test(NAME requests COMMAND relay-requests-tests)
@@ -501,6 +493,13 @@ if(BUILD_TESTING)
     add_executable(relay-windowstate-tests tests/windowstate_test.cpp)
     target_link_libraries(relay-windowstate-tests PRIVATE relay-windowstate ${RELAY_QT}::Test)
     add_test(NAME windowstate COMMAND relay-windowstate-tests)
+    add_executable(relay-closedstack-tests tests/closedstack_test.cpp)
+    target_link_libraries(relay-closedstack-tests PRIVATE relay-windowstate ${RELAY_QT}::Test)
+    add_test(NAME closedstack COMMAND relay-closedstack-tests)
+    add_executable(relay-closedlist-tests tests/closedlist_test.cpp)
+    target_link_libraries(relay-closedlist-tests PRIVATE relay-closedlist ${RELAY_QT}::Test)
+    add_test(NAME closedlist COMMAND relay-closedlist-tests)
+    set_tests_properties(closedlist PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-runtimedirs-tests tests/runtimedirs_test.cpp)
     target_link_libraries(relay-runtimedirs-tests PRIVATE relay-runtimedirs ${RELAY_QT}::Test)
     add_test(NAME runtimedirs COMMAND relay-runtimedirs-tests)
@@ -579,6 +578,23 @@ if(BUILD_TESTING)
     # Reads the shipped theme files (and the sources it scans) from the source tree.
     set_tests_properties(buttonfit PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # Card #V8KT: renders the live pane-state marks (relay::chrome::tabIcon, paintStateGlyph)
+    # at every step of the pulse and fails when a step stops changing the painted pixels. It
+    # includes PaneChrome.h, which is the application's own translation unit, so it links the
+    # app's libraries rather than one small one.
+    add_executable(relay-pulsepaint-tests tests/pulsepaint_test.cpp tests/pulsepaint_paint.cpp)
+    target_link_libraries(relay-pulsepaint-tests PRIVATE relay-closedlist relay-localmodels
+        relay-projects relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown
+        relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents
+        relay-requests relay-conversations relay-completion relay-fileindex relay-backends
+        relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes
+        relay-queuenav relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage
+        relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen
+        relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing
+        relay-remotepane relay-panestate ${RELAY_QT}::Widgets ${RELAY_QT}::Test)
+    add_test(NAME pulsepaint COMMAND relay-pulsepaint-tests)
+    # Renders into pixmaps, so it needs a platform plugin like buttonfit does.
+    set_tests_properties(pulsepaint PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-titles-tests tests/panetitles_test.cpp)
     target_link_libraries(relay-titles-tests PRIVATE relay-titles ${RELAY_QT}::Test)
     add_test(NAME titles COMMAND relay-titles-tests)
@@ -631,6 +647,13 @@ if(BUILD_TESTING)
     add_executable(relay-projects-tests tests/projects_test.cpp)
     target_link_libraries(relay-projects-tests PRIVATE relay-projects ${RELAY_QT}::Test)
     add_test(NAME projects COMMAND relay-projects-tests)
+    # "Initialize a project and create a Switchboard here?": when it is asked, what the probe's
+    # findings read as, and which import kinds a ticked box asks for. Pure (src/ProjectInit.h); the
+    # pane and window wiring behind it is read as text, the way boardworkspace_test.cpp does.
+    add_executable(relay-projectinit-tests tests/projectinit_test.cpp)
+    target_link_libraries(relay-projectinit-tests PRIVATE relay-projects ${RELAY_QT}::Test)
+    target_compile_definitions(relay-projectinit-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME projectinit COMMAND relay-projectinit-tests)
     # Copy on highlight is header-only (src/CopyOnSelect.h); relay-diffview gives the test one
     # real pane surface that installs it.
     add_executable(relay-copyonselect-tests tests/copyonselect_test.cpp)
@@ -658,9 +681,8 @@ if(BUILD_TESTING)
     add_test(NAME backend-and-bash COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -v)
     # The suite takes ~150 s on this machine (2026-09-18); 120 s made every ctest run report it red.
     # XDG_DATA_HOME keeps session autosaves and the conversation index out of the real profile, and
-    # XDG_CONFIG_HOME keeps the developer's own settings out of the run: with a local model endpoint
-    # configured in the real profile, test_roles read it and the `local` role stopped falling back
-    # to main — two failures that only ever appeared on a machine Relay is actually used on.
+    # XDG_CONFIG_HOME keeps the developer's own settings out of the tests: with a local model
+    # configured, test_roles read it and the `local` role stopped falling back to main.
     set_tests_properties(backend-and-bash PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/backend;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-data-home;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/test-config-home;RELAY_KEYRING=off" TIMEOUT 600)
 endif()

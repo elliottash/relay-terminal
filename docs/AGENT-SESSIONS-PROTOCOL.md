@@ -95,6 +95,9 @@ keeps what it was set to across a provider switch, and the GUI shows it as the l
 
 - `set_mode {mode: "build"|"plan"}` → `mode_changed {mode}`.
 - Plan mode: run_command (with command_output and stop_command), read_file, list_directory, load_skill, read_skill_file stay available for investigation; write_file, edit_file and set_keybinding are removed from the tool list; the system prompt says to investigate without changing anything and to finish by calling `write_plan`.
+- Plan-mode turns run on the `planning` role (13.11): by default the pane's own model at `max`
+  reasoning, swapped for that turn only and then put back, with `plan_route` / `plan_route_ended` saying
+  so in the pane.
 - Tool `write_plan {title, content}` (plan mode only) writes `plans_dir/<YYYY-MM-DD-HHMM>-<slug>.md` and emits `plan_written {path, title}`. The GUI opens it in an editable pane.
 - The GUI executes a plan by sending `set_mode build` then `ask` with text referencing the plan path; "execute in fresh context" sends `reset` first.
 
@@ -574,13 +577,16 @@ without the JSON object gives `unaddressed: []` plus `error`.
   model still sees which tools ran.
 - Requests have one extra status, `cancelled` (model-cancelled via todos), distinct from `cancelled_by_user`.
 
-## 13. Model roles (v1.3, 2026-09-17)
+## 13. Model roles (v1.3, 2026-09-17; `planning` added v3.4, 2026-09-19)
 
 One configurable model per job. Backend: `backend/relay_core/roles.py` (resolution and defaults), with
 call sites in `agent.py`, `subagents.py`, `session_protocol.py`, `observe_protocol.py` and `worker.py`;
 tests: `tests/test_roles.py`. Source: `issues/features/needs_qa_llm/2026-09-17-model-roles-and-fast-agent.md` (owner,
-2026-09-17). All additive: existing fields keep their meaning, and a worker that gets no `roles` behaves
-exactly as before.
+2026-09-17); the `planning` role (13.11):
+`issues/features/needs_qa_llm/2026-09-19-plan-mode-turns-run-on-the-main-model-pushed-to.md` (owner, 2026-09-19). All
+additive: existing fields keep their meaning, and a worker that gets no `roles` behaves exactly as before.
+The newest role is `planning`, which serves plan-mode turns: by default the pane's own model pushed to
+`max` reasoning, so a plan is investigated harder without changing the pane's model (13.11).
 
 ### 13.1 Roles
 
@@ -598,10 +604,15 @@ exactly as before.
 | `audit` | the request audit (12.6) | Lite tier |
 | `vision` | image turns on presets without image support | GLM main → `glm-5.3-flash`, otherwise main |
 | `route_assist` | the routing assist call (section 11) | `google/gemini-3.5-flash-lite` on OpenRouter when a key is stored, else main |
+| `planning` | plan-mode turns (section 6) | the pane's own model at max reasoning; no swap when the effort is already max or the provider has no effort knob (13.11) |
 
 Side calls by role: compaction summaries and recaps use `summaries`; next-command/next-prompt suggestions
 use `suggestions`; the request audit uses `audit`; routing assist uses `route_assist`; instruction
 synthesis stays on `main`.
+
+`planning` is not a side call: it serves a plan-mode **turn** of the pane's own agent, the way `vision`
+serves an image turn, and its default is the pane's own model with `max` reasoning applied (13.11). Like
+`vision` and `route_assist` it is not tiered (13.7).
 
 `summaries`, `suggestions` and `audit` were split out of `flash` and `chores` on 2026-09-17 so the roles
 modal's Advanced list can name one job per row (owner). Their defaults resolve to the same models as
@@ -718,7 +729,10 @@ come from the messages. Context blocks Relay writes into a user message
 20000 entries.
 
 `SessionStore.save` refreshes the session's rows on **every autosave**, so the index follows the
-conversation without a separate crawl. Only sessions under `$XDG_DATA_HOME/relay/sessions` are
+conversation without a separate crawl. A turn that is still running writes its session too (at most
+every `MID_TURN_SAVE_S`, 10 s), so a conversation the user is looking at is listed and searchable
+while it happens rather than only once its turn ends — and is not lost if Relay stops mid-turn.
+Only sessions under `$XDG_DATA_HOME/relay/sessions` are
 indexed: a pane pointed at some other `session_dir` (tests, throwaway directories) stays out of
 it, and `RELAY_INDEX=off` disables indexing and the commands below entirely.
 
@@ -915,6 +929,11 @@ threads, entries, ms, conversations, bytes, schema_version, path}`.
 
 ### 14.8 Notes and deviations
 
+- A conversation is written to disk before its first turn ends: the prompt, the replies and each
+  tool result save through `Agent._autosave_soon()` (throttled by `MID_TURN_SAVE_S`, so a turn that
+  calls tools in a loop rewrites the file about every 10 s, not on every call). Without that, a
+  long first turn — and any pane that never finished one — had no session file, so it was absent
+  from this list and from search, and was lost when Relay stopped.
 - The index holds message text. It lives in the same 0700 directory as the sessions, is never
   synced, and holds nothing the session files do not already hold. There is no telemetry.
 - Since v2 the words of a query may sit in different turns (14.2); a quoted phrase still has to
@@ -1015,6 +1034,18 @@ until it reopens, a spent `quota_exhausted` allowance is never waited out; the 4
 (13.9) makes a second HTTP call for the same request and continues the first's count and budget
 rather than starting a fresh six. A local model server is excluded — its 5xx are deterministic,
 and its loading 503 keeps its own fixed wait inside the first-token budget.
+
+Since 2026-09-19 the transport itself also retries a *refused* request — HTTP 408, 409, 429 or any
+5xx from a provider that is not a local model server — up to six times, waiting what a
+`Retry-After` header names (seconds, milliseconds or an HTTP date, capped at a minute) and
+otherwise backing off exponentially (0.5 s doubling to 8 s, with jitter); this is the policy
+Claude Code's transport uses. The status arrives before anything streams, so the retry repeats
+nothing the user has seen. Each wait emits the same event with `reason: "http"` and no `turn_id`
+(the transport does not know the turn), plus a `status`; the refusal becomes an `error` only when
+the attempts run out. Relay's own gateway decides from its error body: a `rate_limited` window is
+waited out until it reopens, a spent `quota_exhausted` allowance is never waited out. A local
+model server is excluded — its 5xx are deterministic, and its loading 503 keeps its own fixed
+wait inside the first-token budget.
 
 `turn_summary` is unchanged; the retry is not a new turn and the ledger entry stays `in_progress`.
 
@@ -1311,6 +1342,48 @@ change nothing (#G5MK).
 `presets` rows carry `max_output` so the GUI can show it. A stored `provider/max_tokens` of 32768 —
 the old default, which was also the old top of the range — migrates to 0 once at startup
 (`migrateOutputTokenCeiling`); any other stored number was chosen on purpose and is left alone.
+
+### 13.11 The `planning` role: what serves a plan-mode turn (v3.4, 2026-09-19)
+
+Owner, 2026-09-19: "allow a separate planning agent with higher reasoning. change to max reasoning by
+default." A plan-mode turn (section 6) runs on the `planning` role, decided once per turn before the
+first model request, the way an image turn decides its model (17.3). The role's **default is the pane's
+own model pushed to `max` reasoning**: `roles.RoleResolver._default` applies
+`apply_effort(main.extra, style, "max")` to the pane's own config, so a plan is investigated harder
+without changing the pane's model, preset or key. `planning` is an ordinary settable role —
+`roles.planning` takes the same fields as any other (13.2) — and a model the user picked by hand always
+wins over the default, swapping for the turn whatever the pane's effort is.
+
+When the effort knob cannot move — the provider has no effort parameter at all (Anthropic, MiniMax;
+effort style `none`, section 3) or the pane's own effort is already `max` — the role resolves back to
+the main agent, and that is not a swap at all. Two outcomes, as for images:
+
+| Case | What happens |
+|---|---|
+| The role resolves to the main agent (effort already max, or no provider effort knob) | nothing changes; no event |
+| It resolves elsewhere (the default at raised effort, or a hand-picked model) | **that turn only** runs on it, then the pane goes back |
+
+New events:
+
+| Event | When | Fields |
+|---|---|---|
+| `plan_route` | a plan-mode turn starts on the planning role's model | `turn_id`, `model`, `from_model`, `preset`, `base_url`, `source`, `effort`, `scope: "turn"`, `text` |
+| `plan_route_ended` | that turn is over, whatever ended it | `turn_id`, `model` (back to this), `was`, `text` |
+
+Both come **before** the turn's terminal event, so `done` / `error` / `cancelled` stay last. No event is
+sent when the planning role resolves to the main agent, so a pane whose provider has no effort knob, or
+whose effort is already max, behaves exactly as it did before this section. `source` is the role's own
+resolution source (13.4): `default` for the built-in default, `configured` for a hand-picked one — never
+`main` or `fallback`, which are the cases that send no event at all. `text` is the sentence the pane
+prints: it names the serving model when it is not the pane's own, and otherwise says the pane's model
+runs at `max` reasoning.
+
+A `set_model` accepted while a plan turn runs is deferred to the turn's end (`applies: "turn_end"`, with
+`in_flight_model` the planning model), exactly like an image turn (section 2): the turn finishes on the
+model it started on. The GUI prints the routing line (`◆ <text>`) and names the serving model in the
+model chip while the turn runs, and clears it on `plan_route_ended` — the same behaviour as
+`vision_route` (17.3). A plan turn that also carries an image nests: the plan swap is decided first and
+the vision swap goes inside it.
 
 ## 16. Voice transcription (v1.6, 2026-09-17)
 
@@ -2155,6 +2228,98 @@ the answer has to come in on, so it cannot block: the write is **parked** and re
 "switchboard/threads/.gitkeep", ".gitattributes"]`. The last is the project's own, appended (the
 union-merge rule for the card threads, named against this board's folder) and is the only file
 written outside the board folder; it is listed so the GUI can say so.
+
+**Who asks, and in what order** (the desktop's half, 2026-09-19; `src/ProjectInit.h` is the table
+and `src/ProjectInitBlock.h` draws it). Exactly five acts may raise the question, once per project:
+
+| Trigger | Attach reason | Raised by |
+|---|---|---|
+| the first prompt sent to the agent in a pane standing in a git repository with no board | `agent-work` | `Pane::submitAgent` |
+| the agent's first card | `agent-card` | the worker's `board_init_request` |
+| opening the Switchboard (Ctrl+Shift+S, the palette, `/switchboard`) | `switchboard` | `RelayWindow::toggleBoardPane` |
+| `/card <text>` — the text is held and lands as the first card on the yes | `card-command` | `Pane` |
+| `/init`, which also clears a remembered no, and with no candidate offers the pane's own directory | `init-command` | `Pane`, and one palette item |
+
+A `cd`, launching Relay, hovering, `#` typed in the composer and opening a file **never** ask. A no
+is `projects::Registry::decline()` and outlives the process; "Not now" is neither a yes nor a no and
+only silences the first trigger for the rest of the session. The question is drawn inline in the
+pane, never as a dialog, and **never blocks what raised it**: the prompt goes to the agent first and
+the question appears beside it.
+
+The GUI's order on a yes is fixed by `_resolve`, not by taste. An **unattached** pane has no board
+object at all, so a `board_init` sent to it answers the no-board error: the tab is attached first
+with `set_board {project, state: "uninitialized"}` and `board_init` goes out only when the
+`board_state {applies: "now"}` for that attach arrives. Mid-turn that `set_board` is deferred to the
+end of the turn (19.11), which is exactly when a yes given mid-turn is meant to take effect. When
+the **worker** asked (`board_init_request`), the pane is attached already and `board_init_answer
+{accept: true}` is the whole of it — the worker creates the board and completes the held card.
+
+### 19.13 What is already in the project, and importing it (v3.1, 2026-09-18)
+
+Before the init question of 19.12 is asked, the GUI asks the worker what is in the project; after
+the board exists, it offers to turn what was found into cards. Three messages, all requiring an
+explicit `project`. Detail — what each tracker looks like, how an item maps onto a card, and why
+`source_key` is what it is — is in [`PROJECT-INIT-AND-IMPORT.md`](PROJECT-INIT-AND-IMPORT.md);
+`backend/relay_core/project_probe.py` reads, `board_import.py` writes.
+
+| Message | Reply |
+|---|---|
+| `project_probe {id?, project, kinds?}` | `project_probe_result {id, root?, …}` — §3 of that document, verbatim |
+| `board_import_propose {id?, project, kinds?}` | `board_import_proposals {id, root?, project, proposals, skipped}` |
+| `board_import_apply {id?, project?, keys, tab?, kinds?}` | `board_imported {id, root, project, cards, skipped}`, then `board_changed` |
+
+**`project` is required and absolute, and there is no default.** A missing, empty or relative one
+is an `error`: the worker runs in whatever directory the GUI started it in, and probing *that*
+would read a tree nobody asked about. `kinds` limits the run to some of
+`project_probe.TRACKER_KINDS`; an unknown kind is an error.
+
+**`project_probe`** needs no board — it is what is asked *before* there is one — writes nothing,
+opens no socket and runs no subprocess, and is safe to send repeatedly. It carries `root` only
+when that project already has a board. `board_import_propose` writes nothing either; `proposals`
+is `Proposal.to_dict()` each (title, status, labels, body, `tasks`, `source`, `depends_on`,
+`order`) and `skipped` counts the items already imported, so the dialog can say "23 of 30".
+
+**`board_import_apply`** needs a **ready** board: an uninitialized one answers `error` with the
+"create one first" text, since the GUI's path is `board_init` (19.12) and then this. `keys` is the
+ticked subset of the last `board_import_proposals` and nothing else from that message is trusted —
+the proposals are re-derived from the project here, so no card body ever comes off the wire. It
+goes through the same busy guard as an ask (`code: "board_busy"` while a Switchboard turn is
+running, `code: "forge_busy"` while a sync is), writes through `BoardTools` like every other owner
+write, and answers with one row per card (`{id, source_key, path, status, tab}`); `skipped` lists
+the keys that produced no card, because they were imported before or are no longer in the project.
+`project` defaults to the pane's own board's project and may not name another one.
+
+### 19.14 Syncing the board with GitHub issues (v3.1, 2026-09-18)
+
+Two messages on the worker that already owns the board. The mapping, the three-way merge, the
+privacy guard and the credential rules are in [`GITHUB-SYNC.md`](GITHUB-SYNC.md);
+`backend/relay_core/forge_sync.py` is the engine and `forge_github.py` the provider.
+
+| Message | Events |
+|---|---|
+| `forge_sync_plan {id?, repo?, base_url?}` | `forge_sync_planned {id, root, repo, dry_run: true, cards, creates, pushed, pulled, conflicts, needs_confirm, cap, idle, errors}` |
+| `forge_sync_run {id?, repo?, base_url?, confirm_bulk?}` | `forge_sync_progress {id, root, card, title, action, number, done, total}` per card, then `forge_sync_done {id, root, repo, pushed, pulled, imported, comments_out, comments_in, conflicts, errors, cards, retry_at?, retry_at_text?}` and `board_changed` |
+
+Both need a **ready** board and take the same busy guard as 19.13. The network work runs on a
+thread, like `hosted_quota` (13.9), so the message loop never waits on GitHub, and **exactly one**
+terminal event follows either way: `forge_sync_planned`, `forge_sync_done`, or `error {id, root,
+code, text}`. An error never carries a traceback and never a credential — the token lives in the
+provider, is scrubbed out of anything raised, and never crosses this pipe in either direction.
+`code` is `forge_auth` (no credential — offer a sign-in), `forge_rate_limited` (with `retry_at`
+and `retry_at_text`), `forge_unavailable`, `forge_privacy`, `forge_failed`, or
+`forge_sync_failed` for a bug here, whose `text` names only the exception type. A second sync, or
+a `board_import_apply`, while one is running answers `error {code: "forge_busy"}`.
+
+`repo` and `base_url` default to `board.yaml`'s `github:` block (`repo`, `base_url`, `create_cap`,
+`default_tab`, `comment_kinds`); a board with neither answers an `error` naming the file to put it
+in. The person → login map is **not** in `board.yaml`: it is per user, in
+`<board>/.private/forge-logins.yaml` (or `.json`), and without it an assignee is simply not
+synced. `forge_sync_plan` writes to neither side; `forge_sync_run` refuses and answers
+`needs_confirm: true` when the plan would create more than `cap` issues, until `confirm_bulk`.
+
+All six events of 19.13 and 19.14 are desktop-only in `remote/wire.py`: they carry local file
+paths and answer the desktop's own dialogs, and the card changes a phone cares about arrive in the
+`board_changed` that follows.
 
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 
@@ -3326,10 +3491,18 @@ app-server daemon remains Tier A, deferred.
 The sessions pane lists guest sessions beside Relay's own: source `claude` reads
 `guest.claude_projects_dir()` (`<cwd-slug>/<session-id>.jsonl`), source `codex` reads the
 rollouts and `guest.codex_state_db()` (highest `state_*.sqlite`). A record is
-`{source, id, title, mtime, workspace, message_count, resume_command}`; `resume_command` respawns
-the guest in the chosen pane (`claude -r <id>`, fork `--fork-session`; `codex resume`, fork per
-its CLI). Search spans all sources; the active pane's live transcript is tailed so a running
-session appears without a rescan.
+`{source, id, title, mtime, workspace, message_count, resume_command, resume_cwd}`;
+`resume_command` respawns the guest in the chosen pane (`claude -r <id>`, fork `--fork-session`;
+`codex resume`, fork per its CLI) and **must be spawned with the working directory set to
+`resume_cwd`** (the session's own workspace, `""` when the transcript named none): both guests
+resolve a session id against the directory they start in — claude by the `<cwd-slug>` directory
+holding its transcripts — so the same argv run elsewhere reports an unknown session.
+`guest_sessions.resume_spawn()` returns the pair as `{argv, cwd}`. A session's id is the one its
+transcript file is named after, which is both what the guest resumes by and what the index row is
+keyed on. Search spans all sources; the active pane's live transcript is tailed so a running
+session appears without a rescan; `guest_sessions.reconcile(index, limit=N)` reads only the N
+newest transcripts per source and therefore prunes nothing (only a full reconcile drops rows
+whose transcript is gone).
 
 ### 26.8 Composer routing and the slash registry
 

@@ -103,7 +103,8 @@ QStringList reasons()
             QString::fromLatin1(kReasonCardPicker),  QString::fromLatin1(kReasonExecuteCard),
             QString::fromLatin1(kReasonPicker),      QString::fromLatin1(kReasonAgentWrite),
             QString::fromLatin1(kReasonRestored),    QString::fromLatin1(kReasonRepoBoard),
-            QString::fromLatin1(kReasonInitCommand), QString::fromLatin1(kReasonAgentCard)};
+            QString::fromLatin1(kReasonInitCommand), QString::fromLatin1(kReasonAgentCard),
+            QString::fromLatin1(kReasonAgentWork)};
 }
 
 bool isReason(const QString &reason) { return reasons().contains(reason); }

@@ -1,0 +1,14 @@
+theme: relay-dark agent=#b48ef7 background=#0f1115 -> chip fill=#292539
+
+none  badge: none                     fill=   0px  ink=  0px   diff vs none: identical                  0px
+      header OCR: fo project TERMINAL ~/project @) m@ K x )
+one   badge: x 183..219, y 12..28     fill= 467px  ink= 24px   diff vs none: (13, 11, 278, 29)       2344px
+      header OCR: { +, Subagents working (41) project TERMINAL ~/project G@) gw RK x )
+two   badge: x 183..219, y 12..28     fill= 449px  ink= 37px   diff vs none: (14, 11, 278, 29)       2329px
+      header OCR: { +. Subagents working (#2) project TERMINAL ~/project Gg RK x )
+busy  badge: x 120..156, y 12..28     fill= 467px  ink= 24px   diff vs none: (15, 11, 215, 29)       1814px
+      header OCR: [+ Relaying. EM) project TRIAL ~Porciect GD B OR x |
+endedlive badge: x 183..219, y 12..28     fill= 467px  ink= 24px   diff vs none: (13, 11, 278, 29)       2344px
+      header OCR: { +, Subagents working (41) project TERMINAL ~/project G@) gw RK x )
+ended badge: none                     fill=   0px  ink=  0px   diff vs none: (37, 0, 203, 30)         905px
+      header OCR: fo Scanned auto TERMINAL ~/project @) w@ KR x )

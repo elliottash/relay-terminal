@@ -888,6 +888,10 @@ class ConversationIndex:
         next reconcile cheap — and `session_dir` stays empty, because the guests' directories are
         not Relay's to write. A user's pin (or rename) survives a re-index, as it does for the
         other sources.
+
+        `custom_title` and `pinned` in `data` override what the row holds, **one key at a time**:
+        a caller that renames a session says only `custom_title` and the pin it did not mention
+        stays on, and a caller that pins says only `pinned` and keeps the name the user gave.
         """
         source = str(data.get("source") or "")
         session_id = str(data.get("id") or "")
@@ -902,23 +906,27 @@ class ConversationIndex:
         mtime = float(mtime) if isinstance(mtime, (int, float)) and not isinstance(mtime, bool) else None
 
         def work(db):
-            keep = db.execute("SELECT custom_title, pinned FROM conversations WHERE session_id=?",
-                              (session_id,)).fetchone()
-            if "custom_title" in data or "pinned" in data:
-                keep = {"custom_title": data.get("custom_title") or None,
-                        "pinned": 1 if data.get("pinned") else 0}
+            stored = db.execute("SELECT custom_title, pinned FROM conversations WHERE session_id=?",
+                                (session_id,)).fetchone()
+            # Merge per key: whichever of the two `data` does not mention keeps the stored value,
+            # so a rename does not clear the pin and a pin does not clear the rename.
+            custom_title = stored["custom_title"] if stored else None
+            pinned = int(stored["pinned"] or 0) if stored else 0
+            if "custom_title" in data:
+                custom_title = data.get("custom_title") or None
+            if "pinned" in data:
+                pinned = 1 if data.get("pinned") else 0
             db.execute("DELETE FROM entries WHERE session_id=?", (session_id,))
             db.execute(
                 "INSERT OR REPLACE INTO conversations(session_id, source, workspace, project, title, custom_title,"
                 " model, preset, created, updated, turns, open_requests, session_dir, pinned, file_mtime,"
                 " indexed_version)"
                 " VALUES(?,?,?,?,?,?, '', '', ?, ?, ?, 0, '', ?, ?, ?)",
-                (session_id, source, workspace, project_name(workspace), title,
-                 keep["custom_title"] if keep else None,
+                (session_id, source, workspace, project_name(workspace), title, custom_title,
                  data.get("created") or mtime, mtime or time.time(),
                  max(0, int(data.get("message_count") or 0)),
-                 int(keep["pinned"]) if keep else 0, mtime, SCHEMA_VERSION))
-            written = header_entries((keep["custom_title"] if keep else None) or title, "") + rows
+                 pinned, mtime, SCHEMA_VERSION))
+            written = header_entries(custom_title or title, "") + rows
             db.executemany(
                 "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
                 [(session_id, int(row.get("turn") or 0), int(row.get("seq") or 0),

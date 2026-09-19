@@ -20,6 +20,8 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [RELAY-FREE.md](RELAY-FREE.md) | Relay Free: the included hosted allowance for a fresh install — identity, token, gateway contract, quotas, privacy posture, operating notes and what exists so far (`#HG7K`) |
 | [RELAY-FREE-HANDOFF.md](RELAY-FREE-HANDOFF.md) | Handoff for the three open Relay Free items: the allowance chip in the phone and Relay-to-Relay views, tuning the Lite output cap from measured replies, and moving Lite to Gemini direct (`#HG7K`) |
 | [REMOTE-PROTOCOL.md](REMOTE-PROTOCOL.md) | RRP/1: the wire contract for phone access and multiplayer — Noise handshake, pairing, messages, sequencing, the rendezvous API, and what is built so far |
+| [PROJECT-INIT-AND-IMPORT.md](PROJECT-INIT-AND-IMPORT.md) | What Relay finds in a project offline before it offers to make a Switchboard, the seven trackers it can import, how an item becomes a card, and the `project_probe` / `board_import_*` messages |
+| [GITHUB-SYNC.md](GITHUB-SYNC.md) | Two-way sync between shared work cards and GitHub issues: the mapping, the three-way merge, conflicts, the privacy guard, credentials, rate limits, and the `forge_sync_*` messages |
 
 ## Research (inputs to decisions; may describe earlier behavior)
 
@@ -33,7 +35,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [MEMORY-AND-MULTI-REQUEST-RESEARCH.md](MEMORY-AND-MULTI-REQUEST-RESEARCH.md) | How Claude Code, Codex, opencode and Warp keep track of multiple requests and long conversations; Relay drop paths and fixes |
 | [SWITCHBOARD-DESIGN.md](SWITCHBOARD-DESIGN.md) | Board (Switchboard) v2: issues/ as Trello-like cards with agent threads, git format, agent tools and autonomy, conversion, phases |
 | [TASKS-AND-MEMORY-DESIGN.md](TASKS-AND-MEMORY-DESIGN.md) | Agent task list (todos, card checklist items, cards) and project memory in the Switchboard: Claude Code and Warp compared, formats, tools, UI, phases |
-| [SWITCHBOARD-FORMAT.md](SWITCHBOARD-FORMAT.md) | The Switchboard file format reference (phase 0): card front matter per type, task markers, threads, ids, ranks, board.yaml, `relay-board.py` check/index/migrate |
+| [SWITCHBOARD-FORMAT.md](SWITCHBOARD-FORMAT.md) | The Switchboard file format reference: the board folder (`switchboard/`, or `issues/` where it already exists), card front matter per type, task markers and their `blocked_by=`, threads, ids, ranks, board.yaml, `relay-board.py` check/index/migrate |
 | [TERMINAL-ENGINE-OPTIONS.md](TERMINAL-ENGINE-OPTIONS.md) | Permissively licensed, cross-platform terminal cores and widgets compared (libghostty-vt, Contour, alacritty_terminal, xterm.js, libvterm, GPL references) |
 | [AGENT-FEATURES-RESEARCH.md](AGENT-FEATURES-RESEARCH.md) | Session, planning, model/effort, command and subagent UX in Warp, opencode, Claude Code and Codex; recommendations and a subagent design for Relay |
 | [PALETTE-RESEARCH.md](PALETTE-RESEARCH.md) | Palette designs in other tools; recommended two palettes, later merged into one actions palette, since 2026-09-18 the Actions tab and search of the Settings pane |

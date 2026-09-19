@@ -11,6 +11,8 @@
 #include <QStandardPaths>
 #include <QRegularExpression>
 
+#include <algorithm>
+
 #include <unistd.h>
 
 // ----- per-pane process isolation ----------------------------------------------------------
@@ -39,11 +41,77 @@ inline bool available() {
     return state == 1;
 }
 
+// Total RAM / swap in bytes, from /proc/meminfo; 0 when it cannot be read.
+inline qulonglong memInfo(const char *key) {
+    QFile file(QStringLiteral("/proc/meminfo"));
+    if (!file.open(QIODevice::ReadOnly)) return 0;
+    const QByteArray prefix = QByteArray(key) + ':';
+    for (const QByteArray &row : file.readAll().split('\n'))
+        if (row.startsWith(prefix)) return row.mid(prefix.size()).trimmed().split(' ').first().toULongLong() * 1024;
+    return 0;
+}
+
+// Defaults scaled to the machine, so the same binary protects a 121G workstation and an 8G
+// laptop: the caps exist to stop one pane taking the machine down, so they follow its size.
+// An unreadable /proc/meminfo falls back to the old flat defaults. Rounded to whole GiB.
+inline QString sized(qulonglong bytes) {
+    return QString::number(std::max<qulonglong>(1, (bytes + (1ULL << 29)) >> 30)) + QStringLiteral("G");
+}
+
+// Agent worker: clamp(RAM/16, 2G, 8G) — a long conversation plus the builds it runs needs
+// multi-GB, while a small machine keeps a 2G floor.
+inline QString agentDefault() {
+    const qulonglong ram = memInfo("MemTotal");
+    return ram ? sized(std::min(8ULL << 30, std::max(2ULL << 30, ram / 16))) : QStringLiteral("2G");
+}
+
+// Pane shell: clamp(RAM/2, 4G, 16G) — shells run whatever the user runs, so they get more.
+inline QString shellDefault() {
+    const qulonglong ram = memInfo("MemTotal");
+    return ram ? sized(std::min(16ULL << 30, std::max(4ULL << 30, ram / 2))) : QStringLiteral("8G");
+}
+
+// Swap caps: a slice of total swap, floored so a kill still comes quickly.
+inline QString agentSwapDefault() {
+    const qulonglong swap = memInfo("SwapTotal");
+    return swap ? sized(std::min(2ULL << 30, std::max(512ULL << 20, swap / 8))) : QStringLiteral("512M");
+}
+
+inline QString shellSwapDefault() {
+    const qulonglong swap = memInfo("SwapTotal");
+    return swap ? sized(std::min(4ULL << 30, std::max(1ULL << 30, swap / 4))) : QStringLiteral("2G");
+}
+
 // A systemd size such as "8G", "512M" or "infinity"; anything else falls back to the default.
-inline QString memory(const char *key, const char *fallback) {
-    const QString value = QSettings().value(QString::fromLatin1(key), QString::fromLatin1(fallback)).toString().trimmed();
+inline QString memory(const char *key, const QString &fallback) {
+    const QString value = QSettings().value(QString::fromLatin1(key), fallback).toString().trimmed();
     static const QRegularExpression valid(QStringLiteral("^(\\d+[KMGT]?|infinity)$"));
-    return valid.match(value).hasMatch() ? value : QString::fromLatin1(fallback);
+    return valid.match(value).hasMatch() ? value : fallback;
+}
+
+// A valid systemd size in bytes, or 0 when it does not parse.
+inline qulonglong parseSize(const QString &size) {
+    QString digits = size;
+    qulonglong multiplier = 1;
+    if (!digits.isEmpty() && !digits.back().isDigit()) {
+        const QChar unit = digits.back();
+        digits.chop(1);
+        if (unit == QLatin1Char('K')) multiplier = 1ULL << 10;
+        else if (unit == QLatin1Char('M')) multiplier = 1ULL << 20;
+        else if (unit == QLatin1Char('G')) multiplier = 1ULL << 30;
+        else if (unit == QLatin1Char('T')) multiplier = 1ULL << 40;
+        else return 0;
+    }
+    bool ok = false;
+    const qulonglong value = digits.toULongLong(&ok);
+    return ok ? value * multiplier : 0;
+}
+
+// `percent`% of a resolved size, so MemoryHigh follows whatever MemoryMax resolved to;
+// "infinity" and unparseable sizes pass through unchanged.
+inline QString fractionOf(const QString &size, int percent) {
+    const qulonglong bytes = parseSize(size);
+    return bytes ? sized(bytes * percent / 100) : size;
 }
 
 // Arguments that run `command` inside the named scope.

@@ -242,7 +242,7 @@ private:
         add("files.explorer", "pane", "File explorer: open or close this pane's folder in an explorer pane",
             {QStringLiteral("Ctrl+B"), QStringLiteral("Ctrl+Shift+B")});
         add("files.open", "pane", "Open a file in a preview pane", {});
-        add("board.open", "pane", "Switchboard: cards, threads and plans", {QStringLiteral("Ctrl+Shift+S")});
+        add("board.open", "pane", "Switchboard: cards, threads and plans (again to close it)", {QStringLiteral("Ctrl+Shift+S")});
         add("control.human", "terminal", "Take control of the terminal (the only way keys reach it; works from the prompt box)", {QStringLiteral("Ctrl+H")});
         add("control.prompt", "terminal", "Back to the Relay prompt (the agent is in control)", {QStringLiteral("Ctrl+Shift+H")});
         add("program.delegate", "terminal", "Let the agent drive the program in this pane (with text in the prompt box, ask it now)",
@@ -294,6 +294,9 @@ private:
         // is the one a program cannot swallow. Ctrl+, stays as the key other apps taught.
         add("app.settings", "window", "Options: what persists, a tab per section (again to close it)",
             {QStringLiteral("Ctrl+Shift+O"), QStringLiteral("Ctrl+,")});
+        // No default key: /update in the prompt box is the fast path, and a key nobody presses on
+        // the average session is not worth claiming (the same reasoning as agent.localAgent).
+        add("app.update", "window", "Update: download and install the latest Relay, then restart", {});
         add("agent.flashAgent", "agent", "Switch this pane between the Main agent and the Flash agent", {QStringLiteral("Alt+F")});   // model roles
         // No default key: /local in the prompt box is the fast path, and Alt+L is not worth
         // claiming for a switch most panes never make (card #JH22).
@@ -330,14 +333,14 @@ private:
             {QStringLiteral("Ctrl+F"), QStringLiteral("Ctrl+Shift+F")});
         add("agent.recap", "agent", "Recap this agent session", {});
         add("agent.requests", "agent", "Tasks: show or hide the agent's task list (/tasks)", {QStringLiteral("Ctrl+Shift+K")});
-        // The reasoning panel from the keyboard (owner report, 2026-09-18: "need a keyboard
+        // The reasoning fold from the keyboard (owner report, 2026-09-18: "need a keyboard
         // shortcut for showing / hiding the reasoning traces, maybe an F# key -- ... or alt+R").
         // Alt+R is his suggestion and no preset binds it: the only Alt+letter Relay has is Alt+F
         // (fast agent), and the four preset tables override no Alt+letter at all, so all of them
         // inherit this default. No Ctrl+Shift twin (Ctrl+Shift+R is pane.restartShell) and no
         // F-key twin yet: which F-keys Relay should claim is docs/F-KEYS.md's question, not a thing
         // to settle one action at a time.
-        add("agent.thinkingPanel", "agent", "Reasoning: show or hide the thinking panel for this pane",
+        add("agent.thinkingPanel", "agent", "Reasoning: fold or unfold this pane's latest reasoning",
             {QStringLiteral("Alt+R")});
         add("agent.continue", "agent", "Continue the agent turn after a step limit (/continue)", {});
         add("agent.instructions", "agent", "Choose agent instruction files", {});

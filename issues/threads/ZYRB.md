@@ -1,0 +1,8 @@
+<!-- relay:entry 20260919T020040Z-te author=agent kind=event model=glm-5.3 pane=7455950c turn=4e62ce12087147089586ffc7d1fb2721/da613e73ce9d48e09c1969fd7cb8a991 -->
+- ✦ agent created this card in Inbox · issues/changes/2026-09-18-onboarding-instructions-dialog-still-shows-when.md
+
+<!-- relay:entry 20260919T020048Z-rd author=agent kind=note model=glm-5.3 pane=7455950c turn=4e62ce12087147089586ffc7d1fb2721/da613e73ce9d48e09c1969fd7cb8a991 -->
+Measured in the code: on the first configured agent pane (`src/Pane.h` ~2488, `instructions/onboarded` false) Relay always opens the dialog via `openInstructions()`, regardless of what `scan_instructions` found. With zero files the dialog still renders — empty tree plus the "No instruction files were found (CLAUDE.md, AGENTS.md, …)" label in `chooseInstructions()` (`src/AgentUi.cpp` ~132) — which is the noise the user hit. There is no default relay.md template today: `synthesize_instructions` (protocol `docs/AGENT-SESSIONS-PROTOCOL.md` ~104) only merges found files via a model call. Fix per the user: when the scan (plus an existing relay.md) yields nothing, don't show the dialog at all — mark onboarded, create a small default `$XDG_CONFIG_HOME/relay/relay.md` directly, select it as the sole instructions file, and open it in the editable pane as the synthesized path already does (`instructions_synthesized` handling, `src/Pane.h` ~4639).
+
+<!-- relay:entry 20260919T020211Z-pc author=agent kind=event model=glm-5.3 pane=7455950c turn=4e62ce12087147089586ffc7d1fb2721/400f58e417a744e692ae9d6c6501c87a -->
+- ✦ agent moved this card · Inbox → In progress · User asked to fix it; implementing the skip-dialog + default relay.md init now.

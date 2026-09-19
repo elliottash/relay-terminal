@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "RemotePane.h"
 
+#include "CopyOnSelect.h"
 #include "Hints.h"
 #include "Theme.h"
 
@@ -466,7 +467,7 @@ QFont terminalFont(int *lineSpacing, int *margin)
         const QString spec = profile.value(QStringLiteral("Appearance/Font")).toString();
         if (!spec.isEmpty() && configured.fromString(spec)) font = configured;
         *lineSpacing = profile.value(QStringLiteral("Appearance/LineSpacing"), 2).toInt();
-        *margin = std::min(12, profile.value(QStringLiteral("Appearance/TerminalMargin"), 8).toInt());
+        *margin = std::min(16, profile.value(QStringLiteral("Appearance/TerminalMargin"), 8).toInt());
     }
     font.setStyleHint(QFont::Monospace);
     font.setFixedPitch(true);
@@ -904,6 +905,7 @@ RemotePane::RemotePane(const QString &paneId, const QString &title, const QStrin
     m_thinkingTail->setReadOnly(true);
     m_thinkingTail->setFrameShape(QFrame::NoFrame);
     m_thinkingTail->setFocusPolicy(Qt::ClickFocus);
+    relay::installCopyOnSelect(m_thinkingTail);
     thinking->addWidget(m_thinkingTail);
     m_thinking->hide();
     layout->addWidget(m_thinking);
@@ -964,6 +966,7 @@ RemotePane::RemotePane(const QString &paneId, const QString &title, const QStrin
     m_sessions->setMenu(m_sessionsMenu);
     m_clock = plainLabel(QStringLiteral("remoteClock"));
     m_context = plainLabel(QStringLiteral("remoteContext"));
+    m_allowance = plainLabel(QStringLiteral("remoteAllowance"));
     m_model = new QToolButton;
     m_model->setObjectName(QStringLiteral("remoteModel"));
     m_model->setPopupMode(QToolButton::InstantPopup);
@@ -992,6 +995,7 @@ RemotePane::RemotePane(const QString &paneId, const QString &title, const QStrin
     strip->addStretch(1);
     strip->addWidget(m_clock);
     strip->addWidget(m_context);
+    strip->addWidget(m_allowance);
     strip->addWidget(m_model);
     strip->addWidget(m_send);
     strip->addWidget(m_sendMenu);
@@ -1199,7 +1203,7 @@ void RemotePane::applyGuestUi()
     if (!guest()) return;
     const bool editor = m_role == QLatin1String("editor");
     m_composer->setVisible(editor && !m_ended);
-    for (QWidget *widget : std::initializer_list<QWidget *>{m_mode, m_folder, m_sessions, m_clock, m_context, m_model, m_sendMenu, m_queue, m_thinking})
+    for (QWidget *widget : std::initializer_list<QWidget *>{m_mode, m_folder, m_sessions, m_clock, m_context, m_allowance, m_model, m_sendMenu, m_queue, m_thinking})
         widget->hide();
     m_box->setVisible(true);
     m_send->setVisible(true);
@@ -1684,6 +1688,14 @@ void RemotePane::renderStrip()
     const QJsonValue left = context.value(QStringLiteral("percent_left"));
     const bool warn = left.isDouble() && left.toDouble() <= 15;
     m_context->setStyleSheet(warn ? QStringLiteral("color: %1;").arg(theme::Warning.name()) : QString());
+
+    // The Relay Free allowance: the desktop's label and detail, warned the way the context chip
+    // is. A state without one (the pane moved to a provider with a key) hides it.
+    const QJsonObject allowance = m_state.value(QStringLiteral("allowance")).toObject();
+    setPlain(m_allowance, str(allowance.value(QStringLiteral("label"))));
+    m_allowance->setToolTip(str(allowance.value(QStringLiteral("detail"))));
+    m_allowance->setStyleSheet(allowance.value(QStringLiteral("warn")).toBool()
+                                   ? QStringLiteral("color: %1;").arg(theme::Warning.name()) : QString());
 
     const QJsonObject model = m_state.value(QStringLiteral("model")).toObject();
     m_model->setVisible(!model.isEmpty());

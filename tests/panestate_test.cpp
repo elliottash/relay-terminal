@@ -37,6 +37,9 @@ Inputs busyPane() {
     in.placeholder = QStringLiteral("Shell commands or agent prompts…");
     in.contextLabel = QStringLiteral("96% left");
     in.percentLeft = 96;
+    in.allowanceLabel = QStringLiteral("Free · 73% left");
+    in.allowanceLeft = 73;
+    in.allowanceDetail = QStringLiteral("182,400 of 250,000 tokens today · resets at 02:00");
     in.sessions = {{QStringLiteral("0f3a-session"), QStringLiteral("Thinking copy test"), QStringLiteral("14:02"), true, true}};
     in.canNew = false;
     return in;
@@ -84,6 +87,12 @@ private slots:
         QCOMPARE(composer.value("mode").toString(), QStringLiteral("auto"));
         QCOMPARE(strings(composer.value("modes")), (QStringList{"auto", "shell", "agent"}));
         QCOMPARE(state.value("context").toObject().value("percent_left").toInt(), 96);
+        const QJsonObject allowance = state.value("allowance").toObject();
+        QCOMPARE(allowance.value("label").toString(), QStringLiteral("Free · 73% left"));
+        QCOMPARE(allowance.value("percent_left").toInt(), 73);
+        QCOMPARE(allowance.value("warn").toBool(), false);
+        QCOMPARE(allowance.value("detail").toString(),
+                 QStringLiteral("182,400 of 250,000 tokens today · resets at 02:00"));
         QCOMPARE(state.value("sessions").toObject().value("can_new").toBool(), false);
     }
     void nothing_running_is_null_not_an_empty_label() {
@@ -96,6 +105,36 @@ private slots:
         QCOMPARE(state.value("turn").toObject().value("clock").toString(), QString());
         QVERIFY(state.value("context").toObject().value("percent_left").isNull());
         QCOMPARE(state.value("queue").toObject().value("hint").toString(), QString());
+    }
+    void no_allowance_when_there_is_none_to_show() {
+        // Not on the hosted preset, or no quota figure yet: no object at all, so a view that drew
+        // one takes its chip off (the pane moved to a provider with a key).
+        Tokens choices(QLatin1Char('m')), sessions(QLatin1Char('s'));
+        Inputs in;
+        in.pane = QStringLiteral("tok");
+        in.contextLabel = QStringLiteral("96% left");
+        in.percentLeft = 96;
+        QVERIFY(!build(1, in, choices, sessions).contains(QStringLiteral("allowance")));
+        in.allowanceLabel = QStringLiteral("Free · 73% left");   // and with one, it is there
+        QVERIFY(build(1, in, choices, sessions).contains(QStringLiteral("allowance")));
+    }
+    void the_allowance_warns_at_ten_percent_and_below() {
+        Tokens choices(QLatin1Char('m')), sessions(QLatin1Char('s'));
+        Inputs in;
+        in.pane = QStringLiteral("tok");
+        in.allowanceLabel = QStringLiteral("Free · %1% left");
+        for (const int left : {8, 10}) {
+            in.allowanceLeft = left;
+            const QJsonObject allowance = build(1, in, choices, sessions).value("allowance").toObject();
+            QCOMPARE(allowance.value("percent_left").toInt(), left);
+            QCOMPARE(allowance.value("warn").toBool(), true);
+        }
+        in.allowanceLeft = 11;
+        QCOMPARE(build(1, in, choices, sessions).value("allowance").toObject().value("warn").toBool(), false);
+        in.allowanceLeft = -1;   // unknown: null, and never warned
+        const QJsonObject allowance = build(1, in, choices, sessions).value("allowance").toObject();
+        QVERIFY(allowance.value("percent_left").isNull());
+        QCOMPARE(allowance.value("warn").toBool(), false);
     }
     void the_phase_follows_the_turn() {
         Inputs in;

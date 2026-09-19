@@ -1062,10 +1062,11 @@ class ChatProvider:
             splitter = ThinkSplitter()
 
         def finish_thinking():
-            nonlocal thinking_closed
+            nonlocal thinking_closed, thinking_chars
             thinking_closed = True
             emit({"event": "thinking_done", "elapsed_ms": int((time.monotonic() - thinking_started) * 1000),
                   "chars": thinking_chars})
+            thinking_chars = 0
         while True:
             if cancel.is_set():
                 raise Cancelled("Stopped.")
@@ -1131,6 +1132,11 @@ class ChatProvider:
                     reasoning_announced = True
                 if thinking_started is None:
                     thinking_started = started if started is not None else time.monotonic()
+                elif thinking_closed:
+                    # Reasoning resumed after the answer had begun (GLM interleave): a second block,
+                    # clocked from its own start, with its own thinking_done when it ends.
+                    thinking_closed = False
+                    thinking_started = time.monotonic()
                 thinking_chars += len(thinking)
                 emit({"event": "thinking_delta", "text": thinking})
             if thinking_started is not None and not thinking_closed and (

@@ -70,7 +70,10 @@ class PresetTableTests(unittest.TestCase):
         # An aggregator picks the endpoint and the caps differ across them; so does a gateway that
         # rebuilds the request. Neither claims a number Relay cannot check.
         self.assertEqual(P.PRESETS["openrouter"].max_output, P.DEFAULT_MAX_OUTPUT)
-        self.assertEqual(P.PRESETS["relay-free"].max_output, P.DEFAULT_MAX_OUTPUT)
+        # Relay Free's cap is the gateway's, not a provider's: what it serves the Main role, which
+        # is what a pane's turns run on. The gateway clamps rather than refusing, so asking more was
+        # never an error — it just made Relay's own number twice the truth.
+        self.assertEqual(P.PRESETS["relay-free"].max_output, 16_000)
 
     def test_automatic_means_the_models_own_cap_and_a_pinned_number_never_exceeds_it(self):
         gemini = P.PRESETS["gemini"]
