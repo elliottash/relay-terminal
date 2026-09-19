@@ -38,7 +38,7 @@ special translator from the relay prompt into the claude code input and back."
 - [x] Validation: a clean export of main builds and passes (58/59 ctest targets, 3,316 Python tests; the one failure was another session's unclassified wire event, since fixed), and both guests were driven live in a pane through the harness route — `harness-drive-README.md` <!-- t:bt -->
 - [x] Tier A headless harness adapters: the contract (`guest_harness.py`), `codex app-server` and `claude -p` stream-json adapters with recorded fixtures, the worker's `HarnessProvider` and `guest:` presets, the picker routed to the preset when usable (protocol §29). Un-deferred by the owner on 2026-09-19 ("i wanted Tier A now … go ahead and unlock that now") <!-- t:x2 -->
 - [x] Tier A follow-ups, the code half: streaming tool output (`tool_output`; codex streams it, Claude Code's stream-json drops the text and that is written down), the context window in `usage`, and scoped approvals (`once` / `session` / `stop`, both guests) <!-- t:a3 -->
-- [ ] Tier A follow-ups, the owner's half: whether Tier B's hook and statusline entries should travel with a headless claude, whether to show a list-price `cost_usd` for a subscription guest, Codex's `--remote` co-attach (it attaches; nothing is built on it), and claude's `tool_progress` (elapsed seconds per running tool, which would need a new event kind and a pane that renders it) <!-- t:a4 -->
+- [x] Tier A follow-ups, the owner's half: all four declined on 2026-09-19 (see Decisions) — no hook entries for a headless claude, no cost figure for a subscription guest, no Codex TUI co-attach, no per-tool elapsed tick <!-- t:a4 -->
 - [x] Picker route: "Claude Code" / "Codex" rows in the pane's model box (`guest:<id>`, no tier, no key), `/model claude|codex`, launched by the pane in its own shell (§26.9) <!-- t:pk -->
 - [x] Launch-time configuration instead of installed files: `guest_launch.py` writes `<runtime>/guest/claude-settings.json` for `claude --settings`, `-c` overrides for codex, bypass flags on both, bridge variables on the command line only; flags verified against Claude Code 2.1.278 / Codex 0.155.1 <!-- t:c1 -->
 - [x] Retire the setup surface: Options › Guests rows and the `guest_install` / `guest_codex --enable` command lines gone; libraries kept for the legacy cleanup every launch runs <!-- t:rs -->
@@ -67,6 +67,24 @@ special translator from the relay prompt into the claude code input and back."
 - 2026-09-19, owner: "the claude / codex agent needs to be --yolo / --dangerously-skip-permissions to allow moving
   around the file system, like relay / warp does." Both launches carry the bypass flag; the permission bar stays for a
   hand-started claude whose own settings ask.
+- 2026-09-19, owner, on the four Tier A questions, all declined with the reasoning recorded:
+  - **No hook or statusline entries for a headless claude.** Everything they report arrives on the
+    stream already (the model and session from `init`, the context share from the `result`'s usage,
+    permissions as control requests, the turn brackets from the harness), so they would report the
+    same facts twice onto a spool a Tier A pane does not read for its agent, and the statusline shim
+    is a subprocess per tick. The user's own hooks still run either way. Claude's own idle
+    `Notification` is the one thing only a hook carries, and it is not worth the duplication.
+  - **No cost figure for a subscription guest.** `total_cost_usd` on a plan is a list-price
+    equivalent, not money charged; codex on a ChatGPT plan reports no dollars at all, so the same
+    work would show a figure in one pane and nothing in the other. Tokens and the context window
+    are the honest version and are already reported. Revisit if a BYOK-billed guest ever exists.
+  - **No Codex TUI co-attach.** `codex --remote` does attach to an app-server Relay started, but it
+    puts two drivers on one thread in a mode upstream calls experimental, and everything the TUI
+    would add has a Relay surface already. It stays a documented capability for debugging.
+  - **No per-tool elapsed tick from claude's `tool_progress`.** The pane already prints the turn's
+    current step with a second-by-second clock above the prompt box (#4E13), so a long tool call is
+    visibly alive and named; the tick would add precision to a question already answered, for a new
+    event kind and pane work.
 - 2026-09-19, owner: Tier A (t:x2) un-deferred — "i think i want to undefer and start woking on it"; what it unlocks is
   written in the t:x2 task and in §26.6's parity paragraph (Codex diffs in Relay need it).
 - 2026-09-19, owner: "a busy guest model change should be the same as our relay-native models. just shift over

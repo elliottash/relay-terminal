@@ -4673,6 +4673,17 @@ beside `context_pct` — codex reports both in `thread/tokenUsage/updated`, clau
 `guest_context`, beside Relay's own measurement of Relay's own window. Two windows, two numbers,
 one event: the chip can say "13k of 258k" instead of "5%".
 
+**What a headless guest is deliberately not given** (owner, 2026-09-19). It gets no `--settings`
+file: 26.4's hook and statusline entries exist to tell a pane what a TUI will not, and every one of
+those facts is already on this stream, so installing them would double-report onto a spool this
+pane does not read and pay a subprocess per statusline tick. It reports no cost: `total_cost_usd`
+on a subscription is a list price rather than money charged, and codex on a plan reports none at
+all, so tokens and the context window are what Relay shows. Codex's TUI is not co-attached to
+Relay's app-server (`codex --remote` does attach, but two drivers on one experimental thread buys
+only what Relay already has a surface for). And claude's `tool_progress`, which carries elapsed
+seconds and no output, is ignored rather than rendered: the pane's own turn clock already names the
+running step and counts the seconds.
+
 **An approval can be scoped.** `answer()` takes `once` (the default), `session`, or `stop` for a
 deny that ends the turn as well, so the card the pane draws under `permissions: "ask"` offers four
 choices rather than two. Codex has all three on the wire; Claude Code has them too — an allow may
