@@ -946,6 +946,44 @@ private slots:
                              QStringLiteral("claude"), QStringLiteral("codex")}));
     }
 
+    // The "Project" chooser (card #916B): a known project goes on the request as `project`, "No
+    // project" as every known folder in `outside_projects`, and "Clear filters" drops either.
+    void theProjectFilterNamesAKnownProjectOrNone() {
+        SessionManager manager;
+        QList<QJsonObject> asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked << request; };
+        manager.show();
+        auto *project = manager.findChild<QComboBox *>(QStringLiteral("sessionsProject"));
+        QVERIFY(project);
+        QCOMPARE(project->count(), 2);                                   // Any project · No project
+        manager.setKnownProjects({{QStringLiteral("relay"), QStringLiteral("/srv/relay")},
+                                  {QStringLiteral("notes"), QStringLiteral("/home/u/notes")},
+                                  {QStringLiteral("notes"), QStringLiteral("/srv/notes")}});
+        QCOMPARE(project->count(), 5);
+        QCOMPARE(project->itemText(1), QStringLiteral("relay"));
+        QCOMPARE(project->itemText(2), QStringLiteral("notes  (/home/u/notes)"));   // two "notes": the folder tells
+        QCOMPARE(project->itemData(4).toString(), QStringLiteral("none"));
+        project->setCurrentIndex(project->findData(QStringLiteral("/srv/relay")));
+        QCOMPARE(asked.last().value(QStringLiteral("project")).toString(), QStringLiteral("/srv/relay"));
+        QVERIFY(!asked.last().contains(QStringLiteral("outside_projects")));
+        project->setCurrentIndex(project->findData(QStringLiteral("none")));
+        QCOMPARE(asked.last().value(QStringLiteral("outside_projects")).toArray(),
+                 (QJsonArray{QStringLiteral("/srv/relay"), QStringLiteral("/home/u/notes"), QStringLiteral("/srv/notes")}));
+        QVERIFY(!asked.last().contains(QStringLiteral("project")));
+        // The worker answers across all projects and says so; the scope menu follows.
+        manager.setResults({{QStringLiteral("items"), QJsonArray{}}, {QStringLiteral("scope"), QStringLiteral("all")}});
+        auto *clear = manager.findChild<QPushButton *>(QStringLiteral("clearFilters"));
+        QVERIFY(clear->isVisibleTo(&manager));
+        clear->click();
+        QVERIFY(!asked.last().contains(QStringLiteral("project")));
+        QVERIFY(!asked.last().contains(QStringLiteral("outside_projects")));
+        // A fed list keeps the choice; a folder that is no longer known stays selectable.
+        project->setCurrentIndex(project->findData(QStringLiteral("/srv/relay")));
+        manager.setKnownProjects({{QStringLiteral("notes"), QStringLiteral("/home/u/notes")}});
+        QCOMPARE(project->currentData().toString(), QStringLiteral("/srv/relay"));
+        QCOMPARE(asked.last().value(QStringLiteral("project")).toString(), QStringLiteral("/srv/relay"));
+    }
+
     void aGuestRowResumesForksAndSaysWhoseItIs() {
         SessionManager manager;
         manager.onQuery = [](const QJsonObject &) {};

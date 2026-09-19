@@ -274,6 +274,28 @@ class IndexTests(unittest.TestCase):
                          ["a" * 32, "b" * 32])
         self.assertRaises(ValueError, self.index.search, "x", scope="everything")
 
+    def test_project_filter_takes_a_folder_and_everything_below_it(self):
+        """The Sessions pane's "Project" chooser (#916B): a project is its folder and every
+        workspace under it; "no project" is everything under none of the known ones."""
+        self.index.update_session(session(), self.root)                                    # /tmp/alpha
+        self.index.update_session(session("b" * 32, workspace="/tmp/alpha/sub", title="Sub",
+                                          updated=3000.0), self.root)
+        self.index.update_session(session("c" * 32, workspace="/tmp/alphabet", title="Not alpha",
+                                          updated=4000.0), self.root)
+        self.index.update_session(session("d" * 32, workspace="/tmp/beta", title="Beta",
+                                          updated=5000.0), self.root)
+        ids = lambda result: sorted(i["session_id"][0] for i in result["items"])
+        under = self.index.search("", scope="project", workspace="/tmp/beta", project="/tmp/alpha")
+        self.assertEqual(ids(under), ["a", "b"])            # the folder and below it, not /tmp/alphabet
+        self.assertEqual(under["scope"], "all")             # naming a project overrides the scope
+        self.assertEqual(ids(self.index.search("", scope="all", project="/tmp/alpha/")), ["a", "b"])
+        outside = self.index.search("", scope="all", outside_projects=["/tmp/alpha", "/tmp/beta"])
+        self.assertEqual(ids(outside), ["c"])
+        self.assertEqual(ids(self.index.search("", scope="all", outside_projects=["/tmp/alpha"])), ["c", "d"])
+        # Wildcards in a folder name are literal, and the total counts what the filter selects.
+        self.assertEqual(ids(self.index.search("", scope="all", project="/tmp/al%")), [])
+        self.assertEqual(under["total"], 2)
+
     def test_rename_and_pin_survive_reindexing(self):
         self.index.update_session(session(), self.root)
         self.index.rename("a" * 32, "  My   renamed thread  ")
@@ -1210,6 +1232,24 @@ class ProtocolTests(unittest.TestCase):
                 self.cmds.handle("conversations", {"query": "", "scope": "all", **request})
                 self.assertEqual([i["session_id"] for i in self.last("conversations")["items"]], expected)
         for bad in ({"has_edits": "yes"}, {"unfinished": 1}, {"pinned": "no"}, {"file": 3}, {"branch": []}):
+            self.assertRaises(ValueError, self.cmds.handle, "conversations", {"query": "", **bad})
+
+    def test_project_and_outside_projects_ride_the_request(self):
+        """The `project` / `outside_projects` fields of 14.3 (#916B), and what is refused."""
+        self.seed(extra_turn="and then")
+        elsewhere = self.home / "elsewhere"
+        elsewhere.mkdir()
+        self.seed(session_id="b" * 32, title="Elsewhere", updated=6000.0, extra_turn="and then")
+        store = SessionStore(conv_index.sessions_root() / "digest2")
+        store.save(session("c" * 32, workspace=str(elsewhere), title="Loose", updated=7000.0))
+        self.cmds.handle("conversations", {"query": "", "scope": "project", "project": str(self.workspace)})
+        event = self.last("conversations")
+        self.assertEqual(event["scope"], "all")
+        self.assertEqual(sorted(i["session_id"] for i in event["items"]), ["a" * 32, "b" * 32])
+        self.cmds.handle("conversations", {"query": "", "scope": "project",
+                                           "outside_projects": [str(self.workspace)]})
+        self.assertEqual([i["session_id"] for i in self.last("conversations")["items"]], ["c" * 32])
+        for bad in ({"project": 3}, {"outside_projects": "x"}, {"outside_projects": [1]}, {"outside_projects": [""]}):
             self.assertRaises(ValueError, self.cmds.handle, "conversations", {"query": "", **bad})
 
     def test_project_operator_reports_the_scope_it_switched_to(self):

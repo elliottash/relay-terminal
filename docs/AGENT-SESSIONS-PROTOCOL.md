@@ -1089,6 +1089,15 @@ relevance (14.2). `offset` pages: the event carries `next_offset` when there is 
 absent). `since`/`until` are epoch seconds against `updated`. An empty `query` lists conversations
 instead of searching. No agent has to be configured.
 
+By project (v3.5, card #916B, the Sessions pane's "Project" chooser): `project?: string` is a
+project folder, and selects the rows whose `workspace` is that folder or lies below it — a pane
+opened in a subdirectory of a checkout belongs to that checkout — as an equality-or-prefix test on
+the canonical path (`normalize_workspace`), wildcards literal. `outside_projects?: [string]` is the
+same test negated for each folder named, which is how "No project" is asked: the GUI sends every
+project Relay knows. Either field makes the answer span all projects whatever `scope` asked, and
+the event's `scope` says so (as it does for a `project:` operator). A non-string `project`, or an
+`outside_projects` that is not a list of non-empty strings, is an error.
+
 → `conversations {id?, scope, workspace, query, sort, offset, next_offset?, total, elapsed_ms,
 parsed, facets, items: [...]}`
 

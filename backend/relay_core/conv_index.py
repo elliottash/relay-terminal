@@ -329,6 +329,16 @@ def like_value(value: str) -> str:
     return f"%{escaped.lower()}%"
 
 
+def under_pattern(folder: str) -> str:
+    r"""`<folder>/%` as a `LIKE ? ESCAPE '\'` pattern: every path below `folder`, wildcards literal.
+
+    Case is kept: the `workspace` column holds `normalize_workspace()` spellings and a project
+    folder arrives the same way, so this is a prefix test on the canonical path, not a search.
+    """
+    escaped = str(folder or "").replace("\\", r"\\").replace("%", r"\%").replace("_", r"\_")
+    return escaped.rstrip("/") + "/%"
+
+
 def parse_date(value: str, now: float | None = None) -> float | None:
     """Epoch seconds for a `before:`/`after:` value: `YYYY-MM-DD`, `today`, `yesterday` or `7d`.
 
@@ -1579,7 +1589,8 @@ class ConversationIndex:
     # ----- reading ---------------------------------------------------------------------
     def _filters(self, *, scope: str, workspace: str | None, model: str | None, has_open: bool,
                  since, until, kinds, has_edits=None, unfinished=None, pinned=None, file=None,
-                 branch=None, has_summary=None, operators=(), now=None) -> tuple[str, list]:
+                 branch=None, has_summary=None, operators=(), now=None, project=None,
+                 outside_projects=()) -> tuple[str, list]:
         """The WHERE clause of the explicit filter arguments and the query's operators.
 
         Everything the user typed arrives as a bound parameter; LIKE patterns have their own
@@ -1593,6 +1604,17 @@ class ConversationIndex:
 
         if scope == "project":
             add("c.workspace = ?", normalize_workspace(str(workspace or "")))
+        # The Sessions pane's "Project" chooser (card #916B). A row belongs to a project when its
+        # workspace *is* that folder or lies below it — a pane opened in a subdirectory of a
+        # checkout is that checkout's — so this is an equality-or-prefix test on the canonical
+        # path. "No project" is the same test negated for every project Relay knows.
+        if project:
+            folder = normalize_workspace(str(project))
+            add(r"(c.workspace = ? OR c.workspace LIKE ? ESCAPE '\')", folder, under_pattern(folder))
+        for known in outside_projects or ():
+            folder = normalize_workspace(str(known))
+            add(r"(c.workspace = ? OR c.workspace LIKE ? ESCAPE '\')", folder, under_pattern(folder),
+                negated=True)
         if model:
             add("c.model = ?", model)
         if has_open:
@@ -1656,7 +1678,8 @@ class ConversationIndex:
                offset: int = 0, matches_per_item: int = MAX_MATCHES_PER_ITEM,
                has_edits: bool | None = None, unfinished: bool | None = None,
                pinned: bool | None = None, file: str | None = None, branch: str | None = None,
-               has_summary: bool | None = None, now: float | None = None) -> dict:
+               has_summary: bool | None = None, now: float | None = None,
+               project: str | None = None, outside_projects: list[str] | None = None) -> dict:
         """Conversations matching `query`, each with its matching turns.
 
         The query may carry operators (`project:`, `file:`, `model:`, `branch:`, `before:`,
@@ -1684,8 +1707,9 @@ class ConversationIndex:
             raise ValueError("Search query is too long.")
         parsed = parse_query(query, now)
         operators = parsed["operators"]
-        # Naming a project is asking about that project, wherever the pane happens to be.
-        if any(op.get("key") == "project" for op in operators):
+        # Naming a project is asking about that project, wherever the pane happens to be. The
+        # pane's "Project" chooser (`project` / `outside_projects`, #916B) says so just as plainly.
+        if any(op.get("key") == "project" for op in operators) or project or outside_projects:
             scope = "all"
         kinds = [s for s in (sources or []) if s in SOURCES]
         if not kinds:
@@ -1695,7 +1719,8 @@ class ConversationIndex:
         clause, params = self._filters(
             scope=scope, workspace=workspace, model=model, has_open=has_open, since=since, until=until,
             kinds=kinds, has_edits=has_edits, unfinished=unfinished, pinned=pinned, file=file,
-            branch=branch, has_summary=has_summary, operators=operators, now=now)
+            branch=branch, has_summary=has_summary, operators=operators, now=now, project=project,
+            outside_projects=outside_projects or ())
         started = time.time()
         parts = fts_parts(parsed["text"])
         terms = query_terms(parsed["text"])

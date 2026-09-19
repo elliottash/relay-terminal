@@ -542,6 +542,14 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     // everything: the request names all four rather than leaving the worker to guess.
     m_kind->addItem(QStringLiteral("Claude Code sessions"), QStringLiteral("claude"));
     m_kind->addItem(QStringLiteral("Codex sessions"), QStringLiteral("codex"));
+    // By project (card #916B): the projects Relay knows, fed by setKnownProjects(), or none of
+    // them. A row's project is its workspace folder, so this is the index's own test on that
+    // column (protocol 14.3 `project` / `outside_projects`), not a guess from the row's name.
+    m_projectFilter = new QComboBox;
+    m_projectFilter->setObjectName(QStringLiteral("sessionsProject"));
+    m_projectFilter->addItem(QStringLiteral("Any project"), QString());
+    m_projectFilter->addItem(QStringLiteral("No project"), QStringLiteral("none"));
+    m_projectFilter->setToolTip(QStringLiteral("Only the sessions of one project Relay knows, or the ones outside every known project"));
     m_model = new QComboBox;
     m_model->addItem(QStringLiteral("Any model"), QString());
     m_date = new QComboBox;
@@ -712,12 +720,13 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
 
     // Two rows, so no filter is cut short in a pane half the window wide: what the list holds,
     // then how it is narrowed, grouped and ordered.
-    for (QComboBox *combo : {m_scope, m_kind, m_model, m_date, m_sort, m_branch, m_group})
+    for (QComboBox *combo : {m_scope, m_kind, m_projectFilter, m_model, m_date, m_sort, m_branch, m_group})
         combo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     auto *filters = new QHBoxLayout;
     filters->setSpacing(8);
     filters->addWidget(m_scope);
     filters->addWidget(m_kind);
+    filters->addWidget(m_projectFilter);
     filters->addWidget(m_threads);
     filters->addStretch(1);
     auto *narrow = new QHBoxLayout;
@@ -816,7 +825,7 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
         }
         scheduleQuery();
     });
-    for (QComboBox *combo : {m_scope, m_kind, m_model, m_date, m_sort, m_branch})
+    for (QComboBox *combo : {m_scope, m_kind, m_projectFilter, m_model, m_date, m_sort, m_branch})
         connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &SessionManager::requery);
     // Grouping is drawn here, not asked of the worker.
     connect(m_group, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
@@ -913,15 +922,18 @@ bool SessionManager::anyFilter() const {
            || m_hasSummary->isChecked() || m_openTasks->isChecked()
            || !m_model->currentData().toString().isEmpty() || !m_branch->currentData().toString().isEmpty()
            || m_date->currentData().toString() != QLatin1String("any")
-           || !m_kind->currentData().toString().isEmpty();
+           || !m_kind->currentData().toString().isEmpty()
+           || !m_projectFilter->currentData().toString().isEmpty();
 }
 
 void SessionManager::clearFilters() {
-    const QSignalBlocker quietModel(m_model), quietBranch(m_branch), quietDate(m_date), quietKind(m_kind);
+    const QSignalBlocker quietModel(m_model), quietBranch(m_branch), quietDate(m_date), quietKind(m_kind),
+        quietProject(m_projectFilter);
     m_model->setCurrentIndex(0);
     m_branch->setCurrentIndex(0);
     m_date->setCurrentIndex(0);
     m_kind->setCurrentIndex(0);
+    m_projectFilter->setCurrentIndex(0);
     for (QAction *action : {m_hasEdits, m_unfinished, m_pinnedOnly, m_hasSummary, m_openTasks}) {
         const QSignalBlocker quiet(action);
         action->setChecked(false);
@@ -953,6 +965,16 @@ QJsonObject SessionManager::queryRequest() const {
                                                QStringLiteral("claude"), QStringLiteral("codex")}
                                   : QJsonArray{kind});
     if (m_threads->isChecked()) request.insert(QStringLiteral("include_threads"), true);
+    // The "Project" chooser (#916B). Either field makes the worker answer across all projects
+    // whatever `scope` says, and it reports that scope back, which the menu then follows.
+    const QString project = m_projectFilter->currentData().toString();
+    if (project == QLatin1String("none")) {
+        QJsonArray outside;
+        for (const auto &known : m_knownProjects) outside.append(known.second);
+        request.insert(QStringLiteral("outside_projects"), outside);
+    } else if (!project.isEmpty()) {
+        request.insert(QStringLiteral("project"), project);
+    }
     const QString sort = m_sort->currentData().toString();
     if (sort != QLatin1String("recent")) request.insert(QStringLiteral("sort"), sort);
     return request;
@@ -1742,6 +1764,29 @@ void SessionManager::setProject(const QString &project) {
     if (m_project == project) return;
     m_project = project;
     if (!m_items.isEmpty()) rebuildTree(selectedId());
+}
+
+void SessionManager::setKnownProjects(const QList<QPair<QString, QString>> &projects) {
+    if (m_knownProjects == projects) return;
+    m_knownProjects = projects;
+    // Rebuild the chooser around the two fixed rows, keeping what was chosen — a folder that is
+    // no longer known stays selectable until the user drops it, as the facet menus do.
+    const QString keep = m_projectFilter->currentData().toString();
+    const QSignalBlocker quiet(m_projectFilter);
+    m_projectFilter->clear();
+    m_projectFilter->addItem(QStringLiteral("Any project"), QString());
+    for (const auto &known : projects) {
+        // Two projects called "src": the folder tells them apart.
+        const bool ambiguous = std::count_if(projects.begin(), projects.end(),
+                                             [&known](const QPair<QString, QString> &other) { return other.first == known.first; }) > 1;
+        m_projectFilter->addItem(ambiguous ? QStringLiteral("%1  (%2)").arg(known.first, known.second) : known.first,
+                                 known.second);
+    }
+    m_projectFilter->addItem(QStringLiteral("No project"), QStringLiteral("none"));
+    if (!keep.isEmpty() && m_projectFilter->findData(keep) < 0) m_projectFilter->addItem(keep, keep);
+    m_projectFilter->setCurrentIndex(std::max(0, m_projectFilter->findData(keep)));
+    const bool changed = m_projectFilter->currentData().toString() != keep;
+    if (changed) requery();
 }
 
 void SessionManager::setOpenSessions(const QStringList &sessionIds) {

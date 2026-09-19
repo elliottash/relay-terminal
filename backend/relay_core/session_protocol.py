@@ -1171,9 +1171,15 @@ class SessionCommands:
             return False
 
     def _conversations(self, request):
-        for name in ("model", "file", "branch"):
+        for name in ("model", "file", "branch", "project"):
             if request.get(name) is not None and not isinstance(request.get(name), str):
                 raise ValueError(f"{name} must be text.")
+        # The Sessions pane's "Project" chooser (#916B): one project folder, or "no project" as the
+        # folders of every project Relay knows, which the index answers with a path prefix each.
+        outside = request.get("outside_projects")
+        if outside is not None and (not isinstance(outside, list)
+                                    or not all(isinstance(p, str) and p for p in outside)):
+            raise ValueError("outside_projects must be a list of project folders.")
         # The guests are sources like any other here (protocol 26.7): naming one is what asks for
         # its rows, and naming something that is not a source is an error rather than a silence.
         sources = request.get("sources")
@@ -1215,7 +1221,9 @@ class SessionCommands:
             include_threads=include_threads, sort=request.get("sort") or "recent",
             offset=request.get("offset") or 0,
             matches_per_item=request.get("matches_per_item") or conv_index.MAX_MATCHES_PER_ITEM,
-            file=request.get("file") or None, branch=request.get("branch") or None, **flags)
+            file=request.get("file") or None, branch=request.get("branch") or None,
+            project=request.get("project") or None,
+            outside_projects=request.get("outside_projects") or None, **flags)
         # A guest row carries what it takes to resume it: the tool's own argv and the directory it
         # must be run in (protocol 26.7). `fork_command` is the same argv with the guest's fork
         # flag, so Ctrl+Enter on a guest row is one message rather than a rule spelled twice.

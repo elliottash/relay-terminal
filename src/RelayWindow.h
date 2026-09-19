@@ -3692,6 +3692,13 @@ public:
         if (fresh) m_manager->watchClosed(view, feed);
         feed();
         view->setProject(QFileInfo(owner->workspace().isEmpty() ? owner->cwd() : owner->workspace()).fileName());
+        // The "Project" chooser (#916B): the projects Relay knows, most recently attached first.
+        {
+            QList<QPair<QString, QString>> known;
+            for (const relay::projects::Record &record : m_manager->projects().knownProjects())
+                known.append({record.name.isEmpty() ? relay::projects::nameFor(record.path) : record.name, record.path});
+            view->setKnownProjects(known);
+        }
         view->onReopenClosed = [windowGuard](const QString &closedId) {
             if (windowGuard) windowGuard->m_manager->restoreClosed(windowGuard, closedId);
         };

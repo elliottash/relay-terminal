@@ -163,6 +163,11 @@ public:
     // Fed by the window, which knows what is open and what was closed; the manager never looks at
     // a window itself. `closed` maps a session id to {closed-list id, closed-at in milliseconds}.
     void setProject(const QString &project);
+    // The projects Relay knows (card #916B), as {name, folder} pairs, most recently attached first:
+    // the "Project" chooser lists them between "Any project" and "No project". A chosen folder goes
+    // on the request as `project`; "No project" sends every folder as `outside_projects`
+    // (protocol 14.3), so the worker answers with rows under none of them.
+    void setKnownProjects(const QList<QPair<QString, QString>> &projects);
     void setOpenSessions(const QStringList &sessionIds);
     // What each open conversation's pane is using, as a labelled tag on its row (issue #D03W).
     // Pushed by the window's status poll; a session with no entry shows nothing.
@@ -234,7 +239,8 @@ private:
     QWidget *m_inset = nullptr;
     QLineEdit *m_search = nullptr;
     QComboBox *m_scope = nullptr, *m_model = nullptr, *m_date = nullptr, *m_kind = nullptr,
-              *m_sort = nullptr, *m_branch = nullptr, *m_group = nullptr;
+              *m_sort = nullptr, *m_branch = nullptr, *m_group = nullptr, *m_projectFilter = nullptr;
+    QList<QPair<QString, QString>> m_knownProjects;   // {name, folder}, for the "Project" chooser
     QCheckBox *m_threads = nullptr;
     QToolButton *m_help = nullptr, *m_filters = nullptr;
     QMenu *m_filterMenu = nullptr;
