@@ -430,6 +430,15 @@ reads it, so the order can change without touching a widget. Protocol: 19. Evide
   ("installed"), `preset:` a stored key. With nothing available it reads *"No verifier available:
   Claude skipped: implemented this card · Codex: not installed · Kimi: no key"*, so the reader knows
   what to install rather than only that the button is dead (`board::verifyLine`).
+- **The worker's `note`, in amber.** `recommend()` sends one line of its own when the answer needs
+  explaining, and the card shows it in `theme::Warning` — Relay's "a human should look" ink,
+  never a colour of this feature's own. With **no** recommendation the note *is* the line and the
+  whole line is amber, which is the Relay Free case (owner, 2026-09-19: *"relay free is never used
+  for verifying — so verifying is not available on the free plan"*): *"No verifier available.
+  Verifying is not available on Relay Free: add a provider key, or install Codex or Claude Code."*
+  Verify is then disabled and its tooltip says that same sentence. With a recommendation the muted
+  line stands and the note follows it in amber as a warning — a same-lineage verifier, or a local
+  model below the floor for judging code — and Verify still works: a weaker check is still a check.
 - **Verify (v)** stands beside Execute, in the same agent outline — it also leaves the board — and
   is on screen only in a QA lane, enabled only when a runner exists.
 - **What it writes.** One `board_comment` of kind `progress`: *"Verify · handed to a new terminal
@@ -450,11 +459,47 @@ reads it, so the order can change without touching a widget. Protocol: 19. Evide
   on the thread, and sign the evidence commit `Verified-By: <provider/model>`. **Never fix the code
   yourself** — a verifier that edits the code becomes its implementer and the card would need
   verifying again; what it finds goes on the thread or into a new bug card.
-- **The other half of the signature.** The Execute brief now asks for an `Implemented-By:
-  <provider/model>` trailer on every commit for the card, and says the card's own `implemented_by`
-  is stamped by the board, so no agent is asked to type a signature it can only guess at.
+- **The other half of the signature.** The Execute brief asks for an `Implemented-By:` trailer on
+  every commit for the card, and says the card's own `implemented_by` is stamped by the board, so no
+  agent is asked to type a signature it can only guess at.
+- **Both briefs ask for the exact model** (owner, 2026-09-19: *"lets try to record the model
+  used"*): `<vendor>/<your exact model id>`, the vendor of the *model* and the id actually running,
+  not the family. A guest appends the harness that ran it — `anthropic/claude-opus-5 via
+  claude-code`, `openai/gpt-5.6-codex via codex` — and falls back to `anthropic/claude-code` or
+  `openai/codex` alone only when it cannot see which model it is, which is all that was ever
+  observable from outside. The pane cannot fill the model in for the guest: the pane that will run
+  the brief does not exist when the brief is written, and the guest's model is only observable once
+  it has started, so the brief asks in words instead.
+- **A guest verifier writes its own `verified_by`.** Nothing stamps it for a CLI with no `board_*`
+  tools, so the Verify brief tells it to put the same signature in the card's front matter when it
+  closes the card. Without that the card would land in Done rather than Verified.
 - **Keys**: `v` on the open card and on the list (which opens the card first), the hint
   `board.verify` on a click, and `v` in both key legends.
+
+### 4.11 The Verified section (#T71W, owner 2026-09-19)
+
+Owner: *"so we need a Verified section in the switchboard?"* — yes, and **derived, not a status**.
+A card whose status is `done` and whose row carries a non-empty `verified_by` sits in **VERIFIED**,
+between NEEDS QA and DONE; DONE keeps what is left, which is a card closed without a cross-model
+check and every dropped one. No `board.yaml` names it and no card's status is ever "verified":
+`Model::sections()` inserts the section before Done whatever the config says, and
+`sectionForCard()` is the one place that reads the signature, so every count, row, filter and
+checkbox agrees by construction.
+
+- **The section carries no statuses.** That is what keeps it honest: `sectionIndex` never learns
+  that `done` lives there (or Done would collect nothing), and `dropStatus("verified")` answers
+  nothing, so quick add does not offer it and a drop cannot land in it.
+- **Nothing moves in.** A drag or `Alt+Shift+→` aimed at Verified is refused in the pane, with the
+  one way in on the notice line: *"A card is verified by closing it from a QA lane with a different
+  model."* Reordering *inside* Verified is ordinary, and moving *out* of it behaves exactly like
+  moving out of Done.
+- **The row says who.** A `✓ <verifier>` badge in the success green, from
+  `board::signatureLabel(verified_by)`: *"✓ Codex"*, *"✓ GLM-5.3"*, *"✓ Claude Opus 5 · Claude
+  Code"*. In the Verified section every row has one, so the header cannot say it and the badge must.
+  The card detail's fields line shows the raw signature, `verified by openai/codex`, beside
+  `implemented by`, because on the card the exact string is the point.
+- **Its fold and its checkbox are ordinary.** It is not folded by default (Done and Deferred still
+  are): the owner asked for the section in order to see it.
 
 ## 5. Referencing cards from the terminal
 

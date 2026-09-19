@@ -184,10 +184,16 @@ QString executeTask(const QString &id, const QString &title, bool hasPlan, bool 
           // `git log --grep '#ID'` can tell who wrote each one. The card's own `implemented_by` is
           // the worker's to stamp, so the agent is not asked for it twice.
           << QStringLiteral("- Sign every one of those commits with the trailer "
-                            "`Implemented-By: <your provider/model>` (lower case, the model's "
-                            "vendor: `anthropic/claude-opus-5`, `openai/codex`, `glm/glm-5.3`) on "
-                            "its own line at the end of the message. The card's `implemented_by` "
-                            "is stamped for you; the trailer is not.")
+                            "`Implemented-By: <vendor>/<your exact model id>` on its own line at "
+                            "the end of the message: lower case, the vendor of the *model* and the "
+                            "id you are actually running, not the family — "
+                            "`anthropic/claude-opus-5`, `openai/gpt-6-astra`, `glm/glm-5.3`. The "
+                            "card's `implemented_by` is stamped for you; the trailer is not.")
+          << QStringLiteral("- If you are Claude Code or Codex, append ` via claude-code` or "
+                            "` via codex` to that signature and still name the model you are on "
+                            "(`anthropic/claude-opus-5 via claude-code`). Only when you cannot see "
+                            "which model you are is `anthropic/claude-code` or `openai/codex` on "
+                            "its own the right answer.")
           << QStringLiteral("- Post progress, questions and decisions on %1 with board_comment, "
                             "not only here.").arg(ref)
           << QStringLiteral("- When it lands, move %1 to needs-qa-llm with the evidence path and a "
@@ -225,6 +231,57 @@ QString familyLabel(const QString &family)
 
 namespace {
 
+// One word of a model id, capitalised the way a person writes it. Only the two lists below are
+// invented; everything else keeps the id's own letters, so a model that ships tomorrow reads
+// correctly without an edit here.
+QString modelWord(const QString &word, bool *acronym)
+{
+    static const QMap<QString, QString> spellings{
+        {QStringLiteral("openai"), QStringLiteral("OpenAI")},
+        {QStringLiteral("deepseek"), QStringLiteral("DeepSeek")},
+        {QStringLiteral("minimax"), QStringLiteral("MiniMax")},
+        {QStringLiteral("zai"), QStringLiteral("Z.AI")}};
+    // Said letter by letter, so it is written that way. A four-letter word is *not* an acronym by
+    // its length: "kimi" and "qwen" are names.
+    static const QSet<QString> acronyms{QStringLiteral("glm"), QStringLiteral("gpt"),
+                                        QStringLiteral("llm"), QStringLiteral("api"),
+                                        QStringLiteral("xai"), QStringLiteral("qa")};
+    if (acronym)
+        *acronym = false;
+    const QString lower = word.toLower();
+    if (spellings.contains(lower))
+        return spellings.value(lower);
+    if (acronyms.contains(lower)) {
+        if (acronym)
+            *acronym = true;
+        return word.toUpper();
+    }
+    if (word.isEmpty() || !word.at(0).isLetter())
+        return word;                       // "5.3", "27b": a version keeps its own shape
+    return word.at(0).toUpper() + word.mid(1);
+}
+
+// "claude-opus-5" -> "Claude Opus 5", "glm-5.3" -> "GLM-5.3", "gpt-6-astra" -> "GPT-6 Astra".
+// The hyphen survives only between an acronym and its version number, which is where a person
+// writes one; every other `-` in a model id is a word break.
+QString modelLabel(const QString &model)
+{
+    const QStringList words = model.split(QLatin1Char('-'), Qt::SkipEmptyParts);
+    QString out;
+    bool previousWasAcronym = false;
+    for (const QString &word : words) {
+        bool acronym = false;
+        const QString text = modelWord(word, &acronym);
+        if (!out.isEmpty())
+            out += (previousWasAcronym && !word.isEmpty() && word.at(0).isDigit())
+                       ? QStringLiteral("-")
+                       : QStringLiteral(" ");
+        out += text;
+        previousWasAcronym = acronym;
+    }
+    return out;
+}
+
 // One entry of `recommended` / `alternates` / `skipped` / `unavailable` as a name: its own
 // `label` when the worker sent one, else the family's.
 QString entryLabel(const QJsonObject &entry)
@@ -245,6 +302,41 @@ QString runnerWord(const QString &runner)
 }
 
 }  // namespace
+
+QString signatureLabel(const QString &signature)
+{
+    static const QRegularExpression parenthetical(QStringLiteral("\\([^)]*\\)"));
+    // `anthropic/claude-opus-5 via claude-code`: the harness the model actually ran under, which
+    // is the thing a person reopens, so it is named beside the model rather than instead of it.
+    static const QRegularExpression via(QStringLiteral("\\s+via\\s+([A-Za-z0-9._-]+)$"));
+    QString text = signature;
+    text.remove(parenthetical);
+    text = text.simplified();
+    if (text.isEmpty())
+        return {};
+    QString harness;
+    const QRegularExpressionMatch match = via.match(text);
+    if (match.hasMatch()) {
+        harness = match.captured(1);
+        text = text.left(match.capturedStart()).trimmed();
+    }
+    QString label = modelLabel(text.section(QLatin1Char('/'), -1).trimmed());
+    if (label.isEmpty())
+        label = familyLabel(text.section(QLatin1Char('/'), 0, 0).trimmed());
+    if (!harness.isEmpty()) {
+        const QString harnessLabel = modelLabel(harness);
+        if (!harnessLabel.isEmpty() && harnessLabel != label)
+            label += QStringLiteral(" · ") + harnessLabel;
+        else if (label.isEmpty())
+            label = harnessLabel;
+    }
+    return label;
+}
+
+QString verifyNote(const QJsonObject &qa)
+{
+    return qa.value(QStringLiteral("note")).toString().trimmed();
+}
 
 QString verifyRunner(const QJsonObject &qa)
 {
@@ -275,6 +367,11 @@ QString verifyLine(const QJsonObject &qa)
                 reasons << (why.isEmpty() ? name : QStringLiteral("%1: %2").arg(name, why));
             }
         };
+        // The worker says it better when it has something to say: Relay Free carries no verifier
+        // at all, and "no key, no key, no key" would not tell the reader that.
+        const QString note = verifyNote(qa);
+        if (!note.isEmpty())
+            return note;
         collect(qa.value(QStringLiteral("skipped")).toArray(), QStringLiteral(" skipped"));
         collect(qa.value(QStringLiteral("unavailable")).toArray(), QString());
         return reasons.isEmpty()
@@ -332,16 +429,24 @@ QString verifyTask(const QString &id, const QString &title, const QString &verif
                             "holds, or back to `in-progress` with the failures on the thread as a "
                             "board_comment when it does not.").arg(ref)
           << QStringLiteral("- Commit your evidence with %1 in the message and the trailer "
-                            "`Verified-By: <your provider/model>` (lower case, the model's vendor: "
-                            "`openai/codex`, `anthropic/claude-code`, `glm/glm-5.3`) on its own "
-                            "line at the end.").arg(ref)
+                            "`Verified-By: <vendor>/<your exact model id>` on its own line at the "
+                            "end: lower case, the vendor of the *model* and the id you are "
+                            "actually running — `openai/gpt-6-astra`, `glm/glm-5.3`. If you "
+                            "are Claude Code or Codex, append ` via claude-code` or ` via codex` "
+                            "and still name the model (`anthropic/claude-opus-5 via claude-code`); "
+                            "`anthropic/claude-code` or `openai/codex` alone is right only when "
+                            "you cannot see which model you are.").arg(ref)
           << QStringLiteral("- Never fix the code yourself. Anything you find goes on %1's thread "
                             "as a board_comment, or into a new bug card — a verifier that edits "
                             "the code becomes its implementer, and the card would need verifying "
                             "again.").arg(ref)
           << QStringLiteral("- If you have no board_* tools (you are a guest CLI), write the "
                             "`## Verdict`, the status and the thread entry into the card's own "
-                            "files, in the format the cards already there use.");
+                            "files, in the format the cards already there use — and, because "
+                            "no worker is there to stamp it for you, write "
+                            "`verified_by: <that same signature>` into the card's front matter "
+                            "when you close it. Without it the board cannot say who checked %1.")
+                 .arg(ref);
     if (!note.trimmed().isEmpty())
         lines << QString() << QStringLiteral("The owner adds, verbatim:") << note.trimmed();
     return lines.join(QLatin1Char('\n'));
@@ -389,6 +494,10 @@ QList<Badge> badges(const Card &card, bool showStatus)
             {QStringLiteral("dropped"), QStringLiteral("dropped")}};
         out << Badge{Badge::Status, shortNames.value(card.status, statusTitle(card.status))};
     }
+    // Who checked it, on the row itself (#T71W): in the Verified section every row has one, so
+    // the section header cannot say it and the badge must.
+    if (!card.verifiedBy.isEmpty())
+        out << Badge{Badge::Verified, QStringLiteral("✓ ") + signatureLabel(card.verifiedBy)};
     for (const QString &label : card.labels)
         out << Badge{Badge::Label, label};
     if (card.assignee == QStringLiteral("agent"))
@@ -435,6 +544,10 @@ int badgeDropOrder(Badge::Kind kind)
     case Badge::Private:
         return 7;
     case Badge::Status:
+        return 8;
+    // A verified row is in the Verified section precisely because of this badge; it goes with
+    // the status, not before it.
+    case Badge::Verified:
         return 8;
     case Badge::Waiting:
         return 9;
@@ -617,6 +730,7 @@ Card Card::fromJson(const QJsonObject &object)
     card.rank = object.value(QStringLiteral("rank")).toString();
     card.path = object.value(QStringLiteral("path")).toString();
     card.implementedBy = object.value(QStringLiteral("implemented_by")).toString();
+    card.verifiedBy = object.value(QStringLiteral("verified_by")).toString();
     card.milestone = object.value(QStringLiteral("milestone")).toString();
     card.created = object.value(QStringLiteral("created")).toString();
     card.topic = object.value(QStringLiteral("topic")).toString();
@@ -705,6 +819,26 @@ QString doneSection()
     return QStringLiteral("done");
 }
 
+QString verifiedSection()
+{
+    return QStringLiteral("verified");
+}
+
+namespace {
+
+// Which section a card belongs in, given a status -> section index built once by the caller.
+// Verified is the one section a status does not name: it is `done` plus a signature.
+QString sectionForCard(const Card &card, const QMap<QString, QString> &index)
+{
+    if (card.status == QStringLiteral("done") && !card.verifiedBy.trimmed().isEmpty())
+        return verifiedSection();
+    if (card.closed())
+        return doneSection();
+    return index.value(card.status);
+}
+
+}  // namespace
+
 const Tab *Model::tab(const QString &id) const
 {
     for (const Tab &tab : m_tabs)
@@ -745,6 +879,10 @@ QList<Column> Model::sections() const
     });
     for (const QString &status : std::as_const(extras))
         out << Column{status, statusTitle(status), {status}};
+    // Verified, then Done. It carries no statuses on purpose: `sectionIndex` must not learn that
+    // "done" lives here, or Done would collect nothing, and `dropStatus` must answer nothing, so
+    // no drop and no quick add can land in a section a card can only be *closed* into.
+    out << Column{verifiedSection(), QStringLiteral("Verified"), {}};
     out << Column{doneSection(), statusTitle(QStringLiteral("done")),
                   {QStringLiteral("done"), QStringLiteral("dropped")}};
     return out;
@@ -771,9 +909,7 @@ QMap<QString, QString> Model::sectionIndex(const QList<Column> &sections) const
 
 QString Model::sectionOf(const Card &card) const
 {
-    if (card.closed())
-        return doneSection();
-    return sectionIndex(sections()).value(card.status);
+    return sectionForCard(card, sectionIndex(sections()));
 }
 
 // ---------------------------------------------------------------------------- cards
@@ -830,14 +966,14 @@ QList<Card> Model::cards(const QString &columnId) const
     const QMap<QString, QString> index = sectionIndex(sections());
     QList<Card> out;
     for (const Card &card : m_cards) {
-        const QString section = card.closed() ? doneSection() : index.value(card.status);
+        const QString section = sectionForCard(card, index);
         if (section != columnId || section.isEmpty())
             continue;
         if (!matches(card, m_filter))
             continue;
         out << card;
     }
-    return sorted(out, columnId == doneSection());
+    return sorted(out, columnId == doneSection() || columnId == verifiedSection());
 }
 
 int Model::openCount() const
@@ -860,7 +996,7 @@ int Model::hiddenCount(const QSet<QString> &hidden) const
     for (const Card &card : m_cards) {
         if (card.closed() || !matches(card, m_filter))
             continue;
-        const QString section = index.value(card.status);
+        const QString section = sectionForCard(card, index);
         if (!section.isEmpty() && hidden.contains(section))
             ++total;
     }
@@ -876,7 +1012,7 @@ QList<Row> Model::rows(const QSet<QString> &collapsed, const QSet<QString> &hidd
     for (const Card &card : m_cards) {
         if (!matches(card, m_filter))
             continue;
-        const QString section = card.closed() ? doneSection() : index.value(card.status);
+        const QString section = sectionForCard(card, index);
         if (section.isEmpty())
             continue;      // a status no section collects and that is not closed: nothing to show
         grouped[section] << card;
@@ -885,7 +1021,8 @@ QList<Row> Model::rows(const QSet<QString> &collapsed, const QSet<QString> &hidd
     for (const Column &column : list) {
         if (hidden.contains(column.id))
             continue;      // its checkbox is unticked: the section is not on the page at all
-        const QList<Card> cards = sorted(grouped.value(column.id), column.id == doneSection());
+        const QList<Card> cards = sorted(grouped.value(column.id),
+                                         column.id == doneSection() || column.id == verifiedSection());
         if (filtered && cards.isEmpty())
             continue;      // a section with nothing to show gets out of the way
         Row header;

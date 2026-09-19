@@ -24,6 +24,10 @@ namespace board {
 struct Card {
     QString id, title, status, tab, assignee, waitingOn, rank, path, implementedBy, milestone,
             created, topic;
+    // The signature of the model that closed this card out of a QA lane, stamped by the worker
+    // (#T71W). Empty on everything else, and that is what puts a `done` card in Verified rather
+    // than in Done — the section is derived, not a status of its own.
+    QString verifiedBy;
     QString type = QStringLiteral("work");
     QStringList labels;
     int threadEntries = 0, tasksDone = 0, tasksTotal = 0;
@@ -70,7 +74,8 @@ QString statusGlyph(const QString &status);
 
 // One badge on a card row (design 4.2): what it says and how the pane colours it.
 struct Badge {
-    enum Kind { Label, Agent, Assignee, Waiting, Status, Tasks, TasksDone, Thread, Private, Age };
+    enum Kind { Label, Agent, Assignee, Waiting, Status, Tasks, TasksDone, Thread, Private, Age,
+                Verified };
     Kind kind;
     QString text;
 };
@@ -124,6 +129,17 @@ QString executeTask(const QString &id, const QString &title, bool hasPlan, bool 
 // "relay-free" -> "Relay Free". An entry's own `label` wins where it has one.
 QString familyLabel(const QString &family);
 
+// A signature as a badge or a fields line names it, short (owner, 2026-09-19: "lets try to record
+// the model used", so these say the *model*, not only its vendor):
+//   "openai/codex"                            -> "Codex"
+//   "glm/glm-5.3"                             -> "GLM-5.3"
+//   "anthropic/claude-opus-5 via claude-code" -> "Claude Opus 5 · Claude Code"
+// A trailing parenthetical is free text and is ignored, as the worker's own reader ignores it.
+// Only the capitalisation is invented: an acronym goes upper case and keeps the hyphen to its
+// version, everything else keeps the model id's own words, so a model this file has never heard
+// of still comes out readable and nothing has to be added here when one ships.
+QString signatureLabel(const QString &signature);
+
 // The recommendation's runner id — "guest:codex", "guest:claude" or "preset:<id>" — or empty
 // when nothing is available. This is what Verify opens a pane on.
 QString verifyRunner(const QJsonObject &qa);
@@ -137,6 +153,12 @@ QString verifyLabel(const QJsonObject &qa);
 //   "No verifier available: Kimi: no key · Codex: not installed"
 // Empty for a card the worker sent no `qa` for.
 QString verifyLine(const QJsonObject &qa);
+
+// The worker's `note` on the recommendation, when it sent one: the whole story when there is no
+// verifier at all ("Verifying is not available on Relay Free…"), and a warning beside the line
+// when the best this machine can do is a weak check (a same-lineage verifier, a local model).
+// The card shows it in the amber that means "a human should look", never as an ordinary field.
+QString verifyNote(const QJsonObject &qa);
 
 // What the verifier's pane is handed when Verify is pressed on a card in a QA lane. The card
 // travels with it (`ask {cards: [id]}`) for a preset runner; a guest CLI gets this text alone as
@@ -197,6 +219,12 @@ int rowOfSection(const QList<Row> &rows, const QString &columnId);
 // The section that holds the closed cards. It is always the last one, and the pane folds it by
 // default: done is a status, not a place (owner decision, 2026-09-18).
 QString doneSection();
+
+// The section above it (owner, 2026-09-19: "so we need a Verified section in the switchboard?").
+// Derived, not a status: a `done` card the worker signed `verified_by` sits here, and Done keeps
+// the rest — a card closed without a cross-model check, and every dropped one. Nothing can be
+// moved *into* it, because the only way in is closing a card out of a QA lane.
+QString verifiedSection();
 
 class Model {
 public:

@@ -114,6 +114,10 @@ QPair<QColor, QColor> badgeInk(board::Badge::Kind kind)
         return {theme::Warning, mix(theme::Warning, theme::Surface, 0.5)};
     case board::Badge::TasksDone:
         return {theme::Success, mix(theme::Success, theme::Surface, 0.6)};
+    // The same green as a finished checklist, and for the same reason: something that had to be
+    // done is done. It is a fact about the card, so it wears a pill like the other facts.
+    case board::Badge::Verified:
+        return {theme::Success, mix(theme::Success, theme::Surface, 0.45)};
     case board::Badge::Status:
         return {theme::Text, theme::BorderStrong};
     case board::Badge::Assignee:
@@ -1492,11 +1496,20 @@ private:
     void showVerify()
     {
         const QString line = inQaLane() ? board::verifyLine(m_qa) : QString();
-        m_verifyLine->setText(line.isEmpty()
-                                  ? QString()
-                                  : QStringLiteral("<span style=\"color:%1\">%2</span>")
-                                        .arg(theme::TextMuted.name(), line.toHtmlEscaped()));
-        m_verifyLine->setVisible(!line.isEmpty());
+        const QString note = inQaLane() ? board::verifyNote(m_qa) : QString();
+        // Amber is "a human should look at this" everywhere in Relay, and that is exactly what a
+        // missing verifier or a same-lineage one is. With a recommendation the line itself stays
+        // in the fields' muted ink and only the warning is amber; with none, the whole line is.
+        const QString ink = hasVerifier() ? theme::TextMuted.name() : theme::Warning.name();
+        QString html = line.isEmpty()
+                           ? QString()
+                           : QStringLiteral("<span style=\"color:%1\">%2</span>")
+                                 .arg(ink, line.toHtmlEscaped());
+        if (!html.isEmpty() && hasVerifier() && !note.isEmpty())
+            html += QStringLiteral(" <span style=\"color:%1\">· %2</span>")
+                        .arg(theme::Warning.name(), note.toHtmlEscaped());
+        m_verifyLine->setText(html);
+        m_verifyLine->setVisible(!html.isEmpty());
         m_verify->setVisible(inQaLane());
         m_verify->setEnabled(!m_busy && hasVerifier());
         const QString label = board::verifyLabel(m_qa);
@@ -1506,8 +1519,9 @@ private:
                                                   "implemented it; it runs the QA checklist (v)")
                                        .arg(label)
                                  : QStringLiteral("No verifier is available for this card: %1")
-                                       .arg(line.isEmpty() ? QStringLiteral("the board has not said who should check it")
-                                                           : line));
+                                       .arg(!note.isEmpty() ? note
+                                            : line.isEmpty() ? QStringLiteral("the board has not said who should check it")
+                                                             : line));
         fitButtons();
     }
 
@@ -1536,6 +1550,9 @@ private:
         add("milestone", QStringLiteral("milestone"));
         add("component", QStringLiteral("component"));
         add("implemented_by", QStringLiteral("implemented by"));
+        // Who closed it out of a QA lane, stamped by the worker (#T71W). Beside the implementer,
+        // because the pair is the point: two different models.
+        add("verified_by", QStringLiteral("verified by"));
         if (!tasks.isEmpty()) {
             int done = 0;
             for (const QJsonValue &task : tasks)
@@ -3024,14 +3041,24 @@ void BoardView::moveCard(const QString &id, const QString &columnId, const QStri
 {
     if (id.isEmpty())
         return;
+    // Verified is not a status, it is a fact the worker stamped (#T71W). Dropping a card in would
+    // have to invent a signature, so the drop is refused here rather than sent and refused there,
+    // and the line says the one way in. Reordering *inside* Verified is fine.
+    const board::Card *moving = m_model.card(id);
+    if (columnId == board::verifiedSection()
+        && !(moving && m_model.sectionOf(*moving) == columnId)) {
+        showNotice(QStringLiteral("A card is verified by closing it from a QA lane with a "
+                                  "different model."),
+                   true);
+        return;
+    }
     const QString requestId = nextRequestId();
     QJsonObject message{{QStringLiteral("type"), QStringLiteral("board_move")},
                         {QStringLiteral("id"), requestId},
                         {QStringLiteral("card"), id},
                         {QStringLiteral("reason"), QStringLiteral("moved in the Switchboard")}};
     const QString status = m_model.dropStatus(columnId);
-    const board::Card *card = m_model.card(id);
-    const bool sameSection = card && m_model.sectionOf(*card) == columnId;
+    const bool sameSection = moving && m_model.sectionOf(*moving) == columnId;
     QString note;
     if (!status.isEmpty() && !sameSection) {
         // Within its own section a card keeps its exact status (Needs QA stays LLM or human).

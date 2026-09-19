@@ -164,6 +164,11 @@ private slots:
     void theExecuteTaskAsksForTheImplementedByTrailer();
     void theVerifyTaskIsTheQaChecklistAndAsksForTheVerifiedByTrailer();
     void aQaLaneCardOffersVerifyOnTheRecommendedRunner();
+    void aDoneCardWithASignatureSitsInVerifiedAndTheRestStayInDone();
+    void aSignatureReadsAsItsModelAndItsHarness();
+    void nothingIsMovedIntoVerifiedAndMovingOutIsOrdinary();
+    void theBriefsAskForTheExactModelAndTheGuestHarness();
+    void relayFreeSaysWhyItCannotVerifyAndAWeakPickWarns();
 };
 
 void BoardModelTests::categoryFoldersComeFromTheConfig()
@@ -187,9 +192,11 @@ void BoardModelTests::sectionsAreTheConfiguredStatusesThenTheRest()
     model.setConfig(config());
     // No cards yet: the configured lanes, with Done last. The configured `done` column is not a
     // lane of its own — Done is always the final section.
+    // Verified is the one section no status names: a `done` card the worker signed `verified_by`
+    // (#T71W). It is always there, between Needs QA and Done, whatever board.yaml says.
     QCOMPARE(sectionIds(model),
              (QStringList{"inbox", "discussing", "ready", "in-progress", "waiting", "needs-qa",
-                          "done"}));
+                          "verified", "done"}));
     const QList<Column> sections = model.sections();
     QCOMPARE(sections.at(4).statuses, (QStringList{"needs-review", "needs-labels", "needs-ab"}));
     QCOMPARE(sections.last().statuses, (QStringList{"done", "dropped"}));
@@ -225,7 +232,7 @@ void BoardModelTests::closedCardsGoToTheDoneSectionAndParkedOnesToTheirOwn()
     QCOMPARE(model.openCount(), 2);
     QCOMPARE(model.cards(relay::board::doneSection()).size(), 2);
     // Deferred is not a configured lane, so it gets a section of its own before Done.
-    QCOMPARE(sectionIds(model).mid(6), (QStringList{"deferred", "done"}));
+    QCOMPARE(sectionIds(model).mid(6), (QStringList{"deferred", "verified", "done"}));
     QCOMPARE(model.cards(QStringLiteral("deferred")).first().id, QStringLiteral("K7Q2"));
     QCOMPARE(model.cards(QStringLiteral("ready")).first().id, QStringLiteral("R4CD"));
     // …and `status:done` in the filter box still finds a closed card.
@@ -247,7 +254,7 @@ void BoardModelTests::plansAndMemoriesKeepTheirOwnStatuses()
 
     // Statuses no configured lane collects get a section each, so one list really does hold
     // every open card whatever its type.
-    QCOMPARE(sectionIds(model).mid(6), (QStringList{"approved", "active", "done"}));
+    QCOMPARE(sectionIds(model).mid(6), (QStringList{"approved", "active", "verified", "done"}));
     QCOMPARE(model.cards(QStringLiteral("approved")).first().id, QStringLiteral("PL01"));
     QCOMPARE(model.cards(QStringLiteral("active")).first().id, QStringLiteral("ME01"));
     QCOMPARE(model.openCount(), 3);
@@ -337,7 +344,8 @@ void BoardModelTests::theFilterHidesEmptySectionsAndUnfoldsTheRest()
     const QSet<QString> folded{relay::board::doneSection()};
     QCOMPARE(sketch(model.rows(folded)),
              (QStringList{"# inbox 1", "M3XJ", "# discussing 0", "# ready 1", "K7Q2",
-                          "# in-progress 0", "# waiting 0", "# needs-qa 0", "# done 1 folded"}));
+                          "# in-progress 0", "# waiting 0", "# needs-qa 0", "# verified 0",
+                          "# done 1 folded"}));
 
     // Filtered, a section with no match gets out of the way, the counts follow, and nothing is
     // folded: a search that hid its own matches would be a search that does nothing.
@@ -614,7 +622,8 @@ void BoardModelTests::theViewRendersOneListFromAnEvent()
     // Done folds itself: its header is there with the count, its card is not.
     QCOMPARE(sketch(view.rows()),
              (QStringList{"# inbox 1", "K7Q2", "# discussing 0", "# ready 1", "M3XJ",
-                          "# in-progress 0", "# waiting 0", "# needs-qa 0", "# done 1 folded"}));
+                          "# in-progress 0", "# waiting 0", "# needs-qa 0", "# verified 0",
+                          "# done 1 folded"}));
     QCOMPARE(listOf(view)->count(), view.rows().size());
 
     view.handleEvent(QJsonObject{{"event", "board_changed"},
@@ -1623,7 +1632,7 @@ void BoardModelTests::theExecuteTaskAsksForTheImplementedByTrailer()
 {
     const QString task = relay::board::executeTask(QStringLiteral("T71W"), QStringLiteral("Signatures"),
                                                    true, true);
-    QVERIFY2(task.contains(QStringLiteral("Implemented-By: <your provider/model>")), qPrintable(task));
+    QVERIFY2(task.contains(QStringLiteral("Implemented-By: <vendor>/<your exact model id>")), qPrintable(task));
     QVERIFY(task.contains(QStringLiteral("anthropic/claude-opus-5")));
     // The worker stamps the card's own field, so the agent is not asked to type it as well.
     QVERIFY(task.contains(QStringLiteral("`implemented_by` is stamped")));
@@ -1645,7 +1654,7 @@ void BoardModelTests::theVerifyTaskIsTheQaChecklistAndAsksForTheVerifiedByTraile
     QVERIFY(task.contains(QStringLiteral("board_update_card")));
     QVERIFY(task.contains(QStringLiteral("board_move_card")));
     QVERIFY(task.contains(QStringLiteral("board_comment")));
-    QVERIFY(task.contains(QStringLiteral("Verified-By: <your provider/model>")));
+    QVERIFY(task.contains(QStringLiteral("Verified-By: <vendor>/<your exact model id>")));
     QVERIFY(task.contains(QStringLiteral("Never fix the code yourself")));
     // A guest CLI gets this text and nothing else, so it also says where the card lives.
     QVERIFY(task.contains(QStringLiteral("issues/threads/T71W.md")));
@@ -1740,6 +1749,165 @@ void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
     QVERIFY(line->isHidden());
     QVERIFY(verify->isHidden());
     QVERIFY(!verify->isEnabled());
+}
+
+
+// ---- the Verified section, the signature, and the notes (#T71W, 2026-09-19) -------------------
+//
+// Owner: "so we need a Verified section in the switchboard?" — yes, and it is derived rather
+// than a status: `done` plus the `verified_by` the worker stamps when a card is closed out of a
+// QA lane by a different model. Done keeps the rest.
+
+void BoardModelTests::aDoneCardWithASignatureSitsInVerifiedAndTheRestStayInDone()
+{
+    Model model;
+    model.setConfig(config());
+    QJsonObject verified = row("K7Q2", "done", "features");
+    verified.insert("verified_by", "openai/codex");
+    QJsonObject closed = row("M3XJ", "done", "features");
+    QJsonObject dropped = row("DN01", "dropped", "features");
+    // A dropped card is closed, never verified, even if something wrote a signature on it.
+    dropped.insert("verified_by", "openai/codex");
+    model.reset(rows({verified, closed, dropped, row("T71W", "needs-qa-llm", "features")}));
+
+    QCOMPARE(model.sectionOf(*model.card("K7Q2")), QStringLiteral("verified"));
+    QCOMPARE(model.sectionOf(*model.card("M3XJ")), QStringLiteral("done"));
+    QCOMPARE(model.sectionOf(*model.card("DN01")), QStringLiteral("done"));
+    QCOMPARE(relay::board::verifiedSection(), QStringLiteral("verified"));
+
+    // Between Needs QA and Done, whether or not board.yaml has ever heard of it.
+    const QStringList ids = sectionIds(model);
+    QCOMPARE(ids.mid(ids.size() - 3), (QStringList{"needs-qa", "verified", "done"}));
+    QCOMPARE(model.cards(QStringLiteral("verified")).size(), 1);
+    QCOMPARE(model.cards(QStringLiteral("done")).size(), 2);
+    // It collects no status of its own, so nothing can be dropped or quick-added into it.
+    QVERIFY(model.dropStatus(QStringLiteral("verified")).isEmpty());
+    QCOMPARE(model.dropStatus(QStringLiteral("done")), QStringLiteral("done"));
+
+    // The row list shows it like any other section, and it folds like any other.
+    const QStringList shown = sketch(model.rows({}));
+    QCOMPARE(shown.mid(shown.indexOf("# verified 1")),
+             (QStringList{"# verified 1", "K7Q2", "# done 2", "DN01", "M3XJ"}));
+    QVERIFY(sketch(model.rows({QStringLiteral("verified")})).contains("# verified 1 folded"));
+
+    // The row wears its verifier, and only a verified row does.
+    const auto names = [](const QList<relay::board::Badge> &list) {
+        QStringList out;
+        for (const relay::board::Badge &badge : list)
+            out << badge.text;
+        return out;
+    };
+    QVERIFY(names(relay::board::badges(*model.card("K7Q2"), false)).contains(QStringLiteral("\u2713 Codex")));
+    QVERIFY(!names(relay::board::badges(*model.card("M3XJ"), false)).contains(QStringLiteral("\u2713 Codex")));
+}
+
+void BoardModelTests::aSignatureReadsAsItsModelAndItsHarness()
+{
+    const auto label = [](const char *text) {
+        return relay::board::signatureLabel(QString::fromUtf8(text));
+    };
+    QCOMPARE(label("openai/codex"), QStringLiteral("Codex"));
+    QCOMPARE(label("anthropic/claude-code"), QStringLiteral("Claude Code"));
+    QCOMPARE(label("glm/glm-5.3"), QStringLiteral("GLM-5.3"));
+    QCOMPARE(label("openai/gpt-6-astra"), QStringLiteral("GPT-6 Astra"));
+    QCOMPARE(label("anthropic/claude-opus-5"), QStringLiteral("Claude Opus 5"));
+    QCOMPARE(label("deepseek/deepseek-v4.1-flash"), QStringLiteral("DeepSeek V4.1 Flash"));
+    QCOMPARE(label("kimi/kimi-k3"), QStringLiteral("Kimi K3"));
+    // The owner, 2026-09-19: "lets try to record the model used" — so a guest names the model
+    // it ran *and* the harness that ran it, and both are readable.
+    QCOMPARE(label("anthropic/claude-opus-5 via claude-code"),
+             QStringLiteral("Claude Opus 5 \u00b7 Claude Code"));
+    QCOMPARE(label("openai/gpt-5.6-codex via codex"), QStringLiteral("GPT-5.6 Codex \u00b7 Codex"));
+    // The harness alone, when the model could not be seen, does not say itself twice.
+    QCOMPARE(label("openai/codex via codex"), QStringLiteral("Codex"));
+    // Free text after the slug is allowed and ignored, as the worker's own reader ignores it.
+    QCOMPARE(label("anthropic/claude-opus-5 (pane 2)"), QStringLiteral("Claude Opus 5"));
+    QVERIFY(label("").isEmpty());
+}
+
+void BoardModelTests::nothingIsMovedIntoVerifiedAndMovingOutIsOrdinary()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QJsonObject verified = row("K7Q2", "done", "features");
+    verified.insert("verified_by", "openai/codex");
+    view.handleEvent(opened({verified, row("T71W", "needs-qa-llm", "features")}));
+    QListWidget *list = listOf(view);
+    QVERIFY(list);
+
+    // Alt+Shift+Right from Needs QA aims at Verified: refused here, with the one way in.
+    view.selectCard(QStringLiteral("T71W"));
+    sent.clear();
+    QTest::keyClick(list, Qt::Key_Right, Qt::AltModifier | Qt::ShiftModifier);
+    QVERIFY(sent.isEmpty());
+    QCOMPARE(view.notice(),
+             QStringLiteral("A card is verified by closing it from a QA lane with a different model."));
+
+    // Out of Verified is an ordinary move, exactly as out of Done.
+    view.selectCard(QStringLiteral("K7Q2"));
+    sent.clear();
+    QTest::keyClick(list, Qt::Key_Left, Qt::AltModifier | Qt::ShiftModifier);
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_move"));
+    QCOMPARE(sent.last().value("status").toString(), QStringLiteral("needs-qa-llm"));
+}
+
+void BoardModelTests::theBriefsAskForTheExactModelAndTheGuestHarness()
+{
+    const QString execute = relay::board::executeTask(QStringLiteral("T71W"), QStringLiteral("Signatures"),
+                                                      true, true);
+    QVERIFY(execute.contains(QStringLiteral("Implemented-By: <vendor>/<your exact model id>")));
+    QVERIFY(execute.contains(QStringLiteral("openai/gpt-6-astra")));
+    QVERIFY(execute.contains(QStringLiteral("` via claude-code` or ` via codex`")));
+    QVERIFY(execute.contains(QStringLiteral("anthropic/claude-opus-5 via claude-code")));
+
+    const QString verify = relay::board::verifyTask(QStringLiteral("T71W"), QStringLiteral("Signatures"),
+                                                    QStringLiteral("Codex"),
+                                                    QStringLiteral("anthropic/claude-opus-5"));
+    QVERIFY(verify.contains(QStringLiteral("Verified-By: <vendor>/<your exact model id>")));
+    QVERIFY(verify.contains(QStringLiteral("` via claude-code` or ` via codex`")));
+    // A guest has no board tools, so nothing stamps `verified_by` for it: the brief says to write
+    // it into the card's front matter itself, or the board cannot say who checked the card.
+    QVERIFY(verify.contains(QStringLiteral("verified_by: <that same signature>")));
+    QVERIFY(verify.contains(QStringLiteral("front matter")));
+}
+
+void BoardModelTests::relayFreeSaysWhyItCannotVerifyAndAWeakPickWarns()
+{
+    // The worker's own sentence for the Relay Free case (qa_verifiers.NO_VERIFIER_NOTE): there is
+    // no verifier at all, and "no key, no key" would not tell the reader why.
+    const QString free = QStringLiteral("No verifier available. Verifying is not available on Relay "
+                                        "Free: add a provider key, or install Codex or Claude Code.");
+    QJsonObject none{{"implemented_by", "relay-free/relay-main"},
+                     {"recommended", QJsonValue::Null},
+                     {"unavailable", QJsonArray{QJsonObject{{"family", "openai"}, {"why", "not installed"}}}},
+                     {"note", free}};
+    QCOMPARE(relay::board::verifyNote(none), free);
+    QCOMPARE(relay::board::verifyLine(none), free);        // the whole line, not a list of reasons
+
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.handleEvent(::opened({row("K7Q2", "needs-qa-llm", "features")}));
+    QJsonObject card = qaCard(none);
+    view.handleEvent(card);
+    auto *line = view.findChild<QLabel *>(QStringLiteral("boardCardVerifyLine"));
+    QVERIFY(line);
+    QVERIFY(!line->isHidden());
+    QVERIFY2(line->text().contains(free), qPrintable(line->text()));
+    QPushButton *verify = button(view, QStringLiteral("Verify"));
+    QVERIFY(verify);
+    QVERIFY(!verify->isEnabled());
+    QVERIFY2(verify->toolTip().contains(free), qPrintable(verify->toolTip()));
+
+    // A warning beside a recommendation: the line stands and the note follows it, and Verify works.
+    const QString weak = QStringLiteral("The recommended verifier shares the implementer's lineage "
+                                        "(cn-open): it shares training data, so it is a weaker check.");
+    QJsonObject warned = qaBlock();
+    warned.insert(QStringLiteral("note"), weak);
+    view.handleEvent(qaCard(warned));
+    QVERIFY(line->text().contains(QStringLiteral("Verify with Codex (installed)")));
+    QVERIFY2(line->text().contains(weak.toHtmlEscaped()), qPrintable(line->text()));
+    QVERIFY(button(view, QStringLiteral("Verify"))->isEnabled());
 }
 
 QTEST_MAIN(BoardModelTests)
